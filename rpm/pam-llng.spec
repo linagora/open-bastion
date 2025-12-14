@@ -12,7 +12,7 @@ BuildRequires:  gcc
 BuildRequires:  make
 BuildRequires:  pam-devel
 BuildRequires:  libcurl-devel
-BuildRequires:  json-c-devel
+BuildRequires:  pkgconfig(json-c)
 BuildRequires:  pkgconfig
 
 Requires:       pam
@@ -44,6 +44,7 @@ and key-based authorization with server groups.
 %{_libdir}/security/pam_llng.so*
 %config(noreplace) %{_sysconfdir}/security/pam_llng.conf.example
 %{_sbindir}/llng-pam-enroll
+%{_mandir}/man8/llng-pam-enroll.8*
 
 %changelog
 * Sat Dec 14 2024 LemonLDAP::NG Team <lemonldap-ng@ow2.org> - 1.0.0-1
