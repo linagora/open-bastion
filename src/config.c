@@ -9,8 +9,32 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "config.h"
+
+/* Security: check file permissions for sensitive files */
+static int check_file_permissions(const char *filename)
+{
+    struct stat st;
+
+    if (stat(filename, &st) != 0) {
+        return -1;  /* File doesn't exist or can't be accessed */
+    }
+
+    /* File must be owned by root (uid 0) */
+    if (st.st_uid != 0) {
+        return -2;  /* Not owned by root */
+    }
+
+    /* File must not be readable by group or others */
+    if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
+        return -3;  /* Permissions too open */
+    }
+
+    return 0;  /* OK */
+}
 
 /* Default values */
 #define DEFAULT_TIMEOUT         10
@@ -31,19 +55,29 @@ void config_init(pam_llng_config_t *config)
     config->log_level = 1;  /* warn */
 }
 
+/* Secure free: zero memory before freeing */
+static void secure_free_str(char *ptr)
+{
+    if (ptr) {
+        explicit_bzero(ptr, strlen(ptr));
+        free(ptr);
+    }
+}
+
 void config_free(pam_llng_config_t *config)
 {
     if (!config) return;
 
     free(config->portal_url);
     free(config->client_id);
-    free(config->client_secret);
+    /* Securely erase secret before freeing */
+    secure_free_str(config->client_secret);
     free(config->server_token_file);
     free(config->server_group);
     free(config->ca_cert);
     free(config->cache_dir);
 
-    memset(config, 0, sizeof(*config));
+    explicit_bzero(config, sizeof(*config));
 }
 
 /* Trim whitespace from string */
@@ -130,6 +164,17 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
 
 int config_load(const char *filename, pam_llng_config_t *config)
 {
+    /* Security check: verify file permissions */
+    int perm_check = check_file_permissions(filename);
+    if (perm_check == -2) {
+        /* File not owned by root - security risk */
+        return -2;
+    }
+    if (perm_check == -3) {
+        /* Permissions too open - security risk */
+        return -3;
+    }
+
     FILE *f = fopen(filename, "r");
     if (!f) {
         return -1;
@@ -193,11 +238,11 @@ int config_parse_args(int argc, const char **argv, pam_llng_config_t *config)
         if (eq) {
             size_t key_len = eq - arg;
             char key[64];
-            if (key_len >= sizeof(key)) {
-                continue;
+            if (key_len >= sizeof(key) - 1) {
+                continue;  /* Key too long, skip */
             }
-            strncpy(key, arg, key_len);
-            key[key_len] = '\0';
+            memcpy(key, arg, key_len);
+            key[key_len] = '\0';  /* Explicit null termination */
 
             const char *value = eq + 1;
             parse_line(key, value, config);
@@ -224,6 +269,13 @@ int config_validate(const pam_llng_config_t *config)
 {
     if (!config->portal_url || strlen(config->portal_url) == 0) {
         return -1;  /* portal_url is required */
+    }
+
+    /* Security: require HTTPS unless SSL verification is explicitly disabled */
+    if (config->verify_ssl) {
+        if (strncmp(config->portal_url, "https://", 8) != 0) {
+            return -4;  /* HTTPS required when verify_ssl is enabled */
+        }
     }
 
     /* For authorize endpoint, we need client credentials for introspection */

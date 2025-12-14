@@ -8,10 +8,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
 
 #include "llng_client.h"
+
+/* Thread-safe curl initialization */
+static pthread_once_t curl_init_once = PTHREAD_ONCE_INIT;
+static void curl_global_init_once(void)
+{
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+}
 
 /* Client structure */
 struct llng_client {
@@ -114,12 +122,8 @@ llng_client_t *llng_client_init(const llng_client_config_t *config)
         return NULL;
     }
 
-    /* Initialize curl globally if needed */
-    static int curl_initialized = 0;
-    if (!curl_initialized) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        curl_initialized = 1;
-    }
+    /* Thread-safe curl initialization */
+    pthread_once(&curl_init_once, curl_global_init_once);
 
     client->curl = curl_easy_init();
     if (!client->curl) {
@@ -139,6 +143,15 @@ llng_client_t *llng_client_init(const llng_client_config_t *config)
     return client;
 }
 
+/* Secure free: zero memory before freeing */
+static void secure_free(char *ptr)
+{
+    if (ptr) {
+        explicit_bzero(ptr, strlen(ptr));
+        free(ptr);
+    }
+}
+
 void llng_client_destroy(llng_client_t *client)
 {
     if (!client) return;
@@ -148,10 +161,12 @@ void llng_client_destroy(llng_client_t *client)
     }
     free(client->portal_url);
     free(client->client_id);
-    free(client->client_secret);
-    free(client->server_token);
+    /* Securely erase secrets before freeing */
+    secure_free(client->client_secret);
+    secure_free(client->server_token);
     free(client->server_group);
     free(client->ca_cert);
+    explicit_bzero(client->error, sizeof(client->error));
     free(client);
 }
 

@@ -13,11 +13,13 @@ BuildRequires:  make
 BuildRequires:  pam-devel
 BuildRequires:  libcurl-devel
 BuildRequires:  pkgconfig(json-c)
+BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig
 
 Requires:       pam
 Requires:       libcurl
 Requires:       json-c
+Requires:       openssl-libs
 Requires:       curl
 Requires:       jq
 

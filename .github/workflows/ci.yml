@@ -146,6 +146,7 @@ jobs:
           pam-devel \
           libcurl-devel \
           json-c-devel \
+          openssl-devel \
           rpm-build
 
     - name: Build RPM

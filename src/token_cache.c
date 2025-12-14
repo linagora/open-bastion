@@ -17,27 +17,49 @@
 #include <errno.h>
 #include <time.h>
 #include <fcntl.h>
+#include <openssl/evp.h>
 
 #include "token_cache.h"
 
-/* Simple SHA256-like hash for cache keys (djb2 variant for simplicity) */
+/* Maximum number of cache entries to prevent DoS */
+#define MAX_CACHE_ENTRIES 10000
+
+/* SHA256 hash for cache keys - cryptographically secure (uses OpenSSL EVP API) */
 static void hash_token(const char *token, const char *user, char *out, size_t out_size)
 {
-    unsigned long hash = 5381;
-    const char *s;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len = 0;
 
-    /* Hash token */
-    for (s = token; *s; s++) {
-        hash = ((hash << 5) + hash) + (unsigned char)*s;
+    if (!ctx) {
+        if (out_size > 0) out[0] = '\0';
+        return;
     }
 
-    /* Include user in hash */
-    hash = ((hash << 5) + hash) + ':';
-    for (s = user; *s; s++) {
-        hash = ((hash << 5) + hash) + (unsigned char)*s;
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1 ||
+        EVP_DigestUpdate(ctx, token, strlen(token)) != 1 ||
+        EVP_DigestUpdate(ctx, ":", 1) != 1 ||
+        EVP_DigestUpdate(ctx, user, strlen(user)) != 1 ||
+        EVP_DigestFinal_ex(ctx, hash, &hash_len) != 1) {
+        EVP_MD_CTX_free(ctx);
+        if (out_size > 0) out[0] = '\0';
+        return;
     }
 
-    snprintf(out, out_size, "%016lx", hash);
+    EVP_MD_CTX_free(ctx);
+
+    /* Convert to hex string (use first 16 bytes = 32 hex chars) */
+    if (out_size >= 33 && hash_len >= 16) {
+        for (int i = 0; i < 16; i++) {
+            snprintf(out + (i * 2), 3, "%02x", hash[i]);
+        }
+        out[32] = '\0';
+    } else if (out_size > 0) {
+        out[0] = '\0';
+    }
+
+    /* Clear sensitive data */
+    explicit_bzero(hash, sizeof(hash));
 }
 
 /* Cache structure */
@@ -80,6 +102,23 @@ void cache_destroy(token_cache_t *cache)
     free(cache);
 }
 
+/* Count entries in cache directory */
+static int count_cache_entries(const char *cache_dir)
+{
+    DIR *dir = opendir(cache_dir);
+    if (!dir) return 0;
+
+    int count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strstr(entry->d_name, ".cache") != NULL) {
+            count++;
+        }
+    }
+    closedir(dir);
+    return count;
+}
+
 /* Build cache file path */
 static void build_cache_path(token_cache_t *cache,
                              const char *token,
@@ -87,7 +126,7 @@ static void build_cache_path(token_cache_t *cache,
                              char *path,
                              size_t path_size)
 {
-    char hash[32];
+    char hash[64];  /* SHA256 truncated to first 16 bytes = 32 hex chars + null */
     hash_token(token, user, hash, sizeof(hash));
     snprintf(path, path_size, "%s/%s.cache", cache->cache_dir, hash);
 }
@@ -158,6 +197,18 @@ int cache_store(token_cache_t *cache,
 {
     if (!cache || !token || !user) {
         return -1;
+    }
+
+    /* Rate limiting: check if cache is full */
+    int entry_count = count_cache_entries(cache->cache_dir);
+    if (entry_count >= MAX_CACHE_ENTRIES) {
+        /* Try to clean up expired entries first */
+        cache_cleanup(cache);
+        entry_count = count_cache_entries(cache->cache_dir);
+        if (entry_count >= MAX_CACHE_ENTRIES) {
+            /* Still full, refuse to add more entries */
+            return -1;
+        }
     }
 
     char path[512];
