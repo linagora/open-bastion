@@ -46,6 +46,7 @@ and key-based authorization with server groups.
 %config(noreplace) %{_sysconfdir}/security/pam_llng.conf.example
 %{_sbindir}/llng-pam-enroll
 %{_mandir}/man8/llng-pam-enroll.8*
+%exclude %{_docdir}/pam_llng/README.md
 
 %changelog
 * Sat Dec 14 2024 LemonLDAP::NG Team <lemonldap-ng@ow2.org> - 1.0.0-1
