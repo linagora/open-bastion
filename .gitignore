@@ -1,0 +1,22 @@
+# Build directory
+build/
+
+# Editor files
+*~
+*.swp
+.vscode/
+.idea/
+
+# Compiled files
+*.o
+*.so
+*.so.*
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Debug
+*.dSYM/

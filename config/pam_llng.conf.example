@@ -1,0 +1,78 @@
+# PAM LemonLDAP::NG Configuration File
+# /etc/security/pam_llng.conf
+
+# ==============================================================================
+# Required Settings
+# ==============================================================================
+
+# LemonLDAP::NG portal URL
+portal_url = https://auth.example.com
+
+# OIDC client credentials (must match the RP configured in LLNG)
+client_id = pam-access
+client_secret = your-client-secret-here
+
+# ==============================================================================
+# Server Authentication
+# ==============================================================================
+
+# Path to file containing the server's access token
+# This token is obtained during server enrollment via Device Authorization Grant
+# The file should contain only the token and be readable only by root
+server_token_file = /etc/security/pam_llng.token
+
+# Server group name for authorization rules
+# This must match a group defined in LLNG's pamAccessServerGroups
+# Default: "default"
+server_group = default
+
+# ==============================================================================
+# HTTP Settings
+# ==============================================================================
+
+# HTTP timeout in seconds
+# Default: 10
+timeout = 10
+
+# Verify SSL certificates
+# Set to false only for testing with self-signed certificates
+# Default: true
+verify_ssl = true
+
+# Custom CA certificate path (optional)
+# ca_cert = /etc/ssl/certs/my-ca.pem
+
+# ==============================================================================
+# Cache Settings
+# ==============================================================================
+
+# Enable token caching to reduce server load
+# Default: true
+cache_enabled = true
+
+# Cache directory
+# Default: /var/cache/pam_llng
+cache_dir = /var/cache/pam_llng
+
+# Cache TTL in seconds (time to live)
+# Cached results expire after this time
+# Default: 300 (5 minutes)
+cache_ttl = 300
+
+# ==============================================================================
+# Operation Mode
+# ==============================================================================
+
+# Authorization-only mode
+# When set to true, pam_sm_authenticate always succeeds (for SSH key auth)
+# and only pam_sm_acct_mgmt performs authorization checks
+# Default: false
+authorize_only = false
+
+# ==============================================================================
+# Logging
+# ==============================================================================
+
+# Log level: error, warn, info, debug (or 0-3)
+# Default: warn
+log_level = warn

@@ -1,0 +1,181 @@
+/*
+ * test_config.c - Unit tests for configuration parsing
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <unistd.h>
+
+#include "config.h"
+
+static int tests_run = 0;
+static int tests_passed = 0;
+
+#define TEST(name) do { \
+    printf("  Testing %s... ", #name); \
+    tests_run++; \
+    if (test_##name()) { \
+        printf("PASS\n"); \
+        tests_passed++; \
+    } else { \
+        printf("FAIL\n"); \
+    } \
+} while(0)
+
+/* Test default initialization */
+static int test_init_defaults(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    int ok = 1;
+    ok = ok && (config.timeout == 10);
+    ok = ok && (config.verify_ssl == true);
+    ok = ok && (config.cache_enabled == true);
+    ok = ok && (config.cache_ttl == 300);
+    ok = ok && (config.server_group != NULL && strcmp(config.server_group, "default") == 0);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test argument parsing */
+static int test_parse_args(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "portal_url=https://test.example.com",
+        "client_id=test-client",
+        "timeout=30",
+        "debug",
+        "no_cache"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    int ret = config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.portal_url != NULL && strcmp(config.portal_url, "https://test.example.com") == 0);
+    ok = ok && (config.client_id != NULL && strcmp(config.client_id, "test-client") == 0);
+    ok = ok && (config.timeout == 30);
+    ok = ok && (config.log_level == 3);  /* debug */
+    ok = ok && (config.cache_enabled == false);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test configuration validation */
+static int test_validate_missing_portal(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    /* Missing portal_url should fail validation */
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret != 0);  /* Should return error */
+}
+
+static int test_validate_missing_credentials(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("https://test.example.com");
+    /* Missing client_id/secret - should fail unless authorize_only */
+
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret != 0);  /* Should return error */
+}
+
+static int test_validate_authorize_only(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("https://test.example.com");
+    config.authorize_only = true;
+    /* In authorize_only mode, client credentials not required */
+
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == 0);  /* Should succeed */
+}
+
+static int test_validate_complete(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("https://test.example.com");
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == 0);  /* Should succeed */
+}
+
+/* Test config file loading */
+static int test_load_config_file(void)
+{
+    /* Create a temp config file */
+    const char *filename = "/tmp/test_pam_llng.conf";
+    FILE *f = fopen(filename, "w");
+    if (!f) return 0;
+
+    fprintf(f, "# Test config\n");
+    fprintf(f, "portal_url = https://auth.example.com\n");
+    fprintf(f, "client_id = test-client\n");
+    fprintf(f, "client_secret = \"test-secret\"\n");
+    fprintf(f, "server_group = production\n");
+    fprintf(f, "timeout = 15\n");
+    fprintf(f, "verify_ssl = false\n");
+    fclose(f);
+
+    pam_llng_config_t config;
+    config_init(&config);
+
+    int ret = config_load(filename, &config);
+    unlink(filename);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.portal_url && strcmp(config.portal_url, "https://auth.example.com") == 0);
+    ok = ok && (config.client_id && strcmp(config.client_id, "test-client") == 0);
+    ok = ok && (config.client_secret && strcmp(config.client_secret, "test-secret") == 0);
+    ok = ok && (config.server_group && strcmp(config.server_group, "production") == 0);
+    ok = ok && (config.timeout == 15);
+    ok = ok && (config.verify_ssl == false);
+
+    config_free(&config);
+    return ok;
+}
+
+int main(void)
+{
+    printf("Running configuration tests...\n\n");
+
+    TEST(init_defaults);
+    TEST(parse_args);
+    TEST(validate_missing_portal);
+    TEST(validate_missing_credentials);
+    TEST(validate_authorize_only);
+    TEST(validate_complete);
+    TEST(load_config_file);
+
+    printf("\n%d/%d tests passed\n", tests_passed, tests_run);
+
+    return (tests_passed == tests_run) ? 0 : 1;
+}
