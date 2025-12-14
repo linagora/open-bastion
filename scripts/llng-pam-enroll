@@ -470,6 +470,14 @@ verify_enrollment() {
     local the_hostname
     the_hostname=$(hostname -f 2>/dev/null || hostname)
 
+    # Build JSON payload safely using jq to prevent injection
+    local json_payload
+    json_payload=$(jq -n \
+        --arg user "__test__" \
+        --arg host "$the_hostname" \
+        --arg server_group "$SERVER_GROUP" \
+        '{user: $user, host: $host, server_group: $server_group}')
+
     # Try to call /pam/authorize to verify the token works
     local curl_options
     curl_options=$(curl_opts)
@@ -477,7 +485,7 @@ verify_enrollment() {
         -X POST "${PORTAL_URL}/pam/authorize" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "{\"user\": \"__test__\", \"host\": \"${the_hostname}\", \"server_group\": \"${SERVER_GROUP}\"}" 2>&1) || {
+        -d "$json_payload" 2>&1) || {
         log_warn "Could not verify enrollment (this may be normal)"
         return 0
     }

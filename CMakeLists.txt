@@ -12,6 +12,7 @@ option(BUILD_TESTING "Build tests" ON)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(JSON_C REQUIRED json-c)
+pkg_check_modules(OPENSSL REQUIRED openssl)
 
 # Find PAM
 find_path(PAM_INCLUDE_DIR security/pam_modules.h
@@ -54,6 +55,7 @@ target_include_directories(pam_llng PRIVATE
     ${PAM_INCLUDE_DIR}
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -61,6 +63,7 @@ target_link_libraries(pam_llng
     ${PAM_LIBRARY}
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
 )
 
 # Compiler flags
@@ -113,12 +116,12 @@ set(CPACK_PACKAGE_VENDOR "Linagora")
 set(CPACK_PACKAGE_CONTACT "LemonLDAP::NG team <lemonldap-ng@ow2.org>")
 
 # Debian package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5, curl, jq")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5, libssl3, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
 
 # RPM package
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-2.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
-set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, curl, jq")
+set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, curl, jq")
 
 include(CPack)

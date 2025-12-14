@@ -19,6 +19,7 @@
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "config.h"
 #include "llng_client.h"
@@ -96,7 +97,16 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
     }
 
     /* Load configuration file */
-    if (config_load(config_file, &data->config) != 0) {
+    int config_result = config_load(config_file, &data->config);
+    if (config_result == -2) {
+        LLNG_LOG_ERR(pamh, "Security error: config file %s is not owned by root", config_file);
+        goto error;
+    }
+    if (config_result == -3) {
+        LLNG_LOG_ERR(pamh, "Security error: config file %s has insecure permissions (must be 0600)", config_file);
+        goto error;
+    }
+    if (config_result != 0) {
         LLNG_LOG_WARN(pamh, "Failed to load config file %s, using defaults", config_file);
     }
 
@@ -107,7 +117,12 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
     }
 
     /* Validate configuration */
-    if (config_validate(&data->config) != 0) {
+    int validate_result = config_validate(&data->config);
+    if (validate_result == -4) {
+        LLNG_LOG_ERR(pamh, "Security error: portal_url must use HTTPS (use verify_ssl=false to disable)");
+        goto error;
+    }
+    if (validate_result != 0) {
         LLNG_LOG_ERR(pamh, "Invalid configuration");
         goto error;
     }
@@ -126,6 +141,21 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
 
     /* Load server token from file if specified */
     if (data->config.server_token_file) {
+        /* Security check: verify token file permissions */
+        struct stat st;
+        if (stat(data->config.server_token_file, &st) == 0) {
+            if (st.st_uid != 0) {
+                LLNG_LOG_ERR(pamh, "Security error: token file %s is not owned by root",
+                        data->config.server_token_file);
+                goto error;
+            }
+            if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
+                LLNG_LOG_ERR(pamh, "Security error: token file %s has insecure permissions",
+                        data->config.server_token_file);
+                goto error;
+            }
+        }
+
         FILE *f = fopen(data->config.server_token_file, "r");
         if (f) {
             char token_buf[4096];
@@ -136,6 +166,8 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
                     token_buf[len-1] = '\0';
                 }
                 client_config.server_token = strdup(token_buf);
+                /* Clear the buffer containing the token */
+                explicit_bzero(token_buf, sizeof(token_buf));
             }
             fclose(f);
         } else {

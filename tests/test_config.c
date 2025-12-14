@@ -7,6 +7,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "config.h"
 
@@ -127,7 +128,43 @@ static int test_validate_complete(void)
     return (ret == 0);  /* Should succeed */
 }
 
-/* Test config file loading */
+/* Test HTTPS requirement */
+static int test_validate_https_required(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("http://test.example.com");  /* HTTP, not HTTPS */
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+    config.verify_ssl = true;  /* SSL verification enabled */
+
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == -4);  /* Should fail with -4 (HTTPS required) */
+}
+
+static int test_validate_http_allowed_insecure(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("http://test.example.com");  /* HTTP */
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+    config.verify_ssl = false;  /* SSL verification disabled */
+
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == 0);  /* Should succeed when verify_ssl=false */
+}
+
+/* Test config file loading
+ * Note: This test verifies file permission checks when running as root,
+ * or skips permission tests when running as non-root user.
+ */
 static int test_load_config_file(void)
 {
     /* Create a temp config file */
@@ -144,12 +181,23 @@ static int test_load_config_file(void)
     fprintf(f, "verify_ssl = false\n");
     fclose(f);
 
+    /* Set secure permissions */
+    chmod(filename, 0600);
+
     pam_llng_config_t config;
     config_init(&config);
 
     int ret = config_load(filename, &config);
     unlink(filename);
 
+    /* When not running as root, config_load will fail with -2 (not owned by root)
+     * This is expected security behavior */
+    if (getuid() != 0) {
+        config_free(&config);
+        return (ret == -2);  /* Expected: file not owned by root */
+    }
+
+    /* When running as root, full test */
     int ok = 1;
     ok = ok && (ret == 0);
     ok = ok && (config.portal_url && strcmp(config.portal_url, "https://auth.example.com") == 0);
@@ -173,6 +221,8 @@ int main(void)
     TEST(validate_missing_credentials);
     TEST(validate_authorize_only);
     TEST(validate_complete);
+    TEST(validate_https_required);
+    TEST(validate_http_allowed_insecure);
     TEST(load_config_file);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
