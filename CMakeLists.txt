@@ -89,6 +89,11 @@ install(FILES ${CMAKE_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
+# Install enrollment script
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/llng-pam-enroll
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Tests
 if(BUILD_TESTING)
     enable_testing()
@@ -103,12 +108,12 @@ set(CPACK_PACKAGE_VENDOR "Linagora")
 set(CPACK_PACKAGE_CONTACT "LemonLDAP::NG team <lemonldap-ng@ow2.org>")
 
 # Debian package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
 
 # RPM package
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-2.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
-set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c")
+set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, curl, jq")
 
 include(CPack)

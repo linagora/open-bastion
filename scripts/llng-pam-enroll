@@ -1,0 +1,533 @@
+#!/bin/bash
+#
+# llng-pam-enroll - Enroll a server with LemonLDAP::NG for PAM authentication
+#
+# This script uses the Device Authorization Grant (RFC 8628) to obtain
+# a server token that allows the PAM module to check user authorizations.
+#
+# Copyright (C) 2024 Linagora
+# License: GPL-2.0
+
+set -e
+
+VERSION="1.0.0"
+PROG_NAME=$(basename "$0")
+
+# Default values
+CONFIG_FILE="/etc/security/pam_llng.conf"
+TOKEN_FILE="/etc/security/pam_llng.token"
+SCOPE="pam:server"
+POLL_INTERVAL=5
+TIMEOUT=300
+
+# Colors for output (disabled if not a terminal)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    BOLD='\033[1m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    BOLD=''
+    NC=''
+fi
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $*"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $*"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+}
+
+log_step() {
+    echo -e "\n${BOLD}==> $*${NC}"
+}
+
+# Show usage
+usage() {
+    cat << EOF
+Usage: $PROG_NAME [OPTIONS]
+
+Enroll this server with LemonLDAP::NG for PAM authentication.
+
+Options:
+  -p, --portal URL       LemonLDAP::NG portal URL (required if not in config)
+  -c, --client-id ID     OIDC client ID (default: pam-access)
+  -s, --client-secret S  OIDC client secret (required if not in config)
+  -g, --server-group G   Server group name (default: default)
+  -t, --token-file FILE  Where to save the token (default: $TOKEN_FILE)
+  -C, --config FILE      Read settings from config file (default: $CONFIG_FILE)
+  -k, --insecure         Skip SSL certificate verification
+  -q, --quiet            Quiet mode (less output)
+  -h, --help             Show this help message
+  -V, --version          Show version
+
+Examples:
+  # Enroll using settings from config file
+  sudo $PROG_NAME
+
+  # Enroll with explicit parameters
+  sudo $PROG_NAME -p https://auth.example.com -c pam-access -s mysecret
+
+  # Enroll for a specific server group
+  sudo $PROG_NAME -g production
+
+EOF
+    exit 0
+}
+
+# Show version
+show_version() {
+    echo "$PROG_NAME version $VERSION"
+    exit 0
+}
+
+# Check for required commands
+check_requirements() {
+    local missing=()
+
+    for cmd in curl jq; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [ ${#missing[@]} -ne 0 ]; then
+        log_error "Missing required commands: ${missing[*]}"
+        log_info "Install them with: apt-get install ${missing[*]}"
+        exit 1
+    fi
+}
+
+# Read value from config file
+read_config() {
+    local key="$1"
+    local file="$2"
+
+    if [ -f "$file" ]; then
+        grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null | \
+            sed -E 's/^[^=]+=\s*//' | \
+            sed -E 's/^["'\'']//' | \
+            sed -E 's/["'\'']$//' | \
+            sed -E 's/\s*#.*$//' | \
+            tail -1
+    fi
+}
+
+# Load configuration from file
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        log_info "Loading configuration from $CONFIG_FILE"
+
+        local val
+
+        val=$(read_config "portal_url" "$CONFIG_FILE")
+        [ -n "$val" ] && PORTAL_URL="$val"
+
+        val=$(read_config "portal" "$CONFIG_FILE")
+        [ -n "$val" ] && PORTAL_URL="$val"
+
+        val=$(read_config "client_id" "$CONFIG_FILE")
+        [ -n "$val" ] && CLIENT_ID="$val"
+
+        val=$(read_config "client_secret" "$CONFIG_FILE")
+        [ -n "$val" ] && CLIENT_SECRET="$val"
+
+        val=$(read_config "server_group" "$CONFIG_FILE")
+        [ -n "$val" ] && SERVER_GROUP="$val"
+
+        val=$(read_config "server_token_file" "$CONFIG_FILE")
+        [ -n "$val" ] && TOKEN_FILE="$val"
+
+        val=$(read_config "token_file" "$CONFIG_FILE")
+        [ -n "$val" ] && TOKEN_FILE="$val"
+    fi
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -p|--portal)
+                PORTAL_URL="$2"
+                shift 2
+                ;;
+            -c|--client-id)
+                CLIENT_ID="$2"
+                shift 2
+                ;;
+            -s|--client-secret)
+                CLIENT_SECRET="$2"
+                shift 2
+                ;;
+            -g|--server-group)
+                SERVER_GROUP="$2"
+                shift 2
+                ;;
+            -t|--token-file)
+                TOKEN_FILE="$2"
+                shift 2
+                ;;
+            -C|--config)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            -k|--insecure)
+                INSECURE=1
+                shift
+                ;;
+            -q|--quiet)
+                QUIET=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                ;;
+            -V|--version)
+                show_version
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Validate configuration
+validate_config() {
+    local errors=0
+
+    if [ -z "$PORTAL_URL" ]; then
+        log_error "Portal URL is required (use -p or set portal_url in config)"
+        errors=$((errors + 1))
+    fi
+
+    if [ -z "$CLIENT_ID" ]; then
+        CLIENT_ID="pam-access"
+        log_info "Using default client_id: $CLIENT_ID"
+    fi
+
+    if [ -z "$CLIENT_SECRET" ]; then
+        log_error "Client secret is required (use -s or set client_secret in config)"
+        errors=$((errors + 1))
+    fi
+
+    if [ -z "$SERVER_GROUP" ]; then
+        SERVER_GROUP="default"
+    fi
+
+    if [ $errors -gt 0 ]; then
+        exit 1
+    fi
+
+    # Remove trailing slash from portal URL
+    PORTAL_URL="${PORTAL_URL%/}"
+}
+
+# Build curl options
+curl_opts() {
+    local opts=("-s" "-f")
+
+    if [ -n "$INSECURE" ]; then
+        opts+=("-k")
+    fi
+
+    echo "${opts[@]}"
+}
+
+# Step 1: Initiate Device Authorization flow
+initiate_device_auth() {
+    log_step "Initiating device authorization"
+
+    local response
+    local http_code
+
+    response=$(curl $(curl_opts) -w "\n%{http_code}" \
+        -X POST "${PORTAL_URL}/oauth2/device" \
+        -d "client_id=${CLIENT_ID}" \
+        -d "scope=${SCOPE}" 2>&1) || {
+        log_error "Failed to contact portal at ${PORTAL_URL}/oauth2/device"
+        log_info "Check that the portal URL is correct and Device Authorization is enabled"
+        exit 1
+    }
+
+    http_code=$(echo "$response" | tail -1)
+    response=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" != "200" ]; then
+        log_error "Portal returned HTTP $http_code"
+        log_error "Response: $response"
+        exit 1
+    fi
+
+    # Parse response
+    DEVICE_CODE=$(echo "$response" | jq -r '.device_code // empty')
+    USER_CODE=$(echo "$response" | jq -r '.user_code // empty')
+    VERIFICATION_URI=$(echo "$response" | jq -r '.verification_uri // empty')
+    VERIFICATION_URI_COMPLETE=$(echo "$response" | jq -r '.verification_uri_complete // empty')
+    EXPIRES_IN=$(echo "$response" | jq -r '.expires_in // 300')
+    INTERVAL=$(echo "$response" | jq -r '.interval // 5')
+
+    if [ -z "$DEVICE_CODE" ] || [ -z "$USER_CODE" ]; then
+        log_error "Invalid response from portal"
+        log_error "Response: $response"
+        exit 1
+    fi
+
+    POLL_INTERVAL=$INTERVAL
+    TIMEOUT=$EXPIRES_IN
+}
+
+# Step 2: Display instructions to user
+display_instructions() {
+    log_step "Administrator approval required"
+
+    echo ""
+    echo -e "${BOLD}To authorize this server, an administrator must:${NC}"
+    echo ""
+    echo -e "  1. Go to: ${BLUE}${VERIFICATION_URI:-${PORTAL_URL}/device}${NC}"
+    echo ""
+    echo -e "  2. Log in with administrator credentials"
+    echo ""
+    echo -e "  3. Enter this code: ${BOLD}${GREEN}${USER_CODE}${NC}"
+    echo ""
+
+    if [ -n "$VERIFICATION_URI_COMPLETE" ]; then
+        echo -e "Or open this URL directly: ${BLUE}${VERIFICATION_URI_COMPLETE}${NC}"
+        echo ""
+    fi
+
+    echo -e "${YELLOW}The code expires in $((TIMEOUT / 60)) minutes.${NC}"
+    echo ""
+}
+
+# Step 3: Poll for token
+poll_for_token() {
+    log_step "Waiting for administrator approval"
+
+    local start_time=$(date +%s)
+    local end_time=$((start_time + TIMEOUT))
+    local response
+    local error
+    local access_token
+
+    while [ $(date +%s) -lt $end_time ]; do
+        # Show progress
+        local elapsed=$(($(date +%s) - start_time))
+        local remaining=$((TIMEOUT - elapsed))
+
+        if [ -z "$QUIET" ]; then
+            printf "\r  Waiting... (%d seconds remaining)  " "$remaining"
+        fi
+
+        sleep "$POLL_INTERVAL"
+
+        response=$(curl $(curl_opts) \
+            -X POST "${PORTAL_URL}/oauth2/token" \
+            -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+            -d "device_code=${DEVICE_CODE}" \
+            -d "client_id=${CLIENT_ID}" \
+            -d "client_secret=${CLIENT_SECRET}" 2>&1) || true
+
+        # Check for access token
+        access_token=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
+
+        if [ -n "$access_token" ]; then
+            echo ""  # Clear the progress line
+            ACCESS_TOKEN="$access_token"
+            return 0
+        fi
+
+        # Check for error
+        error=$(echo "$response" | jq -r '.error // empty' 2>/dev/null)
+
+        case "$error" in
+            authorization_pending|slow_down)
+                # Continue polling
+                if [ "$error" = "slow_down" ]; then
+                    POLL_INTERVAL=$((POLL_INTERVAL + 1))
+                fi
+                ;;
+            expired_token)
+                echo ""
+                log_error "The authorization code has expired"
+                log_info "Please run this script again"
+                exit 1
+                ;;
+            access_denied)
+                echo ""
+                log_error "The administrator denied the authorization"
+                exit 1
+                ;;
+            *)
+                if [ -n "$error" ]; then
+                    echo ""
+                    log_error "Authorization failed: $error"
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+
+    echo ""
+    log_error "Timeout waiting for authorization"
+    log_info "Please run this script again"
+    exit 1
+}
+
+# Step 4: Save the token
+save_token() {
+    log_step "Saving server token"
+
+    local token_dir=$(dirname "$TOKEN_FILE")
+
+    # Create directory if needed
+    if [ ! -d "$token_dir" ]; then
+        mkdir -p "$token_dir" || {
+            log_error "Failed to create directory: $token_dir"
+            exit 1
+        }
+    fi
+
+    # Save token with restricted permissions
+    (
+        umask 077
+        echo "$ACCESS_TOKEN" > "$TOKEN_FILE"
+    ) || {
+        log_error "Failed to write token to $TOKEN_FILE"
+        log_info "You may need to run this script as root"
+        exit 1
+    }
+
+    # Ensure proper ownership (root only)
+    if [ "$(id -u)" = "0" ]; then
+        chown root:root "$TOKEN_FILE"
+        chmod 600 "$TOKEN_FILE"
+    fi
+
+    log_success "Token saved to $TOKEN_FILE"
+}
+
+# Step 5: Update config file with server_group if needed
+update_config() {
+    if [ -f "$CONFIG_FILE" ] && [ "$(id -u)" = "0" ]; then
+        # Check if server_group is already set
+        local current_group=$(read_config "server_group" "$CONFIG_FILE")
+
+        if [ -z "$current_group" ] && [ "$SERVER_GROUP" != "default" ]; then
+            log_info "Adding server_group to $CONFIG_FILE"
+            echo "" >> "$CONFIG_FILE"
+            echo "# Server group (added by $PROG_NAME)" >> "$CONFIG_FILE"
+            echo "server_group = $SERVER_GROUP" >> "$CONFIG_FILE"
+        fi
+
+        # Ensure token_file is set
+        local current_token_file=$(read_config "server_token_file" "$CONFIG_FILE")
+        if [ -z "$current_token_file" ]; then
+            current_token_file=$(read_config "token_file" "$CONFIG_FILE")
+        fi
+
+        if [ -z "$current_token_file" ]; then
+            log_info "Adding server_token_file to $CONFIG_FILE"
+            echo "server_token_file = $TOKEN_FILE" >> "$CONFIG_FILE"
+        fi
+    fi
+}
+
+# Step 6: Verify enrollment
+verify_enrollment() {
+    log_step "Verifying enrollment"
+
+    local response
+    local hostname=$(hostname -f 2>/dev/null || hostname)
+
+    # Try to call /pam/authorize to verify the token works
+    response=$(curl $(curl_opts) \
+        -X POST "${PORTAL_URL}/pam/authorize" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        -H "Content-Type: application/json" \
+        -d "{\"user\": \"__test__\", \"host\": \"${hostname}\", \"server_group\": \"${SERVER_GROUP}\"}" 2>&1) || {
+        log_warn "Could not verify enrollment (this may be normal)"
+        return 0
+    }
+
+    # Check if we got a valid response (even if user not found)
+    local authorized=$(echo "$response" | jq -r '.authorized // empty' 2>/dev/null)
+
+    if [ "$authorized" = "true" ] || [ "$authorized" = "false" ]; then
+        log_success "Server successfully enrolled and verified"
+    else
+        local error=$(echo "$response" | jq -r '.error // empty' 2>/dev/null)
+        if [ -n "$error" ]; then
+            log_warn "Verification returned error: $error"
+        fi
+    fi
+}
+
+# Display final summary
+show_summary() {
+    log_step "Enrollment complete"
+
+    echo ""
+    echo -e "${GREEN}This server is now enrolled with LemonLDAP::NG.${NC}"
+    echo ""
+    echo "Configuration:"
+    echo "  Portal URL:    $PORTAL_URL"
+    echo "  Client ID:     $CLIENT_ID"
+    echo "  Server Group:  $SERVER_GROUP"
+    echo "  Token File:    $TOKEN_FILE"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Configure PAM to use pam_llng module"
+    echo "  2. Test SSH authentication"
+    echo ""
+    echo "Example PAM configuration (/etc/pam.d/sshd):"
+    echo "  auth    sufficient    pam_llng.so"
+    echo "  account required      pam_llng.so"
+    echo ""
+}
+
+# Main function
+main() {
+    # Check if running as root
+    if [ "$(id -u)" != "0" ]; then
+        log_warn "Not running as root. Token file permissions may be incorrect."
+    fi
+
+    check_requirements
+    load_config
+    parse_args "$@"
+    validate_config
+
+    echo ""
+    echo -e "${BOLD}LemonLDAP::NG PAM Server Enrollment${NC}"
+    echo -e "Portal: ${BLUE}${PORTAL_URL}${NC}"
+    echo -e "Server Group: ${GREEN}${SERVER_GROUP}${NC}"
+
+    initiate_device_auth
+    display_instructions
+    poll_for_token
+    save_token
+    update_config
+    verify_enrollment
+    show_summary
+}
+
+main "$@"
