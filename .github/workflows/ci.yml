@@ -8,14 +8,12 @@ on:
 
 jobs:
   build:
-    name: Build and Test
-    runs-on: ubuntu-latest
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
-
-    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout code
@@ -81,9 +79,11 @@ jobs:
       run: cmake --build build --parallel
 
     - name: Run tests with sanitizers
+      env:
+        ASAN_OPTIONS: detect_leaks=1
       run: |
         cd build
-        ASAN_OPTIONS=detect_leaks=1 ctest --output-on-failure
+        ctest --output-on-failure
 
   package-deb:
     name: Build Debian Package
