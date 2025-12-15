@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <time.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
@@ -560,8 +561,9 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     if (json_object_object_get_ex(json, "uid", &val)) {
         pw->pw_uid = (uid_t)json_object_get_int(val);
         /* Validate server-provided UID is in acceptable range */
-        if (pw->pw_uid < 1000 || pw->pw_uid == 65534) {
-            /* Reject system UIDs and nobody - security risk */
+        if (pw->pw_uid < g_config.min_uid || pw->pw_uid > g_config.max_uid ||
+            pw->pw_uid == 65534) {
+            /* Reject UIDs outside configured range and nobody - security risk */
             json_object_put(json);
             return -1;
         }

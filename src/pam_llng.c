@@ -912,8 +912,16 @@ static int create_unix_user(pam_handle_t *pamh,
     long days = time(NULL) / 86400;
     if (fprintf(shadow_file, "%s:!:%ld:0:99999:7:::\n", user, days) < 0) {
         LLNG_LOG_ERR(pamh, "Cannot write to /etc/shadow: %s", strerror(errno));
-        /* Note: passwd was written but shadow failed - inconsistent state */
-        /* This is rare and would require manual cleanup */
+        /* passwd was written but shadow failed - attempt rollback via userdel */
+        LLNG_LOG_WARN(pamh, "Attempting rollback of partial user creation");
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/usr/sbin/userdel", "userdel", user, NULL);
+            _exit(127);
+        } else if (pid > 0) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
         goto cleanup;
     }
 
@@ -936,8 +944,8 @@ static int create_unix_user(pam_handle_t *pamh,
             if (config_validate_skel(config->create_user_skel) == 0) {
                 pid_t pid = fork();
                 if (pid == 0) {
-                    /* Child: copy skel contents */
-                    execl("/bin/cp", "cp", "-rT", config->create_user_skel, home_dir, NULL);
+                    /* Child: copy skel contents (-P preserves symlinks, doesn't follow them) */
+                    execl("/bin/cp", "cp", "-rTP", config->create_user_skel, home_dir, NULL);
                     _exit(127);
                 } else if (pid > 0) {
                     int status;

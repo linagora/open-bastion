@@ -127,13 +127,19 @@ static void generate_request_signature(const char *secret,
     unsigned char hmac[EVP_MAX_MD_SIZE];
     unsigned int hmac_len = 0;
 
-    HMAC(EVP_sha256(), secret, strlen(secret),
-         (unsigned char *)message, strlen(message),
-         hmac, &hmac_len);
+    unsigned char *result = HMAC(EVP_sha256(), secret, strlen(secret),
+                                  (unsigned char *)message, strlen(message),
+                                  hmac, &hmac_len);
 
     /* Clear and free message */
     explicit_bzero(message, msg_len + 1);
     free(message);
+
+    /* Check HMAC result */
+    if (!result) {
+        signature[0] = '\0';
+        return;
+    }
 
     /* Convert to hex string */
     for (unsigned int i = 0; i < hmac_len && (i * 2 + 2) < sig_size; i++) {
