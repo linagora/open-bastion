@@ -250,6 +250,9 @@ static int load_server_token(nss_llng_config_t *config)
         config->server_token = strdup(buffer);
     }
 
+    /* Clear sensitive token from stack buffer */
+    explicit_bzero(buffer, sizeof(buffer));
+
     return config->server_token ? 0 : -1;
 }
 
@@ -379,24 +382,23 @@ static void cache_add(const char *username, const struct passwd *pw, int valid)
 {
     pthread_mutex_lock(&g_cache.lock);
 
-    /* Find empty slot or oldest entry */
-    size_t slot = 0;
-    time_t oldest = time(NULL);
-
-    for (size_t i = 0; i < g_cache.count; i++) {
-        if (!g_cache.entries[i].username) {
-            slot = i;
-            break;
-        }
-        if (g_cache.entries[i].timestamp < oldest) {
-            oldest = g_cache.entries[i].timestamp;
-            slot = i;
-        }
-    }
+    size_t slot;
 
     if (g_cache.count < g_cache.capacity) {
+        /* Use next available slot */
         slot = g_cache.count++;
     } else {
+        /* Cache full - find oldest entry to evict */
+        slot = 0;
+        time_t oldest = g_cache.entries[0].timestamp;
+
+        for (size_t i = 1; i < g_cache.count; i++) {
+            if (g_cache.entries[i].timestamp < oldest) {
+                oldest = g_cache.entries[i].timestamp;
+                slot = i;
+            }
+        }
+
         /* Evict old entry */
         free(g_cache.entries[slot].username);
         free(g_cache.entries[slot].pw_buffer);
@@ -406,36 +408,45 @@ static void cache_add(const char *username, const struct passwd *pw, int valid)
     entry->username = strdup(username);
     entry->timestamp = time(NULL);
     entry->valid = valid;
+    entry->pw_buffer = NULL;
 
     if (valid && pw) {
-        /* Copy passwd struct */
-        size_t bufsize = strlen(pw->pw_name) + strlen(pw->pw_passwd) +
-                         strlen(pw->pw_gecos) + strlen(pw->pw_dir) +
-                         strlen(pw->pw_shell) + 16;
+        /* Pre-calculate string lengths for efficiency */
+        size_t name_len = strlen(pw->pw_name) + 1;
+        size_t passwd_len = strlen(pw->pw_passwd) + 1;
+        size_t gecos_len = strlen(pw->pw_gecos) + 1;
+        size_t dir_len = strlen(pw->pw_dir) + 1;
+        size_t shell_len = strlen(pw->pw_shell) + 1;
+        size_t bufsize = name_len + passwd_len + gecos_len + dir_len + shell_len;
+
         entry->pw_buffer = malloc(bufsize);
+        if (!entry->pw_buffer) {
+            pthread_mutex_unlock(&g_cache.lock);
+            return;
+        }
         char *p = entry->pw_buffer;
 
         entry->pw.pw_name = p;
-        strcpy(p, pw->pw_name);
-        p += strlen(pw->pw_name) + 1;
+        memcpy(p, pw->pw_name, name_len);
+        p += name_len;
 
         entry->pw.pw_passwd = p;
-        strcpy(p, pw->pw_passwd);
-        p += strlen(pw->pw_passwd) + 1;
+        memcpy(p, pw->pw_passwd, passwd_len);
+        p += passwd_len;
 
         entry->pw.pw_uid = pw->pw_uid;
         entry->pw.pw_gid = pw->pw_gid;
 
         entry->pw.pw_gecos = p;
-        strcpy(p, pw->pw_gecos);
-        p += strlen(pw->pw_gecos) + 1;
+        memcpy(p, pw->pw_gecos, gecos_len);
+        p += gecos_len;
 
         entry->pw.pw_dir = p;
-        strcpy(p, pw->pw_dir);
-        p += strlen(pw->pw_dir) + 1;
+        memcpy(p, pw->pw_dir, dir_len);
+        p += dir_len;
 
         entry->pw.pw_shell = p;
-        strcpy(p, pw->pw_shell);
+        memcpy(p, pw->pw_shell, shell_len);
     }
 
     pthread_mutex_unlock(&g_cache.lock);

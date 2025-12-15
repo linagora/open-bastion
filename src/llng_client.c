@@ -41,24 +41,37 @@ struct llng_client {
     char *cert_pin;        /* Certificate pin for CURLOPT_PINNEDPUBLICKEY */
 };
 
-/* Buffer for curl responses */
+/* Buffer for curl responses with exponential growth */
 typedef struct {
     char *data;
     size_t size;
+    size_t capacity;
 } response_buffer_t;
 
-/* Curl write callback */
+#define INITIAL_BUFFER_SIZE 4096
+
+/* Curl write callback with exponential buffer growth */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
     size_t realsize = size * nmemb;
     response_buffer_t *buf = (response_buffer_t *)userp;
 
-    char *ptr = realloc(buf->data, buf->size + realsize + 1);
-    if (!ptr) {
-        return 0;
+    /* Check if we need to grow the buffer */
+    size_t needed = buf->size + realsize + 1;
+    if (needed > buf->capacity) {
+        /* Grow by 1.5x or to needed size, whichever is larger */
+        size_t new_capacity = buf->capacity + (buf->capacity >> 1);
+        if (new_capacity < needed) {
+            new_capacity = needed;
+        }
+        char *ptr = realloc(buf->data, new_capacity);
+        if (!ptr) {
+            return 0;
+        }
+        buf->data = ptr;
+        buf->capacity = new_capacity;
     }
 
-    buf->data = ptr;
     memcpy(&(buf->data[buf->size]), contents, realsize);
     buf->size += realsize;
     buf->data[buf->size] = '\0';
@@ -69,8 +82,9 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 /* Initialize response buffer */
 static void init_buffer(response_buffer_t *buf)
 {
-    buf->data = malloc(1);
+    buf->data = malloc(INITIAL_BUFFER_SIZE);
     buf->size = 0;
+    buf->capacity = INITIAL_BUFFER_SIZE;
     if (buf->data) {
         buf->data[0] = '\0';
     }
@@ -82,6 +96,7 @@ static void free_buffer(response_buffer_t *buf)
     free(buf->data);
     buf->data = NULL;
     buf->size = 0;
+    buf->capacity = 0;
 }
 
 /* Helper to duplicate string or NULL */
@@ -145,6 +160,9 @@ static void generate_request_signature(const char *secret,
     for (unsigned int i = 0; i < hmac_len && (i * 2 + 2) < sig_size; i++) {
         snprintf(signature + (i * 2), 3, "%02x", hmac[i]);
     }
+
+    /* Clear HMAC buffer */
+    explicit_bzero(hmac, sizeof(hmac));
 }
 
 /*
