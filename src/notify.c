@@ -79,7 +79,7 @@ notify_context_t *notify_init(const notify_config_t *config)
     if (config->hmac_secret) {
         ctx->config.hmac_secret = strdup(config->hmac_secret);
     }
-    ctx->config.timeout = config->timeout > 0 ? config->timeout : 5;
+    ctx->config.timeout = config->timeout > 0 ? config->timeout : 30;
     ctx->config.verify_ssl = config->verify_ssl;
     ctx->config.retry_count = config->retry_count > 0 ? config->retry_count : 2;
     ctx->config.retry_delay_ms = config->retry_delay_ms > 0 ? config->retry_delay_ms : 1000;

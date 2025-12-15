@@ -122,14 +122,12 @@ set(CPACK_PACKAGE_VENDOR "Linagora")
 set(CPACK_PACKAGE_CONTACT "LemonLDAP::NG team <lemonldap-ng@ow2.org>")
 
 # Debian package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5 | libjson-c5t64, libssl3 | libssl3t64, curl, jq")
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libkeyutils1")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5 | libjson-c5t64, libssl3 | libssl3t64, libkeyutils1, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
 
 # RPM package
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
-set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, curl, jq")
-set(CPACK_RPM_PACKAGE_SUGGESTS "keyutils-libs")
+set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
 include(CPack)

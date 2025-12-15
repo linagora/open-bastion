@@ -13,25 +13,33 @@ This PAM module enables Linux servers to authenticate users via LemonLDAP::NG (L
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `llng-pam-enroll` script
+- **Security hardening**:
+  - Structured JSON audit logging with correlation IDs
+  - Rate limiting with exponential backoff
+  - AES-256-GCM encrypted secret storage
+  - Webhook notifications for security events
+  - Token binding (IP, fingerprint)
 
 ## Requirements
 
 - LemonLDAP::NG >= 2.22.0 with PAM Access plugin enabled
 - libcurl
 - json-c
+- OpenSSL
+- libkeyutils
 - PAM development headers
 - curl and jq (for enrollment script)
 
 ### Debian/Ubuntu
 
 ```bash
-sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev cmake curl jq
+sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev cmake curl jq
 ```
 
 ### RHEL/CentOS/Fedora
 
 ```bash
-sudo dnf install libcurl-devel json-c-devel pam-devel cmake curl jq
+sudo dnf install libcurl-devel json-c-devel pam-devel openssl-devel keyutils-libs-devel cmake curl jq
 ```
 
 ## Building and Installation
@@ -372,9 +380,28 @@ verify_ssl = true
 cache_enabled = true
 cache_dir = /var/cache/pam_llng
 cache_ttl = 300
+cache_ttl_high_risk = 60
+high_risk_services = sudo,su
 
 # Logging: error, warn, info, debug
 log_level = warn
+
+# Audit logging
+audit_enabled = true
+audit_log_file = /var/log/pam_llng/audit.json
+audit_to_syslog = true
+audit_level = 1  # 0=critical, 1=auth events, 2=all
+
+# Rate limiting
+rate_limit_enabled = true
+rate_limit_max_attempts = 5
+rate_limit_initial_lockout = 30
+rate_limit_max_lockout = 3600
+
+# Webhook notifications (optional)
+# notify_enabled = true
+# notify_url = https://alerts.example.com/webhook
+# notify_secret = your-hmac-secret
 ```
 
 ### PAM Module Arguments
@@ -394,6 +421,9 @@ auth required pam_llng.so portal_url=https://auth.example.com debug
 | `authorize_only` | Skip password check (for SSH key mode) |
 | `no_cache` | Disable token caching |
 | `insecure` | Skip SSL verification |
+| `no_audit` | Disable audit logging |
+| `no_rate_limit` | Disable rate limiting |
+| `no_bind_ip` | Disable IP binding for tokens |
 
 ## Server Groups
 
@@ -514,7 +544,7 @@ sudo llng-pam-enroll
 
 ## License
 
-GPL-2.0
+AGPL-3.0
 
 ## Authors
 
