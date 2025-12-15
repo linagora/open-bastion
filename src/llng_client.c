@@ -142,8 +142,58 @@ static void generate_request_signature(const char *secret,
 }
 
 /*
+ * Generate a unique nonce for replay protection.
+ * Format: timestamp_ms-uuid
+ */
+static void generate_nonce(char *nonce, size_t nonce_size)
+{
+    if (!nonce || nonce_size < 64) {
+        if (nonce && nonce_size > 0) nonce[0] = '\0';
+        return;
+    }
+
+    /* Get timestamp in milliseconds */
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long long timestamp_ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+
+    /* Generate UUID v4 */
+    unsigned char uuid[16];
+    FILE *f = fopen("/dev/urandom", "r");
+    if (f) {
+        if (fread(uuid, 1, 16, f) != 16) {
+            fclose(f);
+            /* Fallback: use timestamp only */
+            snprintf(nonce, nonce_size, "%lld", timestamp_ms);
+            return;
+        }
+        fclose(f);
+    } else {
+        /* Fallback: use timestamp only */
+        snprintf(nonce, nonce_size, "%lld", timestamp_ms);
+        return;
+    }
+
+    /* Set version (4) and variant bits */
+    uuid[6] = (uuid[6] & 0x0F) | 0x40;
+    uuid[8] = (uuid[8] & 0x3F) | 0x80;
+
+    snprintf(nonce, nonce_size,
+             "%lld-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             timestamp_ms,
+             uuid[0], uuid[1], uuid[2], uuid[3],
+             uuid[4], uuid[5],
+             uuid[6], uuid[7],
+             uuid[8], uuid[9],
+             uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+}
+
+/*
  * Add request signing headers if signing_secret is configured.
- * Adds X-Timestamp and X-Signature-256 headers.
+ * Adds X-Timestamp, X-Nonce, and X-Signature-256 headers.
+ *
+ * The nonce provides replay protection - server should reject
+ * requests with previously seen nonces within a time window.
  */
 static struct curl_slist *add_signing_headers(struct curl_slist *headers,
                                                const char *signing_secret,
@@ -157,7 +207,11 @@ static struct curl_slist *add_signing_headers(struct curl_slist *headers,
 
     long timestamp = (long)time(NULL);
 
-    /* Generate signature */
+    /* Generate unique nonce */
+    char nonce[80];
+    generate_nonce(nonce, sizeof(nonce));
+
+    /* Generate signature (includes nonce in message) */
     char signature[65];
     generate_request_signature(signing_secret, timestamp, method, path, body,
                                signature, sizeof(signature));
@@ -166,6 +220,10 @@ static struct curl_slist *add_signing_headers(struct curl_slist *headers,
     char ts_header[64];
     snprintf(ts_header, sizeof(ts_header), "X-Timestamp: %ld", timestamp);
     headers = curl_slist_append(headers, ts_header);
+
+    char nonce_header[128];
+    snprintf(nonce_header, sizeof(nonce_header), "X-Nonce: %s", nonce);
+    headers = curl_slist_append(headers, nonce_header);
 
     char sig_header[128];
     snprintf(sig_header, sizeof(sig_header), "X-Signature-256: sha256=%s", signature);
