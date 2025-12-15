@@ -36,6 +36,9 @@
 #define DEFAULT_MIN_UID 10000
 #define DEFAULT_MAX_UID 60000
 
+/* Recursion guard - prevent infinite loops when NSS calls trigger more NSS lookups */
+static __thread int g_in_nss_lookup = 0;
+
 /* Configuration structure */
 typedef struct {
     char *portal_url;
@@ -89,6 +92,71 @@ static char *trim(char *str)
         *end-- = '\0';
     }
     return str;
+}
+
+/*
+ * Check if a UID is already in use by reading /etc/passwd directly.
+ * This avoids NSS recursion by not calling getpwuid().
+ * Returns 1 if UID is in use, 0 otherwise.
+ */
+static int uid_exists_locally(uid_t uid)
+{
+    FILE *f = fopen("/etc/passwd", "r");
+    if (!f) return 0;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Format: username:x:uid:gid:gecos:home:shell */
+        char *p = line;
+        int field = 0;
+        char *start = p;
+
+        while (*p && field < 3) {
+            if (*p == ':') {
+                if (field == 2) {
+                    *p = '\0';
+                    uid_t local_uid = (uid_t)atoi(start);
+                    if (local_uid == uid) {
+                        fclose(f);
+                        return 1;
+                    }
+                }
+                field++;
+                start = p + 1;
+            }
+            p++;
+        }
+    }
+
+    fclose(f);
+    return 0;
+}
+
+/*
+ * Generate a unique UID from username hash, checking for collisions.
+ * Tries up to 100 times with different seeds before giving up.
+ */
+static uid_t generate_unique_uid(const char *username, uid_t min_uid, uid_t max_uid)
+{
+    unsigned int hash = 5381;
+    for (const char *c = username; *c; c++) {
+        hash = ((hash << 5) + hash) + (unsigned char)*c;
+    }
+
+    uid_t range = max_uid - min_uid;
+    if (range == 0) range = 1;
+
+    /* Try to find a non-colliding UID */
+    for (int attempt = 0; attempt < 100; attempt++) {
+        uid_t candidate = min_uid + ((hash + attempt) % range);
+        if (!uid_exists_locally(candidate)) {
+            return candidate;
+        }
+    }
+
+    /* Fallback: return hash-based UID even if collision exists */
+    /* This shouldn't happen in practice with a reasonable UID range */
+    return min_uid + (hash % range);
 }
 
 /* Load server token from file */
@@ -434,12 +502,8 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     if (json_object_object_get_ex(json, "uid", &val)) {
         pw->pw_uid = (uid_t)json_object_get_int(val);
     } else {
-        /* Generate UID from username hash */
-        unsigned int hash = 5381;
-        for (const char *c = username; *c; c++) {
-            hash = ((hash << 5) + hash) + *c;
-        }
-        pw->pw_uid = g_config.min_uid + (hash % (g_config.max_uid - g_config.min_uid));
+        /* Generate unique UID from username hash, avoiding collisions */
+        pw->pw_uid = generate_unique_uid(username, g_config.min_uid, g_config.max_uid);
     }
 
     /* GID */
@@ -517,9 +581,18 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
         return NSS_STATUS_UNAVAIL;
     }
 
+    /* Recursion guard: if we're already in a lookup, don't recurse */
+    if (g_in_nss_lookup) {
+        *errnop = ENOENT;
+        return NSS_STATUS_NOTFOUND;
+    }
+
+    g_in_nss_lookup = 1;
+
     ensure_initialized();
 
     if (!g_config.portal_url) {
+        g_in_nss_lookup = 0;
         *errnop = ENOENT;
         return NSS_STATUS_UNAVAIL;
     }
@@ -530,6 +603,7 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
     if (cached) {
         if (!cached->valid) {
             pthread_mutex_unlock(&g_cache.lock);
+            g_in_nss_lookup = 0;
             *errnop = ENOENT;
             return NSS_STATUS_NOTFOUND;
         }
@@ -541,6 +615,7 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
 
         if (buflen < needed) {
             pthread_mutex_unlock(&g_cache.lock);
+            g_in_nss_lookup = 0;
             *errnop = ERANGE;
             return NSS_STATUS_TRYAGAIN;
         }
@@ -569,6 +644,7 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
         strcpy(p, cached->pw.pw_shell);
 
         pthread_mutex_unlock(&g_cache.lock);
+        g_in_nss_lookup = 0;
         return NSS_STATUS_SUCCESS;
     }
     pthread_mutex_unlock(&g_cache.lock);
@@ -577,11 +653,13 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
     if (query_llng_userinfo(name, result, buffer, buflen) == 0) {
         /* Add to cache */
         cache_add(name, result, 1);
+        g_in_nss_lookup = 0;
         return NSS_STATUS_SUCCESS;
     }
 
     /* Not found - cache negative result */
     cache_add(name, NULL, 0);
+    g_in_nss_lookup = 0;
     *errnop = ENOENT;
     return NSS_STATUS_NOTFOUND;
 }

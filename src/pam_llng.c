@@ -68,6 +68,84 @@ typedef struct {
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
 
 /*
+ * Check if a group exists by reading /etc/group directly.
+ * This avoids NSS calls which could cause issues.
+ * Returns 1 if group exists, 0 otherwise.
+ */
+static int group_exists_locally(gid_t gid)
+{
+    FILE *f = fopen("/etc/group", "r");
+    if (!f) return 0;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Format: groupname:x:gid:members */
+        char *p = line;
+        int field = 0;
+        char *start = p;
+
+        while (*p && field < 3) {
+            if (*p == ':') {
+                if (field == 2) {
+                    *p = '\0';
+                    gid_t local_gid = (gid_t)atoi(start);
+                    if (local_gid == gid) {
+                        fclose(f);
+                        return 1;
+                    }
+                }
+                field++;
+                start = p + 1;
+            }
+            p++;
+        }
+    }
+
+    fclose(f);
+    return 0;
+}
+
+/*
+ * Invalidate nscd cache for passwd and group databases.
+ * This ensures that subsequent NSS lookups see the newly created user.
+ */
+static void invalidate_nscd_cache(void)
+{
+    /* Try to invalidate nscd cache - ignore errors if nscd isn't running */
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: run nscd --invalidate */
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            dup2(null_fd, STDOUT_FILENO);
+            dup2(null_fd, STDERR_FILENO);
+            close(null_fd);
+        }
+        execl("/usr/sbin/nscd", "nscd", "--invalidate", "passwd", NULL);
+        _exit(0);  /* Exit silently if nscd not found */
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+    }
+
+    /* Also invalidate group cache */
+    pid = fork();
+    if (pid == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd >= 0) {
+            dup2(null_fd, STDOUT_FILENO);
+            dup2(null_fd, STDERR_FILENO);
+            close(null_fd);
+        }
+        execl("/usr/sbin/nscd", "nscd", "--invalidate", "group", NULL);
+        _exit(0);
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+    }
+}
+
+/*
  * Validate username for safe use in /etc/passwd
  * Returns 1 if valid, 0 if invalid
  */
@@ -735,6 +813,12 @@ static int create_unix_user(pam_handle_t *pamh,
         return -1;
     }
 
+    /* Verify that the primary group exists */
+    if (!group_exists_locally(gid)) {
+        LLNG_LOG_ERR(pamh, "Primary group %d does not exist for user %s", gid, user);
+        return -1;
+    }
+
     /* Determine home directory */
     if (home && *home) {
         snprintf(home_dir, sizeof(home_dir), "%s", home);
@@ -873,6 +957,9 @@ static int create_unix_user(pam_handle_t *pamh,
     }
 
     LLNG_LOG_INFO(pamh, "Successfully created Unix user: %s", user);
+
+    /* Invalidate nscd cache so the new user is visible immediately */
+    invalidate_nscd_cache();
 
 cleanup:
     /* Close files (also releases locks) */
