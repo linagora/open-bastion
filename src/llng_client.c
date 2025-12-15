@@ -127,16 +127,30 @@ static void generate_request_signature(const char *secret,
         return;
     }
 
-    /* Build message: timestamp.method.path.body */
+    /* Build message: timestamp.method.path.body
+     * Use stack allocation for typical message sizes to avoid malloc overhead.
+     * Typical: timestamp(~10) + method(~4) + path(~50) + body(~200) < 512 bytes
+     */
     char ts_str[32];
     snprintf(ts_str, sizeof(ts_str), "%ld", timestamp);
 
     size_t msg_len = strlen(ts_str) + 1 + strlen(method) + 1 +
                      strlen(path) + 1 + (body ? strlen(body) : 0);
-    char *message = malloc(msg_len + 1);
-    if (!message) {
-        signature[0] = '\0';
-        return;
+
+    /* Use stack buffer for small messages, heap for large ones */
+    char stack_message[512];
+    char *message;
+    bool heap_allocated = false;
+
+    if (msg_len < sizeof(stack_message)) {
+        message = stack_message;
+    } else {
+        message = malloc(msg_len + 1);
+        if (!message) {
+            signature[0] = '\0';
+            return;
+        }
+        heap_allocated = true;
     }
 
     snprintf(message, msg_len + 1, "%s.%s.%s.%s",
@@ -150,9 +164,11 @@ static void generate_request_signature(const char *secret,
                                   (unsigned char *)message, strlen(message),
                                   hmac, &hmac_len);
 
-    /* Clear and free message */
+    /* Clear message buffer */
     explicit_bzero(message, msg_len + 1);
-    free(message);
+    if (heap_allocated) {
+        free(message);
+    }
 
     /* Check HMAC result */
     if (!result) {

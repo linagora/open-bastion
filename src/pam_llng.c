@@ -493,9 +493,9 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         audit_initialized = true;
     }
 
-    /* Check rate limiting before attempting authentication */
+    /* Build rate limiter key once and check rate limiting before authentication */
+    char rate_key[256];
     if (data->rate_limiter) {
-        char rate_key[256];
         rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
 
         int lockout_remaining = rate_limiter_check(data->rate_limiter, rate_key);
@@ -529,8 +529,6 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
         /* Record failure for rate limiting */
         if (data->rate_limiter) {
-            char rate_key[256];
-            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
             rate_limiter_record_failure(data->rate_limiter, rate_key);
         }
 
@@ -572,8 +570,6 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         pam_result = PAM_AUTH_ERR;
 
         if (data->rate_limiter) {
-            char rate_key[256];
-            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
             rate_limiter_record_failure(data->rate_limiter, rate_key);
         }
 
@@ -595,8 +591,6 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         pam_result = PAM_AUTH_ERR;
 
         if (data->rate_limiter) {
-            char rate_key[256];
-            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
             rate_limiter_record_failure(data->rate_limiter, rate_key);
         }
 
@@ -614,8 +608,6 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
     /* Success - reset rate limiter */
     if (data->rate_limiter) {
-        char rate_key[256];
-        rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
         rate_limiter_reset(data->rate_limiter, rate_key);
     }
 

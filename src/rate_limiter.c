@@ -31,31 +31,45 @@ struct rate_limiter {
     rate_limiter_config_t config;
 };
 
-/* Hash a key to a filename-safe string */
+/*
+ * Hash a key to a filename-safe string.
+ * Uses thread-local EVP_MD_CTX to avoid allocation/deallocation overhead
+ * in the hot path (called on every rate limiter check).
+ *
+ * Note: The thread-local context is intentionally never freed. This is
+ * acceptable for PAM modules where processes are typically short-lived.
+ * For long-running daemons with thread pools, consider using pthread_key_create()
+ * with a destructor callback instead.
+ */
 static void hash_key(const char *key, char *out, size_t out_size)
 {
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    static __thread EVP_MD_CTX *ctx = NULL;
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hash_len = 0;
 
-    if (!ctx || out_size < 33) {
+    if (out_size < 33) {
         if (out_size > 0) out[0] = '\0';
-        if (ctx) EVP_MD_CTX_free(ctx);
         return;
+    }
+
+    /* Lazy initialization of thread-local context */
+    if (!ctx) {
+        ctx = EVP_MD_CTX_new();
+        if (!ctx) {
+            out[0] = '\0';
+            return;
+        }
     }
 
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1 ||
         EVP_DigestUpdate(ctx, key, strlen(key)) != 1 ||
         EVP_DigestFinal_ex(ctx, hash, &hash_len) != 1) {
-        EVP_MD_CTX_free(ctx);
         out[0] = '\0';
         return;
     }
 
-    EVP_MD_CTX_free(ctx);
-
-    /* Convert first 16 bytes to hex */
-    for (int i = 0; i < 16 && (size_t)(i * 2 + 2) < out_size; i++) {
+    /* Convert first 16 bytes to hex (32 chars + null = 33 bytes needed) */
+    for (int i = 0; i < 16; i++) {
         snprintf(out + (i * 2), 3, "%02x", hash[i]);
     }
 }

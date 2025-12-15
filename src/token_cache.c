@@ -350,20 +350,75 @@ void cache_destroy(token_cache_t *cache)
     free(cache);
 }
 
-/* Count entries in cache directory */
-static int count_cache_entries(const char *cache_dir)
+/* Forward declaration for read_cache_file */
+static int read_cache_file(token_cache_t *cache, const char *path,
+                           char **out, size_t *out_len);
+
+/*
+ * Combined count and cleanup in a single directory scan.
+ * Returns the number of valid (non-expired) entries remaining.
+ * This avoids triple directory scans in cache_store().
+ *
+ * New cache format: first line is plaintext "expires_at\n",
+ * so we can check expiration without decrypting.
+ */
+static int count_and_cleanup_entries(token_cache_t *cache, int *removed)
 {
-    DIR *dir = opendir(cache_dir);
+    if (!cache) return 0;
+
+    DIR *dir = opendir(cache->cache_dir);
     if (!dir) return 0;
 
     int count = 0;
+    int cleanup_count = 0;
+    time_t now = time(NULL);
     struct dirent *entry;
+
     while ((entry = readdir(dir)) != NULL) {
-        if (strstr(entry->d_name, ".cache") != NULL) {
-            count++;
+        if (strstr(entry->d_name, ".cache") == NULL) {
+            continue;
         }
+
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", cache->cache_dir, entry->d_name);
+
+        /* Quick expiration check: read only the first line (plaintext timestamp) */
+        FILE *f = fopen(path, "r");
+        if (!f) {
+            unlink(path);
+            cleanup_count++;
+            continue;
+        }
+
+        char line[32];
+        if (!fgets(line, sizeof(line), f)) {
+            fclose(f);
+            unlink(path);
+            cleanup_count++;
+            continue;
+        }
+        fclose(f);
+
+        time_t expires_at;
+        if (sscanf(line, "%ld", &expires_at) != 1) {
+            /* Invalid format - corrupted */
+            unlink(path);
+            cleanup_count++;
+            continue;
+        }
+
+        if (now >= expires_at) {
+            /* Expired - remove it */
+            unlink(path);
+            cleanup_count++;
+            continue;
+        }
+
+        count++;  /* Valid entry */
     }
+
     closedir(dir);
+    if (removed) *removed = cleanup_count;
     return count;
 }
 
@@ -398,81 +453,125 @@ bool cache_lookup(token_cache_t *cache,
         return false;
     }
 
-    /* Get file size */
+    /* Get file size and check mtime for quick expiration check */
     struct stat st;
     if (fstat(fd, &st) != 0 || st.st_size == 0) {
         close(fd);
         return false;
     }
 
-    /* Read entire file */
-    unsigned char *data = malloc(st.st_size + 1);
+    /*
+     * New cache format: "expires_at\n" followed by payload.
+     * Read expiration first to avoid decryption if expired.
+     */
+    char expires_line[32];
+    ssize_t n = read(fd, expires_line, sizeof(expires_line) - 1);
+    if (n <= 0) {
+        close(fd);
+        unlink(path);
+        return false;
+    }
+    expires_line[n] = '\0';
+
+    /* Parse expiration timestamp from first line */
+    time_t expires_at;
+    char *newline = strchr(expires_line, '\n');
+    if (!newline || sscanf(expires_line, "%ld", &expires_at) != 1) {
+        close(fd);
+        unlink(path);
+        return false;
+    }
+
+    /* Check expiration BEFORE decrypting (optimization) */
+    time_t now = time(NULL);
+    if (now >= expires_at) {
+        close(fd);
+        unlink(path);
+        return false;
+    }
+
+    /* Calculate offset to payload (after "expires_at\n") */
+    size_t header_len = (size_t)(newline - expires_line + 1);
+
+    /* Seek to start of payload */
+    if (lseek(fd, header_len, SEEK_SET) == (off_t)-1) {
+        close(fd);
+        return false;
+    }
+
+    /* Read remaining payload */
+    size_t payload_size = st.st_size - header_len;
+    unsigned char *data = malloc(payload_size + 1);
     if (!data) {
         close(fd);
         return false;
     }
 
-    ssize_t bytes_read = read(fd, data, st.st_size);
+    ssize_t bytes_read = read(fd, data, payload_size);
     close(fd);
 
-    if (bytes_read != st.st_size) {
+    if (bytes_read != (ssize_t)payload_size) {
         free(data);
         return false;
     }
-    data[st.st_size] = '\0';
+    data[payload_size] = '\0';
 
-    char *line = NULL;
-    size_t line_len = 0;
+    char *payload = NULL;
+    size_t payload_len = 0;
 
     /* Check if encrypted (starts with magic) */
     if (cache->encrypt && cache->key_derived &&
-        (size_t)st.st_size > strlen(CACHE_MAGIC) &&
+        payload_size > strlen(CACHE_MAGIC) &&
         memcmp(data, CACHE_MAGIC, strlen(CACHE_MAGIC)) == 0) {
-        /* Encrypted cache file */
+        /* Encrypted payload */
         unsigned char *decrypted = NULL;
         size_t decrypted_len = 0;
 
         size_t encrypted_offset = strlen(CACHE_MAGIC);
         if (decrypt_cache_data(cache,
                                data + encrypted_offset,
-                               st.st_size - encrypted_offset,
+                               payload_size - encrypted_offset,
                                &decrypted, &decrypted_len) != 0) {
             /* Decryption failed - remove potentially tampered file */
-            explicit_bzero(data, st.st_size);
+            explicit_bzero(data, payload_size);
             free(data);
             unlink(path);
             return false;
         }
 
-        explicit_bzero(data, st.st_size);
+        explicit_bzero(data, payload_size);
         free(data);
-        line = (char *)decrypted;
-        line_len = decrypted_len;
+        payload = (char *)decrypted;
+        payload_len = decrypted_len;
     } else {
-        /* Plaintext cache file (legacy or encryption disabled) */
-        line = (char *)data;
-        line_len = st.st_size;
+        /* Plaintext payload */
+        payload = (char *)data;
+        payload_len = payload_size;
     }
 
-    time_t expires_at;
+    time_t payload_expires_at;
     int authorized;
     char cached_user[256];
 
-    if (sscanf(line, "%ld %d %255s", &expires_at, &authorized, cached_user) != 3) {
+    /* Parse payload: "expires_at authorized user\n" */
+    if (sscanf(payload, "%ld %d %255s", &payload_expires_at, &authorized, cached_user) != 3) {
         /* Invalid format, remove the file */
-        explicit_bzero(line, line_len);
-        free(line);
+        explicit_bzero(payload, payload_len);
+        free(payload);
         unlink(path);
         return false;
     }
 
-    explicit_bzero(line, line_len);
-    free(line);
+    explicit_bzero(payload, payload_len);
+    free(payload);
 
-    /* Check expiration */
-    time_t now = time(NULL);
-    if (now >= expires_at) {
-        /* Expired, remove */
+    /*
+     * Security check: verify plaintext timestamp matches encrypted payload.
+     * This prevents an attacker from modifying the plaintext timestamp
+     * to extend cache validity without access to the encryption key.
+     */
+    if (payload_expires_at != expires_at) {
+        /* Timestamp mismatch - possible tampering, remove file */
         unlink(path);
         return false;
     }
@@ -500,27 +599,40 @@ int cache_store(token_cache_t *cache,
         return -1;
     }
 
-    /* Rate limiting: check if cache is full */
-    int entry_count = count_cache_entries(cache->cache_dir);
+    /* Rate limiting: check if cache is full (single scan with cleanup) */
+    int entry_count = count_and_cleanup_entries(cache, NULL);
     if (entry_count >= MAX_CACHE_ENTRIES) {
-        /* Try to clean up expired entries first */
-        cache_cleanup(cache);
-        entry_count = count_cache_entries(cache->cache_dir);
-        if (entry_count >= MAX_CACHE_ENTRIES) {
-            /* Still full, refuse to add more entries */
-            return -1;
-        }
+        /* Still full after cleanup, refuse to add more entries */
+        return -1;
     }
 
     char path[512];
     build_cache_path(cache, token, user, path, sizeof(path));
 
-    /* Build plaintext cache entry */
+    /* Build cache entry data */
     time_t expires_at = time(NULL) + (ttl > 0 ? ttl : cache->default_ttl);
-    char plaintext[1024];
-    int plaintext_len = snprintf(plaintext, sizeof(plaintext),
-                                  "%ld %d %s\n", expires_at, authorized ? 1 : 0, user);
-    if (plaintext_len < 0 || plaintext_len >= (int)sizeof(plaintext)) {
+
+    /*
+     * Cache format (optimized for quick expiration check with integrity protection):
+     * - Plaintext header: "expires_at\n" (allows checking expiration without decryption)
+     * - If encrypted: CACHE_MAGIC + encrypted("expires_at authorized user\n")
+     * - If plaintext: "expires_at authorized user\n"
+     *
+     * The expires_at is duplicated: once in plaintext for quick check, once in
+     * encrypted payload for integrity verification. If an attacker modifies the
+     * plaintext timestamp, it won't match the encrypted one and will be rejected.
+     */
+    char expires_header[32];
+    int header_len = snprintf(expires_header, sizeof(expires_header), "%ld\n", expires_at);
+    if (header_len < 0 || header_len >= (int)sizeof(expires_header)) {
+        return -1;
+    }
+
+    /* Include expires_at in payload for integrity verification after decryption */
+    char payload[1024];
+    int payload_len = snprintf(payload, sizeof(payload), "%ld %d %s\n",
+                               expires_at, authorized ? 1 : 0, user);
+    if (payload_len < 0 || payload_len >= (int)sizeof(payload)) {
         return -1;
     }
 
@@ -535,12 +647,20 @@ int cache_store(token_cache_t *cache,
 
     int result = 0;
 
+    /* Always write plaintext expiration header first */
+    ssize_t written = write(fd, expires_header, header_len);
+    if (written != header_len) {
+        close(fd);
+        unlink(temp_path);
+        return -1;
+    }
+
     if (cache->encrypt && cache->key_derived) {
-        /* Encrypt the cache data */
+        /* Encrypt the payload (not the expiration) */
         unsigned char *encrypted = NULL;
         size_t encrypted_len = 0;
 
-        if (encrypt_cache_data(cache, (unsigned char *)plaintext, plaintext_len,
+        if (encrypt_cache_data(cache, (unsigned char *)payload, payload_len,
                                &encrypted, &encrypted_len) != 0) {
             close(fd);
             unlink(temp_path);
@@ -548,7 +668,7 @@ int cache_store(token_cache_t *cache,
         }
 
         /* Write magic header + encrypted data */
-        ssize_t written = write(fd, CACHE_MAGIC, strlen(CACHE_MAGIC));
+        written = write(fd, CACHE_MAGIC, strlen(CACHE_MAGIC));
         if (written == (ssize_t)strlen(CACHE_MAGIC)) {
             written = write(fd, encrypted, encrypted_len);
             if (written != (ssize_t)encrypted_len) {
@@ -561,15 +681,16 @@ int cache_store(token_cache_t *cache,
         explicit_bzero(encrypted, encrypted_len);
         free(encrypted);
     } else {
-        /* Write plaintext */
-        ssize_t written = write(fd, plaintext, plaintext_len);
-        if (written != plaintext_len) {
+        /* Write plaintext payload */
+        written = write(fd, payload, payload_len);
+        if (written != payload_len) {
             result = -1;
         }
     }
 
+    explicit_bzero(payload, sizeof(payload));
+
     close(fd);
-    explicit_bzero(plaintext, sizeof(plaintext));
 
     if (result != 0) {
         unlink(temp_path);
