@@ -95,6 +95,35 @@ static char *trim(char *str)
 }
 
 /*
+ * Safe string copy with guaranteed null termination and bounds checking.
+ * Updates dst pointer and remaining size after copy.
+ * Returns 0 on success, -1 if buffer too small.
+ */
+static int safe_strcpy(char **dst, size_t *remaining, const char *src)
+{
+    if (!dst || !*dst || !remaining || *remaining == 0) {
+        return -1;
+    }
+
+    const char *source = src ? src : "";
+    size_t src_len = strlen(source);
+
+    /* Need space for string + null terminator */
+    if (src_len >= *remaining) {
+        return -1;  /* Buffer too small */
+    }
+
+    memcpy(*dst, source, src_len);
+    (*dst)[src_len] = '\0';
+
+    size_t advance = src_len + 1;
+    *dst += advance;
+    *remaining -= advance;
+
+    return 0;
+}
+
+/*
  * Check if a UID is already in use by reading /etc/passwd directly.
  * This avoids NSS recursion by not calling getpwuid().
  * Returns 1 if UID is in use, 0 otherwise.
@@ -481,22 +510,30 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
         return -1;
     }
 
-    /* Extract user info */
+    /* Extract user info with safe bounds checking */
     char *p = buffer;
     size_t remaining = buflen;
 
+    /* Verify minimum buffer size (rough estimate) */
+    size_t min_needed = strlen(username) + 64 + 256 + 256 + 128;
+    if (buflen < min_needed) {
+        json_object_put(json);
+        return -1;
+    }
+
     /* Username */
     pw->pw_name = p;
-    strncpy(p, username, remaining);
-    size_t len = strlen(username) + 1;
-    p += len;
-    remaining -= len;
+    if (safe_strcpy(&p, &remaining, username) != 0) {
+        json_object_put(json);
+        return -1;
+    }
 
     /* Password (disabled) */
     pw->pw_passwd = p;
-    strncpy(p, "x", remaining);
-    p += 2;
-    remaining -= 2;
+    if (safe_strcpy(&p, &remaining, "x") != 0) {
+        json_object_put(json);
+        return -1;
+    }
 
     /* UID */
     if (json_object_object_get_ex(json, "uid", &val)) {
@@ -513,41 +550,57 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
         pw->pw_gid = g_config.default_gid;
     }
 
-    /* GECOS */
+    /* GECOS - sanitize to remove dangerous characters */
     pw->pw_gecos = p;
+    const char *gecos_raw = "";
     if (json_object_object_get_ex(json, "gecos", &val)) {
-        const char *gecos = json_object_get_string(val);
-        strncpy(p, gecos ? gecos : "", remaining);
-    } else {
-        strncpy(p, "", remaining);
+        const char *tmp = json_object_get_string(val);
+        if (tmp) gecos_raw = tmp;
     }
-    len = strlen(pw->pw_gecos) + 1;
-    p += len;
-    remaining -= len;
+    /* Sanitize GECOS: remove colons and newlines which could corrupt passwd format */
+    char gecos_safe[256];
+    size_t gi = 0;
+    for (const char *gc = gecos_raw; *gc && gi < sizeof(gecos_safe) - 1; gc++) {
+        if (*gc != ':' && *gc != '\n' && *gc != '\r') {
+            gecos_safe[gi++] = *gc;
+        }
+    }
+    gecos_safe[gi] = '\0';
+    if (safe_strcpy(&p, &remaining, gecos_safe) != 0) {
+        json_object_put(json);
+        return -1;
+    }
 
     /* Home directory */
     pw->pw_dir = p;
+    char home_buf[256];
     if (json_object_object_get_ex(json, "home", &val)) {
         const char *home = json_object_get_string(val);
         if (home && *home) {
-            strncpy(p, home, remaining);
+            snprintf(home_buf, sizeof(home_buf), "%s", home);
         } else {
-            snprintf(p, remaining, "%s/%s", g_config.default_home_base, username);
+            snprintf(home_buf, sizeof(home_buf), "%s/%s", g_config.default_home_base, username);
         }
     } else {
-        snprintf(p, remaining, "%s/%s", g_config.default_home_base, username);
+        snprintf(home_buf, sizeof(home_buf), "%s/%s", g_config.default_home_base, username);
     }
-    len = strlen(pw->pw_dir) + 1;
-    p += len;
-    remaining -= len;
+    if (safe_strcpy(&p, &remaining, home_buf) != 0) {
+        json_object_put(json);
+        return -1;
+    }
 
     /* Shell */
     pw->pw_shell = p;
+    const char *shell_to_use = g_config.default_shell;
     if (json_object_object_get_ex(json, "shell", &val)) {
         const char *shell = json_object_get_string(val);
-        strncpy(p, (shell && *shell) ? shell : g_config.default_shell, remaining);
-    } else {
-        strncpy(p, g_config.default_shell, remaining);
+        if (shell && *shell) {
+            shell_to_use = shell;
+        }
+    }
+    if (safe_strcpy(&p, &remaining, shell_to_use) != 0) {
+        json_object_put(json);
+        return -1;
     }
 
     json_object_put(json);
@@ -608,7 +661,7 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
             return NSS_STATUS_NOTFOUND;
         }
 
-        /* Copy from cache */
+        /* Copy from cache with safe bounds checking */
         size_t needed = strlen(cached->pw.pw_name) + strlen(cached->pw.pw_passwd) +
                        strlen(cached->pw.pw_gecos) + strlen(cached->pw.pw_dir) +
                        strlen(cached->pw.pw_shell) + 16;
@@ -621,31 +674,35 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
         }
 
         char *p = buffer;
+        size_t remaining = buflen;
+
         result->pw_name = p;
-        strcpy(p, cached->pw.pw_name);
-        p += strlen(p) + 1;
+        if (safe_strcpy(&p, &remaining, cached->pw.pw_name) != 0) goto cache_overflow;
 
         result->pw_passwd = p;
-        strcpy(p, cached->pw.pw_passwd);
-        p += strlen(p) + 1;
+        if (safe_strcpy(&p, &remaining, cached->pw.pw_passwd) != 0) goto cache_overflow;
 
         result->pw_uid = cached->pw.pw_uid;
         result->pw_gid = cached->pw.pw_gid;
 
         result->pw_gecos = p;
-        strcpy(p, cached->pw.pw_gecos);
-        p += strlen(p) + 1;
+        if (safe_strcpy(&p, &remaining, cached->pw.pw_gecos) != 0) goto cache_overflow;
 
         result->pw_dir = p;
-        strcpy(p, cached->pw.pw_dir);
-        p += strlen(p) + 1;
+        if (safe_strcpy(&p, &remaining, cached->pw.pw_dir) != 0) goto cache_overflow;
 
         result->pw_shell = p;
-        strcpy(p, cached->pw.pw_shell);
+        if (safe_strcpy(&p, &remaining, cached->pw.pw_shell) != 0) goto cache_overflow;
 
         pthread_mutex_unlock(&g_cache.lock);
         g_in_nss_lookup = 0;
         return NSS_STATUS_SUCCESS;
+
+    cache_overflow:
+        pthread_mutex_unlock(&g_cache.lock);
+        g_in_nss_lookup = 0;
+        *errnop = ERANGE;
+        return NSS_STATUS_TRYAGAIN;
     }
     pthread_mutex_unlock(&g_cache.lock);
 
