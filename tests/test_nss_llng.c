@@ -64,26 +64,40 @@ static int uid_exists_locally(uid_t uid)
 
 /*
  * Replicate the generate_unique_uid function from libnss_llng.c
- * for testing purposes
+ * for testing purposes.
+ * Returns 0 on failure (collision or invalid params).
  */
 static uid_t generate_unique_uid(const char *username, uid_t min_uid, uid_t max_uid)
 {
+    if (!username || !*username) {
+        return 0;
+    }
+
+    if (min_uid >= max_uid || min_uid < 1000) {
+        return 0;
+    }
+
     unsigned int hash = 5381;
     for (const char *c = username; *c; c++) {
         hash = ((hash << 5) + hash) + (unsigned char)*c;
     }
 
     uid_t range = max_uid - min_uid;
-    if (range == 0) range = 1;
+    if (range == 0) {
+        return 0;
+    }
 
     for (int attempt = 0; attempt < 100; attempt++) {
-        uid_t candidate = min_uid + ((hash + attempt) % range);
+        uid_t candidate = min_uid + ((hash + (unsigned int)attempt) % range);
+        if (candidate < 1000) continue;
+        if (candidate == 65534) continue;
         if (!uid_exists_locally(candidate)) {
             return candidate;
         }
     }
 
-    return min_uid + (hash % range);
+    /* Return 0 (error) instead of colliding UID */
+    return 0;
 }
 
 /* Test uid_exists_locally with root (UID 0) */

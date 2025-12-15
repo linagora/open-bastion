@@ -164,28 +164,49 @@ static int uid_exists_locally(uid_t uid)
 /*
  * Generate a unique UID from username hash, checking for collisions.
  * Tries up to 100 times with different seeds before giving up.
+ *
+ * Returns valid UID on success, 0 on failure (UID 0 is reserved for root).
+ * Caller MUST check for return value of 0 and handle as error.
  */
 static uid_t generate_unique_uid(const char *username, uid_t min_uid, uid_t max_uid)
 {
+    if (!username || !*username) {
+        return 0;  /* Error: invalid username */
+    }
+
+    if (min_uid >= max_uid || min_uid < 1000) {
+        return 0;  /* Error: invalid UID range */
+    }
+
     unsigned int hash = 5381;
     for (const char *c = username; *c; c++) {
         hash = ((hash << 5) + hash) + (unsigned char)*c;
     }
 
     uid_t range = max_uid - min_uid;
-    if (range == 0) range = 1;
+    if (range == 0) {
+        return 0;  /* Error: zero range */
+    }
 
     /* Try to find a non-colliding UID */
     for (int attempt = 0; attempt < 100; attempt++) {
-        uid_t candidate = min_uid + ((hash + attempt) % range);
+        uid_t candidate = min_uid + ((hash + (unsigned int)attempt) % range);
+
+        /* Skip reserved UIDs */
+        if (candidate < 1000) continue;      /* System UIDs */
+        if (candidate == 65534) continue;    /* nobody */
+
         if (!uid_exists_locally(candidate)) {
             return candidate;
         }
     }
 
-    /* Fallback: return hash-based UID even if collision exists */
-    /* This shouldn't happen in practice with a reasonable UID range */
-    return min_uid + (hash % range);
+    /*
+     * SECURITY: Return 0 (error) instead of a colliding UID.
+     * Returning a colliding UID could lead to privilege escalation
+     * if the new user shares UID with an existing privileged user.
+     */
+    return 0;
 }
 
 /* Load server token from file */
@@ -538,9 +559,20 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     /* UID */
     if (json_object_object_get_ex(json, "uid", &val)) {
         pw->pw_uid = (uid_t)json_object_get_int(val);
+        /* Validate server-provided UID is in acceptable range */
+        if (pw->pw_uid < 1000 || pw->pw_uid == 65534) {
+            /* Reject system UIDs and nobody - security risk */
+            json_object_put(json);
+            return -1;
+        }
     } else {
         /* Generate unique UID from username hash, avoiding collisions */
         pw->pw_uid = generate_unique_uid(username, g_config.min_uid, g_config.max_uid);
+        if (pw->pw_uid == 0) {
+            /* Failed to generate unique UID - all candidates collide */
+            json_object_put(json);
+            return -1;
+        }
     }
 
     /* GID */
