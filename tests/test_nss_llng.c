@@ -182,8 +182,8 @@ static int test_generate_uid_range_one(void)
 
     uid_t uid = generate_unique_uid("edgecase", min_uid, max_uid);
 
-    /* With range of 1, should return min_uid (if not taken) */
-    return uid == min_uid || uid == min_uid;  /* Only one possible value */
+    /* With range of 1, should return min_uid (if not taken) or 0 if taken */
+    return uid == min_uid || uid == 0;
 }
 
 /* Test that known usernames produce predictable hashes */
