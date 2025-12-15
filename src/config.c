@@ -99,6 +99,10 @@ void config_init(pam_llng_config_t *config)
     config->create_user_enabled = false;
     config->create_user_home_base = strdup("/home");
     config->create_user_skel = strdup("/etc/skel");
+
+    /* Path validation - secure defaults */
+    config->approved_shells = strdup(DEFAULT_APPROVED_SHELLS);
+    config->approved_home_prefixes = strdup(DEFAULT_APPROVED_HOME_PREFIXES);
 }
 
 /* Secure free: zero memory before freeing */
@@ -144,6 +148,10 @@ void config_free(pam_llng_config_t *config)
     free(config->create_user_groups);
     free(config->create_user_home_base);
     free(config->create_user_skel);
+
+    /* Path validation */
+    free(config->approved_shells);
+    free(config->approved_home_prefixes);
 
     explicit_bzero(config, sizeof(*config));
 }
@@ -343,6 +351,15 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
     else if (strcmp(key, "create_user_skel") == 0 || strcmp(key, "skel") == 0) {
         free(config->create_user_skel);
         config->create_user_skel = strdup(value);
+    }
+    /* Path validation settings */
+    else if (strcmp(key, "approved_shells") == 0) {
+        free(config->approved_shells);
+        config->approved_shells = strdup(value);
+    }
+    else if (strcmp(key, "approved_home_prefixes") == 0) {
+        free(config->approved_home_prefixes);
+        config->approved_home_prefixes = strdup(value);
     }
     /* Unknown keys are silently ignored */
 
@@ -550,4 +567,101 @@ int config_validate(const pam_llng_config_t *config)
     /* But it's okay to not have one if only doing authentication */
 
     return 0;
+}
+
+/*
+ * Check if a path contains dangerous patterns
+ * Returns 1 if dangerous, 0 if safe
+ */
+static int path_contains_dangerous_patterns(const char *path)
+{
+    if (!path) return 1;
+
+    /* Must be absolute path */
+    if (path[0] != '/') return 1;
+
+    /* Check for path traversal attempts */
+    if (strstr(path, "..") != NULL) return 1;
+
+    /* Check for multiple consecutive slashes (could indicate obfuscation) */
+    if (strstr(path, "//") != NULL) return 1;
+
+    /* Check for dangerous characters */
+    for (const char *p = path; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        /* Allow: alphanumeric, /, -, _, . */
+        if (!isalnum(c) && c != '/' && c != '-' && c != '_' && c != '.') {
+            return 1;
+        }
+    }
+
+    /* Check for hidden paths (starting with dot after slash) */
+    if (strstr(path, "/.") != NULL) return 1;
+
+    return 0;
+}
+
+int config_validate_shell(const char *shell, const char *approved_shells)
+{
+    if (!shell || !*shell) return -1;
+
+    /* Check for dangerous patterns first */
+    if (path_contains_dangerous_patterns(shell)) return -1;
+
+    /* Use default if no approved list provided */
+    const char *list = approved_shells ? approved_shells : DEFAULT_APPROVED_SHELLS;
+
+    /* Make a mutable copy for tokenization */
+    char *list_copy = strdup(list);
+    if (!list_copy) return -1;
+
+    int found = 0;
+    char *saveptr;
+    char *token = strtok_r(list_copy, ":", &saveptr);
+
+    while (token != NULL) {
+        if (strcmp(shell, token) == 0) {
+            found = 1;
+            break;
+        }
+        token = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(list_copy);
+    return found ? 0 : -1;
+}
+
+int config_validate_home(const char *home, const char *approved_prefixes)
+{
+    if (!home || !*home) return -1;
+
+    /* Check for dangerous patterns first */
+    if (path_contains_dangerous_patterns(home)) return -1;
+
+    /* Use default if no approved list provided */
+    const char *list = approved_prefixes ? approved_prefixes : DEFAULT_APPROVED_HOME_PREFIXES;
+
+    /* Make a mutable copy for tokenization */
+    char *list_copy = strdup(list);
+    if (!list_copy) return -1;
+
+    int found = 0;
+    char *saveptr;
+    char *token = strtok_r(list_copy, ":", &saveptr);
+
+    while (token != NULL) {
+        size_t prefix_len = strlen(token);
+        /* Home must start with prefix and be followed by / or end */
+        if (strncmp(home, token, prefix_len) == 0) {
+            char next = home[prefix_len];
+            if (next == '/' || next == '\0') {
+                found = 1;
+                break;
+            }
+        }
+        token = strtok_r(NULL, ":", &saveptr);
+    }
+
+    free(list_copy);
+    return found ? 0 : -1;
 }

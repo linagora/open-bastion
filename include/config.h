@@ -75,6 +75,10 @@ typedef struct {
     char *create_user_groups;       /* Additional groups (comma-separated) */
     char *create_user_home_base;    /* Home base directory (default: /home) */
     char *create_user_skel;         /* Skeleton directory (default: /etc/skel) */
+
+    /* Path validation */
+    char *approved_shells;          /* Colon-separated approved shells (default: common shells) */
+    char *approved_home_prefixes;   /* Colon-separated home prefixes (default: /home:/var/home) */
 } pam_llng_config_t;
 
 /*
@@ -104,5 +108,23 @@ void config_init(pam_llng_config_t *config);
  * Returns 0 if valid, -1 if invalid (with error logged)
  */
 int config_validate(const pam_llng_config_t *config);
+
+/*
+ * Validate shell path against approved shells list
+ * Returns 0 if valid, -1 if invalid
+ */
+int config_validate_shell(const char *shell, const char *approved_shells);
+
+/*
+ * Validate home directory path against approved prefixes
+ * Returns 0 if valid, -1 if invalid
+ */
+int config_validate_home(const char *home, const char *approved_prefixes);
+
+/* Default approved shells */
+#define DEFAULT_APPROVED_SHELLS "/bin/bash:/bin/sh:/usr/bin/bash:/usr/bin/sh:/bin/zsh:/usr/bin/zsh:/bin/dash:/usr/bin/dash:/bin/fish:/usr/bin/fish"
+
+/* Default approved home prefixes */
+#define DEFAULT_APPROVED_HOME_PREFIXES "/home:/var/home"
 
 #endif /* CONFIG_H */

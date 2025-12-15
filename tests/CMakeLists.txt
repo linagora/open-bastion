@@ -44,5 +44,10 @@ add_executable(test_nss_llng test_nss_llng.c)
 target_include_directories(test_nss_llng PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_nss_llng COMMAND test_nss_llng)
 
+# Test path validation
+add_executable(test_path_validator test_path_validator.c ../src/config.c)
+target_include_directories(test_path_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME test_path_validator COMMAND test_path_validator)
+
 # Note: Integration tests require a running LLNG instance
 # and are meant to be run manually
