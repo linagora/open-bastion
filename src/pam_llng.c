@@ -25,6 +25,9 @@
 #include <pwd.h>
 #include <grp.h>
 #include <errno.h>
+#include <ctype.h>
+#include <sys/file.h>
+#include <fcntl.h>
 
 #include "config.h"
 #include "llng_client.h"
@@ -61,8 +64,39 @@ typedef struct {
 #define LLNG_LOG_DEBUG(handle, fmt, ...) \
     pam_syslog(handle, LOG_DEBUG, fmt, ##__VA_ARGS__)
 
-/* Cleanup function for pam_set_data (module data) */
+/* Forward declaration */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
+
+/*
+ * Validate username for safe use in /etc/passwd
+ * Returns 1 if valid, 0 if invalid
+ */
+static int validate_username(const char *user)
+{
+    if (!user || !*user) return 0;
+
+    size_t len = strlen(user);
+    /* POSIX username max is typically 32, be conservative */
+    if (len > 32 || len == 0) return 0;
+
+    /* First character must be lowercase letter or underscore */
+    if (!islower((unsigned char)user[0]) && user[0] != '_') return 0;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = user[i];
+        /* Allow lowercase, digits, underscore, hyphen */
+        if (!islower((unsigned char)c) && !isdigit((unsigned char)c) &&
+            c != '_' && c != '-') {
+            return 0;
+        }
+        /* Reject dangerous characters for /etc/passwd */
+        if (c == ':' || c == '\n' || c == '\r' || c == '\0' || c == '/') {
+            return 0;
+        }
+    }
+
+    return 1;
+}
 
 /* Cleanup function for pam_set_data (strings) */
 static void cleanup_string(pam_handle_t *pamh, void *data, int error_status)
@@ -663,6 +697,8 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
  * Create Unix user account by writing directly to /etc/passwd and /etc/shadow
  * This bypasses NSS checks that would otherwise fail because libnss_llng
  * reports the user as already existing.
+ *
+ * Uses file locking to prevent race conditions with concurrent logins.
  * Returns 0 on success, -1 on error
  */
 static int create_unix_user(pam_handle_t *pamh,
@@ -677,6 +713,17 @@ static int create_unix_user(pam_handle_t *pamh,
     char home_dir[512];
     const char *user_shell;
     const char *user_gecos;
+    int passwd_fd = -1;
+    int shadow_fd = -1;
+    FILE *passwd_file = NULL;
+    FILE *shadow_file = NULL;
+    int ret = -1;
+
+    /* Validate username before any file operations */
+    if (!validate_username(user)) {
+        LLNG_LOG_ERR(pamh, "Invalid username for user creation: %s", user);
+        return -1;
+    }
 
     /* Get UID/GID from NSS (libnss_llng) */
     struct passwd *nss_pw = getpwnam(user);
@@ -714,29 +761,88 @@ static int create_unix_user(pam_handle_t *pamh,
 
     LLNG_LOG_INFO(pamh, "Creating Unix user: %s (uid=%d, gid=%d)", user, uid, gid);
 
-    /* Append to /etc/passwd */
-    FILE *passwd_file = fopen("/etc/passwd", "a");
-    if (!passwd_file) {
+    /*
+     * Open and lock both files before writing to ensure atomicity.
+     * This prevents race conditions when multiple sessions try to
+     * create the same user simultaneously.
+     */
+    passwd_fd = open("/etc/passwd", O_RDWR | O_APPEND);
+    if (passwd_fd < 0) {
         LLNG_LOG_ERR(pamh, "Cannot open /etc/passwd: %s", strerror(errno));
-        return -1;
+        goto cleanup;
     }
-    fprintf(passwd_file, "%s:x:%d:%d:%s:%s:%s\n",
-            user, uid, gid, user_gecos, home_dir, user_shell);
-    fclose(passwd_file);
 
-    /* Append to /etc/shadow (locked password - login via PAM only) */
-    FILE *shadow_file = fopen("/etc/shadow", "a");
-    if (!shadow_file) {
+    shadow_fd = open("/etc/shadow", O_RDWR | O_APPEND);
+    if (shadow_fd < 0) {
         LLNG_LOG_ERR(pamh, "Cannot open /etc/shadow: %s", strerror(errno));
-        return -1;
+        goto cleanup;
     }
+
+    /* Acquire exclusive locks on both files */
+    if (flock(passwd_fd, LOCK_EX) < 0) {
+        LLNG_LOG_ERR(pamh, "Cannot lock /etc/passwd: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    if (flock(shadow_fd, LOCK_EX) < 0) {
+        LLNG_LOG_ERR(pamh, "Cannot lock /etc/shadow: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    /* Re-check if user exists after acquiring locks (TOCTOU protection) */
+    if (user_exists_locally(user)) {
+        LLNG_LOG_DEBUG(pamh, "User %s was created by another process", user);
+        ret = 0;  /* Not an error - user exists now */
+        goto cleanup;
+    }
+
+    /* Convert file descriptors to FILE* for fprintf */
+    passwd_file = fdopen(passwd_fd, "a");
+    if (!passwd_file) {
+        LLNG_LOG_ERR(pamh, "Cannot fdopen /etc/passwd: %s", strerror(errno));
+        goto cleanup;
+    }
+    passwd_fd = -1;  /* fdopen took ownership */
+
+    shadow_file = fdopen(shadow_fd, "a");
+    if (!shadow_file) {
+        LLNG_LOG_ERR(pamh, "Cannot fdopen /etc/shadow: %s", strerror(errno));
+        goto cleanup;
+    }
+    shadow_fd = -1;  /* fdopen took ownership */
+
+    /* Write to /etc/passwd */
+    if (fprintf(passwd_file, "%s:x:%d:%d:%s:%s:%s\n",
+                user, uid, gid, user_gecos, home_dir, user_shell) < 0) {
+        LLNG_LOG_ERR(pamh, "Cannot write to /etc/passwd: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    if (fflush(passwd_file) != 0) {
+        LLNG_LOG_ERR(pamh, "Cannot flush /etc/passwd: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    /* Write to /etc/shadow (locked password - login via PAM only) */
     /* Format: username:!:days_since_epoch:0:99999:7::: */
     long days = time(NULL) / 86400;
-    fprintf(shadow_file, "%s:!:%ld:0:99999:7:::\n", user, days);
-    fclose(shadow_file);
+    if (fprintf(shadow_file, "%s:!:%ld:0:99999:7:::\n", user, days) < 0) {
+        LLNG_LOG_ERR(pamh, "Cannot write to /etc/shadow: %s", strerror(errno));
+        /* Note: passwd was written but shadow failed - inconsistent state */
+        /* This is rare and would require manual cleanup */
+        goto cleanup;
+    }
 
-    /* Create home directory */
-    if (mkdir(home_dir, 0755) != 0 && errno != EEXIST) {
+    if (fflush(shadow_file) != 0) {
+        LLNG_LOG_ERR(pamh, "Cannot flush /etc/shadow: %s", strerror(errno));
+        goto cleanup;
+    }
+
+    /* User created successfully in passwd/shadow */
+    ret = 0;
+
+    /* Create home directory with secure permissions (0700) */
+    if (mkdir(home_dir, 0700) != 0 && errno != EEXIST) {
         LLNG_LOG_WARN(pamh, "Cannot create home directory %s: %s", home_dir, strerror(errno));
         /* Continue anyway - user is created */
     } else {
@@ -767,7 +873,15 @@ static int create_unix_user(pam_handle_t *pamh,
     }
 
     LLNG_LOG_INFO(pamh, "Successfully created Unix user: %s", user);
-    return 0;
+
+cleanup:
+    /* Close files (also releases locks) */
+    if (passwd_file) fclose(passwd_file);
+    if (shadow_file) fclose(shadow_file);
+    if (passwd_fd >= 0) close(passwd_fd);
+    if (shadow_fd >= 0) close(shadow_fd);
+
+    return ret;
 }
 
 /*
