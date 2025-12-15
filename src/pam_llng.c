@@ -819,20 +819,36 @@ static int create_unix_user(pam_handle_t *pamh,
         return -1;
     }
 
-    /* Determine home directory */
-    if (home && *home) {
+    /* Determine and validate home directory */
+    if (home && *home && config_validate_home(home, config->approved_home_prefixes) == 0) {
         snprintf(home_dir, sizeof(home_dir), "%s", home);
-    } else if (config->create_user_home_base) {
-        snprintf(home_dir, sizeof(home_dir), "%s/%s", config->create_user_home_base, user);
     } else {
-        snprintf(home_dir, sizeof(home_dir), "/home/%s", user);
+        /* Use default home base if provided path is invalid or empty */
+        if (home && *home) {
+            LLNG_LOG_WARN(pamh, "Invalid home path '%s' for user %s, using default", home, user);
+        }
+        if (config->create_user_home_base) {
+            snprintf(home_dir, sizeof(home_dir), "%s/%s", config->create_user_home_base, user);
+        } else {
+            snprintf(home_dir, sizeof(home_dir), "/home/%s", user);
+        }
     }
 
-    /* Determine shell */
-    user_shell = shell;
-    if (!user_shell || !*user_shell) {
-        user_shell = config->create_user_shell;
+    /* Determine and validate shell */
+    user_shell = NULL;
+    if (shell && *shell && config_validate_shell(shell, config->approved_shells) == 0) {
+        user_shell = shell;
+    } else {
+        if (shell && *shell) {
+            LLNG_LOG_WARN(pamh, "Invalid shell '%s' for user %s, using default", shell, user);
+        }
+        /* Try config default shell */
+        if (config->create_user_shell &&
+            config_validate_shell(config->create_user_shell, config->approved_shells) == 0) {
+            user_shell = config->create_user_shell;
+        }
     }
+    /* Final fallback to /bin/bash */
     if (!user_shell || !*user_shell) {
         user_shell = "/bin/bash";
     }

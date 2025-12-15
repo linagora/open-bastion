@@ -4,7 +4,7 @@
  * This module allows NSS to resolve users from a LemonLDAP::NG server.
  * It responds to getpwnam() calls by querying the LLNG /pam/userinfo endpoint.
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 
@@ -22,6 +22,9 @@
 #include <sys/stat.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
+
+/* Shared path validation functions */
+#include "path_validator.h"
 
 /* Configuration file path */
 #define NSS_LLNG_CONF "/etc/nss_llng.conf"
@@ -125,75 +128,17 @@ static int safe_strcpy(char **dst, size_t *remaining, const char *src)
 }
 
 /*
- * Check if path contains dangerous patterns.
- * Returns 1 if dangerous, 0 if safe.
+ * Wrappers for shared path validation functions from path_validator.h
+ * These use the default approved lists.
  */
-static int path_is_dangerous(const char *path)
+static inline int validate_shell(const char *shell)
 {
-    if (!path || !*path) return 1;
-
-    /* Must be absolute */
-    if (path[0] != '/') return 1;
-
-    /* Check for path traversal and dangerous patterns */
-    if (strstr(path, "..")) return 1;
-    if (strstr(path, "//")) return 1;
-
-    /* Check for shell metacharacters */
-    for (const char *p = path; *p; p++) {
-        if (*p == ';' || *p == '|' || *p == '&' || *p == '$' ||
-            *p == '`' || *p == '\n' || *p == '\r' || *p == '\'' ||
-            *p == '"' || *p == '(' || *p == ')' || *p == '<' ||
-            *p == '>' || *p == ' ' || *p == '\t') {
-            return 1;
-        }
-    }
-
-    return 0;
+    return path_validator_check_shell(shell, NULL);
 }
 
-/* Default approved shells */
-static const char *default_approved_shells[] = {
-    "/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh",
-    "/bin/zsh", "/usr/bin/zsh", "/bin/dash", "/usr/bin/dash",
-    "/bin/fish", "/usr/bin/fish", NULL
-};
-
-/* Default approved home prefixes */
-static const char *default_approved_home_prefixes[] = {
-    "/home/", "/var/home/", NULL
-};
-
-/*
- * Validate shell path against approved list.
- * Returns 0 if valid, -1 if invalid.
- */
-static int validate_shell(const char *shell)
+static inline int validate_home(const char *home)
 {
-    if (path_is_dangerous(shell)) return -1;
-
-    /* Check against approved shells */
-    for (const char **s = default_approved_shells; *s; s++) {
-        if (strcmp(shell, *s) == 0) return 0;
-    }
-
-    return -1;
-}
-
-/*
- * Validate home directory path.
- * Returns 0 if valid, -1 if invalid.
- */
-static int validate_home(const char *home)
-{
-    if (path_is_dangerous(home)) return -1;
-
-    /* Check against approved prefixes */
-    for (const char **p = default_approved_home_prefixes; *p; p++) {
-        if (strncmp(home, *p, strlen(*p)) == 0) return 0;
-    }
-
-    return -1;
+    return path_validator_check_home(home, NULL);
 }
 
 /*
@@ -417,17 +362,27 @@ static int load_config(nss_llng_config_t *config)
 }
 
 /* Initialize cache */
-static void init_cache(void)
+static int init_cache(void)
 {
     g_cache.capacity = 100;
     g_cache.entries = calloc(g_cache.capacity, sizeof(cache_entry_t));
+    if (!g_cache.entries) {
+        g_cache.capacity = 0;
+        return -1;  /* OOM */
+    }
     g_cache.count = 0;
     pthread_mutex_init(&g_cache.lock, NULL);
+    return 0;
 }
 
 /* Find cache entry */
 static cache_entry_t *cache_find(const char *username)
 {
+    /* Guard against uninitialized cache */
+    if (!g_cache.entries || g_cache.capacity == 0) {
+        return NULL;
+    }
+
     time_t now = time(NULL);
 
     for (size_t i = 0; i < g_cache.count; i++) {
@@ -452,6 +407,11 @@ static cache_entry_t *cache_find(const char *username)
 /* Add to cache */
 static void cache_add(const char *username, const struct passwd *pw, int valid)
 {
+    /* Guard against uninitialized cache */
+    if (!g_cache.entries || g_cache.capacity == 0) {
+        return;
+    }
+
     pthread_mutex_lock(&g_cache.lock);
 
     size_t slot;
@@ -737,7 +697,12 @@ static void ensure_initialized(void)
     if (!g_initialized) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
         load_config(&g_config);
-        init_cache();
+        if (init_cache() != 0) {
+            /* Cache init failed (OOM), continue without caching */
+            g_cache.capacity = 0;
+            g_cache.count = 0;
+            g_cache.entries = NULL;
+        }
         g_initialized = 1;
     }
     pthread_mutex_unlock(&g_init_lock);

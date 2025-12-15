@@ -14,6 +14,7 @@ add_library(nss_llng SHARED libnss_llng.c)
 target_include_directories(nss_llng PRIVATE
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 target_link_libraries(nss_llng

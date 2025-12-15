@@ -204,6 +204,39 @@ static int test_hash_stability(void)
     return hash1 == hash2;
 }
 
+/* Test generate_unique_uid with NULL username */
+static int test_generate_uid_null_username(void)
+{
+    /* NULL username should return 0 (error) */
+    uid_t uid = generate_unique_uid(NULL, 10000, 60000);
+    return uid == 0;
+}
+
+/* Test generate_unique_uid with empty username */
+static int test_generate_uid_empty_username(void)
+{
+    /* Empty username should return 0 (error) */
+    uid_t uid = generate_unique_uid("", 10000, 60000);
+    return uid == 0;
+}
+
+/* Test generate_unique_uid with invalid UID range (min >= max) */
+static int test_generate_uid_invalid_range(void)
+{
+    /* Invalid range should return 0 (error) */
+    uid_t uid1 = generate_unique_uid("testuser", 60000, 10000);  /* min > max */
+    uid_t uid2 = generate_unique_uid("testuser", 50000, 50000);  /* min == max */
+    return uid1 == 0 && uid2 == 0;
+}
+
+/* Test generate_unique_uid with min_uid below 1000 */
+static int test_generate_uid_low_min(void)
+{
+    /* min_uid < 1000 should return 0 (error) to protect system UIDs */
+    uid_t uid = generate_unique_uid("testuser", 500, 1000);
+    return uid == 0;
+}
+
 int main(void)
 {
     printf("NSS LLNG Module Tests\n");
@@ -221,6 +254,12 @@ int main(void)
     TEST(generate_uid_small_range);
     TEST(generate_uid_range_one);
     TEST(hash_stability);
+
+    printf("\nEdge cases and error handling:\n");
+    TEST(generate_uid_null_username);
+    TEST(generate_uid_empty_username);
+    TEST(generate_uid_invalid_range);
+    TEST(generate_uid_low_min);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
 
