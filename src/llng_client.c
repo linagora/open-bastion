@@ -311,6 +311,22 @@ int llng_verify_token(llng_client_t *client,
         }
     }
 
+    /* User attributes for account creation (from attrs object) */
+    struct json_object *attrs_obj;
+    if (json_object_object_get_ex(json, "attrs", &attrs_obj)) {
+        if (json_object_is_type(attrs_obj, json_type_object)) {
+            if (json_object_object_get_ex(attrs_obj, "gecos", &val)) {
+                response->gecos = strdup(json_object_get_string(val));
+            }
+            if (json_object_object_get_ex(attrs_obj, "shell", &val)) {
+                response->shell = strdup(json_object_get_string(val));
+            }
+            if (json_object_object_get_ex(attrs_obj, "home", &val)) {
+                response->home = strdup(json_object_get_string(val));
+            }
+        }
+    }
+
     json_object_put(json);
     return 0;
 }
@@ -556,6 +572,9 @@ void llng_response_free(llng_response_t *response)
     free(response->user);
     free(response->reason);
     free(response->scope);
+    free(response->gecos);
+    free(response->shell);
+    free(response->home);
 
     if (response->groups) {
         for (size_t i = 0; i < response->groups_count; i++) {

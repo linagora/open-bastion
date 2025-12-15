@@ -57,7 +57,8 @@ EOF
 account    required     pam_llng.so server_group=$server_group
 account    required     pam_unix.so
 
-# SESSION
+# SESSION (pam_llng creates Unix account if needed)
+session    required     pam_llng.so server_group=$server_group
 session    required     pam_unix.so
 EOF
 }
@@ -101,7 +102,8 @@ EOF
 account    required     pam_llng.so server_group=$server_group
 account    required     pam_unix.so
 
-# SESSION
+# SESSION (pam_llng creates Unix account if needed)
+session    required     pam_llng.so server_group=$server_group
 session    required     pam_unix.so
 EOF
 }
@@ -112,6 +114,7 @@ generate_llng_conf() {
     client_id="$2"
     client_secret="$3"
     server_group="$4"
+    create_user="$5"
 
     cat << EOF
 # /etc/security/pam_llng.conf
@@ -140,6 +143,9 @@ cache_ttl = 300
 
 # Logging: error, warn, info, debug
 log_level = warn
+
+# Auto-create Unix accounts on first login
+create_user = $create_user
 EOF
 }
 
@@ -162,6 +168,8 @@ case "$1" in
             CONFIGURE_SUDO="$RET"
             db_get libpam-llng/sudo-server-group
             SUDO_SERVER_GROUP="$RET"
+            db_get libpam-llng/create-user
+            CREATE_USER="$RET"
 
             # Use main server group for sudo if not specified
             if [ -z "$SUDO_SERVER_GROUP" ]; then
@@ -170,7 +178,7 @@ case "$1" in
 
             # Generate pam_llng.conf if portal URL is provided
             if [ -n "$PORTAL_URL" ]; then
-                generate_llng_conf "$PORTAL_URL" "$CLIENT_ID" "$CLIENT_SECRET" "$SERVER_GROUP" > "$CONF_FILE"
+                generate_llng_conf "$PORTAL_URL" "$CLIENT_ID" "$CLIENT_SECRET" "$SERVER_GROUP" "$CREATE_USER" > "$CONF_FILE"
                 chmod 600 "$CONF_FILE"
                 chown root:root "$CONF_FILE"
             fi

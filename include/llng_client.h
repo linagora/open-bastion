@@ -21,6 +21,11 @@ typedef struct {
     int expires_in;
     bool active;  /* For introspection */
     char *scope;
+
+    /* User attributes for account creation (from /pam/verify) */
+    char *gecos;      /* Full name / GECOS field */
+    char *shell;      /* Login shell */
+    char *home;       /* Home directory */
 } llng_response_t;
 
 /* Client configuration */

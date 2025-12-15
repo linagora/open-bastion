@@ -94,6 +94,11 @@ void config_init(pam_llng_config_t *config)
 
     /* Webhooks - disabled by default */
     config->notify_enabled = false;
+
+    /* User creation - disabled by default */
+    config->create_user_enabled = false;
+    config->create_user_home_base = strdup("/home");
+    config->create_user_skel = strdup("/etc/skel");
 }
 
 /* Secure free: zero memory before freeing */
@@ -133,6 +138,12 @@ void config_free(pam_llng_config_t *config)
     /* Webhooks */
     free(config->notify_url);
     secure_free_str(config->notify_secret);
+
+    /* User creation */
+    free(config->create_user_shell);
+    free(config->create_user_groups);
+    free(config->create_user_home_base);
+    free(config->create_user_skel);
 
     explicit_bzero(config, sizeof(*config));
 }
@@ -313,6 +324,26 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         free(config->notify_secret);
         config->notify_secret = strdup(value);
     }
+    /* User creation settings */
+    else if (strcmp(key, "create_user") == 0 || strcmp(key, "create_user_enabled") == 0) {
+        config->create_user_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "create_user_shell") == 0) {
+        free(config->create_user_shell);
+        config->create_user_shell = strdup(value);
+    }
+    else if (strcmp(key, "create_user_groups") == 0) {
+        free(config->create_user_groups);
+        config->create_user_groups = strdup(value);
+    }
+    else if (strcmp(key, "create_user_home_base") == 0 || strcmp(key, "home_base") == 0) {
+        free(config->create_user_home_base);
+        config->create_user_home_base = strdup(value);
+    }
+    else if (strcmp(key, "create_user_skel") == 0 || strcmp(key, "skel") == 0) {
+        free(config->create_user_skel);
+        config->create_user_skel = strdup(value);
+    }
     /* Unknown keys are silently ignored */
 
     return 0;
@@ -446,6 +477,13 @@ int config_parse_args(int argc, const char **argv, pam_llng_config_t *config)
         }
         else if (strcmp(arg, "no_keyring") == 0 || strcmp(arg, "nokeyring") == 0) {
             config->secrets_use_keyring = false;
+        }
+        /* User creation flags */
+        else if (strcmp(arg, "create_user") == 0) {
+            config->create_user_enabled = true;
+        }
+        else if (strcmp(arg, "no_create_user") == 0 || strcmp(arg, "nocreateuser") == 0) {
+            config->create_user_enabled = false;
         }
     }
 

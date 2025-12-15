@@ -52,3 +52,13 @@ _Description: Server group name for sudo:
  .
  This allows different authorization rules for SSH access and sudo usage.
  Leave empty to use the same group as SSH.
+
+Template: libpam-llng/create-user
+Type: boolean
+Default: false
+_Description: Auto-create Unix accounts on first login?
+ If enabled, Unix accounts will be created automatically when a user
+ authenticates for the first time via LemonLDAP::NG.
+ .
+ User attributes (gecos, shell, home) can be exported from LLNG via
+ pamAccessExportedVars configuration.

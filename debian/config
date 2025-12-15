@@ -25,6 +25,10 @@ if [ "$MODE" != "none" ]; then
         db_input low libpam-llng/sudo-server-group || true
         db_go || true
     fi
+
+    # Ask about auto-creating Unix accounts
+    db_input medium libpam-llng/create-user || true
+    db_go || true
 fi
 
 exit 0

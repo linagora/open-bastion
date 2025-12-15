@@ -1,0 +1,33 @@
+# /etc/nss_llng.conf - Configuration for libnss_llng
+#
+# This NSS module queries LemonLDAP::NG to resolve users.
+# It allows SSH and other services to authenticate users that don't
+# exist in /etc/passwd.
+
+# LemonLDAP::NG portal URL (required)
+portal_url = https://auth.example.com
+
+# Server token file (from PAM module enrollment)
+server_token_file = /etc/security/pam_llng.token
+
+# HTTP timeout in seconds
+timeout = 5
+
+# Verify SSL certificates (set to false for testing only)
+verify_ssl = true
+
+# Cache TTL in seconds (how long to cache user info)
+cache_ttl = 300
+
+# Default shell for users without loginShell attribute
+default_shell = /bin/bash
+
+# Base directory for home directories
+default_home_base = /home
+
+# UID range for auto-generated UIDs (when not provided by LLNG)
+min_uid = 10000
+max_uid = 60000
+
+# Default GID (usually 'users' group = 100)
+default_gid = 100

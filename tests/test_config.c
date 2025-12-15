@@ -161,6 +161,69 @@ static int test_validate_http_allowed_insecure(void)
     return (ret == 0);  /* Should succeed when verify_ssl=false */
 }
 
+/* Test create_user defaults */
+static int test_create_user_defaults(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    int ok = 1;
+    ok = ok && (config.create_user_enabled == false);
+    ok = ok && (config.create_user_home_base != NULL && strcmp(config.create_user_home_base, "/home") == 0);
+    ok = ok && (config.create_user_skel != NULL && strcmp(config.create_user_skel, "/etc/skel") == 0);
+    ok = ok && (config.create_user_shell == NULL);
+    ok = ok && (config.create_user_groups == NULL);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test create_user argument parsing */
+static int test_parse_create_user_args(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "portal_url=https://test.example.com",
+        "create_user",
+        "create_user_shell=/bin/zsh",
+        "create_user_groups=users,docker"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    int ret = config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.create_user_enabled == true);
+    ok = ok && (config.create_user_shell != NULL && strcmp(config.create_user_shell, "/bin/zsh") == 0);
+    ok = ok && (config.create_user_groups != NULL && strcmp(config.create_user_groups, "users,docker") == 0);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test no_create_user flag */
+static int test_parse_no_create_user(void)
+{
+    pam_llng_config_t config;
+    config_init(&config);
+    config.create_user_enabled = true;  /* Enable first */
+
+    const char *argv[] = {
+        "no_create_user"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    config_parse_args(argc, argv, &config);
+
+    int ok = (config.create_user_enabled == false);
+
+    config_free(&config);
+    return ok;
+}
+
 /* Test config file loading
  * Note: This test verifies file permission checks when running as root,
  * or skips permission tests when running as non-root user.
@@ -223,6 +286,9 @@ int main(void)
     TEST(validate_complete);
     TEST(validate_https_required);
     TEST(validate_http_allowed_insecure);
+    TEST(create_user_defaults);
+    TEST(parse_create_user_args);
+    TEST(parse_no_create_user);
     TEST(load_config_file);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);

@@ -68,6 +68,13 @@ typedef struct {
     bool notify_enabled;            /* Enable webhook notifications (default: false) */
     char *notify_url;               /* Webhook URL for security events */
     char *notify_secret;            /* HMAC secret for webhook signatures */
+
+    /* Auto-create Unix accounts */
+    bool create_user_enabled;       /* Enable auto user creation (default: false) */
+    char *create_user_shell;        /* Default shell (default: from LLNG or /bin/bash) */
+    char *create_user_groups;       /* Additional groups (comma-separated) */
+    char *create_user_home_base;    /* Home base directory (default: /home) */
+    char *create_user_skel;         /* Skeleton directory (default: /etc/skel) */
 } pam_llng_config_t;
 
 /*

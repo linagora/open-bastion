@@ -11,6 +11,7 @@
 
 #define PAM_SM_AUTH
 #define PAM_SM_ACCOUNT
+#define PAM_SM_SESSION
 
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
@@ -20,6 +21,10 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <pwd.h>
+#include <grp.h>
+#include <errno.h>
 
 #include "config.h"
 #include "llng_client.h"
@@ -56,7 +61,18 @@ typedef struct {
 #define LLNG_LOG_DEBUG(handle, fmt, ...) \
     pam_syslog(handle, LOG_DEBUG, fmt, ##__VA_ARGS__)
 
-/* Cleanup function for pam_set_data */
+/* Cleanup function for pam_set_data (module data) */
+static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
+
+/* Cleanup function for pam_set_data (strings) */
+static void cleanup_string(pam_handle_t *pamh, void *data, int error_status)
+{
+    (void)pamh;
+    (void)error_status;
+    free(data);
+}
+
+/* Cleanup function for pam_set_data (module data) */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
 {
     (void)pamh;
@@ -285,6 +301,28 @@ static const char *get_tty(pam_handle_t *pamh)
     return NULL;
 }
 
+/* Check if user exists in local /etc/passwd file (not via NSS) */
+static int user_exists_locally(const char *username)
+{
+    FILE *f = fopen("/etc/passwd", "r");
+    if (!f) return 0;
+
+    char line[1024];
+    size_t ulen = strlen(username);
+
+    while (fgets(line, sizeof(line), f)) {
+        /* Format: username:x:uid:gid:gecos:home:shell */
+        /* Check if line starts with "username:" */
+        if (strncmp(line, username, ulen) == 0 && line[ulen] == ':') {
+            fclose(f);
+            return 1;  /* User found */
+        }
+    }
+
+    fclose(f);
+    return 0;  /* User not found */
+}
+
 /*
  * pam_sm_authenticate - Authenticate user with LLNG token
  *
@@ -466,6 +504,26 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         rate_limiter_reset(data->rate_limiter, rate_key);
     }
 
+    /* Store user attributes for pam_sm_open_session (user creation) */
+    if (response.gecos) {
+        char *gecos_copy = strdup(response.gecos);
+        if (gecos_copy) {
+            pam_set_data(pamh, "llng_gecos", gecos_copy, cleanup_string);
+        }
+    }
+    if (response.shell) {
+        char *shell_copy = strdup(response.shell);
+        if (shell_copy) {
+            pam_set_data(pamh, "llng_shell", shell_copy, cleanup_string);
+        }
+    }
+    if (response.home) {
+        char *home_copy = strdup(response.home);
+        if (home_copy) {
+            pam_set_data(pamh, "llng_home", home_copy, cleanup_string);
+        }
+    }
+
     /* Log success */
     if (audit_initialized) {
         audit_event.event_type = AUDIT_AUTH_SUCCESS;
@@ -598,5 +656,214 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
 
     LLNG_LOG_INFO(pamh, "User %s authorized for access", user);
     llng_response_free(&response);
+    return PAM_SUCCESS;
+}
+
+/*
+ * Create Unix user account by writing directly to /etc/passwd and /etc/shadow
+ * This bypasses NSS checks that would otherwise fail because libnss_llng
+ * reports the user as already existing.
+ * Returns 0 on success, -1 on error
+ */
+static int create_unix_user(pam_handle_t *pamh,
+                            const char *user,
+                            const pam_llng_config_t *config,
+                            const char *gecos,
+                            const char *shell,
+                            const char *home)
+{
+    uid_t uid = 0;
+    gid_t gid = 0;
+    char home_dir[512];
+    const char *user_shell;
+    const char *user_gecos;
+
+    /* Get UID/GID from NSS (libnss_llng) */
+    struct passwd *nss_pw = getpwnam(user);
+    if (nss_pw) {
+        uid = nss_pw->pw_uid;
+        gid = nss_pw->pw_gid;
+    } else {
+        LLNG_LOG_ERR(pamh, "Cannot get user info from NSS for %s", user);
+        return -1;
+    }
+
+    /* Determine home directory */
+    if (home && *home) {
+        snprintf(home_dir, sizeof(home_dir), "%s", home);
+    } else if (config->create_user_home_base) {
+        snprintf(home_dir, sizeof(home_dir), "%s/%s", config->create_user_home_base, user);
+    } else {
+        snprintf(home_dir, sizeof(home_dir), "/home/%s", user);
+    }
+
+    /* Determine shell */
+    user_shell = shell;
+    if (!user_shell || !*user_shell) {
+        user_shell = config->create_user_shell;
+    }
+    if (!user_shell || !*user_shell) {
+        user_shell = "/bin/bash";
+    }
+
+    /* Determine GECOS */
+    user_gecos = gecos;
+    if (!user_gecos || !*user_gecos) {
+        user_gecos = "";
+    }
+
+    LLNG_LOG_INFO(pamh, "Creating Unix user: %s (uid=%d, gid=%d)", user, uid, gid);
+
+    /* Append to /etc/passwd */
+    FILE *passwd_file = fopen("/etc/passwd", "a");
+    if (!passwd_file) {
+        LLNG_LOG_ERR(pamh, "Cannot open /etc/passwd: %s", strerror(errno));
+        return -1;
+    }
+    fprintf(passwd_file, "%s:x:%d:%d:%s:%s:%s\n",
+            user, uid, gid, user_gecos, home_dir, user_shell);
+    fclose(passwd_file);
+
+    /* Append to /etc/shadow (locked password - login via PAM only) */
+    FILE *shadow_file = fopen("/etc/shadow", "a");
+    if (!shadow_file) {
+        LLNG_LOG_ERR(pamh, "Cannot open /etc/shadow: %s", strerror(errno));
+        return -1;
+    }
+    /* Format: username:!:days_since_epoch:0:99999:7::: */
+    long days = time(NULL) / 86400;
+    fprintf(shadow_file, "%s:!:%ld:0:99999:7:::\n", user, days);
+    fclose(shadow_file);
+
+    /* Create home directory */
+    if (mkdir(home_dir, 0755) != 0 && errno != EEXIST) {
+        LLNG_LOG_WARN(pamh, "Cannot create home directory %s: %s", home_dir, strerror(errno));
+        /* Continue anyway - user is created */
+    } else {
+        /* Copy skeleton files if configured */
+        if (config->create_user_skel && access(config->create_user_skel, R_OK) == 0) {
+            pid_t pid = fork();
+            if (pid == 0) {
+                /* Child: copy skel contents */
+                execl("/bin/cp", "cp", "-rT", config->create_user_skel, home_dir, NULL);
+                _exit(127);
+            } else if (pid > 0) {
+                int status;
+                waitpid(pid, &status, 0);
+            }
+        }
+
+        /* Set ownership recursively using chown -R uid:gid */
+        char owner_str[64];
+        snprintf(owner_str, sizeof(owner_str), "%d:%d", uid, gid);
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/bin/chown", "chown", "-R", owner_str, home_dir, NULL);
+            _exit(127);
+        } else if (pid > 0) {
+            int status;
+            waitpid(pid, &status, 0);
+        }
+    }
+
+    LLNG_LOG_INFO(pamh, "Successfully created Unix user: %s", user);
+    return 0;
+}
+
+/*
+ * pam_sm_open_session - Open session (create user if needed)
+ *
+ * If create_user is enabled and the user doesn't exist in /etc/passwd,
+ * this function creates the Unix account.
+ */
+PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
+                                    int flags,
+                                    int argc,
+                                    const char **argv)
+{
+    (void)flags;
+
+    const char *user = NULL;
+    int ret;
+
+    /* Get username */
+    ret = pam_get_user(pamh, &user, NULL);
+    if (ret != PAM_SUCCESS || !user || !*user) {
+        LLNG_LOG_ERR(pamh, "Failed to get username for session");
+        return PAM_SESSION_ERR;
+    }
+
+    /* Initialize module */
+    pam_llng_data_t *data = get_module_data(pamh, argc, argv);
+    if (!data) {
+        return PAM_SESSION_ERR;
+    }
+
+    /* Check if user creation is enabled */
+    if (!data->config.create_user_enabled) {
+        LLNG_LOG_DEBUG(pamh, "User creation disabled, skipping for %s", user);
+        return PAM_SUCCESS;
+    }
+
+    /* Check if user already exists in local /etc/passwd (not via NSS)
+     * This is important because libnss_llng may report the user as existing
+     * even though no local Unix account has been created yet. */
+    if (user_exists_locally(user)) {
+        LLNG_LOG_DEBUG(pamh, "User %s already exists locally", user);
+        return PAM_SUCCESS;
+    }
+
+    /* User doesn't exist - get user info from PAM data if available */
+    const char *gecos = NULL;
+    const char *shell = NULL;
+    const char *home = NULL;
+
+    /* Try to get LLNG user info stored during authentication */
+    const void *llng_gecos = NULL;
+    const void *llng_shell = NULL;
+    const void *llng_home = NULL;
+
+    pam_get_data(pamh, "llng_gecos", &llng_gecos);
+    pam_get_data(pamh, "llng_shell", &llng_shell);
+    pam_get_data(pamh, "llng_home", &llng_home);
+
+    gecos = (const char *)llng_gecos;
+    shell = (const char *)llng_shell;
+    home = (const char *)llng_home;
+
+    /* Create the user */
+    LLNG_LOG_INFO(pamh, "User %s does not exist, creating account", user);
+
+    if (create_unix_user(pamh, user, &data->config, gecos, shell, home) != 0) {
+        LLNG_LOG_ERR(pamh, "Failed to create Unix user: %s", user);
+        return PAM_SESSION_ERR;
+    }
+
+    /* Log success to audit */
+    if (data->audit) {
+        audit_event_t audit_event;
+        audit_event_init(&audit_event, AUDIT_USER_CREATED);
+        audit_event.user = user;
+        audit_event.result_code = PAM_SUCCESS;
+        audit_event.reason = "Unix account created";
+        audit_event_set_end_time(&audit_event);
+        audit_log_event(data->audit, &audit_event);
+    }
+
+    return PAM_SUCCESS;
+}
+
+/*
+ * pam_sm_close_session - Close session (no-op)
+ */
+PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
+                                     int flags,
+                                     int argc,
+                                     const char **argv)
+{
+    (void)pamh;
+    (void)flags;
+    (void)argc;
+    (void)argv;
     return PAM_SUCCESS;
 }
