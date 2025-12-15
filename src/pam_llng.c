@@ -6,7 +6,7 @@
  * - pam_sm_acct_mgmt: Checks user authorization via LLNG server
  *
  * Copyright (C) 2024 Linagora
- * License: GPL-2.0
+ * License: AGPL-3.0
  */
 
 #define PAM_SM_AUTH
@@ -23,6 +23,8 @@
 
 #include "config.h"
 #include "llng_client.h"
+#include "audit_log.h"
+#include "rate_limiter.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -37,6 +39,8 @@
 typedef struct {
     pam_llng_config_t config;
     llng_client_t *client;
+    audit_context_t *audit;
+    rate_limiter_t *rate_limiter;
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -67,6 +71,12 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
 #endif
         if (llng_data->client) {
             llng_client_destroy(llng_data->client);
+        }
+        if (llng_data->audit) {
+            audit_destroy(llng_data->audit);
+        }
+        if (llng_data->rate_limiter) {
+            rate_limiter_destroy(llng_data->rate_limiter);
         }
         config_free(&llng_data->config);
         free(llng_data);
@@ -198,6 +208,36 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
     }
 #endif
 
+    /* Initialize audit logging */
+    if (data->config.audit_enabled) {
+        audit_config_t audit_cfg = {
+            .enabled = true,
+            .log_file = data->config.audit_log_file,
+            .log_to_syslog = data->config.audit_to_syslog,
+            .level = data->config.audit_level
+        };
+        data->audit = audit_init(&audit_cfg);
+        if (!data->audit) {
+            LLNG_LOG_WARN(pamh, "Failed to initialize audit logging, continuing without");
+        }
+    }
+
+    /* Initialize rate limiter */
+    if (data->config.rate_limit_enabled) {
+        rate_limiter_config_t rl_cfg = {
+            .enabled = true,
+            .state_dir = data->config.rate_limit_state_dir,
+            .max_attempts = data->config.rate_limit_max_attempts,
+            .initial_lockout_sec = data->config.rate_limit_initial_lockout,
+            .max_lockout_sec = data->config.rate_limit_max_lockout,
+            .backoff_multiplier = data->config.rate_limit_backoff_mult
+        };
+        data->rate_limiter = rate_limiter_init(&rl_cfg);
+        if (!data->rate_limiter) {
+            LLNG_LOG_WARN(pamh, "Failed to initialize rate limiter, continuing without");
+        }
+    }
+
     /* Store data for later calls */
     if (pam_set_data(pamh, PAM_LLNG_DATA, data, cleanup_data) != PAM_SUCCESS) {
         LLNG_LOG_ERR(pamh, "Failed to store module data");
@@ -225,6 +265,26 @@ static pam_llng_data_t *get_module_data(pam_handle_t *pamh,
     return init_module_data(pamh, argc, argv);
 }
 
+/* Get client IP from PAM environment or rhost */
+static const char *get_client_ip(pam_handle_t *pamh)
+{
+    const char *rhost = NULL;
+    if (pam_get_item(pamh, PAM_RHOST, (const void **)&rhost) == PAM_SUCCESS && rhost) {
+        return rhost;
+    }
+    return "local";
+}
+
+/* Get TTY from PAM */
+static const char *get_tty(pam_handle_t *pamh)
+{
+    const char *tty = NULL;
+    if (pam_get_item(pamh, PAM_TTY, (const void **)&tty) == PAM_SUCCESS && tty) {
+        return tty;
+    }
+    return NULL;
+}
+
 /*
  * pam_sm_authenticate - Authenticate user with LLNG token
  *
@@ -240,7 +300,13 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
     const char *user = NULL;
     const char *password = NULL;
+    const char *service = NULL;
+    const char *client_ip = NULL;
+    const char *tty = NULL;
     int ret;
+    int pam_result = PAM_AUTH_ERR;
+    audit_event_t audit_event;
+    bool audit_initialized = false;
 
     /* Get username */
     ret = pam_get_user(pamh, &user, NULL);
@@ -257,6 +323,46 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         return PAM_SERVICE_ERR;
     }
 
+    /* Get context information for audit and rate limiting */
+    client_ip = get_client_ip(pamh);
+    tty = get_tty(pamh);
+    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS) {
+        service = "unknown";
+    }
+
+    /* Initialize audit event */
+    if (data->audit) {
+        audit_event_init(&audit_event, AUDIT_AUTH_FAILURE);  /* Default to failure */
+        audit_event.user = user;
+        audit_event.service = service;
+        audit_event.client_ip = client_ip;
+        audit_event.tty = tty;
+        audit_initialized = true;
+    }
+
+    /* Check rate limiting before attempting authentication */
+    if (data->rate_limiter) {
+        char rate_key[256];
+        rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
+
+        int lockout_remaining = rate_limiter_check(data->rate_limiter, rate_key);
+        if (lockout_remaining > 0) {
+            LLNG_LOG_WARN(pamh, "User %s is rate limited for %d seconds", user, lockout_remaining);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_RATE_LIMITED;
+                audit_event.result_code = PAM_AUTH_ERR;
+                char reason[128];
+                snprintf(reason, sizeof(reason), "Rate limited for %d seconds", lockout_remaining);
+                audit_event.reason = reason;
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTH_ERR;
+        }
+    }
+
     /* If authorize_only mode, skip password check */
     if (data->config.authorize_only) {
         LLNG_LOG_DEBUG(pamh, "authorize_only mode, skipping password check");
@@ -267,59 +373,106 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     ret = pam_get_authtok(pamh, PAM_AUTHTOK, &password, NULL);
     if (ret != PAM_SUCCESS || !password || !*password) {
         LLNG_LOG_DEBUG(pamh, "No password provided for user %s", user);
+
+        /* Record failure for rate limiting */
+        if (data->rate_limiter) {
+            char rate_key[256];
+            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
+            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        if (audit_initialized) {
+            audit_event.result_code = PAM_AUTH_ERR;
+            audit_event.reason = "No password provided";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         return PAM_AUTH_ERR;
     }
 
-#ifdef ENABLE_CACHE
-    /* Check cache first */
-    if (data->cache) {
-        cache_entry_t entry;
-        if (cache_lookup(data->cache, password, user, &entry)) {
-            LLNG_LOG_DEBUG(pamh, "Cache hit for user %s", user);
-            bool authorized = entry.authorized;
-            cache_entry_free(&entry);
-            return authorized ? PAM_SUCCESS : PAM_AUTH_ERR;
-        }
-    }
-#endif
-
-    /* Introspect the token */
+    /*
+     * Verify the one-time PAM token via /pam/verify
+     * The token is destroyed after successful verification (single-use).
+     * Note: Cache is not used for one-time tokens.
+     */
     llng_response_t response = {0};
-    if (llng_introspect_token(data->client, password, &response) != 0) {
-        LLNG_LOG_ERR(pamh, "Token introspection failed: %s",
+    if (llng_verify_token(data->client, password, &response) != 0) {
+        LLNG_LOG_ERR(pamh, "Token verification failed: %s",
                 llng_client_error(data->client));
+
+        if (audit_initialized) {
+            audit_event.event_type = AUDIT_SERVER_ERROR;
+            audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+            audit_event.reason = llng_client_error(data->client);
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         return PAM_AUTHINFO_UNAVAIL;
     }
 
-    /* Check if token is active */
+    /* Check if token is valid (active field from response) */
     if (!response.active) {
-        LLNG_LOG_INFO(pamh, "Token is not active for user %s", user);
-        llng_response_free(&response);
-        return PAM_AUTH_ERR;
-    }
+        LLNG_LOG_INFO(pamh, "Token is not valid for user %s: %s", user,
+                 response.reason ? response.reason : "unknown reason");
+        pam_result = PAM_AUTH_ERR;
 
-    /* Check if token has the pam scope */
-    if (!response.scope || strstr(response.scope, "pam") == NULL) {
-        LLNG_LOG_INFO(pamh, "Token does not have pam scope for user %s", user);
+        if (data->rate_limiter) {
+            char rate_key[256];
+            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
+            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        if (audit_initialized) {
+            audit_event.result_code = PAM_AUTH_ERR;
+            audit_event.reason = response.reason ? response.reason : "Token not valid";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         llng_response_free(&response);
-        return PAM_AUTH_ERR;
+        return pam_result;
     }
 
     /* Verify user matches */
     if (!response.user || strcmp(response.user, user) != 0) {
         LLNG_LOG_WARN(pamh, "Token user mismatch: expected %s, got %s",
                  user, response.user ? response.user : "(null)");
+        pam_result = PAM_AUTH_ERR;
+
+        if (data->rate_limiter) {
+            char rate_key[256];
+            rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
+            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        if (audit_initialized) {
+            audit_event.event_type = AUDIT_SECURITY_ERROR;
+            audit_event.result_code = PAM_AUTH_ERR;
+            audit_event.reason = "Token user mismatch";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         llng_response_free(&response);
-        return PAM_AUTH_ERR;
+        return pam_result;
     }
 
-#ifdef ENABLE_CACHE
-    /* Cache the result */
-    if (data->cache) {
-        int ttl = response.expires_in > 0 ? response.expires_in : data->config.cache_ttl;
-        cache_store(data->cache, password, user, true, ttl);
+    /* Success - reset rate limiter */
+    if (data->rate_limiter) {
+        char rate_key[256];
+        rate_limiter_build_key(user, client_ip, rate_key, sizeof(rate_key));
+        rate_limiter_reset(data->rate_limiter, rate_key);
     }
-#endif
+
+    /* Log success */
+    if (audit_initialized) {
+        audit_event.event_type = AUDIT_AUTH_SUCCESS;
+        audit_event.result_code = PAM_SUCCESS;
+        audit_event_set_end_time(&audit_event);
+        audit_log_event(data->audit, &audit_event);
+    }
 
     LLNG_LOG_INFO(pamh, "User %s authenticated successfully via LLNG token", user);
     llng_response_free(&response);
@@ -355,7 +508,11 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     (void)flags;
 
     const char *user = NULL;
+    const char *client_ip = NULL;
+    const char *tty = NULL;
     int ret;
+    audit_event_t audit_event;
+    bool audit_initialized = false;
 
     /* Get username */
     ret = pam_get_user(pamh, &user, NULL);
@@ -372,6 +529,10 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         return PAM_SERVICE_ERR;
     }
 
+    /* Get context information */
+    client_ip = get_client_ip(pamh);
+    tty = get_tty(pamh);
+
     /* Get hostname */
     char hostname[256];
     if (gethostname(hostname, sizeof(hostname)) != 0) {
@@ -384,11 +545,30 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         service = "unknown";
     }
 
+    /* Initialize audit event */
+    if (data->audit) {
+        audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);  /* Default to denied */
+        audit_event.user = user;
+        audit_event.service = service;
+        audit_event.client_ip = client_ip;
+        audit_event.tty = tty;
+        audit_initialized = true;
+    }
+
     /* Call authorization endpoint */
     llng_response_t response = {0};
     if (llng_authorize_user(data->client, user, hostname, service, &response) != 0) {
         LLNG_LOG_ERR(pamh, "Authorization check failed: %s",
                 llng_client_error(data->client));
+
+        if (audit_initialized) {
+            audit_event.event_type = AUDIT_SERVER_ERROR;
+            audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+            audit_event.reason = llng_client_error(data->client);
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         return PAM_AUTHINFO_UNAVAIL;
     }
 
@@ -396,8 +576,24 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     if (!response.authorized) {
         LLNG_LOG_INFO(pamh, "User %s not authorized: %s", user,
                  response.reason ? response.reason : "no reason given");
+
+        if (audit_initialized) {
+            audit_event.result_code = PAM_PERM_DENIED;
+            audit_event.reason = response.reason ? response.reason : "Not authorized";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
         llng_response_free(&response);
         return PAM_PERM_DENIED;
+    }
+
+    /* Success */
+    if (audit_initialized) {
+        audit_event.event_type = AUDIT_AUTHZ_SUCCESS;
+        audit_event.result_code = PAM_SUCCESS;
+        audit_event_set_end_time(&audit_event);
+        audit_log_event(data->audit, &audit_event);
     }
 
     LLNG_LOG_INFO(pamh, "User %s authorized for access", user);

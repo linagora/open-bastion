@@ -15,6 +15,7 @@ BuildRequires:  libcurl-devel
 BuildRequires:  pkgconfig(json-c)
 BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig
+BuildRequires:  systemd-rpm-macros
 
 Requires:       pam
 Requires:       libcurl
@@ -22,6 +23,7 @@ Requires:       json-c
 Requires:       openssl-libs
 Requires:       curl
 Requires:       jq
+Requires:       systemd
 
 %description
 PAM module for LemonLDAP::NG authentication supporting token-based
@@ -47,8 +49,20 @@ and key-based authorization with server groups.
 %{_libdir}/security/pam_llng.so*
 %config(noreplace) %{_sysconfdir}/security/pam_llng.conf.example
 %{_sbindir}/llng-pam-enroll
+%{_sbindir}/llng-pam-heartbeat
+%{_unitdir}/pam-llng-heartbeat.service
+%{_unitdir}/pam-llng-heartbeat.timer
 %{_mandir}/man8/llng-pam-enroll.8*
 %exclude %{_docdir}/pam_llng/README.md
+
+%post
+%systemd_post pam-llng-heartbeat.timer
+
+%preun
+%systemd_preun pam-llng-heartbeat.timer
+
+%postun
+%systemd_postun_with_restart pam-llng-heartbeat.timer
 
 %changelog
 * Sat Dec 14 2024 LemonLDAP::NG Team <lemonldap-ng@ow2.org> - 1.0.0-1

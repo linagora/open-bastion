@@ -2,7 +2,7 @@
  * llng_client.h - HTTP client for LemonLDAP::NG PAM module
  *
  * Copyright (C) 2024 Linagora
- * License: GPL-2.0
+ * License: AGPL-3.0
  */
 
 #ifndef LLNG_CLIENT_H
@@ -50,7 +50,19 @@ llng_client_t *llng_client_init(const llng_client_config_t *config);
 void llng_client_destroy(llng_client_t *client);
 
 /*
- * Introspect an access token
+ * Verify and consume a one-time PAM user token via /pam/verify
+ * The token is destroyed after successful verification (single-use).
+ * Requires server_token to be set in config.
+ * Returns 0 on success, -1 on error
+ */
+int llng_verify_token(llng_client_t *client,
+                      const char *user_token,
+                      llng_response_t *response);
+
+/*
+ * Introspect an access token via /oauth2/introspect
+ * DEPRECATED for user tokens - use llng_verify_token instead.
+ * Still useful for server token introspection.
  * Returns 0 on success, -1 on error
  */
 int llng_introspect_token(llng_client_t *client,

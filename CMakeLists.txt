@@ -31,6 +31,12 @@ set(PAM_MODULE_SOURCES
     src/pam_llng.c
     src/llng_client.c
     src/config.c
+    src/audit_log.c
+    src/rate_limiter.c
+    src/client_context.c
+    src/token_manager.c
+    src/notify.c
+    src/secret_store.c
 )
 
 if(ENABLE_CACHE)
@@ -97,6 +103,18 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/llng-pam-enroll
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install heartbeat script
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/llng-pam-heartbeat
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+# Install systemd units
+install(FILES
+    ${CMAKE_SOURCE_DIR}/systemd/pam-llng-heartbeat.timer
+    ${CMAKE_SOURCE_DIR}/systemd/pam-llng-heartbeat.service
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
+)
+
 # Install man page
 install(FILES ${CMAKE_SOURCE_DIR}/man/llng-pam-enroll.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
@@ -116,12 +134,12 @@ set(CPACK_PACKAGE_VENDOR "Linagora")
 set(CPACK_PACKAGE_CONTACT "LemonLDAP::NG team <lemonldap-ng@ow2.org>")
 
 # Debian package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5, libssl3, curl, jq")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5 | libjson-c5t64, libssl3 | libssl3t64, libkeyutils1, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
 
 # RPM package
-set(CPACK_RPM_PACKAGE_LICENSE "GPL-2.0")
+set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
-set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, curl, jq")
+set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
 include(CPack)

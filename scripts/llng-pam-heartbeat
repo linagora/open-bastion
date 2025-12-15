@@ -1,0 +1,249 @@
+#!/bin/bash
+#
+# llng-pam-heartbeat - Send heartbeat to LemonLDAP::NG PAM server
+#
+# This script is called periodically by systemd timer to send heartbeat
+# to the LLNG portal, allowing the SSO to track active PAM servers.
+#
+# Copyright (C) 2024 Linagora
+# License: GPL-2.0
+
+set -e
+
+VERSION="1.0.0"
+PROG_NAME=$(basename "$0")
+
+# Default values
+CONFIG_FILE="/etc/security/pam_llng.conf"
+TOKEN_FILE="/etc/security/pam_llng.token"
+STATS_FILE="/var/lib/pam_llng/stats.json"
+TIMEOUT=10
+
+# Logging functions
+log_info() {
+    logger -t "$PROG_NAME" -p auth.info "$*"
+}
+
+log_error() {
+    logger -t "$PROG_NAME" -p auth.err "$*"
+}
+
+log_debug() {
+    if [ -n "$DEBUG" ]; then
+        logger -t "$PROG_NAME" -p auth.debug "$*"
+    fi
+}
+
+# Read value from config file
+read_config() {
+    local key="$1"
+    local file="$2"
+
+    if [ -f "$file" ]; then
+        grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null | \
+            sed -E 's/^[^=]+=\s*//' | \
+            sed -E 's/^["'\'']//' | \
+            sed -E 's/["'\'']$//' | \
+            sed -E 's/\s*#.*$//' | \
+            tail -1
+    fi
+}
+
+# Load configuration
+load_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "Configuration file not found: $CONFIG_FILE"
+        exit 1
+    fi
+
+    PORTAL_URL=$(read_config "portal_url" "$CONFIG_FILE")
+    [ -z "$PORTAL_URL" ] && PORTAL_URL=$(read_config "portal" "$CONFIG_FILE")
+
+    SERVER_GROUP=$(read_config "server_group" "$CONFIG_FILE")
+    [ -z "$SERVER_GROUP" ] && SERVER_GROUP="default"
+
+    local token_file_config
+    token_file_config=$(read_config "server_token_file" "$CONFIG_FILE")
+    [ -z "$token_file_config" ] && token_file_config=$(read_config "token_file" "$CONFIG_FILE")
+    [ -n "$token_file_config" ] && TOKEN_FILE="$token_file_config"
+
+    VERIFY_SSL=$(read_config "verify_ssl" "$CONFIG_FILE")
+    [ -z "$VERIFY_SSL" ] && VERIFY_SSL="true"
+
+    if [ -z "$PORTAL_URL" ]; then
+        log_error "portal_url not configured"
+        exit 1
+    fi
+
+    # Remove trailing slash
+    PORTAL_URL="${PORTAL_URL%/}"
+}
+
+# Read token file (JSON format)
+read_token() {
+    if [ ! -f "$TOKEN_FILE" ]; then
+        log_debug "Token file not found: $TOKEN_FILE"
+        exit 0  # Exit silently - server may not be enrolled yet
+    fi
+
+    # Check if token file is JSON or plain text
+    if head -1 "$TOKEN_FILE" | grep -q '^{'; then
+        # JSON format
+        REFRESH_TOKEN=$(jq -r '.refresh_token // empty' "$TOKEN_FILE" 2>/dev/null)
+    else
+        # Legacy plain text format - no refresh token available
+        log_debug "Token file is in legacy format, cannot send heartbeat"
+        exit 0
+    fi
+
+    if [ -z "$REFRESH_TOKEN" ]; then
+        log_debug "No refresh_token in token file"
+        exit 0
+    fi
+}
+
+# Get statistics from stats file
+get_stats() {
+    if [ -f "$STATS_FILE" ]; then
+        cat "$STATS_FILE"
+    else
+        echo '{}'
+    fi
+}
+
+# Build curl options
+curl_opts() {
+    local opts=("-s" "-f" "--connect-timeout" "$TIMEOUT")
+
+    if [ "$VERIFY_SSL" = "false" ] || [ "$VERIFY_SSL" = "0" ]; then
+        opts+=("-k")
+    fi
+
+    echo "${opts[@]}"
+}
+
+# Send heartbeat
+send_heartbeat() {
+    local hostname
+    hostname=$(hostname -f 2>/dev/null || hostname)
+
+    local uptime_seconds
+    uptime_seconds=$(cat /proc/uptime 2>/dev/null | cut -d. -f1 || echo "0")
+
+    local stats
+    stats=$(get_stats)
+
+    # Build JSON payload using jq for safety
+    local payload
+    payload=$(jq -n \
+        --arg refresh_token "$REFRESH_TOKEN" \
+        --arg hostname "$hostname" \
+        --arg server_group "$SERVER_GROUP" \
+        --arg version "$VERSION" \
+        --argjson uptime "$uptime_seconds" \
+        --argjson stats "$stats" \
+        '{
+            refresh_token: $refresh_token,
+            hostname: $hostname,
+            server_group: $server_group,
+            version: $version,
+            uptime: $uptime,
+            stats: $stats
+        }')
+
+    local curl_options
+    curl_options=$(curl_opts)
+
+    local response
+    local http_code
+
+    response=$(curl $curl_options -w "\n%{http_code}" \
+        -X POST "${PORTAL_URL}/pam/heartbeat" \
+        -H "Content-Type: application/json" \
+        -d "$payload" 2>&1) || {
+        log_error "Failed to send heartbeat to ${PORTAL_URL}/pam/heartbeat"
+        exit 1
+    }
+
+    http_code=$(echo "$response" | tail -1)
+    response=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        log_debug "Heartbeat sent successfully to $PORTAL_URL"
+
+        # Extract next_heartbeat interval from response
+        local next_interval
+        next_interval=$(echo "$response" | jq -r '.next_heartbeat // empty' 2>/dev/null)
+        if [ -n "$next_interval" ]; then
+            log_debug "Next heartbeat in ${next_interval}s"
+        fi
+    elif [ "$http_code" = "401" ]; then
+        log_error "Heartbeat rejected: invalid or expired refresh_token"
+        exit 1
+    elif [ "$http_code" = "403" ]; then
+        log_error "Heartbeat rejected: server not enrolled via Device Authorization"
+        exit 1
+    else
+        log_error "Heartbeat failed with HTTP $http_code: $response"
+        exit 1
+    fi
+}
+
+# Usage
+usage() {
+    cat << EOF
+Usage: $PROG_NAME [OPTIONS]
+
+Send heartbeat to LemonLDAP::NG PAM server.
+
+Options:
+  -c, --config FILE    Configuration file (default: $CONFIG_FILE)
+  -t, --token-file F   Token file (default: $TOKEN_FILE)
+  -d, --debug          Enable debug logging
+  -h, --help           Show this help
+  -V, --version        Show version
+
+EOF
+    exit 0
+}
+
+# Parse arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -c|--config)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            -t|--token-file)
+                TOKEN_FILE="$2"
+                shift 2
+                ;;
+            -d|--debug)
+                DEBUG=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                ;;
+            -V|--version)
+                echo "$PROG_NAME version $VERSION"
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Main
+main() {
+    parse_args "$@"
+    load_config
+    read_token
+    send_heartbeat
+}
+
+main "$@"

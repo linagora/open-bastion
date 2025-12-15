@@ -359,6 +359,9 @@ poll_for_token() {
         if [ -n "$access_token" ]; then
             echo ""  # Clear the progress line
             ACCESS_TOKEN="$access_token"
+            # Also extract refresh_token and expires_in
+            REFRESH_TOKEN=$(echo "$response" | jq -r '.refresh_token // empty' 2>/dev/null)
+            EXPIRES_IN=$(echo "$response" | jq -r '.expires_in // 3600' 2>/dev/null)
             return 0
         fi
 
@@ -415,10 +418,34 @@ save_token() {
         }
     fi
 
+    # Calculate expires_at timestamp
+    local now
+    now=$(date +%s)
+    local expires_at=$((now + EXPIRES_IN))
+
+    # Build JSON token file using jq
+    local token_json
+    token_json=$(jq -n \
+        --arg access_token "$ACCESS_TOKEN" \
+        --arg refresh_token "${REFRESH_TOKEN:-}" \
+        --argjson expires_at "$expires_at" \
+        --argjson enrolled_at "$now" \
+        '{
+            access_token: $access_token,
+            refresh_token: $refresh_token,
+            expires_at: $expires_at,
+            enrolled_at: $enrolled_at
+        }')
+
+    # Remove refresh_token if empty
+    if [ -z "$REFRESH_TOKEN" ]; then
+        token_json=$(echo "$token_json" | jq 'del(.refresh_token)')
+    fi
+
     # Save token with restricted permissions
     (
         umask 077
-        echo "$ACCESS_TOKEN" > "$TOKEN_FILE"
+        echo "$token_json" > "$TOKEN_FILE"
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
         log_info "You may need to run this script as root"
@@ -432,6 +459,13 @@ save_token() {
     fi
 
     log_success "Token saved to $TOKEN_FILE"
+
+    if [ -n "$REFRESH_TOKEN" ]; then
+        log_info "Refresh token included for heartbeat support"
+    else
+        log_warn "No refresh token received - heartbeat won't work"
+        log_info "Ensure RP 'pam-access' has refresh tokens enabled"
+    fi
 }
 
 # Step 5: Update config file with server_group if needed

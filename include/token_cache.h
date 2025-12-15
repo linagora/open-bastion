@@ -2,7 +2,7 @@
  * token_cache.h - Token caching for LemonLDAP::NG PAM module
  *
  * Copyright (C) 2024 Linagora
- * License: GPL-2.0
+ * License: AGPL-3.0
  */
 
 #ifndef TOKEN_CACHE_H

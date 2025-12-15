@@ -2,7 +2,7 @@
  * llng_client.c - HTTP client for LemonLDAP::NG PAM module
  *
  * Copyright (C) 2024 Linagora
- * License: GPL-2.0
+ * License: AGPL-3.0
  */
 
 #include <stdio.h>
@@ -190,6 +190,129 @@ static void setup_curl(llng_client_t *client)
     if (client->ca_cert) {
         curl_easy_setopt(client->curl, CURLOPT_CAINFO, client->ca_cert);
     }
+}
+
+int llng_verify_token(llng_client_t *client,
+                      const char *user_token,
+                      llng_response_t *response)
+{
+    if (!client || !user_token || !response) {
+        if (client) snprintf(client->error, sizeof(client->error), "Invalid parameters");
+        return -1;
+    }
+
+    if (!client->server_token) {
+        snprintf(client->error, sizeof(client->error),
+                 "No server token configured. Server must be enrolled first.");
+        return -1;
+    }
+
+    memset(response, 0, sizeof(*response));
+    setup_curl(client);
+
+    /* Build URL */
+    char url[1024];
+    snprintf(url, sizeof(url), "%s/pam/verify", client->portal_url);
+
+    /* Build JSON request body */
+    struct json_object *req_json = json_object_new_object();
+    json_object_object_add(req_json, "token", json_object_new_string(user_token));
+
+    const char *req_body = json_object_to_json_string(req_json);
+
+    /* Build headers with Bearer token (server authentication) */
+    struct curl_slist *headers = NULL;
+    char auth_header[4200];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
+             client->server_token);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    response_buffer_t buf;
+    init_buffer(&buf);
+
+    curl_easy_setopt(client->curl, CURLOPT_URL, url);
+    curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, req_body);
+    curl_easy_setopt(client->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, &buf);
+
+    CURLcode res = curl_easy_perform(client->curl);
+
+    json_object_put(req_json);
+    curl_slist_free_all(headers);
+    explicit_bzero(auth_header, sizeof(auth_header));
+
+    if (res != CURLE_OK) {
+        snprintf(client->error, sizeof(client->error),
+                 "Curl error: %s", curl_easy_strerror(res));
+        free_buffer(&buf);
+        return -1;
+    }
+
+    long http_code;
+    curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (http_code == 401) {
+        snprintf(client->error, sizeof(client->error),
+                 "Server token invalid or expired. Re-enrollment required.");
+        free_buffer(&buf);
+        return -1;
+    }
+
+    if (http_code == 403) {
+        snprintf(client->error, sizeof(client->error),
+                 "Server not enrolled. Run enrollment first.");
+        free_buffer(&buf);
+        return -1;
+    }
+
+    if (http_code != 200) {
+        snprintf(client->error, sizeof(client->error),
+                 "HTTP error: %ld", http_code);
+        free_buffer(&buf);
+        return -1;
+    }
+
+    /* Parse JSON response */
+    struct json_object *json = json_tokener_parse(buf.data);
+    free_buffer(&buf);
+
+    if (!json) {
+        snprintf(client->error, sizeof(client->error), "Invalid JSON response");
+        return -1;
+    }
+
+    struct json_object *val;
+
+    /* Check 'valid' field (maps to 'active' for compatibility) */
+    if (json_object_object_get_ex(json, "valid", &val)) {
+        response->active = json_object_get_boolean(val);
+    }
+
+    if (json_object_object_get_ex(json, "user", &val)) {
+        response->user = strdup(json_object_get_string(val));
+    }
+
+    if (json_object_object_get_ex(json, "error", &val)) {
+        response->reason = strdup(json_object_get_string(val));
+    }
+
+    if (json_object_object_get_ex(json, "groups", &val)) {
+        if (json_object_is_type(val, json_type_array)) {
+            size_t count = json_object_array_length(val);
+            response->groups = calloc(count + 1, sizeof(char *));
+            if (response->groups) {
+                response->groups_count = count;
+                for (size_t i = 0; i < count; i++) {
+                    struct json_object *g = json_object_array_get_idx(val, i);
+                    response->groups[i] = strdup(json_object_get_string(g));
+                }
+            }
+        }
+    }
+
+    json_object_put(json);
+    return 0;
 }
 
 int llng_introspect_token(llng_client_t *client,

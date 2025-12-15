@@ -1,0 +1,18 @@
+[Unit]
+Description=PAM LLNG Heartbeat Timer
+Documentation=man:llng-pam-heartbeat(8)
+After=network-online.target
+Wants=network-online.target
+
+[Timer]
+# First heartbeat 1 minute after boot
+OnBootSec=1min
+# Then every 5 minutes
+OnUnitActiveSec=5min
+# Persist the timer across reboots
+Persistent=true
+# Randomize by up to 30 seconds to avoid thundering herd
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

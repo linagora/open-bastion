@@ -7,6 +7,18 @@ PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
 TOKEN_FILE="/etc/security/pam_llng.token"
 CACHE_DIR="/var/cache/pam_llng"
+STATS_DIR="/var/lib/pam_llng"
+
+case "$1" in
+    remove|purge)
+        # Stop and disable heartbeat timer
+        if [ -d /run/systemd/system ]; then
+            systemctl stop pam-llng-heartbeat.timer 2>/dev/null || true
+            systemctl disable pam-llng-heartbeat.timer 2>/dev/null || true
+            systemctl daemon-reload || true
+        fi
+        ;;
+esac
 
 case "$1" in
     purge)
@@ -27,6 +39,9 @@ case "$1" in
 
         # Remove cache directory
         rm -rf "$CACHE_DIR"
+
+        # Remove stats directory
+        rm -rf "$STATS_DIR"
 
         # Purge debconf data
         if [ -e /usr/share/debconf/confmodule ]; then

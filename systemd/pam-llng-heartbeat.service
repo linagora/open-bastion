@@ -1,0 +1,32 @@
+[Unit]
+Description=PAM LLNG Heartbeat
+Documentation=man:llng-pam-heartbeat(8)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/llng-pam-heartbeat
+User=root
+Group=root
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+# Allow reading config and token files
+ReadOnlyPaths=/etc/security/pam_llng.conf
+ReadOnlyPaths=/etc/security/pam_llng.token
+ReadWritePaths=/var/lib/pam_llng
+
+# Network access required
+PrivateNetwork=no

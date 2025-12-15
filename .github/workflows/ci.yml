@@ -147,7 +147,8 @@ jobs:
           libcurl-devel \
           json-c-devel \
           openssl-devel \
-          rpm-build
+          rpm-build \
+          systemd-rpm-macros
 
     - name: Build RPM
       run: |

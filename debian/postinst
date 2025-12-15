@@ -189,6 +189,17 @@ case "$1" in
             mkdir -p /var/cache/pam_llng
             chmod 700 /var/cache/pam_llng
 
+            # Create stats directory
+            mkdir -p /var/lib/pam_llng
+            chmod 700 /var/lib/pam_llng
+
+            # Enable and start heartbeat timer
+            if [ -d /run/systemd/system ]; then
+                systemctl daemon-reload || true
+                systemctl enable pam-llng-heartbeat.timer || true
+                systemctl start pam-llng-heartbeat.timer || true
+            fi
+
             # Clear secret from debconf database for security
             db_set libpam-llng/client-secret ""
         fi

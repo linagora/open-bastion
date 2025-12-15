@@ -4,7 +4,7 @@
  * Uses simple file-based cache with SHA256 hashed token names.
  *
  * Copyright (C) 2024 Linagora
- * License: GPL-2.0
+ * License: AGPL-3.0
  */
 
 #include <stdio.h>
