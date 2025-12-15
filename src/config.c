@@ -646,24 +646,31 @@ int config_validate_shell(const char *shell, const char *approved_shells)
     /* Use default if no approved list provided */
     const char *list = approved_shells ? approved_shells : DEFAULT_APPROVED_SHELLS;
 
-    /* Make a mutable copy for tokenization */
-    char *list_copy = strdup(list);
-    if (!list_copy) return -1;
+    /*
+     * Parse colon-separated list without strdup/strtok to avoid
+     * allocation overhead in the hot path (called on every auth).
+     */
+    size_t shell_len = strlen(shell);
+    const char *current = list;
 
-    int found = 0;
-    char *saveptr;
-    char *token = strtok_r(list_copy, ":", &saveptr);
+    while (current && *current) {
+        /* Find the end of current token (next ':' or end of string) */
+        const char *colon = strchr(current, ':');
+        size_t token_len = colon ? (size_t)(colon - current) : strlen(current);
 
-    while (token != NULL) {
-        if (strcmp(shell, token) == 0) {
-            found = 1;
-            break;
+        /* Skip empty tokens (e.g., "::" or leading/trailing ":") */
+        if (token_len > 0) {
+            /* Compare shell with this token */
+            if (token_len == shell_len && strncmp(shell, current, token_len) == 0) {
+                return 0;  /* Found */
+            }
         }
-        token = strtok_r(NULL, ":", &saveptr);
+
+        /* Move to next token */
+        current = colon ? colon + 1 : NULL;
     }
 
-    free(list_copy);
-    return found ? 0 : -1;
+    return -1;  /* Not found */
 }
 
 int config_validate_home(const char *home, const char *approved_prefixes)
@@ -676,29 +683,33 @@ int config_validate_home(const char *home, const char *approved_prefixes)
     /* Use default if no approved list provided */
     const char *list = approved_prefixes ? approved_prefixes : DEFAULT_APPROVED_HOME_PREFIXES;
 
-    /* Make a mutable copy for tokenization */
-    char *list_copy = strdup(list);
-    if (!list_copy) return -1;
+    /*
+     * Parse colon-separated list without strdup/strtok to avoid
+     * allocation overhead in the hot path (called on every auth).
+     */
+    const char *current = list;
 
-    int found = 0;
-    char *saveptr;
-    char *token = strtok_r(list_copy, ":", &saveptr);
+    while (current && *current) {
+        /* Find the end of current token (next ':' or end of string) */
+        const char *colon = strchr(current, ':');
+        size_t prefix_len = colon ? (size_t)(colon - current) : strlen(current);
 
-    while (token != NULL) {
-        size_t prefix_len = strlen(token);
-        /* Home must start with prefix and be followed by / or end */
-        if (strncmp(home, token, prefix_len) == 0) {
-            char next = home[prefix_len];
-            if (next == '/' || next == '\0') {
-                found = 1;
-                break;
+        /* Skip empty tokens (e.g., "::" or leading/trailing ":") */
+        if (prefix_len > 0) {
+            /* Home must start with prefix and be followed by / or end */
+            if (strncmp(home, current, prefix_len) == 0) {
+                char next = home[prefix_len];
+                if (next == '/' || next == '\0') {
+                    return 0;  /* Found */
+                }
             }
         }
-        token = strtok_r(NULL, ":", &saveptr);
+
+        /* Move to next token */
+        current = colon ? colon + 1 : NULL;
     }
 
-    free(list_copy);
-    return found ? 0 : -1;
+    return -1;  /* Not found */
 }
 
 int config_validate_skel(const char *skel_path)
