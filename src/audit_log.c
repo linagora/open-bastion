@@ -347,12 +347,32 @@ int audit_log_event(audit_context_t *ctx, const audit_event_t *event)
     if (ctx->config.log_file) {
         pthread_mutex_lock(&ctx->lock);
 
-        int fd = open(ctx->config.log_file, O_WRONLY | O_APPEND | O_CREAT, 0640);
-        if (fd >= 0) {
-            /* Write and ignore result - audit logging should not fail auth */
-            ssize_t ret = write(fd, json_line, strlen(json_line));
-            (void)ret;  /* Intentionally ignore write errors for audit */
-            close(fd);
+        /*
+         * Open with secure permissions (0640: owner rw, group r).
+         * If the file already exists, verify it has secure permissions.
+         */
+        struct stat st;
+        bool permissions_ok = true;
+
+        if (stat(ctx->config.log_file, &st) == 0) {
+            /* File exists - check permissions are not too open */
+            if (st.st_mode & S_IWOTH) {
+                /* World-writable is a security risk - refuse to write */
+                permissions_ok = false;
+            }
+        }
+
+        if (permissions_ok) {
+            int fd = open(ctx->config.log_file, O_WRONLY | O_APPEND | O_CREAT, 0640);
+            if (fd >= 0) {
+                /* Ensure file permissions are correct (in case of umask issues) */
+                fchmod(fd, 0640);
+
+                /* Write and ignore result - audit logging should not fail auth */
+                ssize_t ret = write(fd, json_line, strlen(json_line));
+                (void)ret;  /* Intentionally ignore write errors for audit */
+                close(fd);
+            }
         }
 
         pthread_mutex_unlock(&ctx->lock);

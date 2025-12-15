@@ -242,6 +242,13 @@ int rate_limiter_record_failure(rate_limiter_t *rl, const char *key)
         int lockout_count = state.failure_count - rl->config.max_attempts;
         double multiplier = 1.0;
 
+        /*
+         * Limit backoff iterations to 10 to prevent:
+         * 1. Integer overflow with large multipliers (e.g., 2^10 = 1024x)
+         * 2. Excessive lockout times beyond max_lockout_sec
+         * With default settings (initial=30s, mult=2.0, max=3600s):
+         *   - 10 iterations = 30 * 1024 = 30720s, capped to 3600s
+         */
         for (int i = 0; i < lockout_count && i < 10; i++) {
             multiplier *= rl->config.backoff_multiplier;
         }

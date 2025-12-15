@@ -13,6 +13,7 @@
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <json-c/json.h>
 
 #include "notify.h"
 
@@ -151,7 +152,14 @@ int notify_send_json(notify_context_t *ctx, const char *json_payload)
         snprintf(sig_header, sizeof(sig_header), "X-Signature-256: sha256=%s", signature);
         headers = curl_slist_append(headers, sig_header);
 
-        /* Also add timestamp for replay protection */
+        /*
+         * X-Timestamp header for replay attack protection.
+         * Webhook receivers SHOULD:
+         * 1. Reject requests with timestamps older than a threshold (e.g., 5 minutes)
+         * 2. Include the timestamp in the HMAC verification:
+         *    expected_sig = HMAC-SHA256(secret, timestamp + "." + body)
+         * This prevents replay attacks where old valid payloads are resent.
+         */
         char ts_header[64];
         snprintf(ts_header, sizeof(ts_header), "X-Timestamp: %ld", (long)time(NULL));
         headers = curl_slist_append(headers, ts_header);
@@ -206,37 +214,40 @@ int notify_send_event(notify_context_t *ctx, const audit_event_t *event)
         return 0;  /* Not an error, just filtered */
     }
 
-    /* Build JSON payload */
+    /* Build JSON payload using json-c for proper escaping */
     char timestamp[32];
     struct tm tm;
     time_t now = time(NULL);
     gmtime_r(&now, &tm);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &tm);
 
-    char json[2048];
-    snprintf(json, sizeof(json),
-             "{"
-             "\"timestamp\":\"%s\","
-             "\"event_type\":\"%s\","
-             "\"correlation_id\":\"%s\","
-             "\"host\":\"%s\","
-             "\"user\":\"%s\","
-             "\"service\":\"%s\","
-             "\"client_ip\":\"%s\","
-             "\"result_code\":%d,"
-             "\"reason\":\"%s\""
-             "}",
-             timestamp,
-             audit_event_type_str(event->event_type),
-             event->correlation_id,
-             ctx->hostname,
-             event->user ? event->user : "",
-             event->service ? event->service : "",
-             event->client_ip ? event->client_ip : "",
-             event->result_code,
-             event->reason ? event->reason : "");
+    json_object *jobj = json_object_new_object();
+    if (!jobj) {
+        snprintf(ctx->error_buf, sizeof(ctx->error_buf), "Failed to create JSON object");
+        return -1;
+    }
 
-    return notify_send_json(ctx, json);
+    json_object_object_add(jobj, "timestamp", json_object_new_string(timestamp));
+    json_object_object_add(jobj, "event_type",
+                           json_object_new_string(audit_event_type_str(event->event_type)));
+    json_object_object_add(jobj, "correlation_id",
+                           json_object_new_string(event->correlation_id));
+    json_object_object_add(jobj, "host", json_object_new_string(ctx->hostname));
+    json_object_object_add(jobj, "user",
+                           json_object_new_string(event->user ? event->user : ""));
+    json_object_object_add(jobj, "service",
+                           json_object_new_string(event->service ? event->service : ""));
+    json_object_object_add(jobj, "client_ip",
+                           json_object_new_string(event->client_ip ? event->client_ip : ""));
+    json_object_object_add(jobj, "result_code", json_object_new_int(event->result_code));
+    json_object_object_add(jobj, "reason",
+                           json_object_new_string(event->reason ? event->reason : ""));
+
+    const char *json_str = json_object_to_json_string(jobj);
+    int result = notify_send_json(ctx, json_str);
+
+    json_object_put(jobj);  /* Free the JSON object */
+    return result;
 }
 
 const char *notify_error(notify_context_t *ctx)

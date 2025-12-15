@@ -78,8 +78,33 @@ static int derive_key(secret_store_t *store)
         combined_len = snprintf(combined, sizeof(combined), "%s", machine_id);
     }
 
-    /* Use a static salt for PBKDF2 (the machine-id provides uniqueness) */
-    unsigned char pbkdf_salt[SALT_SIZE] = "pam_llng_secret";
+    /*
+     * Derive a unique salt from machine-id to avoid rainbow table attacks.
+     * We hash the machine-id to create a per-installation salt.
+     * This is better than a static salt while still being deterministic.
+     */
+    unsigned char pbkdf_salt[SALT_SIZE];
+    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
+    unsigned char salt_hash[EVP_MAX_MD_SIZE];
+    unsigned int salt_hash_len = 0;
+
+    if (!md_ctx ||
+        EVP_DigestInit_ex(md_ctx, EVP_sha256(), NULL) != 1 ||
+        EVP_DigestUpdate(md_ctx, "pam_llng_salt:", 14) != 1 ||
+        EVP_DigestUpdate(md_ctx, machine_id, strlen(machine_id)) != 1 ||
+        EVP_DigestFinal_ex(md_ctx, salt_hash, &salt_hash_len) != 1) {
+        if (md_ctx) EVP_MD_CTX_free(md_ctx);
+        snprintf(store->error_buf, sizeof(store->error_buf),
+                 "Salt derivation failed");
+        explicit_bzero(machine_id, sizeof(machine_id));
+        explicit_bzero(combined, sizeof(combined));
+        return -1;
+    }
+    EVP_MD_CTX_free(md_ctx);
+
+    /* Use first SALT_SIZE bytes of hash as salt */
+    memcpy(pbkdf_salt, salt_hash, SALT_SIZE);
+    explicit_bzero(salt_hash, sizeof(salt_hash));
 
     /* Derive key using PBKDF2 */
     if (PKCS5_PBKDF2_HMAC(combined, combined_len,
@@ -91,11 +116,13 @@ static int derive_key(secret_store_t *store)
                  "Key derivation failed");
         explicit_bzero(machine_id, sizeof(machine_id));
         explicit_bzero(combined, sizeof(combined));
+        explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
         return -1;
     }
 
     explicit_bzero(machine_id, sizeof(machine_id));
     explicit_bzero(combined, sizeof(combined));
+    explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
 
     store->key_derived = true;
     return 0;
@@ -491,10 +518,23 @@ int secret_store_rotate_key(secret_store_t *store)
 {
     if (!store) return -1;
 
-    /* This would require re-reading all secrets with old key
-     * and re-encrypting with new key. For now, just re-derive key. */
+    /*
+     * Key rotation is not automatically supported.
+     *
+     * If machine-id changes (e.g., VM cloning, reinstallation), all stored
+     * secrets become unreadable because the derived encryption key changes.
+     *
+     * To handle this scenario:
+     * 1. Before machine-id change: decrypt and backup all secrets
+     * 2. After machine-id change: re-encrypt secrets with new key
+     *
+     * This function exists as a placeholder to document this limitation.
+     * A future implementation could iterate all .enc files in store_dir,
+     * but would need the old key to decrypt first.
+     */
     snprintf(store->error_buf, sizeof(store->error_buf),
-             "Key rotation requires manual re-encryption of secrets");
+             "Automatic key rotation not supported. "
+             "If machine-id changed, secrets must be manually re-created.");
     return -1;
 }
 

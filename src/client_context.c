@@ -9,41 +9,68 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <arpa/inet.h>
 #include <openssl/evp.h>
 #include <security/pam_modules.h>
 
 #include "client_context.h"
 
-/* Parse IP address from rhost (may contain hostname) */
+/*
+ * Validate and extract IP address from rhost using inet_pton.
+ * Handles: "192.168.1.1", "192.168.1.1:22", "::1", "[::1]:22", hostnames
+ */
 static char *parse_ip_from_rhost(const char *rhost)
 {
     if (!rhost || !*rhost) {
         return strdup("local");
     }
 
-    /* Check if it looks like an IP address (starts with digit or is IPv6) */
-    if (isdigit((unsigned char)rhost[0]) || rhost[0] == ':') {
-        /* Remove port if present (e.g., "192.168.1.1:22" -> "192.168.1.1") */
-        char *ip = strdup(rhost);
-        if (ip) {
-            /* Handle IPv4 with port */
-            char *colon = strrchr(ip, ':');
-            if (colon && strchr(ip, '.')) {
-                /* Only strip if it's not IPv6 (IPv6 has multiple colons) */
-                int colon_count = 0;
-                for (char *p = ip; *p; p++) {
-                    if (*p == ':') colon_count++;
-                }
-                if (colon_count == 1) {
-                    *colon = '\0';
-                }
+    struct in_addr ipv4;
+    struct in6_addr ipv6;
+    char ip_buf[INET6_ADDRSTRLEN];
+    char *result = NULL;
+
+    /* Handle IPv6 in brackets: [::1]:port or [::1] */
+    if (rhost[0] == '[') {
+        const char *end = strchr(rhost, ']');
+        if (end && (end - rhost - 1) < (int)sizeof(ip_buf)) {
+            size_t len = end - rhost - 1;
+            memcpy(ip_buf, rhost + 1, len);
+            ip_buf[len] = '\0';
+
+            if (inet_pton(AF_INET6, ip_buf, &ipv6) == 1) {
+                return strdup(ip_buf);
             }
         }
-        return ip;
     }
 
-    /* It's a hostname, return as-is */
-    return strdup(rhost);
+    /* Try parsing as plain IPv6 first */
+    if (inet_pton(AF_INET6, rhost, &ipv6) == 1) {
+        return strdup(rhost);
+    }
+
+    /* Try parsing as IPv4 */
+    if (inet_pton(AF_INET, rhost, &ipv4) == 1) {
+        return strdup(rhost);
+    }
+
+    /* Handle IPv4:port format (e.g., "192.168.1.1:22") */
+    const char *last_colon = strrchr(rhost, ':');
+    if (last_colon && strchr(rhost, '.')) {  /* Has both colon and dot = likely IPv4:port */
+        size_t ip_len = last_colon - rhost;
+        if (ip_len > 0 && ip_len < sizeof(ip_buf)) {
+            memcpy(ip_buf, rhost, ip_len);
+            ip_buf[ip_len] = '\0';
+
+            if (inet_pton(AF_INET, ip_buf, &ipv4) == 1) {
+                return strdup(ip_buf);
+            }
+        }
+    }
+
+    /* Not a valid IP address, return as-is (hostname) */
+    result = strdup(rhost);
+    return result;
 }
 
 client_context_t *client_context_collect(pam_handle_t *pamh)

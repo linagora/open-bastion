@@ -10,7 +10,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+#include <errno.h>
+#include <libgen.h>
 
 #include "config.h"
 
@@ -152,12 +155,25 @@ static char *trim(char *str)
     return str;
 }
 
-/* Helper to parse boolean values */
+/*
+ * Helper to parse boolean values.
+ * Returns true for: "true", "yes", "1", "on"
+ * Returns false for: "false", "no", "0", "off", and any other value
+ */
 static bool parse_bool(const char *value)
 {
-    return (strcmp(value, "true") == 0 ||
-            strcmp(value, "yes") == 0 ||
-            strcmp(value, "1") == 0);
+    if (!value) return false;
+
+    /* Explicit true values */
+    if (strcmp(value, "true") == 0 ||
+        strcmp(value, "yes") == 0 ||
+        strcmp(value, "1") == 0 ||
+        strcmp(value, "on") == 0) {
+        return true;
+    }
+
+    /* All other values including "false", "no", "0", "off" return false */
+    return false;
 }
 
 /* Parse a single config line */
@@ -436,6 +452,37 @@ int config_parse_args(int argc, const char **argv, pam_llng_config_t *config)
     return 0;
 }
 
+/* Helper to create parent directory for a file path */
+static void ensure_parent_dir(const char *filepath)
+{
+    if (!filepath) return;
+
+    char *path_copy = strdup(filepath);
+    if (!path_copy) return;
+
+    char *parent = dirname(path_copy);
+    if (parent && strcmp(parent, ".") != 0 && strcmp(parent, "/") != 0) {
+        struct stat st;
+        if (stat(parent, &st) != 0) {
+            /* Try to create the parent directory with secure permissions */
+            if (mkdir(parent, 0750) != 0 && errno != EEXIST) {
+                /* Try creating grandparent first */
+                char *parent_copy = strdup(parent);
+                if (parent_copy) {
+                    char *grandparent = dirname(parent_copy);
+                    if (grandparent && strcmp(grandparent, ".") != 0) {
+                        mkdir(grandparent, 0755);
+                    }
+                    free(parent_copy);
+                }
+                mkdir(parent, 0750);
+            }
+        }
+    }
+
+    free(path_copy);
+}
+
 int config_validate(const pam_llng_config_t *config)
 {
     if (!config->portal_url || strlen(config->portal_url) == 0) {
@@ -454,6 +501,11 @@ int config_validate(const pam_llng_config_t *config)
         if (!config->client_id || !config->client_secret) {
             return -1;  /* client_id and client_secret required for token validation */
         }
+    }
+
+    /* Create directories for audit log file if needed */
+    if (config->audit_enabled && config->audit_log_file) {
+        ensure_parent_dir(config->audit_log_file);
     }
 
     /* For account management, we need a server token */
