@@ -275,7 +275,7 @@ parse_args() {
                 exit 0
                 ;;
             -c|--config)
-                if [ -z "${2:-}" ]; then
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                     log_err "Option $1 requires an argument"
                     exit 1
                 fi
@@ -283,7 +283,7 @@ parse_args() {
                 shift 2
                 ;;
             -d|--dir)
-                if [ -z "${2:-}" ]; then
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                     log_err "Option $1 requires an argument"
                     exit 1
                 fi
@@ -291,7 +291,7 @@ parse_args() {
                 shift 2
                 ;;
             -f|--format)
-                if [ -z "${2:-}" ]; then
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                     log_err "Option $1 requires an argument"
                     exit 1
                 fi
