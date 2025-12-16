@@ -4,7 +4,7 @@
  * Caches authorization responses from LLNG server for offline use.
  * Uses JSON format (LLNGCACHE03) with AES-256-GCM encryption.
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

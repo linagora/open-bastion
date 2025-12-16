@@ -5,7 +5,7 @@
 # This script uses the Device Authorization Grant (RFC 8628) to obtain
 # a server token that allows the PAM module to check user authorizations.
 #
-# Copyright (C) 2024 Linagora
+# Copyright (C) 2025 Linagora
 # License: GPL-2.0
 
 set -e

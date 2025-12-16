@@ -1,7 +1,7 @@
 /*
  * token_manager.c - Token management with refresh rotation for PAM module
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

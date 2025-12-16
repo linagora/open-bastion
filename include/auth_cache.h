@@ -4,7 +4,7 @@
  * Caches authorization responses from LLNG server for offline use.
  * Uses AES-256-GCM encryption with machine-id derived key.
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

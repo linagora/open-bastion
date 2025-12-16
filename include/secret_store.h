@@ -5,7 +5,7 @@
  * - /etc/machine-id (unique per machine)
  * - Optional salt from configuration
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

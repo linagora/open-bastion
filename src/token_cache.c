@@ -4,7 +4,7 @@
  * Uses file-based cache with SHA256 hashed token names.
  * Supports optional AES-256-GCM encryption derived from machine-id.
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

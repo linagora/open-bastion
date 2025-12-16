@@ -1,7 +1,7 @@
 /*
  * test_secret_store.c - Unit tests for secret store
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

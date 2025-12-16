@@ -1,7 +1,7 @@
 /*
  * test_client_context.c - Unit tests for client context
  *
- * Copyright (C) 2024 Linagora
+ * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
  */
 

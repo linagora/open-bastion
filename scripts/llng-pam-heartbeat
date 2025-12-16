@@ -5,7 +5,7 @@
 # This script is called periodically by systemd timer to send heartbeat
 # to the LLNG portal, allowing the SSO to track active PAM servers.
 #
-# Copyright (C) 2024 Linagora
+# Copyright (C) 2025 Linagora
 # License: GPL-2.0
 
 set -e

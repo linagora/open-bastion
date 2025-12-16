@@ -546,7 +546,8 @@ sudo llng-pam-enroll
 
 AGPL-3.0
 
-## Authors
+## Author
 
-- LemonLDAP::NG team <https://lemonldap-ng.org/team>
-- Linagora <https://linagora.com>
+Xavier Guimard <xguimard@linagora.com>
+
+Copyright (C) 2025 [Linagora](https://linagora.com)
