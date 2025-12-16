@@ -1,0 +1,78 @@
+.TH LLNG-PAM-HEARTBEAT 8 "December 2024" "pam-llng 1.0.0" "System Administration"
+.SH NAME
+llng-pam-heartbeat \- Send heartbeat to LemonLDAP::NG server
+.SH SYNOPSIS
+.B llng-pam-heartbeat
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B llng-pam-heartbeat
+sends a heartbeat signal to the LemonLDAP::NG server to report that this
+server is still active and using PAM authentication.
+.PP
+The heartbeat allows administrators to monitor enrolled servers and detect
+"ghost" servers that have uninstalled the PAM module without proper unenrollment.
+.PP
+This script is typically run by a systemd timer (pam-llng-heartbeat.timer)
+every 5 minutes.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Read settings from config file. Default: /etc/security/pam_llng.conf
+.TP
+.BR \-t ", " \-\-token\-file " " \fIFILE\fR
+Server token file. Default: /etc/security/pam_llng.token
+.TP
+.BR \-k ", " \-\-insecure
+Skip SSL certificate verification.
+.TP
+.BR \-q ", " \-\-quiet
+Quiet mode (less output).
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit.
+.TP
+.BR \-V ", " \-\-version
+Show version and exit.
+.SH EXAMPLES
+.PP
+Send a heartbeat manually:
+.RS
+.nf
+sudo llng-pam-heartbeat
+.fi
+.RE
+.PP
+Check heartbeat timer status:
+.RS
+.nf
+systemctl status pam-llng-heartbeat.timer
+.fi
+.RE
+.SH FILES
+.TP
+.I /etc/security/pam_llng.conf
+Main configuration file for the PAM module.
+.TP
+.I /etc/security/pam_llng.token
+Server token file containing access and refresh tokens.
+.TP
+.I /var/lib/pam_llng/
+Directory for storing statistics and state.
+.SH EXIT STATUS
+.TP
+.B 0
+Heartbeat sent successfully.
+.TP
+.B 1
+Heartbeat failed (missing token, network error, etc.)
+.SH SEE ALSO
+.BR llng-pam-enroll (8),
+.BR pam_llng (8),
+.BR systemd.timer (5)
+.PP
+LemonLDAP::NG documentation: https://lemonldap-ng.org/
+.SH AUTHOR
+Xavier Guimard <xguimard@linagora.com>
+.SH COPYRIGHT
+Copyright (C) 2024 Linagora.
+License: AGPL-3.0+

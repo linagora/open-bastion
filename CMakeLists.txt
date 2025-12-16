@@ -108,8 +108,10 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/llng-pam-heartbeat
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install man page
-install(FILES ${CMAKE_SOURCE_DIR}/man/llng-pam-enroll.8
+# Install man pages
+install(FILES
+    ${CMAKE_SOURCE_DIR}/man/llng-pam-enroll.8
+    ${CMAKE_SOURCE_DIR}/man/llng-pam-heartbeat.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 

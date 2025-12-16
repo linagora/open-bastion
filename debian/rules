@@ -10,6 +10,11 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-DENABLE_CACHE=ON
 
-# PAM modules don't need ldconfig trigger
+override_dh_auto_install:
+	dh_auto_install
+	# Remove development symlink (libnss modules don't need it)
+	rm -f debian/libpam-llng/usr/lib/*/libnss_llng.so
+
+# NSS and PAM modules need ldconfig but no development symlinks
 override_dh_makeshlibs:
-	dh_makeshlibs -n
+	dh_makeshlibs -X/security/
