@@ -133,11 +133,20 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/llng-backend-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install man pages
+# Install man pages (section 8 - admin commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/llng-pam-enroll.8
     ${CMAKE_SOURCE_DIR}/man/llng-pam-heartbeat.8
+    ${CMAKE_SOURCE_DIR}/man/llng-bastion-setup.8
+    ${CMAKE_SOURCE_DIR}/man/llng-backend-setup.8
+    ${CMAKE_SOURCE_DIR}/man/llng-session-recorder.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
+)
+
+# Install man pages (section 1 - user commands)
+install(FILES
+    ${CMAKE_SOURCE_DIR}/man/llng-ssh-cert.1
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
 # Install systemd units

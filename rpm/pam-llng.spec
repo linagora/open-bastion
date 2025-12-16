@@ -61,8 +61,12 @@ and key-based authorization with server groups.
 %config(noreplace) %{_sysconfdir}/llng/session-recorder.conf.example
 %{_unitdir}/pam-llng-heartbeat.service
 %{_unitdir}/pam-llng-heartbeat.timer
+%{_mandir}/man1/llng-ssh-cert.1*
 %{_mandir}/man8/llng-pam-enroll.8*
 %{_mandir}/man8/llng-pam-heartbeat.8*
+%{_mandir}/man8/llng-bastion-setup.8*
+%{_mandir}/man8/llng-backend-setup.8*
+%{_mandir}/man8/llng-session-recorder.8*
 %exclude %{_docdir}/pam_llng/README.md
 
 %post
