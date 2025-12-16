@@ -274,32 +274,105 @@ Layer 5: Audit
 - **Per-server**: Each server has unique credentials
 - **Revocable**: Admin can revoke server access in LLNG
 
+## Setup Scripts
+
+### Bastion Setup
+
+Use `llng-bastion-setup` to automate bastion configuration:
+
+```bash
+sudo llng-bastion-setup --portal https://auth.example.com --server-group bastion
+```
+
+This script:
+- Downloads SSH CA public key from LLNG
+- Configures sshd with `TrustedUserCAKeys`
+- Enables session recording via `ForceCommand`
+- Configures PAM for LLNG authorization
+- Enrolls the server with LLNG
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `-p, --portal URL` | LLNG portal URL (required) |
+| `-g, --server-group NAME` | Server group (default: bastion) |
+| `-t, --token-file FILE` | Read server token from file |
+| `-k, --insecure` | Skip SSL verification |
+| `-n, --dry-run` | Show what would be done |
+
+### Backend Setup
+
+Use `llng-backend-setup` to automate backend server configuration:
+
+```bash
+sudo llng-backend-setup --portal https://auth.example.com --server-group production
+```
+
+This script:
+- Downloads SSH CA public key from LLNG
+- Configures sshd for certificate authentication
+- Configures PAM with automatic user creation
+- Configures sudo to use LLNG authorization
+- Configures NSS for user/group resolution
+- Enrolls the server with LLNG
+
+Options:
+| Option | Description |
+|--------|-------------|
+| `-p, --portal URL` | LLNG portal URL (required) |
+| `-g, --server-group NAME` | Server group (default: default) |
+| `-t, --token-file FILE` | Read server token from file |
+| `--no-sudo` | Don't configure sudo |
+| `--no-create-user` | Disable auto user creation |
+| `-k, --insecure` | Skip SSL verification |
+| `-n, --dry-run` | Show what would be done |
+
+## SSH Certificates
+
+Users can obtain SSH certificates from LLNG using `llng-ssh-cert`:
+
+```bash
+llng-ssh-cert --portal https://auth.example.com --validity 60
+```
+
+This uses the Device Authorization Grant to authenticate and sign the user's public key.
+
 ## Deployment Checklist
 
 ### LLNG Portal
 
 - [ ] PAM Access plugin enabled
+- [ ] SSH CA enabled (`sshCaActivation`)
 - [ ] Server groups configured
 - [ ] Authorization rules defined
 - [ ] Device authorization enabled
 
 ### Bastion Hosts
 
+```bash
+sudo llng-bastion-setup --portal https://auth.example.com
+```
+
+Or manually:
 - [ ] `pam_llng.so` installed
-- [ ] `libnss_llng.so` installed
 - [ ] Server enrolled (`llng-pam-enroll`)
 - [ ] PAM configured in `/etc/pam.d/sshd`
-- [ ] NSS configured in `/etc/nsswitch.conf`
-- [ ] Session recorder configured
+- [ ] SSH CA key configured (`TrustedUserCAKeys`)
+- [ ] Session recorder configured (`ForceCommand`)
 - [ ] sshd_config updated
 
 ### Backend Servers
 
+```bash
+sudo llng-backend-setup --portal https://auth.example.com -g production
+```
+
+Or manually:
 - [ ] `pam_llng.so` installed
 - [ ] `libnss_llng.so` installed
 - [ ] Server enrolled with correct server_group
 - [ ] `create_user = true` if auto-provisioning needed
-- [ ] PAM and NSS configured
+- [ ] PAM, NSS, and sudo configured
 
 ## See Also
 
