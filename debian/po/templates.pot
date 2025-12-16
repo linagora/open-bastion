@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pam-llng\n"
 "Report-Msgid-Bugs-To: pam-llng@packages.debian.org\n"
-"POT-Creation-Date: 2025-12-14 15:10+0100\n"
+"POT-Creation-Date: 2025-12-16 22:18+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -129,4 +129,26 @@ msgstr ""
 msgid ""
 "This allows different authorization rules for SSH access and sudo usage. "
 "Leave empty to use the same group as SSH."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../templates:8001
+msgid "Auto-create Unix accounts on first login?"
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../templates:8001
+msgid ""
+"If enabled, Unix accounts will be created automatically when a user "
+"authenticates for the first time via LemonLDAP::NG."
+msgstr ""
+
+#. Type: boolean
+#. Description
+#: ../templates:8001
+msgid ""
+"User attributes (gecos, shell, home) can be exported from LLNG via "
+"pamAccessExportedVars configuration."
 msgstr ""

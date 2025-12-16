@@ -1,0 +1,152 @@
+.TH LLNG-BACKEND-SETUP 8 "December 2024" "pam-llng 1.0.0" "System Administration"
+.SH NAME
+llng-backend-setup \- Configure a server as an SSH backend with LemonLDAP::NG
+.SH SYNOPSIS
+.B llng-backend-setup
+.BI \-\-portal " URL"
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B llng-backend-setup
+configures a Linux server as an SSH backend that:
+.IP \(bu 2
+Accepts SSH certificate authentication via LLNG CA
+.IP \(bu 2
+Creates Unix users automatically from LLNG attributes
+.IP \(bu 2
+Enables sudo authorization via LLNG
+.IP \(bu 2
+Uses NSS module for user/group resolution
+.PP
+Unlike bastion mode, backend mode allows direct shell access and can create
+local Unix users on-demand based on LLNG user attributes.
+.SH OPTIONS
+.TP
+.BR \-p ", " \-\-portal " " \fIURL\fR
+LemonLDAP::NG portal URL (required).
+.TP
+.BR \-g ", " \-\-server\-group " " \fINAME\fR
+Server group name for authorization rules. Default: default
+.TP
+.BR \-t ", " \-\-token\-file " " \fIFILE\fR
+Read server token from file (use - for stdin). For non-interactive enrollment.
+.TP
+.BR \-\-no\-create\-user
+Disable automatic user creation.
+.TP
+.BR \-\-no\-sudo
+Disable sudo configuration.
+.TP
+.BR \-\-no\-nss
+Disable NSS configuration.
+.TP
+.BR \-\-allow\-password
+Allow password authentication (in addition to certificates).
+.TP
+.BR \-y ", " \-\-yes
+Non-interactive mode (requires \-\-token\-file).
+.TP
+.BR \-k ", " \-\-insecure
+Skip SSL certificate verification.
+.TP
+.BR \-n ", " \-\-dry\-run
+Show what would be done without making changes.
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit.
+.TP
+.BR \-V ", " \-\-version
+Show version and exit.
+.SH CONFIGURATION
+The script performs the following configuration steps:
+.IP 1. 4
+Downloads SSH CA public key from LLNG portal (/ssh/ca endpoint).
+.IP 2. 4
+Creates sshd configuration with TrustedUserCAKeys.
+.IP 3. 4
+Configures PAM for LLNG authorization with user creation.
+.IP 4. 4
+Configures sudo to use LLNG authorization.
+.IP 5. 4
+Configures NSS to resolve users/groups from LLNG.
+.IP 6. 4
+Enrolls the server with LLNG (unless token provided).
+.IP 7. 4
+Restarts SSH service.
+.SH USER CREATION
+When a user authenticates successfully and does not exist locally, the PAM
+module can automatically create the user with attributes from LLNG:
+.IP \(bu 2
+Username from SSH certificate principal
+.IP \(bu 2
+GECOS from LLNG user attributes
+.IP \(bu 2
+Home directory created automatically
+.IP \(bu 2
+Shell from LLNG or system default
+.IP \(bu 2
+Group memberships from LLNG
+.SH FILES
+.TP
+.I /etc/ssh/llng_ca.pub
+SSH CA public key downloaded from LLNG.
+.TP
+.I /etc/ssh/sshd_config.d/50-llng-backend.conf
+SSH configuration for backend mode.
+.TP
+.I /etc/pam.d/sshd
+PAM configuration for SSH.
+.TP
+.I /etc/pam.d/sudo
+PAM configuration for sudo.
+.TP
+.I /etc/security/pam_llng.conf
+PAM module configuration.
+.TP
+.I /etc/nss_llng.conf
+NSS module configuration.
+.TP
+.I /etc/nsswitch.conf
+NSS configuration (modified to include llng).
+.SH EXAMPLES
+.PP
+Interactive setup with all features:
+.RS
+.nf
+sudo llng-backend-setup \-\-portal https://auth.example.com
+.fi
+.RE
+.PP
+Setup without automatic user creation:
+.RS
+.nf
+sudo llng-backend-setup \-\-portal https://auth.example.com \\
+    \-\-no-create-user
+.fi
+.RE
+.PP
+Setup with password fallback allowed:
+.RS
+.nf
+sudo llng-backend-setup \-\-portal https://auth.example.com \\
+    \-\-allow-password
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Setup completed successfully.
+.TP
+.B 1
+Setup failed.
+.SH SEE ALSO
+.BR llng-bastion-setup (8),
+.BR llng-ssh-cert (1),
+.BR nsswitch.conf (5),
+.BR sshd_config (5)
+.PP
+LemonLDAP::NG documentation: https://lemonldap-ng.org/
+.SH AUTHOR
+Xavier Guimard <xguimard@linagora.com>
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0+

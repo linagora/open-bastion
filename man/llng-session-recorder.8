@@ -1,0 +1,94 @@
+.TH LLNG-SESSION-RECORDER 8 "December 2024" "pam-llng 1.0.0" "System Administration"
+.SH NAME
+llng-session-recorder \- Record SSH sessions for LemonLDAP::NG bastion
+.SH SYNOPSIS
+.B llng-session-recorder
+.SH DESCRIPTION
+.B llng-session-recorder
+is used as a ForceCommand in SSH bastion configurations to record all
+user sessions. It captures terminal input/output using the
+.BR script (1)
+utility.
+.PP
+The script is typically invoked automatically by sshd when configured with
+ForceCommand. It should not normally be run directly by users.
+.PP
+Session recordings are stored in a directory organized by date and user,
+making it easy to audit user activity.
+.SH CONFIGURATION
+Configuration is read from
+.I /etc/llng/session-recorder.conf
+with the following options:
+.TP
+.B sessions_dir
+Directory where session recordings are stored.
+Default: /var/lib/llng-sessions
+.TP
+.B format
+Recording format. Currently only "script" is supported.
+.TP
+.B max_duration
+Maximum session duration in seconds. Sessions longer than this
+are terminated. Default: 28800 (8 hours)
+.SH SESSION HANDLING
+When invoked via SSH, the script:
+.IP 1. 4
+Creates a session directory under sessions_dir.
+.IP 2. 4
+Records the session using script(1).
+.IP 3. 4
+If SSH_ORIGINAL_COMMAND is set, executes that command.
+.IP 4. 4
+Otherwise, starts the user's login shell.
+.SH FILES
+.TP
+.I /etc/llng/session-recorder.conf
+Configuration file.
+.TP
+.I /var/lib/llng-sessions/
+Default session recordings directory.
+.TP
+.I /var/lib/llng-sessions/YYYY-MM-DD/USER/SESSION.typescript
+Session recording file.
+.TP
+.I /var/lib/llng-sessions/YYYY-MM-DD/USER/SESSION.timing
+Timing data for session playback.
+.SH ENVIRONMENT
+.TP
+.B SSH_ORIGINAL_COMMAND
+If set by sshd, this command is executed instead of the user's shell.
+.TP
+.B SSH_CLIENT
+Used to identify the client connection.
+.TP
+.B USER
+The authenticated username.
+.SH PLAYBACK
+Sessions recorded with script format can be replayed using:
+.RS
+.nf
+scriptreplay \-\-typescript session.typescript \-\-timing session.timing
+.fi
+.RE
+.SH SECURITY CONSIDERATIONS
+.IP \(bu 2
+Session recordings may contain sensitive data (passwords typed in
+terminals, etc.). Ensure proper access controls on the sessions directory.
+.IP \(bu 2
+Consider implementing log rotation and secure deletion policies.
+.IP \(bu 2
+The recordings directory should only be accessible by root.
+.SH EXIT STATUS
+Returns the exit status of the executed command or shell.
+.SH SEE ALSO
+.BR llng-bastion-setup (8),
+.BR script (1),
+.BR scriptreplay (1),
+.BR sshd_config (5)
+.PP
+LemonLDAP::NG documentation: https://lemonldap-ng.org/
+.SH AUTHOR
+Xavier Guimard <xguimard@linagora.com>
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0+

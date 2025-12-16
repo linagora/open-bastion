@@ -1,0 +1,102 @@
+.TH LLNG-SSH-CERT 1 "December 2024" "pam-llng 1.0.0" "User Commands"
+.SH NAME
+llng-ssh-cert \- Obtain SSH certificates from LemonLDAP::NG
+.SH SYNOPSIS
+.B llng-ssh-cert
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B llng-ssh-cert
+allows users to obtain signed SSH certificates from LemonLDAP::NG,
+enabling passwordless SSH authentication to servers that trust the LLNG CA.
+.PP
+The script uses the Device Authorization Grant (RFC 8628) to authenticate
+the user. A verification code is displayed that must be entered on the
+LemonLDAP::NG portal.
+.PP
+Once authenticated, the user's public key is signed by the LLNG SSH CA,
+creating a certificate that can be used for SSH authentication.
+.SH OPTIONS
+.TP
+.BR \-p ", " \-\-portal " " \fIURL\fR
+LemonLDAP::NG portal URL (required).
+.TP
+.BR \-v ", " \-\-validity " " \fIMINUTES\fR
+Certificate validity in minutes. Default: 30
+.TP
+.BR \-K ", " \-\-key " " \fIFILE\fR
+Public key file to sign. Default: uses key from SSH agent.
+.TP
+.BR \-o ", " \-\-output " " \fIFILE\fR
+Output certificate file. Default: add to SSH agent.
+.TP
+.BR \-t ", " \-\-token\-file " " \fIFILE\fR
+Read access token from file instead of Device Authorization flow. Use - for stdin.
+.TP
+.BR \-c ", " \-\-client\-id " " \fIID\fR
+OIDC client ID. Default: ssh-cert
+.TP
+.BR \-k ", " \-\-insecure
+Skip SSL certificate verification.
+.TP
+.BR \-d ", " \-\-debug
+Enable debug output.
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit.
+.TP
+.BR \-V ", " \-\-version
+Show version and exit.
+.SH ENVIRONMENT
+.TP
+.B LLNG_PORTAL_URL
+Default portal URL if not specified with \-p.
+.TP
+.B LLNG_SSH_CERT_VALIDITY
+Default certificate validity in minutes.
+.TP
+.B LLNG_SSH_CERT_CLIENT_ID
+Default OIDC client ID.
+.SH EXAMPLES
+.PP
+Get a 1-hour certificate using key from SSH agent:
+.RS
+.nf
+llng-ssh-cert \-p https://auth.example.com \-v 60
+.fi
+.RE
+.PP
+Sign a specific public key:
+.RS
+.nf
+llng-ssh-cert \-p https://auth.example.com \-k ~/.ssh/id_ed25519.pub
+.fi
+.RE
+.PP
+Save certificate to file:
+.RS
+.nf
+llng-ssh-cert \-p https://auth.example.com \-o ~/.ssh/id_ed25519-cert.pub
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.ssh/id_*-cert.pub
+SSH certificate files.
+.SH EXIT STATUS
+.TP
+.B 0
+Certificate obtained successfully.
+.TP
+.B 1
+Failed (network error, authorization denied, invalid key, etc.)
+.SH SEE ALSO
+.BR ssh (1),
+.BR ssh-add (1),
+.BR llng-bastion-setup (8)
+.PP
+LemonLDAP::NG documentation: https://lemonldap-ng.org/
+.SH AUTHOR
+Xavier Guimard <xguimard@linagora.com>
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0+

@@ -1,0 +1,527 @@
+#!/bin/bash
+#
+# llng-ssh-cert - Obtain SSH certificates from LemonLDAP::NG
+#
+# This script allows users to obtain signed SSH certificates from LLNG,
+# enabling passwordless SSH authentication to servers that trust the LLNG CA.
+#
+# Copyright (C) 2025 Linagora
+# Author: Xavier Guimard <xguimard@linagora.com>
+# License: AGPL-3.0
+
+set -euo pipefail
+
+VERSION="1.0.0"
+PROG_NAME=$(basename "$0")
+
+# Default configuration
+PORTAL_URL="${LLNG_PORTAL_URL:-}"
+VALIDITY_MINUTES="${LLNG_SSH_CERT_VALIDITY:-30}"
+CLIENT_ID="${LLNG_SSH_CERT_CLIENT_ID:-ssh-cert}"
+SCOPE="openid ssh_cert"
+OUTPUT_FILE=""
+PUBLIC_KEY=""
+PUBLIC_KEY_FILE=""
+ADD_TO_AGENT=true
+USE_TOKEN=""
+VERIFY_SSL=true
+TIMEOUT=30
+TEMP_FILES=()
+
+# Cleanup function for temp files
+cleanup() {
+    for f in "${TEMP_FILES[@]}"; do
+        rm -f "$f" 2>/dev/null
+    done
+}
+trap cleanup EXIT
+
+# Colors for output (only if terminal)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
+
+# Print colored output
+info() {
+    echo -e "${GREEN}[INFO]${NC} $*"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+}
+
+debug() {
+    if [ -n "${DEBUG:-}" ]; then
+        echo -e "${BLUE}[DEBUG]${NC} $*" >&2
+    fi
+}
+
+# Build curl options
+curl_opts() {
+    local opts=("-s" "--connect-timeout" "$TIMEOUT")
+
+    if [ "$VERIFY_SSL" = "false" ]; then
+        opts+=("-k")
+    fi
+
+    echo "${opts[@]}"
+}
+
+# Get public key from SSH agent
+get_key_from_agent() {
+    local keys
+    keys=$(ssh-add -L 2>/dev/null) || {
+        error "No keys found in SSH agent. Add a key with: ssh-add"
+        return 1
+    }
+
+    # Get the first key
+    local first_key
+    first_key=$(echo "$keys" | head -1)
+
+    if [ -z "$first_key" ]; then
+        error "No keys found in SSH agent"
+        return 1
+    fi
+
+    # Extract key type for display
+    local key_type
+    key_type=$(echo "$first_key" | awk '{print $1}')
+    debug "Using key from agent: $key_type"
+
+    echo "$first_key"
+}
+
+# Get public key from file
+get_key_from_file() {
+    local file="$1"
+
+    if [ ! -f "$file" ]; then
+        error "Public key file not found: $file"
+        return 1
+    fi
+
+    cat "$file"
+}
+
+# Device Authorization Grant flow
+device_auth_flow() {
+    info "Starting Device Authorization flow..."
+
+    # Step 1: Request device code
+    local device_response
+    local curl_options
+    curl_options=$(curl_opts)
+
+    # shellcheck disable=SC2086
+    device_response=$(curl $curl_options -X POST "${PORTAL_URL}/oauth2/device" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        --data-urlencode "client_id=${CLIENT_ID}" \
+        --data-urlencode "scope=${SCOPE}") || {
+        error "Failed to initiate device authorization"
+        return 1
+    }
+
+    debug "Device response: $device_response"
+
+    # Parse response
+    local device_code user_code verification_uri expires_in interval
+    device_code=$(echo "$device_response" | jq -r '.device_code // empty')
+    user_code=$(echo "$device_response" | jq -r '.user_code // empty')
+    verification_uri=$(echo "$device_response" | jq -r '.verification_uri // empty')
+    expires_in=$(echo "$device_response" | jq -r '.expires_in // 1800')
+    interval=$(echo "$device_response" | jq -r '.interval // 5')
+
+    if [ -z "$device_code" ] || [ -z "$user_code" ]; then
+        error "Invalid device authorization response"
+        debug "Response: $device_response"
+        return 1
+    fi
+
+    # Display instructions
+    echo ""
+    echo "┌─────────────────────────────────────────────────────────┐"
+    echo "│           SSH Certificate Authorization                  │"
+    echo "├─────────────────────────────────────────────────────────┤"
+    printf "│  1. Visit: %-44s │\n" "$verification_uri"
+    printf "│  2. Enter code: %-39s │\n" "$user_code"
+    echo "│  3. Approve the request                                  │"
+    echo "└─────────────────────────────────────────────────────────┘"
+    echo ""
+
+    # Try to open browser
+    if command -v xdg-open >/dev/null 2>&1; then
+        info "Opening browser..."
+        xdg-open "$verification_uri" 2>/dev/null &
+    elif command -v open >/dev/null 2>&1; then
+        info "Opening browser..."
+        open "$verification_uri" 2>/dev/null &
+    else
+        warn "Please open the URL manually in your browser"
+    fi
+
+    # Step 2: Poll for token
+    info "Waiting for authorization..."
+
+    local start_time
+    start_time=$(date +%s)
+    local access_token=""
+
+    while true; do
+        local now
+        now=$(date +%s)
+        local elapsed=$((now - start_time))
+
+        if [ $elapsed -gt "$expires_in" ]; then
+            error "Authorization timed out"
+            return 1
+        fi
+
+        sleep "$interval"
+
+        local token_response
+        # shellcheck disable=SC2086
+        token_response=$(curl $curl_options -X POST "${PORTAL_URL}/oauth2/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+            --data-urlencode "device_code=${device_code}" \
+            --data-urlencode "client_id=${CLIENT_ID}" 2>/dev/null) || continue
+
+        debug "Token response: $token_response"
+
+        local error_code
+        error_code=$(echo "$token_response" | jq -r '.error // empty')
+
+        case "$error_code" in
+            "authorization_pending")
+                # Still waiting
+                printf "."
+                ;;
+            "slow_down")
+                # Increase interval
+                interval=$((interval + 5))
+                ;;
+            "")
+                # Success - extract token
+                access_token=$(echo "$token_response" | jq -r '.access_token // empty')
+                if [ -n "$access_token" ]; then
+                    echo ""
+                    info "Authorization successful!"
+                    break
+                fi
+                ;;
+            *)
+                echo ""
+                error "Authorization failed: $error_code"
+                local error_desc
+                error_desc=$(echo "$token_response" | jq -r '.error_description // empty')
+                [ -n "$error_desc" ] && error "$error_desc"
+                return 1
+                ;;
+        esac
+    done
+
+    echo "$access_token"
+}
+
+# Sign the public key
+sign_public_key() {
+    local access_token="$1"
+    local public_key="$2"
+
+    info "Requesting certificate from LLNG..."
+
+    local curl_options
+    curl_options=$(curl_opts)
+
+    # Build JSON payload
+    local payload
+    payload=$(jq -n \
+        --arg public_key "$public_key" \
+        --argjson validity_minutes "$VALIDITY_MINUTES" \
+        '{
+            public_key: $public_key,
+            validity_minutes: $validity_minutes
+        }')
+
+    debug "Sign request: $payload"
+
+    local response
+    # shellcheck disable=SC2086
+    response=$(curl $curl_options -X POST "${PORTAL_URL}/ssh/sign" \
+        -H "Authorization: Bearer ${access_token}" \
+        -H "Content-Type: application/json" \
+        -d "$payload") || {
+        error "Failed to request certificate"
+        return 1
+    }
+
+    debug "Sign response: $response"
+
+    # Check for errors
+    local error_msg
+    error_msg=$(echo "$response" | jq -r '.error // empty')
+    if [ -n "$error_msg" ]; then
+        error "Certificate signing failed: $error_msg"
+        return 1
+    fi
+
+    # Extract certificate
+    local certificate
+    certificate=$(echo "$response" | jq -r '.certificate // empty')
+    if [ -z "$certificate" ]; then
+        error "No certificate in response"
+        debug "Response: $response"
+        return 1
+    fi
+
+    # Display info
+    local valid_until serial key_id principals
+    valid_until=$(echo "$response" | jq -r '.valid_until // "unknown"')
+    serial=$(echo "$response" | jq -r '.serial // "unknown"')
+    key_id=$(echo "$response" | jq -r '.key_id // "unknown"')
+    principals=$(echo "$response" | jq -r '.principals | join(", ") // "unknown"')
+
+    info "Certificate obtained successfully!"
+    echo "  Serial:     $serial"
+    echo "  Key ID:     $key_id"
+    echo "  Principals: $principals"
+    echo "  Valid until: $valid_until"
+
+    echo "$certificate"
+}
+
+# Add certificate to SSH agent
+add_to_agent() {
+    local cert_file="$1"
+    local key_file="${cert_file%-cert.pub}"
+
+    # Check if we have the corresponding private key
+    if [ -f "$key_file" ]; then
+        info "Adding certificate to SSH agent..."
+        ssh-add "$key_file" 2>/dev/null || {
+            warn "Failed to add certificate to agent"
+            return 1
+        }
+        info "Certificate added to SSH agent"
+    else
+        warn "Private key not found, cannot add to agent automatically"
+        info "To add manually: ssh-add -c <your-private-key>"
+    fi
+}
+
+# Usage
+usage() {
+    cat << EOF
+Usage: $PROG_NAME [OPTIONS]
+
+Obtain SSH certificates from LemonLDAP::NG.
+
+Options:
+  -p, --portal URL       LLNG portal URL (required)
+  -v, --validity MIN     Certificate validity in minutes (default: $VALIDITY_MINUTES)
+  -K, --key FILE         Public key file (default: from SSH agent)
+  -o, --output FILE      Output certificate file (default: add to agent)
+  -t, --token-file FILE  Read access token from file (use - for stdin)
+  -c, --client-id ID     OIDC client ID (default: $CLIENT_ID)
+  -k, --insecure         Skip SSL certificate verification
+  -d, --debug            Enable debug output
+  -h, --help             Show this help
+  -V, --version          Show version
+
+Environment variables:
+  LLNG_PORTAL_URL           Portal URL
+  LLNG_SSH_CERT_VALIDITY    Default validity in minutes
+  LLNG_SSH_CERT_CLIENT_ID   OIDC client ID
+
+Examples:
+  # Get a 1-hour certificate (key from agent)
+  $PROG_NAME -p https://auth.example.com -v 60
+
+  # Sign a specific public key
+  $PROG_NAME -p https://auth.example.com -k ~/.ssh/id_ed25519.pub
+
+  # Save certificate to file
+  $PROG_NAME -p https://auth.example.com -o ~/.ssh/id_ed25519-cert.pub
+
+EOF
+    exit 0
+}
+
+# Parse arguments
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -p|--portal)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                PORTAL_URL="$2"
+                shift 2
+                ;;
+            -v|--validity)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                if ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -le 0 ]; then
+                    error "Validity must be a positive integer (minutes)"
+                    exit 1
+                fi
+                VALIDITY_MINUTES="$2"
+                shift 2
+                ;;
+            -K|--key)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                PUBLIC_KEY_FILE="$2"
+                shift 2
+                ;;
+            -o|--output)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                OUTPUT_FILE="$2"
+                ADD_TO_AGENT=false
+                shift 2
+                ;;
+            -t|--token-file)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                if [ "$2" = "-" ]; then
+                    USE_TOKEN=$(cat)
+                elif [ -f "$2" ]; then
+                    USE_TOKEN=$(cat "$2")
+                else
+                    error "Token file not found: $2"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            -c|--client-id)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                CLIENT_ID="$2"
+                shift 2
+                ;;
+            -k|--insecure)
+                VERIFY_SSL=false
+                shift
+                ;;
+            -d|--debug)
+                DEBUG=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                ;;
+            -V|--version)
+                echo "$PROG_NAME version $VERSION"
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Main
+main() {
+    parse_args "$@"
+
+    # Validate required parameters
+    if [ -z "$PORTAL_URL" ]; then
+        error "Portal URL is required (-p/--portal)"
+        exit 1
+    fi
+
+    # Remove trailing slash from portal URL
+    PORTAL_URL="${PORTAL_URL%/}"
+
+    # Check dependencies
+    for cmd in curl jq ssh-add; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            error "Required command not found: $cmd"
+            exit 1
+        fi
+    done
+
+    # Get public key
+    if [ -n "$PUBLIC_KEY_FILE" ]; then
+        PUBLIC_KEY=$(get_key_from_file "$PUBLIC_KEY_FILE") || exit 1
+    else
+        PUBLIC_KEY=$(get_key_from_agent) || exit 1
+    fi
+
+    debug "Public key: ${PUBLIC_KEY:0:50}..."
+
+    # Get access token
+    local access_token
+    if [ -n "$USE_TOKEN" ]; then
+        access_token="$USE_TOKEN"
+        info "Using provided access token"
+    else
+        access_token=$(device_auth_flow) || exit 1
+    fi
+
+    # Sign the key
+    local certificate
+    certificate=$(sign_public_key "$access_token" "$PUBLIC_KEY") || exit 1
+
+    # Output certificate
+    if [ -n "$OUTPUT_FILE" ]; then
+        echo "$certificate" > "$OUTPUT_FILE"
+        chmod 644 "$OUTPUT_FILE"
+        info "Certificate saved to: $OUTPUT_FILE"
+
+        # Show how to use it
+        echo ""
+        echo "To use this certificate:"
+        echo "  ssh-add ${OUTPUT_FILE%-cert.pub}"
+        echo "  ssh user@server"
+    elif [ "$ADD_TO_AGENT" = "true" ]; then
+        # If we have a key file, create matching cert file and add to agent
+        if [ -n "$PUBLIC_KEY_FILE" ]; then
+            local cert_file="${PUBLIC_KEY_FILE%.pub}-cert.pub"
+            echo "$certificate" > "$cert_file"
+            chmod 644 "$cert_file"
+            info "Certificate saved to: $cert_file"
+            add_to_agent "$cert_file"
+        else
+            info "Certificate (copy to your key location with -cert.pub suffix):"
+            echo "$certificate"
+        fi
+    else
+        echo "$certificate"
+    fi
+
+    echo ""
+    info "You can now SSH to servers that trust this CA!"
+}
+
+main "$@"

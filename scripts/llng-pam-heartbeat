@@ -6,7 +6,7 @@
 # to the LLNG portal, allowing the SSO to track active PAM servers.
 #
 # Copyright (C) 2025 Linagora
-# License: GPL-2.0
+# License: AGPL-3.0
 
 set -e
 
