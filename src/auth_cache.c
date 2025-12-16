@@ -591,21 +591,35 @@ bool auth_cache_force_online(const char *force_online_file, const char *user)
 {
     if (!force_online_file) return false;
 
+    /* Open file first, then stat via fd to avoid TOCTOU race */
+    int fd = open(force_online_file, O_RDONLY);
+    if (fd < 0) {
+        return false;  /* File doesn't exist or unreadable, normal operation */
+    }
+
     struct stat st;
-    if (stat(force_online_file, &st) != 0) {
-        return false;  /* File doesn't exist, normal operation */
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return false;
     }
 
     /* File exists - check if empty (means all users) */
     if (st.st_size == 0) {
+        close(fd);
         return true;  /* All users forced online */
     }
 
     /* File has content - check if user is listed */
-    if (!user) return true;
+    if (!user) {
+        close(fd);
+        return true;
+    }
 
-    FILE *f = fopen(force_online_file, "r");
-    if (!f) return true;  /* Can't read, assume force online */
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return true;  /* Can't read, assume force online */
+    }
 
     char line[256];
     while (fgets(line, sizeof(line), f)) {
@@ -620,12 +634,12 @@ bool auth_cache_force_online(const char *force_online_file, const char *user)
         if (len == 0 || line[0] == '#') continue;
 
         if (strcmp(line, user) == 0) {
-            fclose(f);
+            fclose(f);  /* Also closes fd */
             return true;  /* User is listed */
         }
     }
 
-    fclose(f);
+    fclose(f);  /* Also closes fd */
     return false;  /* User not listed, use cache */
 }
 

@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #include "config.h"
 
@@ -230,10 +231,16 @@ static int test_parse_no_create_user(void)
  */
 static int test_load_config_file(void)
 {
-    /* Create a temp config file */
+    /* Create a temp config file with secure permissions from the start */
     const char *filename = "/tmp/test_pam_llng.conf";
-    FILE *f = fopen(filename, "w");
-    if (!f) return 0;
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return 0;
+
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        return 0;
+    }
 
     fprintf(f, "# Test config\n");
     fprintf(f, "portal_url = https://auth.example.com\n");
@@ -242,10 +249,7 @@ static int test_load_config_file(void)
     fprintf(f, "server_group = production\n");
     fprintf(f, "timeout = 15\n");
     fprintf(f, "verify_ssl = false\n");
-    fclose(f);
-
-    /* Set secure permissions */
-    chmod(filename, 0600);
+    fclose(f);  /* Also closes fd */
 
     pam_llng_config_t config;
     config_init(&config);

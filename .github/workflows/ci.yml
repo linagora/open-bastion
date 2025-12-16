@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+# Restrict GITHUB_TOKEN permissions to read-only by default
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and Test (${{ matrix.os }})
