@@ -54,6 +54,9 @@ and key-based authorization with server groups.
 %{_sbindir}/llng-pam-enroll
 %{_sbindir}/llng-pam-heartbeat
 %{_sbindir}/llng-session-recorder
+%{_sbindir}/llng-bastion-setup
+%{_sbindir}/llng-backend-setup
+%{_bindir}/llng-ssh-cert
 %dir %{_sysconfdir}/llng
 %config(noreplace) %{_sysconfdir}/llng/session-recorder.conf.example
 %{_unitdir}/pam-llng-heartbeat.service
