@@ -9,6 +9,7 @@ Build-Depends: debhelper-compat (= 13)
  , libcurl4-openssl-dev
  , libjson-c-dev
  , libpam0g-dev
+ , libssl-dev
  , pkgconf
 
 Package: libpam-llng

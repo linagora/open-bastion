@@ -30,11 +30,20 @@ static int tests_passed = 0;
 } while(0)
 
 static const char *test_store_dir = "/tmp/test_pam_llng_secrets";
+static int machine_id_available = 0;
+
+/* Check if /etc/machine-id exists (required for secret store) */
+static int check_machine_id(void)
+{
+    struct stat st;
+    return stat("/etc/machine-id", &st) == 0;
+}
 
 /* Setup test directory */
 static void setup(void)
 {
     mkdir(test_store_dir, 0700);
+    machine_id_available = check_machine_id();
 }
 
 /* Recursively remove directory - safe alternative to system("rm -rf") */
@@ -79,6 +88,11 @@ static void cleanup(void)
 /* Test initialization */
 static int test_init(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -97,6 +111,11 @@ static int test_init(void)
 /* Test store and retrieve */
 static int test_put_get(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -131,6 +150,11 @@ static int test_put_get(void)
 /* Test exists */
 static int test_exists(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -156,6 +180,11 @@ static int test_exists(void)
 /* Test delete */
 static int test_delete(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -184,6 +213,11 @@ static int test_delete(void)
 /* Test not found */
 static int test_not_found(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -207,6 +241,11 @@ static int test_not_found(void)
 /* Test different keys */
 static int test_different_keys(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -240,6 +279,11 @@ static int test_different_keys(void)
 /* Test overwrite */
 static int test_overwrite(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -290,6 +334,11 @@ static int test_disabled(void)
 /* Test binary data */
 static int test_binary_data(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
@@ -352,6 +401,11 @@ static int test_error_message(void)
 /* Test rotate key returns error (not implemented) */
 static int test_rotate_key_not_implemented(void)
 {
+    if (!machine_id_available) {
+        printf("SKIP (no machine-id) ");
+        return 1;
+    }
+
     secret_store_config_t config = {
         .enabled = true,
         .store_dir = (char *)test_store_dir,
