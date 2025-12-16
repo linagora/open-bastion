@@ -1805,10 +1805,10 @@ index 000000000..c90ceec90
 +        ;;
 +esac
 diff --git a/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Attributes.pm b/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Attributes.pm
-index e2e72e2b4..2243c19e0 100644
+index e2e72e2b4..35578c468 100644
 --- a/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Attributes.pm
 +++ b/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Attributes.pm
-@@ -1551,6 +1551,63 @@ sub attributes {
+@@ -1551,6 +1551,81 @@ sub attributes {
              documentation => 'OIDC personnal offline token removal',
          },
  
@@ -1835,7 +1835,25 @@ index e2e72e2b4..2243c19e0 100644
 +            test          => sub { return perlExpr(@_) },
 +            msgFail       => '__badExpression__',
 +            default       => { default => 1 },
-+            documentation => 'Authorization rules per PAM server group',
++            documentation => 'Authorization rules per PAM server group (legacy, use SSH/Sudo rules)',
++        },
++        pamAccessSshRules => {
++            type          => 'keyTextContainer',
++            keyTest       => qr/^[\w\-]+$/,
++            keyMsgFail    => '__badPamServerGroupName__',
++            test          => sub { return perlExpr(@_) },
++            msgFail       => '__badExpression__',
++            default       => {},
++            documentation => 'SSH authorization rules per server group',
++        },
++        pamAccessSudoRules => {
++            type          => 'keyTextContainer',
++            keyTest       => qr/^[\w\-]+$/,
++            keyMsgFail    => '__badPamServerGroupName__',
++            test          => sub { return perlExpr(@_) },
++            msgFail       => '__badExpression__',
++            default       => {},
++            documentation => 'Sudo authorization rules per server group',
 +        },
 +        pamAccessRp => {
 +            type          => 'text',
@@ -1872,7 +1890,7 @@ index e2e72e2b4..2243c19e0 100644
          # History
          failedLoginNumber => {
              default       => 5,
-@@ -1610,6 +1667,11 @@ sub attributes {
+@@ -1610,6 +1685,11 @@ sub attributes {
              'default' => '$_auth eq \'OIDC\'',
              'type'    => 'boolOrExpr'
          },
@@ -1884,7 +1902,7 @@ index e2e72e2b4..2243c19e0 100644
          portalDisplayOidcConsents => {
              type          => 'boolOrExpr',
              default       => '$_oidcConsents && $_oidcConsents =~ /\w+/',
-@@ -5150,6 +5212,24 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
+@@ -5150,6 +5230,24 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
              default       => 2592000,
              documentation => 'OpenID Connect global offline session TTL',
          },
@@ -1909,7 +1927,7 @@ index e2e72e2b4..2243c19e0 100644
          oidcStorage => {
              type          => 'PerlModule',
              documentation => 'Apache::Session module to store OIDC user data',
-@@ -5432,6 +5512,12 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
+@@ -5432,6 +5530,12 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
              default       => 0,
              documentation => 'Allow OAuth2 Client Credentials Grant',
          },
@@ -1922,7 +1940,7 @@ index e2e72e2b4..2243c19e0 100644
          oidcRPMetaDataOptionsRefreshToken => {
              type          => 'bool',
              default       => 0,
-@@ -5575,6 +5661,52 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
+@@ -5575,6 +5679,52 @@ m{^(?:ldapi://[^/]*/?|\w[\w\-\.]*(?::\d{1,5})?|ldap(?:s|\+tls)?://\w[\w\-\.]*(?:
  'Shall OIDC/SAML/CAS protected apps access be recorded to session?'
          },
  
@@ -1988,7 +2006,7 @@ index 4b11f02b2..330804d65 100644
                              'oidcRPMetaDataOptionsAuthnLevel',
                              'oidcRPMetaDataOptionsRule',
 diff --git a/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Tree.pm b/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Tree.pm
-index 933ff188a..1192b034d 100644
+index 933ff188a..97ec4e838 100644
 --- a/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Tree.pm
 +++ b/lemonldap-ng-manager/lib/Lemonldap/NG/Manager/Build/Tree.pm
 @@ -40,6 +40,7 @@ sub tree {
@@ -1999,7 +2017,7 @@ index 933ff188a..1192b034d 100644
                                          'portalDisplayLogout',
                                          'portalDisplayOrder'
                                      ]
-@@ -977,6 +978,37 @@ sub tree {
+@@ -977,6 +978,45 @@ sub tree {
                              nodes => ['adminLogoutServerSecret']
                          },
                          'oidcOfflineTokens',
@@ -2011,7 +2029,15 @@ index 933ff188a..1192b034d 100644
 +                                'pamAccessActivation',
 +                                'pamAccessTokenDuration',
 +                                'pamAccessMaxDuration',
-+                                'pamAccessServerGroups',
++                                {
++                                    title => 'pamAccessAuthzRules',
++                                    form  => 'simpleInputContainer',
++                                    nodes => [
++                                        'pamAccessServerGroups',
++                                        'pamAccessSshRules',
++                                        'pamAccessSudoRules',
++                                    ]
++                                },
 +                                'pamAccessRp',
 +                                'pamAccessHeartbeatInterval',
 +                                'pamAccessInactiveThreshold',
@@ -2037,7 +2063,7 @@ index 933ff188a..1192b034d 100644
                      ]
                  },
                  {
-@@ -1653,6 +1685,16 @@ sub tree {
+@@ -1653,6 +1693,16 @@ sub tree {
                          'oidcServiceMetadataTtl',
                      ]
                  },
@@ -2102,12 +2128,13 @@ index 5c3a1fb5d..9cd88ae8e 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"المنطقة الزمنية",
  "openidParams":"معاييرأوبين أيدي",
  "overPrm":"المعلمات الزائد",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2116,11 +2143,13 @@ index 5c3a1fb5d..9cd88ae8e 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"مستوى إثبات الهوية",
  "pamParams":"معايير بام",
  "pamService":"خدمة بام",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"موافقات OIDC",
  "portalDisplayOrder":"Display order",
@@ -2128,7 +2157,7 @@ index 5c3a1fb5d..9cd88ae8e 100644
  "portalDisplayPasswordPolicy":"Display policy in password form",
  "portalDisplayRefreshMyRights":"Display rights refresh link",
  "portalDisplayRegister":"تسجيل حساب جديد",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Order",
  "samlIDPMetaDataOptionsStoreSAMLToken":"حفظ SAML توكن",
  "samlIDPMetaDataOptionsTooltip":"Tooltip",
@@ -2138,7 +2167,7 @@ index 5c3a1fb5d..9cd88ae8e 100644
  "samlIDPMetaDataXML":"البيانات الوصفية",
  "samlIDPName":"اسم SAML IDP",
  "samlIDPSSODescriptor":"موفر الهوية",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP services",
  "soapSessionServer":"Session server",
  "specialRule":"قاعدة خاصة",
@@ -2155,7 +2184,7 @@ index 5c3a1fb5d..9cd88ae8e 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/en.json b/lemonldap-ng-manager/site/htdocs/static/languages/en.json
-index 5e269ed52..12579024d 100644
+index 5e269ed52..422deb8c7 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/en.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/en.json
 @@ -778,6 +778,7 @@
@@ -2184,12 +2213,13 @@ index 5e269ed52..12579024d 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Timezone",
  "openidParams":"OpenID parameters",
  "overPrm":"Overloaded parameters",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2198,11 +2228,13 @@ index 5e269ed52..12579024d 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Authentication level",
  "pamParams":"PAM parameters",
  "pamService":"PAM service",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"OIDC consents",
  "portalDisplayOrder":"Display order",
@@ -2210,7 +2242,7 @@ index 5e269ed52..12579024d 100644
  "portalDisplayPasswordPolicy":"Display policy in password form",
  "portalDisplayRefreshMyRights":"Display rights refresh link",
  "portalDisplayRegister":"Register new account",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Order",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Store SAML Token",
  "samlIDPMetaDataOptionsTooltip":"Tooltip",
@@ -2220,7 +2252,7 @@ index 5e269ed52..12579024d 100644
  "samlIDPMetaDataXML":"Metadata",
  "samlIDPName":"SAML IDP Name",
  "samlIDPSSODescriptor":"Identity Provider",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP services",
  "soapSessionServer":"Session server",
  "specialRule":"Special rule",
@@ -2237,7 +2269,7 @@ index 5e269ed52..12579024d 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/es.json b/lemonldap-ng-manager/site/htdocs/static/languages/es.json
-index e70233093..99414537f 100644
+index e70233093..ff8b19f39 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/es.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/es.json
 @@ -778,6 +778,7 @@
@@ -2266,12 +2298,13 @@ index e70233093..99414537f 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Zona horaria",
  "openidParams":"Parámetros OpenID",
  "overPrm":"Overloaded parameters",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2280,11 +2313,13 @@ index e70233093..99414537f 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Nivel de autentificación",
  "pamParams":"Parámetros PAM",
  "pamService":"Servicio PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Permisos OIDC",
  "portalDisplayOrder":"Display order",
@@ -2292,7 +2327,7 @@ index e70233093..99414537f 100644
  "portalDisplayPasswordPolicy":"Display policy in password form",
  "portalDisplayRefreshMyRights":"Display rights refresh link",
  "portalDisplayRegister":"Registrar nueva cuenta",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Orden",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Store SAML Token",
  "samlIDPMetaDataOptionsTooltip":"Tooltip",
@@ -2302,7 +2337,7 @@ index e70233093..99414537f 100644
  "samlIDPMetaDataXML":"Metadatos",
  "samlIDPName":"SAML IDP Name",
  "samlIDPSSODescriptor":"Identity Provider",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Servicio SOAP",
  "soapSessionServer":"Session server",
  "specialRule":"Regla especial",
@@ -2319,7 +2354,7 @@ index e70233093..99414537f 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/fr.json b/lemonldap-ng-manager/site/htdocs/static/languages/fr.json
-index 4617307dd..e994362a1 100644
+index 4617307dd..69fb704c0 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/fr.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/fr.json
 @@ -778,6 +778,7 @@
@@ -2348,12 +2383,13 @@ index 4617307dd..e994362a1 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Désactiver l'algorithme none pour les signatures",
  "oidcServiceMetaDataEncKeys":"Clefs de chiffrement",
  "oidcServiceMetaDataEndPoints":"Points d'accès",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Zone horaire",
  "openidParams":"Paramètres OpenID",
  "overPrm":"Paramètres surchargés",
 +"pamAccess":"Accès PAM",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Règles d'autorisation",
 +"pamAccessExportedVars":"Variables exportées",
 +"pamAccessHeartbeatInterval":"Intervalle de heartbeat",
 +"pamAccessHeartbeatRequired":"Exiger le heartbeat",
@@ -2362,11 +2398,13 @@ index 4617307dd..e994362a1 100644
 +"pamAccessRp":"Fournisseur de service OIDC",
 +"pamAccessRule":"Règle d'autorisation",
 +"pamAccessServerGroups":"Groupes de serveurs",
++"pamAccessSshRules":"Règles SSH",
++"pamAccessSudoRules":"Règles sudo",
 +"pamAccessTokenDuration":"Durée par défaut du token",
  "pamAuthnLevel":"Niveau d'authentification",
  "pamParams":"Paramètres PAM",
  "pamService":"Service PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Afficher onglet des sessions hors-ligne",
  "portalDisplayOidcConsents":"Consentements OIDC",
  "portalDisplayOrder":"Ordre d'affichage",
@@ -2374,7 +2412,7 @@ index 4617307dd..e994362a1 100644
  "portalDisplayPasswordPolicy":"Afficher la politique dans le formulaire de mot de passe",
  "portalDisplayRefreshMyRights":"Afficher le lien de rafraichissement des droits",
  "portalDisplayRegister":"Création d'un nouveau compte",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Ordre",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Conserver le jeton SAML",
  "samlIDPMetaDataOptionsTooltip":"Info-bulle",
@@ -2384,7 +2422,7 @@ index 4617307dd..e994362a1 100644
  "samlIDPMetaDataXML":"Metadonnées",
  "samlIDPName":"Nom du fournisseur d'identité SAML",
  "samlIDPSSODescriptor":"Fournisseur d'identité",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Services SOAP",
  "soapSessionServer":"Serveur de sessions",
  "specialRule":"Règle spécifique",
@@ -2400,7 +2438,7 @@ index 4617307dd..e994362a1 100644
  "sslByAjax":"Utiliser une requête Ajax",
  "sslHost":"URL mTLS pour Ajax",
  "sslParams":"Paramètres mTLS",
-@@ -1472,4 +1498,4 @@
+@@ -1472,4 +1501,4 @@
  "yubikey2fUrl":"URL du service",
  "yubikey2fUserCanRemoveKey":"Autoriser les utilisateurs à effacer leur Yubikey",
  "zeroConfExplanations":"Le serveur ne dispose pas de configuration. Cette configuration de base vous permet d'en initialiser une."
@@ -2408,7 +2446,7 @@ index 4617307dd..e994362a1 100644
 +}
 \ No newline at end of file
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/he.json b/lemonldap-ng-manager/site/htdocs/static/languages/he.json
-index 8c56267dd..808584c0b 100644
+index 8c56267dd..57cf6729b 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/he.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/he.json
 @@ -778,6 +778,7 @@
@@ -2437,12 +2475,13 @@ index 8c56267dd..808584c0b 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"אזור זמן",
  "openidParams":"OpenID parameters",
  "overPrm":"משתנים מועמסים",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2451,11 +2490,13 @@ index 8c56267dd..808584c0b 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"דרגת אימות",
  "pamParams":"משתני PAM",
  "pamService":"שירות PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"הסכמות OIDC",
  "portalDisplayOrder":"Display order",
@@ -2463,7 +2504,7 @@ index 8c56267dd..808584c0b 100644
  "portalDisplayPasswordPolicy":"הצגת המדיניות בטופס הסיסמה",
  "portalDisplayRefreshMyRights":"Display rights refresh link",
  "portalDisplayRegister":"רישום חשבון חדש",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"סדר",
  "samlIDPMetaDataOptionsStoreSAMLToken":"אחסון אסימון SAML",
  "samlIDPMetaDataOptionsTooltip":"חלונית עצה",
@@ -2473,7 +2514,7 @@ index 8c56267dd..808584c0b 100644
  "samlIDPMetaDataXML":"נתוני על",
  "samlIDPName":"SAML IDP Name",
  "samlIDPSSODescriptor":"Identity Provider",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP services",
  "soapSessionServer":"שרת הפעלה",
  "specialRule":"כלל מיוחד",
@@ -2490,7 +2531,7 @@ index 8c56267dd..808584c0b 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/it.json b/lemonldap-ng-manager/site/htdocs/static/languages/it.json
-index eda03125c..1a7d8fe66 100644
+index eda03125c..ca20f81bf 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/it.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/it.json
 @@ -778,6 +778,7 @@
@@ -2519,12 +2560,13 @@ index eda03125c..1a7d8fe66 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Fuso orario",
  "openidParams":"Parametri OpenID",
  "overPrm":"Parametri sovraccaricati",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2533,11 +2575,13 @@ index eda03125c..1a7d8fe66 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Livello di autenticazione",
  "pamParams":"Parametri PAM",
  "pamService":"Servizio PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Consensi OIDC",
  "portalDisplayOrder":"Display order",
@@ -2545,7 +2589,7 @@ index eda03125c..1a7d8fe66 100644
  "portalDisplayPasswordPolicy":"Display policy in password form",
  "portalDisplayRefreshMyRights":"Display rights refresh link",
  "portalDisplayRegister":"Registra nuovo account",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Ordine",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Store SAML Token",
  "samlIDPMetaDataOptionsTooltip":"Tooltip",
@@ -2555,7 +2599,7 @@ index eda03125c..1a7d8fe66 100644
  "samlIDPMetaDataXML":"Metadati",
  "samlIDPName":"Nome di SAML IDP ",
  "samlIDPSSODescriptor":"Provider di identità",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP services",
  "soapSessionServer":"Session server",
  "specialRule":"Regola speciale",
@@ -2572,7 +2616,7 @@ index eda03125c..1a7d8fe66 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/pl.json b/lemonldap-ng-manager/site/htdocs/static/languages/pl.json
-index 5592cd6f2..a444721cf 100644
+index 5592cd6f2..44820b4f5 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/pl.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/pl.json
 @@ -778,6 +778,7 @@
@@ -2601,12 +2645,13 @@ index 5592cd6f2..a444721cf 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Klucze szyfrujące",
  "oidcServiceMetaDataEndPoints":"Punkty końcowe",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Strefa czasowa",
  "openidParams":"Parametry OpenID",
  "overPrm":"Przeciążone parametry",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2615,11 +2660,13 @@ index 5592cd6f2..a444721cf 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Poziom uwierzytelnienia",
  "pamParams":"Parametry PAM",
  "pamService":"Usługa PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Zgody OIDC",
  "portalDisplayOrder":"Kolejność wyświetlania",
@@ -2627,7 +2674,7 @@ index 5592cd6f2..a444721cf 100644
  "portalDisplayPasswordPolicy":"Wyświetl zasady w formie hasła",
  "portalDisplayRefreshMyRights":"Wyświetl link do odświeżania praw",
  "portalDisplayRegister":"Zarejestruj Nowe Konto",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Kolejność",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Przechowuj token SAML",
  "samlIDPMetaDataOptionsTooltip":"Etykietka",
@@ -2637,7 +2684,7 @@ index 5592cd6f2..a444721cf 100644
  "samlIDPMetaDataXML":"Metadane",
  "samlIDPName":"Nazwa IDP SAML",
  "samlIDPSSODescriptor":"Dostawca tożsamości",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Usługa SOAP",
  "soapSessionServer":"Serwer sesji",
  "specialRule":"Reguła specjalna",
@@ -2654,7 +2701,7 @@ index 5592cd6f2..a444721cf 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/pt.json b/lemonldap-ng-manager/site/htdocs/static/languages/pt.json
-index 635539687..73efc4ab9 100644
+index 635539687..2633e0a04 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/pt.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/pt.json
 @@ -778,6 +778,7 @@
@@ -2683,12 +2730,13 @@ index 635539687..73efc4ab9 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Pontos finais",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Fuso horário",
  "openidParams":"Parâmetros OpenID",
  "overPrm":"Parâmetros sobrecarregarga",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2697,11 +2745,13 @@ index 635539687..73efc4ab9 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Nível de autenticação",
  "pamParams":"Parâmetros PAM",
  "pamService":"Serviço PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Consentimentos OIDC",
  "portalDisplayOrder":"Ordem de apresentação",
@@ -2709,7 +2759,7 @@ index 635539687..73efc4ab9 100644
  "portalDisplayPasswordPolicy":"Mostrar a política no formulário de senha",
  "portalDisplayRefreshMyRights":"Mostrar o link de renovar direitos",
  "portalDisplayRegister":"Registre uma nova conta",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Ordem",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Guardar token SAML",
  "samlIDPMetaDataOptionsTooltip":"Dica da ferramenta",
@@ -2719,7 +2769,7 @@ index 635539687..73efc4ab9 100644
  "samlIDPMetaDataXML":"Metadados",
  "samlIDPName":"Nome do IDP SAML",
  "samlIDPSSODescriptor":"Provedor de Identidade",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Serviços SOAP",
  "soapSessionServer":"Servidor de sessão",
  "specialRule":"Regra especial",
@@ -2736,7 +2786,7 @@ index 635539687..73efc4ab9 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/pt_BR.json b/lemonldap-ng-manager/site/htdocs/static/languages/pt_BR.json
-index 1ba264e56..0abbf729b 100644
+index 1ba264e56..6f3cf081f 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/pt_BR.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/pt_BR.json
 @@ -778,6 +778,7 @@
@@ -2765,12 +2815,13 @@ index 1ba264e56..0abbf729b 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Pontos finais",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Fuso horário",
  "openidParams":"Parâmetros OpenID",
  "overPrm":"Parâmetros sobrecarregados",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2779,11 +2830,13 @@ index 1ba264e56..0abbf729b 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Nível de autenticação",
  "pamParams":"Parâmetros PAM",
  "pamService":"Serviço PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Consentimentos OIDC",
  "portalDisplayOrder":"Ordem de apresentação",
@@ -2791,7 +2844,7 @@ index 1ba264e56..0abbf729b 100644
  "portalDisplayPasswordPolicy":"Mostrar a política no formulário de senha",
  "portalDisplayRefreshMyRights":"Mostrar o link de renovar direitos",
  "portalDisplayRegister":"Registre uma nova conta",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Ordem",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Guardar token SAML",
  "samlIDPMetaDataOptionsTooltip":"Dica da ferramenta",
@@ -2801,7 +2854,7 @@ index 1ba264e56..0abbf729b 100644
  "samlIDPMetaDataXML":"Metadados",
  "samlIDPName":"Nome do IDP SAML",
  "samlIDPSSODescriptor":"Provedor de Identidade",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Serviços SOAP",
  "soapSessionServer":"Servidor de sessão",
  "specialRule":"Regra especial",
@@ -2818,7 +2871,7 @@ index 1ba264e56..0abbf729b 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/ru.json b/lemonldap-ng-manager/site/htdocs/static/languages/ru.json
-index 035797a5b..583e903dd 100644
+index 035797a5b..a31f11f63 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/ru.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/ru.json
 @@ -778,6 +778,7 @@
@@ -2847,12 +2900,13 @@ index 035797a5b..583e903dd 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Конечные точки",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Часовой пояс",
  "openidParams":"Параметры OpenID",
  "overPrm":"Перегруженные параметры",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2861,11 +2915,13 @@ index 035797a5b..583e903dd 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Уровень аутентификации",
  "pamParams":"Параметры PAM",
  "pamService":"Сервис PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Соглашения OIDC",
  "portalDisplayOrder":"Отобразить порядок",
@@ -2873,7 +2929,7 @@ index 035797a5b..583e903dd 100644
  "portalDisplayPasswordPolicy":"Отобразить политику в виде пароля",
  "portalDisplayRefreshMyRights":"Отобразить ссылку на обновление прав",
  "portalDisplayRegister":"Зарегистрировать новый аккаунт",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Порядок",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Хранить токен SAML",
  "samlIDPMetaDataOptionsTooltip":"Подсказка",
@@ -2883,7 +2939,7 @@ index 035797a5b..583e903dd 100644
  "samlIDPMetaDataXML":"Метаданные",
  "samlIDPName":"Имя SAML IDP",
  "samlIDPSSODescriptor":"Поставщик удостоверений",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"Службы SOAP",
  "soapSessionServer":"Сервер сеансов",
  "specialRule":"Особое правило",
@@ -2900,7 +2956,7 @@ index 035797a5b..583e903dd 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/tr.json b/lemonldap-ng-manager/site/htdocs/static/languages/tr.json
-index 523cad0b4..5b6ec9fb2 100644
+index 523cad0b4..0f9294a3e 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/tr.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/tr.json
 @@ -778,6 +778,7 @@
@@ -2929,12 +2985,13 @@ index 523cad0b4..5b6ec9fb2 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Uç noktalar",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Zaman dilimi",
  "openidParams":"OpenID parametreleri",
  "overPrm":"Aşırı yüklenmiş parametreler",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -2943,11 +3000,13 @@ index 523cad0b4..5b6ec9fb2 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Doğrulama seviyesi",
  "pamParams":"PAM parametreleri",
  "pamService":"PAM Servisi",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"OIDC izinleri",
  "portalDisplayOrder":"Görüntüleme sırası",
@@ -2955,7 +3014,7 @@ index 523cad0b4..5b6ec9fb2 100644
  "portalDisplayPasswordPolicy":"Politikayı parola form alanında görüntüle",
  "portalDisplayRefreshMyRights":"Görüntüleme hakları yenileme bağlantısı",
  "portalDisplayRegister":"Yeni hesap kaydet",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Sıra",
  "samlIDPMetaDataOptionsStoreSAMLToken":"SAML Token'ı sakla",
  "samlIDPMetaDataOptionsTooltip":"Araç ipucu",
@@ -2965,7 +3024,7 @@ index 523cad0b4..5b6ec9fb2 100644
  "samlIDPMetaDataXML":"Üst veri",
  "samlIDPName":"SAML IDP Adı",
  "samlIDPSSODescriptor":"Kimlik Sağlayıcısı",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP servisleri",
  "soapSessionServer":"Oturum sunucusu",
  "specialRule":"Özel kural",
@@ -2982,7 +3041,7 @@ index 523cad0b4..5b6ec9fb2 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/vi.json b/lemonldap-ng-manager/site/htdocs/static/languages/vi.json
-index 2487ca11f..87511c489 100644
+index 2487ca11f..fdf419229 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/vi.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/vi.json
 @@ -778,6 +778,7 @@
@@ -3011,12 +3070,13 @@ index 2487ca11f..87511c489 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"Múi giờ",
  "openidParams":"Tham số OpenID",
  "overPrm":"Thông số quá tải",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -3025,11 +3085,13 @@ index 2487ca11f..87511c489 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"Mức xác thực",
  "pamParams":"Tham số PAM",
  "pamService":"Dịch vụ PAM",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"Những sự chấp thuận OIDC",
  "portalDisplayOrder":"Thứ tự hiển thị",
@@ -3037,7 +3099,7 @@ index 2487ca11f..87511c489 100644
  "portalDisplayPasswordPolicy":"Hiển thị chính sách trong biểu mẫu mật khẩu",
  "portalDisplayRefreshMyRights":"hiển thị liên kết làm mới quyền",
  "portalDisplayRegister":"Đăng ký tài khoản mới",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"Order",
  "samlIDPMetaDataOptionsStoreSAMLToken":"Lưu trữ token SAML",
  "samlIDPMetaDataOptionsTooltip":"Chú giải ",
@@ -3047,7 +3109,7 @@ index 2487ca11f..87511c489 100644
  "samlIDPMetaDataXML":"Mô-tả dữ liệu",
  "samlIDPName":"Tên SAML IDP ",
  "samlIDPSSODescriptor":"Bộ cung cấp Nhận dạng",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"dịch vụ SOAP",
  "soapSessionServer":"máy chủ phiên",
  "specialRule":"Quy tắc đặc biệt",
@@ -3064,7 +3126,7 @@ index 2487ca11f..87511c489 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/zh.json b/lemonldap-ng-manager/site/htdocs/static/languages/zh.json
-index c5543eee0..d9340bcc7 100644
+index c5543eee0..bb00c2bd6 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/zh.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/zh.json
 @@ -778,6 +778,7 @@
@@ -3093,12 +3155,13 @@ index c5543eee0..d9340bcc7 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"時區",
  "openidParams":"OpenID 參數",
  "overPrm":"超載參數",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -3107,11 +3170,13 @@ index c5543eee0..d9340bcc7 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"驗證等級",
  "pamParams":"PAM 參數",
  "pamService":"PAM 服務",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"OIDC 同意",
  "portalDisplayOrder":"Display order",
@@ -3119,7 +3184,7 @@ index c5543eee0..d9340bcc7 100644
  "portalDisplayPasswordPolicy":"在密碼表單中顯示策略",
  "portalDisplayRefreshMyRights":"顯示權限重新整理連結",
  "portalDisplayRegister":"註冊新帳號",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"順序",
  "samlIDPMetaDataOptionsStoreSAMLToken":"儲存 SAML 權杖",
  "samlIDPMetaDataOptionsTooltip":"工具提示",
@@ -3129,7 +3194,7 @@ index c5543eee0..d9340bcc7 100644
  "samlIDPMetaDataXML":"詮釋資料",
  "samlIDPName":"SAML IDP 名稱",
  "samlIDPSSODescriptor":"身份提供者",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP 服務",
  "soapSessionServer":"Session server",
  "specialRule":"特殊規則",
@@ -3146,7 +3211,7 @@ index c5543eee0..d9340bcc7 100644
  "sslHost":"Ajax mTLS URL",
  "sslParams":"mTLS parameters",
 diff --git a/lemonldap-ng-manager/site/htdocs/static/languages/zh_TW.json b/lemonldap-ng-manager/site/htdocs/static/languages/zh_TW.json
-index 50a35c356..b596e0924 100644
+index 50a35c356..57658e324 100644
 --- a/lemonldap-ng-manager/site/htdocs/static/languages/zh_TW.json
 +++ b/lemonldap-ng-manager/site/htdocs/static/languages/zh_TW.json
 @@ -778,6 +778,7 @@
@@ -3175,12 +3240,13 @@ index 50a35c356..b596e0924 100644
  "oidcServiceMetaDataDisallowNoneAlg":"Disallow \"none\" algorithm for signature",
  "oidcServiceMetaDataEncKeys":"Encryption keys",
  "oidcServiceMetaDataEndPoints":"Endpoints",
-@@ -931,6 +936,17 @@
+@@ -931,6 +936,20 @@
  "openIdSreg_timezone":"時區",
  "openidParams":"OpenID 參數",
  "overPrm":"超載參數",
 +"pamAccess":"PAM Access",
 +"pamAccessActivation":"Activation",
++"pamAccessAuthzRules":"Authorization rules",
 +"pamAccessExportedVars":"Exported variables",
 +"pamAccessHeartbeatInterval":"Heartbeat interval",
 +"pamAccessHeartbeatRequired":"Require heartbeat",
@@ -3189,11 +3255,13 @@ index 50a35c356..b596e0924 100644
 +"pamAccessRp":"OIDC Relying Party",
 +"pamAccessRule":"Authorization rule",
 +"pamAccessServerGroups":"Server groups",
++"pamAccessSshRules":"SSH rules",
++"pamAccessSudoRules":"Sudo rules",
 +"pamAccessTokenDuration":"Default token duration",
  "pamAuthnLevel":"驗證等級",
  "pamParams":"PAM 參數",
  "pamService":"PAM 服務",
-@@ -981,6 +997,7 @@
+@@ -981,6 +1000,7 @@
  "portalDisplayOfflineTokens":"Display offline session tab",
  "portalDisplayOidcConsents":"OIDC 同意",
  "portalDisplayOrder":"Display order",
@@ -3201,7 +3269,7 @@ index 50a35c356..b596e0924 100644
  "portalDisplayPasswordPolicy":"在密碼表單中顯示策略",
  "portalDisplayRefreshMyRights":"顯示權限重新整理連結",
  "portalDisplayRegister":"註冊新帳號",
-@@ -1179,8 +1196,8 @@
+@@ -1179,8 +1199,8 @@
  "samlIDPMetaDataOptionsSortNumber":"順序",
  "samlIDPMetaDataOptionsStoreSAMLToken":"儲存 SAML 權杖",
  "samlIDPMetaDataOptionsTooltip":"工具提示",
@@ -3211,7 +3279,7 @@ index 50a35c356..b596e0924 100644
  "samlIDPMetaDataXML":"詮釋資料",
  "samlIDPName":"SAML IDP 名稱",
  "samlIDPSSODescriptor":"身份提供者",
-@@ -1329,6 +1346,15 @@
+@@ -1329,6 +1349,15 @@
  "soapServices":"SOAP 服務",
  "soapSessionServer":"Session server",
  "specialRule":"特殊規則",
@@ -3922,10 +3990,10 @@ index 000000000..7c4e998e1
 +1;
 diff --git a/lemonldap-ng-portal/lib/Lemonldap/NG/Portal/Plugins/PamAccess.pm b/lemonldap-ng-portal/lib/Lemonldap/NG/Portal/Plugins/PamAccess.pm
 new file mode 100644
-index 000000000..2de9d5c64
+index 000000000..f062fa186
 --- /dev/null
 +++ b/lemonldap-ng-portal/lib/Lemonldap/NG/Portal/Plugins/PamAccess.pm
-@@ -0,0 +1,1431 @@
+@@ -0,0 +1,1519 @@
 +# PAM Access plugin for LemonLDAP::NG
 +#
 +# This plugin provides:
@@ -4254,7 +4322,9 @@ index 000000000..2de9d5c64
 +    }
 +
 +    # 5. Evaluate authorization rule based on server_group
-+    my $authorized = $self->_checkPamRule( $req, $host, $service, $server_group );
++    my $result = $self->_checkPamRule( $req, $host, $service, $server_group );
++    my $authorized   = $result->{authorized};
++    my $sudo_allowed = $result->{sudo_allowed};
 +
 +    # Get groups for response
 +    my $groups = $req->sessionInfo->{groups} || '';
@@ -4263,7 +4333,8 @@ index 000000000..2de9d5c64
 +    $self->logger->info(
 +        "PAM authorize: user '$user' " .
 +        ($authorized ? 'granted' : 'denied') .
-+        " access to host '$host'"
++        " access to host '$host'" .
++        ($authorized && $sudo_allowed ? ' (sudo allowed)' : '')
 +    );
 +
 +    # Audit log for authorization result
@@ -4278,6 +4349,7 @@ index 000000000..2de9d5c64
 +            server_group => $server_group,
 +            server_id    => $server_id,
 +            groups       => \@groupList,
++            sudo_allowed => $sudo_allowed,
 +        );
 +    }
 +    else {
@@ -4295,20 +4367,34 @@ index 000000000..2de9d5c64
 +        );
 +    }
 +
++    # Build response with permissions
++    my $response = {
++        authorized => $authorized ? JSON::true : JSON::false,
++        user       => $user,
++        groups     => \@groupList,
++    };
++
++    # Add permissions for authorized users
++    if ($authorized) {
++        $response->{permissions} = {
++            sudo_allowed => $sudo_allowed ? JSON::true : JSON::false,
++        };
++    }
++    else {
++        $response->{reason} = 'Access denied by rule';
++    }
++
 +    return $self->p->sendJSONresponse(
 +        $req,
-+        {
-+            authorized => $authorized ? JSON::true : JSON::false,
-+            user       => $user,
-+            groups     => \@groupList,
-+            ( $authorized ? () : ( reason => 'Access denied by rule' ) ),
-+        },
++        $response,
 +        code => 200
 +    );
 +}
 +
 +# HELPER METHODS
 +
++# Check PAM authorization rule for a specific service type
++# Returns: { authorized => 0|1, sudo_allowed => 0|1 }
 +sub _checkPamRule {
 +    my ( $self, $req, $host, $service, $server_group ) = @_;
 +
@@ -4317,29 +4403,99 @@ index 000000000..2de9d5c64
 +    $req->sessionInfo->{_pamService}     = $service;
 +    $req->sessionInfo->{_pamServerGroup} = $server_group || 'default';
 +
-+    my $rules = $self->conf->{pamAccessServerGroups} || {};
++    my $result = {
++        authorized   => 0,
++        sudo_allowed => 0,
++    };
++
++    # Determine which rule set to use based on service type
++    my $ssh_authorized = $self->_evaluateRule(
++        $req, $server_group, 'ssh'
++    );
++
++    # For SSH service, check SSH rules
++    if ( $service eq 'sshd' || $service eq 'ssh' ) {
++        $result->{authorized} = $ssh_authorized;
++    }
++    # For sudo service, check both SSH (must be connected) and sudo rules
++    elsif ( $service eq 'sudo' ) {
++        # User must first be authorized for SSH
++        if ($ssh_authorized) {
++            $result->{authorized} = 1;
++            $result->{sudo_allowed} = $self->_evaluateRule(
++                $req, $server_group, 'sudo'
++            );
++        }
++    }
++    # For other services, fall back to legacy rules
++    else {
++        $result->{authorized} = $self->_evaluateRule(
++            $req, $server_group, 'legacy'
++        );
++    }
++
++    # Also compute sudo_allowed for SSH requests (for response)
++    if ( $service eq 'sshd' || $service eq 'ssh' ) {
++        $result->{sudo_allowed} = $self->_evaluateRule(
++            $req, $server_group, 'sudo'
++        );
++    }
++
++    return $result;
++}
++
++# Evaluate a specific rule type for a server group
++sub _evaluateRule {
++    my ( $self, $req, $server_group, $rule_type ) = @_;
++
++    $server_group ||= 'default';
++
++    # Select the appropriate rule set
++    my $rules;
++    if ( $rule_type eq 'ssh' ) {
++        $rules = $self->conf->{pamAccessSshRules} || {};
++        # Fallback to legacy rules if SSH rules not defined
++        if ( !%$rules ) {
++            $rules = $self->conf->{pamAccessServerGroups} || {};
++        }
++    }
++    elsif ( $rule_type eq 'sudo' ) {
++        $rules = $self->conf->{pamAccessSudoRules} || {};
++        # No fallback for sudo - if not defined, sudo is denied
++    }
++    else {
++        # Legacy mode
++        $rules = $self->conf->{pamAccessServerGroups} || {};
++    }
++
 +    my $rule;
 +
 +    # 1. Look for rule matching the requested server_group
-+    if ( $server_group && exists $rules->{$server_group} ) {
++    if ( exists $rules->{$server_group} ) {
 +        $rule = $rules->{$server_group};
-+        $self->logger->debug("PAM authorize: using rule for group '$server_group'");
++        $self->logger->debug(
++            "PAM authorize: using $rule_type rule for group '$server_group'"
++        );
 +    }
 +    # 2. Fallback to 'default' group
 +    elsif ( exists $rules->{default} ) {
 +        $rule = $rules->{default};
-+        $self->logger->debug("PAM authorize: server_group '$server_group' not found, using 'default' rule");
++        $self->logger->debug(
++            "PAM authorize: $rule_type rule for '$server_group' not found, using 'default'"
++        );
 +    }
-+    # 3. No rule found -> deny access
++    # 3. No rule found -> deny
 +    else {
-+        $self->logger->warn("PAM authorize: no rule found for group '$server_group' and no 'default' rule");
++        $self->logger->debug(
++            "PAM authorize: no $rule_type rule for '$server_group' or 'default'"
++        );
 +        return 0;
 +    }
 +
 +    # Simple boolean
-+    return $rule if $rule =~ /^[01]$/;
++    return $rule if defined $rule && $rule =~ /^[01]$/;
 +
-+    # Empty rule -> deny
++    # Empty or undefined rule -> deny
 +    return 0 unless defined $rule && $rule ne '';
 +
 +    # Evaluate rule as expression
