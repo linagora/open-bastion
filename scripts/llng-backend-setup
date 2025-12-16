@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2155
 #
 # llng-backend-setup - Configure a server as an SSH backend with LLNG
 #

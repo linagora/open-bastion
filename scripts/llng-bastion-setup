@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2155
 #
 # llng-bastion-setup - Configure a server as an SSH bastion with LLNG
 #
