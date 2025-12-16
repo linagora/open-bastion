@@ -24,6 +24,7 @@ Requires:       openssl-libs
 Requires:       curl
 Requires:       jq
 Requires:       systemd
+Requires:       util-linux
 
 %description
 PAM module for LemonLDAP::NG authentication supporting token-based
@@ -52,6 +53,9 @@ and key-based authorization with server groups.
 %config(noreplace) %{_sysconfdir}/nss_llng.conf.example
 %{_sbindir}/llng-pam-enroll
 %{_sbindir}/llng-pam-heartbeat
+%{_sbindir}/llng-session-recorder
+%dir %{_sysconfdir}/llng
+%config(noreplace) %{_sysconfdir}/llng/session-recorder.conf.example
 %{_unitdir}/pam-llng-heartbeat.service
 %{_unitdir}/pam-llng-heartbeat.timer
 %{_mandir}/man8/llng-pam-enroll.8*

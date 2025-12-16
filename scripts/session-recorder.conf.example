@@ -10,10 +10,10 @@
 sessions_dir = /var/lib/llng-sessions
 
 # Recording format:
-#   asciinema - JSON format, web-friendly, can be replayed in browser
-#   ttyrec    - Binary format, compact, requires ttyrec/ttyplay tools
-#   script    - Plain text typescript, fallback option
-format = asciinema
+#   script    - Plain text typescript (default, always available)
+#   asciinema - JSON format, web-friendly (requires asciinema package)
+#   ttyrec    - Binary format, compact (requires ttyrec package)
+format = script
 
 # Maximum session duration in seconds (default: 86400 = 24 hours)
 # Sessions exceeding this limit will be terminated

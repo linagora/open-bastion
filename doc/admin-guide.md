@@ -202,8 +202,9 @@ cat > /etc/llng/session-recorder.conf << 'EOF'
 # Session recordings directory
 sessions_dir = /var/lib/llng-sessions
 
-# Recording format (asciinema for web replay)
-format = asciinema
+# Recording format (script is default, always available)
+# Use asciinema for web replay if installed
+format = script
 
 # Max session duration (8 hours)
 max_duration = 28800

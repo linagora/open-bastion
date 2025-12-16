@@ -27,6 +27,7 @@ PAM module package.
 
 - `script` command (from `util-linux`, usually pre-installed)
 - `jq` for JSON metadata generation
+- Optional: `asciinema` for asciinema format support
 - Optional: `ttyrec` for ttyrec format support
 - Optional: `uuidgen` for UUID generation (fallback uses /proc/sys/kernel/random/uuid)
 
@@ -50,10 +51,10 @@ Create `/etc/llng/session-recorder.conf`:
 sessions_dir = /var/lib/llng-sessions
 
 # Recording format:
-#   asciinema - JSON format, web-friendly, can be replayed in browser
-#   ttyrec    - Binary format, compact, requires ttyrec/ttyplay
-#   script    - Plain text typescript (fallback)
-format = asciinema
+#   script    - Plain text typescript (default, always available)
+#   asciinema - JSON format, web-friendly (requires asciinema)
+#   ttyrec    - Binary format, compact (requires ttyrec)
+format = script
 
 # Maximum session duration in seconds
 # Sessions exceeding this limit are terminated
@@ -96,12 +97,23 @@ systemctl restart sshd
 
 ## Recording Formats
 
-### Asciinema (Recommended)
+### Script (Default)
+
+- **Format**: Plain text typescript
+- **Extension**: `.typescript`
+- **Advantages**: No dependencies, always available, standard Unix tool
+- **Replay**: `cat recording.typescript` or `scriptreplay`
+
+This is the default format because `script` is available on all systems.
+
+### Asciinema
 
 - **Format**: JSON (asciinema v2)
 - **Extension**: `.cast`
 - **Advantages**: Web-friendly, can be replayed in browser, human-readable
 - **Replay**: `asciinema play recording.cast` or web player
+
+Requires `asciinema` package to be installed.
 
 Example header:
 ```json
@@ -117,14 +129,6 @@ Example header:
 
 Requires `ttyrec` package to be installed.
 
-### Script (Fallback)
-
-- **Format**: Plain text
-- **Extension**: `.typescript`
-- **Advantages**: No dependencies, always available
-- **Replay**: `cat recording.typescript`
-
-Used automatically if the requested format is unavailable.
 
 ## Session Metadata
 
