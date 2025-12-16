@@ -108,8 +108,20 @@ static void build_state_path(rate_limiter_t *rl, const char *key, char *path, si
 /* Load state from file */
 static bool load_state(const char *path, rate_limit_state_t *state)
 {
-    FILE *f = fopen(path, "r");
-    if (!f) return false;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            /* Symlink detected - security violation, remove it */
+            unlink(path);
+        }
+        return false;
+    }
+
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return false;
+    }
 
     char line[256];
     if (!fgets(line, sizeof(line), f)) {
@@ -138,7 +150,7 @@ static bool save_state(const char *path, const rate_limit_state_t *state)
     char temp_path[512];
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
-    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) return false;
 
     FILE *f = fdopen(fd, "w");

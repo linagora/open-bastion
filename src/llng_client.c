@@ -14,6 +14,7 @@
 #include <json-c/json.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 
 #include "llng_client.h"
 
@@ -206,6 +207,7 @@ static void generate_request_signature(const char *secret,
 /*
  * Generate a unique nonce for replay protection.
  * Format: timestamp_ms-uuid
+ * Uses OpenSSL RAND_bytes for cryptographically secure random generation.
  */
 static void generate_nonce(char *nonce, size_t nonce_size)
 {
@@ -219,19 +221,10 @@ static void generate_nonce(char *nonce, size_t nonce_size)
     clock_gettime(CLOCK_REALTIME, &ts);
     long long timestamp_ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 
-    /* Generate UUID v4 */
+    /* Generate UUID v4 using OpenSSL RAND_bytes (CSPRNG) */
     unsigned char uuid[16];
-    FILE *f = fopen("/dev/urandom", "r");
-    if (f) {
-        if (fread(uuid, 1, 16, f) != 16) {
-            fclose(f);
-            /* Fallback: use timestamp only */
-            snprintf(nonce, nonce_size, "%lld", timestamp_ms);
-            return;
-        }
-        fclose(f);
-    } else {
-        /* Fallback: use timestamp only */
+    if (RAND_bytes(uuid, sizeof(uuid)) != 1) {
+        /* RAND_bytes failed - this is a critical error, but use timestamp as fallback */
         snprintf(nonce, nonce_size, "%lld", timestamp_ms);
         return;
     }

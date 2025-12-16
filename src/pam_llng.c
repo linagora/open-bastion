@@ -182,6 +182,43 @@ static int validate_username(const char *user)
     return 1;
 }
 
+/*
+ * Sanitize GECOS field to prevent /etc/passwd corruption.
+ * Replaces dangerous characters (:, \n, \r, control chars) with spaces.
+ * Returns a newly allocated sanitized string (caller must free).
+ */
+static char *sanitize_gecos(const char *gecos)
+{
+    if (!gecos || !*gecos) {
+        return strdup("");
+    }
+
+    /* Limit GECOS length to prevent oversized /etc/passwd entries */
+    #define MAX_GECOS_LENGTH 256
+    size_t len = strlen(gecos);
+    if (len > MAX_GECOS_LENGTH) {
+        len = MAX_GECOS_LENGTH;
+    }
+
+    char *sanitized = malloc(len + 1);
+    if (!sanitized) {
+        return strdup("");
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)gecos[i];
+        /* Replace dangerous characters with space */
+        if (c == ':' || c == '\n' || c == '\r' || c < 32 || c == 127) {
+            sanitized[i] = ' ';
+        } else {
+            sanitized[i] = gecos[i];
+        }
+    }
+    sanitized[len] = '\0';
+
+    return sanitized;
+}
+
 /* Cleanup function for pam_set_data (strings) */
 static void cleanup_string(pam_handle_t *pamh, void *data, int error_status)
 {
@@ -288,25 +325,49 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
 
     /* Load server token from file if specified */
     if (data->config.server_token_file) {
-        /* Security check: verify token file permissions */
+        /*
+         * Security: open with O_NOFOLLOW to prevent symlink attacks,
+         * then check permissions on the opened fd to avoid TOCTOU.
+         */
+        int token_fd = open(data->config.server_token_file, O_RDONLY | O_NOFOLLOW);
+        if (token_fd < 0) {
+            if (errno == ELOOP) {
+                LLNG_LOG_ERR(pamh, "Security error: token file %s is a symlink",
+                        data->config.server_token_file);
+            } else {
+                LLNG_LOG_ERR(pamh, "Security error: cannot open token file %s: %s",
+                        data->config.server_token_file, strerror(errno));
+            }
+            goto error;
+        }
+
         struct stat st;
-        if (stat(data->config.server_token_file, &st) != 0) {
+        if (fstat(token_fd, &st) != 0) {
             LLNG_LOG_ERR(pamh, "Security error: cannot stat token file %s",
                     data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
         if (st.st_uid != 0) {
             LLNG_LOG_ERR(pamh, "Security error: token file %s is not owned by root",
                     data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
         if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
             LLNG_LOG_ERR(pamh, "Security error: token file %s has insecure permissions",
                     data->config.server_token_file);
+            close(token_fd);
+            goto error;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            LLNG_LOG_ERR(pamh, "Security error: token file %s is not a regular file",
+                    data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
 
-        FILE *f = fopen(data->config.server_token_file, "r");
+        FILE *f = fdopen(token_fd, "r");
         if (f) {
             char token_buf[4096];
             if (fgets(token_buf, sizeof(token_buf), f)) {
@@ -319,8 +380,9 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
                 /* Clear the buffer containing the token */
                 explicit_bzero(token_buf, sizeof(token_buf));
             }
-            fclose(f);
+            fclose(f);  /* Also closes token_fd */
         } else {
+            close(token_fd);
             LLNG_LOG_WARN(pamh, "Failed to read server token file: %s",
                      data->config.server_token_file);
         }
@@ -677,6 +739,25 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         if (audit_initialized) {
             audit_event.result_code = PAM_AUTH_ERR;
             audit_event.reason = "No password provided";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
+        return PAM_AUTH_ERR;
+    }
+
+    /* Security: validate token length to prevent DoS via memory exhaustion */
+    #define MAX_TOKEN_LENGTH 8192
+    if (strlen(password) > MAX_TOKEN_LENGTH) {
+        LLNG_LOG_WARN(pamh, "Token too long (max %d chars)", MAX_TOKEN_LENGTH);
+
+        if (data->rate_limiter) {
+            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        if (audit_initialized) {
+            audit_event.result_code = PAM_AUTH_ERR;
+            audit_event.reason = "Token too long";
             audit_event_set_end_time(&audit_event);
             audit_log_event(data->audit, &audit_event);
         }
@@ -1075,7 +1156,7 @@ static int create_unix_user(pam_handle_t *pamh,
     gid_t gid = 0;
     char home_dir[512];
     const char *user_shell;
-    const char *user_gecos;
+    char *safe_gecos = NULL;  /* Sanitized GECOS (must be freed) */
     int passwd_fd = -1;
     int shadow_fd = -1;
     FILE *passwd_file = NULL;
@@ -1138,10 +1219,11 @@ static int create_unix_user(pam_handle_t *pamh,
         user_shell = "/bin/bash";
     }
 
-    /* Determine GECOS */
-    user_gecos = gecos;
-    if (!user_gecos || !*user_gecos) {
-        user_gecos = "";
+    /* Sanitize GECOS to prevent /etc/passwd corruption */
+    safe_gecos = sanitize_gecos(gecos);
+    if (!safe_gecos) {
+        LLNG_LOG_ERR(pamh, "Failed to sanitize GECOS for user %s", user);
+        goto cleanup;
     }
 
     LLNG_LOG_INFO(pamh, "Creating Unix user: %s (uid=%d, gid=%d)", user, uid, gid);
@@ -1198,7 +1280,7 @@ static int create_unix_user(pam_handle_t *pamh,
 
     /* Write to /etc/passwd */
     if (fprintf(passwd_file, "%s:x:%d:%d:%s:%s:%s\n",
-                user, uid, gid, user_gecos, home_dir, user_shell) < 0) {
+                user, uid, gid, safe_gecos, home_dir, user_shell) < 0) {
         LLNG_LOG_ERR(pamh, "Cannot write to /etc/passwd: %s", strerror(errno));
         goto cleanup;
     }
@@ -1277,6 +1359,9 @@ static int create_unix_user(pam_handle_t *pamh,
     invalidate_nscd_cache();
 
 cleanup:
+    /* Free sanitized GECOS */
+    free(safe_gecos);
+
     /* Close files (also releases locks) */
     if (passwd_file) fclose(passwd_file);
     if (shadow_file) fclose(shadow_file);

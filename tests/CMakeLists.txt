@@ -16,8 +16,11 @@ add_test(NAME test_rate_limiter COMMAND test_rate_limiter)
 
 # Test audit logging
 add_executable(test_audit_log test_audit_log.c ../src/audit_log.c)
-target_include_directories(test_audit_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_audit_log pthread)
+target_include_directories(test_audit_log PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_audit_log pthread ${OPENSSL_LIBRARIES})
 add_test(NAME test_audit_log COMMAND test_audit_log)
 
 # Test client context

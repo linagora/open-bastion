@@ -343,8 +343,14 @@ bool auth_cache_lookup(auth_cache_t *cache,
     build_auth_cache_path(cache, user, server_group, host, path, sizeof(path));
 
     /* Read file */
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return false;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            /* Symlink detected - security violation, remove it */
+            unlink(path);
+        }
+        return false;
+    }
 
     struct stat st;
     if (fstat(fd, &st) != 0 || st.st_size == 0) {
@@ -601,7 +607,7 @@ bool auth_cache_force_online(const char *force_online_file, const char *user)
     if (!force_online_file) return false;
 
     /* Open file first, then stat via fd to avoid TOCTOU race */
-    int fd = open(force_online_file, O_RDONLY);
+    int fd = open(force_online_file, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         return false;  /* File doesn't exist or unreadable, normal operation */
     }
@@ -688,10 +694,13 @@ int auth_cache_cleanup(auth_cache_t *cache)
         snprintf(path, sizeof(path), "%s/%s", cache->cache_dir, entry->d_name);
 
         /* Try to read and check expiration */
-        int fd = open(path, O_RDONLY);
+        int fd = open(path, O_RDONLY | O_NOFOLLOW);
         if (fd < 0) {
-            unlink(path);
-            removed++;
+            if (errno == ELOOP) {
+                /* Symlink - remove it */
+                unlink(path);
+                removed++;
+            }
             continue;
         }
 
