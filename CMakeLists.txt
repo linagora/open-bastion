@@ -37,6 +37,7 @@ set(PAM_MODULE_SOURCES
     src/token_manager.c
     src/notify.c
     src/secret_store.c
+    src/auth_cache.c
 )
 
 if(ENABLE_CACHE)

@@ -14,16 +14,21 @@
 #include <unistd.h>
 #include <errno.h>
 #include <libgen.h>
+#include <fcntl.h>
 
 #include "config.h"
 
-/* Security: check file permissions for sensitive files */
-static int check_file_permissions(const char *filename)
+/*
+ * Security: check file permissions for sensitive files.
+ * Uses fstat on already-opened fd to avoid TOCTOU.
+ * Returns 0 on OK, negative on error.
+ */
+static int check_file_permissions_fd(int fd)
 {
     struct stat st;
 
-    if (stat(filename, &st) != 0) {
-        return -1;  /* File doesn't exist or can't be accessed */
+    if (fstat(fd, &st) != 0) {
+        return -1;  /* Can't stat */
     }
 
     /* File must be owned by root (uid 0) */
@@ -36,6 +41,11 @@ static int check_file_permissions(const char *filename)
         return -3;  /* Permissions too open */
     }
 
+    /* Must be a regular file, not a symlink or device */
+    if (!S_ISREG(st.st_mode)) {
+        return -4;  /* Not a regular file */
+    }
+
     return 0;  /* OK */
 }
 
@@ -44,6 +54,8 @@ static int check_file_permissions(const char *filename)
 #define DEFAULT_CACHE_TTL               300
 #define DEFAULT_CACHE_TTL_HIGH_RISK     60
 #define DEFAULT_CACHE_DIR               "/var/cache/pam_llng"
+#define DEFAULT_AUTH_CACHE_DIR          "/var/cache/pam_llng/auth"
+#define DEFAULT_AUTH_CACHE_FORCE_ONLINE "/etc/security/pam_llng.force_online"
 #define DEFAULT_SERVER_GROUP            "default"
 #define DEFAULT_AUDIT_LOG_FILE          "/var/log/pam_llng/audit.json"
 #define DEFAULT_RATE_LIMIT_STATE_DIR    "/var/lib/pam_llng/ratelimit"
@@ -70,6 +82,11 @@ void config_init(pam_llng_config_t *config)
     config->cache_dir = strdup(DEFAULT_CACHE_DIR);
     config->cache_encrypted = true;  /* Encrypted by default */
     config->cache_invalidate_on_logout = true;  /* Invalidate on logout by default */
+
+    /* Authorization cache settings (for offline mode) */
+    config->auth_cache_enabled = true;
+    config->auth_cache_dir = strdup(DEFAULT_AUTH_CACHE_DIR);
+    config->auth_cache_force_online = strdup(DEFAULT_AUTH_CACHE_FORCE_ONLINE);
 
     /* Server settings */
     config->server_group = strdup(DEFAULT_SERVER_GROUP);
@@ -137,6 +154,10 @@ void config_free(pam_llng_config_t *config)
     /* Cache settings */
     free(config->cache_dir);
     free(config->high_risk_services);
+
+    /* Authorization cache settings */
+    free(config->auth_cache_dir);
+    free(config->auth_cache_force_online);
 
     /* Audit settings */
     free(config->audit_log_file);
@@ -206,11 +227,36 @@ static bool parse_bool(const char *value)
     return false;
 }
 
+/* Maximum lengths for security-sensitive configuration values */
+#define MAX_URL_LENGTH 512
+#define MAX_TOKEN_FILE_PATH 256
+
+/* Check URL for dangerous characters (injection prevention) */
+static int url_contains_dangerous_chars(const char *url)
+{
+    if (!url) return 1;
+    /* Reject URLs with control characters that could enable header injection */
+    for (const char *p = url; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 32 || c == 127) {  /* Control characters */
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Parse a single config line */
 static int parse_line(const char *key, const char *value, pam_llng_config_t *config)
 {
     /* Basic settings */
     if (strcmp(key, "portal_url") == 0 || strcmp(key, "portal") == 0) {
+        /* Validate URL length and content */
+        if (strlen(value) > MAX_URL_LENGTH) {
+            return -1;  /* URL too long */
+        }
+        if (url_contains_dangerous_chars(value)) {
+            return -1;  /* Dangerous characters */
+        }
         free(config->portal_url);
         config->portal_url = strdup(value);
     }
@@ -273,6 +319,18 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
     }
     else if (strcmp(key, "cache_invalidate_on_logout") == 0) {
         config->cache_invalidate_on_logout = parse_bool(value);
+    }
+    /* Authorization cache settings (offline mode) */
+    else if (strcmp(key, "auth_cache_enabled") == 0 || strcmp(key, "auth_cache") == 0) {
+        config->auth_cache_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "auth_cache_dir") == 0) {
+        free(config->auth_cache_dir);
+        config->auth_cache_dir = strdup(value);
+    }
+    else if (strcmp(key, "auth_cache_force_online") == 0 || strcmp(key, "force_online_file") == 0) {
+        free(config->auth_cache_force_online);
+        config->auth_cache_force_online = strdup(value);
     }
     /* Authorization mode */
     else if (strcmp(key, "authorize_only") == 0) {
@@ -400,19 +458,35 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
 
 int config_load(const char *filename, pam_llng_config_t *config)
 {
-    /* Security check: verify file permissions */
-    int perm_check = check_file_permissions(filename);
+    /*
+     * Security: open file with O_NOFOLLOW to prevent symlink attacks,
+     * then check permissions on the opened fd to avoid TOCTOU.
+     */
+    int fd = open(filename, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        return -1;  /* File doesn't exist or is a symlink */
+    }
+
+    int perm_check = check_file_permissions_fd(fd);
     if (perm_check == -2) {
         /* File not owned by root - security risk */
+        close(fd);
         return -2;
     }
     if (perm_check == -3) {
         /* Permissions too open - security risk */
+        close(fd);
         return -3;
     }
+    if (perm_check == -4) {
+        /* Not a regular file */
+        close(fd);
+        return -4;
+    }
 
-    FILE *f = fopen(filename, "r");
+    FILE *f = fdopen(fd, "r");
     if (!f) {
+        close(fd);
         return -1;
     }
 
@@ -496,6 +570,9 @@ int config_parse_args(int argc, const char **argv, pam_llng_config_t *config)
         else if (strcmp(arg, "no_cache_encrypt") == 0 || strcmp(arg, "nocacheencrypt") == 0) {
             config->cache_encrypted = false;
         }
+        else if (strcmp(arg, "no_auth_cache") == 0 || strcmp(arg, "noauthcache") == 0) {
+            config->auth_cache_enabled = false;
+        }
         else if (strcmp(arg, "no_verify_ssl") == 0 || strcmp(arg, "insecure") == 0) {
             config->verify_ssl = false;
         }
@@ -556,12 +633,12 @@ static void ensure_parent_dir(const char *filepath)
         if (stat(parent, &st) != 0) {
             /* Try to create the parent directory with secure permissions */
             if (mkdir(parent, 0750) != 0 && errno != EEXIST) {
-                /* Try creating grandparent first */
+                /* Try creating grandparent first with restricted permissions */
                 char *parent_copy = strdup(parent);
                 if (parent_copy) {
                     char *grandparent = dirname(parent_copy);
                     if (grandparent && strcmp(grandparent, ".") != 0) {
-                        mkdir(grandparent, 0755);
+                        mkdir(grandparent, 0750);
                     }
                     free(parent_copy);
                 }

@@ -28,7 +28,7 @@ typedef struct {
     int min_tls_version;     /* Minimum TLS version: 12=1.2, 13=1.3 (default: 13) */
     char *cert_pin;          /* Certificate pin (sha256//base64 format, optional) */
 
-    /* Cache settings */
+    /* Cache settings (for token cache) */
     bool cache_enabled;      /* Enable token caching (default: true) */
     char *cache_dir;         /* Cache directory (default: /var/cache/pam_llng) */
     int cache_ttl;           /* Cache TTL in seconds (default: 300) */
@@ -36,6 +36,11 @@ typedef struct {
     char *high_risk_services; /* Comma-separated list of high-risk PAM services */
     bool cache_encrypted;    /* Encrypt cache files with AES-256-GCM (default: true) */
     bool cache_invalidate_on_logout; /* Invalidate cache when session closes (default: true) */
+
+    /* Authorization cache settings (for offline mode) */
+    bool auth_cache_enabled;        /* Enable authorization caching (default: true) */
+    char *auth_cache_dir;           /* Auth cache directory (default: /var/cache/pam_llng/auth) */
+    char *auth_cache_force_online;  /* Force-online trigger file (default: /etc/security/pam_llng.force_online) */
 
     /* Authorization mode */
     bool authorize_only;     /* Only check authorization, no password (for SSH keys) */

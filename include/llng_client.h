@@ -11,6 +11,27 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Permissions structure from /pam/authorize response */
+typedef struct {
+    bool sudo_allowed;      /* User is allowed to use sudo */
+    bool sudo_nopasswd;     /* Sudo without password (future use) */
+} llng_permissions_t;
+
+/* Offline settings from /pam/authorize response */
+typedef struct {
+    bool enabled;           /* Offline mode allowed for this user */
+    int ttl;                /* Cache TTL in seconds (0 = no caching) */
+} llng_offline_settings_t;
+
+/* SSH certificate info extracted from environment */
+typedef struct {
+    char *key_id;           /* Certificate key ID */
+    char *serial;           /* Certificate serial number */
+    char *principals;       /* Comma-separated principals */
+    char *ca_fingerprint;   /* CA key fingerprint */
+    bool valid;             /* Certificate was validated */
+} llng_ssh_cert_info_t;
+
 /* Response structure from LLNG server */
 typedef struct {
     bool authorized;
@@ -26,6 +47,14 @@ typedef struct {
     char *gecos;      /* Full name / GECOS field */
     char *shell;      /* Login shell */
     char *home;       /* Home directory */
+
+    /* Permissions from /pam/authorize */
+    llng_permissions_t permissions;
+    bool has_permissions;   /* True if permissions object was present */
+
+    /* Offline settings from /pam/authorize */
+    llng_offline_settings_t offline;
+    bool has_offline;       /* True if offline object was present */
 } llng_response_t;
 
 /* Client configuration */
@@ -86,6 +115,28 @@ int llng_authorize_user(llng_client_t *client,
                         const char *host,
                         const char *service,
                         llng_response_t *response);
+
+/*
+ * Check user authorization with SSH certificate info via /pam/authorize
+ * Same as llng_authorize_user but includes SSH certificate details
+ * Returns 0 on success, -1 on error
+ */
+int llng_authorize_user_with_cert(llng_client_t *client,
+                                   const char *user,
+                                   const char *host,
+                                   const char *service,
+                                   const llng_ssh_cert_info_t *ssh_cert,
+                                   llng_response_t *response);
+
+/*
+ * Free SSH certificate info structure contents
+ */
+void llng_ssh_cert_info_free(llng_ssh_cert_info_t *cert_info);
+
+/*
+ * Initialize response structure to safe defaults (all zeros)
+ */
+void llng_response_init(llng_response_t *response);
 
 /*
  * Free response structure contents

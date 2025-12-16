@@ -16,8 +16,11 @@ add_test(NAME test_rate_limiter COMMAND test_rate_limiter)
 
 # Test audit logging
 add_executable(test_audit_log test_audit_log.c ../src/audit_log.c)
-target_include_directories(test_audit_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_audit_log pthread)
+target_include_directories(test_audit_log PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_audit_log pthread ${OPENSSL_LIBRARIES})
 add_test(NAME test_audit_log COMMAND test_audit_log)
 
 # Test client context
@@ -53,6 +56,35 @@ add_test(NAME test_path_validator COMMAND test_path_validator)
 add_executable(test_username_validator test_username_validator.c)
 target_include_directories(test_username_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_username_validator COMMAND test_username_validator)
+
+# Test llng_client structures and functions
+add_executable(test_llng_client test_llng_client.c ../src/llng_client.c)
+target_include_directories(test_llng_client PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_llng_client
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_llng_client COMMAND test_llng_client)
+
+# Test authorization cache
+add_executable(test_auth_cache test_auth_cache.c ../src/auth_cache.c)
+target_include_directories(test_auth_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_auth_cache
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+add_test(NAME test_auth_cache COMMAND test_auth_cache)
 
 # Note: Integration tests require a running LLNG instance
 # and are meant to be run manually

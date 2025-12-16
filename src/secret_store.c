@@ -185,13 +185,13 @@ secret_store_t *secret_store_init(const secret_store_config_t *config)
     struct stat st;
     if (stat(store->config.store_dir, &st) != 0) {
         if (mkdir(store->config.store_dir, 0700) != 0 && errno != EEXIST) {
-            /* Try to create parent directories */
+            /* Try to create parent directories with restricted permissions */
             char *parent = strdup(store->config.store_dir);
             if (parent) {
                 char *last_slash = strrchr(parent, '/');
                 if (last_slash) {
                     *last_slash = '\0';
-                    mkdir(parent, 0755);
+                    mkdir(parent, 0700);
                 }
                 free(parent);
             }
@@ -310,7 +310,7 @@ int secret_store_put(secret_store_t *store,
     char temp_path[520];
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
-    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) {
         free(out);
         snprintf(store->error_buf, sizeof(store->error_buf),
@@ -368,10 +368,17 @@ int secret_store_get(secret_store_t *store,
     char path[512];
     build_path(store, key, path, sizeof(path));
 
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         if (errno == ENOENT) {
             return -2;  /* Not found */
+        }
+        if (errno == ELOOP) {
+            /* Symlink detected - security violation, remove it */
+            unlink(path);
+            snprintf(store->error_buf, sizeof(store->error_buf),
+                     "Symlink detected in secret store - removed");
+            return -1;
         }
         snprintf(store->error_buf, sizeof(store->error_buf),
                  "Failed to open secret file: %s", strerror(errno));
@@ -480,7 +487,7 @@ int secret_store_delete(secret_store_t *store, const char *key)
     build_path(store, key, path, sizeof(path));
 
     /* Overwrite file with zeros before deletion */
-    int fd = open(path, O_WRONLY);
+    int fd = open(path, O_WRONLY | O_NOFOLLOW);
     if (fd >= 0) {
         struct stat st;
         if (fstat(fd, &st) == 0 && st.st_size > 0) {

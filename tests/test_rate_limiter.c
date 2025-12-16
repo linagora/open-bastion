@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include "rate_limiter.h"
 
@@ -37,12 +38,19 @@ static void setup(void)
     mkdir(test_state_dir, 0700);
 }
 
-/* Recursively remove directory - safe alternative to system("rm -rf") */
+/* Recursively remove directory - safe alternative to system("rm -rf")
+ * Uses openat/unlinkat to avoid TOCTOU race conditions */
 static int remove_directory(const char *path)
 {
-    DIR *dir = opendir(path);
-    if (!dir) {
+    int dir_fd = open(path, O_RDONLY | O_DIRECTORY);
+    if (dir_fd < 0) {
         if (errno == ENOENT) return 0;  /* Already gone */
+        return -1;
+    }
+
+    DIR *dir = fdopendir(dir_fd);
+    if (!dir) {
+        close(dir_fd);
         return -1;
     }
 
@@ -54,19 +62,18 @@ static int remove_directory(const char *path)
             continue;
         }
 
-        snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
-
         struct stat st;
-        if (lstat(filepath, &st) == 0) {
+        if (fstatat(dir_fd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0) {
             if (S_ISDIR(st.st_mode)) {
+                snprintf(filepath, sizeof(filepath), "%s/%s", path, entry->d_name);
                 remove_directory(filepath);
             } else {
-                unlink(filepath);
+                unlinkat(dir_fd, entry->d_name, 0);
             }
         }
     }
 
-    closedir(dir);
+    closedir(dir);  /* Also closes dir_fd */
     return rmdir(path);
 }
 

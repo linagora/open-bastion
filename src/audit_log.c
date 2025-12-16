@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <syslog.h>
 #include <pthread.h>
+#include <openssl/rand.h>
 
 #include "audit_log.h"
 
@@ -63,17 +64,8 @@ void audit_generate_correlation_id(char *buf, size_t buf_size)
     }
 
     unsigned char uuid[16];
-    FILE *f = fopen("/dev/urandom", "r");
-    if (f) {
-        if (fread(uuid, 1, 16, f) != 16) {
-            /* Failed to read enough random bytes - do not generate UUID */
-            fclose(f);
-            buf[0] = '\0';
-            return;
-        }
-        fclose(f);
-    } else {
-        /* /dev/urandom unavailable - do not generate UUID */
+    if (RAND_bytes(uuid, sizeof(uuid)) != 1) {
+        /* Failed to generate random bytes */
         buf[0] = '\0';
         return;
     }

@@ -457,8 +457,12 @@ bool cache_lookup(token_cache_t *cache,
     char path[PATH_MAX];
     build_cache_path(cache, token, user, path, sizeof(path));
 
-    int fd = open(path, O_RDONLY);
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
+        if (errno == ELOOP) {
+            /* Symlink detected - security violation, remove it */
+            unlink(path);
+        }
         return false;
     }
 
@@ -656,7 +660,7 @@ int cache_store(token_cache_t *cache,
     char temp_path[PATH_MAX + 8];  /* PATH_MAX + ".tmp" + margin */
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
 
-    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) {
         return -1;
     }
@@ -729,8 +733,14 @@ int cache_store(token_cache_t *cache,
 static int read_cache_file(token_cache_t *cache, const char *path,
                            char **out, size_t *out_len)
 {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return -1;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            /* Symlink detected - security violation, remove it */
+            unlink(path);
+        }
+        return -1;
+    }
 
     struct stat st;
     if (fstat(fd, &st) != 0 || st.st_size == 0) {

@@ -14,6 +14,7 @@
 #include <json-c/json.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 
 #include "llng_client.h"
 
@@ -23,6 +24,21 @@
 
 /* Stack buffer size for HMAC signature message building */
 #define SIGNATURE_STACK_BUFFER_SIZE 512
+
+/* Safe strdup from JSON - returns NULL if json string is NULL */
+static inline char *safe_json_strdup(struct json_object *obj)
+{
+    const char *str = json_object_get_string(obj);
+    return str ? strdup(str) : NULL;
+}
+
+/* Forward declaration for internal authorize function */
+static int llng_authorize_user_internal(llng_client_t *client,
+                                         const char *user,
+                                         const char *host,
+                                         const char *service,
+                                         const llng_ssh_cert_info_t *ssh_cert,
+                                         llng_response_t *response);
 
 /* Thread-safe curl initialization */
 static pthread_once_t curl_init_once = PTHREAD_ONCE_INIT;
@@ -191,6 +207,7 @@ static void generate_request_signature(const char *secret,
 /*
  * Generate a unique nonce for replay protection.
  * Format: timestamp_ms-uuid
+ * Uses OpenSSL RAND_bytes for cryptographically secure random generation.
  */
 static void generate_nonce(char *nonce, size_t nonce_size)
 {
@@ -204,19 +221,10 @@ static void generate_nonce(char *nonce, size_t nonce_size)
     clock_gettime(CLOCK_REALTIME, &ts);
     long long timestamp_ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 
-    /* Generate UUID v4 */
+    /* Generate UUID v4 using OpenSSL RAND_bytes (CSPRNG) */
     unsigned char uuid[16];
-    FILE *f = fopen("/dev/urandom", "r");
-    if (f) {
-        if (fread(uuid, 1, 16, f) != 16) {
-            fclose(f);
-            /* Fallback: use timestamp only */
-            snprintf(nonce, nonce_size, "%lld", timestamp_ms);
-            return;
-        }
-        fclose(f);
-    } else {
-        /* Fallback: use timestamp only */
+    if (RAND_bytes(uuid, sizeof(uuid)) != 1) {
+        /* RAND_bytes failed - this is a critical error, but use timestamp as fallback */
         snprintf(nonce, nonce_size, "%lld", timestamp_ms);
         return;
     }
@@ -518,11 +526,11 @@ int llng_verify_token(llng_client_t *client,
     }
 
     if (json_object_object_get_ex(json, "user", &val)) {
-        response->user = strdup(json_object_get_string(val));
+        response->user = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "error", &val)) {
-        response->reason = strdup(json_object_get_string(val));
+        response->reason = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "groups", &val)) {
@@ -533,7 +541,9 @@ int llng_verify_token(llng_client_t *client,
                 response->groups_count = count;
                 for (size_t i = 0; i < count; i++) {
                     struct json_object *g = json_object_array_get_idx(val, i);
-                    response->groups[i] = strdup(json_object_get_string(g));
+                    if (g) {
+                        response->groups[i] = safe_json_strdup(g);
+                    }
                 }
             }
         }
@@ -544,13 +554,13 @@ int llng_verify_token(llng_client_t *client,
     if (json_object_object_get_ex(json, "attrs", &attrs_obj)) {
         if (json_object_is_type(attrs_obj, json_type_object)) {
             if (json_object_object_get_ex(attrs_obj, "gecos", &val)) {
-                response->gecos = strdup(json_object_get_string(val));
+                response->gecos = safe_json_strdup(val);
             }
             if (json_object_object_get_ex(attrs_obj, "shell", &val)) {
-                response->shell = strdup(json_object_get_string(val));
+                response->shell = safe_json_strdup(val);
             }
             if (json_object_object_get_ex(attrs_obj, "home", &val)) {
-                response->home = strdup(json_object_get_string(val));
+                response->home = safe_json_strdup(val);
             }
         }
     }
@@ -641,11 +651,11 @@ int llng_introspect_token(llng_client_t *client,
     }
 
     if (json_object_object_get_ex(json, "sub", &val)) {
-        response->user = strdup(json_object_get_string(val));
+        response->user = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "scope", &val)) {
-        response->scope = strdup(json_object_get_string(val));
+        response->scope = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "exp", &val)) {
@@ -665,6 +675,20 @@ int llng_authorize_user(llng_client_t *client,
                         const char *host,
                         const char *service,
                         llng_response_t *response)
+{
+    /* Delegate to internal function without SSH certificate info */
+    return llng_authorize_user_internal(client, user, host, service, NULL, response);
+}
+
+/*
+ * Internal helper for authorize with optional SSH cert info
+ */
+static int llng_authorize_user_internal(llng_client_t *client,
+                                         const char *user,
+                                         const char *host,
+                                         const char *service,
+                                         const llng_ssh_cert_info_t *ssh_cert,
+                                         llng_response_t *response)
 {
     if (!client || !user || !response) {
         if (client) snprintf(client->error, sizeof(client->error), "Invalid parameters");
@@ -696,6 +720,28 @@ int llng_authorize_user(llng_client_t *client,
     if (client->server_group) {
         json_object_object_add(req_json, "server_group",
                                json_object_new_string(client->server_group));
+    }
+
+    /* Add SSH certificate info if provided */
+    if (ssh_cert && ssh_cert->valid) {
+        struct json_object *cert_json = json_object_new_object();
+        if (ssh_cert->key_id) {
+            json_object_object_add(cert_json, "key_id",
+                                   json_object_new_string(ssh_cert->key_id));
+        }
+        if (ssh_cert->serial) {
+            json_object_object_add(cert_json, "serial",
+                                   json_object_new_string(ssh_cert->serial));
+        }
+        if (ssh_cert->principals) {
+            json_object_object_add(cert_json, "principals",
+                                   json_object_new_string(ssh_cert->principals));
+        }
+        if (ssh_cert->ca_fingerprint) {
+            json_object_object_add(cert_json, "ca_fingerprint",
+                                   json_object_new_string(ssh_cert->ca_fingerprint));
+        }
+        json_object_object_add(req_json, "ssh_cert", cert_json);
     }
 
     const char *req_body = json_object_to_json_string(req_json);
@@ -773,11 +819,11 @@ int llng_authorize_user(llng_client_t *client,
     }
 
     if (json_object_object_get_ex(json, "user", &val)) {
-        response->user = strdup(json_object_get_string(val));
+        response->user = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "reason", &val)) {
-        response->reason = strdup(json_object_get_string(val));
+        response->reason = safe_json_strdup(val);
     }
 
     if (json_object_object_get_ex(json, "groups", &val)) {
@@ -788,14 +834,70 @@ int llng_authorize_user(llng_client_t *client,
                 response->groups_count = count;
                 for (size_t i = 0; i < count; i++) {
                     struct json_object *g = json_object_array_get_idx(val, i);
-                    response->groups[i] = strdup(json_object_get_string(g));
+                    if (g) {
+                        response->groups[i] = safe_json_strdup(g);
+                    }
                 }
+            }
+        }
+    }
+
+    /* Parse permissions object */
+    struct json_object *perms_obj;
+    if (json_object_object_get_ex(json, "permissions", &perms_obj)) {
+        if (json_object_is_type(perms_obj, json_type_object)) {
+            response->has_permissions = true;
+            if (json_object_object_get_ex(perms_obj, "sudo_allowed", &val)) {
+                response->permissions.sudo_allowed = json_object_get_boolean(val);
+            }
+            if (json_object_object_get_ex(perms_obj, "sudo_nopasswd", &val)) {
+                response->permissions.sudo_nopasswd = json_object_get_boolean(val);
+            }
+        }
+    }
+
+    /* Parse offline settings object */
+    struct json_object *offline_obj;
+    if (json_object_object_get_ex(json, "offline", &offline_obj)) {
+        if (json_object_is_type(offline_obj, json_type_object)) {
+            response->has_offline = true;
+            if (json_object_object_get_ex(offline_obj, "enabled", &val)) {
+                response->offline.enabled = json_object_get_boolean(val);
+            }
+            if (json_object_object_get_ex(offline_obj, "ttl", &val)) {
+                response->offline.ttl = json_object_get_int(val);
             }
         }
     }
 
     json_object_put(json);
     return 0;
+}
+
+int llng_authorize_user_with_cert(llng_client_t *client,
+                                   const char *user,
+                                   const char *host,
+                                   const char *service,
+                                   const llng_ssh_cert_info_t *ssh_cert,
+                                   llng_response_t *response)
+{
+    return llng_authorize_user_internal(client, user, host, service, ssh_cert, response);
+}
+
+void llng_ssh_cert_info_free(llng_ssh_cert_info_t *cert_info)
+{
+    if (!cert_info) return;
+    free(cert_info->key_id);
+    free(cert_info->serial);
+    free(cert_info->principals);
+    free(cert_info->ca_fingerprint);
+    memset(cert_info, 0, sizeof(*cert_info));
+}
+
+void llng_response_init(llng_response_t *response)
+{
+    if (!response) return;
+    memset(response, 0, sizeof(*response));
 }
 
 void llng_response_free(llng_response_t *response)

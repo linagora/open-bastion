@@ -33,6 +33,7 @@
 #include "llng_client.h"
 #include "audit_log.h"
 #include "rate_limiter.h"
+#include "auth_cache.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -45,6 +46,7 @@
 
 /* Time constants */
 #define SECONDS_PER_DAY 86400
+#define DEFAULT_OFFLINE_CACHE_TTL 86400  /* Default 24 hours for offline cache */
 
 /* Internal data structure */
 typedef struct {
@@ -52,6 +54,7 @@ typedef struct {
     llng_client_t *client;
     audit_context_t *audit;
     rate_limiter_t *rate_limiter;
+    auth_cache_t *auth_cache;  /* Authorization cache for offline mode */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -179,6 +182,43 @@ static int validate_username(const char *user)
     return 1;
 }
 
+/*
+ * Sanitize GECOS field to prevent /etc/passwd corruption.
+ * Replaces dangerous characters (:, \n, \r, control chars) with spaces.
+ * Returns a newly allocated sanitized string (caller must free).
+ */
+static char *sanitize_gecos(const char *gecos)
+{
+    if (!gecos || !*gecos) {
+        return strdup("");
+    }
+
+    /* Limit GECOS length to prevent oversized /etc/passwd entries */
+    #define MAX_GECOS_LENGTH 256
+    size_t len = strlen(gecos);
+    if (len > MAX_GECOS_LENGTH) {
+        len = MAX_GECOS_LENGTH;
+    }
+
+    char *sanitized = malloc(len + 1);
+    if (!sanitized) {
+        return strdup("");
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)gecos[i];
+        /* Replace dangerous characters with space */
+        if (c == ':' || c == '\n' || c == '\r' || c < 32 || c == 127) {
+            sanitized[i] = ' ';
+        } else {
+            sanitized[i] = gecos[i];
+        }
+    }
+    sanitized[len] = '\0';
+
+    return sanitized;
+}
+
 /* Cleanup function for pam_set_data (strings) */
 static void cleanup_string(pam_handle_t *pamh, void *data, int error_status)
 {
@@ -200,6 +240,9 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
             cache_destroy(llng_data->cache);
         }
 #endif
+        if (llng_data->auth_cache) {
+            auth_cache_destroy(llng_data->auth_cache);
+        }
         if (llng_data->client) {
             llng_client_destroy(llng_data->client);
         }
@@ -282,25 +325,49 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
 
     /* Load server token from file if specified */
     if (data->config.server_token_file) {
-        /* Security check: verify token file permissions */
+        /*
+         * Security: open with O_NOFOLLOW to prevent symlink attacks,
+         * then check permissions on the opened fd to avoid TOCTOU.
+         */
+        int token_fd = open(data->config.server_token_file, O_RDONLY | O_NOFOLLOW);
+        if (token_fd < 0) {
+            if (errno == ELOOP) {
+                LLNG_LOG_ERR(pamh, "Security error: token file %s is a symlink",
+                        data->config.server_token_file);
+            } else {
+                LLNG_LOG_ERR(pamh, "Security error: cannot open token file %s: %s",
+                        data->config.server_token_file, strerror(errno));
+            }
+            goto error;
+        }
+
         struct stat st;
-        if (stat(data->config.server_token_file, &st) != 0) {
+        if (fstat(token_fd, &st) != 0) {
             LLNG_LOG_ERR(pamh, "Security error: cannot stat token file %s",
                     data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
         if (st.st_uid != 0) {
             LLNG_LOG_ERR(pamh, "Security error: token file %s is not owned by root",
                     data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
         if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
             LLNG_LOG_ERR(pamh, "Security error: token file %s has insecure permissions",
                     data->config.server_token_file);
+            close(token_fd);
+            goto error;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            LLNG_LOG_ERR(pamh, "Security error: token file %s is not a regular file",
+                    data->config.server_token_file);
+            close(token_fd);
             goto error;
         }
 
-        FILE *f = fopen(data->config.server_token_file, "r");
+        FILE *f = fdopen(token_fd, "r");
         if (f) {
             char token_buf[4096];
             if (fgets(token_buf, sizeof(token_buf), f)) {
@@ -313,8 +380,9 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
                 /* Clear the buffer containing the token */
                 explicit_bzero(token_buf, sizeof(token_buf));
             }
-            fclose(f);
+            fclose(f);  /* Also closes token_fd */
         } else {
+            close(token_fd);
             LLNG_LOG_WARN(pamh, "Failed to read server token file: %s",
                      data->config.server_token_file);
         }
@@ -369,6 +437,14 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
         }
     }
 
+    /* Initialize authorization cache (for offline mode) */
+    if (data->config.auth_cache_enabled) {
+        data->auth_cache = auth_cache_init(data->config.auth_cache_dir);
+        if (!data->auth_cache) {
+            LLNG_LOG_WARN(pamh, "Failed to initialize auth cache, offline mode disabled");
+        }
+    }
+
     /* Store data for later calls */
     if (pam_set_data(pamh, PAM_LLNG_DATA, data, cleanup_data) != PAM_SUCCESS) {
         LLNG_LOG_ERR(pamh, "Failed to store module data");
@@ -404,6 +480,130 @@ static const char *get_client_ip(pam_handle_t *pamh)
         return rhost;
     }
     return "local";
+}
+
+/*
+ * Extract SSH certificate info from PAM environment.
+ * SSH sets SSH_USER_AUTH environment variable with certificate details.
+ * Format: "publickey <algorithm> <fingerprint>:<key_id>:<serial>:<principals>"
+ * Or for OpenSSH 8.5+, multiple methods comma-separated.
+ *
+ * Returns 1 if certificate info was found, 0 otherwise.
+ */
+static int extract_ssh_cert_info(pam_handle_t *pamh, llng_ssh_cert_info_t *cert_info)
+{
+    if (!cert_info) return 0;
+    memset(cert_info, 0, sizeof(*cert_info));
+
+    /* Get SSH_USER_AUTH from PAM environment */
+    const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
+    if (!ssh_auth || !*ssh_auth) {
+        LLNG_LOG_DEBUG(pamh, "No SSH_USER_AUTH in environment");
+        return 0;
+    }
+
+    LLNG_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
+
+    /*
+     * Check if this is certificate authentication.
+     * Certificate auth shows as: "publickey <algo>-cert-v01@openssh.com ..."
+     * Regular key auth shows as: "publickey <algo> ..."
+     */
+    if (strstr(ssh_auth, "-cert-") == NULL) {
+        LLNG_LOG_DEBUG(pamh, "SSH authentication is not certificate-based");
+        return 0;
+    }
+
+    /*
+     * Parse SSH_USER_AUTH. The format varies between SSH versions.
+     * We try to extract what we can.
+     *
+     * OpenSSH exposes certificate info via SSH_CERT_* environment variables
+     * when ExposeAuthInfo is enabled in sshd_config.
+     */
+    cert_info->valid = true;
+
+    /* Maximum length for SSH environment variables to prevent DoS */
+    #define MAX_SSH_ENV_LEN 4096
+
+    /* Try to get certificate details from SSH_CERT_* environment vars */
+    const char *key_id = pam_getenv(pamh, "SSH_CERT_KEY_ID");
+    if (key_id && strlen(key_id) < MAX_SSH_ENV_LEN) {
+        cert_info->key_id = strdup(key_id);
+    }
+
+    const char *serial = pam_getenv(pamh, "SSH_CERT_SERIAL");
+    if (serial && strlen(serial) < MAX_SSH_ENV_LEN) {
+        cert_info->serial = strdup(serial);
+    }
+
+    const char *principals = pam_getenv(pamh, "SSH_CERT_PRINCIPALS");
+    if (principals && strlen(principals) < MAX_SSH_ENV_LEN) {
+        cert_info->principals = strdup(principals);
+    }
+
+    const char *ca_fp = pam_getenv(pamh, "SSH_CERT_CA_KEY_FP");
+    if (ca_fp && strlen(ca_fp) < MAX_SSH_ENV_LEN) {
+        cert_info->ca_fingerprint = strdup(ca_fp);
+    }
+
+    /* If we didn't get any details, try to parse from SSH_USER_AUTH */
+    if (!cert_info->key_id && !cert_info->serial) {
+        /*
+         * Try parsing format: "publickey algo fingerprint:keyid:serial:principals"
+         * This is a simplified parser - real format may vary.
+         */
+        char *auth_copy = strdup(ssh_auth);
+        if (auth_copy) {
+            /* Skip "publickey " prefix */
+            char *p = auth_copy;
+            if (strncmp(p, "publickey ", 10) == 0) {
+                p += 10;
+            }
+            /* Skip algorithm */
+            char *space = strchr(p, ' ');
+            if (space) {
+                p = space + 1;
+                /* Now p points to fingerprint or other data */
+                char *colon = strchr(p, ':');
+                if (colon) {
+                    /* Extract fingerprint */
+                    *colon = '\0';
+                    cert_info->ca_fingerprint = strdup(p);
+                    p = colon + 1;
+
+                    /* Try to extract key_id */
+                    colon = strchr(p, ':');
+                    if (colon) {
+                        *colon = '\0';
+                        if (*p) cert_info->key_id = strdup(p);
+                        p = colon + 1;
+
+                        /* Try to extract serial */
+                        colon = strchr(p, ':');
+                        if (colon) {
+                            *colon = '\0';
+                            if (*p) cert_info->serial = strdup(p);
+                            p = colon + 1;
+                            if (*p) cert_info->principals = strdup(p);
+                        } else if (*p) {
+                            cert_info->serial = strdup(p);
+                        }
+                    } else if (*p) {
+                        cert_info->key_id = strdup(p);
+                    }
+                }
+            }
+            free(auth_copy);
+        }
+    }
+
+    LLNG_LOG_DEBUG(pamh, "SSH cert info: key_id=%s serial=%s principals=%s",
+                   cert_info->key_id ? cert_info->key_id : "(none)",
+                   cert_info->serial ? cert_info->serial : "(none)",
+                   cert_info->principals ? cert_info->principals : "(none)");
+
+    return 1;
 }
 
 /* Get TTY from PAM */
@@ -546,6 +746,25 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         return PAM_AUTH_ERR;
     }
 
+    /* Security: validate token length to prevent DoS via memory exhaustion */
+    #define MAX_TOKEN_LENGTH 8192
+    if (strlen(password) > MAX_TOKEN_LENGTH) {
+        LLNG_LOG_WARN(pamh, "Token too long (max %d chars)", MAX_TOKEN_LENGTH);
+
+        if (data->rate_limiter) {
+            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        if (audit_initialized) {
+            audit_event.result_code = PAM_AUTH_ERR;
+            audit_event.reason = "Token too long";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
+        return PAM_AUTH_ERR;
+    }
+
     /*
      * Verify the one-time PAM token via /pam/verify
      * The token is destroyed after successful verification (single-use).
@@ -668,6 +887,9 @@ PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh,
  *
  * This function calls the /pam/authorize endpoint to verify the user
  * has permission to access this server, based on server groups.
+ *
+ * For sudo service, it also checks if the user has sudo permissions
+ * and stores the result in PAM data for later use.
  */
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                                 int flags,
@@ -714,6 +936,17 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         service = "unknown";
     }
 
+    /*
+     * Detect if this is an SSH connection with certificate authentication.
+     * Extract certificate info to send to LLNG for authorization.
+     */
+    llng_ssh_cert_info_t ssh_cert_info = {0};
+    bool has_ssh_cert = false;
+
+    if (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0) {
+        has_ssh_cert = extract_ssh_cert_info(pamh, &ssh_cert_info);
+    }
+
     /* Initialize audit event */
     if (data->audit) {
         audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);  /* Default to denied */
@@ -724,26 +957,93 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         audit_initialized = true;
     }
 
-    /* Call authorization endpoint */
-    llng_response_t response = {0};
-    if (llng_authorize_user(data->client, user, hostname, service, &response) != 0) {
-        LLNG_LOG_ERR(pamh, "Authorization check failed: %s",
-                llng_client_error(data->client));
+    /*
+     * Check if force-online is requested for this user.
+     * If the force-online file exists and user is listed, skip cache.
+     */
+    bool use_cache = (data->auth_cache != NULL);
+    if (use_cache && data->config.auth_cache_force_online) {
+        if (auth_cache_force_online(data->config.auth_cache_force_online, user)) {
+            LLNG_LOG_INFO(pamh, "Force-online requested for user %s, skipping cache", user);
+            use_cache = false;
+        }
+    }
 
-        if (audit_initialized) {
-            audit_event.event_type = AUDIT_SERVER_ERROR;
-            audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
-            audit_event.reason = llng_client_error(data->client);
-            audit_event_set_end_time(&audit_event);
-            audit_log_event(data->audit, &audit_event);
+    /* Call authorization endpoint (with or without SSH cert info) */
+    llng_response_t response = {0};
+    int auth_result;
+    bool from_cache = false;
+
+    if (has_ssh_cert) {
+        LLNG_LOG_DEBUG(pamh, "Authorizing with SSH certificate info");
+        auth_result = llng_authorize_user_with_cert(data->client, user, hostname,
+                                                     service, &ssh_cert_info, &response);
+        llng_ssh_cert_info_free(&ssh_cert_info);
+    } else {
+        auth_result = llng_authorize_user(data->client, user, hostname, service, &response);
+    }
+
+    if (auth_result != 0) {
+        /*
+         * Server unreachable - try offline cache if available.
+         * This is the core of the offline mode feature (#36).
+         */
+        if (use_cache) {
+            auth_cache_entry_t cache_entry = {0};
+            if (auth_cache_lookup(data->auth_cache, user,
+                                  data->config.server_group, hostname, &cache_entry)) {
+                LLNG_LOG_INFO(pamh, "Server unavailable, using cached authorization for %s", user);
+
+                /* Populate response from cache */
+                response.authorized = cache_entry.authorized;
+                response.user = cache_entry.user ? strdup(cache_entry.user) : NULL;
+                cache_entry.user = NULL;  /* Ownership transferred */
+
+                response.has_permissions = true;
+                response.permissions.sudo_allowed = cache_entry.sudo_allowed;
+                response.permissions.sudo_nopasswd = cache_entry.sudo_nopasswd;
+
+                /* Copy groups */
+                if (cache_entry.groups && cache_entry.groups_count > 0) {
+                    response.groups = cache_entry.groups;
+                    response.groups_count = cache_entry.groups_count;
+                    cache_entry.groups = NULL;  /* Ownership transferred */
+                    cache_entry.groups_count = 0;
+                }
+
+                /* Copy user attributes */
+                response.gecos = cache_entry.gecos ? strdup(cache_entry.gecos) : NULL;
+                response.shell = cache_entry.shell ? strdup(cache_entry.shell) : NULL;
+                response.home = cache_entry.home ? strdup(cache_entry.home) : NULL;
+
+                auth_cache_entry_free(&cache_entry);
+                from_cache = true;
+                auth_result = 0;  /* Cache hit is success */
+            } else {
+                LLNG_LOG_WARN(pamh, "Server unavailable and no valid cache for %s", user);
+            }
         }
 
-        return PAM_AUTHINFO_UNAVAIL;
+        if (auth_result != 0) {
+            LLNG_LOG_ERR(pamh, "Authorization check failed: %s",
+                    llng_client_error(data->client));
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SERVER_ERROR;
+                audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+                audit_event.reason = llng_client_error(data->client);
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTHINFO_UNAVAIL;
+        }
     }
 
     /* Check result */
     if (!response.authorized) {
-        LLNG_LOG_INFO(pamh, "User %s not authorized: %s", user,
+        LLNG_LOG_INFO(pamh, "User %s not authorized%s: %s", user,
+                 from_cache ? " (from cache)" : "",
                  response.reason ? response.reason : "no reason given");
 
         if (audit_initialized) {
@@ -757,6 +1057,70 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         return PAM_PERM_DENIED;
     }
 
+    /*
+     * Store authorization in cache if:
+     * - Not already from cache
+     * - Server indicates offline mode is allowed for this user
+     * - Cache is available
+     */
+    if (!from_cache && use_cache && response.has_offline && response.offline.enabled) {
+        int ttl = response.offline.ttl > 0 ? response.offline.ttl : DEFAULT_OFFLINE_CACHE_TTL;
+        auth_cache_entry_t cache_entry = {
+            .version = 3,
+            .user = (char *)user,
+            .authorized = response.authorized,
+            .groups = response.groups,
+            .groups_count = response.groups_count,
+            .sudo_allowed = response.has_permissions ? response.permissions.sudo_allowed : false,
+            .sudo_nopasswd = response.has_permissions ? response.permissions.sudo_nopasswd : false,
+            .gecos = response.gecos,
+            .shell = response.shell,
+            .home = response.home
+        };
+
+        if (auth_cache_store(data->auth_cache, user, data->config.server_group,
+                             hostname, &cache_entry, ttl) == 0) {
+            LLNG_LOG_DEBUG(pamh, "Cached authorization for %s (TTL: %d seconds)", user, ttl);
+        } else {
+            LLNG_LOG_WARN(pamh, "Failed to cache authorization for %s", user);
+        }
+    }
+
+    /*
+     * Handle sudo authorization.
+     * For sudo service, check if the user has sudo_allowed permission.
+     * Store the result in PAM environment for sudo to use.
+     */
+    if (strcmp(service, "sudo") == 0) {
+        if (response.has_permissions && !response.permissions.sudo_allowed) {
+            LLNG_LOG_INFO(pamh, "User %s authorized for SSH but not for sudo%s", user,
+                     from_cache ? " (from cache)" : "");
+
+            if (audit_initialized) {
+                audit_event.result_code = PAM_PERM_DENIED;
+                audit_event.reason = "Sudo not allowed";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            llng_response_free(&response);
+            return PAM_PERM_DENIED;
+        }
+
+        /* Store sudo_nopasswd flag if applicable */
+        if (response.has_permissions && response.permissions.sudo_nopasswd) {
+            pam_putenv(pamh, "LLNG_SUDO_NOPASSWD=1");
+            LLNG_LOG_DEBUG(pamh, "User %s granted sudo without password", user);
+        }
+    }
+
+    /* Store permissions in PAM data for potential use by other modules */
+    if (response.has_permissions) {
+        if (response.permissions.sudo_allowed) {
+            pam_putenv(pamh, "LLNG_SUDO_ALLOWED=1");
+        }
+    }
+
     /* Success */
     if (audit_initialized) {
         audit_event.event_type = AUDIT_AUTHZ_SUCCESS;
@@ -765,7 +1129,10 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         audit_log_event(data->audit, &audit_event);
     }
 
-    LLNG_LOG_INFO(pamh, "User %s authorized for access", user);
+    LLNG_LOG_INFO(pamh, "User %s authorized for access%s%s", user,
+                  (response.has_permissions && response.permissions.sudo_allowed) ?
+                  " (sudo allowed)" : "",
+                  from_cache ? " (from cache)" : "");
     llng_response_free(&response);
     return PAM_SUCCESS;
 }
@@ -789,7 +1156,7 @@ static int create_unix_user(pam_handle_t *pamh,
     gid_t gid = 0;
     char home_dir[512];
     const char *user_shell;
-    const char *user_gecos;
+    char *safe_gecos = NULL;  /* Sanitized GECOS (must be freed) */
     int passwd_fd = -1;
     int shadow_fd = -1;
     FILE *passwd_file = NULL;
@@ -852,10 +1219,11 @@ static int create_unix_user(pam_handle_t *pamh,
         user_shell = "/bin/bash";
     }
 
-    /* Determine GECOS */
-    user_gecos = gecos;
-    if (!user_gecos || !*user_gecos) {
-        user_gecos = "";
+    /* Sanitize GECOS to prevent /etc/passwd corruption */
+    safe_gecos = sanitize_gecos(gecos);
+    if (!safe_gecos) {
+        LLNG_LOG_ERR(pamh, "Failed to sanitize GECOS for user %s", user);
+        goto cleanup;
     }
 
     LLNG_LOG_INFO(pamh, "Creating Unix user: %s (uid=%d, gid=%d)", user, uid, gid);
@@ -912,7 +1280,7 @@ static int create_unix_user(pam_handle_t *pamh,
 
     /* Write to /etc/passwd */
     if (fprintf(passwd_file, "%s:x:%d:%d:%s:%s:%s\n",
-                user, uid, gid, user_gecos, home_dir, user_shell) < 0) {
+                user, uid, gid, safe_gecos, home_dir, user_shell) < 0) {
         LLNG_LOG_ERR(pamh, "Cannot write to /etc/passwd: %s", strerror(errno));
         goto cleanup;
     }
@@ -991,6 +1359,9 @@ static int create_unix_user(pam_handle_t *pamh,
     invalidate_nscd_cache();
 
 cleanup:
+    /* Free sanitized GECOS */
+    free(safe_gecos);
+
     /* Close files (also releases locks) */
     if (passwd_file) fclose(passwd_file);
     if (shadow_file) fclose(shadow_file);
