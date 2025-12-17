@@ -1,0 +1,121 @@
+# LemonLDAP::NG Token-based SSH Authentication Demo
+#
+# Architecture:
+#   - sso: LLNG Portal with PAM Access, Device Authorization (no SSH CA)
+#   - bastion: SSH bastion using tokens as passwords
+#   - backend: SSH backend using tokens as passwords
+#   - backend-new: Unconfigured backend for enrollment demo
+#
+# Usage:
+#   docker compose up -d
+#   # Get a token: llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
+#   # SSH to bastion: ssh -p 2222 dwho@localhost
+#   # Password: paste your LLNG access token
+
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    image: llng-token-sso
+    container_name: llng-token-sso
+    ports:
+      - "80:80"
+    volumes:
+      # Custom plugins (individual files to not override existing plugins)
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:ro
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:ro
+      # Templates for PAM Access and Device Authorization
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:ro
+      # JavaScript for PAM Access
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:ro
+      # Configuration
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+      # No persistent volumes - fresh start for each demo
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      llng-token-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  bastion:
+    build:
+      context: ..
+      dockerfile: docker-demo-token/bastion/Dockerfile
+    image: llng-token-bastion
+    container_name: llng-token-bastion
+    ports:
+      - "2222:22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=bastion
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    volumes:
+      # PAM module sources for build
+      - ..:/src/llng-pam-module:ro
+      # No persistent volumes - fresh start for each demo
+    networks:
+      - llng-token-net
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker-demo-token/backend/Dockerfile
+    image: llng-token-backend
+    container_name: llng-token-backend
+    # No external port - only accessible via bastion
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=backend
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    volumes:
+      # PAM module sources for build
+      - ..:/src/llng-pam-module:ro
+    networks:
+      - llng-token-net
+
+  # Unconfigured backend for enrollment demo
+  backend-new:
+    build:
+      context: ..
+      dockerfile: docker-demo-token/backend-new/Dockerfile
+    image: llng-token-backend-new
+    container_name: llng-token-backend-new
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=backend-new
+      # No LLNG_SERVER_TOKEN - must be enrolled manually
+    networks:
+      - llng-token-net
+
+networks:
+  llng-token-net:
+    driver: bridge

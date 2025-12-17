@@ -124,10 +124,11 @@
   "oidcOPMetaDataJSON": {},
   "oidcOPMetaDataJWKS": {},
 
-  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization ::Plugins::SSHCA",
+  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization",
 
   "portalDisplayPamAccess": 1,
   "portalDisplaySshCa": 1,
+  "pamAccessActivation": 1,
   "pamAccessTokenDuration": 600,
   "pamAccessMaxDuration": 3600,
   "pamAccessRp": "pam-access",
@@ -157,7 +158,7 @@
   "pamAccessOfflineEnabled": "1",
   "pamAccessOfflineTtl": 86400,
 
-  "sshCaActivation": 1,
+  "sshCaActivation": 0,
   "sshCaKeyType": "ed25519",
   "sshCaKeyRef": "ssh-ca",
   "sshCaCertDefaultValidity": 60,

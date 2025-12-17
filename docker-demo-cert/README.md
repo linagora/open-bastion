@@ -29,7 +29,7 @@ This Docker Compose demo demonstrates SSH certificate authentication with LemonL
 ### 1. Start the environment
 
 ```bash
-cd docker-demo/
+cd docker-demo-cert/
 docker compose up -d
 ```
 

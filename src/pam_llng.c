@@ -34,6 +34,7 @@
 #include "audit_log.h"
 #include "rate_limiter.h"
 #include "auth_cache.h"
+#include "token_manager.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -367,22 +368,18 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
             goto error;
         }
 
-        FILE *f = fdopen(token_fd, "r");
-        if (f) {
-            char token_buf[4096];
-            if (fgets(token_buf, sizeof(token_buf), f)) {
-                /* Remove trailing newline */
-                size_t len = strlen(token_buf);
-                if (len > 0 && token_buf[len-1] == '\n') {
-                    token_buf[len-1] = '\0';
-                }
-                client_config.server_token = strdup(token_buf);
-                /* Clear the buffer containing the token */
-                explicit_bzero(token_buf, sizeof(token_buf));
-            }
-            fclose(f);  /* Also closes token_fd */
+        /* Security checks passed, close fd and use token_manager to load */
+        close(token_fd);
+
+        /* Use token_manager_load_file which supports both JSON and plain text */
+        token_info_t token_info = {0};
+        if (token_manager_load_file(data->config.server_token_file, &token_info) == 0
+            && token_info.access_token) {
+            client_config.server_token = token_info.access_token;
+            token_info.access_token = NULL;  /* Transfer ownership */
+            /* Free other fields we don't need */
+            free(token_info.refresh_token);
         } else {
-            close(token_fd);
             LLNG_LOG_WARN(pamh, "Failed to read server token file: %s",
                      data->config.server_token_file);
         }
