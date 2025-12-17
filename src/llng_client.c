@@ -82,8 +82,13 @@ typedef struct {
 /* Curl write callback with exponential buffer growth */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
-    size_t realsize = size * nmemb;
     response_buffer_t *buf = (response_buffer_t *)userp;
+
+    /* Security: Check for integer overflow in size calculation */
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) {
+        return 0;  /* Overflow - abort transfer */
+    }
+    size_t realsize = size * nmemb;
 
     /* Security: Check maximum response size limit (fixes #48) */
     if (buf->size + realsize > MAX_RESPONSE_SIZE) {
@@ -330,6 +335,13 @@ static int validate_cert_pin_format(const char *pin)
     while (token && valid) {
         /* Skip leading whitespace */
         while (*token == ' ') token++;
+
+        /* Strip trailing whitespace */
+        size_t token_len = strlen(token);
+        while (token_len > 0 && token[token_len - 1] == ' ') {
+            token[token_len - 1] = '\0';
+            token_len--;
+        }
 
         if (strncmp(token, "sha256//", 8) == 0) {
             /* SHA256 hash format: sha256// followed by base64 (44 chars for SHA256) */
@@ -632,10 +644,17 @@ int llng_verify_token(llng_client_t *client,
         json_object_put(json);
         return -1;
     }
-    response->user = safe_json_strdup(val);
+    const char *user_str = json_object_get_string(val);
+    if (!user_str) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid 'user' field type in response");
+        json_object_put(json);
+        return -1;
+    }
+    response->user = strdup(user_str);
     if (!response->user) {
         snprintf(client->error, sizeof(client->error),
-                 "Invalid 'user' field in response");
+                 "Out of memory copying 'user' field");
         json_object_put(json);
         return -1;
     }
@@ -940,10 +959,17 @@ static int llng_authorize_user_internal(llng_client_t *client,
         json_object_put(json);
         return -1;
     }
-    response->user = safe_json_strdup(val);
+    const char *authz_user_str = json_object_get_string(val);
+    if (!authz_user_str) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid 'user' field type in response");
+        json_object_put(json);
+        return -1;
+    }
+    response->user = strdup(authz_user_str);
     if (!response->user) {
         snprintf(client->error, sizeof(client->error),
-                 "Invalid 'user' field in response");
+                 "Out of memory copying 'user' field");
         json_object_put(json);
         return -1;
     }

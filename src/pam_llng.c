@@ -93,8 +93,12 @@ static int verify_token_file_security(pam_handle_t *pamh, pam_llng_data_t *data)
 
     time_t now = time(NULL);
 
-    /* Only check periodically to avoid performance impact */
+    /* Only check periodically to avoid performance impact.
+     * Handle clock adjustments: if time() fails or clock moved backward,
+     * force a recheck to be safe. */
     if (data->last_token_check > 0 &&
+        now != (time_t)-1 &&
+        now >= data->last_token_check &&
         (now - data->last_token_check) < TOKEN_RECHECK_INTERVAL) {
         return 0;  /* Recently checked, skip */
     }
@@ -643,10 +647,15 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, llng_ssh_cert_info_t *cert_
          */
         #define MAX_SSH_FIELD_LEN 1024  /* Max length for individual parsed fields */
 
-        /* Helper macro to safely duplicate a field with length check */
+        /* Helper macro to safely duplicate a field with length check.
+         * Note: strdup failure results in NULL dest, which is handled gracefully
+         * by the rest of the code (fields are optional). */
         #define SAFE_FIELD_DUP(dest, src) do { \
             if ((src) && *(src) && strlen(src) < MAX_SSH_FIELD_LEN) { \
                 (dest) = strdup(src); \
+                if (!(dest)) { \
+                    LLNG_LOG_DEBUG(pamh, "strdup failed for SSH cert field"); \
+                } \
             } \
         } while(0)
 
@@ -1512,9 +1521,11 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
      * different username.
      */
     char *session_user = strdup(user);
-    if (session_user) {
-        pam_set_data(pamh, "llng_session_user", session_user, cleanup_string);
+    if (!session_user) {
+        LLNG_LOG_ERR(pamh, "Out of memory storing session user");
+        return PAM_BUF_ERR;
     }
+    pam_set_data(pamh, "llng_session_user", session_user, cleanup_string);
 
     /* Initialize module */
     pam_llng_data_t *data = get_module_data(pamh, argc, argv);
