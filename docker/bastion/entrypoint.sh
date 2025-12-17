@@ -195,8 +195,22 @@ for i in {1..30}; do
 
     if [ -n "$ACCESS_TOKEN" ]; then
         echo "Access token obtained!"
-        echo "$ACCESS_TOKEN" > "$TOKEN_FILE"
+        # Extract additional token info
+        REFRESH_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.refresh_token // empty')
+        EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // 3600')
+        NOW=$(date +%s)
+        EXPIRES_AT=$((NOW + EXPIRES_IN))
+        # Save in JSON format with metadata
+        cat > "$TOKEN_FILE" << TOKENEOF
+{
+  "access_token": "$ACCESS_TOKEN",
+  "refresh_token": "${REFRESH_TOKEN:-}",
+  "expires_at": $EXPIRES_AT,
+  "enrolled_at": $NOW
+}
+TOKENEOF
         chmod 600 "$TOKEN_FILE"
+        echo "Token saved in JSON format (expires at: $(date -d "@$EXPIRES_AT" 2>/dev/null || echo "$EXPIRES_AT"))"
         break
     fi
 

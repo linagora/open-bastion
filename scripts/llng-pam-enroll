@@ -419,11 +419,22 @@ save_token() {
         }
     fi
 
-    # Save token in plain text format (compatible with pam_llng module)
-    # The PAM module reads only the first line of the token file
+    # Save token in JSON format with metadata for token lifecycle management
+    # The PAM module (token_manager.c) supports both JSON and plain text formats
+    local now
+    now=$(date +%s)
+    local expires_at=$((now + ${EXPIRES_IN:-3600}))
+
     (
         umask 077
-        echo "$ACCESS_TOKEN" > "$TOKEN_FILE"
+        cat > "$TOKEN_FILE" << TOKENEOF
+{
+  "access_token": "$ACCESS_TOKEN",
+  "refresh_token": "${REFRESH_TOKEN:-}",
+  "expires_at": $expires_at,
+  "enrolled_at": $now
+}
+TOKENEOF
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
         log_info "You may need to run this script as root"
@@ -436,10 +447,11 @@ save_token() {
         chmod 600 "$TOKEN_FILE"
     fi
 
-    log_success "Token saved to $TOKEN_FILE"
+    log_success "Token saved to $TOKEN_FILE (JSON format)"
 
     if [ -n "$REFRESH_TOKEN" ]; then
-        log_info "Refresh token received (not saved - PAM uses access token only)"
+        log_info "Refresh token saved - can be used for automatic token renewal"
+        log_info "Token expires at: $(date -d "@$expires_at" 2>/dev/null || date -r "$expires_at" 2>/dev/null || echo "$expires_at")"
     fi
 }
 
