@@ -468,7 +468,11 @@ static void file_cache_save(const struct passwd *pw)
     }
 
     FILE *f = fopen(filepath, "w");
-    if (!f) return;
+    if (!f) {
+        syslog(LOG_WARNING, "libnss_llng: cannot create cache file %s: %s",
+               filepath, strerror(errno));
+        return;
+    }
 
     /* Write in format: username:uid:gid:gecos:home:shell:timestamp */
     fprintf(f, "%s:%u:%u:%s:%s:%s:%ld\n",
