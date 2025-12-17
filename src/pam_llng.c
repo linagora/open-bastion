@@ -499,6 +499,14 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, llng_ssh_cert_info_t *cert_
         return 0;
     }
 
+    /* Security: Check length before processing (fixes #45) */
+    #define MAX_SSH_AUTH_LEN 8192
+    if (strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
+        LLNG_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
+        return 0;
+    }
+    #undef MAX_SSH_AUTH_LEN
+
     LLNG_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
 
     /*
@@ -549,7 +557,18 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, llng_ssh_cert_info_t *cert_
         /*
          * Try parsing format: "publickey algo fingerprint:keyid:serial:principals"
          * This is a simplified parser - real format may vary.
+         *
+         * Security: Apply length limits to all extracted fields (fixes #45)
          */
+        #define MAX_SSH_FIELD_LEN 1024  /* Max length for individual parsed fields */
+
+        /* Helper macro to safely duplicate a field with length check */
+        #define SAFE_FIELD_DUP(dest, src) do { \
+            if ((src) && *(src) && strlen(src) < MAX_SSH_FIELD_LEN) { \
+                (dest) = strdup(src); \
+            } \
+        } while(0)
+
         char *auth_copy = strdup(ssh_auth);
         if (auth_copy) {
             /* Skip "publickey " prefix */
@@ -566,33 +585,35 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, llng_ssh_cert_info_t *cert_
                 if (colon) {
                     /* Extract fingerprint */
                     *colon = '\0';
-                    cert_info->ca_fingerprint = strdup(p);
+                    SAFE_FIELD_DUP(cert_info->ca_fingerprint, p);
                     p = colon + 1;
 
                     /* Try to extract key_id */
                     colon = strchr(p, ':');
                     if (colon) {
                         *colon = '\0';
-                        if (*p) cert_info->key_id = strdup(p);
+                        SAFE_FIELD_DUP(cert_info->key_id, p);
                         p = colon + 1;
 
                         /* Try to extract serial */
                         colon = strchr(p, ':');
                         if (colon) {
                             *colon = '\0';
-                            if (*p) cert_info->serial = strdup(p);
+                            SAFE_FIELD_DUP(cert_info->serial, p);
                             p = colon + 1;
-                            if (*p) cert_info->principals = strdup(p);
-                        } else if (*p) {
-                            cert_info->serial = strdup(p);
+                            SAFE_FIELD_DUP(cert_info->principals, p);
+                        } else {
+                            SAFE_FIELD_DUP(cert_info->serial, p);
                         }
-                    } else if (*p) {
-                        cert_info->key_id = strdup(p);
+                    } else {
+                        SAFE_FIELD_DUP(cert_info->key_id, p);
                     }
                 }
             }
             free(auth_copy);
         }
+        #undef SAFE_FIELD_DUP
+        #undef MAX_SSH_FIELD_LEN
     }
 
     LLNG_LOG_DEBUG(pamh, "SSH cert info: key_id=%s serial=%s principals=%s",
