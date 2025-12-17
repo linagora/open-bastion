@@ -287,6 +287,77 @@ static struct curl_slist *add_signing_headers(struct curl_slist *headers,
     return headers;
 }
 
+/*
+ * Security: Validate certificate pin format (fixes #47)
+ * Valid formats:
+ * - sha256//base64hash (44 chars of base64 after sha256//)
+ * - Path to DER or PEM file (starts with / or .)
+ * Multiple pins can be separated by ';'
+ * Returns 1 if valid, 0 if invalid
+ */
+static int validate_cert_pin_format(const char *pin)
+{
+    if (!pin || !*pin) {
+        return 0;
+    }
+
+    /* Work on a copy to handle multiple pins */
+    char *pin_copy = strdup(pin);
+    if (!pin_copy) {
+        return 0;
+    }
+
+    int valid = 1;
+    char *saveptr = NULL;
+    char *token = strtok_r(pin_copy, ";", &saveptr);
+
+    while (token && valid) {
+        /* Skip leading whitespace */
+        while (*token == ' ') token++;
+
+        if (strncmp(token, "sha256//", 8) == 0) {
+            /* SHA256 hash format: sha256// followed by base64 (44 chars for SHA256) */
+            const char *hash = token + 8;
+            size_t len = strlen(hash);
+            /* Base64 of 32 bytes = 44 chars (or 43 with no padding) */
+            if (len < 43 || len > 44) {
+                valid = 0;
+            } else {
+                /* Validate base64 characters */
+                for (size_t i = 0; i < len && valid; i++) {
+                    char c = hash[i];
+                    if (!((c >= 'A' && c <= 'Z') ||
+                          (c >= 'a' && c <= 'z') ||
+                          (c >= '0' && c <= '9') ||
+                          c == '+' || c == '/' || c == '=')) {
+                        valid = 0;
+                    }
+                }
+            }
+        } else if (token[0] == '/' || token[0] == '.') {
+            /* File path - check if it looks like a valid path */
+            /* Basic check: not empty after prefix, no control characters */
+            if (strlen(token) < 2) {
+                valid = 0;
+            } else {
+                for (const char *p = token; *p && valid; p++) {
+                    if ((unsigned char)*p < 32) {
+                        valid = 0;
+                    }
+                }
+            }
+        } else {
+            /* Unknown format */
+            valid = 0;
+        }
+
+        token = strtok_r(NULL, ";", &saveptr);
+    }
+
+    free(pin_copy);
+    return valid;
+}
+
 /* Base64 encode for Basic auth */
 static char *base64_encode(const char *input, size_t len)
 {
@@ -344,7 +415,17 @@ llng_client_t *llng_client_init(const llng_client_config_t *config)
     client->ca_cert = strdup_or_null(config->ca_cert);
     client->signing_secret = strdup_or_null(config->signing_secret);
     client->min_tls_version = config->min_tls_version > 0 ? config->min_tls_version : TLS_VERSION_1_3;
-    client->cert_pin = strdup_or_null(config->cert_pin);
+
+    /* Security: Validate certificate pin format before use (fixes #47) */
+    if (config->cert_pin) {
+        if (!validate_cert_pin_format(config->cert_pin)) {
+            snprintf(client->error, sizeof(client->error),
+                     "Invalid certificate pin format. Expected sha256//base64 or file path");
+            llng_client_destroy(client);
+            return NULL;
+        }
+        client->cert_pin = strdup(config->cert_pin);
+    }
 
     return client;
 }
