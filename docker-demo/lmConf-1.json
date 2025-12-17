@@ -127,6 +127,7 @@
   "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization ::Plugins::SSHCA",
 
   "portalDisplayPamAccess": 1,
+  "portalDisplaySshCa": 1,
   "pamAccessTokenDuration": 600,
   "pamAccessMaxDuration": 3600,
   "pamAccessRp": "pam-access",

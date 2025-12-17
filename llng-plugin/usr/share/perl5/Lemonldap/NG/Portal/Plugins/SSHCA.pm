@@ -644,6 +644,21 @@ to obtain short-lived SSH certificates signed by a trusted Certificate Authority
 
 =head1 ENDPOINTS
 
+=head2 GET /ssh
+
+Displays the SSH certificate signing web interface.
+Requires authentication. This interface allows users to:
+
+=over
+
+=item * Paste their SSH public key
+
+=item * Choose certificate validity duration
+
+=item * Obtain a signed certificate for SSH authentication
+
+=back
+
 =head2 GET /ssh/ca
 
 Returns the SSH CA public key in OpenSSH format.
@@ -684,6 +699,12 @@ Response:
 =item sshCaActivation
 
 Enable/disable the SSH CA plugin (default: 0)
+
+=item portalDisplaySshCa
+
+Display the SSH CA tab in the portal menu (default: 0).
+When enabled, authenticated users will see an "SSH CA" tab in the portal
+allowing them to sign their SSH keys through the web interface.
 
 =item sshCaKeyRef
 

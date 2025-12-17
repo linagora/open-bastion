@@ -29,7 +29,7 @@ This Docker Compose demo demonstrates SSH certificate authentication with LemonL
 ### 1. Start the environment
 
 ```bash
-cd docker/
+cd docker-demo/
 docker compose up -d
 ```
 
@@ -57,7 +57,19 @@ First, ensure you have an SSH key pair. If not, create one:
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
 ```
 
-Then request a certificate for your public key:
+Then request a certificate for your public key.
+
+**Option A: Using the web interface**
+
+1. Go to http://localhost:80 and log in
+2. Click on the "SSH CA" tab in the portal
+3. Paste your public key (content of `~/.ssh/id_ed25519.pub`)
+4. Choose the validity duration
+5. Click "Sign" and download the certificate
+6. Save it as `~/.ssh/id_ed25519-cert.pub`
+
+**Option B: Using curl**
+
 ```bash
 # For bastion access
 curl -s -X POST http://localhost:80/ssh/sign \
@@ -422,6 +434,7 @@ session    required     pam_unix.so
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/ssh` | GET | Web interface to sign SSH keys (requires auth) |
 | `/ssh/ca` | GET | Get SSH CA public key |
 | `/ssh/sign` | POST | Sign a user's public key |
 | `/pam/authorize` | POST | Check user authorization |
