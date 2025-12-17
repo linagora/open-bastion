@@ -20,6 +20,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
@@ -470,9 +471,11 @@ static void file_cache_save(const struct passwd *pw)
             pw->pw_shell ? pw->pw_shell : "",
             (long)time(NULL));
 
+    /* Make cache file world-readable so all users can do UID lookups.
+     * Use fchmod() on the file descriptor to avoid TOCTOU race condition
+     * (file could be replaced between fclose and chmod) */
+    fchmod(fileno(f), 0644);
     fclose(f);
-    /* Make cache file world-readable so all users can do UID lookups */
-    chmod(filepath, 0644);
 }
 
 /* Load user info from file cache by UID */
@@ -741,18 +744,27 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     }
 
     /* UID - only use if it's actually an integer, not a string like "username" */
-    if (json_object_object_get_ex(json, "uid", &val) &&
-        json_object_is_type(val, json_type_int)) {
-        pw->pw_uid = (uid_t)json_object_get_int(val);
-        /* Validate server-provided UID is in acceptable range */
-        if (pw->pw_uid < g_config.min_uid || pw->pw_uid > g_config.max_uid ||
-            pw->pw_uid == NOBODY_UID) {
-            /* Reject UIDs outside configured range and nobody - security risk */
-            json_object_put(json);
-            return -1;
+    if (json_object_object_get_ex(json, "uid", &val)) {
+        if (json_object_is_type(val, json_type_int)) {
+            pw->pw_uid = (uid_t)json_object_get_int(val);
+            /* Validate server-provided UID is in acceptable range */
+            if (pw->pw_uid < g_config.min_uid || pw->pw_uid > g_config.max_uid ||
+                pw->pw_uid == NOBODY_UID) {
+                /* Reject UIDs outside configured range and nobody - security risk */
+                json_object_put(json);
+                return -1;
+            }
+        } else {
+            /* Server returned non-integer uid (likely string username) - log warning */
+            syslog(LOG_WARNING, "libnss_llng: server returned non-integer uid for user %s, generating UID from hash", username);
+            pw->pw_uid = generate_unique_uid(username, g_config.min_uid, g_config.max_uid);
+            if (pw->pw_uid == 0) {
+                json_object_put(json);
+                return -1;
+            }
         }
     } else {
-        /* Generate unique UID from username hash, avoiding collisions */
+        /* No UID provided - generate unique UID from username hash */
         pw->pw_uid = generate_unique_uid(username, g_config.min_uid, g_config.max_uid);
         if (pw->pw_uid == 0) {
             /* Failed to generate unique UID - all candidates collide */
