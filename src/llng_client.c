@@ -73,11 +73,23 @@ typedef struct {
 
 #define INITIAL_BUFFER_SIZE 4096
 
+/*
+ * Security: Maximum response size to prevent DoS via memory exhaustion (fixes #48)
+ * 1 MB should be more than enough for any legitimate LLNG API response
+ */
+#define MAX_RESPONSE_SIZE (1 * 1024 * 1024)
+
 /* Curl write callback with exponential buffer growth */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
     size_t realsize = size * nmemb;
     response_buffer_t *buf = (response_buffer_t *)userp;
+
+    /* Security: Check maximum response size limit (fixes #48) */
+    if (buf->size + realsize > MAX_RESPONSE_SIZE) {
+        /* Response too large - return 0 to abort transfer */
+        return 0;
+    }
 
     /* Check if we need to grow the buffer */
     size_t needed = buf->size + realsize + 1;
@@ -86,6 +98,10 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
         size_t new_capacity = buf->capacity + (buf->capacity >> 1);
         if (new_capacity < needed) {
             new_capacity = needed;
+        }
+        /* Cap capacity at max response size */
+        if (new_capacity > MAX_RESPONSE_SIZE + 1) {
+            new_capacity = MAX_RESPONSE_SIZE + 1;
         }
         char *ptr = realloc(buf->data, new_capacity);
         if (!ptr) {
