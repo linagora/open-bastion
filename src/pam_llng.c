@@ -1505,6 +1505,17 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         return PAM_SESSION_ERR;
     }
 
+    /*
+     * Security: Store authenticated user for close_session verification (#49)
+     * This prevents cache invalidation attacks where an attacker could
+     * invalidate another user's cache by calling close_session with a
+     * different username.
+     */
+    char *session_user = strdup(user);
+    if (session_user) {
+        pam_set_data(pamh, "llng_session_user", session_user, cleanup_string);
+    }
+
     /* Initialize module */
     pam_llng_data_t *data = get_module_data(pamh, argc, argv);
     if (!data) {
@@ -1579,6 +1590,7 @@ PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
     (void)flags;
 
     const char *user = NULL;
+    const char *session_user = NULL;
     int ret;
 
     /* Get username */
@@ -1586,6 +1598,22 @@ PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
     if (ret != PAM_SUCCESS || !user || !*user) {
         /* Can't get user, nothing to invalidate */
         return PAM_SUCCESS;
+    }
+
+    /*
+     * Security: Verify this is the same user from open_session (#49)
+     * This prevents cache invalidation attacks where close_session could
+     * be called with a different username to invalidate another user's cache.
+     */
+    if (pam_get_data(pamh, "llng_session_user", (const void **)&session_user) == PAM_SUCCESS
+        && session_user) {
+        if (strcmp(user, session_user) != 0) {
+            LLNG_LOG_WARN(pamh,
+                "Security: close_session user mismatch (session=%s, request=%s), "
+                "refusing cache invalidation",
+                session_user, user);
+            return PAM_SUCCESS;  /* Don't fail, just skip invalidation */
+        }
     }
 
     /* Initialize module to access cache */
