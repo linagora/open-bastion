@@ -15,9 +15,9 @@ use strict;
 use Mouse;
 use JSON qw(from_json to_json);
 use Lemonldap::NG::Portal::Main::Constants qw(
-    PE_OK
-    PE_ERROR
-    PE_SENDRESPONSE
+  PE_OK
+  PE_ERROR
+  PE_SENDRESPONSE
 );
 
 our $VERSION = '2.22.0';
@@ -65,7 +65,7 @@ sub init {
 
     # Routes for authenticated users (token generation interface)
     $self->addAuthRoute( pam => 'pamInterface', ['GET'] )
-         ->addAuthRoute( pam => 'generateToken', ['POST'] );
+      ->addAuthRoute( pam => 'generateToken', ['POST'] );
 
     # Route for server-to-server authorization (Bearer token auth)
     $self->addUnauthRoute(
@@ -91,29 +91,6 @@ sub init {
         ['POST']
     );
 
-    # SSH CA routes (only if SSH CA is enabled)
-    if ( $self->conf->{sshCaActivation} ) {
-        $self->logger->debug('SSH CA is enabled, adding routes');
-
-        # GET /ssh/ca - Public CA key (no auth required)
-        $self->addUnauthRoute(
-            ssh => { ca => 'sshCaPublicKey' },
-            ['GET']
-        );
-
-        # GET /ssh/revoked - Key Revocation List (no auth required)
-        $self->addUnauthRoute(
-            ssh => { revoked => 'sshCaKrl' },
-            ['GET']
-        );
-
-        # POST /ssh/sign - Sign user's SSH key (auth required)
-        $self->addAuthRoute(
-            ssh => { sign => 'sshCaSign' },
-            ['POST']
-        );
-    }
-
     return 1;
 }
 
@@ -130,13 +107,14 @@ sub display {
             $req,
             'pamaccess',
             params => {
-                TOKEN          => '',
-                LOGIN          => $req->userData->{ $self->conf->{whatToTrace} } || '',
-                EXPIRES_IN     => '',
-                SHOW_TOKEN     => 0,
-                DEFAULT_DURATION => $self->conf->{pamAccessTokenDuration} || 600,
-                MAX_DURATION   => $self->conf->{pamAccessMaxDuration} || 3600,
-                js             => "$self->{p}->{staticPrefix}/common/js/pamaccess.js",
+                TOKEN => '',
+                LOGIN => $req->userData->{ $self->conf->{whatToTrace} } || '',
+                EXPIRES_IN       => '',
+                SHOW_TOKEN       => 0,
+                DEFAULT_DURATION => $self->conf->{pamAccessTokenDuration}
+                  || 600,
+                MAX_DURATION => $self->conf->{pamAccessMaxDuration} || 3600,
+                js => "$self->{p}->{staticPrefix}/common/js/pamaccess.js",
             }
         ),
     };
@@ -156,21 +134,22 @@ sub generateToken {
     my ( $self, $req ) = @_;
 
     # Get requested duration
-    my $duration = $req->param('duration') || $self->conf->{pamAccessTokenDuration} || 600;
+    my $duration =
+      $req->param('duration') || $self->conf->{pamAccessTokenDuration} || 600;
 
     # Enforce maximum duration
     my $maxDuration = $self->conf->{pamAccessMaxDuration} || 3600;
     $duration = $maxDuration if $duration > $maxDuration;
 
-    my $login = $req->userData->{ $self->conf->{whatToTrace} };
+    my $login  = $req->userData->{ $self->conf->{whatToTrace} };
     my $groups = $req->userData->{groups} || '';
 
     # Calculate _utime for automatic cleanup by purgeCentralCache
     # _utime + timeout = expiration time
     # So: _utime = now + duration - timeout
-    my $now = time();
+    my $now     = time();
     my $timeout = $self->conf->{timeout} || 7200;
-    my $utime = $now + $duration - $timeout;
+    my $utime   = $now + $duration - $timeout;
 
     # Create one-time token as a session with kind=PAMTOKEN
     my $tokenInfo = {
@@ -186,9 +165,10 @@ sub generateToken {
     # Add exported variables for user provisioning
     my $exportedVars = $self->conf->{pamAccessExportedVars} || {};
     for my $key ( keys %$exportedVars ) {
-        my $attr = $exportedVars->{$key};
+        my $attr  = $exportedVars->{$key};
         my $value = $req->userData->{$attr};
-        $tokenInfo->{"_pamAttr_$key"} = $value if defined $value && $value ne '';
+        $tokenInfo->{"_pamAttr_$key"} = $value
+          if defined $value && $value ne '';
     }
 
     my $tokenSession = $self->p->getApacheSession(
@@ -207,15 +187,17 @@ sub generateToken {
     }
 
     my $token = $tokenSession->id;
-    $self->logger->info("PAM one-time token generated for user $login (TTL: ${duration}s)");
+    $self->logger->info(
+        "PAM one-time token generated for user $login (TTL: ${duration}s)");
 
     # Audit log for token generation
     $self->p->auditLog(
         $req,
         code    => 'PAM_TOKEN_GENERATED',
         user    => $login,
-        message => "PAM one-time token generated for user $login (TTL: ${duration}s)",
-        ttl     => $duration,
+        message =>
+          "PAM one-time token generated for user $login (TTL: ${duration}s)",
+        ttl => $duration,
     );
 
     return $self->p->sendJSONresponse(
@@ -236,25 +218,24 @@ sub authorize {
     my $access_token = $self->oidc->getEndPointAccessToken($req);
     unless ($access_token) {
         $self->logger->warn('PAM authorize: No Bearer token provided');
-        return $self->_unauthorizedResponse($req, 'Bearer token required');
+        return $self->_unauthorizedResponse( $req, 'Bearer token required' );
     }
 
     my $tokenSession = $self->oidc->getAccessToken($access_token);
     unless ($tokenSession) {
         $self->logger->warn('PAM authorize: Invalid or expired Bearer token');
-        return $self->_unauthorizedResponse($req, 'Invalid or expired token');
+        return $self->_unauthorizedResponse( $req, 'Invalid or expired token' );
     }
 
     # 2. Verify token was obtained via Device Authorization Grant
     my $grant_type = $tokenSession->data->{grant_type} || '';
     unless ( $grant_type eq 'device_code' ) {
         $self->logger->warn(
-            "PAM authorize: Token not from Device Authorization Grant "
-            . "(grant_type: '$grant_type'). Server must enroll via /oauth2/device"
+                "PAM authorize: Token not from Device Authorization Grant "
+              . "(grant_type: '$grant_type'). Server must enroll via /oauth2/device"
         );
-        return $self->_forbiddenResponse(
-            $req,
-            'Server not enrolled. Use Device Authorization Grant to register this server.'
+        return $self->_forbiddenResponse( $req,
+'Server not enrolled. Use Device Authorization Grant to register this server.'
         );
     }
 
@@ -262,18 +243,19 @@ sub authorize {
     my $scope = $tokenSession->data->{scope} || '';
     unless ( $scope =~ /\bpam(?::server)?\b/ ) {
         $self->logger->warn("PAM authorize: Invalid token scope '$scope'");
-        return $self->_forbiddenResponse($req, 'Invalid token scope');
+        return $self->_forbiddenResponse( $req, 'Invalid token scope' );
     }
 
     # Log server identity from token
     my $server_id = $tokenSession->data->{client_id} || 'unknown';
-    $self->logger->info("PAM authorize request from enrolled server: $server_id");
+    $self->logger->info(
+        "PAM authorize request from enrolled server: $server_id");
 
     # 4. Parse JSON request body
     my $body = eval { from_json( $req->content ) };
     if ($@) {
         $self->logger->error("PAM authorize: Invalid JSON body: $@");
-        return $self->_badRequest($req, 'Invalid JSON');
+        return $self->_badRequest( $req, 'Invalid JSON' );
     }
 
     my $user         = $body->{user};
@@ -282,25 +264,27 @@ sub authorize {
     my $server_group = $body->{server_group} || 'default';
 
     unless ($user) {
-        return $self->_badRequest($req, 'Missing user parameter');
+        return $self->_badRequest( $req, 'Missing user parameter' );
     }
 
-    $self->logger->debug("PAM authorize: checking user '$user' for host '$host', service '$service', server_group '$server_group'");
+    $self->logger->debug(
+"PAM authorize: checking user '$user' for host '$host', service '$service', server_group '$server_group'"
+    );
 
     # 4. Lookup user (without active session)
     $req->user($user);
     $req->data->{_pamAuthorize} = 1;
     $req->steps( [
-        'getUser',
-        'setSessionInfo',
-        $self->p->groupsAndMacros,
-        'setLocalGroups'
-    ] );
+            'getUser',                 'setSessionInfo',
+            $self->p->groupsAndMacros, 'setLocalGroups'
+        ]
+    );
 
     my $error = $self->p->process($req);
 
     if ( $error != PE_OK ) {
-        $self->logger->info("PAM authorize: User '$user' not found (error: $error)");
+        $self->logger->info(
+            "PAM authorize: User '$user' not found (error: $error)");
 
         # Audit log for authorization failure (user not found)
         $self->p->auditLog(
@@ -331,23 +315,22 @@ sub authorize {
     my $sudo_allowed = $result->{sudo_allowed};
 
     # Get groups for response
-    my $groups = $req->sessionInfo->{groups} || '';
+    my $groups    = $req->sessionInfo->{groups} || '';
     my @groupList = split /[,;\s]+/, $groups;
 
-    $self->logger->info(
-        "PAM authorize: user '$user' " .
-        ($authorized ? 'granted' : 'denied') .
-        " access to host '$host'" .
-        ($authorized && $sudo_allowed ? ' (sudo allowed)' : '')
-    );
+    $self->logger->info( "PAM authorize: user '$user' "
+          . ( $authorized ? 'granted' : 'denied' )
+          . " access to host '$host'"
+          . ( $authorized && $sudo_allowed ? ' (sudo allowed)' : '' ) );
 
     # Audit log for authorization result
     if ($authorized) {
         $self->p->auditLog(
             $req,
-            code         => 'PAM_AUTHZ_SUCCESS',
-            user         => $user,
-            message      => "PAM authorization granted for user '$user' on host '$host'",
+            code    => 'PAM_AUTHZ_SUCCESS',
+            user    => $user,
+            message =>
+              "PAM authorization granted for user '$user' on host '$host'",
             host         => $host,
             service      => $service,
             server_group => $server_group,
@@ -359,9 +342,10 @@ sub authorize {
     else {
         $self->p->auditLog(
             $req,
-            code         => 'PAM_AUTHZ_DENIED',
-            user         => $user,
-            message      => "PAM authorization denied for user '$user' on host '$host'",
+            code    => 'PAM_AUTHZ_DENIED',
+            user    => $user,
+            message =>
+              "PAM authorization denied for user '$user' on host '$host'",
             host         => $host,
             service      => $service,
             server_group => $server_group,
@@ -380,14 +364,13 @@ sub authorize {
 
     # Add permissions for authorized users
     if ($authorized) {
-        $response->{permissions} = {
-            sudo_allowed => $sudo_allowed ? JSON::true : JSON::false,
-        };
+        $response->{permissions} =
+          { sudo_allowed => $sudo_allowed ? JSON::true : JSON::false, };
 
         # Add user attributes for NSS/cache (from exported vars)
         my $exportedVars = $self->conf->{pamAccessExportedVars} || {};
         for my $key ( keys %$exportedVars ) {
-            my $attr = $exportedVars->{$key};
+            my $attr  = $exportedVars->{$key};
             my $value = $req->sessionInfo->{$attr};
             if ( defined $value && $value ne '' ) {
                 $response->{$key} = $value;
@@ -403,7 +386,7 @@ sub authorize {
                 ttl     => $offlineTtl,
             };
             $self->logger->debug(
-                "PAM authorize: offline mode enabled for user '$user' (TTL: ${offlineTtl}s)"
+"PAM authorize: offline mode enabled for user '$user' (TTL: ${offlineTtl}s)"
             );
         }
     }
@@ -411,11 +394,7 @@ sub authorize {
         $response->{reason} = 'Access denied by rule';
     }
 
-    return $self->p->sendJSONresponse(
-        $req,
-        $response,
-        code => 200
-    );
+    return $self->p->sendJSONresponse( $req, $response, code => 200 );
 }
 
 # HELPER METHODS
@@ -436,36 +415,34 @@ sub _checkPamRule {
     };
 
     # Determine which rule set to use based on service type
-    my $ssh_authorized = $self->_evaluateRule(
-        $req, $server_group, 'ssh'
-    );
+    my $ssh_authorized = $self->_evaluateRule( $req, $server_group, 'ssh' );
 
     # For SSH service, check SSH rules
     if ( $service eq 'sshd' || $service eq 'ssh' ) {
         $result->{authorized} = $ssh_authorized;
     }
+
     # For sudo service, check both SSH (must be connected) and sudo rules
     elsif ( $service eq 'sudo' ) {
+
         # User must first be authorized for SSH
         if ($ssh_authorized) {
             $result->{authorized} = 1;
-            $result->{sudo_allowed} = $self->_evaluateRule(
-                $req, $server_group, 'sudo'
-            );
+            $result->{sudo_allowed} =
+              $self->_evaluateRule( $req, $server_group, 'sudo' );
         }
     }
+
     # For other services, fall back to legacy rules
     else {
-        $result->{authorized} = $self->_evaluateRule(
-            $req, $server_group, 'legacy'
-        );
+        $result->{authorized} =
+          $self->_evaluateRule( $req, $server_group, 'legacy' );
     }
 
     # Also compute sudo_allowed for SSH requests (for response)
     if ( $service eq 'sshd' || $service eq 'ssh' ) {
-        $result->{sudo_allowed} = $self->_evaluateRule(
-            $req, $server_group, 'sudo'
-        );
+        $result->{sudo_allowed} =
+          $self->_evaluateRule( $req, $server_group, 'sudo' );
     }
 
     return $result;
@@ -481,6 +458,7 @@ sub _evaluateRule {
     my $rules;
     if ( $rule_type eq 'ssh' ) {
         $rules = $self->conf->{pamAccessSshRules} || {};
+
         # Fallback to legacy rules if SSH rules not defined
         if ( !%$rules ) {
             $rules = $self->conf->{pamAccessServerGroups} || {};
@@ -488,6 +466,7 @@ sub _evaluateRule {
     }
     elsif ( $rule_type eq 'sudo' ) {
         $rules = $self->conf->{pamAccessSudoRules} || {};
+
         # No fallback for sudo - if not defined, sudo is denied
     }
     else {
@@ -501,16 +480,17 @@ sub _evaluateRule {
     if ( exists $rules->{$server_group} ) {
         $rule = $rules->{$server_group};
         $self->logger->debug(
-            "PAM authorize: using $rule_type rule for group '$server_group'"
-        );
+            "PAM authorize: using $rule_type rule for group '$server_group'");
     }
+
     # 2. Fallback to 'default' group
     elsif ( exists $rules->{default} ) {
         $rule = $rules->{default};
         $self->logger->debug(
-            "PAM authorize: $rule_type rule for '$server_group' not found, using 'default'"
+"PAM authorize: $rule_type rule for '$server_group' not found, using 'default'"
         );
     }
+
     # 3. No rule found -> deny
     else {
         $self->logger->debug(
@@ -526,9 +506,9 @@ sub _evaluateRule {
     return 0 unless defined $rule && $rule ne '';
 
     # Evaluate rule as expression
-    my $result = $self->p->HANDLER->buildSub(
-        $self->p->HANDLER->substitute($rule)
-    )->( $req, $req->sessionInfo );
+    my $result =
+      $self->p->HANDLER->buildSub( $self->p->HANDLER->substitute($rule) )
+      ->( $req, $req->sessionInfo );
 
     return $result ? 1 : 0;
 }
@@ -546,9 +526,9 @@ sub _evaluateOfflineMode {
     return 1 if $rule eq '1';
 
     # Evaluate as expression
-    my $result = $self->p->HANDLER->buildSub(
-        $self->p->HANDLER->substitute($rule)
-    )->( $req, $req->sessionInfo );
+    my $result =
+      $self->p->HANDLER->buildSub( $self->p->HANDLER->substitute($rule) )
+      ->( $req, $req->sessionInfo );
 
     return $result ? 1 : 0;
 }
@@ -560,7 +540,7 @@ sub _unauthorizedResponse {
     return $self->p->sendJSONresponse(
         $req,
         { error => $message },
-        code => 401,
+        code    => 401,
         headers => [ 'WWW-Authenticate' => 'Bearer realm="pam"' ],
     );
 }
@@ -569,22 +549,16 @@ sub _forbiddenResponse {
     my ( $self, $req, $message ) = @_;
     $message ||= 'Forbidden';
 
-    return $self->p->sendJSONresponse(
-        $req,
-        { error => $message },
-        code => 403
-    );
+    return $self->p->sendJSONresponse( $req, { error => $message },
+        code => 403 );
 }
 
 sub _badRequest {
     my ( $self, $req, $message ) = @_;
     $message ||= 'Bad Request';
 
-    return $self->p->sendJSONresponse(
-        $req,
-        { error => $message },
-        code => 400
-    );
+    return $self->p->sendJSONresponse( $req, { error => $message },
+        code => 400 );
 }
 
 # POST /pam/verify - Verify and consume a one-time PAM token
@@ -595,22 +569,23 @@ sub verifyToken {
     my $server_token = $self->oidc->getEndPointAccessToken($req);
     unless ($server_token) {
         $self->logger->warn('PAM verify: No server Bearer token provided');
-        return $self->_unauthorizedResponse( $req, 'Server Bearer token required' );
+        return $self->_unauthorizedResponse( $req,
+            'Server Bearer token required' );
     }
 
     my $serverSession = $self->oidc->getAccessToken($server_token);
     unless ($serverSession) {
         $self->logger->warn('PAM verify: Invalid or expired server token');
-        return $self->_unauthorizedResponse( $req, 'Invalid or expired server token' );
+        return $self->_unauthorizedResponse( $req,
+            'Invalid or expired server token' );
     }
 
     # Verify server token was obtained via Device Authorization Grant
     my $grant_type = $serverSession->data->{grant_type} || '';
     unless ( $grant_type eq 'device_code' ) {
         $self->logger->warn(
-            "PAM verify: Server token not from Device Authorization Grant "
-              . "(grant_type: '$grant_type')"
-        );
+                "PAM verify: Server token not from Device Authorization Grant "
+              . "(grant_type: '$grant_type')" );
         return $self->_forbiddenResponse( $req,
             'Server not enrolled. Use Device Authorization Grant.' );
     }
@@ -631,7 +606,8 @@ sub verifyToken {
     my $server_id = $serverSession->data->{client_id} || 'unknown';
 
     # 3. Retrieve the PAMTOKEN session
-    my $tokenSession = $self->p->getApacheSession( $user_token, kind => 'PAMTOKEN' );
+    my $tokenSession =
+      $self->p->getApacheSession( $user_token, kind => 'PAMTOKEN' );
     unless ($tokenSession) {
         $self->logger->info("PAM verify: Invalid or expired token");
 
@@ -688,9 +664,10 @@ sub verifyToken {
         # Audit log for expired token
         $self->p->auditLog(
             $req,
-            code      => 'PAM_AUTH_TOKEN_EXPIRED',
-            user      => $user,
-            message   => "PAM authentication failed: token expired for user '$user'",
+            code    => 'PAM_AUTH_TOKEN_EXPIRED',
+            user    => $user,
+            message =>
+              "PAM authentication failed: token expired for user '$user'",
             server_id => $server_id,
             reason    => 'Token expired',
         );
@@ -707,8 +684,8 @@ sub verifyToken {
     }
 
     # 6. Extract user info
-    my $user   = $tokenSession->data->{_pamUser}   || '';
-    my $groups = $tokenSession->data->{_pamGroups} || '';
+    my $user      = $tokenSession->data->{_pamUser}   || '';
+    my $groups    = $tokenSession->data->{_pamGroups} || '';
     my @groupList = $groups ? split( /[,;\s]+/, $groups ) : ();
 
     # Extract exported attributes (prefixed with _pamAttr_)
@@ -775,9 +752,8 @@ sub heartbeat {
     my $grant_type = $rtSession->data->{grant_type} || '';
     unless ( $grant_type eq 'device_code' ) {
         $self->logger->warn(
-            "PAM heartbeat: Token not from Device Authorization Grant "
-              . "(grant_type: '$grant_type')"
-        );
+                "PAM heartbeat: Token not from Device Authorization Grant "
+              . "(grant_type: '$grant_type')" );
         return $self->_forbiddenResponse( $req,
             'Token not from Device Authorization Grant' );
     }
@@ -829,13 +805,15 @@ sub userinfo {
     my $server_token = $self->oidc->getEndPointAccessToken($req);
     unless ($server_token) {
         $self->logger->warn('PAM userinfo: No server Bearer token provided');
-        return $self->_unauthorizedResponse( $req, 'Server Bearer token required' );
+        return $self->_unauthorizedResponse( $req,
+            'Server Bearer token required' );
     }
 
     my $serverSession = $self->oidc->getAccessToken($server_token);
     unless ($serverSession) {
         $self->logger->warn('PAM userinfo: Invalid or expired server token');
-        return $self->_unauthorizedResponse( $req, 'Invalid or expired server token' );
+        return $self->_unauthorizedResponse( $req,
+            'Invalid or expired server token' );
     }
 
     # Verify server token was obtained via Device Authorization Grant
@@ -843,8 +821,7 @@ sub userinfo {
     unless ( $grant_type eq 'device_code' ) {
         $self->logger->warn(
             "PAM userinfo: Server token not from Device Authorization Grant "
-              . "(grant_type: '$grant_type')"
-        );
+              . "(grant_type: '$grant_type')" );
         return $self->_forbiddenResponse( $req,
             'Server not enrolled. Use Device Authorization Grant.' );
     }
@@ -865,16 +842,16 @@ sub userinfo {
     $req->user($user);
     $req->data->{_pamUserinfo} = 1;
     $req->steps( [
-        'getUser',
-        'setSessionInfo',
-        $self->p->groupsAndMacros,
-        'setLocalGroups'
-    ] );
+            'getUser',                 'setSessionInfo',
+            $self->p->groupsAndMacros, 'setLocalGroups'
+        ]
+    );
 
     my $error = $self->p->process($req);
 
     if ( $error != PE_OK ) {
-        $self->logger->debug("PAM userinfo: User '$user' not found (error: $error)");
+        $self->logger->debug(
+            "PAM userinfo: User '$user' not found (error: $error)");
         return $self->p->sendJSONresponse(
             $req,
             {
@@ -890,13 +867,13 @@ sub userinfo {
     my %attrs;
 
     for my $key ( keys %$exportedVars ) {
-        my $attr = $exportedVars->{$key};
+        my $attr  = $exportedVars->{$key};
         my $value = $req->sessionInfo->{$attr};
         $attrs{$key} = $value if defined $value && $value ne '';
     }
 
     # Always include basic info
-    my $groups = $req->sessionInfo->{groups} || '';
+    my $groups    = $req->sessionInfo->{groups} || '';
     my @groupList = split /[,;\s]+/, $groups;
 
     $self->logger->debug("PAM userinfo: Found user '$user'");
@@ -911,481 +888,6 @@ sub userinfo {
         },
         code => 200
     );
-}
-
-# =============================================================================
-# SSH CA METHODS
-# =============================================================================
-
-# GET /ssh/ca.pub - Return SSH CA public key
-sub sshCaPublicKey {
-    my ( $self, $req ) = @_;
-
-    # Get the key reference from config
-    my $keyRef = $self->conf->{sshCaKeyRef};
-    unless ($keyRef) {
-        $self->logger->error('SSH CA: No key reference configured (sshCaKeyRef)');
-        return $self->p->sendError( $req, 'SSH CA not configured', 500 );
-    }
-
-    # Get the key from LLNG keys store
-    my $keys = $self->conf->{keys} || {};
-    my $keyData = $keys->{$keyRef};
-    unless ($keyData) {
-        $self->logger->error("SSH CA: Key '$keyRef' not found in keys store");
-        return $self->p->sendError( $req, 'SSH CA key not found', 500 );
-    }
-
-    # Get the public key
-    my $publicKey = $keyData->{keyPublic};
-    unless ($publicKey) {
-        $self->logger->error("SSH CA: No public key for '$keyRef'");
-        return $self->p->sendError( $req, 'SSH CA public key not found', 500 );
-    }
-
-    # Convert PEM public key to SSH format
-    my $sshPubKey = $self->_pemToSshPublicKey($publicKey, $keyRef);
-    unless ($sshPubKey) {
-        $self->logger->error('SSH CA: Failed to convert public key to SSH format');
-        return $self->p->sendError( $req, 'Failed to convert key', 500 );
-    }
-
-    $self->logger->debug('SSH CA: Serving public key');
-
-    return [
-        200,
-        [
-            'Content-Type'  => 'text/plain; charset=utf-8',
-            'Cache-Control' => 'public, max-age=3600',
-        ],
-        [$sshPubKey]
-    ];
-}
-
-# GET /ssh/revoked - Return SSH Key Revocation List (KRL)
-sub sshCaKrl {
-    my ( $self, $req ) = @_;
-
-    my $krlPath = $self->conf->{sshCaKrlPath};
-    unless ($krlPath) {
-        $self->logger->error('SSH CA: No KRL path configured');
-        return $self->p->sendError( $req, 'KRL not configured', 500 );
-    }
-
-    # Read KRL file if it exists
-    if ( -f $krlPath ) {
-        open my $fh, '<:raw', $krlPath or do {
-            $self->logger->error("SSH CA: Cannot read KRL file: $!");
-            return $self->p->sendError( $req, 'Cannot read KRL', 500 );
-        };
-        local $/;
-        my $krlData = <$fh>;
-        close $fh;
-
-        $self->logger->debug('SSH CA: Serving KRL');
-
-        return [
-            200,
-            [
-                'Content-Type'  => 'application/octet-stream',
-                'Cache-Control' => 'public, max-age=300',
-            ],
-            [$krlData]
-        ];
-    }
-    else {
-        # Return empty KRL if file doesn't exist
-        $self->logger->debug('SSH CA: KRL file not found, returning empty response');
-        return [
-            200,
-            [
-                'Content-Type'  => 'application/octet-stream',
-                'Cache-Control' => 'public, max-age=300',
-            ],
-            ['']
-        ];
-    }
-}
-
-# POST /ssh/sign - Sign user's SSH public key
-sub sshCaSign {
-    my ( $self, $req ) = @_;
-
-    # Parse JSON request body
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error("SSH CA sign: Invalid JSON body: $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
-
-    my $userPubKey = $body->{public_key};
-    unless ($userPubKey) {
-        return $self->_badRequest( $req, 'public_key parameter required' );
-    }
-
-    # Validate SSH public key format
-    unless ( $userPubKey =~ /^(ssh-\w+|ecdsa-sha2-\w+)\s+[A-Za-z0-9+\/=]+/ ) {
-        return $self->_badRequest( $req, 'Invalid SSH public key format' );
-    }
-
-    # Get validity from request or use default
-    my $validityMinutes = $body->{validity_minutes}
-                        || $self->conf->{sshCaCertDefaultValidity}
-                        || 30;
-
-    # Enforce maximum validity
-    my $maxValidity = $self->conf->{sshCaCertMaxValidity} || 60;
-    $validityMinutes = $maxValidity if $validityMinutes > $maxValidity;
-
-    # SECURITY: Always derive principals from the authenticated user's session
-    # Never trust principals from the request body to prevent impersonation attacks
-    my @principals;
-
-    # Evaluate principal sources from config (e.g., '$uid' or '$uid $mail')
-    my $principalSources = $self->conf->{sshCaPrincipalSources} || '$uid';
-
-    # Simple variable substitution from session (try userData first, then sessionInfo)
-    my $principal = $principalSources;
-    $principal =~ s/\$(\w+)/
-        $req->userData->{$1} || $req->sessionInfo->{$1} || ''
-    /ge;
-    $principal =~ s/^\s+|\s+$//g;  # trim
-
-    # Split on whitespace if multiple principals
-    @principals = grep { $_ ne '' } split /\s+/, $principal;
-
-    # Log warning if client tried to specify principals (potential attack attempt)
-    if ( $body->{principals} && ref $body->{principals} eq 'ARRAY' ) {
-        $self->logger->warn(
-            "SSH CA sign: Ignoring 'principals' parameter from request "
-            . "(user: " . ($req->user || 'unknown') . "). "
-            . "Principals are always derived from session for security."
-        );
-    }
-
-    unless (@principals) {
-        $self->logger->error('SSH CA sign: No principals available');
-        return $self->_badRequest( $req, 'No principals available' );
-    }
-
-    # Get user info for key_id
-    my $whatToTrace = $self->conf->{whatToTrace} || 'uid';
-    my $user = $req->userData->{$whatToTrace}
-            || $req->sessionInfo->{$whatToTrace}
-            || $req->userData->{uid}
-            || $req->sessionInfo->{uid}
-            || $req->user
-            || 'unknown';
-
-    # Generate serial number
-    my $serial = $self->_getNextSerial();
-
-    # Generate key_id
-    my $timestamp = time();
-    my $keyId = sprintf( "%s\@llng-%d-%06d", $user, $timestamp, $serial );
-
-    # Sign the certificate
-    my $result = $self->_signSshKey(
-        $userPubKey,
-        \@principals,
-        $validityMinutes,
-        $serial,
-        $keyId
-    );
-
-    unless ( $result && $result->{certificate} ) {
-        $self->logger->error('SSH CA sign: Failed to sign key');
-        return $self->p->sendJSONresponse(
-            $req,
-            { error => 'Failed to sign SSH key' },
-            code => 500
-        );
-    }
-
-    # Calculate expiration time
-    my $validUntil = time() + ( $validityMinutes * 60 );
-    my @t = gmtime($validUntil);
-    my $validUntilISO = sprintf(
-        "%04d-%02d-%02dT%02d:%02d:%02dZ",
-        $t[5] + 1900, $t[4] + 1, $t[3], $t[2], $t[1], $t[0]
-    );
-
-    $self->logger->info(
-        "SSH CA: Certificate issued for user '$user', "
-        . "principals: " . join(',', @principals) . ", "
-        . "validity: ${validityMinutes}min, serial: $serial"
-    );
-
-    # Audit log
-    $self->p->auditLog(
-        $req,
-        code       => 'SSH_CERT_ISSUED',
-        user       => $user,
-        message    => "SSH certificate issued for user '$user'",
-        principals => \@principals,
-        serial     => $serial,
-        key_id     => $keyId,
-        validity   => $validityMinutes,
-    );
-
-    return $self->p->sendJSONresponse(
-        $req,
-        {
-            certificate => $result->{certificate},
-            serial      => $serial,
-            valid_until => $validUntilISO,
-            principals  => \@principals,
-            key_id      => $keyId,
-        }
-    );
-}
-
-# HELPER: Get next serial number (atomic increment)
-sub _getNextSerial {
-    my ($self) = @_;
-
-    my $serialPath = $self->conf->{sshCaSerialPath}
-                   || '/var/lib/lemonldap-ng/ssh/serial';
-
-    # Ensure directory exists
-    my $dir = $serialPath;
-    $dir =~ s|/[^/]+$||;
-    unless ( -d $dir ) {
-        require File::Path;
-        File::Path::make_path($dir);
-    }
-
-    # Read current serial, increment, and write back atomically using flock
-    use Fcntl qw(:flock);
-
-    my $serial = 1;
-
-    # Open file for read+write, creating if needed
-    if ( open my $fh, '+>>', $serialPath ) {
-        # Acquire exclusive lock to prevent race conditions
-        flock( $fh, LOCK_EX ) or do {
-            $self->logger->warn("SSH CA: Cannot lock serial file: $!");
-            close $fh;
-            return $serial;
-        };
-
-        # Seek to beginning to read current value
-        seek( $fh, 0, 0 );
-        my $current = <$fh>;
-        if ( defined $current ) {
-            chomp $current;
-            $serial = int($current) + 1 if $current =~ /^\d+$/;
-        }
-
-        # Truncate and write new serial
-        seek( $fh, 0, 0 );
-        truncate( $fh, 0 );
-        print $fh "$serial\n";
-
-        # Lock is released when file handle is closed
-        close $fh;
-    }
-    else {
-        $self->logger->warn("SSH CA: Cannot open serial file: $!");
-    }
-
-    return $serial;
-}
-
-# HELPER: Sign SSH key using ssh-keygen
-sub _signSshKey {
-    my ( $self, $userPubKey, $principals, $validityMinutes, $serial, $keyId ) = @_;
-
-    require File::Temp;
-
-    # Get CA private key
-    my $keyRef = $self->conf->{sshCaKeyRef};
-    unless ($keyRef) {
-        $self->logger->error('SSH CA: No key reference configured');
-        return undef;
-    }
-
-    my $keys = $self->conf->{keys} || {};
-    my $keyData = $keys->{$keyRef};
-    unless ( $keyData && $keyData->{keyPrivate} ) {
-        $self->logger->error("SSH CA: Key '$keyRef' not found or has no private key");
-        return undef;
-    }
-
-    # Create temp directory for key files
-    my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
-
-    # Write CA private key to temp file (convert PEM to OpenSSH format)
-    my $caKeyFile = "$tmpdir/ca_key";
-    my $caKeyOpenSSH = $self->_pemToOpenSSHPrivateKey( $keyData->{keyPrivate} );
-    unless ($caKeyOpenSSH) {
-        $self->logger->error('SSH CA: Failed to convert CA key');
-        return undef;
-    }
-
-    open my $fh, '>', $caKeyFile or do {
-        $self->logger->error("SSH CA: Cannot write CA key: $!");
-        return undef;
-    };
-    print $fh $caKeyOpenSSH;
-    close $fh;
-    chmod 0600, $caKeyFile;
-
-    # Write user's public key to temp file
-    my $userKeyFile = "$tmpdir/user_key.pub";
-    open $fh, '>', $userKeyFile or do {
-        $self->logger->error("SSH CA: Cannot write user key: $!");
-        return undef;
-    };
-    print $fh $userPubKey;
-    print $fh "\n" unless $userPubKey =~ /\n$/;
-    close $fh;
-
-    # Build ssh-keygen command
-    my @cmd = (
-        'ssh-keygen',
-        '-s', $caKeyFile,           # CA key
-        '-I', $keyId,               # Key identity
-        '-n', join(',', @$principals),  # Principals
-        '-V', "+${validityMinutes}m",   # Validity
-        '-z', $serial,              # Serial number
-        $userKeyFile                # User's public key to sign
-    );
-
-    $self->logger->debug("SSH CA: Running: " . join(' ', @cmd));
-
-    # Execute ssh-keygen
-    my $output = '';
-    my $pid = open my $pipe, '-|';
-    if ( !defined $pid ) {
-        $self->logger->error("SSH CA: Cannot fork: $!");
-        return undef;
-    }
-    elsif ( $pid == 0 ) {
-        # Child process
-        open STDERR, '>&', \*STDOUT;
-        exec @cmd;
-        exit 1;
-    }
-    else {
-        # Parent process
-        local $/;
-        $output = <$pipe>;
-        close $pipe;
-    }
-
-    my $exitCode = $? >> 8;
-    if ( $exitCode != 0 ) {
-        $self->logger->error("SSH CA: ssh-keygen failed (exit $exitCode): $output");
-        return undef;
-    }
-
-    # Read the generated certificate
-    my $certFile = "$tmpdir/user_key-cert.pub";
-    unless ( -f $certFile ) {
-        $self->logger->error("SSH CA: Certificate file not created");
-        return undef;
-    }
-
-    open $fh, '<', $certFile or do {
-        $self->logger->error("SSH CA: Cannot read certificate: $!");
-        return undef;
-    };
-    my $certificate = <$fh>;
-    close $fh;
-    chomp $certificate;
-
-    return { certificate => $certificate };
-}
-
-# HELPER: Convert PEM private key to OpenSSH format
-sub _pemToOpenSSHPrivateKey {
-    my ( $self, $pemKey ) = @_;
-
-    # For Ed25519 keys, we need to convert PEM to OpenSSH format
-    # ssh-keygen can read PEM format directly for some key types,
-    # but for Ed25519 we may need conversion
-
-    # First, try to detect if it's already in OpenSSH format
-    if ( $pemKey =~ /^-----BEGIN OPENSSH PRIVATE KEY-----/ ) {
-        return $pemKey;
-    }
-
-    # For Ed25519 PEM keys, use ssh-keygen to convert
-    if ( $pemKey =~ /BEGIN PRIVATE KEY/ || $pemKey =~ /BEGIN EC PRIVATE KEY/ ) {
-        require File::Temp;
-        my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
-        my $pemFile = "$tmpdir/key.pem";
-        my $sshFile = "$tmpdir/key";
-
-        # Write PEM key
-        open my $fh, '>', $pemFile or return undef;
-        print $fh $pemKey;
-        close $fh;
-        chmod 0600, $pemFile;
-
-        # Try to use the PEM directly with ssh-keygen
-        # ssh-keygen -s accepts PEM format for RSA/ECDSA
-        # For Ed25519, we need to check if it works
-
-        # Actually, let's just return the PEM and see if ssh-keygen accepts it
-        return $pemKey;
-    }
-
-    # RSA keys in traditional format
-    if ( $pemKey =~ /BEGIN RSA PRIVATE KEY/ ) {
-        return $pemKey;
-    }
-
-    return $pemKey;
-}
-
-# HELPER: Convert PEM public key to SSH format
-sub _pemToSshPublicKey {
-    my ( $self, $pemKey, $comment ) = @_;
-
-    require MIME::Base64;
-
-    my $sshKey;
-
-    # Try Ed25519 first
-    eval {
-        require Crypt::PK::Ed25519;
-        my $pk = Crypt::PK::Ed25519->new(\$pemKey);
-        my $rawKey = $pk->export_key_raw('public');
-
-        # Build SSH format: string "ssh-ed25519" + string <32 bytes key>
-        my $keyType = 'ssh-ed25519';
-        my $blob = pack('N', length($keyType)) . $keyType
-                 . pack('N', length($rawKey)) . $rawKey;
-
-        $sshKey = "$keyType " . MIME::Base64::encode_base64($blob, '');
-    };
-
-    # Try RSA if Ed25519 failed
-    if ($@ || !$sshKey) {
-        eval {
-            require Crypt::PK::RSA;
-            my $pk = Crypt::PK::RSA->new(\$pemKey);
-            # RSA keys can use export_key_openssh
-            $sshKey = $pk->export_key_openssh;
-        };
-    }
-
-    unless ($sshKey) {
-        $self->logger->error("SSH CA: Failed to convert key to SSH format: $@");
-        return undef;
-    }
-
-    # Add comment (SSH key has format: type base64 [comment])
-    chomp($sshKey);
-    my @parts = split /\s+/, $sshKey;
-    if (@parts == 2) {
-        # No comment yet, add one
-        $sshKey .= " LLNG-SSH-CA-$comment";
-    }
-
-    return "$sshKey\n";
 }
 
 1;

@@ -124,7 +124,7 @@
   "oidcOPMetaDataJSON": {},
   "oidcOPMetaDataJWKS": {},
 
-  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization",
+  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization ::Plugins::SSHCA",
 
   "portalDisplayPamAccess": 1,
   "pamAccessTokenDuration": 600,
