@@ -120,12 +120,13 @@ read_config() {
     local file="$2"
 
     if [ -f "$file" ]; then
+        # Use || true to prevent set -e from exiting when grep finds no match
         grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null | \
             sed -E 's/^[^=]+=\s*//' | \
             sed -E 's/^["'\'']//' | \
             sed -E 's/["'\'']$//' | \
             sed -E 's/\s*#.*$//' | \
-            tail -1
+            tail -1 || true
     fi
 }
 
@@ -137,25 +138,25 @@ load_config() {
         local val
 
         val=$(read_config "portal_url" "$CONFIG_FILE")
-        [ -n "$val" ] && PORTAL_URL="$val"
+        [ -n "$val" ] && PORTAL_URL="$val" || :
 
         val=$(read_config "portal" "$CONFIG_FILE")
-        [ -n "$val" ] && PORTAL_URL="$val"
+        [ -n "$val" ] && PORTAL_URL="$val" || :
 
         val=$(read_config "client_id" "$CONFIG_FILE")
-        [ -n "$val" ] && CLIENT_ID="$val"
+        [ -n "$val" ] && CLIENT_ID="$val" || :
 
         val=$(read_config "client_secret" "$CONFIG_FILE")
-        [ -n "$val" ] && CLIENT_SECRET="$val"
+        [ -n "$val" ] && CLIENT_SECRET="$val" || :
 
         val=$(read_config "server_group" "$CONFIG_FILE")
-        [ -n "$val" ] && SERVER_GROUP="$val"
+        [ -n "$val" ] && SERVER_GROUP="$val" || :
 
         val=$(read_config "server_token_file" "$CONFIG_FILE")
-        [ -n "$val" ] && TOKEN_FILE="$val"
+        [ -n "$val" ] && TOKEN_FILE="$val" || :
 
         val=$(read_config "token_file" "$CONFIG_FILE")
-        [ -n "$val" ] && TOKEN_FILE="$val"
+        [ -n "$val" ] && TOKEN_FILE="$val" || :
     fi
 }
 
@@ -418,34 +419,22 @@ save_token() {
         }
     fi
 
-    # Calculate expires_at timestamp
+    # Save token in JSON format with metadata for token lifecycle management
+    # The PAM module (token_manager.c) supports both JSON and plain text formats
     local now
     now=$(date +%s)
-    local expires_at=$((now + EXPIRES_IN))
+    local expires_at=$((now + ${EXPIRES_IN:-3600}))
 
-    # Build JSON token file using jq
-    local token_json
-    token_json=$(jq -n \
-        --arg access_token "$ACCESS_TOKEN" \
-        --arg refresh_token "${REFRESH_TOKEN:-}" \
-        --argjson expires_at "$expires_at" \
-        --argjson enrolled_at "$now" \
-        '{
-            access_token: $access_token,
-            refresh_token: $refresh_token,
-            expires_at: $expires_at,
-            enrolled_at: $enrolled_at
-        }')
-
-    # Remove refresh_token if empty
-    if [ -z "$REFRESH_TOKEN" ]; then
-        token_json=$(echo "$token_json" | jq 'del(.refresh_token)')
-    fi
-
-    # Save token with restricted permissions
     (
         umask 077
-        echo "$token_json" > "$TOKEN_FILE"
+        cat > "$TOKEN_FILE" << TOKENEOF
+{
+  "access_token": "$ACCESS_TOKEN",
+  "refresh_token": "${REFRESH_TOKEN:-}",
+  "expires_at": $expires_at,
+  "enrolled_at": $now
+}
+TOKENEOF
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
         log_info "You may need to run this script as root"
@@ -458,13 +447,11 @@ save_token() {
         chmod 600 "$TOKEN_FILE"
     fi
 
-    log_success "Token saved to $TOKEN_FILE"
+    log_success "Token saved to $TOKEN_FILE (JSON format)"
 
     if [ -n "$REFRESH_TOKEN" ]; then
-        log_info "Refresh token included for heartbeat support"
-    else
-        log_warn "No refresh token received - heartbeat won't work"
-        log_info "Ensure RP 'pam-access' has refresh tokens enabled"
+        log_info "Refresh token saved - can be used for automatic token renewal"
+        log_info "Token expires at: $(date -d "@$expires_at" 2>/dev/null || date -r "$expires_at" 2>/dev/null || echo "$expires_at")"
     fi
 }
 

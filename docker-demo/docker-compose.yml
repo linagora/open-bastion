@@ -1,0 +1,120 @@
+# LemonLDAP::NG SSH Certificate Authentication Demo
+#
+# Architecture:
+#   - sso: LLNG Portal with SSH CA, PAM Access, Device Authorization
+#   - bastion: SSH bastion with session recording
+#   - backend: SSH backend with user creation
+#   - backend-new: Unconfigured backend for enrollment demo
+#
+# Usage:
+#   docker compose up -d
+#   # Test SSO: llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
+#   # Get SSH cert: docker exec -it bastion llng-ssh-cert -p http://sso
+#   # SSH to bastion: ssh -p 2222 dwho@localhost
+
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    container_name: llng-sso
+    ports:
+      - "80:80"
+    volumes:
+      # Custom plugins (individual files to not override existing plugins)
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:ro
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:ro
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/SSHCA.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/SSHCA.pm:ro
+      # Templates for PAM Access and Device Authorization
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/sshca.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/sshca.tpl:ro
+      # JavaScript for PAM Access
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/sshca.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/sshca.js:ro
+      # Configuration
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+      # No persistent volumes - fresh start for each demo
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      llng-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  bastion:
+    build:
+      context: ..
+      dockerfile: docker/bastion/Dockerfile
+    container_name: llng-bastion
+    ports:
+      - "2222:22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=bastion
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    volumes:
+      # PAM module sources for build
+      - ..:/src/llng-pam-module:ro
+      # No persistent volumes - fresh start for each demo
+    networks:
+      - llng-net
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile
+    container_name: llng-backend
+    # No external port - only accessible via bastion
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=backend
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    volumes:
+      # PAM module sources for build
+      - ..:/src/llng-pam-module:ro
+    networks:
+      - llng-net
+
+  # Unconfigured backend for enrollment demo
+  backend-new:
+    build:
+      context: ..
+      dockerfile: docker/backend-new/Dockerfile
+    container_name: llng-backend-new
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso
+      - LLNG_SERVER_GROUP=backend-new
+      # No LLNG_SERVER_TOKEN - must be enrolled manually
+    networks:
+      - llng-net
+
+networks:
+  llng-net:
+    driver: bridge

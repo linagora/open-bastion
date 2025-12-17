@@ -98,7 +98,7 @@ load_config() {
 ensure_sessions_dir() {
     if [ ! -d "$SESSIONS_DIR" ]; then
         mkdir -p "$SESSIONS_DIR"
-        chmod 0755 "$SESSIONS_DIR"
+        chmod 0700 "$SESSIONS_DIR"
     fi
 
     # Create user subdirectory (owned by user, mode 0700)
