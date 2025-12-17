@@ -59,7 +59,14 @@ typedef struct {
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
+    /* Security: Store token file metadata for periodic re-verification (#46) */
+    ino_t token_file_inode;
+    time_t token_file_mtime;
+    time_t last_token_check;
 } pam_llng_data_t;
+
+/* How often to re-verify token file permissions (in seconds) */
+#define TOKEN_RECHECK_INTERVAL 300  /* 5 minutes */
 
 /* Logging macros - prefixed to avoid conflict with syslog constants */
 #define LLNG_LOG_ERR(handle, fmt, ...) \
@@ -73,6 +80,76 @@ typedef struct {
 
 /* Forward declaration */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
+
+/*
+ * Security: Re-verify token file permissions periodically (fixes #46)
+ * Returns 0 if OK, -1 if security violation detected
+ */
+static int verify_token_file_security(pam_handle_t *pamh, pam_llng_data_t *data)
+{
+    if (!data || !data->config.server_token_file) {
+        return 0;  /* No token file configured, nothing to verify */
+    }
+
+    time_t now = time(NULL);
+
+    /* Only check periodically to avoid performance impact */
+    if (data->last_token_check > 0 &&
+        (now - data->last_token_check) < TOKEN_RECHECK_INTERVAL) {
+        return 0;  /* Recently checked, skip */
+    }
+
+    /* Re-verify token file security */
+    int token_fd = open(data->config.server_token_file, O_RDONLY | O_NOFOLLOW);
+    if (token_fd < 0) {
+        LLNG_LOG_ERR(pamh, "Security: token file %s no longer accessible",
+                data->config.server_token_file);
+        return -1;
+    }
+
+    struct stat st;
+    if (fstat(token_fd, &st) != 0) {
+        LLNG_LOG_ERR(pamh, "Security: cannot stat token file %s",
+                data->config.server_token_file);
+        close(token_fd);
+        return -1;
+    }
+    close(token_fd);
+
+    /* Check if file was replaced (different inode) */
+    if (data->token_file_inode != 0 && st.st_ino != data->token_file_inode) {
+        LLNG_LOG_ERR(pamh, "Security: token file %s was replaced (inode changed)",
+                data->config.server_token_file);
+        return -1;
+    }
+
+    /* Check if file was modified */
+    if (data->token_file_mtime != 0 && st.st_mtime != data->token_file_mtime) {
+        LLNG_LOG_WARN(pamh, "Security: token file %s was modified since startup",
+                data->config.server_token_file);
+        /* Update mtime but continue - modification alone is not a security violation */
+        data->token_file_mtime = st.st_mtime;
+    }
+
+    /* Re-verify ownership */
+    if (st.st_uid != 0) {
+        LLNG_LOG_ERR(pamh, "Security: token file %s ownership changed (not root)",
+                data->config.server_token_file);
+        return -1;
+    }
+
+    /* Re-verify permissions */
+    if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
+        LLNG_LOG_ERR(pamh, "Security: token file %s permissions changed (too permissive)",
+                data->config.server_token_file);
+        return -1;
+    }
+
+    /* Update last check time */
+    data->last_token_check = now;
+
+    return 0;
+}
 
 /*
  * Check if a group exists by reading /etc/group directly.
@@ -368,7 +445,11 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
             goto error;
         }
 
-        /* Security checks passed, close fd and use token_manager to load */
+        /* Security checks passed - store metadata for periodic re-verification (#46) */
+        data->token_file_inode = st.st_ino;
+        data->token_file_mtime = st.st_mtime;
+        data->last_token_check = time(NULL);
+
         close(token_fd);
 
         /* Use token_manager_load_file which supports both JSON and plain text */
@@ -694,6 +775,12 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         return PAM_SERVICE_ERR;
     }
 
+    /* Security: Periodically re-verify token file permissions (#46) */
+    if (verify_token_file_security(pamh, data) != 0) {
+        LLNG_LOG_ERR(pamh, "Token file security verification failed, refusing authentication");
+        return PAM_SERVICE_ERR;
+    }
+
     /* Get context information for audit and rate limiting */
     client_ip = get_client_ip(pamh);
     tty = get_tty(pamh);
@@ -935,6 +1022,12 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     /* Initialize module */
     pam_llng_data_t *data = get_module_data(pamh, argc, argv);
     if (!data) {
+        return PAM_SERVICE_ERR;
+    }
+
+    /* Security: Periodically re-verify token file permissions (#46) */
+    if (verify_token_file_security(pamh, data) != 0) {
+        LLNG_LOG_ERR(pamh, "Token file security verification failed, refusing authorization");
         return PAM_SERVICE_ERR;
     }
 
