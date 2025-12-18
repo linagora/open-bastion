@@ -1171,3 +1171,105 @@ timedatectl set-ntp true
 - [ ] Test de connexion SSH réussi
 - [ ] Monitoring expiration token configuré
 - [ ] Procédure de ré-enrôlement documentée
+
+---
+
+## 6. Conformité ANSSI - Recommandations OpenID Connect
+
+Cette section détaille la conformité du module PAM LLNG avec les [recommandations ANSSI pour la sécurisation du protocole OpenID Connect](https://cyber.gouv.fr/publications/recommandations-pour-la-securisation-de-la-mise-en-oeuvre-du-protocole-openid-connect).
+
+Référence : [Issue LLNG #3030](https://gitlab.ow2.org/lemonldap-ng/lemonldap-ng/-/issues/3030)
+
+### Fonctionnalités de sécurité implémentées
+
+| Recommandation | Référence | Statut | Implémentation |
+|----------------|-----------|--------|----------------|
+| Authentification JWT du client | R8, R8+ | ✅ Implémenté | `client_secret_jwt` (RFC 7523) avec HMAC-SHA256 |
+| Protection anti-rejeu JWT | - | ✅ Implémenté | Claim `jti` (UUID unique) dans chaque JWT |
+| Codes aléatoires | R18, R24 | ✅ LLNG | Génération côté serveur LLNG |
+| Désactivation code après usage | R30 | ✅ LLNG | Géré par le serveur LLNG |
+| Limitation TTL access_token | R33 | ✅ Configuration | Configurable côté LLNG |
+| Pas de token dans les logs | R32 | ✅ Implémenté | Aucun token dans les logs PAM |
+| PKCE pour Device Flow | Extension | ✅ Implémenté | `code_verifier` / `code_challenge` (S256) |
+
+### Configuration LLNG recommandée (côté serveur)
+
+Pour maximiser la sécurité du client OIDC `pam-access`, appliquer ces paramètres dans le Manager LLNG :
+
+```yaml
+# OIDC → Relying Parties → pam-access → Options
+
+# Authentification client par JWT (recommandation R8+)
+oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+
+# Désactiver les flows non utilisés (R1)
+oidcRPMetaDataOptionsAllowImplicitFlow: 0
+oidcRPMetaDataOptionsAllowHybridFlow: 0
+
+# Limiter le TTL de l'access_token (R33) - 1 heure
+oidcRPMetaDataOptionsAccessTokenExpiration: 3600
+
+# Activer la rotation du refresh_token
+oidcRPMetaDataOptionsRefreshTokenRotation: 1
+
+# Stockage hashé des tokens (R21, R25) - LLNG 2.19.0+
+# Activé globalement dans la configuration LLNG
+```
+
+### Recommandations non applicables au Device Flow
+
+Certaines recommandations ANSSI concernent le flux Authorization Code classique et ne s'appliquent pas au Device Authorization Grant (RFC 8628) :
+
+| Recommandation | Référence | Raison |
+|----------------|-----------|--------|
+| Envoi de `state` | R10, R12 | Le Device Flow n'utilise pas de redirection HTTP |
+| Envoi de `nonce` | R14, R16 | Pas d'`id_token` dans le flux device code |
+| Vérification `state` | R22 | Pas de `state` dans le Device Flow |
+
+### PKCE pour Device Flow
+
+Bien que le RFC 8628 ne mentionne pas PKCE, le module PAM l'implémente comme extension de sécurité :
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PKCE dans le Device Flow                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+1. Enrôlement (llng-pam-enroll) :
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ code_verifier = random(32 bytes) → base64url                    │
+   │ code_challenge = SHA256(code_verifier) → base64url              │
+   └─────────────────────────────────────────────────────────────────┘
+
+   POST /oauth2/device
+   ├── client_id=pam-access
+   ├── scope=pam:server
+   ├── code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+   └── code_challenge_method=S256
+
+2. Obtention du token :
+   POST /oauth2/token
+   ├── grant_type=device_code
+   ├── device_code=XXX
+   ├── client_id=pam-access
+   ├── client_assertion=<JWT>
+   └── code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+```
+
+**Avantages de PKCE pour le Device Flow :**
+- Protection contre l'interception du `device_code` sur le réseau
+- Le `code_verifier` n'est jamais transmis avant l'échange du token
+- Même si un attaquant intercepte le `device_code`, il ne peut pas l'échanger sans le `code_verifier`
+
+### Tableau de synthèse sécurité
+
+| Couche | Protection | Mécanisme |
+|--------|------------|-----------|
+| Transport | Confidentialité | TLS 1.3 obligatoire |
+| Transport | Intégrité | Certificate pinning (optionnel) |
+| Client | Authentification | `client_secret_jwt` (RFC 7523) |
+| Client | Anti-rejeu | JWT avec `jti` unique |
+| Token | Confidentialité | PKCE (`code_verifier` / `code_challenge`) |
+| Token | Rotation | Refresh token rotatif |
+| Stockage | Confidentialité | Permissions 0600, hashage côté LLNG |
+| Segmentation | Blast radius | `server_group` |
