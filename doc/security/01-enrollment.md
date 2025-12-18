@@ -6,12 +6,12 @@ L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). 
 
 ### Acteurs
 
-| Acteur | Rôle |
-|--------|------|
-| **Opérateur** | Personne exécutant `llng-pam-enroll` sur le serveur à enrôler |
-| **Administrateur LLNG** | Personne habilitée à approuver les enrôlements sur le portail LLNG |
-| **Serveur cible** | Machine à enrôler pour l'authentification PAM |
-| **Portail LLNG** | Serveur LemonLDAP::NG fournissant les endpoints OAuth2 |
+| Acteur                   | Rôle                                                             |
+| ------------------------ | ---------------------------------------------------------------- |
+| **Opérateur**            | Personne exécutant `llng-pam-enroll` sur le serveur à enrôler    |
+| **Administrateur LLNG**  | Personne habilitée à approuver les enrôlements sur le portail LLNG |
+| **Serveur cible**        | Machine à enrôler pour l'authentification PAM                    |
+| **Portail LLNG**         | Serveur LemonLDAP::NG fournissant les endpoints OAuth2           |
 
 ### Prérequis (côté LLNG)
 
@@ -28,12 +28,12 @@ Avant de pouvoir exécuter `llng-pam-enroll`, l'administrateur système doit con
 
 **Informations à fournir :**
 
-| Paramètre | Description | Exemple |
-|-----------|-------------|---------|
-| `portal_url` | URL du portail LLNG | `https://auth.example.com` |
-| `client_id` | Identifiant du client OIDC | `pam-access` |
-| `client_secret` | Secret partagé OIDC | `s3cr3t-p@ssw0rd` |
-| `server_group` | Groupe de serveurs (optionnel) | `production` |
+| Paramètre       | Description                    | Exemple                    |
+| --------------- | ------------------------------ | -------------------------- |
+| `portal_url`    | URL du portail LLNG            | `https://auth.example.com` |
+| `client_id`     | Identifiant du client OIDC     | `pam-access`               |
+| `client_secret` | Secret partagé OIDC            | `s3cr3t-p@ssw0rd`          |
+| `server_group`  | Groupe de serveurs (optionnel) | `production`               |
 
 **Comment l'administrateur obtient ces informations :**
 
@@ -81,7 +81,7 @@ Dans ce cas, le secret est obtenu par l'opérateur via un canal sécurisé (gest
 
 ---
 
-### Flux détaillé (Phase 1 : Device Authorization Grant)
+### Flux détaillé (Phase 1 : Device Authorization Grant avec PKCE)
 
 ```
 ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
@@ -92,9 +92,17 @@ Dans ce cas, le secret est obtenu par l'opérateur via un canal sécurisé (gest
        │ 1. sudo llng-pam-enroll                       │
        │──────────────────────>│                       │
        │                       │                       │
+       │                       │ 1b. Génère PKCE:      │
+       │                       │   code_verifier=random│
+       │                       │   code_challenge=     │
+       │                       │     SHA256(verifier)  │
+       │                       │                       │
        │                       │ 2. POST /oauth2/device│
        │                       │   client_id=pam-access│
        │                       │   scope=pam:server    │
+       │                       │   code_challenge=XXX  │
+       │                       │   code_challenge_     │
+       │                       │     method=S256       │
        │                       │──────────────────────>│
        │                       │                       │
        │                       │ 3. device_code,       │
@@ -141,7 +149,12 @@ Dans ce cas, le secret est obtenu par l'opérateur via un canal sécurisé (gest
        │                       │  device_code=XXX      │
        │                       │  client_id=pam-access │
        │                       │  client_assertion=JWT │
+       │                       │  code_verifier=YYY    │
        │                       │──────────────────────>│
+       │                       │                       │
+       │                       │ 10b. LLNG vérifie:    │
+       │                       │  SHA256(code_verifier)│
+       │                       │    == code_challenge  │
        │                       │                       │
        │                       │ 11. access_token,     │
        │                       │     refresh_token,    │
@@ -162,19 +175,38 @@ Dans ce cas, le secret est obtenu par l'opérateur via un canal sécurisé (gest
        │                       │                       │
 ```
 
+**Rôle de PKCE (RFC 7636) dans ce flux :**
+- Le `code_verifier` est un secret généré localement (32 octets aléatoires, base64url)
+- Le `code_challenge` est le hash SHA256 du `code_verifier` (envoyé à l'étape 2)
+- Seul le serveur légitime possède le `code_verifier` (jamais transmis avant l'étape 10)
+- Un attaquant interceptant le `device_code` ne peut pas l'échanger sans le `code_verifier`
+
 ### Étapes détaillées
 
-#### Étape 1-3 : Initiation du flux Device Authorization
+#### Étape 1-3 : Initiation du flux Device Authorization avec PKCE
 
-L'opérateur exécute `sudo llng-pam-enroll` sur le serveur. Le script envoie une requête au portail :
+L'opérateur exécute `sudo llng-pam-enroll` sur le serveur. Le script génère d'abord les paramètres PKCE :
+
+```bash
+# Génération PKCE (RFC 7636)
+code_verifier=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')
+code_challenge=$(echo -n "$code_verifier" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=')
+```
+
+Puis envoie une requête au portail avec le `code_challenge` :
 
 ```http
 POST /oauth2/device HTTP/1.1
 Host: auth.example.com
 Content-Type: application/x-www-form-urlencoded
 
-client_id=pam-access&scope=pam:server
+client_id=pam-access
+&scope=pam:server
+&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+&code_challenge_method=S256
 ```
+
+**Note :** Le `code_verifier` reste secret sur le serveur. Seul le hash (`code_challenge`) est envoyé.
 
 Le portail répond avec :
 
@@ -225,9 +257,11 @@ L'administrateur LLNG :
 3. Saisit le `user_code` reçu de l'opérateur
 4. Vérifie les informations et approuve l'enrôlement
 
-#### Étape 10-11 : Obtention du token
+#### Étape 10-11 : Obtention du token avec validation PKCE
 
-Pendant ce temps, le script poll toutes les 5 secondes avec une authentification `client_secret_jwt` (RFC 7523) :
+Pendant ce temps, le script poll toutes les 5 secondes avec :
+- Authentification `client_secret_jwt` (RFC 7523)
+- Le `code_verifier` PKCE pour prouver la possession du secret initial
 
 ```http
 POST /oauth2/token HTTP/1.1
@@ -238,8 +272,13 @@ grant_type=urn:ietf:params:oauth:grant-type:device_code
 &device_code=GmRhmhcxhwAzkoEqiMEg_DnyEysNkuNhszIySk9eS
 &client_id=pam-access
 &client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
-&client_assertion=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwYW0tYWNjZXNzIiwic3ViIjoicGFtLWFjY2VzcyIsImF1ZCI6Imh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbS9vYXV0aDIvdG9rZW4iLCJleHAiOjE3MzQ1NjQ1OTAsImlhdCI6MTczNDU2NDI5MCwianRpIjoiYTFiMmMzZDQtZTVmNi00Nzg5LWFiY2QtZWYxMjM0NTY3ODkwIn0.<SIGNATURE>
+&client_assertion=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....<SIGNATURE>
+&code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
 ```
+
+**Validation PKCE côté LLNG :**
+Le serveur vérifie que `SHA256(code_verifier) == code_challenge` (envoyé à l'étape 2).
+Si la vérification échoue, le serveur retourne `{"error": "invalid_grant", "error_description": "PKCE validation failed"}`.
 
 **Le JWT (`client_assertion`) contient :**
 - `iss` et `sub` : le `client_id` (pam-access)
@@ -393,21 +432,21 @@ auth required pam_llng.so no_rotate_refresh  # Pour désactiver (non recommandé
 
 ### Échelle de cotation
 
-| Score | Probabilité | Impact |
-|-------|-------------|--------|
-| 1 | Très improbable | Négligeable |
-| 2 | Peu probable | Limité |
-| 3 | Probable | Important |
-| 4 | Très probable | Critique |
+| Score | Probabilité     | Impact      |
+| ----- | --------------- | ----------- |
+| 1     | Très improbable | Négligeable |
+| 2     | Peu probable    | Limité      |
+| 3     | Probable        | Important   |
+| 4     | Très probable   | Critique    |
 
 ---
 
 ### R0 - Compromission du client_secret lors de l'initialisation
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 2 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   2   |
 
 **Description :** Le `client_secret` doit être transmis de l'administrateur LLNG à l'administrateur système du serveur cible lors de la phase d'initialisation. Ce secret pourrait être intercepté.
 
@@ -459,19 +498,19 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 - L'admin LLNG génère le secret et le transmet via un canal chiffré (Signal, GPG)
 - Le secret est saisi directement sur le serveur cible, pas copié dans des documents intermédiaires
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 2 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       2        |
 
 ---
 
 ### R1 - Interception du user_code pendant sa transmission
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
 
 **Description :** Le `user_code` (ex: `ABCD-1234`) doit être transmis de l'opérateur à l'administrateur LLNG par un canal externe (email, téléphone, Slack...). Ce canal peut être compromis.
 
@@ -498,19 +537,19 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 - L'administrateur doit vérifier que la demande est légitime (ticket, appel téléphonique de confirmation)
 - Documenter qui a demandé l'enrôlement et pourquoi
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       2        |
+| **Impact**      |       3        |
 
 ---
 
 ### R2 - Brute-force du user_code
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
 
 **Description :** Le `user_code` est court (8 caractères, typiquement alphanumériques). Un attaquant pourrait tenter de le deviner.
 
@@ -530,19 +569,19 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 - Monitoring des tentatives de brute-force
 - Augmenter la longueur du `user_code` si nécessaire
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 3 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       3        |
 
 ---
 
 ### R3 - Interception du client_secret pendant le polling
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Description :** Le `client_secret` OIDC est utilisé pour authentifier le client lors des requêtes vers `/oauth2/token`. Une interception permettrait de créer des tokens serveur frauduleux pour n'importe quel `device_code` futur.
 
@@ -593,19 +632,19 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 - Stocker `client_secret` dans le fichier de config plutôt que le passer en CLI
 - Protéger le fichier de config (`chmod 600`)
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 3 (avec `client_secret_jwt`, le secret intercepté est un JWT à usage unique) |
+|                 | Score résiduel                                                              |
+| --------------- | :-------------------------------------------------------------------------: |
+| **Probabilité** |                                      1                                      |
+| **Impact**      | 3 (avec `client_secret_jwt`, le secret intercepté est un JWT à usage unique) |
 
 ---
 
 ### R4 - Vol du fichier token après enrôlement
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   4   |
 
 **Description :** Le fichier `/etc/security/pam_llng.token` contient l'`access_token` du serveur. Sa compromission permet d'usurper l'identité du serveur auprès de LLNG.
 
@@ -651,19 +690,19 @@ auditctl -w /etc/security/pam_llng.token -p rwa -k pam_token_access
 - Un token compromis ne permet d'usurper que les serveurs du même `server_group`
 - Impact réduit de 4 → 3 si segmentation fine appliquée
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 4 (ou 3 avec segmentation server_group) |
+|                 | Score résiduel                          |
+| --------------- | :-------------------------------------: |
+| **Probabilité** |                    1                    |
+| **Impact**      | 4 (ou 3 avec segmentation server_group) |
 
 ---
 
 ### R5 - Usurpation du serveur LLNG pendant l'enrôlement
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Description :** Un attaquant pourrait se faire passer pour le serveur LLNG et :
 - Capturer le `client_secret` envoyé pendant le polling
@@ -699,19 +738,19 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
   openssl enc -base64
 ```
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 4 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       4        |
 
 ---
 
 ### R6 - Expiration du device_code non gérée
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 2 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   2   |
 
 **Description :** Le `device_code` expire après 5 minutes (par défaut). Si l'administrateur tarde à approuver, l'enrôlement échoue.
 
@@ -728,19 +767,19 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 - Coordonner avec l'administrateur avant de lancer le script
 - S'assurer que l'administrateur est disponible et prêt
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 1 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       2        |
+| **Impact**      |       1        |
 
 ---
 
 ### R7 - Enrôlement non autorisé (serveur malveillant)
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Description :** Un attaquant pourrait enrôler un serveur non autorisé et obtenir un token valide.
 
@@ -773,19 +812,19 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 - Un serveur malveillant ne peut usurper que les serveurs de son groupe
 - Impact réduit de 4 → 3 avec segmentation
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 3 (avec segmentation server_group) |
+|                 | Score résiduel                     |
+| --------------- | :--------------------------------: |
+| **Probabilité** |                 1                  |
+| **Impact**      | 3 (avec segmentation server_group) |
 
 ---
 
 ### R8 - Fuite du token en mémoire
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
 
 **Description :** Le token pourrait être extrait de la mémoire du processus PAM ou du script d'enrôlement.
 
@@ -814,19 +853,19 @@ echo "kernel.yama.ptrace_scope = 1" >> /etc/sysctl.conf
 cryptsetup luksFormat /dev/swap_partition
 ```
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 3 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       3        |
 
 ---
 
 ### R9 - Déni de service sur les endpoints d'enrôlement
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 2 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   2   |
 
 **Description :** Un attaquant pourrait empêcher les enrôlements légitimes.
 
@@ -849,19 +888,19 @@ cryptsetup luksFormat /dev/swap_partition
 - WAF devant LLNG
 - Procédure d'enrôlement alternative (hors-ligne) documentée
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 2 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       2        |
 
 ---
 
 ### R10 - Expiration du access_token non détectée
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
 
 **Description :** Le `access_token` du serveur a une durée de vie limitée (ex: 1 heure). S'il expire sans être rafraîchi, les authentifications échouent.
 
@@ -891,19 +930,19 @@ timedatectl set-ntp true
 - Monitoring de l'expiration des tokens
 - Procédure de ré-enrôlement d'urgence documentée
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 2 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       2        |
 
 ---
 
 ### R11 - Compromission du refresh_token
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Description :** Le `refresh_token` est stocké avec l'`access_token` dans `/etc/security/pam_llng.token`. Contrairement à l'`access_token` qui expire rapidement (ex: 1h), le `refresh_token` a une durée de vie longue et permet d'obtenir de nouveaux `access_token` sans ré-enrôlement.
 
@@ -935,19 +974,19 @@ timedatectl set-ntp true
 - Mêmes bénéfices que R4 : le token ne permet d'usurper que les serveurs du `server_group`
 - Impact réduit de 4 → 3 avec segmentation
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 3 (avec segmentation server_group) |
+|                 | Score résiduel                     |
+| --------------- | :--------------------------------: |
+| **Probabilité** |                 1                  |
+| **Impact**      | 3 (avec segmentation server_group) |
 
 ---
 
 ### R12 - Refresh_token dormant sur serveur inactif
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
 
 **Description :** Si un serveur enrôlé ne poll pas le SSO pendant une longue période (serveur éteint, déconnecté, décommissionné mais pas dé-enrôlé), son `refresh_token` reste valide indéfiniment.
 
@@ -974,10 +1013,74 @@ timedatectl set-ntp true
 - Heartbeat périodique pour maintenir le token actif
 - Détection de perte de connectivité
 
-| | Score résiduel |
-|---|:---:|
+|                 | Score résiduel                      |
+| --------------- | :---------------------------------: |
 | **Probabilité** | 2 (avec procédure de dé-enrôlement) |
-| **Impact** | 3 |
+| **Impact**      |                  3                  |
+
+---
+
+### R13 - Interception du device_code sans PKCE
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
+
+**Description :** Sans PKCE, un attaquant qui intercepte le `device_code` sur le réseau peut l'échanger contre un token avant le serveur légitime, même sans connaître le `code_verifier`.
+
+**Vecteurs d'attaque :**
+- MITM sur le réseau lors de l'appel POST `/oauth2/device`
+- Interception de la réponse contenant le `device_code`
+- L'attaquant poll `/oauth2/token` avec le `device_code` volé
+- Dès que l'admin approuve, l'attaquant obtient le token
+
+**Conséquence :** L'attaquant obtient un token serveur valide, le serveur légitime échoue car le `device_code` a été consommé.
+
+**Remédiation embarquée :**
+- **PKCE (RFC 7636)** : Le script `llng-pam-enroll` génère un `code_verifier` secret qui n'est jamais transmis lors de la requête initiale. Seul le `code_challenge` (hash SHA256) est envoyé.
+- Sans le `code_verifier`, l'attaquant ne peut pas échanger le `device_code` volé.
+
+**Remédiation configuration (côté LLNG) :**
+```yaml
+# OIDC → Relying Parties → pam-access → Options
+# FORTEMENT RECOMMANDÉ pour les clients Device Flow
+oidcRPMetaDataOptionsRequirePKCE: 1
+```
+
+Avec cette option activée, LLNG rejette les requêtes d'enrôlement sans `code_challenge`.
+
+**Flux sécurisé avec PKCE :**
+```
+Serveur légitime                          Attaquant
+      │                                        │
+      │ POST /oauth2/device                    │
+      │   code_challenge=SHA256(secret)        │
+      │──────────────────────────────────────>│ (intercepte)
+      │                                        │
+      │ device_code=XXX (volé par attaquant)  │
+      │<──────────────────────────────────────│
+      │                                        │
+      │                     POST /oauth2/token │
+      │                       device_code=XXX  │
+      │                       (sans code_verifier)
+      │                                        │
+      │                     ❌ ERREUR: invalid_grant
+      │                     "PKCE validation failed"
+      │                                        │
+      │ POST /oauth2/token                     │
+      │   device_code=XXX                      │
+      │   code_verifier=secret                 │
+      │──────────────────────────────────────>│
+      │                                        │
+      │ ✅ access_token                        │
+      │<──────────────────────────────────────│
+```
+
+|                 | Score résiduel (avec PKCE) |
+| --------------- | :------------------------: |
+| **Probabilité** |             1              |
+| **Impact**      |  1 (attaque impossible)    |
 
 ---
 
@@ -991,8 +1094,8 @@ timedatectl set-ntp true
               │       1        │       2        │       3        │       4        │
               │ Très improbable│  Peu probable  │    Probable    │ Très probable  │
    ┌──────────┼────────────────┼────────────────┼────────────────┼────────────────┤
-   │    4     │                │   R3  R5  R7   │      R4        │                │
- I │ Critique │                │      R11       │                │                │
+   │    4     │                │ R3 R5 R7 R11   │      R4        │                │
+ I │ Critique │                │     R13        │                │                │
  M ├──────────┼────────────────┼────────────────┼────────────────┼────────────────┤
  P │    3     │                │    R8  R10     │  R1  R2  R12   │                │
  A │Important │                │                │                │                │
@@ -1005,7 +1108,7 @@ timedatectl set-ntp true
    └──────────┴────────────────┴────────────────┴────────────────┴────────────────┘
 ```
 
-### Après remédiation (sans segmentation server_group)
+### Après remédiation (avec PKCE, sans segmentation server_group)
 
 ```
                                     PROBABILITÉ
@@ -1022,14 +1125,16 @@ timedatectl set-ntp true
  T │    2     │   R0  R9  R10  │      R6        │                │                │
    │  Limité  │                │                │                │                │
    ├──────────┼────────────────┼────────────────┼────────────────┼────────────────┤
-   │    1     │                │                │                │                │
+   │    1     │      R13       │                │                │                │
    │Négligeable                │                │                │                │
    └──────────┴────────────────┴────────────────┴────────────────┴────────────────┘
 ```
 
 **Note sur R3 :** Grâce à l'authentification `client_secret_jwt`, l'impact est réduit de 4 à 3 car un JWT intercepté est à usage unique (le `jti` empêche le rejeu).
 
-### Après remédiation (avec segmentation server_group)
+**Note sur R13 :** Avec PKCE activé (`oidcRPMetaDataOptionsRequirePKCE: 1`), l'interception du `device_code` devient inutile car l'attaquant ne possède pas le `code_verifier`. Le risque passe à P=1/I=1 (négligeable).
+
+### Après remédiation (avec PKCE et segmentation server_group)
 
 ```
                                     PROBABILITÉ
@@ -1046,7 +1151,7 @@ timedatectl set-ntp true
  T │    2     │   R0  R9  R10  │      R6        │                │                │
    │  Limité  │                │                │                │                │
    ├──────────┼────────────────┼────────────────┼────────────────┼────────────────┤
-   │    1     │                │                │                │                │
+   │    1     │      R13       │                │                │                │
    │Négligeable                │                │                │                │
    └──────────┴────────────────┴────────────────┴────────────────┴────────────────┘
 ```
@@ -1054,6 +1159,8 @@ timedatectl set-ntp true
 **Bénéfice de la segmentation :** R4, R7 et R11 passent d'Impact 4 (Critique) à Impact 3 (Important) car le blast radius est limité au `server_group` compromis.
 
 **Bénéfice de `client_secret_jwt` :** R3 passe d'Impact 4 à Impact 3 car le JWT intercepté est à usage unique (protection anti-rejeu via `jti`).
+
+**Bénéfice de PKCE :** R13 passe d'Impact 4 à Impact 1 (négligeable) car sans le `code_verifier`, l'interception du `device_code` est inutile.
 
 **Note sur R12 :** Ce risque reste en P=2/I=3 avec les procédures de dé-enrôlement. L'implémentation de l'issue #52 (révocation automatique après inactivité) permettrait de réduire davantage la probabilité.
 
@@ -1182,15 +1289,16 @@ Référence : [Issue LLNG #3030](https://gitlab.ow2.org/lemonldap-ng/lemonldap-n
 
 ### Fonctionnalités de sécurité implémentées
 
-| Recommandation | Référence | Statut | Implémentation |
-|----------------|-----------|--------|----------------|
-| Authentification JWT du client | R8, R8+ | ✅ Implémenté | `client_secret_jwt` (RFC 7523) avec HMAC-SHA256 |
-| Protection anti-rejeu JWT | - | ✅ Implémenté | Claim `jti` (UUID unique) dans chaque JWT |
-| Codes aléatoires | R18, R24 | ✅ LLNG | Génération côté serveur LLNG |
-| Désactivation code après usage | R30 | ✅ LLNG | Géré par le serveur LLNG |
-| Limitation TTL access_token | R33 | ✅ Configuration | Configurable côté LLNG |
-| Pas de token dans les logs | R32 | ✅ Implémenté | Aucun token dans les logs PAM |
-| PKCE pour Device Flow | Extension | ✅ Implémenté | `code_verifier` / `code_challenge` (S256) |
+| Recommandation                   | Référence | Statut           | Implémentation                                    |
+| -------------------------------- | --------- | ---------------- | ------------------------------------------------- |
+| Authentification JWT du client   | R8, R8+   | ✅ Implémenté    | `client_secret_jwt` (RFC 7523) avec HMAC-SHA256   |
+| Protection anti-rejeu JWT        | -         | ✅ Implémenté    | Claim `jti` (UUID unique) dans chaque JWT         |
+| Codes aléatoires                 | R18, R24  | ✅ LLNG          | Génération côté serveur LLNG                      |
+| Désactivation code après usage   | R30       | ✅ LLNG          | Géré par le serveur LLNG                          |
+| Limitation TTL access_token      | R33       | ✅ Configuration | Configurable côté LLNG                            |
+| Pas de token dans les logs       | R32       | ✅ Implémenté    | Aucun token dans les logs PAM                     |
+| PKCE pour Device Flow            | Extension | ✅ Implémenté    | `code_verifier` / `code_challenge` (S256)         |
+| PKCE obligatoire                 | Extension | ✅ Configuration | `oidcRPMetaDataOptionsRequirePKCE: 1` côté LLNG   |
 
 ### Configuration LLNG recommandée (côté serveur)
 
@@ -1201,6 +1309,9 @@ Pour maximiser la sécurité du client OIDC `pam-access`, appliquer ces paramèt
 
 # Authentification client par JWT (recommandation R8+)
 oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+
+# Exiger PKCE pour le Device Flow (FORTEMENT RECOMMANDÉ)
+oidcRPMetaDataOptionsRequirePKCE: 1
 
 # Désactiver les flows non utilisés (R1)
 oidcRPMetaDataOptionsAllowImplicitFlow: 0
@@ -1216,15 +1327,19 @@ oidcRPMetaDataOptionsRefreshTokenRotation: 1
 # Activé globalement dans la configuration LLNG
 ```
 
+**Note importante sur `oidcRPMetaDataOptionsRequirePKCE` :**
+
+Lorsque cette option est activée, le serveur LLNG rejette les requêtes d'enrôlement qui ne fournissent pas de `code_challenge`. Cela garantit que tous les clients doivent utiliser PKCE, empêchant les attaquants d'utiliser des scripts obsolètes sans PKCE pour enrôler des serveurs malveillants.
+
 ### Recommandations non applicables au Device Flow
 
 Certaines recommandations ANSSI concernent le flux Authorization Code classique et ne s'appliquent pas au Device Authorization Grant (RFC 8628) :
 
-| Recommandation | Référence | Raison |
-|----------------|-----------|--------|
-| Envoi de `state` | R10, R12 | Le Device Flow n'utilise pas de redirection HTTP |
-| Envoi de `nonce` | R14, R16 | Pas d'`id_token` dans le flux device code |
-| Vérification `state` | R22 | Pas de `state` dans le Device Flow |
+| Recommandation         | Référence | Raison                                             |
+| ---------------------- | --------- | -------------------------------------------------- |
+| Envoi de `state`       | R10, R12  | Le Device Flow n'utilise pas de redirection HTTP   |
+| Envoi de `nonce`       | R14, R16  | Pas d'`id_token` dans le flux device code          |
+| Vérification `state`   | R22       | Pas de `state` dans le Device Flow                 |
 
 ### PKCE pour Device Flow
 
@@ -1263,13 +1378,14 @@ Bien que le RFC 8628 ne mentionne pas PKCE, le module PAM l'implémente comme ex
 
 ### Tableau de synthèse sécurité
 
-| Couche | Protection | Mécanisme |
-|--------|------------|-----------|
-| Transport | Confidentialité | TLS 1.3 obligatoire |
-| Transport | Intégrité | Certificate pinning (optionnel) |
-| Client | Authentification | `client_secret_jwt` (RFC 7523) |
-| Client | Anti-rejeu | JWT avec `jti` unique |
-| Token | Confidentialité | PKCE (`code_verifier` / `code_challenge`) |
-| Token | Rotation | Refresh token rotatif |
-| Stockage | Confidentialité | Permissions 0600, hashage côté LLNG |
-| Segmentation | Blast radius | `server_group` |
+| Couche       | Protection        | Mécanisme                                                 |
+| ------------ | ----------------- | --------------------------------------------------------- |
+| Transport    | Confidentialité   | TLS 1.3 obligatoire                                       |
+| Transport    | Intégrité         | Certificate pinning (optionnel)                           |
+| Client       | Authentification  | `client_secret_jwt` (RFC 7523)                            |
+| Client       | Anti-rejeu        | JWT avec `jti` unique                                     |
+| Device Flow  | Anti-interception | PKCE obligatoire (`oidcRPMetaDataOptionsRequirePKCE: 1`)  |
+| Token        | Confidentialité   | PKCE (`code_verifier` / `code_challenge`)                 |
+| Token        | Rotation          | Refresh token rotatif                                     |
+| Stockage     | Confidentialité   | Permissions 0600, hashage côté LLNG                       |
+| Segmentation | Blast radius      | `server_group`                                            |

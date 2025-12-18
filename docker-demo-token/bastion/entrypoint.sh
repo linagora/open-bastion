@@ -77,12 +77,21 @@ else
     exit 1
 fi
 
-# Step 3: Initiate Device Authorization Grant
-echo "Initiating Device Authorization Grant..."
+# Step 3: Initiate Device Authorization Grant with PKCE (RFC 7636)
+echo "Initiating Device Authorization Grant with PKCE..."
+
+# Generate PKCE code_verifier (32 bytes of random data, base64url encoded)
+CODE_VERIFIER=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+# Generate code_challenge = BASE64URL(SHA256(code_verifier))
+CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+echo "  PKCE enabled (code_challenge_method=S256)"
+
 DEVICE_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
     -d "client_id=$CLIENT_ID" \
     -d "client_secret=$CLIENT_SECRET" \
-    -d "scope=pam pam:server")
+    -d "scope=pam pam:server" \
+    -d "code_challenge=$CODE_CHALLENGE" \
+    -d "code_challenge_method=S256")
 echo "  Device response: $DEVICE_RESP"
 
 DEVICE_CODE=$(echo "$DEVICE_RESP" | jq -r '.device_code // empty')
@@ -118,14 +127,15 @@ else
     echo "Checking approval status..."
 fi
 
-# Step 5: Poll for access token
+# Step 5: Poll for access token (with PKCE code_verifier)
 echo "Polling for access token..."
 for i in {1..30}; do
     TOKEN_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/token" \
         -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
         -d "device_code=$DEVICE_CODE" \
         -d "client_id=$CLIENT_ID" \
-        -d "client_secret=$CLIENT_SECRET")
+        -d "client_secret=$CLIENT_SECRET" \
+        -d "code_verifier=$CODE_VERIFIER")
 
     ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
 

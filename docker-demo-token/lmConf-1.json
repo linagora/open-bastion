@@ -98,7 +98,8 @@
       "oidcRPMetaDataOptionsClientAuthenticationMethod": "client_secret_jwt",
       "oidcRPMetaDataOptionsAccessTokenExpiration": 86400,
       "oidcRPMetaDataOptionsRefreshToken": 1,
-      "oidcRPMetaDataOptionsAllowDeviceAuthorizationGrant": 1
+      "oidcRPMetaDataOptionsAllowDeviceAuthorizationGrant": 1,
+      "oidcRPMetaDataOptionsRequirePKCE": 1
     },
     "ssh-cert": {
       "oidcRPMetaDataOptionsDisplayName": "SSH Certificate",

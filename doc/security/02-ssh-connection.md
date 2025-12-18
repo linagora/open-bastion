@@ -4,24 +4,24 @@
 
 Cette analyse couvre quatre architectures de déploiement SSH avec le module PAM LLNG :
 
-| Architecture | Description | Niveau de sécurité |
-|--------------|-------------|-------------------|
-| **A** | Serveur isolé | Base |
-| **B** | Serveur isolé + SSH CA | Amélioré |
-| **C** | Bastion + backends | Élevé |
-| **D** | Bastion + backends + SSH CA | Optimal |
+| Architecture | Description                  | Niveau de sécurité |
+| ------------ | ---------------------------- | ------------------ |
+| **A**        | Serveur isolé                | Base               |
+| **B**        | Serveur isolé + SSH CA       | Amélioré           |
+| **C**        | Bastion + backends           | Élevé              |
+| **D**        | Bastion + backends + SSH CA  | Optimal            |
 
 ### Acteurs
 
-| Acteur | Rôle |
-|--------|------|
-| **Utilisateur** | Personne se connectant en SSH |
-| **Client SSH** | Machine de l'utilisateur (laptop, workstation) |
-| **Serveur SSH** | Serveur cible avec PAM LLNG |
-| **Bastion** | Point d'entrée unique pour les connexions SSH |
-| **Backend** | Serveur accessible uniquement via le bastion |
-| **Portail LLNG** | Serveur d'authentification/autorisation |
-| **SSH CA** | Autorité de certification pour les clés SSH |
+| Acteur            | Rôle                                              |
+| ----------------- | ------------------------------------------------- |
+| **Utilisateur**   | Personne se connectant en SSH                     |
+| **Client SSH**    | Machine de l'utilisateur (laptop, workstation)    |
+| **Serveur SSH**   | Serveur cible avec PAM LLNG                       |
+| **Bastion**       | Point d'entrée unique pour les connexions SSH     |
+| **Backend**       | Serveur accessible uniquement via le bastion      |
+| **Portail LLNG**  | Serveur d'authentification/autorisation           |
+| **SSH CA**        | Autorité de certification pour les clés SSH       |
 
 ---
 
@@ -151,12 +151,12 @@ const char *ca_fp = pam_getenv(pamh, "SSH_CERT_CA_KEY_FP");
 
 ### Avantages vs Architecture A
 
-| Aspect | Architecture A | Architecture B |
-|--------|----------------|----------------|
-| Traçabilité | Username seul | key_id, serial, principals |
-| Révocation | Impossible sans LLNG | Possible via CRL ou LLNG |
-| Durée de vie clé | Illimitée | Limitée par certificat |
-| Audit | Basique | Complet avec serial |
+| Aspect           | Architecture A   | Architecture B               |
+| ---------------- | ---------------- | ---------------------------- |
+| Traçabilité      | Username seul    | key_id, serial, principals   |
+| Révocation       | Impossible sans LLNG | Possible via CRL ou LLNG |
+| Durée de vie clé | Illimitée        | Limitée par certificat       |
+| Audit            | Basique          | Complet avec serial          |
 
 ### Configuration serveur SSH
 
@@ -231,12 +231,12 @@ Ou via groupe de sécurité (AWS/GCP/Azure) :
 
 ### Avantages sécurité
 
-| Aspect | Sans restriction réseau | Avec restriction au bastion |
-|--------|------------------------|----------------------------|
-| Surface d'attaque | Backends exposés | Bastion seul exposé |
-| Contournement | Possible si IP backend connue | Impossible |
-| Audit | Partiel | Complet (tout passe par bastion) |
-| Compromission bastion | Accès backends | Accès backends (identique) |
+| Aspect                | Sans restriction réseau       | Avec restriction au bastion      |
+| --------------------- | ----------------------------- | -------------------------------- |
+| Surface d'attaque     | Backends exposés              | Bastion seul exposé              |
+| Contournement         | Possible si IP backend connue | Impossible                       |
+| Audit                 | Partiel                       | Complet (tout passe par bastion) |
+| Compromission bastion | Accès backends                | Accès backends (identique)       |
 
 ### Configuration server_group
 
@@ -365,21 +365,21 @@ ListenAddress 10.0.0.0  # Réseau privé uniquement
 
 ### Échelle de cotation
 
-| Score | Probabilité | Impact |
-|-------|-------------|--------|
-| 1 | Très improbable | Négligeable |
-| 2 | Peu probable | Limité |
-| 3 | Probable | Important |
-| 4 | Très probable | Critique |
+| Score | Probabilité     | Impact      |
+| ----- | --------------- | ----------- |
+| 1     | Très improbable | Négligeable |
+| 2     | Peu probable    | Limité      |
+| 3     | Probable        | Important   |
+| 4     | Très probable   | Critique    |
 
 ---
 
 ### R-S1 - Authentification par mot de passe SSH
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   4   |
 
 **Architectures concernées :** A, B, C, D (si mal configuré)
 
@@ -399,19 +399,19 @@ ChallengeResponseAuthentication no
 PubkeyAuthentication yes
 ```
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 (avec clés uniquement) |
-| **Impact** | 4 |
+|                 | Score résiduel             |
+| --------------- | :------------------------: |
+| **Probabilité** | 1 (avec clés uniquement)   |
+| **Impact**      |             4              |
 
 ---
 
 ### R-S2 - Vol de clé SSH privée
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Architectures concernées :** A, C (sans certificats)
 
@@ -442,19 +442,19 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 **Remédiation architecturale :**
 - Passer à l'architecture B ou D (certificats avec durée de vie limitée)
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 (avec désactivation utilisateur LLNG possible) |
+|                 | Score résiduel                                    |
+| --------------- | :-----------------------------------------------: |
+| **Probabilité** |                         2                         |
+| **Impact**      | 3 (avec désactivation utilisateur LLNG possible)  |
 
 ---
 
 ### R-S3 - Certificat SSH compromis
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
 
 **Architectures concernées :** B, D
 
@@ -476,19 +476,19 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 - Liste de révocation par serial
 - Alerte si même certificat utilisé depuis IPs différentes
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 (avec durée courte + révocation) |
-| **Impact** | 2 (durée limitée) |
+|                 | Score résiduel                        |
+| --------------- | :-----------------------------------: |
+| **Probabilité** | 1 (avec durée courte + révocation)    |
+| **Impact**      |          2 (durée limitée)            |
 
 ---
 
 ### R-S4 - Compromission de la CA SSH
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   4   |
 
 **Architectures concernées :** B, D
 
@@ -520,19 +520,19 @@ chmod 400 /secure/ca_key
 - Utiliser un HSM pour stocker la clé CA
 - Short-lived CA (renouvellement régulier)
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 |
-| **Impact** | 4 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       4        |
 
 ---
 
 ### R-S5 - Contournement du bastion
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
 
 **Architectures concernées :** C, D (si mal configuré)
 
@@ -568,19 +568,19 @@ ssh -o ConnectTimeout=5 backend.internal.example.com
 # Connection refused / timeout = OK
 ```
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 (avec restriction réseau) |
-| **Impact** | 3 |
+|                 | Score résiduel                  |
+| --------------- | :-----------------------------: |
+| **Probabilité** | 1 (avec restriction réseau)     |
+| **Impact**      |               3                 |
 
 ---
 
 ### R-S6 - Compromission du bastion
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 4 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
 
 **Architectures concernées :** C, D
 
@@ -621,19 +621,19 @@ Host backend
 - Même depuis un bastion compromis, chaque accès backend est vérifié
 - L'attaquant doit compromettre AUSSI les credentials utilisateur
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 (avec PAM LLNG sur backends) |
+|                 | Score résiduel                      |
+| --------------- | :---------------------------------: |
+| **Probabilité** |                  2                  |
+| **Impact**      | 3 (avec PAM LLNG sur backends)      |
 
 ---
 
 ### R-S7 - Serveur LLNG indisponible
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 3 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
 
 **Architectures concernées :** A, B, C, D
 
@@ -662,19 +662,19 @@ auth_cache_offline_ttl = 86400  # 24h si LLNG indisponible
 - LLNG en haute disponibilité
 - Plusieurs portails LLNG (failover)
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 1 (avec HA) |
-| **Impact** | 2 (avec cache offline) |
+|                 | Score résiduel           |
+| --------------- | :----------------------: |
+| **Probabilité** |      1 (avec HA)         |
+| **Impact**      | 2 (avec cache offline)   |
 
 ---
 
 ### R-S8 - Session SSH persistante après révocation
 
-| | Score |
-|---|:---:|
-| **Probabilité** | 3 |
-| **Impact** | 2 |
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   2   |
 
 **Architectures concernées :** A, B, C, D
 
@@ -704,10 +704,10 @@ TMOUT=3600  # Déconnexion après 1h d'inactivité
 pkill -u $USERNAME -KILL
 ```
 
-| | Score résiduel |
-|---|:---:|
-| **Probabilité** | 2 |
-| **Impact** | 2 |
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       2        |
+| **Impact**      |       2        |
 
 ---
 

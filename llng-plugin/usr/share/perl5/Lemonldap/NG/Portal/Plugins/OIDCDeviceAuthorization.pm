@@ -2,6 +2,8 @@ package Lemonldap::NG::Portal::Plugins::OIDCDeviceAuthorization;
 
 # OAuth 2.0 Device Authorization Grant - RFC 8628
 # https://datatracker.ietf.org/doc/html/rfc8628
+#
+# With PKCE extension (RFC 7636) for additional security
 
 use strict;
 use Mouse;
@@ -126,6 +128,34 @@ sub deviceAuthorizationEndpoint {
     # Get requested scope
     my $scope = $req->param('scope') || 'openid';
 
+    # PKCE support (RFC 7636)
+    my $code_challenge        = $req->param('code_challenge');
+    my $code_challenge_method = $req->param('code_challenge_method') || 'plain';
+
+    # Check if PKCE is required for this RP
+    if ( $self->oidc->rpOptions->{$rp}->{oidcRPMetaDataOptionsRequirePKCE}
+        and !$code_challenge )
+    {
+        $self->logger->warn("PKCE required but no code_challenge provided for RP $rp");
+        return $self->_sendDeviceError( $req, 'invalid_request',
+            'code_challenge is required' );
+    }
+
+    # Validate code_challenge_method if PKCE is used
+    if ($code_challenge) {
+        unless ( $code_challenge_method eq 'plain'
+            or $code_challenge_method eq 'S256' )
+        {
+            $self->logger->warn(
+                "Invalid code_challenge_method: $code_challenge_method");
+            return $self->_sendDeviceError( $req, 'invalid_request',
+                'code_challenge_method must be plain or S256' );
+        }
+        $self->logger->debug(
+            "PKCE enabled for device authorization (method=$code_challenge_method)"
+        );
+    }
+
     # Generate device_code (secret, used for polling)
     my $device_code = $self->_generateDeviceCode();
 
@@ -142,16 +172,18 @@ sub deviceAuthorizationEndpoint {
     my $device_code_hash = sha256_hex($device_code);
 
     my $session_data = {
-        _type       => 'deviceauth',
-        _utime      => time() - $self->conf->{timeout} + $expiration,
-        device_code => $device_code,
-        user_code   => $user_code,
-        client_id   => $client_id,
-        rp          => $rp,
-        scope       => $scope,
-        status      => 'pending',              # pending, approved, denied
-        created_at  => time(),
-        expires_at  => time() + $expiration,
+        _type                 => 'deviceauth',
+        _utime                => time() - $self->conf->{timeout} + $expiration,
+        device_code           => $device_code,
+        user_code             => $user_code,
+        client_id             => $client_id,
+        rp                    => $rp,
+        scope                 => $scope,
+        status                => 'pending',    # pending, approved, denied
+        created_at            => time(),
+        expires_at            => time() + $expiration,
+        code_challenge        => $code_challenge,
+        code_challenge_method => $code_challenge_method,
     };
 
     # Store the device authorization using getApacheSession with fixed ID
@@ -411,13 +443,9 @@ sub _generateUserCode {
     my $length =
       $self->conf->{oidcServiceDeviceAuthorizationUserCodeLength} || 8;
     my $chars = USER_CODE_CHARS;
-    my $chars_len = length($chars);
     my $code  = '';
-
-    # Use cryptographically secure random bytes
-    my $random_bytes = Crypt::URandom::urandom($length);
-    for my $byte ( unpack( 'C*', $random_bytes ) ) {
-        $code .= substr( $chars, $byte % $chars_len, 1 );
+    for ( 1 .. $length ) {
+        $code .= substr( $chars, int( rand( length($chars) ) ), 1 );
     }
     return $code;
 }
@@ -533,6 +561,27 @@ sub _deleteDeviceAuth {
 
 sub _generateTokens {
     my ( $self, $req, $device_auth, $rp ) = @_;
+
+    # Validate PKCE if it was used
+    my $code_challenge        = $device_auth->{code_challenge};
+    my $code_challenge_method = $device_auth->{code_challenge_method};
+
+    if ($code_challenge) {
+        my $code_verifier = $req->param('code_verifier');
+
+        # Use the OIDC issuer's validatePKCEChallenge method
+        unless (
+            $self->oidc->validatePKCEChallenge(
+                $code_verifier, $code_challenge, $code_challenge_method
+            )
+          )
+        {
+            $self->logger->error("PKCE validation failed for device code grant");
+            return $self->_sendTokenError( $req, 'invalid_grant',
+                'PKCE validation failed' );
+        }
+        $self->logger->debug("PKCE validation successful");
+    }
 
     my $scope = $device_auth->{scope};
 

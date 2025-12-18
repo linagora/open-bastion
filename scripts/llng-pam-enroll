@@ -114,6 +114,26 @@ check_requirements() {
     fi
 }
 
+# Generate PKCE code_verifier and code_challenge (RFC 7636)
+# This provides additional security for the Device Authorization Grant
+generate_pkce() {
+    # Generate 32 bytes of random data for code_verifier
+    # RFC 7636 requires 43-128 characters, base64url of 32 bytes = 43 chars
+    local random_bytes
+    if [ -r /dev/urandom ]; then
+        random_bytes=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+    else
+        # Fallback using openssl rand
+        random_bytes=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')
+    fi
+
+    CODE_VERIFIER="$random_bytes"
+
+    # Generate code_challenge = BASE64URL(SHA256(code_verifier))
+    CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+    CODE_CHALLENGE_METHOD="S256"
+}
+
 # Generate a JWT for client_secret_jwt authentication (RFC 7523)
 # This avoids sending the client_secret in plaintext over the network
 generate_client_jwt() {
@@ -310,6 +330,10 @@ curl_opts() {
 initiate_device_auth() {
     log_step "Initiating device authorization"
 
+    # Generate PKCE parameters for additional security (RFC 7636)
+    generate_pkce
+    log_info "PKCE enabled (code_challenge_method=S256)"
+
     local response
     local http_code
 
@@ -318,7 +342,9 @@ initiate_device_auth() {
     response=$(curl $curl_options -w "\n%{http_code}" \
         -X POST "${PORTAL_URL}/oauth2/device" \
         -d "client_id=${CLIENT_ID}" \
-        -d "scope=${SCOPE}" 2>&1) || {
+        -d "scope=${SCOPE}" \
+        -d "code_challenge=${CODE_CHALLENGE}" \
+        -d "code_challenge_method=${CODE_CHALLENGE_METHOD}" 2>&1) || {
         log_error "Failed to contact portal at ${PORTAL_URL}/oauth2/device"
         log_info "Check that the portal URL is correct and Device Authorization is enabled"
         exit 1
@@ -413,7 +439,8 @@ poll_for_token() {
             -d "device_code=${DEVICE_CODE}" \
             -d "client_id=${CLIENT_ID}" \
             -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
-            -d "client_assertion=${client_jwt}" 2>&1) || true
+            -d "client_assertion=${client_jwt}" \
+            -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
 
         # Check for access token
         access_token=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
