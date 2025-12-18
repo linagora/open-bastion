@@ -1,4 +1,4 @@
-.TH LLNG-PAM-ENROLL 8 "December 2024" "pam-llng 1.0.0" "System Administration"
+.TH LLNG-PAM-ENROLL 8 "December 2025" "pam-llng 1.0.0" "System Administration"
 .SH NAME
 llng-pam-enroll \- Enroll a server with LemonLDAP::NG for PAM authentication
 .SH SYNOPSIS
@@ -73,6 +73,24 @@ Main configuration file for the PAM module.
 .TP
 .I /etc/security/pam_llng.token
 Server token file created by this script.
+.SH SECURITY
+.PP
+The enrollment process uses several security mechanisms:
+.TP
+.B PKCE (RFC 7636)
+PKCE (Proof Key for Code Exchange) is automatically used to protect against
+device_code interception attacks. A code_verifier is generated locally and
+never transmitted until the token exchange, preventing attackers from using
+an intercepted device_code.
+.TP
+.B client_secret_jwt (RFC 7523)
+Client authentication uses JWT assertions signed with HMAC-SHA256.
+The client_secret is never transmitted over the network; instead, it signs
+a JWT with a unique jti claim to prevent replay attacks.
+.TP
+.B TLS
+All communications with the LemonLDAP::NG server use HTTPS. Certificate
+verification is enabled by default (use \-k to disable for testing only).
 .SH EXIT STATUS
 .TP
 .B 0
@@ -88,5 +106,5 @@ LemonLDAP::NG documentation: https://lemonldap-ng.org/
 .SH AUTHOR
 Xavier Guimard <xguimard@linagora.com>
 .SH COPYRIGHT
-Copyright (C) 2024 Linagora.
+Copyright (C) 2025 Linagora.
 License: AGPL-3.0+

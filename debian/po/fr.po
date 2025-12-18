@@ -1,14 +1,14 @@
 # French translation of pam-llng debconf templates.
-# Copyright (C) 2024 Linagora
+# Copyright (C) 2025 Linagora
 # This file is distributed under the same license as the pam-llng package.
-# Xavier Guimard <xguimard@linagora.com>, 2024.
+# Xavier Guimard <xguimard@linagora.com>, 2025.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: pam-llng\n"
 "Report-Msgid-Bugs-To: pam-llng@packages.debian.org\n"
 "POT-Creation-Date: 2025-12-16 22:18+0100\n"
-"PO-Revision-Date: 2024-12-14 15:10+0100\n"
+"PO-Revision-Date: 2025-12-14 15:10+0100\n"
 "Last-Translator: Xavier Guimard <xguimard@linagora.com>\n"
 "Language-Team: French <debian-l10n-french@lists.debian.org>\n"
 "Language: fr\n"

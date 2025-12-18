@@ -80,5 +80,5 @@ and key-based authorization with server groups.
 %systemd_postun_with_restart pam-llng-heartbeat.timer
 
 %changelog
-* Sat Dec 14 2024 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
+* Sat Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
 - Initial RPM package

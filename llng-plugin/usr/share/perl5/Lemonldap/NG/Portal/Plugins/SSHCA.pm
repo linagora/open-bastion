@@ -687,7 +687,7 @@ Response:
     {
         "certificate": "ssh-ed25519-cert-v01@openssh.com AAAA...",
         "serial": 1,
-        "valid_until": "2024-01-01T12:00:00Z",
+        "valid_until": "2025-01-01T12:00:00Z",
         "principals": ["user1"],
         "key_id": "user1@llng-1234567890-000001"
     }

@@ -224,7 +224,7 @@ static void format_timestamp(const struct timespec *ts, char *buf, size_t buf_si
     if (ms < 0) ms = 0;
     if (ms > 999) ms = 999;
 
-    /* ISO 8601 format: 2024-01-15T12:30:45.123Z = 24 chars + null */
+    /* ISO 8601 format: 2025-01-15T12:30:45.123Z = 24 chars + null */
     snprintf(buf, buf_size, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
              year, mon, day, hour, min, sec, ms);
 }
