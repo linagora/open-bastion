@@ -12,7 +12,7 @@ Analyse des Risques - État Après Remédiations
 
 Pistes d'Amélioration par Risque
 
-R5 (P=1, I=4) - Usurpation du serveur LLNG
+# R5 _(P=1, I=4)_ - Usurpation du serveur LLNG
 
 Problème : Impact critique irréductible (compromission du SSO = game over)
 
@@ -21,7 +21,7 @@ Pistes pour réduire la probabilité à quasi-zéro :
 2. mTLS : Le serveur PAM présente aussi un certificat client
 3. DANE (DNSSEC + TLSA) : Validation du certificat via DNS signé
 
-R2 (P=1, I=3) - Brute-force du user_code (avec CrowdSec)
+# R2 _(P=1, I=3)_ - Brute-force du user_code (avec CrowdSec)
 
 **Recommandations RFC 8628 :**
 
@@ -67,19 +67,19 @@ oidcServiceDeviceAuthorizationExpiration: 300  # 5 min au lieu de 10
 
 Avec CrowdSec activé, P passe à 1 car le brute-force devient "infeasible" (RFC 8628)
 
-R6 (P=2, I=2) - Expiration device_code
+# R6 _(P=2, I=2)_ - Expiration device_code
 
 Pistes pour réduire P à 1 :
 1. Augmenter le TTL par défaut (10 min au lieu de 5)
 2. Notification push quand l'admin approuve (l'opérateur sait que c'est bon)
 
-R1, R4, R7, R11 (P=1, I=3) - Risques liés aux tokens/credentials
+# R1, R4, R7, R11 _(P=1, I=3)_ - Risques liés aux tokens/credentials
 
 Pistes pour réduire I à 2 :
 1. Token lié au matériel (TPM/HSM) : Le token ne peut être utilisé que sur la machine qui l'a obtenu
 2. Segmentation plus fine (déjà fait, mais possibilité de groups dynamiques)
 
-R8 (P=1, I=3) - Fuite mémoire
+# R8 _(P=1, I=3)_ - Fuite mémoire
 
 Pistes pour réduire P (quasi-impossible) :
 1. mlock() pour empêcher le swap des secrets
