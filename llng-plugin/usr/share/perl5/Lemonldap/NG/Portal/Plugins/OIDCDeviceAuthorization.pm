@@ -136,7 +136,8 @@ sub deviceAuthorizationEndpoint {
     if ( $self->oidc->rpOptions->{$rp}->{oidcRPMetaDataOptionsRequirePKCE}
         and !$code_challenge )
     {
-        $self->logger->warn("PKCE required but no code_challenge provided for RP $rp");
+        $self->logger->warn(
+            "PKCE required but no code_challenge provided for RP $rp");
         return $self->_sendDeviceError( $req, 'invalid_request',
             'code_challenge is required' );
     }
@@ -152,7 +153,7 @@ sub deviceAuthorizationEndpoint {
                 'code_challenge_method must be plain or S256' );
         }
         $self->logger->debug(
-            "PKCE enabled for device authorization (method=$code_challenge_method)"
+"PKCE enabled for device authorization (method=$code_challenge_method)"
         );
     }
 
@@ -172,17 +173,17 @@ sub deviceAuthorizationEndpoint {
     my $device_code_hash = sha256_hex($device_code);
 
     my $session_data = {
-        _type                 => 'deviceauth',
-        _utime                => time() - $self->conf->{timeout} + $expiration,
-        device_code           => $device_code,
-        user_code             => $user_code,
-        client_id             => $client_id,
-        rp                    => $rp,
-        scope                 => $scope,
-        status                => 'pending',    # pending, approved, denied
-        created_at            => time(),
-        expires_at            => time() + $expiration,
-        code_challenge        => $code_challenge,
+        _type          => 'deviceauth',
+        _utime         => time() - $self->conf->{timeout} + $expiration,
+        device_code    => $device_code,
+        user_code      => $user_code,
+        client_id      => $client_id,
+        rp             => $rp,
+        scope          => $scope,
+        status         => 'pending',              # pending, approved, denied
+        created_at     => time(),
+        expires_at     => time() + $expiration,
+        code_challenge => $code_challenge,
         code_challenge_method => $code_challenge_method,
     };
 
@@ -576,7 +577,8 @@ sub _generateTokens {
 
         # Verify code_verifier is provided when code_challenge exists
         unless ($code_verifier) {
-            $self->logger->error("code_verifier is required when code_challenge was provided");
+            $self->logger->error(
+                "code_verifier is required when code_challenge was provided");
             return $self->_sendTokenError( $req, 'invalid_grant',
                 'code_verifier is required' );
         }
@@ -588,7 +590,8 @@ sub _generateTokens {
             )
           )
         {
-            $self->logger->error("PKCE validation failed for device code grant");
+            $self->logger->error(
+                "PKCE validation failed for device code grant");
             return $self->_sendTokenError( $req, 'invalid_grant',
                 'PKCE validation failed' );
         }

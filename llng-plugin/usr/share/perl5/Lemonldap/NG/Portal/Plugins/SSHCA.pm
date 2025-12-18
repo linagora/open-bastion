@@ -380,9 +380,9 @@ sub _getNextSerial {
 
     my $serial = 1;
 
-    # Open file in append+read mode to ensure file is created if it doesn't exist.
-    # We then seek to beginning to read/write. This avoids a TOCTOU race when
-    # checking existence separately from opening.
+  # Open file in append+read mode to ensure file is created if it doesn't exist.
+  # We then seek to beginning to read/write. This avoids a TOCTOU race when
+  # checking existence separately from opening.
     if ( open my $fh, '+>>', $serialPath ) {
 
         # Acquire exclusive lock to prevent race conditions
