@@ -192,3 +192,55 @@ jobs:
       with:
         scandir: './scripts'
         severity: warning
+
+  integration-test:
+    name: Integration Tests (Docker)
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install llng CLI
+      run: |
+        # Install simple-oidc-client (llng CLI)
+        git clone --depth 1 https://github.com/linagora/simple-oidc-client.git /tmp/simple-oidc-client
+        sudo cp /tmp/simple-oidc-client/sh/llng /usr/local/bin/
+        sudo cp /tmp/simple-oidc-client/sh/llng-lib.sh /usr/local/bin/
+        sudo chmod +x /usr/local/bin/llng
+
+    - name: Install test dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl openssh-client
+
+    - name: Clone LLNG plugins
+      run: |
+        # Clone llng-plugin for the demo
+        git clone --depth 1 https://github.com/linagora/llng-docker.git /tmp/llng-docker || true
+        if [ -d /tmp/llng-docker/llng-plugin ]; then
+          cp -r /tmp/llng-docker/llng-plugin ./llng-plugin
+        else
+          # Create minimal plugin structure if not available
+          mkdir -p llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins
+          mkdir -p llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap
+          mkdir -p llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js
+        fi
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Run integration tests
+      run: |
+        chmod +x tests/test_integration_docker.sh
+        ./tests/test_integration_docker.sh --verbose
+      timeout-minutes: 15
+
+    - name: Show container logs on failure
+      if: failure()
+      run: |
+        cd docker-demo-cert
+        docker compose logs || true

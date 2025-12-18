@@ -54,6 +54,7 @@
 
   "portalSkin": "bootstrap",
   "loginHistoryEnabled": 0,
+  "restSessionServer": 1,
 
   "issuerDBOpenIDConnectActivation": 1,
   "oidcServiceMetaDataAuthorizeURI": "authorize",
