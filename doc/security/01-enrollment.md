@@ -6,12 +6,12 @@ L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). 
 
 ### Acteurs
 
-| Acteur                   | Rôle                                                             |
-| ------------------------ | ---------------------------------------------------------------- |
-| **Opérateur**            | Personne exécutant `llng-pam-enroll` sur le serveur à enrôler    |
+| Acteur                   | Rôle                                                               |
+| ------------------------ | ------------------------------------------------------------------ |
+| **Opérateur**            | Personne exécutant `llng-pam-enroll` sur le serveur à enrôler      |
 | **Administrateur LLNG**  | Personne habilitée à approuver les enrôlements sur le portail LLNG |
-| **Serveur cible**        | Machine à enrôler pour l'authentification PAM                    |
-| **Portail LLNG**         | Serveur LemonLDAP::NG fournissant les endpoints OAuth2           |
+| **Serveur cible**        | Machine à enrôler pour l'authentification PAM                      |
+| **Portail LLNG**         | Serveur LemonLDAP::NG fournissant les endpoints OAuth2             |
 
 ### Prérequis (côté LLNG)
 
@@ -407,8 +407,8 @@ auth required pam_llng.so no_rotate_refresh  # Pour désactiver (non recommandé
    │         │                 │          │                 │          │
    └─────────┘                 └──────────┘                 └──────────┘
         │                            │                            │
-        │ access_token (1h)          │ Vérifie                   │ Nouveau access_token
-        │ refresh_token              │ expiration                │ Nouveau refresh_token
+        │ access_token (1h)          │ Vérifie                    │ Nouveau access_token
+        │ refresh_token              │ expiration                 │ Nouveau refresh_token
         │                            │                            │
         ▼                            ▼                            ▼
    ┌─────────────────────────────────────────────────────────────────┐
@@ -1065,29 +1065,29 @@ Avec cette option activée, LLNG rejette les requêtes d'enrôlement sans `code_
 
 **Flux sécurisé avec PKCE :**
 ```
-Serveur légitime                          Attaquant
+Serveur légitime                           Attaquant
       │                                        │
       │ POST /oauth2/device                    │
       │   code_challenge=SHA256(secret)        │
-      │──────────────────────────────────────>│ (intercepte)
+      │───────────────────────────────────────>│ (intercepte)
       │                                        │
-      │ device_code=XXX (volé par attaquant)  │
-      │<──────────────────────────────────────│
+      │ device_code=XXX (volé par attaquant)   │
+      │<───────────────────────────────────────│
       │                                        │
-      │                     POST /oauth2/token │
-      │                       device_code=XXX  │
-      │                       (sans code_verifier)
+      │                POST /oauth2/token      │
+      │                  device_code=XXX       │
+      │                  (sans code_verifier)  │
       │                                        │
-      │                     ❌ ERREUR: invalid_grant
-      │                     "PKCE validation failed"
+      │                ❌ ERREUR: invalid_grant│
+      │                "PKCE validation failed"│
       │                                        │
       │ POST /oauth2/token                     │
       │   device_code=XXX                      │
       │   code_verifier=secret                 │
-      │──────────────────────────────────────>│
+      │───────────────────────────────────────>│
       │                                        │
       │ ✅ access_token                        │
-      │<──────────────────────────────────────│
+      │<───────────────────────────────────────│
 ```
 
 |                 | Score résiduel (avec PKCE) |

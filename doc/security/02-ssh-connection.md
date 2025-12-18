@@ -151,12 +151,12 @@ const char *ca_fp = pam_getenv(pamh, "SSH_CERT_CA_KEY_FP");
 
 ### Avantages vs Architecture A
 
-| Aspect           | Architecture A   | Architecture B               |
-| ---------------- | ---------------- | ---------------------------- |
-| Traçabilité      | Username seul    | key_id, serial, principals   |
+| Aspect           | Architecture A       | Architecture B               |
+| ---------------- | -------------------- | ---------------------------- |
+| Traçabilité      | Username seul        | key_id, serial, principals   |
 | Révocation       | Impossible sans LLNG | Possible via CRL ou LLNG |
-| Durée de vie clé | Illimitée        | Limitée par certificat       |
-| Audit            | Basique          | Complet avec serial          |
+| Durée de vie clé | Illimitée            | Limitée par certificat       |
+| Audit            | Basique              | Complet avec serial          |
 
 ### Configuration serveur SSH
 
@@ -180,10 +180,10 @@ Les serveurs backends ne sont accessibles que via un bastion. Cette architecture
 ```
                                        ┌─────────────────────────────────────────┐
                                        │           Zone sécurisée                │
-┌─────────────┐      ┌─────────────┐   │   ┌─────────────┐   ┌─────────────┐    │
-│   Client    │      │   Bastion   │   │   │  Backend 1  │   │  Backend 2  │    │
-│    SSH      │      │  (PAM LLNG) │   │   │ (PAM LLNG)  │   │ (PAM LLNG)  │    │
-└──────┬──────┘      └──────┬──────┘   │   └──────┬──────┘   └──────┬──────┘    │
+┌─────────────┐      ┌─────────────┐   │   ┌─────────────┐   ┌─────────────┐     │
+│   Client    │      │   Bastion   │   │   │  Backend 1  │   │  Backend 2  │     │
+│    SSH      │      │  (PAM LLNG) │   │   │ (PAM LLNG)  │   │ (PAM LLNG)  │     │
+└──────┬──────┘      └──────┬──────┘   │   └──────┬──────┘   └──────┬──────┘     │
        │                    │          │          │                  │           │
        │ 1. ssh bastion     │          │          │                  │           │
        │───────────────────>│          │          │                  │           │
@@ -266,28 +266,28 @@ Architecture optimale combinant :
 - Restriction réseau des backends
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                  │
-│  ┌─────────────┐                                           ┌─────────────┐      │
-│  │   SSH CA    │                                           │   Portail   │      │
-│  │ (signe les  │                                           │    LLNG     │      │
-│  │ certificats)│                                           │             │      │
-│  └──────┬──────┘                                           └──────┬──────┘      │
-│         │                                                         │             │
-│         │ Certificat signé                                        │             │
-│         ▼                                                         │             │
-│  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐       │             │
-│  │   Client    │      │   Bastion   │      │   Backend   │       │             │
-│  │    SSH      │─────>│  (PAM LLNG) │─────>│  (PAM LLNG) │       │             │
-│  │ (cert signé)│      │ (TrustedCA) │      │ (TrustedCA) │       │             │
-│  └─────────────┘      └──────┬──────┘      └──────┬──────┘       │             │
-│                              │                    │               │             │
-│                              │ Vérifie cert +     │ Vérifie cert +│             │
-│                              │ autorise via LLNG  │ autorise LLNG │             │
-│                              │                    │               │             │
-│                              └────────────────────┴───────────────┘             │
-│                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│  ┌─────────────┐                                           ┌─────────────┐  │
+│  │   SSH CA    │                                           │   Portail   │  │
+│  │ (signe les  │                                           │    LLNG     │  │
+│  │ certificats)│                                           │             │  │
+│  └──────┬──────┘                                           └──────┬──────┘  │
+│         │                                                         │         │
+│         │ Certificat signé                                        │         │
+│         ▼                                                         │         │
+│  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐        │         │
+│  │   Client    │      │   Bastion   │      │   Backend   │        │         │
+│  │    SSH      │─────>│  (PAM LLNG) │─────>│  (PAM LLNG) │        │         │
+│  │ (cert signé)│      │ (TrustedCA) │      │ (TrustedCA) │        │         │
+│  └─────────────┘      └──────┬──────┘      └──────┬──────┘        │         │
+│                              │                    │               │         │
+│                              │ Vérifie cert +     │ Vérifie cert +│         │
+│                              │ autorise via LLNG  │ autorise LLNG │         │
+│                              │                    │               │         │
+│                              └────────────────────┴───────────────┘         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Flux complet
@@ -927,12 +927,12 @@ Tout de B et C, plus :
 
 ### Choix d'architecture
 
-| Contexte | Architecture recommandée |
-|----------|-------------------------|
-| Petit projet, peu de serveurs | A (avec clés + PAM LLNG) |
-| Conformité audit renforcé | B (certificats pour traçabilité) |
-| Infrastructure importante | C (bastion obligatoire) |
-| Haute sécurité / production critique | D (bastion + certificats) |
+|               Contexte               |     Architecture recommandée     |
+|--------------------------------------|----------------------------------|
+| Petit projet, peu de serveurs        | A (avec clés + PAM LLNG)         |
+| Conformité audit renforcé            | B (certificats pour traçabilité) |
+| Infrastructure importante            | C (bastion obligatoire)          |
+| Haute sécurité / production critique | D (bastion + certificats)        |
 
 ### Évolution progressive
 
