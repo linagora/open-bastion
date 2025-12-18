@@ -25,6 +25,12 @@
 /* Stack buffer size for HMAC signature message building */
 #define SIGNATURE_STACK_BUFFER_SIZE 512
 
+/* Security: Maximum user groups to prevent DoS via memory exhaustion */
+#define MAX_USER_GROUPS 256
+
+/* Security: Maximum base64 input size to prevent integer overflow (64KB) */
+#define MAX_BASE64_INPUT_SIZE (64 * 1024)
+
 /* Safe strdup from JSON - returns NULL if json string is NULL */
 static inline char *safe_json_strdup(struct json_object *obj)
 {
@@ -74,10 +80,11 @@ typedef struct {
 #define INITIAL_BUFFER_SIZE 4096
 
 /*
- * Security: Maximum response size to prevent DoS via memory exhaustion (fixes #48)
- * 1 MB should be more than enough for any legitimate LLNG API response
+ * Security: Maximum response size to prevent DoS via memory exhaustion
+ * 256 KB should be more than enough for any legitimate LLNG API response
+ * (typical responses are under 10 KB)
  */
-#define MAX_RESPONSE_SIZE (1 * 1024 * 1024)
+#define MAX_RESPONSE_SIZE (256 * 1024)
 
 /* Curl write callback with exponential buffer growth */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
@@ -395,6 +402,12 @@ static int validate_cert_pin_format(const char *pin)
 /* Base64 encode for Basic auth */
 static char *base64_encode(const char *input, size_t len)
 {
+    /* Security: Validate input parameters */
+    if (!input || len == 0) return NULL;
+
+    /* Security: Prevent integer overflow and excessive allocation */
+    if (len > MAX_BASE64_INPUT_SIZE) return NULL;
+
     static const char b64_table[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -537,6 +550,14 @@ static void setup_curl(llng_client_t *client)
          */
         curl_easy_setopt(client->curl, CURLOPT_PINNEDPUBLICKEY, client->cert_pin);
     }
+
+    /* Performance: Enable TCP keep-alive for connection reuse */
+    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPIDLE, 120L);
+    curl_easy_setopt(client->curl, CURLOPT_TCP_KEEPINTVL, 60L);
+
+    /* Performance: Accept compressed responses */
+    curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
 }
 
 int llng_verify_token(llng_client_t *client,
@@ -635,10 +656,16 @@ int llng_verify_token(llng_client_t *client,
 
     struct json_object *val;
 
-    /* Security: Validate required fields are present (fixes #44) */
+    /* Security: Validate required fields are present and have correct type */
     if (!json_object_object_get_ex(json, "valid", &val)) {
         snprintf(client->error, sizeof(client->error),
                  "Missing required 'valid' field in response");
+        json_object_put(json);
+        return -1;
+    }
+    if (!json_object_is_type(val, json_type_boolean)) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid 'valid' field type in response (expected boolean)");
         json_object_put(json);
         return -1;
     }
@@ -672,6 +699,10 @@ int llng_verify_token(llng_client_t *client,
     if (json_object_object_get_ex(json, "groups", &val)) {
         if (json_object_is_type(val, json_type_array)) {
             size_t count = json_object_array_length(val);
+            /* Security: Limit groups to prevent DoS via memory exhaustion */
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
             response->groups = calloc(count + 1, sizeof(char *));
             if (response->groups) {
                 response->groups_count = count;
@@ -950,10 +981,16 @@ static int llng_authorize_user_internal(llng_client_t *client,
 
     struct json_object *val;
 
-    /* Security: Validate required fields are present (fixes #44) */
+    /* Security: Validate required fields are present and have correct type */
     if (!json_object_object_get_ex(json, "authorized", &val)) {
         snprintf(client->error, sizeof(client->error),
                  "Missing required 'authorized' field in response");
+        json_object_put(json);
+        return -1;
+    }
+    if (!json_object_is_type(val, json_type_boolean)) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid 'authorized' field type in response (expected boolean)");
         json_object_put(json);
         return -1;
     }
@@ -987,6 +1024,10 @@ static int llng_authorize_user_internal(llng_client_t *client,
     if (json_object_object_get_ex(json, "groups", &val)) {
         if (json_object_is_type(val, json_type_array)) {
             size_t count = json_object_array_length(val);
+            /* Security: Limit groups to prevent DoS via memory exhaustion */
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
             response->groups = calloc(count + 1, sizeof(char *));
             if (response->groups) {
                 response->groups_count = count;

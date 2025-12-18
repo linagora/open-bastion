@@ -238,9 +238,12 @@ Recommended permissions:
 | Brute force | Rate limiting with exponential backoff |
 | Cache tampering | AES-256-GCM authenticated encryption |
 | Path injection | Strict path validation, approved lists |
-| Buffer overflow | Bounds-checked string operations |
+| Buffer overflow | Bounds-checked string operations, snprintf with null-termination |
 | UID collision | Fail-safe collision detection |
 | Request tampering | Optional HMAC request signing with nonces |
+| Memory exhaustion DoS | Response size limits (256KB), group limits (256 max) |
+| Integer overflow | Input validation in base64 encoding, backoff calculations |
+| Malformed JSON | Type validation for critical response fields |
 
 ## Security Reporting
 

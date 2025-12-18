@@ -1044,10 +1044,10 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     client_ip = get_client_ip(pamh);
     tty = get_tty(pamh);
 
-    /* Get hostname */
-    char hostname[256];
-    if (gethostname(hostname, sizeof(hostname)) != 0) {
-        strncpy(hostname, "unknown", sizeof(hostname));
+    /* Get hostname - use snprintf for guaranteed null-termination */
+    char hostname[256] = {0};
+    if (gethostname(hostname, sizeof(hostname) - 1) != 0) {
+        snprintf(hostname, sizeof(hostname), "unknown");
     }
 
     /* Get service name */

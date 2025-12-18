@@ -47,6 +47,9 @@ static inline char *safe_json_strdup(struct json_object *obj)
 /* Maximum cache entries */
 #define MAX_AUTH_CACHE_ENTRIES 10000
 
+/* Security: Maximum user groups to prevent DoS via memory exhaustion */
+#define MAX_USER_GROUPS 256
+
 /* Cache structure */
 struct auth_cache {
     char *cache_dir;
@@ -451,6 +454,10 @@ bool auth_cache_lookup(auth_cache_t *cache,
     if (json_object_object_get_ex(json, "groups", &val)) {
         if (json_object_is_type(val, json_type_array)) {
             size_t count = json_object_array_length(val);
+            /* Security: Limit groups to prevent DoS via memory exhaustion */
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
             entry->groups = calloc(count + 1, sizeof(char *));
             if (entry->groups) {
                 entry->groups_count = count;
