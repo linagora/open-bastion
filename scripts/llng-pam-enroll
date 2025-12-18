@@ -132,7 +132,14 @@ generate_client_jwt() {
     elif [ -f /proc/sys/kernel/random/uuid ]; then
         jti=$(cat /proc/sys/kernel/random/uuid)
     else
-        jti="$(hostname)-${now}-$$"
+        # Fallback: add entropy from /dev/urandom for uniqueness
+        local rand_suffix
+        if [ -r /dev/urandom ]; then
+            rand_suffix=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        else
+            rand_suffix="${RANDOM}${RANDOM}${RANDOM}${RANDOM}"
+        fi
+        jti="$(hostname)-${now}-$$-${rand_suffix}"
     fi
 
     # Header: {"alg":"HS256","typ":"JWT"}
@@ -140,9 +147,16 @@ generate_client_jwt() {
     header=$(echo -n '{"alg":"HS256","typ":"JWT"}' | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
 
     # Payload with standard claims per RFC 7523
+    # Use jq to properly escape JSON strings (handles special chars in client_id, etc.)
     local payload_json
-    payload_json=$(printf '{"iss":"%s","sub":"%s","aud":"%s","exp":%d,"iat":%d,"jti":"%s"}' \
-        "$client_id" "$client_id" "$token_endpoint" "$exp" "$now" "$jti")
+    payload_json=$(jq -n -c \
+        --arg iss "$client_id" \
+        --arg sub "$client_id" \
+        --arg aud "$token_endpoint" \
+        --argjson exp "$exp" \
+        --argjson iat "$now" \
+        --arg jti "$jti" \
+        '{iss: $iss, sub: $sub, aud: $aud, exp: $exp, iat: $iat, jti: $jti}')
     local payload
     payload=$(echo -n "$payload_json" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
 

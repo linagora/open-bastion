@@ -138,21 +138,35 @@ static char *generate_client_jwt(const char *client_id, const char *client_secre
         return NULL;
     }
 
-    /* Build payload */
-    char payload_json[1024];
-    int payload_len = snprintf(payload_json, sizeof(payload_json),
-        "{\"iss\":\"%s\",\"sub\":\"%s\",\"aud\":\"%s\",\"exp\":%ld,\"iat\":%ld,\"jti\":\"%s\"}",
-        client_id, client_id, token_endpoint, (long)exp, (long)now, jti);
+    /* Build payload using json-c to properly escape strings */
+    struct json_object *payload_obj = json_object_new_object();
+    if (!payload_obj) {
+        free(jti);
+        free(header_b64);
+        return NULL;
+    }
+
+    json_object_object_add(payload_obj, "iss", json_object_new_string(client_id));
+    json_object_object_add(payload_obj, "sub", json_object_new_string(client_id));
+    json_object_object_add(payload_obj, "aud", json_object_new_string(token_endpoint));
+    json_object_object_add(payload_obj, "exp", json_object_new_int64((int64_t)exp));
+    json_object_object_add(payload_obj, "iat", json_object_new_int64((int64_t)now));
+    json_object_object_add(payload_obj, "jti", json_object_new_string(jti));
 
     free(jti);
 
-    if (payload_len < 0 || (size_t)payload_len >= sizeof(payload_json)) {
+    const char *payload_json = json_object_to_json_string_ext(payload_obj,
+                                                               JSON_C_TO_STRING_PLAIN);
+    if (!payload_json) {
+        json_object_put(payload_obj);
         free(header_b64);
         return NULL;
     }
 
     char *payload_b64 = base64url_encode((const unsigned char *)payload_json,
                                           strlen(payload_json));
+    json_object_put(payload_obj);
+
     if (!payload_b64) {
         free(header_b64);
         return NULL;
