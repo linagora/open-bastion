@@ -58,8 +58,15 @@ static void secure_free_str(char *ptr)
     }
 }
 
+/* For unit testing, expose internal functions */
+#ifdef TOKEN_MANAGER_TEST
+#define STATIC_OR_TEST
+#else
+#define STATIC_OR_TEST static
+#endif
+
 /* Base64url encode (RFC 4648 section 5) */
-static char *base64url_encode(const unsigned char *data, size_t len)
+STATIC_OR_TEST char *base64url_encode(const unsigned char *data, size_t len)
 {
     static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
@@ -84,7 +91,7 @@ static char *base64url_encode(const unsigned char *data, size_t len)
 }
 
 /* Generate a UUID v4 for JWT jti claim */
-static char *generate_uuid(void)
+STATIC_OR_TEST char *generate_uuid(void)
 {
     unsigned char uuid_bytes[16];
     if (RAND_bytes(uuid_bytes, sizeof(uuid_bytes)) != 1) {
@@ -115,8 +122,8 @@ static char *generate_uuid(void)
  * Returns dynamically allocated JWT string or NULL on error
  * Caller must free with secure_free_str()
  */
-static char *generate_client_jwt(const char *client_id, const char *client_secret,
-                                  const char *token_endpoint)
+STATIC_OR_TEST char *generate_client_jwt(const char *client_id, const char *client_secret,
+                                          const char *token_endpoint)
 {
     if (!client_id || !client_secret || !token_endpoint) {
         return NULL;
