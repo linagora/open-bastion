@@ -747,9 +747,10 @@ int llng_introspect_token(llng_client_t *client,
         }
 
         int written = snprintf(postdata + len, sizeof(postdata) - len,
+            "&client_id=%s"
             "&client_assertion_type=urn%%3Aietf%%3Aparams%%3Aoauth%%3A"
             "client-assertion-type%%3Ajwt-bearer"
-            "&client_assertion=%s", encoded_jwt);
+            "&client_assertion=%s", client->client_id, encoded_jwt);
         curl_free(encoded_jwt);
 
         /* Check for buffer overflow */
