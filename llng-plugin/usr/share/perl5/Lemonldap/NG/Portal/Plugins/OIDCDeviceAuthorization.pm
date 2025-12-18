@@ -442,10 +442,15 @@ sub _generateUserCode {
     my ($self) = @_;
     my $length =
       $self->conf->{oidcServiceDeviceAuthorizationUserCodeLength} || 8;
-    my $chars = USER_CODE_CHARS;
-    my $code  = '';
-    for ( 1 .. $length ) {
-        $code .= substr( $chars, int( rand( length($chars) ) ), 1 );
+    my $chars     = USER_CODE_CHARS;
+    my $chars_len = length($chars);
+    my $code      = '';
+
+    # Use cryptographically secure random bytes to generate the user code
+    my $bytes = Crypt::URandom::urandom($length);
+    foreach my $b ( split //, $bytes ) {
+        my $idx = ord($b) % $chars_len;
+        $code .= substr( $chars, $idx, 1 );
     }
     return $code;
 }
@@ -568,6 +573,13 @@ sub _generateTokens {
 
     if ($code_challenge) {
         my $code_verifier = $req->param('code_verifier');
+
+        # Verify code_verifier is provided when code_challenge exists
+        unless ($code_verifier) {
+            $self->logger->error("code_verifier is required when code_challenge was provided");
+            return $self->_sendTokenError( $req, 'invalid_grant',
+                'code_verifier is required' );
+        }
 
         # Use the OIDC issuer's validatePKCEChallenge method
         unless (

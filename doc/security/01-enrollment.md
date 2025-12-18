@@ -189,8 +189,8 @@ L'opérateur exécute `sudo llng-pam-enroll` sur le serveur. Le script génère 
 
 ```bash
 # Génération PKCE (RFC 7636)
-code_verifier=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')
-code_challenge=$(echo -n "$code_verifier" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=')
+code_verifier=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+code_challenge=$(echo -n "$code_verifier" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
 ```
 
 Puis envoie une requête au portail avec le `code_challenge` :
