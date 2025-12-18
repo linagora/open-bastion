@@ -28,8 +28,8 @@ use constant hook => {
 };
 
 # Character set for user_code (RFC 8628 section 6.1)
-# Excludes vowels to avoid offensive words, excludes 0/O, 1/I/L for readability
-use constant USER_CODE_CHARS => 'BCDFGHJKLMNPQRSTVWXZ23456789';
+# Base-20 without vowels to avoid offensive words, easy to type on mobile
+use constant USER_CODE_CHARS => 'BCDFGHJKLMNPQRSTVWXZ';
 
 # Session kind for device authorization storage
 use constant sessionKind => 'DEVA';
@@ -48,6 +48,16 @@ has rule => (
     is      => 'rw',
     default => sub {
         sub { 1 }
+    }
+);
+
+# Lazy access to CrowdSecAgent plugin (optional, for abuse reporting)
+has crowdsec => (
+    is      => 'ro',
+    lazy    => 1,
+    default => sub {
+        $_[0]
+          ->p->loadedModules->{'Lemonldap::NG::Portal::Plugins::CrowdSecAgent'};
     }
 );
 
@@ -87,6 +97,16 @@ sub init {
         device => 'submitVerification',
         ['POST']
     );
+
+    # Warn if CrowdSec is not configured (RFC 8628 recommends IP-based lockout)
+    # Check config rather than loadedModules since init order is not guaranteed
+    unless ($self->conf->{crowdsec}
+        and $self->conf->{crowdsecAgent} )
+    {
+        $self->logger->warn(
+"CrowdSecAgent plugin not configured. RFC 8628 recommends IP-based rate limiting for device authorization. Consider enabling CrowdSec for better security."
+        );
+    }
 
     $self->logger->debug("Device Authorization Grant (RFC 8628) enabled");
     return 1;
@@ -371,6 +391,10 @@ sub submitVerification {
     my $device_auth = $self->_findByUserCode($user_code);
     unless ($device_auth) {
         $self->logger->info("Invalid or expired user_code: $user_code");
+
+        # Report to CrowdSec if available (potential bruteforce)
+        $self->_reportInvalidUserCode( $req, $user_code );
+
         return $self->_showVerificationError( $req, 'invalidUserCode' );
     }
 
@@ -711,6 +735,27 @@ sub _showVerificationError {
             ERROR     => 1,
         }
     );
+}
+
+# CrowdSec integration methods
+
+sub _reportInvalidUserCode {
+    my ( $self, $req, $user_code ) = @_;
+
+    my $crowdsec = $self->crowdsec;
+    return unless $crowdsec && $crowdsec->can('alert');
+
+    my $ip  = $req->address;
+    my $msg = "RFC 8628: Invalid user_code attempt from $ip (code: $user_code)";
+
+    $crowdsec->alert(
+        $ip, $msg,
+        {
+            scenario => 'llng/device-auth-bruteforce',
+            reason   => $msg,
+        }
+    );
+    $self->logger->debug("Reported invalid user_code attempt to CrowdSec");
 }
 
 1;
