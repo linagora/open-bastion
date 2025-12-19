@@ -79,6 +79,22 @@ target_compile_options(pam_llng PRIVATE
     -Wall -Wextra -Werror
     -fPIC
     -D_GNU_SOURCE
+    # Security hardening flags
+    -fstack-protector-strong      # Stack buffer overflow protection
+    -Wformat -Wformat-security    # Format string vulnerability detection
+)
+
+# _FORTIFY_SOURCE requires optimization (-O1 or higher) to be effective
+# Only enable for Release/RelWithDebInfo builds to avoid warnings in Debug
+target_compile_definitions(pam_llng PRIVATE
+    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:_FORTIFY_SOURCE=2>
+)
+
+# Linker security flags (Full RELRO = relro + now)
+target_link_options(pam_llng PRIVATE
+    -Wl,-z,relro                  # RELRO (with -z,now = Full RELRO)
+    -Wl,-z,now                    # Resolve symbols at load time (completes Full RELRO)
+    -Wl,-z,noexecstack            # Non-executable stack
 )
 
 # Installation

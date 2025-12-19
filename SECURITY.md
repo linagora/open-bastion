@@ -239,6 +239,59 @@ Recommended permissions:
 | Cache directory | 0700 | root |
 | Rate limit state dir | 0700 | root |
 
+## Operational Security Considerations
+
+### Debug Logging Warning
+
+**CRITICAL: Never enable debug logging in production environments.**
+
+When `log_level = debug`, the module may log sensitive information to syslog:
+
+- SSH certificate metadata (key_id, serial, principals)
+- Token validation details
+- Authorization request parameters
+
+**Risk**: If debug logs are captured by a log aggregator or accessed by unauthorized users,
+this information could be used to:
+- Identify infrastructure topology
+- Track user movements across systems
+- Correlate sessions for targeting
+
+**Recommendation**:
+- Use `log_level = warn` or `log_level = error` in production
+- If debug logging is temporarily needed, ensure syslog access is restricted
+- Rotate and purge logs containing debug output promptly
+
+### Machine-ID Stability Requirement
+
+The encryption key for cached tokens and secrets is derived from `/etc/machine-id`.
+
+**Impact of machine-id change**:
+- All cached tokens become unreadable (automatic re-authentication required)
+- Encrypted secrets in the secret store become permanently unrecoverable
+- Server enrollment tokens must be re-issued
+
+**Scenarios causing machine-id change**:
+- VM cloning without regenerating machine-id
+- System reinstallation
+- Container image reuse across hosts
+- Some cloud provider instance recreation
+
+**Recommendations**:
+1. **Document machine-id stability** as a deployment requirement
+2. **Before system migration**: Backup enrollment tokens or plan for re-enrollment
+3. **VM cloning**: Always regenerate machine-id (`systemd-machine-id-setup`) and re-enroll
+4. **Monitoring**: Alert on machine-id changes via configuration management
+
+**Re-enrollment procedure after machine-id change**:
+```bash
+# 1. The old token file is now unusable - remove it
+rm /etc/security/pam_llng.token
+
+# 2. Re-run enrollment
+llng-pam-enroll --portal https://auth.example.com --client-id pam-access
+```
+
 ## Threat Mitigations
 
 | Threat | Mitigation |
