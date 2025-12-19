@@ -16,11 +16,17 @@
       <div class="form-group row mb-3">
         <label class="col-sm-4 col-form-label" for="sshValidity" trspan="sshCertValidity">Certificate validity</label>
         <div class="col-sm-8">
-          <select class="form-control" id="sshValidity" name="validity_minutes">
-            <option value="10">10 minutes</option>
-            <option value="30" selected>30 minutes</option>
-            <option value="60">1 hour</option>
+          <select class="form-control" id="sshValidity" name="validity_days" data-max-validity="<TMPL_VAR NAME="MAX_VALIDITY_DAYS">">
+            <option value="1" data-trspan="oneDay">1 day</option>
+            <option value="7" data-trspan="oneWeek">1 week</option>
+            <option value="30" data-trspan="oneMonth" selected>1 month</option>
+            <option value="90" data-trspan="threeMonths">3 months</option>
+            <option value="180" data-trspan="sixMonths">6 months</option>
+            <option value="365" data-trspan="oneYear">1 year</option>
           </select>
+          <small class="form-text text-muted">
+            <span trspan="sshCaMaxValidity">Maximum allowed</span>: <span id="maxValidityDisplay"><TMPL_VAR NAME="MAX_VALIDITY_DAYS"></span> <span trspan="days">days</span>
+          </small>
         </div>
       </div>
       <div class="form-group row">

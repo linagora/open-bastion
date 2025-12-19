@@ -132,6 +132,76 @@ const char *ca_fp = pam_getenv(pamh, "SSH_CERT_CA_KEY_FP");
 | Durée de vie clé | Illimitée            | Limitée par certificat       |
 | Audit            | Basique              | Complet avec serial          |
 
+### Durée de vie des certificats SSH
+
+#### Principe : la sécurité repose sur `/pam/authorize`
+
+Avec le module PAM LLNG, la durée de vie du certificat SSH a peu d'impact sur la sécurité car :
+
+```
+┌──────────────────────┐         ┌─────────────────────┐
+│  Certificat SSH      │         │   /pam/authorize    │
+│  (authentification)  │ ──────► │   (autorisation)    │
+│                      │         │                     │
+│  "Qui suis-je ?"     │         │  "Ai-je le droit ?" │
+└──────────────────────┘         └─────────────────────┘
+         │                                  │
+         │                                  ▼
+         │                       • Compte actif ?
+         │                       • Membre des bons groupes ?
+         │                       • server_group autorisé ?
+         ▼
+   Validité : 1 jour à 1 an
+   (peu d'impact sécurité)
+```
+
+**Le vrai verrou est `/pam/authorize`** : même avec un certificat valide, l'accès est refusé si le compte est désactivé ou retiré des groupes autorisés.
+
+#### Comparaison des durées
+
+| Durée certificat | Avantages | Inconvénients |
+|------------------|-----------|---------------|
+| **Courte (1h-8h)** | Révocation "naturelle" par expiration | Renouvellement fréquent, friction utilisateur |
+| **Moyenne (1-7 jours)** | Bon compromis, renouvellement quotidien/hebdo | KRL nécessaire pour révocation urgente |
+| **Longue (1-12 mois)** | UX optimale, pas de friction | KRL obligatoire, révocation via `/ssh/admin` |
+
+#### Recommandation
+
+Une durée **longue (plusieurs mois)** est acceptable car :
+
+1. **La révocation se fait côté LLNG** : désactivation du compte ou retrait des groupes → effet immédiat
+2. **`/pam/authorize` est vérifié à chaque connexion** : un certificat valide ne suffit pas
+3. **La KRL via `/ssh/admin`** permet la révocation immédiate du certificat si nécessaire
+4. **Évite le contournement** : les utilisateurs ne seront pas tentés d'ajouter leur clé dans `~/.ssh/authorized_keys`
+
+#### Workflow utilisateur avec certificat longue durée
+
+La clé SSH privée reste permanente, seul le certificat est renouvelé périodiquement :
+
+```bash
+# Une seule fois : générer sa clé SSH
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+
+# Tous les 6 mois : renouveler le certificat via LLNG /ssh
+# → Le certificat est stocké dans ~/.ssh/id_ed25519-cert.pub
+# → ssh-agent n'a pas besoin d'être rechargé
+```
+
+#### Verrouillage de `authorized_keys` (recommandé)
+
+Pour éviter que les utilisateurs contournent le système de certificats :
+
+```bash
+# /etc/ssh/sshd_config
+
+# Désactiver les authorized_keys utilisateur
+AuthorizedKeysFile none
+
+# Utiliser uniquement les certificats CA
+TrustedUserCAKeys /etc/ssh/llng_ca.pub
+RevokedKeys /etc/ssh/revoked_keys
+```
+
 ### Configuration serveur SSH
 
 ```bash

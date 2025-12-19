@@ -95,6 +95,9 @@ sub init {
 sub display {
     my ( $self, $req ) = @_;
 
+    # Max validity in days (default 365 days = 1 year)
+    my $maxValidityDays = $self->conf->{sshCaCertMaxValidity} || 365;
+
     return {
         logo => 'certificate',
         name => 'SSHCA',
@@ -102,10 +105,8 @@ sub display {
         html => $self->loadTemplate(
             $req, 'sshca',
             params => {
-                DEFAULT_VALIDITY => $self->conf->{sshCaCertDefaultValidity}
-                  || 30,
-                MAX_VALIDITY => $self->conf->{sshCaCertMaxValidity} || 60,
-                js           => "$self->{p}->{staticPrefix}/common/js/sshca.js",
+                MAX_VALIDITY_DAYS => $maxValidityDays,
+                js => "$self->{p}->{staticPrefix}/common/js/sshca.js",
             }
         ),
     };
@@ -239,15 +240,15 @@ sub sshCaSign {
         return $self->_badRequest( $req, 'Invalid SSH public key format' );
     }
 
-    # Get validity from request or use default
-    my $validityMinutes =
-         $body->{validity_minutes}
-      || $self->conf->{sshCaCertDefaultValidity}
-      || 30;
+    # Get validity from request (in days) or default to 30 days
+    my $validityDays = $body->{validity_days} || 30;
 
-    # Enforce maximum validity
-    my $maxValidity = $self->conf->{sshCaCertMaxValidity} || 60;
-    $validityMinutes = $maxValidity if $validityMinutes > $maxValidity;
+    # Enforce maximum validity (in days, default 365)
+    my $maxValidityDays = $self->conf->{sshCaCertMaxValidity} || 365;
+    $validityDays = $maxValidityDays if $validityDays > $maxValidityDays;
+
+    # Convert to minutes for ssh-keygen
+    my $validityMinutes = $validityDays * 24 * 60;
 
  # SECURITY: Always derive principals from the authenticated user's session
  # Never trust principals from the request body to prevent impersonation attacks
