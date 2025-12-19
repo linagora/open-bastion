@@ -18,6 +18,8 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 Voir [01-enrollment.md](01-enrollment.md) et [02-ssh-connection.md](02-ssh-connection.md) pour les détails des risques et remédiations.
 
+Voir [03-offboarding.md](03-offboarding.md) pour la procédure de révocation des accès administrateurs.
+
 ---
 
 ## Pistes d'Amélioration - Enrôlement

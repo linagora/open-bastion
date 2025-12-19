@@ -1352,8 +1352,11 @@ flowchart TB
 - [ ] Client OIDC `pam-access` créé avec scope `pam:server`
 - [ ] `client_secret` stocké dans `/etc/security/pam_llng.conf` (pas en CLI)
 - [ ] Fichier de config en permissions 0600
+- [ ] Accès au Manager LLNG restreint (risque : accès à la clé privée SSH CA)
 - [ ] Canal de communication sécurisé avec l'administrateur LLNG établi
 - [ ] Administrateur LLNG disponible et prévenu
+
+> **Note sécurité** : L'accès en lecture à la configuration LLNG permet d'obtenir la clé privée SSH CA (si le plugin SSH CA est activé). Cependant, ce risque est modéré par la séparation authentification/autorisation : un certificat SSH valide ne suffit pas, l'utilisateur doit aussi être autorisé via `/pam/authorize`.
 
 ### Pendant l'enrôlement
 
