@@ -13,6 +13,9 @@
 #define PAM_SM_ACCOUNT
 #define PAM_SM_SESSION
 
+/* Mark PAM entry points as visible when using -fvisibility=hidden */
+#define PAM_VISIBLE __attribute__((visibility("default")))
+
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <stdio.h>
@@ -176,7 +179,15 @@ static int group_exists_locally(gid_t gid)
             if (*p == ':') {
                 if (field == 2) {
                     *p = '\0';
-                    gid_t local_gid = (gid_t)atoi(start);
+                    char *endptr;
+                    errno = 0;
+                    unsigned long parsed_gid = strtoul(start, &endptr, 10);
+                    if (errno != 0 || endptr == start || *endptr != '\0' ||
+                        parsed_gid > (unsigned long)((gid_t)-1)) {
+                        /* Invalid GID format, skip this line */
+                        break;
+                    }
+                    gid_t local_gid = (gid_t)parsed_gid;
                     if (local_gid == gid) {
                         fclose(f);
                         return 1;
@@ -766,7 +777,7 @@ static int user_exists_locally(const char *username)
  * The password provided by the user is expected to be an LLNG access token
  * generated via the /pam endpoint.
  */
-PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
+PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                                    int flags,
                                    int argc,
                                    const char **argv)
@@ -998,7 +1009,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 /*
  * pam_sm_setcred - Set credentials (not used)
  */
-PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh,
+PAM_VISIBLE PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh,
                               int flags,
                               int argc,
                               const char **argv)
@@ -1019,7 +1030,7 @@ PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh,
  * For sudo service, it also checks if the user has sudo permissions
  * and stores the result in PAM data for later use.
  */
-PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
+PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                                 int flags,
                                 int argc,
                                 const char **argv)
@@ -1551,7 +1562,7 @@ cleanup:
  * If create_user is enabled and the user doesn't exist in /etc/passwd,
  * this function creates the Unix account.
  */
-PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
+PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
                                     int flags,
                                     int argc,
                                     const char **argv)
@@ -1647,7 +1658,7 @@ PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
  * If cache_invalidate_on_logout is enabled, invalidates the user's
  * cached tokens to ensure re-authentication on next login.
  */
-PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
+PAM_VISIBLE PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
                                      int flags,
                                      int argc,
                                      const char **argv)
