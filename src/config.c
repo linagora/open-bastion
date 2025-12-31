@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -231,6 +232,62 @@ static bool parse_bool(const char *value)
 #define MAX_URL_LENGTH 512
 #define MAX_TOKEN_FILE_PATH 256
 
+/*
+ * Safe integer parsing with validation.
+ * Returns the parsed value, or default_val if parsing fails.
+ * Unlike atoi(), this detects invalid input and doesn't silently return 0.
+ */
+static int parse_int(const char *value, int default_val, int min_val, int max_val)
+{
+    if (!value || !*value) return default_val;
+
+    char *endptr;
+    errno = 0;
+    long result = strtol(value, &endptr, 10);
+
+    /* Check for conversion errors */
+    if (errno != 0 || endptr == value || *endptr != '\0') {
+        return default_val;  /* Invalid input */
+    }
+
+    /* Check for long-to-int overflow (on 64-bit platforms, long > int) */
+    if (result < INT_MIN || result > INT_MAX) {
+        return default_val;
+    }
+
+    /* Check user-specified range */
+    if (result < min_val || result > max_val) {
+        return default_val;
+    }
+
+    return (int)result;
+}
+
+/*
+ * Safe double parsing with validation.
+ * Returns the parsed value, or default_val if parsing fails.
+ */
+static double parse_double(const char *value, double default_val, double min_val, double max_val)
+{
+    if (!value || !*value) return default_val;
+
+    char *endptr;
+    errno = 0;
+    double result = strtod(value, &endptr);
+
+    /* Check for conversion errors */
+    if (errno != 0 || endptr == value || *endptr != '\0') {
+        return default_val;  /* Invalid input */
+    }
+
+    /* Check range */
+    if (result < min_val || result > max_val) {
+        return default_val;
+    }
+
+    return result;
+}
+
 /* Check URL for dangerous characters (injection prevention) */
 static int url_contains_dangerous_chars(const char *url)
 {
@@ -292,7 +349,7 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         config->server_group = strdup(value);
     }
     else if (strcmp(key, "timeout") == 0) {
-        config->timeout = atoi(value);
+        config->timeout = parse_int(value, DEFAULT_TIMEOUT, 1, 300);
     }
     else if (strcmp(key, "verify_ssl") == 0) {
         config->verify_ssl = parse_bool(value);
@@ -302,7 +359,7 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         config->ca_cert = strdup(value);
     }
     else if (strcmp(key, "min_tls_version") == 0) {
-        config->min_tls_version = atoi(value);
+        config->min_tls_version = parse_int(value, TLS_VERSION_1_3, 0, 99);
         /* Normalize: accept 1.2, 1.3, 12, 13 */
         if (config->min_tls_version == 1) config->min_tls_version = TLS_VERSION_1_2;  /* "1" -> 1.2 legacy */
         else if (config->min_tls_version < TLS_VERSION_1_2) config->min_tls_version = TLS_VERSION_1_3;  /* Invalid -> default */
@@ -320,10 +377,10 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         config->cache_dir = strdup(value);
     }
     else if (strcmp(key, "cache_ttl") == 0) {
-        config->cache_ttl = atoi(value);
+        config->cache_ttl = parse_int(value, DEFAULT_CACHE_TTL, 0, 86400);
     }
     else if (strcmp(key, "cache_ttl_high_risk") == 0) {
-        config->cache_ttl_high_risk = atoi(value);
+        config->cache_ttl_high_risk = parse_int(value, DEFAULT_CACHE_TTL_HIGH_RISK, 0, 86400);
     }
     else if (strcmp(key, "high_risk_services") == 0) {
         free(config->high_risk_services);
@@ -357,7 +414,7 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         else if (strcmp(value, "warn") == 0) config->log_level = 1;
         else if (strcmp(value, "info") == 0) config->log_level = 2;
         else if (strcmp(value, "debug") == 0) config->log_level = 3;
-        else config->log_level = atoi(value);
+        else config->log_level = parse_int(value, 1, 0, 3);  /* default: warn */
     }
     /* Audit settings */
     else if (strcmp(key, "audit_enabled") == 0 || strcmp(key, "audit") == 0) {
@@ -374,7 +431,7 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         if (strcmp(value, "critical") == 0) config->audit_level = 0;
         else if (strcmp(value, "auth") == 0) config->audit_level = 1;
         else if (strcmp(value, "all") == 0) config->audit_level = 2;
-        else config->audit_level = atoi(value);
+        else config->audit_level = parse_int(value, 1, 0, 2);  /* default: auth */
     }
     /* Rate limiting settings */
     else if (strcmp(key, "rate_limit_enabled") == 0 || strcmp(key, "rate_limit") == 0) {
@@ -385,16 +442,16 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
         config->rate_limit_state_dir = strdup(value);
     }
     else if (strcmp(key, "rate_limit_max_attempts") == 0) {
-        config->rate_limit_max_attempts = atoi(value);
+        config->rate_limit_max_attempts = parse_int(value, 5, 1, 100);
     }
     else if (strcmp(key, "rate_limit_initial_lockout") == 0) {
-        config->rate_limit_initial_lockout = atoi(value);
+        config->rate_limit_initial_lockout = parse_int(value, 30, 1, 3600);
     }
     else if (strcmp(key, "rate_limit_max_lockout") == 0) {
-        config->rate_limit_max_lockout = atoi(value);
+        config->rate_limit_max_lockout = parse_int(value, 3600, 60, 86400);
     }
     else if (strcmp(key, "rate_limit_backoff_mult") == 0) {
-        config->rate_limit_backoff_mult = atof(value);
+        config->rate_limit_backoff_mult = parse_double(value, 2.0, 1.1, 10.0);
     }
     /* Token binding settings */
     else if (strcmp(key, "token_bind_ip") == 0 || strcmp(key, "bind_ip") == 0) {
