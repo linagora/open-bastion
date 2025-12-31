@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -249,7 +250,12 @@ static int parse_int(const char *value, int default_val, int min_val, int max_va
         return default_val;  /* Invalid input */
     }
 
-    /* Check range */
+    /* Check for long-to-int overflow (on 64-bit platforms, long > int) */
+    if (result < INT_MIN || result > INT_MAX) {
+        return default_val;
+    }
+
+    /* Check user-specified range */
     if (result < min_val || result > max_val) {
         return default_val;
     }
