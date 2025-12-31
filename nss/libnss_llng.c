@@ -604,6 +604,10 @@ static int file_cache_load_by_uid(uid_t uid, struct passwd *pw, char *buffer, si
     char *endptr;
     errno = 0;
     long timestamp = strtol(timestamp_str, &endptr, 10);
+    /* Allow trailing whitespace (e.g. newline from fgets) after the number */
+    while (*endptr != '\0' && isspace((unsigned char)*endptr)) {
+        endptr++;
+    }
     if (errno != 0 || endptr == timestamp_str || *endptr != '\0') {
         return -1;  /* Invalid timestamp */
     }
