@@ -30,6 +30,7 @@ target_compile_options(nss_llng PRIVATE
     # Security hardening flags
     -fstack-protector-strong      # Stack buffer overflow protection
     -Wformat -Wformat-security    # Format string vulnerability detection
+    -fvisibility=hidden           # Hide internal symbols, reduce attack surface
 )
 
 # _FORTIFY_SOURCE requires optimization (-O1 or higher) to be effective

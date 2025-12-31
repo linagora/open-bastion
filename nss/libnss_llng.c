@@ -28,6 +28,9 @@
 /* Shared path validation functions */
 #include "path_validator.h"
 
+/* Mark NSS entry points as visible when using -fvisibility=hidden */
+#define NSS_VISIBLE __attribute__((visibility("default")))
+
 /* Configuration file path */
 #define NSS_LLNG_CONF "/etc/nss_llng.conf"
 
@@ -134,6 +137,67 @@ static int safe_strcpy(char **dst, size_t *remaining, const char *src)
 }
 
 /*
+ * Safe parsing functions to replace atoi().
+ * These handle overflow, invalid input, and provide proper error detection.
+ */
+static int safe_parse_uid(const char *str, uid_t *result)
+{
+    if (!str || !result) return -1;
+
+    char *endptr;
+    errno = 0;
+    unsigned long val = strtoul(str, &endptr, 10);
+
+    if (errno != 0 || endptr == str || *endptr != '\0') {
+        return -1;  /* Parse error or trailing garbage */
+    }
+    if (val > (unsigned long)((uid_t)-1)) {
+        return -1;  /* Overflow */
+    }
+
+    *result = (uid_t)val;
+    return 0;
+}
+
+static int safe_parse_gid(const char *str, gid_t *result)
+{
+    if (!str || !result) return -1;
+
+    char *endptr;
+    errno = 0;
+    unsigned long val = strtoul(str, &endptr, 10);
+
+    if (errno != 0 || endptr == str || *endptr != '\0') {
+        return -1;  /* Parse error or trailing garbage */
+    }
+    if (val > (unsigned long)((gid_t)-1)) {
+        return -1;  /* Overflow */
+    }
+
+    *result = (gid_t)val;
+    return 0;
+}
+
+static int safe_parse_int(const char *str, int *result, int min_val, int max_val)
+{
+    if (!str || !result) return -1;
+
+    char *endptr;
+    errno = 0;
+    long val = strtol(str, &endptr, 10);
+
+    if (errno != 0 || endptr == str || *endptr != '\0') {
+        return -1;  /* Parse error or trailing garbage */
+    }
+    if (val < min_val || val > max_val) {
+        return -1;  /* Out of range */
+    }
+
+    *result = (int)val;
+    return 0;
+}
+
+/*
  * Wrappers for shared path validation functions from path_validator.h
  * These use the default approved lists.
  */
@@ -168,8 +232,8 @@ static int uid_exists_locally(uid_t uid)
             if (*p == ':') {
                 if (field == 2) {
                     *p = '\0';
-                    uid_t local_uid = (uid_t)atoi(start);
-                    if (local_uid == uid) {
+                    uid_t local_uid;
+                    if (safe_parse_uid(start, &local_uid) == 0 && local_uid == uid) {
                         fclose(f);
                         return 1;
                     }
@@ -322,13 +386,19 @@ static int load_config(nss_llng_config_t *config)
             config->server_token_file = strdup(value);
         }
         else if (strcmp(key, "timeout") == 0) {
-            config->timeout = atoi(value);
+            int timeout;
+            if (safe_parse_int(value, &timeout, 1, 300) == 0) {
+                config->timeout = timeout;
+            }
         }
         else if (strcmp(key, "verify_ssl") == 0) {
             config->verify_ssl = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         }
         else if (strcmp(key, "cache_ttl") == 0) {
-            config->cache_ttl = atoi(value);
+            int cache_ttl;
+            if (safe_parse_int(value, &cache_ttl, 0, 86400) == 0) {
+                config->cache_ttl = cache_ttl;
+            }
         }
         else if (strcmp(key, "default_shell") == 0) {
             free(config->default_shell);
@@ -339,13 +409,22 @@ static int load_config(nss_llng_config_t *config)
             config->default_home_base = strdup(value);
         }
         else if (strcmp(key, "min_uid") == 0) {
-            config->min_uid = (uid_t)atoi(value);
+            uid_t min_uid;
+            if (safe_parse_uid(value, &min_uid) == 0) {
+                config->min_uid = min_uid;
+            }
         }
         else if (strcmp(key, "max_uid") == 0) {
-            config->max_uid = (uid_t)atoi(value);
+            uid_t max_uid;
+            if (safe_parse_uid(value, &max_uid) == 0) {
+                config->max_uid = max_uid;
+            }
         }
         else if (strcmp(key, "default_gid") == 0) {
-            config->default_gid = (gid_t)atoi(value);
+            gid_t default_gid;
+            if (safe_parse_gid(value, &default_gid) == 0) {
+                config->default_gid = default_gid;
+            }
         }
     }
 
@@ -521,8 +600,17 @@ static int file_cache_load_by_uid(uid_t uid, struct passwd *pw, char *buffer, si
         return -1;
     }
 
-    /* Check TTL */
-    long timestamp = atol(timestamp_str);
+    /* Check TTL - use strtol for safe parsing */
+    char *endptr;
+    errno = 0;
+    long timestamp = strtol(timestamp_str, &endptr, 10);
+    /* Allow trailing whitespace (e.g. newline from fgets) after the number */
+    while (*endptr != '\0' && isspace((unsigned char)*endptr)) {
+        endptr++;
+    }
+    if (errno != 0 || endptr == timestamp_str || *endptr != '\0') {
+        return -1;  /* Invalid timestamp */
+    }
     if (time(NULL) - timestamp > g_config.cache_ttl) {
         /* Expired - remove file */
         unlink(filepath);
@@ -530,8 +618,14 @@ static int file_cache_load_by_uid(uid_t uid, struct passwd *pw, char *buffer, si
     }
 
     /* Check UID matches */
-    uid_t file_uid = (uid_t)atoi(uid_str);
-    if (file_uid != uid) {
+    uid_t file_uid;
+    if (safe_parse_uid(uid_str, &file_uid) != 0 || file_uid != uid) {
+        return -1;
+    }
+
+    /* Parse GID */
+    gid_t file_gid;
+    if (safe_parse_gid(gid_str, &file_gid) != 0) {
         return -1;
     }
 
@@ -546,7 +640,7 @@ static int file_cache_load_by_uid(uid_t uid, struct passwd *pw, char *buffer, si
     if (safe_strcpy(&p, &remaining, "x") != 0) return -1;
 
     pw->pw_uid = file_uid;
-    pw->pw_gid = (gid_t)atoi(gid_str);
+    pw->pw_gid = file_gid;
 
     pw->pw_gecos = p;
     if (safe_strcpy(&p, &remaining, gecos_str ? gecos_str : "") != 0) return -1;
@@ -876,7 +970,7 @@ static void ensure_initialized(void)
 }
 
 /* NSS entry point: getpwnam_r */
-enum nss_status _nss_llng_getpwnam_r(const char *name,
+NSS_VISIBLE enum nss_status _nss_llng_getpwnam_r(const char *name,
                                       struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
@@ -977,7 +1071,7 @@ enum nss_status _nss_llng_getpwnam_r(const char *name,
 }
 
 /* NSS entry point: getpwuid_r */
-enum nss_status _nss_llng_getpwuid_r(uid_t uid,
+NSS_VISIBLE enum nss_status _nss_llng_getpwuid_r(uid_t uid,
                                       struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
@@ -1067,20 +1161,20 @@ enum nss_status _nss_llng_getpwuid_r(uid_t uid,
 }
 
 /* NSS entry point: setpwent (start enumeration) */
-enum nss_status _nss_llng_setpwent(void)
+NSS_VISIBLE enum nss_status _nss_llng_setpwent(void)
 {
     /* We don't support enumeration */
     return NSS_STATUS_SUCCESS;
 }
 
 /* NSS entry point: endpwent (end enumeration) */
-enum nss_status _nss_llng_endpwent(void)
+NSS_VISIBLE enum nss_status _nss_llng_endpwent(void)
 {
     return NSS_STATUS_SUCCESS;
 }
 
 /* NSS entry point: getpwent_r (enumerate) */
-enum nss_status _nss_llng_getpwent_r(struct passwd *result,
+NSS_VISIBLE enum nss_status _nss_llng_getpwent_r(struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
                                       int *errnop)

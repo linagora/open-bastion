@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <pwd.h>
+#include <errno.h>
 
 /* Reserved UID for 'nobody' user - must never be assigned */
 #define NOBODY_UID 65534
@@ -48,10 +49,16 @@ static int uid_exists_locally(uid_t uid)
             if (*p == ':') {
                 if (field == 2) {
                     *p = '\0';
-                    uid_t local_uid = (uid_t)atoi(start);
-                    if (local_uid == uid) {
-                        fclose(f);
-                        return 1;
+                    char *endptr;
+                    errno = 0;
+                    unsigned long parsed_uid = strtoul(start, &endptr, 10);
+                    if (errno == 0 && endptr != start && *endptr == '\0' &&
+                        parsed_uid <= (unsigned long)((uid_t)-1)) {
+                        uid_t local_uid = (uid_t)parsed_uid;
+                        if (local_uid == uid) {
+                            fclose(f);
+                            return 1;
+                        }
                     }
                 }
                 field++;
