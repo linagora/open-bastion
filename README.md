@@ -1,8 +1,10 @@
 # PAM Module for LemonLDAP::NG
 
-**Control SSH access and sudo privileges on your Linux servers through LemonLDAP::NG.**
+**Control SSH access and sudo privileges on your Linux servers through [LemonLDAP::NG Web-SSO](https://lemonldap-ng.org).**
 
-This PAM module integrates your servers with LemonLDAP::NG (LLNG) to centrally manage who can SSH into which servers and who can use sudo. Administrators define access rules in the LLNG portal, and the PAM module enforces them on each server.
+This PAM module integrates your servers with [LemonLDAP::NG](https://lemonldap-ng.org) (LLNG)
+to centrally manage who can SSH into which servers and who can use [sudo](https://en.wikipedia.org/wiki/Sudo).
+Administrators define access rules in the LLNG portal, and the PAM module enforces them on each server.
 
 The module supports two authentication methods:
 
@@ -26,7 +28,10 @@ The module supports two authentication methods:
 
 ## Requirements
 
-- LemonLDAP::NG >= 2.22.0 with PAM Access plugin enabled
+Globally:
+- A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](./llng-plugin) installed and enabled
+
+On each SSH servers to protect:
 - libcurl
 - json-c
 - OpenSSL
