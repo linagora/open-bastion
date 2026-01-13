@@ -77,18 +77,18 @@ Enterprise solutions focused on privileged access control and session recording:
 Wallix is a French company whose Wallix Bastion product is often considered in the same market.
 Here's a detailed comparison:
 
-| Feature | LLNG + Bastion | Wallix Bastion |
-|---------|----------------|----------------|
-| **SSH Session Recording** | ✅ | ✅ |
-| **Session Playback** | ✅ | ✅ |
-| **Multi-Factor Authentication** | ✅ (built-in) | ✅ (add-on) |
-| **Web Single Sign-On** | ✅ | ❌ |
-| **SAML/OIDC Provider** | ✅ | Limited |
-| **Centralized Access Policies** | ✅ | ✅ |
-| **Password Vault** | Unneeded (SSH CA) | ✅ |
-| **RDP Recording** | ✅ (via Redemption) | ✅ |
-| **License** | AGPL (Free) | Proprietary |
-| **Typical Cost** | Free | 50-100€/user/year |
+| Feature                         | LLNG + Bastion      | Wallix Bastion    |
+| ------------------------------- | ------------------- | ----------------- |
+| **SSH Session Recording**       | ✅                  | ✅                |
+| **Session Playback**            | ✅                  | ✅                |
+| **Multi-Factor Authentication** | ✅ (built-in)       | ✅ (add-on)       |
+| **Web Single Sign-On**          | ✅                  | ❌                |
+| **SAML/OIDC Provider**          | ✅                  | Limited           |
+| **Centralized Access Policies** | ✅                  | ✅                |
+| **Password Vault**              | Unneeded (SSH CA)   | ✅                |
+| **RDP Recording**               | ✅ (via Redemption) | ✅                |
+| **License**                     | AGPL (Free)         | Proprietary       |
+| **Typical Cost**                | Free                | 50-100€/user/year |
 
 ### When to Choose LLNG
 
@@ -134,22 +134,22 @@ flowchart TB
 
 ### Key Features
 
-| Feature | Details |
-|---------|---------|
-| **Native RDP client** | Works with mstsc.exe and other RDP clients |
-| **Session recording** | `.wrm` format, convertible to MP4 |
-| **Unified authorization** | Same `pamAccessServerGroups` as SSH |
-| **Authentication hook** | Python-based integration with LLNG API |
+| Feature                   | Details                                    |
+| ------------------------- | ------------------------------------------ |
+| **Native RDP client**     | Works with mstsc.exe and other RDP clients |
+| **Session recording**     | `.wrm` format, convertible to MP4          |
+| **Unified authorization** | Same `pamAccessServerGroups` as SSH        |
+| **Authentication hook**   | Python-based integration with LLNG API     |
 
 ### Comparison with Commercial Solutions
 
-| Feature | LLNG + Redemption | Wallix Bastion | CyberArk |
-|---------|-------------------|----------------|----------|
-| RDP proxy | ✅ | ✅ | ✅ |
-| Session recording | ✅ | ✅ | ✅ |
-| Web SSO integration | ✅ | ❌ | ❌ |
-| Open source | ✅ (GPL-2.0) | ❌ | ❌ |
-| Cost | Free | €€€ | €€€€ |
+| Feature             | LLNG + Redemption | Wallix Bastion | CyberArk |
+| ------------------- | ----------------- | -------------- | -------- |
+| RDP proxy           | ✅                | ✅             | ✅       |
+| Session recording   | ✅                | ✅             | ✅       |
+| Web SSO integration | ✅                | ❌             | ❌       |
+| Open source         | ✅ (GPL-2.0)      | ❌             | ❌       |
+| Cost                | Free              | €€€            | €€€€     |
 
 ### Limitations
 

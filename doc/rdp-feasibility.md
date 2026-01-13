@@ -8,12 +8,12 @@ LemonLDAP::NG authentication integration, and session recording.
 
 **Recommendation**: Integrate **WALLIX Redemption** as the RDP proxy component.
 
-| Aspect | Assessment |
-|--------|------------|
-| Feasibility | High - proven open-source solution exists |
-| Effort | 9-13 days for Proof of Concept |
-| Risk | Medium - GPL-2.0 license, build complexity |
-| Integration | Native `/pam/authorize` API reuse |
+| Aspect      | Assessment                                 |
+| ----------- | ------------------------------------------ |
+| Feasibility | High - proven open-source solution exists  |
+| Effort      | 9-13 days for Proof of Concept             |
+| Risk        | Medium - GPL-2.0 license, build complexity |
+| Integration | Native `/pam/authorize` API reuse          |
 
 ---
 
@@ -21,20 +21,20 @@ LemonLDAP::NG authentication integration, and session recording.
 
 ### Functional Requirements
 
-| Requirement | Priority | Notes |
-|-------------|----------|-------|
+| Requirement                           | Priority  | Notes                         |
+| ------------------------------------- | --------- | ----------------------------- |
 | Native RDP client support (mstsc.exe) | Must have | Web-only (Guacamole) rejected |
-| LemonLDAP::NG authentication | Must have | Unified identity management |
-| Session recording | Must have | Audit compliance |
-| Session replay | Must have | Security investigations |
-| Unified authorization (SSH/RDP) | Must have | Same `pamAccessServerGroups` |
+| LemonLDAP::NG authentication          | Must have | Unified identity management   |
+| Session recording                     | Must have | Audit compliance              |
+| Session replay                        | Must have | Security investigations       |
+| Unified authorization (SSH/RDP)       | Must have | Same `pamAccessServerGroups`  |
 
 ### Non-Functional Requirements
 
-| Requirement | Target |
-|-------------|--------|
-| License | Compatible with AGPL |
-| Maintenance | Reasonable community support |
+| Requirement | Target                                      |
+| ----------- | ------------------------------------------- |
+| License     | Compatible with AGPL                        |
+| Maintenance | Reasonable community support                |
 | Performance | Acceptable latency for interactive sessions |
 
 ---
@@ -45,12 +45,12 @@ LemonLDAP::NG authentication integration, and session recording.
 
 **Description**: Browser-based RDP gateway using HTML5.
 
-| Aspect | Assessment |
-|--------|------------|
-| RDP proxy | Via guacd daemon |
+| Aspect            | Assessment              |
+| ----------------- | ----------------------- |
+| RDP proxy         | Via guacd daemon        |
 | Session recording | Native (`.guac` format) |
-| Authentication | OIDC native support |
-| License | Apache 2.0 |
+| Authentication    | OIDC native support     |
+| License           | Apache 2.0              |
 
 **Verdict**: Rejected - does not support native RDP clients (mstsc.exe).
 
@@ -58,12 +58,12 @@ LemonLDAP::NG authentication integration, and session recording.
 
 **Description**: Build custom RDP proxy using FreeRDP library.
 
-| Aspect | Assessment |
-|--------|------------|
-| RDP proxy | Via `freerdp-proxy` |
+| Aspect            | Assessment                     |
+| ----------------- | ------------------------------ |
+| RDP proxy         | Via `freerdp-proxy`            |
 | Session recording | Must be developed from scratch |
-| Authentication | Must be developed |
-| Effort | 15-21 days |
+| Authentication    | Must be developed              |
+| Effort            | 15-21 days                     |
 
 **Verdict**: Rejected - excessive development effort and risk.
 
@@ -71,13 +71,13 @@ LemonLDAP::NG authentication integration, and session recording.
 
 **Description**: Open-source RDP proxy from Wallix (French company).
 
-| Aspect | Assessment |
-|--------|------------|
-| RDP proxy | True MITM proxy, native clients work |
-| Session recording | Native (`.wrm` format, MP4 export) |
-| Authentication | Python hooks (`passthrough.py`) |
-| License | GPL-2.0 |
-| Repository | https://github.com/wallix/redemption |
+| Aspect            | Assessment                           |
+| ----------------- | ------------------------------------ |
+| RDP proxy         | True MITM proxy, native clients work |
+| Session recording | Native (`.wrm` format, MP4 export)   |
+| Authentication    | Python hooks (`passthrough.py`)      |
+| License           | GPL-2.0                              |
+| Repository        | https://github.com/wallix/redemption |
 
 **Verdict**: Recommended - best balance of features and effort.
 
@@ -85,12 +85,12 @@ LemonLDAP::NG authentication integration, and session recording.
 
 **Description**: Complete PAM platform with RDP support.
 
-| Aspect | Assessment |
-|--------|------------|
-| RDP proxy | Native web-based |
-| Session recording | Native |
-| Authentication | OIDC support |
-| License | GPLv3 |
+| Aspect            | Assessment       |
+| ----------------- | ---------------- |
+| RDP proxy         | Native web-based |
+| Session recording | Native           |
+| Authentication    | OIDC support     |
+| License           | GPLv3            |
 
 **Verdict**: Alternative - larger footprint, parallel system to LLNG.
 
@@ -98,14 +98,14 @@ LemonLDAP::NG authentication integration, and session recording.
 
 ## Comparison Matrix
 
-| Criterion | Guacamole | FreeRDP | Redemption | JumpServer |
-|-----------|-----------|---------|------------|------------|
-| Native RDP client | No | Yes | Yes | No |
-| Session recording | Yes | No | Yes | Yes |
-| LLNG integration effort | Low | Very High | Medium | Low |
-| Maintenance burden | Low | Very High | Medium | Medium |
-| License | Apache 2.0 | Apache 2.0 | GPL-2.0 | GPLv3 |
-| **Score** | 3/5 | 1/5 | **4/5** | 3/5 |
+| Criterion               | Guacamole  | FreeRDP    | Redemption | JumpServer |
+| ----------------------- | ---------- | ---------- | ---------- | ---------- |
+| Native RDP client       | No         | Yes        | Yes        | No         |
+| Session recording       | Yes        | No         | Yes        | Yes        |
+| LLNG integration effort | Low        | Very High  | Medium     | Low        |
+| Maintenance burden      | Low        | Very High  | Medium     | Medium     |
+| License                 | Apache 2.0 | Apache 2.0 | GPL-2.0    | GPLv3      |
+| **Score**               | 3/5        | 1/5        | **4/5**    | 3/5        |
 
 ---
 
@@ -187,14 +187,14 @@ flowchart TB
 
 The existing `pamAccessServerGroups` mechanism will apply to both SSH and RDP:
 
-| Group Name | Authorization Rule | Protocol |
-|------------|-------------------|----------|
-| production | `$hGroup->{sre} or $hGroup->{oncall}` | SSH |
-| staging | `$hGroup->{sre} or $hGroup->{dev}` | SSH |
-| development | `$hGroup->{dev}` | SSH |
-| windows-prod | `$hGroup->{sre} or $hGroup->{admins}` | RDP |
-| windows-dev | `$hGroup->{dev}` | RDP |
-| bastion | `$hGroup->{employees}` | SSH |
+| Group Name   | Authorization Rule                      | Protocol |
+| ------------ | --------------------------------------- | -------- |
+| production   | `$hGroups->{sre} or $hGroups->{oncall}` | SSH      |
+| staging      | `$hGroups->{sre} or $hGroups->{dev}`    | SSH      |
+| development  | `$hGroups->{dev}`                       | SSH      |
+| windows-prod | `$hGroups->{sre} or $hGroups->{admins}` | RDP      |
+| windows-dev  | `$hGroups->{dev}`                       | RDP      |
+| bastion      | `$hGroups->{employees}`                 | SSH      |
 
 ### API Call Flow
 
@@ -242,12 +242,12 @@ llng-pam-enroll --portal https://auth.example.com --server-group rdp-proxy
 
 Redemption uses `.wrm` (WALLIX Recording Media) format:
 
-| Aspect | Details |
-|--------|---------|
-| Format | Proprietary binary, efficient |
-| Contents | RDP protocol capture with timing |
-| Size | ~10-50 MB/hour typical |
-| Conversion | `redrec` tool converts to MP4 |
+| Aspect     | Details                          |
+| ---------- | -------------------------------- |
+| Format     | Proprietary binary, efficient    |
+| Contents   | RDP protocol capture with timing |
+| Size       | ~10-50 MB/hour typical           |
+| Conversion | `redrec` tool converts to MP4    |
 
 ### Storage Structure
 
@@ -265,19 +265,19 @@ Redemption uses `.wrm` (WALLIX Recording Media) format:
 
 ```json
 {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user": "dwho",
-    "client_ip": "192.168.1.100",
-    "target_host": "windows-server.example.com",
-    "target_user": "dwho@DOMAIN",
-    "start_time": "2025-12-16T10:30:00Z",
-    "end_time": "2025-12-16T11:45:23Z",
-    "status": "completed",
-    "protocol": "rdp",
-    "recording_file": "20251216-103000_550e8400.wrm",
-    "recording_size_bytes": 15728640,
-    "hostname": "rdp-proxy.example.com",
-    "version": "1.0.0"
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user": "dwho",
+  "client_ip": "192.168.1.100",
+  "target_host": "windows-server.example.com",
+  "target_user": "dwho@DOMAIN",
+  "start_time": "2025-12-16T10:30:00Z",
+  "end_time": "2025-12-16T11:45:23Z",
+  "status": "completed",
+  "protocol": "rdp",
+  "recording_file": "20251216-103000_550e8400.wrm",
+  "recording_size_bytes": 15728640,
+  "hostname": "rdp-proxy.example.com",
+  "version": "1.0.0"
 }
 ```
 
@@ -293,35 +293,35 @@ Redemption uses `.wrm` (WALLIX Recording Media) format:
 
 ### License Risk: GPL-2.0
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Copyleft requirement | Modifications must be published | Acceptable for open-source project |
-| License compatibility | Must verify AGPL compatibility | GPLv3 Section 13 allows combination |
+| Risk                  | Impact                          | Mitigation                          |
+| --------------------- | ------------------------------- | ----------------------------------- |
+| Copyleft requirement  | Modifications must be published | Acceptable for open-source project  |
+| License compatibility | Must verify AGPL compatibility  | GPLv3 Section 13 allows combination |
 
 **Action**: Verify with legal team before production deployment.
 
 ### Build Complexity
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| C++20 requirement | Modern compiler needed | Use Docker container |
-| 15+ dependencies | Complex build process | Pre-built Docker image |
-| Build time | 30-60 minutes | Cache build artifacts |
+| Risk              | Impact                 | Mitigation             |
+| ----------------- | ---------------------- | ---------------------- |
+| C++20 requirement | Modern compiler needed | Use Docker container   |
+| 15+ dependencies  | Complex build process  | Pre-built Docker image |
+| Build time        | 30-60 minutes          | Cache build artifacts  |
 
 ### Credential Management
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Credential exposure | Proxy handles Windows passwords | TLS encryption, secure storage |
-| Pass-through mode | User provides credentials | Acceptable for PoC |
-| Vault mode (future) | LLNG stores credentials | Requires additional development |
+| Risk                | Impact                          | Mitigation                      |
+| ------------------- | ------------------------------- | ------------------------------- |
+| Credential exposure | Proxy handles Windows passwords | TLS encryption, secure storage  |
+| Pass-through mode   | User provides credentials       | Acceptable for PoC              |
+| Vault mode (future) | LLNG stores credentials         | Requires additional development |
 
 ### NLA (Network Level Authentication)
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| NLA complexity | Credential extraction complex | Test both NLA and non-NLA |
-| CredSSP handling | Protocol-specific challenges | Redemption handles this |
+| Risk             | Impact                        | Mitigation                |
+| ---------------- | ----------------------------- | ------------------------- |
+| NLA complexity   | Credential extraction complex | Test both NLA and non-NLA |
+| CredSSP handling | Protocol-specific challenges  | Redemption handles this   |
 
 ---
 
@@ -363,13 +363,13 @@ Redemption uses `.wrm` (WALLIX Recording Media) format:
 
 ## Effort Estimation
 
-| Phase | Effort | Cumulative |
-|-------|--------|------------|
-| Documentation | 1-2 days | 1-2 days |
-| Build Redemption | 2-3 days | 3-5 days |
-| LLNG Integration | 3-4 days | 6-9 days |
-| Session Recording | 2-3 days | 8-12 days |
-| Final Documentation | 1 day | 9-13 days |
+| Phase               | Effort   | Cumulative |
+| ------------------- | -------- | ---------- |
+| Documentation       | 1-2 days | 1-2 days   |
+| Build Redemption    | 2-3 days | 3-5 days   |
+| LLNG Integration    | 3-4 days | 6-9 days   |
+| Session Recording   | 2-3 days | 8-12 days  |
+| Final Documentation | 1 day    | 9-13 days  |
 
 **Total PoC effort**: 9-13 days
 
@@ -377,14 +377,14 @@ Redemption uses `.wrm` (WALLIX Recording Media) format:
 
 Additional work for production:
 
-| Task | Effort |
-|------|--------|
-| High availability setup | 2-3 days |
-| Monitoring and alerting | 1-2 days |
-| Backup and retention policies | 1 day |
-| Security hardening | 2-3 days |
-| Documentation and training | 2-3 days |
-| **Total** | **8-12 days** |
+| Task                          | Effort        |
+| ----------------------------- | ------------- |
+| High availability setup       | 2-3 days      |
+| Monitoring and alerting       | 1-2 days      |
+| Backup and retention policies | 1 day         |
+| Security hardening            | 2-3 days      |
+| Documentation and training    | 2-3 days      |
+| **Total**                     | **8-12 days** |
 
 ---
 
@@ -412,12 +412,14 @@ Additional work for production:
 Adding RDP support via WALLIX Redemption is **feasible** and **recommended**.
 
 **Key advantages**:
+
 - Proven technology from French company (Wallix)
 - Native RDP client support (mstsc.exe works)
 - Built-in session recording
 - Integrates with existing LLNG authorization model
 
 **Key risks**:
+
 - GPL-2.0 license requires legal review
 - Build complexity (mitigated by Docker)
 - Credential management needs careful design

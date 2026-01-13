@@ -20,6 +20,7 @@ Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 ```
 
 Or via GUI:
+
 1. Open **System Properties** → **Remote** tab
 2. Select **Allow remote connections to this computer**
 3. Uncheck **Allow connections only from computers running Remote Desktop with Network Level Authentication** (for PoC only)

@@ -43,6 +43,7 @@ docker compose up -d
 ```
 
 This will:
+
 - Build the LemonLDAP::NG SSO container
 - Build the Redemption RDP proxy container
 - Start both services
@@ -72,6 +73,7 @@ Use your RDP client (mstsc.exe, Remmina, etc.) to connect:
 - **Password**: Your LLNG password
 
 The proxy will:
+
 1. Authenticate you via LLNG
 2. Check authorization (same `pamAccessServerGroups` as SSH)
 3. Connect to the Windows target
@@ -81,9 +83,9 @@ The proxy will:
 
 ### Components
 
-| Component | Port | Description |
-|-----------|------|-------------|
-| `sso` | 80 | LemonLDAP::NG Portal |
+| Component   | Port | Description                 |
+| ----------- | ---- | --------------------------- |
+| `sso`       | 80   | LemonLDAP::NG Portal        |
 | `rdp-proxy` | 3389 | WALLIX Redemption RDP Proxy |
 
 ### Authorization Flow
@@ -97,11 +99,11 @@ The proxy will:
 
 ### Configuration Files
 
-| File | Description |
-|------|-------------|
-| `redemption/config/rdpproxy.ini` | Redemption configuration |
-| `redemption/config/passthrough.py` | LLNG authentication hook |
-| `lmConf-1.json` | LLNG portal configuration |
+| File                               | Description               |
+| ---------------------------------- | ------------------------- |
+| `redemption/config/rdpproxy.ini`   | Redemption configuration  |
+| `redemption/config/passthrough.py` | LLNG authentication hook  |
+| `lmConf-1.json`                    | LLNG portal configuration |
 
 ## Session Recording
 
@@ -139,13 +141,13 @@ Each recording has a JSON metadata file:
 
 ```json
 {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user": "dwho",
-    "client_ip": "192.168.1.50",
-    "target_host": "windows-server.example.com",
-    "start_time": "2025-12-16T10:30:00Z",
-    "end_time": "2025-12-16T11:45:23Z",
-    "protocol": "rdp"
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user": "dwho",
+  "client_ip": "192.168.1.50",
+  "target_host": "windows-server.example.com",
+  "start_time": "2025-12-16T10:30:00Z",
+  "end_time": "2025-12-16T11:45:23Z",
+  "protocol": "rdp"
 }
 ```
 
@@ -190,12 +192,12 @@ curl -X POST http://localhost/pam/authorize \
 
 ### Common Issues
 
-| Issue | Solution |
-|-------|----------|
-| Connection refused | Check Windows firewall allows RDP (3389) |
-| Authorization failed | Verify user is in correct server group |
+| Issue                 | Solution                                        |
+| --------------------- | ----------------------------------------------- |
+| Connection refused    | Check Windows firewall allows RDP (3389)        |
+| Authorization failed  | Verify user is in correct server group          |
 | Recording not created | Check `/var/lib/llng-sessions/rdp/` permissions |
-| NLA error | Disable NLA on Windows target for PoC |
+| NLA error             | Disable NLA on Windows target for PoC           |
 
 ## Security Considerations
 
