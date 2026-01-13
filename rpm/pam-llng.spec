@@ -58,8 +58,10 @@ and key-based authorization with server groups.
 %{_sbindir}/llng-bastion-setup
 %{_sbindir}/llng-backend-setup
 %{_bindir}/llng-ssh-cert
+%{_bindir}/llng-ssh-proxy
 %dir %{_sysconfdir}/llng
 %config(noreplace) %{_sysconfdir}/llng/session-recorder.conf.example
+%config(noreplace) %{_sysconfdir}/llng/ssh-proxy.conf.example
 %{_unitdir}/pam-llng-heartbeat.service
 %{_unitdir}/pam-llng-heartbeat.timer
 %{_mandir}/man1/llng-ssh-cert.1*
@@ -68,6 +70,7 @@ and key-based authorization with server groups.
 %{_mandir}/man8/llng-bastion-setup.8*
 %{_mandir}/man8/llng-backend-setup.8*
 %{_mandir}/man8/llng-session-recorder.8*
+%{_mandir}/man1/llng-ssh-proxy.1*
 %exclude %{_docdir}/pam_llng/README.md
 
 %post
