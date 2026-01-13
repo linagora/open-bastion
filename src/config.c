@@ -134,6 +134,11 @@ void config_init(pam_llng_config_t *config)
     config->bastion_jwt_verify_local = true;  /* Local verification preferred */
     config->bastion_jwt_cache_ttl = 3600;     /* 1 hour JWKS cache */
     config->bastion_jwt_clock_skew = 60;      /* 1 minute clock skew allowed */
+
+    /* JTI replay detection - enabled by default when bastion JWT is used */
+    config->bastion_jwt_replay_detection = true;
+    config->bastion_jwt_replay_cache_size = 10000;
+    config->bastion_jwt_replay_cleanup_interval = 60;
 }
 
 /* Secure free: zero memory before freeing */
@@ -563,6 +568,16 @@ static int parse_line(const char *key, const char *value, pam_llng_config_t *con
     else if (strcmp(key, "bastion_jwt_allowed_bastions") == 0 || strcmp(key, "allowed_bastions") == 0) {
         free(config->bastion_jwt_allowed_bastions);
         config->bastion_jwt_allowed_bastions = strdup(value);
+    }
+    /* JTI replay detection options */
+    else if (strcmp(key, "bastion_jwt_replay_detection") == 0) {
+        config->bastion_jwt_replay_detection = parse_bool(value);
+    }
+    else if (strcmp(key, "bastion_jwt_replay_cache_size") == 0) {
+        config->bastion_jwt_replay_cache_size = parse_int(value, 10000, 100, 1000000);
+    }
+    else if (strcmp(key, "bastion_jwt_replay_cleanup_interval") == 0) {
+        config->bastion_jwt_replay_cleanup_interval = parse_int(value, 60, 10, 3600);
     }
     /* Unknown keys are silently ignored */
 

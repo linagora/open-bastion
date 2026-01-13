@@ -41,6 +41,7 @@ set(PAM_MODULE_SOURCES
     src/auth_cache.c
     src/bastion_jwt.c
     src/jwks_cache.c
+    src/jti_cache.c
 )
 
 if(ENABLE_CACHE)

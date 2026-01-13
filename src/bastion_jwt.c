@@ -16,6 +16,7 @@
 
 #include "bastion_jwt.h"
 #include "jwks_cache.h"
+#include "jti_cache.h"
 
 /* Security limits */
 #define MAX_JWT_LENGTH 8192
@@ -30,6 +31,7 @@ struct bastion_jwt_verifier {
     int max_clock_skew;
     char *allowed_bastions;
     jwks_cache_t *jwks_cache;
+    jti_cache_t *jti_cache;  /* For replay detection (NULL = disabled) */
 };
 
 /* Base64url decode (RFC 4648 section 5) */
@@ -305,6 +307,7 @@ bastion_jwt_verifier_t *bastion_jwt_verifier_init(const bastion_jwt_config_t *co
     }
 
     verifier->jwks_cache = config->jwks_cache;
+    verifier->jti_cache = config->jti_cache;  /* May be NULL (disabled) */
 
     return verifier;
 }
@@ -445,6 +448,27 @@ bastion_jwt_result_t bastion_jwt_verify(bastion_jwt_verifier_t *verifier,
         }
     }
 
+    /* Check for replay attack if JTI cache is enabled */
+    if (verifier->jti_cache) {
+        if (claims->jti) {
+            jti_cache_result_t jti_result = jti_cache_check_and_add(
+                verifier->jti_cache, claims->jti, claims->exp);
+
+            if (jti_result == JTI_CACHE_REPLAY_DETECTED) {
+                bastion_jwt_claims_free(claims);
+                return BASTION_JWT_REPLAY_DETECTED;
+            } else if (jti_result != JTI_CACHE_OK) {
+                /* Log non-fatal cache errors (full, internal error, etc.) */
+                fprintf(stderr, "bastion_jwt: JTI cache warning: %s (jti=%s)\n",
+                        jti_cache_result_str(jti_result), claims->jti);
+            }
+        } else {
+            /* Replay detection configured but token has no jti claim */
+            fprintf(stderr, "bastion_jwt: warning: replay detection enabled but "
+                    "token has no 'jti' claim, skipping replay check\n");
+        }
+    }
+
     return BASTION_JWT_OK;
 }
 
@@ -473,6 +497,8 @@ const char *bastion_jwt_result_str(bastion_jwt_result_t result)
         return "Unauthorized bastion";
     case BASTION_JWT_NO_KEY_FOUND:
         return "No public key found for verification";
+    case BASTION_JWT_REPLAY_DETECTED:
+        return "JWT replay detected";
     case BASTION_JWT_INTERNAL_ERROR:
         return "Internal error";
     default:

@@ -101,7 +101,7 @@ target_link_libraries(test_token_manager
 add_test(NAME test_token_manager COMMAND test_token_manager)
 
 # Test bastion JWT verification
-add_executable(test_bastion_jwt test_bastion_jwt.c ../src/bastion_jwt.c ../src/jwks_cache.c)
+add_executable(test_bastion_jwt test_bastion_jwt.c ../src/bastion_jwt.c ../src/jwks_cache.c ../src/jti_cache.c)
 target_include_directories(test_bastion_jwt PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
@@ -112,8 +112,17 @@ target_link_libraries(test_bastion_jwt
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
     ${OPENSSL_LIBRARIES}
+    pthread
 )
 add_test(NAME test_bastion_jwt COMMAND test_bastion_jwt)
+
+# Test JTI cache for replay detection
+add_executable(test_jti_cache test_jti_cache.c ../src/jti_cache.c)
+target_include_directories(test_jti_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(test_jti_cache pthread)
+add_test(NAME test_jti_cache COMMAND test_jti_cache)
 
 # Note: Integration tests require a running LLNG instance
 # and are meant to be run manually

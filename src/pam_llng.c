@@ -40,6 +40,7 @@
 #include "token_manager.h"
 #include "bastion_jwt.h"
 #include "jwks_cache.h"
+#include "jti_cache.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -62,6 +63,7 @@ typedef struct {
     rate_limiter_t *rate_limiter;
     auth_cache_t *auth_cache;  /* Authorization cache for offline mode */
     jwks_cache_t *jwks_cache;  /* JWKS cache for bastion JWT verification */
+    jti_cache_t *jti_cache;    /* JTI cache for bastion JWT replay detection */
     bastion_jwt_verifier_t *bastion_jwt_verifier;  /* Bastion JWT verifier */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
@@ -346,6 +348,9 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (llng_data->jwks_cache) {
             jwks_cache_destroy(llng_data->jwks_cache);
         }
+        if (llng_data->jti_cache) {
+            jti_cache_destroy(llng_data->jti_cache);
+        }
         if (llng_data->client) {
             llng_client_destroy(llng_data->client);
         }
@@ -584,6 +589,19 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
             }
         }
 
+        /* Initialize JTI cache for replay detection if enabled */
+        if (data->config.bastion_jwt_replay_detection) {
+            jti_cache_config_t jti_cfg = {
+                .max_entries = (size_t)data->config.bastion_jwt_replay_cache_size,
+                .cleanup_interval = data->config.bastion_jwt_replay_cleanup_interval,
+                .persist_path = NULL  /* Memory-only for now */
+            };
+            data->jti_cache = jti_cache_create(&jti_cfg);
+            if (!data->jti_cache) {
+                LLNG_LOG_WARN(pamh, "Failed to initialize JTI cache for replay detection");
+            }
+        }
+
         /* Initialize bastion JWT verifier */
         if (data->jwks_cache) {
             /* Use portal_url as issuer if not specified */
@@ -597,7 +615,8 @@ static pam_llng_data_t *init_module_data(pam_handle_t *pamh,
                 .audience = "pam:bastion-backend",
                 .max_clock_skew = data->config.bastion_jwt_clock_skew,
                 .allowed_bastions = data->config.bastion_jwt_allowed_bastions,
-                .jwks_cache = data->jwks_cache
+                .jwks_cache = data->jwks_cache,
+                .jti_cache = data->jti_cache  /* May be NULL if disabled */
             };
             data->bastion_jwt_verifier = bastion_jwt_verifier_init(&jwt_cfg);
             if (!data->bastion_jwt_verifier) {
