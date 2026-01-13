@@ -77,18 +77,18 @@ Enterprise solutions focused on privileged access control and session recording:
 Wallix is a French company whose Wallix Bastion product is often considered in the same market.
 Here's a detailed comparison:
 
-| Feature                         | LLNG + Bastion    | Wallix Bastion    |
-| ------------------------------- | ----------------- | ----------------- |
-| **SSH Session Recording**       | ✅                | ✅                |
-| **Session Playback**            | ✅                | ✅                |
-| **Multi-Factor Authentication** | ✅ (built-in)     | ✅ (add-on)       |
-| **Web Single Sign-On**          | ✅                | ❌                |
-| **SAML/OIDC Provider**          | ✅                | Limited           |
-| **Centralized Access Policies** | ✅                | ✅                |
-| **Password Vault**              | Unneeded (SSH CA) | ✅                |
-| **RDP Recording**               | ❌                | ✅                |
-| **License**                     | AGPL (Free)       | Proprietary       |
-| **Typical Cost**                | Free              | 50-100€/user/year |
+| Feature | LLNG + Bastion | Wallix Bastion |
+|---------|----------------|----------------|
+| **SSH Session Recording** | ✅ | ✅ |
+| **Session Playback** | ✅ | ✅ |
+| **Multi-Factor Authentication** | ✅ (built-in) | ✅ (add-on) |
+| **Web Single Sign-On** | ✅ | ❌ |
+| **SAML/OIDC Provider** | ✅ | Limited |
+| **Centralized Access Policies** | ✅ | ✅ |
+| **Password Vault** | Unneeded (SSH CA) | ✅ |
+| **RDP Recording** | ✅ (via Redemption) | ✅ |
+| **License** | AGPL (Free) | Proprietary |
+| **Typical Cost** | Free | 50-100€/user/year |
 
 ### When to Choose LLNG
 
@@ -104,10 +104,66 @@ Choose LemonLDAP::NG + PAM Module when you need:
 
 Consider commercial PAM solutions when you need:
 
-- **RDP session recording** (Windows servers)
-- **Built-in password vault** with rotation
+- **Built-in password vault** with automatic rotation
 - **Vendor support contracts** required by policy
 - **Pre-certified compliance** (some regulations accept specific vendors)
+- **Turnkey solution** without custom integration
+
+---
+
+## RDP Support via WALLIX Redemption
+
+LemonLDAP::NG now supports RDP session recording through integration with
+[WALLIX Redemption](https://github.com/wallix/redemption), an open-source
+RDP proxy from the French company Wallix.
+
+### Architecture
+
+```
+                    ┌─────────────────┐
+                    │ LemonLDAP::NG   │
+                    │ /pam/authorize  │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+       ┌───────────┐  ┌───────────┐  ┌───────────┐
+       │SSH Bastion│  │RDP Proxy  │  │SSH Bastion│
+       │pam_llng.so│  │Redemption │  │pam_llng.so│
+       └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
+             │              │              │
+       ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
+       │Linux Srvs │  │Windows Srvs│ │Linux Srvs │
+       └───────────┘  └───────────┘  └───────────┘
+```
+
+### Key Features
+
+| Feature | Details |
+|---------|---------|
+| **Native RDP client** | Works with mstsc.exe and other RDP clients |
+| **Session recording** | `.wrm` format, convertible to MP4 |
+| **Unified authorization** | Same `pamAccessServerGroups` as SSH |
+| **Authentication hook** | Python-based integration with LLNG API |
+
+### Comparison with Commercial Solutions
+
+| Feature | LLNG + Redemption | Wallix Bastion | CyberArk |
+|---------|-------------------|----------------|----------|
+| RDP proxy | ✅ | ✅ | ✅ |
+| Session recording | ✅ | ✅ | ✅ |
+| Web SSO integration | ✅ | ❌ | ❌ |
+| Open source | ✅ (GPL-2.0) | ❌ | ❌ |
+| Cost | Free | €€€ | €€€€ |
+
+### Limitations
+
+- **License**: Redemption is GPL-2.0 (modifications must be published)
+- **Password vault**: Not included (pass-through mode for credentials)
+- **NLA support**: Works but requires careful configuration
+
+See [rdp-feasibility.md](rdp-feasibility.md) for detailed technical analysis.
 
 ---
 

@@ -1,0 +1,86 @@
+# LemonLDAP::NG RDP Proxy Demo with WALLIX Redemption
+#
+# Architecture:
+#   - sso: LLNG Portal with PAM Access and authorization
+#   - rdp-proxy: WALLIX Redemption RDP proxy with LLNG integration
+#
+# Usage:
+#   docker compose up -d
+#   # Connect with RDP client (mstsc.exe) to localhost:3389
+#   # Login with LLNG credentials + target Windows server
+#
+# Prerequisites:
+#   - Windows Server with RDP enabled (see windows-target/README.md)
+#   - Network access from Docker to Windows server
+
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    image: llng-rdp-sso
+    container_name: llng-rdp-sso
+    ports:
+      - "80:8080"
+    volumes:
+      # Custom plugins
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:ro
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:ro
+      # Templates
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:ro
+      # JavaScript
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:ro
+      # Configuration
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+      # Recordings storage (shared with rdp-proxy)
+      - rdp-recordings:/var/lib/llng-sessions/rdp
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      llng-rdp-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  rdp-proxy:
+    build:
+      context: ./redemption
+      dockerfile: Dockerfile
+    image: llng-rdp-proxy
+    container_name: llng-rdp-proxy
+    ports:
+      - "3389:3389"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      # LLNG integration settings
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      # Default Windows target (can be overridden per-connection)
+      - DEFAULT_TARGET_HOST=${WINDOWS_TARGET_HOST:-192.168.1.100}
+      - DEFAULT_TARGET_PORT=3389
+    volumes:
+      # Configuration
+      - ./redemption/config/rdpproxy.ini:/etc/rdpproxy/rdpproxy.ini:ro
+      - ./redemption/config/passthrough.py:/etc/rdpproxy/passthrough.py:ro
+      # Recordings storage
+      - rdp-recordings:/var/lib/llng-sessions/rdp
+    networks:
+      - llng-rdp-net
+
+volumes:
+  rdp-recordings:
+    driver: local
+
+networks:
+  llng-rdp-net:
+    driver: bridge
