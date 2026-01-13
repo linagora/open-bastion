@@ -63,7 +63,7 @@ LemonLDAP::NG authentication integration, and session recording.
 | RDP proxy | Via `freerdp-proxy` |
 | Session recording | Must be developed from scratch |
 | Authentication | Must be developed |
-| Effort | 15-21 months |
+| Effort | 15-21 days |
 
 **Verdict**: Rejected - excessive development effort and risk.
 

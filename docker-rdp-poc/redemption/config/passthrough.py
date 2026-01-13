@@ -50,7 +50,7 @@ except ImportError as e:
     error_output = json.dumps({
         "status": "denied",
         "message": "Internal error: missing requests dependency"
-    })
+    }, ensure_ascii=True)
     print(error_output)
     sys.exit(1)
 
