@@ -768,6 +768,95 @@ pkill -u $USERNAME -KILL
 
 ---
 
+### R-S9 - Replay d'un JWT bastion intercepté
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   2   |
+
+**Architectures concernées :** C, D (avec JWT bastion activé)
+
+**Description :** Un attaquant qui intercepte un JWT bastion en transit pourrait le rejouer pour usurper une connexion dans la fenêtre de validité du token (5 minutes par défaut).
+
+**Vecteurs d'attaque :**
+- MITM entre bastion et backend (rare si réseau interne)
+- Lecture de la variable d'environnement `LLNG_BASTION_JWT` sur le bastion
+- Logs applicatifs exposant le JWT
+
+**Facteurs atténuants :**
+- Le JWT a une durée de vie très courte (300s par défaut)
+- Le JWT contient `target_host` : utilisable uniquement vers ce backend spécifique
+- Le JWT contient `bastion_ip` : le backend peut vérifier la cohérence IP (warning si différent)
+- Le `jti` (JWT ID) est unique et généré avec `Crypt::URandom` ou `/dev/urandom`
+
+**Remédiation embarquée :**
+- TTL court configurable via `pamAccessBastionJwtTtl` (défaut: 300s)
+- Claim `target_host` limite le scope du JWT à un seul backend
+- UUID cryptographiquement sécurisé pour le `jti`
+
+**Remédiation configuration :**
+```ini
+# /etc/security/pam_llng.conf (backend) - Réduire le TTL accepté
+bastion_jwt_clock_skew = 30   # Réduire la tolérance (défaut: 60s)
+```
+
+```yaml
+# LLNG Manager - Réduire la durée de vie du JWT
+pamAccessBastionJwtTtl: 60    # 1 minute au lieu de 5
+```
+
+**Remédiation future possible :**
+- Cache local des `jti` utilisés pour détecter les replays (non implémenté)
+- Liaison du JWT à l'IP source SSH (vérification stricte vs warning actuel)
+
+|                 | Score résiduel                               |
+| --------------- | :------------------------------------------: |
+| **Probabilité** | 1 (avec TTL court + réseau interne sécurisé) |
+| **Impact**      |               2                              |
+
+---
+
+### R-S10 - Rotation des clés JWKS non propagée
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   2   |
+
+**Architectures concernées :** C, D (avec JWT bastion activé)
+
+**Description :** Si les clés de signature LLNG sont rotées ou révoquées, le cache JWKS local sur les backends pourrait continuer à accepter des JWT signés avec les anciennes clés.
+
+**Vecteurs d'attaque :**
+- Un attaquant ayant obtenu l'ancienne clé privée LLNG pourrait signer des JWT frauduleux
+- Si LLNG est compromis et les clés rotées, les backends continuent à faire confiance aux anciennes clés
+
+**Remédiation embarquée :**
+- TTL du cache JWKS configurable (défaut: 3600s = 1h)
+- Refresh automatique du cache si `kid` (Key ID) non trouvé
+- Vérification du claim `iss` (issuer) pour éviter les JWT d'autres sources
+
+**Remédiation configuration :**
+```ini
+# /etc/security/pam_llng.conf (backend)
+bastion_jwt_cache_ttl = 1800   # 30 min au lieu d'1h pour rotation plus rapide
+```
+
+**Remédiation procédurale :**
+- Lors d'une rotation de clés LLNG, purger manuellement les caches :
+  ```bash
+  rm -f /var/cache/pam_llng/jwks.json
+  ```
+- En cas de compromission LLNG : désactiver temporairement `bastion_jwt_required` le temps de propager les nouvelles clés
+
+|                 | Score résiduel                    |
+| --------------- | :-------------------------------: |
+| **Probabilité** | 1 (avec TTL court + procédure)    |
+| **Impact**      |               2                   |
+
+---
+
 ## 7. Matrices des Risques par Architecture
 
 ### Architecture A : Serveur Isolé
@@ -820,23 +909,24 @@ pkill -u $USERNAME -KILL
 
 **Avant remédiation :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
-| **4 - Critique**         |                     | R-S6             | R-S1         |                   |
-| **3 - Important**        |                     | R-S2 R-S7        | R-S5 R-S8    |                   |
-| **2 - Limité**           |                     |                  |              |                   |
-| **1 - Négligeable**      |                     |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable     | 3 - Probable | 4 - Très probable |
+|--------------------------|---------------------|----------------------|--------------|-------------------|
+| **4 - Critique**         |                     | R-S6                 | R-S1         |                   |
+| **3 - Important**        |                     | R-S2 R-S7            | R-S5 R-S8    |                   |
+| **2 - Limité**           |                     | R-S9 R-S10           |              |                   |
+| **1 - Négligeable**      |                     |                      |              |                   |
 
-**Après remédiation (avec restriction réseau backends) :**
+**Après remédiation (avec restriction réseau backends + JWT bastion) :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
-| **4 - Critique**         | R-S1                |                  |              |                   |
-| **3 - Important**        | R-S5                | R-S2 R-S6        |              |                   |
-| **2 - Limité**           | R-S7                | R-S8             |              |                   |
-| **1 - Négligeable**      |                     |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable     | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+|--------------------------|-------------------------|------------------|--------------|-------------------|
+| **4 - Critique**         | R-S1                    |                  |              |                   |
+| **3 - Important**        | R-S5                    | R-S2 R-S6        |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10         | R-S8             |              |                   |
+| **1 - Négligeable**      |                         |                  |              |                   |
 
 **Bénéfice restriction réseau :** R-S5 (contournement bastion) passe de P=3 à P=1.
+**Bénéfice JWT bastion :** R-S9 et R-S10 sont à faible risque grâce au TTL court et vérification JWKS.
 
 ---
 
@@ -844,27 +934,28 @@ pkill -u $USERNAME -KILL
 
 **Avant remédiation :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
-| **4 - Critique**         | R-S4                | R-S6             | R-S1         |                   |
-| **3 - Important**        |                     | R-S3 R-S7        | R-S5 R-S8    |                   |
-| **2 - Limité**           |                     |                  |              |                   |
-| **1 - Négligeable**      |                     |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable     | 3 - Probable | 4 - Très probable |
+|--------------------------|---------------------|----------------------|--------------|-------------------|
+| **4 - Critique**         | R-S4                | R-S6                 | R-S1         |                   |
+| **3 - Important**        |                     | R-S3 R-S7            | R-S5 R-S8    |                   |
+| **2 - Limité**           |                     | R-S9 R-S10           |              |                   |
+| **1 - Négligeable**      |                     |                      |              |                   |
 
 **Après remédiation complète :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
-| **4 - Critique**         | R-S1 R-S4           |                  |              |                   |
-| **3 - Important**        | R-S5                | R-S6             |              |                   |
-| **2 - Limité**           | R-S3 R-S7           | R-S8             |              |                   |
-| **1 - Négligeable**      |                     |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable      | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+|--------------------------|--------------------------|------------------|--------------|-------------------|
+| **4 - Critique**         | R-S1 R-S4                |                  |              |                   |
+| **3 - Important**        | R-S5                     | R-S6             |              |                   |
+| **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 | R-S8             |              |                   |
+| **1 - Négligeable**      |                      |                  |              |                   |
 
 **Architecture D = meilleur profil de risque :**
 - Tous les risques critiques en P=1
 - Certificats → durée de vie limitée
 - Bastion → point d'entrée unique
 - Restriction réseau → pas de contournement
+- JWT bastion → preuve cryptographique de l'origine
 
 ---
 
