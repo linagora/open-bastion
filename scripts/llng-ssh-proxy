@@ -123,8 +123,9 @@ request_bastion_jwt() {
     }
 
     # Check if response is valid JSON with a token
+    # LLNG returns the JWT in the 'bastion_jwt' field
     local jwt
-    jwt=$(echo "$response" | jq -r '.token // empty' 2>/dev/null)
+    jwt=$(echo "$response" | jq -r '.bastion_jwt // empty' 2>/dev/null)
 
     if [ -z "$jwt" ]; then
         # Check for error message

@@ -1245,7 +1245,16 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             /* Store bastion info in PAM environment for potential use */
             if (claims.bastion_id) {
                 char env_buf[256];
-                snprintf(env_buf, sizeof(env_buf), "LLNG_BASTION_ID=%s", claims.bastion_id);
+                int env_len = snprintf(env_buf, sizeof(env_buf),
+                                       "LLNG_BASTION_ID=%s", claims.bastion_id);
+                if (env_len < 0) {
+                    LLNG_LOG_WARN(pamh,
+                                  "Failed to format LLNG_BASTION_ID environment variable");
+                } else if ((size_t)env_len >= sizeof(env_buf)) {
+                    LLNG_LOG_WARN(pamh,
+                                  "Truncated LLNG_BASTION_ID (length %d, buffer %zu)",
+                                  env_len, sizeof(env_buf));
+                }
                 pam_putenv(pamh, env_buf);
             }
 

@@ -1101,19 +1101,18 @@ sub _signBastionJwt {
     my $key;
     my $kid;
 
-    # Check if we have OIDC service private key
+    # Check if we have OIDC service private signing key
+    # Note: We intentionally do NOT fallback to encryption key - signing keys
+    # and encryption keys serve different cryptographic purposes and should
+    # not be used interchangeably (per security best practices)
     if ( $self->conf->{oidcServicePrivateKeySig} ) {
         $key = $self->conf->{oidcServicePrivateKeySig};
         $kid = $self->conf->{oidcServiceKeyIdSig} || 'llng-sig';
     }
-    elsif ( $self->conf->{oidcServicePrivateKeyEnc} ) {
-        # Fallback to encryption key if no signing key
-        $key = $self->conf->{oidcServicePrivateKeyEnc};
-        $kid = $self->conf->{oidcServiceKeyIdEnc} || 'llng-enc';
-    }
     else {
         $self->logger->error(
-            'PAM bastion-token: No OIDC private key configured for JWT signing'
+            'PAM bastion-token: No OIDC private signing key configured '
+              . '(oidcServicePrivateKeySig required for JWT signing)'
         );
         return undef;
     }

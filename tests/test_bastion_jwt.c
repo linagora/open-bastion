@@ -78,16 +78,18 @@ static int test_bastion_allowed_multiple(void)
 
 static int test_bastion_allowed_with_spaces(void)
 {
-    /* Spaces around commas should be handled */
+    /* Spaces around commas should be handled - the implementation trims whitespace */
     const char *allowed = "bastion-01, bastion-02 , bastion-03";
 
-    /* Note: depending on implementation, spaces may or may not be trimmed */
-    /* Test the actual behavior */
-    bool b1 = bastion_jwt_is_bastion_allowed("bastion-01", allowed);
-    bool b2 = bastion_jwt_is_bastion_allowed("bastion-02", allowed);
+    /* First item (no leading space) should match */
+    ASSERT(bastion_jwt_is_bastion_allowed("bastion-01", allowed) == true);
 
-    /* At minimum, exact matches should work */
-    ASSERT(bastion_jwt_is_bastion_allowed("bastion-01", allowed) == b1);
+    /* Items with leading/trailing spaces should match after trimming */
+    ASSERT(bastion_jwt_is_bastion_allowed("bastion-02", allowed) == true);
+    ASSERT(bastion_jwt_is_bastion_allowed("bastion-03", allowed) == true);
+
+    /* Non-existent bastion should not match */
+    ASSERT(bastion_jwt_is_bastion_allowed("bastion-04", allowed) == false);
     return 1;
 }
 
