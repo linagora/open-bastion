@@ -49,14 +49,19 @@ This will:
 
 ### 3. Enroll the RDP Proxy
 
-The RDP proxy needs to be enrolled with LLNG (one-time setup):
+The RDP proxy needs to be enrolled with LLNG (one-time setup).
+
+For this PoC, obtain a server token manually:
 
 ```bash
-# Get enrollment token from LLNG
-docker exec -it llng-rdp-proxy llng-pam-enroll \
-    --portal http://sso:8080 \
-    --server-group rdp-proxy
+# 1. Login to LLNG portal at http://localhost
+# 2. Use Device Authorization Grant to get a server token
+# 3. Set the token in docker-compose.yml or as environment variable:
+export LLNG_SERVER_TOKEN="your_token_here"
+docker compose up -d
 ```
+
+See the main project's `llng-pam-enroll` script for automated enrollment.
 
 ### 4. Connect with RDP Client
 

@@ -42,8 +42,6 @@ import json
 import os
 import sys
 import logging
-from datetime import datetime
-from typing import Optional
 
 try:
     import requests
@@ -164,7 +162,7 @@ def read_input() -> dict:
     """Read JSON input from Redemption via stdin."""
     try:
         input_data = sys.stdin.read()
-        logger.debug(f"Received input: {input_data}")
+        # Note: Do not log input_data as it contains passwords
         return json.loads(input_data)
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON input: {e}")
@@ -173,9 +171,8 @@ def read_input() -> dict:
 
 def write_output(result: dict) -> None:
     """Write JSON output for Redemption to stdout."""
-    output = json.dumps(result)
-    logger.debug(f"Sending output: {output}")
-    print(output)
+    # Note: Do not log result as it may contain passwords
+    print(json.dumps(result, ensure_ascii=True))
 
 
 def main():

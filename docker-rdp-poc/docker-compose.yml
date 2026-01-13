@@ -63,8 +63,8 @@ services:
     environment:
       # LLNG integration settings
       - LLNG_PORTAL_URL=http://sso:8080
-      - LLNG_CLIENT_ID=pam-access
-      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_SERVER_TOKEN=${LLNG_SERVER_TOKEN:?Set LLNG_SERVER_TOKEN from enrollment}
+      - LLNG_SERVER_GROUP=rdp-proxy
       # Default Windows target (can be overridden per-connection)
       - DEFAULT_TARGET_HOST=${WINDOWS_TARGET_HOST:-192.168.1.100}
       - DEFAULT_TARGET_PORT=3389

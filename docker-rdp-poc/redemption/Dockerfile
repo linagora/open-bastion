@@ -94,17 +94,13 @@ RUN useradd -r -s /sbin/nologin rdpproxy \
     /var/run/rdpproxy
 
 # Copy passthrough script template
-COPY config/passthrough.py /etc/rdpproxy/passthrough.py
+COPY --chmod=755 config/passthrough.py /etc/rdpproxy/passthrough.py
 
 # Copy default configuration
 COPY config/rdpproxy.ini /etc/rdpproxy/rdpproxy.ini
 
 # Expose RDP port
 EXPOSE 3389
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:8080/health || exit 1
 
 # Run as non-root
 USER rdpproxy
