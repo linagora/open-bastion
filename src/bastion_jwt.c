@@ -86,9 +86,15 @@ static unsigned char *base64url_decode(const char *input, size_t input_len, size
             val <<= 6;
         }
 
-        if (j < out_size) out[j++] = (val >> 16) & 0xff;
-        if (j < out_size) out[j++] = (val >> 8) & 0xff;
-        if (j < out_size) out[j++] = val & 0xff;
+        /* Calculate how many bytes to write for this block:
+         * - Full 4-char block produces 3 bytes
+         * - 3-char block (1 padding) produces 2 bytes
+         * - 2-char block (2 padding) produces 1 byte
+         * Use remaining space as upper bound */
+        size_t remaining = out_size - j;
+        if (remaining >= 1) out[j++] = (val >> 16) & 0xff;
+        if (remaining >= 2) out[j++] = (val >> 8) & 0xff;
+        if (remaining >= 3) out[j++] = val & 0xff;
     }
 
     out[j] = '\0';
