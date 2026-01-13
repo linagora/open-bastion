@@ -189,12 +189,12 @@ The existing `pamAccessServerGroups` mechanism will apply to both SSH and RDP:
 
 | Group Name | Authorization Rule | Protocol |
 |------------|-------------------|----------|
-| production | `$hGroup->{sre} or $hGroup->{oncall}` | SSH |
-| staging | `$hGroup->{sre} or $hGroup->{dev}` | SSH |
-| development | `$hGroup->{dev}` | SSH |
-| windows-prod | `$hGroup->{sre} or $hGroup->{admins}` | RDP |
-| windows-dev | `$hGroup->{dev}` | RDP |
-| bastion | `$hGroup->{employees}` | SSH |
+| production | `$hGroups->{sre} or $hGroups->{oncall}` | SSH |
+| staging | `$hGroups->{sre} or $hGroups->{dev}` | SSH |
+| development | `$hGroups->{dev}` | SSH |
+| windows-prod | `$hGroups->{sre} or $hGroups->{admins}` | RDP |
+| windows-dev | `$hGroups->{dev}` | RDP |
+| bastion | `$hGroups->{employees}` | SSH |
 
 ### API Call Flow
 

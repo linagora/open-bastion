@@ -71,6 +71,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-requests \
     # Utilities
     curl \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built binaries from builder
@@ -98,6 +99,14 @@ COPY --chmod=755 config/passthrough.py /etc/rdpproxy/passthrough.py
 
 # Copy default configuration
 COPY config/rdpproxy.ini /etc/rdpproxy/rdpproxy.ini
+
+# Generate self-signed certificates for PoC
+# In production, use proper CA-signed certificates
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/rdpproxy/key.pem \
+    -out /etc/rdpproxy/cert.pem \
+    -subj "/CN=rdp-proxy/O=LLNG-PoC" \
+    && chown rdpproxy:rdpproxy /etc/rdpproxy/*.pem
 
 # Expose RDP port
 EXPOSE 3389
