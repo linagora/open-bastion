@@ -45,16 +45,35 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-import requests
+try:
+    import requests
+except ImportError as e:
+    # Critical dependency missing
+    error_output = json.dumps({
+        "status": "denied",
+        "message": "Internal error: missing requests dependency"
+    })
+    print(error_output)
+    sys.exit(1)
 
-# Configure logging
+# Configure logging with fallback if file is not writable
+LOG_FILE_PATH = '/var/log/rdpproxy/passthrough.log'
+
+handlers = [logging.StreamHandler(sys.stderr)]
+try:
+    log_dir = os.path.dirname(LOG_FILE_PATH)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    file_handler = logging.FileHandler(LOG_FILE_PATH)
+    handlers.append(file_handler)
+except (OSError, PermissionError):
+    # Fall back to stderr-only logging if file is not writable
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/var/log/rdpproxy/passthrough.log'),
-        logging.StreamHandler(sys.stderr)
-    ]
+    handlers=handlers,
 )
 logger = logging.getLogger('llng-passthrough')
 
