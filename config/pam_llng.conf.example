@@ -76,3 +76,54 @@ authorize_only = false
 # Log level: error, warn, info, debug (or 0-3)
 # Default: warn
 log_level = warn
+
+# ==============================================================================
+# Bastion JWT Verification (for backend servers)
+# ==============================================================================
+
+# Require JWT from bastion for authentication
+# When enabled, connections without a valid bastion JWT are rejected
+# Default: false
+# bastion_jwt_required = false
+
+# Expected JWT issuer (LLNG portal URL)
+# Must match the portal that signed the JWT
+# bastion_jwt_issuer = https://auth.example.com
+
+# JWKS endpoint URL for public key retrieval
+# Default: {portal_url}/.well-known/jwks.json
+# bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
+
+# Local cache file for JWKS (enables offline verification)
+# Default: /var/cache/pam_llng/jwks.json
+# bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+
+# JWKS cache TTL in seconds
+# Default: 3600 (1 hour)
+# bastion_jwt_cache_ttl = 3600
+
+# Allowed clock skew in seconds for JWT expiration checks
+# Default: 60
+# bastion_jwt_clock_skew = 60
+
+# Comma-separated list of allowed bastion IDs (client_id)
+# Leave empty to allow all bastions
+# bastion_jwt_allowed_bastions = bastion-prod-01,bastion-prod-02
+
+# ==============================================================================
+# JWT Replay Detection
+# ==============================================================================
+
+# Enable JTI-based replay detection
+# Each JWT ID (jti) is cached and rejected if reused
+# Default: true
+# bastion_jwt_replay_detection = true
+
+# Maximum number of JTI entries in cache
+# Should be large enough to hold all expected JTIs during their TTL
+# Default: 10000
+# bastion_jwt_replay_cache_size = 10000
+
+# Cleanup interval for expired JTI entries (seconds)
+# Default: 60
+# bastion_jwt_replay_cleanup_interval = 60

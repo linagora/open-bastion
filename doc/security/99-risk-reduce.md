@@ -17,7 +17,7 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 - Score ≤ 3 : Zone verte → Tous les autres risques
 
 **Nouveaux risques identifiés (PR #64 - JWT bastion) :**
-- **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 après remédiation)
+- **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 - détection replay réduit P)
 - **R-S10** : Rotation des clés JWKS non propagée (P=1, I=1 - atténué par publication anticipée LLNG)
 
 Voir [01-enrollment.md](01-enrollment.md) et [02-ssh-connection.md](02-ssh-connection.md) pour les détails des risques et remédiations.
@@ -98,19 +98,37 @@ Pistes pour réduire P à 1 :
 
 ## Pistes d'Amélioration - JWT Bastion
 
-### R-S9 _(P=1, I=2)_ - Replay JWT bastion
+### R-S9 _(P=1, I=2)_ - Replay JWT bastion - **IMPLÉMENTÉ**
 
-Pistes pour réduire P à quasi-zéro :
-1. **Cache local des `jti`** : Stocker les `jti` utilisés avec leur expiration pour détecter les replays
-   ```c
-   // Pseudo-code
-   if (jti_cache_contains(claims->jti)) {
-       return BASTION_JWT_REPLAY_DETECTED;
-   }
-   jti_cache_add(claims->jti, claims->exp);
-   ```
-2. **Vérification stricte IP** : Rejeter (au lieu de warning) si `bastion_ip` != IP source SSH
-3. **Nonce challenge** : Le backend génère un nonce que le bastion doit inclure dans le JWT (complexe)
+**Détection de replay implémentée via cache JTI :**
+
+Le module PAM maintient un cache thread-safe des `jti` (JWT ID) utilisés :
+
+```c
+// src/jti_cache.c - Vérifie et ajoute atomiquement
+jti_cache_result_t result = jti_cache_check_and_add(cache, claims->jti, claims->exp);
+if (result == JTI_CACHE_REPLAY_DETECTED) {
+    return BASTION_JWT_REPLAY_DETECTED;
+}
+```
+
+**Configuration :**
+```ini
+# /etc/security/pam_llng.conf
+bastion_jwt_replay_detection = true   # Activé par défaut
+bastion_jwt_replay_cache_size = 10000 # Max entrées
+bastion_jwt_replay_cleanup_interval = 60  # Nettoyage automatique
+```
+
+**Caractéristiques :**
+- Cache hash table O(1) pour lookup/insertion
+- Thread-safe avec mutex
+- Nettoyage automatique des entrées expirées
+- Gestion de la saturation (cleanup puis rejet si plein)
+
+Pistes supplémentaires (non implémentées) :
+1. **Vérification stricte IP** : Rejeter si `bastion_ip` != IP source SSH
+2. **Nonce challenge** : Le backend génère un nonce (complexifie le protocole)
 
 ### R-S10 _(P=1, I=1)_ - Rotation JWKS non propagée
 

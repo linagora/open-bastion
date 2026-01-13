@@ -14,8 +14,9 @@
 #include <stdbool.h>
 #include <time.h>
 
-/* Forward declaration */
+/* Forward declarations */
 typedef struct jwks_cache jwks_cache_t;
+typedef struct jti_cache jti_cache_t;
 
 /* JWT claims extracted from bastion token */
 typedef struct {
@@ -41,6 +42,7 @@ typedef struct {
     int max_clock_skew;          /* Allowed clock skew in seconds (default: 60) */
     char *allowed_bastions;      /* Comma-separated list of allowed bastion IDs (NULL = all) */
     jwks_cache_t *jwks_cache;    /* JWKS cache for public keys */
+    jti_cache_t *jti_cache;      /* JTI cache for replay detection (NULL = disabled) */
 } bastion_jwt_config_t;
 
 /* JWT verifier handle */
@@ -59,6 +61,7 @@ typedef enum {
     BASTION_JWT_INVALID_AUDIENCE,
     BASTION_JWT_UNAUTHORIZED_BASTION,
     BASTION_JWT_NO_KEY_FOUND,
+    BASTION_JWT_REPLAY_DETECTED,
     BASTION_JWT_INTERNAL_ERROR
 } bastion_jwt_result_t;
 

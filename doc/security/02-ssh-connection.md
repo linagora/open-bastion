@@ -794,6 +794,15 @@ pkill -u $USERNAME -KILL
 - TTL court configurable via `pamAccessBastionJwtTtl` (défaut: 300s)
 - Claim `target_host` limite le scope du JWT à un seul backend
 - UUID cryptographiquement sécurisé pour le `jti`
+- **Cache JTI pour détection de replay** : chaque `jti` utilisé est stocké localement jusqu'à expiration
+
+**Configuration détection replay (activée par défaut) :**
+```ini
+# /etc/security/pam_llng.conf (backend)
+bastion_jwt_replay_detection = true   # Activer la détection (défaut: true)
+bastion_jwt_replay_cache_size = 10000 # Capacité du cache (défaut: 10000)
+bastion_jwt_replay_cleanup_interval = 60  # Nettoyage toutes les N sec (défaut: 60)
+```
 
 **Remédiation configuration :**
 ```ini
@@ -806,14 +815,10 @@ bastion_jwt_clock_skew = 30   # Réduire la tolérance (défaut: 60s)
 pamAccessBastionJwtTtl: 60    # 1 minute au lieu de 5
 ```
 
-**Remédiation future possible :**
-- Cache local des `jti` utilisés pour détecter les replays (non implémenté)
-- Liaison du JWT à l'IP source SSH (vérification stricte vs warning actuel)
-
-|                 | Score résiduel                               |
-| --------------- | :------------------------------------------: |
-| **Probabilité** | 1 (avec TTL court + réseau interne sécurisé) |
-| **Impact**      |               2                              |
+|                 | Score résiduel                                        |
+| --------------- | :---------------------------------------------------: |
+| **Probabilité** | 1 (avec détection replay + TTL court)                 |
+| **Impact**      |               2 (usurpation de session si bypass)     |
 
 ---
 

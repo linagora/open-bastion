@@ -101,6 +101,11 @@ typedef struct {
     int bastion_jwt_cache_ttl;      /* JWKS cache TTL in seconds (default: 3600) */
     int bastion_jwt_clock_skew;     /* Allowed clock skew in seconds (default: 60) */
     char *bastion_jwt_allowed_bastions; /* Comma-separated list of allowed bastion IDs */
+
+    /* JTI replay detection (for bastion JWT) */
+    bool bastion_jwt_replay_detection;     /* Enable JTI replay detection (default: true) */
+    int bastion_jwt_replay_cache_size;     /* Max JTI cache entries (default: 10000) */
+    int bastion_jwt_replay_cleanup_interval; /* Cleanup interval in seconds (default: 60) */
 } pam_llng_config_t;
 
 /*
