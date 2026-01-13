@@ -931,7 +931,8 @@ sub bastionToken {
 
     my $tokenSession = $self->oidc->getAccessToken($access_token);
     unless ($tokenSession) {
-        $self->logger->warn('PAM bastion-token: Invalid or expired Bearer token');
+        $self->logger->warn(
+            'PAM bastion-token: Invalid or expired Bearer token');
         return $self->_unauthorizedResponse( $req, 'Invalid or expired token' );
     }
 
@@ -953,7 +954,7 @@ sub bastionToken {
     }
 
     # 4. Verify server is in a bastion group
-    my $server_group = $tokenSession->data->{server_group} || 'default';
+    my $server_group   = $tokenSession->data->{server_group}   || 'default';
     my $bastion_groups = $self->conf->{pamAccessBastionGroups} || 'bastion';
     my @allowed_groups = split /[,;\s]+/, $bastion_groups;
 
@@ -967,7 +968,7 @@ sub bastionToken {
 
     unless ($is_bastion) {
         $self->logger->warn(
-            "PAM bastion-token: Server group '$server_group' is not a bastion group"
+"PAM bastion-token: Server group '$server_group' is not a bastion group"
         );
         return $self->_forbiddenResponse( $req,
             "Server is not an authorized bastion (group: $server_group)" );
@@ -992,13 +993,14 @@ sub bastionToken {
     my $bastion_id = $tokenSession->data->{client_id} || 'unknown';
 
     $self->logger->info(
-        "PAM bastion-token: Generating JWT for bastion '$bastion_id' "
+            "PAM bastion-token: Generating JWT for bastion '$bastion_id' "
           . "proxying user '$user' to '$target_host'" );
 
     # 7. Generate JWT
-    my $jwt_ttl = $self->conf->{pamAccessBastionJwtTtl} || 300;  # 5 minutes default
-    my $now     = time();
-    my $exp     = $now + $jwt_ttl;
+    my $jwt_ttl =
+      $self->conf->{pamAccessBastionJwtTtl} || 300;    # 5 minutes default
+    my $now = time();
+    my $exp = $now + $jwt_ttl;
 
     # Generate unique JWT ID (must be cryptographically secure)
     my $jti = $self->_generateUUID();
@@ -1012,17 +1014,17 @@ sub bastionToken {
 
     # Build JWT claims
     my $claims = {
-        iss          => $self->conf->{portal},                 # Issuer: LLNG portal URL
-        sub          => $user,                                  # Subject: user being proxied
-        aud          => 'pam:bastion-backend',                  # Audience
-        exp          => $exp,                                   # Expiration
-        iat          => $now,                                   # Issued at
-        jti          => $jti,                                   # Unique ID
-        bastion_id   => $bastion_id,                            # Bastion server ID
-        bastion_group => $server_group,                         # Bastion server group
-        target_host  => $target_host,                           # Target backend
-        target_group => $target_group,                          # Target server group
-        bastion_ip   => $req->address,                          # Bastion IP address
+        iss           => $self->conf->{portal},    # Issuer: LLNG portal URL
+        sub           => $user,                    # Subject: user being proxied
+        aud           => 'pam:bastion-backend',    # Audience
+        exp           => $exp,                     # Expiration
+        iat           => $now,                     # Issued at
+        jti           => $jti,                     # Unique ID
+        bastion_id    => $bastion_id,              # Bastion server ID
+        bastion_group => $server_group,            # Bastion server group
+        target_host   => $target_host,             # Target backend
+        target_group  => $target_group,            # Target server group
+        bastion_ip    => $req->address,            # Bastion IP address
     };
 
     # Lookup user groups if available
@@ -1036,13 +1038,13 @@ sub bastionToken {
 
     my $error = $self->p->process($req);
     if ( $error == PE_OK ) {
-        my $groups = $req->sessionInfo->{groups} || '';
+        my $groups    = $req->sessionInfo->{groups} || '';
         my @groupList = split /[,;\s]+/, $groups;
         $claims->{user_groups} = \@groupList if @groupList;
     }
     else {
         $self->logger->warn(
-            "PAM bastion-token: Failed to retrieve groups for user $user (error=$error), JWT will have no user_groups claim"
+"PAM bastion-token: Failed to retrieve groups for user $user (error=$error), JWT will have no user_groups claim"
         );
     }
 
@@ -1060,9 +1062,9 @@ sub bastionToken {
     # 9. Audit log
     $self->p->auditLog(
         $req,
-        code         => 'PAM_BASTION_TOKEN_GENERATED',
-        user         => $user,
-        message      => "Bastion JWT generated for user '$user' to '$target_host'",
+        code    => 'PAM_BASTION_TOKEN_GENERATED',
+        user    => $user,
+        message => "Bastion JWT generated for user '$user' to '$target_host'",
         bastion_id   => $bastion_id,
         target_host  => $target_host,
         target_group => $target_group,
@@ -1089,11 +1091,12 @@ sub _generateUUID {
         @bytes = unpack( 'C16', Crypt::URandom::urandom(16) );
     }
     elsif ( -r '/dev/urandom' ) {
+
         # Fallback to /dev/urandom if Crypt::URandom not available
         open my $fh, '<:raw', '/dev/urandom'
           or do {
             $self->logger->error(
-                'PAM bastion-token: Cannot open /dev/urandom for UUID generation'
+'PAM bastion-token: Cannot open /dev/urandom for UUID generation'
             );
             return undef;
           };
@@ -1104,21 +1107,21 @@ sub _generateUUID {
     else {
         # No secure random source available
         $self->logger->error(
-            'PAM bastion-token: No cryptographically secure random source available '
-              . '(install Crypt::URandom or ensure /dev/urandom is readable)'
-        );
+'PAM bastion-token: No cryptographically secure random source available '
+              . '(install Crypt::URandom or ensure /dev/urandom is readable)' );
         return undef;
     }
 
     # Set version 4 (random)
     $bytes[6] = ( $bytes[6] & 0x0f ) | 0x40;
+
     # Set variant (RFC 4122)
     $bytes[8] = ( $bytes[8] & 0x3f ) | 0x80;
 
-    return sprintf(
+    return
+      sprintf(
         '%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x',
-        @bytes
-    );
+        @bytes );
 }
 
 # Sign a JWT for bastion authentication using RS256
@@ -1144,9 +1147,8 @@ sub _signBastionJwt {
     }
     else {
         $self->logger->error(
-            'PAM bastion-token: No OIDC private signing key configured '
-              . '(oidcServicePrivateKeySig required for JWT signing)'
-        );
+                'PAM bastion-token: No OIDC private signing key configured '
+              . '(oidcServicePrivateKeySig required for JWT signing)' );
         return undef;
     }
 
@@ -1161,12 +1163,10 @@ sub _signBastionJwt {
     require MIME::Base64;
     require JSON;
 
-    my $header_b64 = MIME::Base64::encode_base64url(
-        JSON::encode_json($header), ''
-    );
-    my $payload_b64 = MIME::Base64::encode_base64url(
-        JSON::encode_json($claims), ''
-    );
+    my $header_b64 =
+      MIME::Base64::encode_base64url( JSON::encode_json($header), '' );
+    my $payload_b64 =
+      MIME::Base64::encode_base64url( JSON::encode_json($claims), '' );
 
     my $signing_input = "$header_b64.$payload_b64";
 
@@ -1184,9 +1184,7 @@ sub _signBastionJwt {
     }
 
     my $signature;
-    eval {
-        $signature = $rsa->sign($signing_input);
-    };
+    eval { $signature = $rsa->sign($signing_input); };
     if ($@) {
         $self->logger->error("PAM bastion-token: Signing error: $@");
         return undef;
