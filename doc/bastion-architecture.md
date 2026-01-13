@@ -5,37 +5,48 @@ using LemonLDAP::NG as the central identity provider.
 
 ## Overview
 
-```
-                                    ┌─────────────────────┐
-                                    │   LemonLDAP::NG     │
-                                    │      Portal         │
-                                    │                     │
-                                    │  - User auth        │
-                                    │  - PAM tokens       │
-                                    │  - Authorization    │
-                                    │  - Session mgmt     │
-                                    └──────────┬──────────┘
-                                               │
-                           ┌───────────────────┼───────────────────┐
-                           │                   │                   │
-                           ▼                   ▼                   ▼
-                    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-                    │   Bastion   │     │   Bastion   │     │   Bastion   │
-                    │   (Zone A)  │     │   (Zone B)  │     │   (Zone C)  │
-                    │             │     │             │     │             │
-                    │ pam_llng.so │     │ pam_llng.so │     │ pam_llng.so │
-                    │ nss_llng.so │     │ nss_llng.so │     │ nss_llng.so │
-                    │ recorder    │     │ recorder    │     │ recorder    │
-                    └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-                           │                   │                   │
-              ┌────────────┼────────────┐      │      ┌────────────┼────────────┐
-              ▼            ▼            ▼      │      ▼            ▼            ▼
-         ┌────────┐   ┌────────┐   ┌────────┐  │ ┌────────┐   ┌────────┐   ┌────────┐
-         │Backend │   │Backend │   │Backend │  │ │Backend │   │Backend │   │Backend │
-         │Server 1│   │Server 2│   │Server 3│  │ │Server 4│   │Server 5│   │Server 6│
-         └────────┘   └────────┘   └────────┘  │ └────────┘   └────────┘   └────────┘
-                                               │
-                                    (similar for Zone B)
+```mermaid
+flowchart TB
+    subgraph LLNG["LemonLDAP::NG Portal"]
+        direction TB
+        auth["User auth"]
+        tokens["PAM tokens"]
+        authz["Authorization"]
+        sessions["Session mgmt"]
+    end
+
+    subgraph ZoneA["Zone A"]
+        BastionA["Bastion A<br/>pam_llng.so<br/>nss_llng.so<br/>recorder"]
+        Backend1["Backend 1"]
+        Backend2["Backend 2"]
+        Backend3["Backend 3"]
+    end
+
+    subgraph ZoneB["Zone B"]
+        BastionB["Bastion B<br/>pam_llng.so<br/>nss_llng.so<br/>recorder"]
+        Backend4["Backend 4"]
+        Backend5["Backend 5"]
+    end
+
+    subgraph ZoneC["Zone C"]
+        BastionC["Bastion C<br/>pam_llng.so<br/>nss_llng.so<br/>recorder"]
+        Backend6["Backend 6"]
+        Backend7["Backend 7"]
+    end
+
+    LLNG --> BastionA
+    LLNG --> BastionB
+    LLNG --> BastionC
+
+    BastionA --> Backend1
+    BastionA --> Backend2
+    BastionA --> Backend3
+
+    BastionB --> Backend4
+    BastionB --> Backend5
+
+    BastionC --> Backend6
+    BastionC --> Backend7
 ```
 
 ## Components
@@ -75,50 +86,78 @@ Internal servers accessed through bastions:
 
 ### 1. User Obtains PAM Token
 
-```
-User Browser                    LLNG Portal
-     │                               │
-     │──── Login (OIDC/SAML) ───────▶│
-     │◀─── Session cookie ───────────│
-     │                               │
-     │──── Request PAM token ───────▶│
-     │◀─── Temporary token ──────────│
-           (valid 5-60 min)
+```mermaid
+sequenceDiagram
+    participant User as User Browser
+    participant LLNG as LLNG Portal
+
+    User->>LLNG: Login (OIDC/SAML)
+    LLNG-->>User: Session cookie
+
+    User->>LLNG: Request PAM token
+    LLNG-->>User: Temporary token (valid 5-60 min)
 ```
 
 ### 2. User Connects to Bastion
 
-```
-User                    Bastion                    LLNG Portal
-  │                        │                            │
-  │─── SSH + token ───────▶│                            │
-  │                        │─── POST /oauth2/introspect ▶│
-  │                        │◀── {active: true, user} ───│
-  │                        │                            │
-  │                        │─── POST /pam/authorize ────▶│
-  │                        │◀── {authorized: true} ─────│
-  │                        │                            │
-  │◀── Session started ────│                            │
-  │    (recording active)  │                            │
+```mermaid
+sequenceDiagram
+    participant User
+    participant Bastion
+    participant LLNG as LLNG Portal
+
+    User->>Bastion: SSH + token
+    Bastion->>LLNG: POST /oauth2/introspect
+    LLNG-->>Bastion: {active: true, user}
+
+    Bastion->>LLNG: POST /pam/authorize
+    LLNG-->>Bastion: {authorized: true}
+
+    Bastion-->>User: Session started (recording active)
 ```
 
-### 3. User Jumps to Backend
+### 3. User Jumps to Backend (with Bastion JWT)
 
+When bastion JWT verification is enabled, the bastion must obtain a signed JWT from LLNG
+before connecting to the backend. This provides cryptographic proof that the connection
+originates from an authorized bastion.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Bastion
+    participant LLNG as LLNG Portal
+    participant Backend
+
+    User->>Bastion: SSH to backend (via llng-ssh-proxy)
+
+    Bastion->>LLNG: POST /pam/bastion-token
+    LLNG-->>Bastion: {token: "JWT..."}
+
+    Bastion->>Backend: SSH + LLNG_BASTION_JWT env var
+
+    Note over Backend: Verify JWT signature<br/>(using JWKS cache)
+
+    Backend->>LLNG: POST /pam/authorize
+    LLNG-->>Backend: {authorized: true}
+
+    Backend->>LLNG: getpwnam() via NSS
+    LLNG-->>Backend: user info
+
+    Note over Backend: Create account if needed
+
+    Backend-->>Bastion: Session established
+    Bastion-->>User: Connected to backend
 ```
-User                    Bastion                 Backend              LLNG
-  │                        │                       │                   │
-  │─── SSH to backend ────▶│                       │                   │
-  │    (ProxyJump)         │─── SSH ──────────────▶│                   │
-  │                        │                       │─ POST /pam/auth ─▶│
-  │                        │                       │◀─ {authorized} ───│
-  │                        │                       │                   │
-  │                        │                       │─ getpwnam() ─────▶│
-  │                        │                       │◀─ user info ──────│
-  │                        │                       │                   │
-  │                        │                       │ (create account)  │
-  │                        │◀─ Session ────────────│                   │
-  │◀─────────────────────────────────────────────────────────────────────
-```
+
+The bastion JWT contains:
+- `sub`: Username being proxied
+- `iss`: LLNG portal URL
+- `exp`: Expiration time (short-lived)
+- `bastion_id`: Identifier of the bastion server
+- `bastion_group`: Server group of the bastion
+- `target_host`: Target backend hostname
+- `user_groups`: User's LLNG groups
 
 ## Server Groups
 
@@ -156,18 +195,21 @@ llng-pam-enroll -g bastion
 
 The NSS module (`libnss_llng`) enables user resolution before account creation:
 
-```
-SSH Connection                   NSS                      LLNG
-      │                           │                         │
-      │── getpwnam("dwho") ──────▶│                         │
-      │                           │── POST /pam/userinfo ──▶│
-      │                           │◀── {found: true, ...} ──│
-      │◀── passwd entry ──────────│                         │
-      │                                                     │
-      │   (SSH accepts connection because user "exists")    │
-      │                                                     │
-      │── PAM open_session ──────────────────────────────────
-      │   (creates real /etc/passwd entry)
+```mermaid
+sequenceDiagram
+    participant SSH as SSH Connection
+    participant NSS
+    participant LLNG
+
+    SSH->>NSS: getpwnam("dwho")
+    NSS->>LLNG: POST /pam/userinfo
+    LLNG-->>NSS: {found: true, ...}
+    NSS-->>SSH: passwd entry (virtual)
+
+    Note over SSH: SSH accepts connection<br/>because user "exists"
+
+    SSH->>NSS: PAM open_session
+    Note over NSS: Creates real /etc/passwd entry
 ```
 
 ### nsswitch.conf
@@ -250,13 +292,16 @@ Layer 1: Network
 Layer 2: Bastion
   └── LLNG authentication, session recording, audit logs
 
-Layer 3: Authorization
+Layer 3: Bastion JWT
+  └── Cryptographic proof of bastion origin, prevents direct backend access
+
+Layer 4: Authorization
   └── Server groups, per-user rules, time-based access
 
-Layer 4: Backend
-  └── LLNG authorization, minimal privileges, auto-provisioning
+Layer 5: Backend
+  └── LLNG authorization, JWT verification, minimal privileges, auto-provisioning
 
-Layer 5: Audit
+Layer 6: Audit
   └── Centralized logging, session replay, compliance reports
 ```
 
@@ -373,6 +418,112 @@ Or manually:
 - [ ] Server enrolled with correct server_group
 - [ ] `create_user = true` if auto-provisioning needed
 - [ ] PAM, NSS, and sudo configured
+
+## Bastion JWT Verification
+
+Bastion JWT verification provides cryptographic assurance that SSH connections to backend
+servers originate from authorized bastion servers.
+
+### Why Bastion JWT?
+
+Without bastion JWT verification, an attacker who:
+- Obtains valid LLNG credentials, or
+- Compromises a backend server's network access
+
+...could potentially connect directly to backends, bypassing the bastion's session recording
+and audit controls.
+
+With bastion JWT:
+- Backends cryptographically verify the connection source
+- Direct connections are rejected, even with valid credentials
+- All access is forced through audited bastion channels
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph Bastion["Bastion Server"]
+        proxy["llng-ssh-proxy"]
+    end
+
+    subgraph LLNG["LLNG Portal"]
+        bastion_token["/pam/bastion-token"]
+        jwks["/.well-known/jwks.json"]
+    end
+
+    subgraph Backend["Backend Server"]
+        pam["pam_llng.so"]
+        cache["JWKS Cache"]
+    end
+
+    proxy -->|1. Request JWT| bastion_token
+    bastion_token -->|2. Signed JWT| proxy
+    proxy -->|3. SSH + JWT| pam
+    pam -->|4. Get public keys| jwks
+    jwks -->|5. Cache keys| cache
+    pam -->|6. Verify signature| cache
+```
+
+### Configuration
+
+#### On Bastion
+
+```bash
+# /etc/llng/ssh-proxy.conf
+PORTAL_URL=https://auth.example.com
+SERVER_TOKEN_FILE=/etc/security/pam_llng.token
+SERVER_GROUP=bastion
+TARGET_GROUP=backend
+```
+
+#### On Backend
+
+```ini
+# /etc/security/pam_llng.conf
+bastion_jwt_required = true
+bastion_jwt_issuer = https://auth.example.com
+bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
+bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_cache_ttl = 3600
+bastion_jwt_clock_skew = 60
+# bastion_jwt_allowed_bastions = bastion-01,bastion-02
+```
+
+```bash
+# /etc/ssh/sshd_config.d/llng.conf
+AcceptEnv LLNG_BASTION_JWT
+```
+
+### Offline Verification
+
+The JWKS cache allows backends to verify JWT signatures without contacting LLNG:
+
+1. On first connection, backend fetches JWKS from LLNG
+2. Public keys are cached locally with TTL (default: 1 hour)
+3. Subsequent verifications use cached keys
+4. Cache is refreshed when TTL expires or key ID not found
+
+This enables:
+- Faster verification (no network latency)
+- Resilience to LLNG outages
+- Reduced load on LLNG portal
+
+### JWT Claims
+
+| Claim | Description |
+|-------|-------------|
+| `iss` | LLNG portal URL (issuer) |
+| `sub` | Username being proxied |
+| `aud` | `pam:bastion-backend` |
+| `exp` | Expiration timestamp |
+| `iat` | Issued-at timestamp |
+| `jti` | Unique token ID |
+| `bastion_id` | Bastion server identifier |
+| `bastion_group` | Bastion's server group |
+| `bastion_ip` | Bastion's IP address |
+| `target_host` | Target backend hostname |
+| `target_group` | Target server group |
+| `user_groups` | User's LLNG groups |
 
 ## See Also
 

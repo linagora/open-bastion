@@ -34,8 +34,10 @@ There are three typical deployment scenarios:
 A standalone server authenticates users directly with LLNG, without
 going through a bastion.
 
-```
-User ──── SSH ────▶ Standalone Server ────▶ LLNG Portal
+```mermaid
+flowchart LR
+    User -->|SSH| Standalone[Standalone Server]
+    Standalone -->|Verify| LLNG[LLNG Portal]
 ```
 
 ### Step 1: Install Packages
@@ -140,11 +142,11 @@ A bastion is a hardened jump host that:
 - Records all SSH sessions
 - Proxies connections to backend servers
 
-```
-User ──── SSH ────▶ Bastion ──── SSH ────▶ Backend Servers
-                       │
-                       ▼
-              Session Recording
+```mermaid
+flowchart LR
+    User -->|SSH| Bastion
+    Bastion -->|SSH + JWT| Backend[Backend Servers]
+    Bastion -->|Record| Sessions[(Session Recording)]
 ```
 
 ### Step 1: Install Packages
@@ -260,7 +262,37 @@ EOF
 systemctl restart sshd
 ```
 
-### Step 7: Configure Log Rotation
+### Step 7: Configure SSH Proxy for Backend Access
+
+When bastion JWT verification is enabled on backends, configure the SSH proxy:
+
+```bash
+mkdir -p /etc/llng
+cat > /etc/llng/ssh-proxy.conf << 'EOF'
+# LLNG SSH Proxy configuration
+PORTAL_URL=https://auth.example.com
+SERVER_TOKEN_FILE=/etc/security/pam_llng.token
+SERVER_GROUP=bastion
+TARGET_GROUP=production
+TIMEOUT=10
+VERIFY_SSL=true
+SSH_OPTIONS="-o StrictHostKeyChecking=accept-new"
+EOF
+
+chmod 644 /etc/llng/ssh-proxy.conf
+```
+
+Users can then connect to backends using:
+```bash
+# Direct command
+llng-ssh-proxy backend-server
+
+# Or via SSH config on bastion (~/.ssh/config):
+Host backend-*
+    ProxyCommand llng-ssh-proxy %h %p
+```
+
+### Step 8: Configure Log Rotation
 
 ```bash
 cat > /etc/logrotate.d/llng-sessions << 'EOF'
@@ -297,11 +329,11 @@ ssh backend-server
 Backend servers are internal servers accessed through the bastion.
 They auto-create Unix accounts for LLNG users.
 
-```
-Bastion ──── SSH ────▶ Backend Server
-                            │
-                            ▼
-                    Auto-create account
+```mermaid
+flowchart LR
+    Bastion -->|SSH + JWT| Backend
+    Backend -->|Verify JWT| JWKS[(JWKS Cache)]
+    Backend -->|Auto-create| Account
 ```
 
 ### Step 1: Install Packages
@@ -340,6 +372,16 @@ create_user = true
 create_user_home_base = /home
 create_user_shell = /bin/bash
 create_user_skel = /etc/skel
+
+# Bastion JWT verification (REQUIRED for backends)
+bastion_jwt_required = true
+bastion_jwt_issuer = https://auth.example.com
+bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
+bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_cache_ttl = 3600
+bastion_jwt_clock_skew = 60
+# Optionally restrict to specific bastions:
+# bastion_jwt_allowed_bastions = bastion-01,bastion-02
 
 # Logging
 log_level = warn
@@ -422,6 +464,9 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 
+# Accept bastion JWT environment variable
+AcceptEnv LLNG_BASTION_JWT
+
 # Accept connections from bastion only
 # (combine with firewall rules)
 EOF
@@ -438,11 +483,11 @@ ufw deny 22
 ufw enable
 ```
 
-### Step 9: Test
+### Step 10: Test
 
 ```bash
-# From bastion, connect to backend
-ssh backend-server
+# From bastion, connect to backend using llng-ssh-proxy
+llng-ssh-proxy backend-server
 
 # Verify user was created
 grep $USER /etc/passwd
@@ -450,6 +495,9 @@ grep $USER /etc/passwd
 # Verify home directory
 ls -la /home/$USER
 ```
+
+> **Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
+> even with valid SSH keys. This ensures all access goes through authorized bastions.
 
 ---
 
@@ -579,7 +627,9 @@ ls -la /home/username
 | `/etc/security/pam_llng.token` | Server enrollment token |
 | `/etc/nss_llng.conf` | NSS module configuration |
 | `/etc/llng/session-recorder.conf` | Session recorder configuration |
+| `/etc/llng/ssh-proxy.conf` | SSH proxy configuration (bastion) |
 | `/var/lib/llng-sessions/` | Session recordings |
+| `/var/cache/pam_llng/jwks.json` | JWKS cache for JWT verification |
 | `/var/log/pam_llng/audit.json` | Audit log |
 
 ### Commands
@@ -589,6 +639,7 @@ ls -la /home/username
 | `llng-pam-enroll` | Enroll server with LLNG |
 | `llng-pam-enroll -g GROUP` | Enroll with specific server group |
 | `llng-session-recorder` | Record SSH session (ForceCommand) |
+| `llng-ssh-proxy HOST` | Connect to backend with bastion JWT |
 
 ## See Also
 

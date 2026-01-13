@@ -576,7 +576,7 @@ chmod 400 /secure/ca_key
 - Surface d'attaque élargie
 - Attaques directes sur les backends
 
-**Remédiation configuration (CRITIQUE) :**
+**Remédiation configuration (CRITIQUE) - Option 1 : Restriction réseau :**
 ```bash
 # Sur les backends : /etc/ssh/sshd_config
 ListenAddress 10.0.0.0  # Réseau privé uniquement
@@ -589,17 +589,46 @@ iptables -A INPUT -p tcp --dport 22 -j DROP
 # Backend SG: SSH (22) from Bastion-SG only
 ```
 
-**Vérification :**
-```bash
-# Depuis l'extérieur, doit échouer :
-ssh -o ConnectTimeout=5 backend.internal.example.com
-# Connection refused / timeout = OK
+**Remédiation configuration (RECOMMANDÉE) - Option 2 : Bastion JWT :**
+
+La vérification JWT bastion offre une protection cryptographique contre le contournement,
+même si les restrictions réseau sont contournées (VPN, erreur de configuration, etc.) :
+
+```ini
+# /etc/security/pam_llng.conf sur les backends
+bastion_jwt_required = true
+bastion_jwt_issuer = https://auth.example.com
+bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
+bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+# Optionnel : whitelist des bastions autorisés
+bastion_jwt_allowed_bastions = bastion-prod-01,bastion-prod-02
 ```
 
-|                 | Score résiduel                  |
-| --------------- | :-----------------------------: |
-| **Probabilité** | 1 (avec restriction réseau)     |
-| **Impact**      |               3                 |
+```bash
+# /etc/ssh/sshd_config sur les backends
+AcceptEnv LLNG_BASTION_JWT
+```
+
+Avec le JWT bastion :
+- Même avec un accès réseau direct au backend, la connexion est refusée sans JWT valide
+- Le JWT prouve cryptographiquement que la connexion vient d'un bastion autorisé
+- Le JWT est vérifié localement (cache JWKS) → fonctionne même si LLNG est temporairement indisponible
+
+**Vérification :**
+```bash
+# Depuis l'extérieur, doit échouer même avec credentials valides :
+ssh -o ConnectTimeout=5 backend.internal.example.com
+# PAM: Bastion JWT required but not provided
+
+# Depuis le bastion via llng-ssh-proxy, doit fonctionner :
+llng-ssh-proxy backend.internal.example.com
+# Connexion établie
+```
+
+|                 | Score résiduel                               |
+| --------------- | :------------------------------------------: |
+| **Probabilité** | 1 (avec JWT bastion + restriction réseau)    |
+| **Impact**      |               3                              |
 
 ---
 

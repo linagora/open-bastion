@@ -19,6 +19,11 @@ The module supports two authentication methods:
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `llng-pam-enroll` script
+- **Bastion-to-backend authentication**:
+  - JWT-based proof of connection origin
+  - Backends only accept SSH from authorized bastions
+  - Offline verification via cached JWKS public keys
+  - `llng-ssh-proxy` script for seamless bastion connections
 - **Security hardening**:
   - Structured JSON audit logging with correlation IDs
   - Rate limiting with exponential backoff
@@ -597,6 +602,120 @@ Or during enrollment:
 ```bash
 sudo llng-pam-enroll -g production
 ```
+
+## Bastion-to-Backend Authentication
+
+In a bastion architecture, backend servers should only accept SSH connections that originate
+from authorized bastion servers, not direct connections from users or attackers.
+
+The PAM module supports **Bastion JWT verification** to cryptographically ensure that
+SSH connections to backends come from authorized bastions with valid LLNG sessions.
+
+### How It Works
+
+```
+┌─────────┐     ┌─────────┐     ┌──────────┐     ┌─────────┐
+│  User   │────▶│ Bastion │────▶│   LLNG   │     │ Backend │
+│         │ SSH │         │ JWT │  Portal  │     │         │
+│         │     │         │ req │          │     │         │
+└─────────┘     └────┬────┘     └────┬─────┘     └────┬────┘
+                     │               │                 │
+                     │  JWT token    │                 │
+                     │◀──────────────│                 │
+                     │               │                 │
+                     │  SSH + JWT    │                 │
+                     │──────────────────────────────▶ │
+                     │               │                 │
+                     │               │  Verify JWT     │
+                     │               │  (JWKS cache)   │
+                     │  Access granted                 │
+                     │◀─────────────────────────────── │
+```
+
+1. User connects to bastion via SSH (with certificate or token)
+2. From bastion, user runs `llng-ssh-proxy backend-server`
+3. The proxy requests a signed JWT from LLNG `/pam/bastion-token` endpoint
+4. The proxy connects to backend with the JWT in `LLNG_BASTION_JWT` environment variable
+5. Backend's PAM module verifies the JWT signature using cached JWKS public keys
+6. If valid and not expired, SSH connection proceeds; otherwise, denied
+
+### Bastion Configuration
+
+On the **bastion server**, install the SSH proxy script and configure it:
+
+```bash
+# Install llng-ssh-proxy (included with the PAM module)
+sudo cp scripts/llng-ssh-proxy /usr/bin/
+sudo chmod 755 /usr/bin/llng-ssh-proxy
+
+# Create configuration
+sudo tee /etc/llng/ssh-proxy.conf << 'EOF'
+PORTAL_URL=https://auth.example.com
+SERVER_TOKEN_FILE=/etc/security/pam_llng.token
+SERVER_GROUP=bastion
+TARGET_GROUP=backend
+TIMEOUT=10
+VERIFY_SSL=true
+EOF
+```
+
+Users can then connect to backends using:
+
+```bash
+# From bastion, connect to backend
+llng-ssh-proxy backend-server
+
+# Or configure SSH to use the proxy automatically
+# In ~/.ssh/config on bastion:
+Host backend-*
+    ProxyCommand llng-ssh-proxy %h %p
+```
+
+### Backend Configuration
+
+On the **backend server**, enable bastion JWT verification:
+
+```ini
+# /etc/security/pam_llng.conf
+
+# ... other settings ...
+
+# Bastion JWT verification (REQUIRED for backends)
+bastion_jwt_required = true
+bastion_jwt_issuer = https://auth.example.com
+bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
+bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_cache_ttl = 3600
+bastion_jwt_clock_skew = 60
+# bastion_jwt_allowed_bastions = bastion-01,bastion-02  # Optional whitelist
+```
+
+Also configure sshd to accept the JWT environment variable:
+
+```bash
+# /etc/ssh/sshd_config.d/llng-backend.conf
+AcceptEnv LLNG_BASTION_JWT
+```
+
+### Security Benefits
+
+- **No direct access**: Backends reject connections without valid bastion JWT
+- **Cryptographic proof**: JWT is RS256-signed by LLNG, cannot be forged
+- **Offline verification**: JWKS cache allows verification without contacting LLNG
+- **Session binding**: JWT contains user info, bastion ID, and expiration
+- **Audit trail**: Both bastion and backend log the connection with JWT claims
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `bastion_jwt_required` | `false` | Enable bastion JWT verification |
+| `bastion_jwt_issuer` | (portal_url) | Expected JWT issuer |
+| `bastion_jwt_jwks_url` | (auto) | URL to fetch public keys |
+| `bastion_jwt_jwks_cache` | `/var/cache/pam_llng/jwks.json` | Local JWKS cache file |
+| `bastion_jwt_cache_ttl` | `3600` | JWKS cache TTL in seconds |
+| `bastion_jwt_clock_skew` | `60` | Allowed clock skew in seconds |
+| `bastion_jwt_allowed_bastions` | (none) | Comma-separated list of allowed bastion IDs |
 
 ## User Experience
 
