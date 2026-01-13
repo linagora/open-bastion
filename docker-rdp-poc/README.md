@@ -5,20 +5,18 @@ using WALLIX Redemption integrated with LemonLDAP::NG.
 
 ## Overview
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│ RDP Proxy   │────▶│ LLNG Portal │     │   Windows   │
-│  (mstsc)    │     │ (Redemption)│     │ /pam/auth   │     │   Server    │
-└─────────────┘     └──────┬──────┘     └─────────────┘     └──────▲──────┘
-                           │                                       │
-                           │           RDP Traffic                 │
-                           └───────────────────────────────────────┘
-                                       │
-                                       ▼
-                              ┌─────────────┐
-                              │  Recording  │
-                              │   (.wrm)    │
-                              └─────────────┘
+```mermaid
+flowchart LR
+    CLIENT[Client<br/>mstsc.exe]
+    PROXY[RDP Proxy<br/>Redemption]
+    LLNG[LLNG Portal<br/>/pam/authorize]
+    WIN[Windows<br/>Server]
+    REC[(Recording<br/>.wrm)]
+
+    CLIENT -->|RDP| PROXY
+    PROXY <-->|HTTP API| LLNG
+    PROXY -->|RDP| WIN
+    PROXY --> REC
 ```
 
 ## Prerequisites

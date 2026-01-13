@@ -113,82 +113,70 @@ LemonLDAP::NG authentication integration, and session recording.
 
 ### Overview
 
-```
-                                    ┌─────────────────────────┐
-                                    │    LemonLDAP::NG        │
-                                    │       Portal            │
-                                    │                         │
-                                    │  - User authentication  │
-                                    │  - /pam/authorize API   │
-                                    │  - pamAccessServerGroups│
-                                    └───────────┬─────────────┘
-                                                │
-                          ┌─────────────────────┼─────────────────────┐
-                          │                     │                     │
-                          ▼                     ▼                     ▼
-                   ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
-                   │ SSH Bastion │       │  RDP Proxy  │       │ SSH Bastion │
-                   │  (Zone A)   │       │ (Redemption)│       │  (Zone B)   │
-                   │             │       │             │       │             │
-                   │ pam_llng.so │       │ passthrough │       │ pam_llng.so │
-                   │ recorder    │       │ .py hook    │       │ recorder    │
-                   └──────┬──────┘       └──────┬──────┘       └──────┬──────┘
-                          │                     │                     │
-              ┌───────────┼───────────┐         │         ┌───────────┼───────────┐
-              ▼           ▼           ▼         ▼         ▼           ▼           ▼
-         ┌────────┐  ┌────────┐  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
-         │Linux 1 │  │Linux 2 │  │Linux 3 │ │Windows1│ │Windows2│ │Linux 4 │ │Linux 5 │
-         │  SSH   │  │  SSH   │  │  SSH   │ │  RDP   │ │  RDP   │ │  SSH   │ │  SSH   │
-         └────────┘  └────────┘  └────────┘ └────────┘ └────────┘ └────────┘ └────────┘
+```mermaid
+flowchart TB
+    subgraph LLNG["LemonLDAP::NG Portal"]
+        AUTH[User authentication]
+        API["/pam/authorize API"]
+        GROUPS[pamAccessServerGroups]
+    end
+
+    subgraph ZoneA["Zone A"]
+        BASTION_A[SSH Bastion<br/>pam_llng.so]
+        LINUX1[Linux 1]
+        LINUX2[Linux 2]
+        LINUX3[Linux 3]
+    end
+
+    subgraph RDP["RDP Zone"]
+        RDP_PROXY[RDP Proxy<br/>Redemption]
+        WIN1[Windows 1]
+        WIN2[Windows 2]
+    end
+
+    subgraph ZoneB["Zone B"]
+        BASTION_B[SSH Bastion<br/>pam_llng.so]
+        LINUX4[Linux 4]
+        LINUX5[Linux 5]
+    end
+
+    LLNG --> BASTION_A
+    LLNG --> RDP_PROXY
+    LLNG --> BASTION_B
+
+    BASTION_A --> LINUX1
+    BASTION_A --> LINUX2
+    BASTION_A --> LINUX3
+
+    RDP_PROXY --> WIN1
+    RDP_PROXY --> WIN2
+
+    BASTION_B --> LINUX4
+    BASTION_B --> LINUX5
 ```
 
 ### Redemption Components
 
-```
-Client RDP (mstsc.exe)
-        │
-        │ RDP/TLS (port 3389)
-        ▼
-┌─────────────────────────────────────────┐
-│         WALLIX Redemption               │
-│                                         │
-│  ┌─────────────────────────────────┐    │
-│  │        rdpproxy                 │    │
-│  │  (RDP Server Component)         │    │
-│  │                                 │    │
-│  │  Accepts client connection      │    │
-│  │  Extracts credentials           │    │
-│  └──────────────┬──────────────────┘    │
-│                 │                       │
-│  ┌──────────────▼──────────────────┐    │
-│  │     passthrough.py              │    │      ┌─────────────────┐
-│  │     (Authentication Hook)       │────────────▶ LemonLDAP::NG  │
-│  │                                 │◀───────────│ /pam/authorize │
-│  │  - Calls LLNG API               │    │      │ service=rdp    │
-│  │  - Validates user access        │    │      └─────────────────┘
-│  │  - Returns target credentials   │    │
-│  └──────────────┬──────────────────┘    │
-│                 │                       │
-│  ┌──────────────▼──────────────────┐    │
-│  │        rdpproxy                 │    │
-│  │  (RDP Client Component)         │    │
-│  │                                 │    │
-│  │  Connects to target server      │    │
-│  │  Relays traffic bidirectionally │    │
-│  └──────────────┬──────────────────┘    │
-│                 │                       │
-│  ┌──────────────▼──────────────────┐    │
-│  │     Session Recorder            │    │
-│  │                                 │    │
-│  │  - Captures RDP traffic         │    │
-│  │  - Writes .wrm files            │    │
-│  │  - Generates metadata           │    │
-│  └─────────────────────────────────┘    │
-└─────────────────────────────────────────┘
-        │
-        │ RDP/NLA
-        ▼
-   Windows Server (target)
+```mermaid
+flowchart TB
+    CLIENT[Client RDP<br/>mstsc.exe]
+
+    subgraph REDEMPTION["WALLIX Redemption"]
+        SERVER[rdpproxy<br/>RDP Server Component]
+        HOOK[passthrough.py<br/>Authentication Hook]
+        RDPCLIENT[rdpproxy<br/>RDP Client Component]
+        RECORDER[Session Recorder<br/>.wrm files]
+    end
+
+    LLNG[LemonLDAP::NG<br/>/pam/authorize<br/>service=rdp]
+    TARGET[Windows Server]
+
+    CLIENT -->|RDP/TLS :3389| SERVER
+    SERVER --> HOOK
+    HOOK <-->|HTTP API| LLNG
+    HOOK --> RDPCLIENT
+    RDPCLIENT --> RECORDER
+    RDPCLIENT -->|RDP/NLA| TARGET
 ```
 
 ---
@@ -199,21 +187,14 @@ Client RDP (mstsc.exe)
 
 The existing `pamAccessServerGroups` mechanism will apply to both SSH and RDP:
 
-```
-LLNG Manager Configuration:
-
-Server Groups:
-┌────────────────┬─────────────────────────────────────┐
-│ Group Name     │ Authorization Rule                  │
-├────────────────┼─────────────────────────────────────┤
-│ production     │ $hGroup->{sre} or $hGroup->{oncall} │
-│ staging        │ $hGroup->{sre} or $hGroup->{dev}    │
-│ development    │ $hGroup->{dev}                      │
-│ windows-prod   │ $hGroup->{sre} or $hGroup->{admins} │  ◀── RDP servers
-│ windows-dev    │ $hGroup->{dev}                      │  ◀── RDP servers
-│ bastion        │ $hGroup->{employees}                │
-└────────────────┴─────────────────────────────────────┘
-```
+| Group Name | Authorization Rule | Protocol |
+|------------|-------------------|----------|
+| production | `$hGroup->{sre} or $hGroup->{oncall}` | SSH |
+| staging | `$hGroup->{sre} or $hGroup->{dev}` | SSH |
+| development | `$hGroup->{dev}` | SSH |
+| windows-prod | `$hGroup->{sre} or $hGroup->{admins}` | RDP |
+| windows-dev | `$hGroup->{dev}` | RDP |
+| bastion | `$hGroup->{employees}` | SSH |
 
 ### API Call Flow
 

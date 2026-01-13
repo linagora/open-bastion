@@ -119,23 +119,17 @@ RDP proxy from the French company Wallix.
 
 ### Architecture
 
-```
-                    ┌─────────────────┐
-                    │ LemonLDAP::NG   │
-                    │ /pam/authorize  │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-              ▼              ▼              ▼
-       ┌───────────┐  ┌───────────┐  ┌───────────┐
-       │SSH Bastion│  │RDP Proxy  │  │SSH Bastion│
-       │pam_llng.so│  │Redemption │  │pam_llng.so│
-       └─────┬─────┘  └─────┬─────┘  └─────┬─────┘
-             │              │              │
-       ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-       │Linux Srvs │  │Windows Srvs│ │Linux Srvs │
-       └───────────┘  └───────────┘  └───────────┘
+```mermaid
+flowchart TB
+    LLNG[LemonLDAP::NG<br/>/pam/authorize]
+
+    LLNG --> SSH_A[SSH Bastion<br/>pam_llng.so]
+    LLNG --> RDP[RDP Proxy<br/>Redemption]
+    LLNG --> SSH_B[SSH Bastion<br/>pam_llng.so]
+
+    SSH_A --> LINUX_A[Linux Servers]
+    RDP --> WIN[Windows Servers]
+    SSH_B --> LINUX_B[Linux Servers]
 ```
 
 ### Key Features
