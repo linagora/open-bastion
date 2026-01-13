@@ -1215,7 +1215,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                              user, claims.sub ? claims.sub : "(null)");
 
                 if (data->audit) {
-                    audit_event_init(&audit_event, AUDIT_SECURITY_ERROR);
+                    /* Use AUDIT_AUTHZ_DENIED for authorization failures,
+                     * AUDIT_SECURITY_ERROR is for crypto/verification failures */
+                    audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);
                     audit_event.user = user;
                     audit_event.service = service;
                     audit_event.client_ip = client_ip;

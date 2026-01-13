@@ -1040,6 +1040,11 @@ sub bastionToken {
         my @groupList = split /[,;\s]+/, $groups;
         $claims->{user_groups} = \@groupList if @groupList;
     }
+    else {
+        $self->logger->warn(
+            "PAM bastion-token: Failed to retrieve groups for user $user (error=$error), JWT will have no user_groups claim"
+        );
+    }
 
     # 8. Sign JWT using OIDC module's key
     my $jwt = $self->_signBastionJwt($claims);
