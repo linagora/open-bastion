@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     libboost-tools-dev \
     libboost-test-dev \
+    libboost-build-dev \
     pkg-config \
     gettext \
     git \
