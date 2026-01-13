@@ -8,21 +8,22 @@ This Docker Compose demo demonstrates SSH certificate authentication with LemonL
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    subgraph Docker["Docker Network (llng-net)"]
+        SSO["SSO<br/>(LLNG)<br/>:80"]
+        Bastion["Bastion<br/>(SSH)<br/>:2222"]
+        Backend["Backend<br/>(SSH)<br/>:22"]
+    end
+
+    User["User"] -->|:80| SSO
+    User -->|:2222| Bastion
+    Bastion -->|SSH + JWT| Backend
+
+    style Backend fill:#f9f,stroke:#333
 ```
-                    ┌─────────────────────────────────────────────────────┐
-                    │                   Docker Network                     │
-                    │                                                      │
-┌──────────┐        │  ┌───────────┐      ┌───────────┐      ┌──────────┐ │
-│  User    │        │  │    SSO    │      │  Bastion  │      │ Backend  │ │
-│          │───────────│  (LLNG)   │      │   (SSH)   │─────▶│  (SSH)   │ │
-│          │  :80   │  │  :80      │      │  :2222    │      │  :22     │ │
-└──────────┘        │  └───────────┘      └───────────┘      └──────────┘ │
-     │              │        │                  │                  │      │
-     │              │        └──────────────────┴──────────────────┘      │
-     │              │                    llng-net                          │
-     └──────────────┴─────────────────────────────────────────────────────┘
-           :2222 (bastion only - backend has no external port)
-```
+
+> Note: Only bastion port 2222 is exposed externally. Backend has no external port.
 
 ## Quick Start
 
@@ -118,29 +119,22 @@ even with a valid SSH certificate. This ensures backends only accept connections
 
 SSH certificate authentication relies on a **Certificate Authority (CA)** that both the user and the server trust:
 
-```
-┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│    User     │         │  LLNG SSO   │         │ SSH Server  │
-│             │         │   (CA)      │         │             │
-│ Has: key    │         │ Has: CA key │         │ Trusts: CA  │
-│             │         │             │         │             │
-└──────┬──────┘         └──────┬──────┘         └──────┬──────┘
-       │                       │                       │
-       │  1. Send public key   │                       │
-       │──────────────────────▶│                       │
-       │                       │                       │
-       │  2. Return signed     │                       │
-       │     certificate       │                       │
-       │◀──────────────────────│                       │
-       │                       │                       │
-       │  3. Present certificate                       │
-       │──────────────────────────────────────────────▶│
-       │                       │                       │
-       │                       │  4. Verify signature  │
-       │                       │     with CA public key│
-       │                       │                       │
-       │  5. Access granted    │                       │
-       │◀──────────────────────────────────────────────│
+```mermaid
+sequenceDiagram
+    participant User
+    participant CA as LLNG SSO (CA)
+    participant Server as SSH Server
+
+    Note over User: Has: SSH key pair
+    Note over CA: Has: CA signing key
+    Note over Server: Trusts: CA public key
+
+    User->>CA: 1. Send public key
+    CA-->>User: 2. Return signed certificate
+
+    User->>Server: 3. Present certificate
+    Note over Server: 4. Verify signature<br/>with CA public key
+    Server-->>User: 5. Access granted
 ```
 
 ### CA Configuration in this demo
@@ -443,27 +437,21 @@ session    required     pam_unix.so
 The backend server is configured to require a JWT from the bastion server. This provides
 cryptographic proof that the SSH connection originates from an authorized bastion.
 
-```
-┌─────────┐     ┌─────────┐     ┌──────────┐     ┌─────────┐
-│  User   │────▶│ Bastion │────▶│   LLNG   │     │ Backend │
-│         │ SSH │         │ JWT │  Portal  │     │         │
-│  cert   │     │         │ req │          │     │         │
-└─────────┘     └────┬────┘     └────┬─────┘     └────┬────┘
-                     │               │                 │
-                     │  JWT token    │                 │
-                     │◀──────────────│                 │
-                     │               │                 │
-                     │  SSH + JWT    │                 │
-                     │──────────────────────────────▶ │
-                     │               │                 │
-                     │               │   JWKS cache    │
-                     │               │◀────────────────│
-                     │               │   (offline)     │
-                     │               │                 │
-                     │               │  Verify locally │
-                     │               │  (no network)   │
-                     │  Access granted                 │
-                     │◀─────────────────────────────── │
+```mermaid
+sequenceDiagram
+    participant User
+    participant Bastion
+    participant LLNG as LLNG Portal
+    participant Backend
+
+    User->>Bastion: SSH with certificate
+    Bastion->>LLNG: Request JWT (/pam/bastion-token)
+    LLNG-->>Bastion: Signed JWT
+
+    Bastion->>Backend: SSH + LLNG_BASTION_JWT
+
+    Note over Backend: Verify JWT using<br/>cached JWKS (offline)
+    Backend-->>Bastion: Access granted
 ```
 
 ### How it works:
