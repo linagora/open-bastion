@@ -607,8 +607,11 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_enabled = parse_bool(value);
     }
     else if (strcmp(key, "crowdsec_url") == 0) {
-        free(config->crowdsec_url);
-        config->crowdsec_url = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_url);
+            config->crowdsec_url = tmp;
+        }
     }
     else if (strcmp(key, "crowdsec_timeout") == 0) {
         config->crowdsec_timeout = parse_int(value, 5, 1, 60);
@@ -617,28 +620,43 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_fail_open = parse_bool(value);
     }
     else if (strcmp(key, "crowdsec_bouncer_key") == 0) {
-        free(config->crowdsec_bouncer_key);
-        config->crowdsec_bouncer_key = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_bouncer_key);
+            config->crowdsec_bouncer_key = tmp;
+        }
     }
     else if (strcmp(key, "crowdsec_action") == 0) {
         /* Validate: only "reject" or "warn" are valid */
         if (strcmp(value, "reject") == 0 || strcmp(value, "warn") == 0) {
-            free(config->crowdsec_action);
-            config->crowdsec_action = strdup(value);
+            char *tmp = strdup(value);
+            if (tmp) {
+                free(config->crowdsec_action);
+                config->crowdsec_action = tmp;
+            }
         }
         /* Invalid values are silently ignored, keeping the default */
     }
     else if (strcmp(key, "crowdsec_machine_id") == 0) {
-        free(config->crowdsec_machine_id);
-        config->crowdsec_machine_id = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_machine_id);
+            config->crowdsec_machine_id = tmp;
+        }
     }
     else if (strcmp(key, "crowdsec_password") == 0) {
-        free(config->crowdsec_password);
-        config->crowdsec_password = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_password);
+            config->crowdsec_password = tmp;
+        }
     }
     else if (strcmp(key, "crowdsec_scenario") == 0) {
-        free(config->crowdsec_scenario);
-        config->crowdsec_scenario = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_scenario);
+            config->crowdsec_scenario = tmp;
+        }
     }
     else if (strcmp(key, "crowdsec_send_all_alerts") == 0) {
         config->crowdsec_send_all_alerts = parse_bool(value);
@@ -650,8 +668,11 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_block_delay = parse_int(value, 180, 10, 86400);
     }
     else if (strcmp(key, "crowdsec_ban_duration") == 0) {
-        free(config->crowdsec_ban_duration);
-        config->crowdsec_ban_duration = strdup(value);
+        char *tmp = strdup(value);
+        if (tmp) {
+            free(config->crowdsec_ban_duration);
+            config->crowdsec_ban_duration = tmp;
+        }
     }
     /* Unknown keys are silently ignored */
 
