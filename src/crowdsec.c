@@ -825,14 +825,6 @@ crowdsec_result_t crowdsec_check_ip(crowdsec_context_t *ctx, const char *ip)
         return CS_ERROR;
     }
 
-    /* Ensure buffer data is valid before parsing */
-    if (buf.data == NULL) {
-        snprintf(ctx->error_buf, sizeof(ctx->error_buf),
-                 "Failed to allocate memory for CrowdSec response buffer");
-        free_buffer(&buf);
-        return CS_ERROR;
-    }
-
     /* Parse response */
     /* "null" or empty means no decisions = allow */
     if (buf.size == 0 || strcmp(buf.data, "null") == 0) {
