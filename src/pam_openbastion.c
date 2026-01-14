@@ -41,6 +41,7 @@
 #include "bastion_jwt.h"
 #include "jwks_cache.h"
 #include "jti_cache.h"
+#include "crowdsec.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -65,6 +66,7 @@ typedef struct {
     jwks_cache_t *jwks_cache;  /* JWKS cache for bastion JWT verification */
     jti_cache_t *jti_cache;    /* JTI cache for bastion JWT replay detection */
     bastion_jwt_verifier_t *bastion_jwt_verifier;  /* Bastion JWT verifier */
+    crowdsec_context_t *crowdsec;  /* CrowdSec bouncer/watcher */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -360,6 +362,9 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->rate_limiter) {
             rate_limiter_destroy(ob_data->rate_limiter);
         }
+        if (ob_data->crowdsec) {
+            crowdsec_destroy(ob_data->crowdsec);
+        }
         config_free(&ob_data->config);
         free(ob_data);
     }
@@ -550,6 +555,37 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         data->auth_cache = auth_cache_init(data->config.auth_cache_dir);
         if (!data->auth_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize auth cache, offline mode disabled");
+        }
+    }
+
+    /* Initialize CrowdSec integration */
+    if (data->config.crowdsec_enabled) {
+        crowdsec_action_t cs_action = CS_ACTION_REJECT;
+        if (data->config.crowdsec_action &&
+            strcmp(data->config.crowdsec_action, "warn") == 0) {
+            cs_action = CS_ACTION_WARN;
+        }
+
+        crowdsec_config_t cs_cfg = {
+            .enabled = true,
+            .url = data->config.crowdsec_url,
+            .timeout = data->config.crowdsec_timeout,
+            .fail_open = data->config.crowdsec_fail_open,
+            .verify_ssl = data->config.verify_ssl,
+            .ca_cert = data->config.ca_cert,
+            .bouncer_key = data->config.crowdsec_bouncer_key,
+            .action = cs_action,
+            .machine_id = data->config.crowdsec_machine_id,
+            .password = data->config.crowdsec_password,
+            .scenario = data->config.crowdsec_scenario,
+            .send_all_alerts = data->config.crowdsec_send_all_alerts,
+            .max_failures = data->config.crowdsec_max_failures,
+            .block_delay = data->config.crowdsec_block_delay,
+            .ban_duration = data->config.crowdsec_ban_duration
+        };
+        data->crowdsec = crowdsec_init(&cs_cfg);
+        if (!data->crowdsec) {
+            OB_LOG_WARN(pamh, "Failed to initialize CrowdSec, continuing without");
         }
     }
 
@@ -951,6 +987,48 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         }
     }
 
+    /* CrowdSec bouncer: check if IP is banned before authentication */
+    if (data->crowdsec) {
+        crowdsec_result_t cs_result = crowdsec_check_ip(data->crowdsec, client_ip);
+
+        if (cs_result == CS_DENY) {
+            /* Check action mode: reject or warn */
+            if (data->config.crowdsec_action &&
+                strcmp(data->config.crowdsec_action, "warn") == 0) {
+                /* Warn mode: log but continue */
+                OB_LOG_WARN(pamh, "User %s from %s flagged by CrowdSec (warn mode)", user, client_ip);
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_SECURITY_ERROR;
+                    audit_event.reason = "CrowdSec ban (warn mode, allowing)";
+                    audit_log_event(data->audit, &audit_event);
+                }
+            } else {
+                /* Reject mode: block access */
+                OB_LOG_WARN(pamh, "User %s from %s blocked by CrowdSec", user, client_ip);
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_AUTH_DENIED;
+                    audit_event.result_code = PAM_AUTH_ERR;
+                    audit_event.reason = "Blocked by CrowdSec";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+                return PAM_AUTH_ERR;
+            }
+        } else if (cs_result == CS_ERROR && !data->config.crowdsec_fail_open) {
+            /* Fail-closed mode and CrowdSec unavailable */
+            OB_LOG_WARN(pamh, "CrowdSec unavailable, fail-closed policy active");
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SERVER_ERROR;
+                audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+                audit_event.reason = "CrowdSec unavailable (fail-closed)";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+            return PAM_AUTHINFO_UNAVAIL;
+        }
+        /* CS_ALLOW or (CS_ERROR + fail_open): continue with authentication */
+    }
+
     /* If authorize_only mode, skip password check */
     if (data->config.authorize_only) {
         OB_LOG_DEBUG(pamh, "authorize_only mode, skipping password check");
@@ -1027,6 +1105,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
             rate_limiter_record_failure(data->rate_limiter, rate_key);
         }
 
+        /* Report auth failure to CrowdSec watcher */
+        if (data->crowdsec) {
+            crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+        }
+
         if (audit_initialized) {
             audit_event.result_code = PAM_AUTH_ERR;
             audit_event.reason = response.reason ? response.reason : "Token not valid";
@@ -1046,6 +1129,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
         if (data->rate_limiter) {
             rate_limiter_record_failure(data->rate_limiter, rate_key);
+        }
+
+        /* Report auth failure to CrowdSec watcher (potential impersonation attempt) */
+        if (data->crowdsec) {
+            crowdsec_report_failure(data->crowdsec, client_ip, user, service);
         }
 
         if (audit_initialized) {

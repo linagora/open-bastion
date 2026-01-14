@@ -42,6 +42,7 @@ set(PAM_MODULE_SOURCES
     src/bastion_jwt.c
     src/jwks_cache.c
     src/jti_cache.c
+    src/crowdsec.c
 )
 
 if(ENABLE_CACHE)

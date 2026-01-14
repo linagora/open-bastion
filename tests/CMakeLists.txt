@@ -124,5 +124,21 @@ target_include_directories(test_jti_cache PRIVATE
 target_link_libraries(test_jti_cache pthread)
 add_test(NAME test_jti_cache COMMAND test_jti_cache)
 
+# Test CrowdSec integration
+add_executable(test_crowdsec test_crowdsec.c ../src/crowdsec.c)
+target_compile_definitions(test_crowdsec PRIVATE _GNU_SOURCE)
+target_include_directories(test_crowdsec PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_crowdsec
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+add_test(NAME test_crowdsec COMMAND test_crowdsec)
+
 # Note: Integration tests require a running Open Bastion instance
 # and are meant to be run manually

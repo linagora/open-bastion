@@ -106,6 +106,25 @@ typedef struct {
     bool bastion_jwt_replay_detection;     /* Enable JTI replay detection (default: true) */
     int bastion_jwt_replay_cache_size;     /* Max JTI cache entries (default: 10000) */
     int bastion_jwt_replay_cleanup_interval; /* Cleanup interval in seconds (default: 60) */
+
+    /* CrowdSec integration (disabled by default) */
+    bool crowdsec_enabled;                 /* Enable CrowdSec integration (default: false) */
+    char *crowdsec_url;                    /* LAPI URL (default: http://127.0.0.1:8080) */
+    int crowdsec_timeout;                  /* HTTP timeout in seconds (default: 5) */
+    bool crowdsec_fail_open;               /* Allow on error (default: true) */
+
+    /* CrowdSec Bouncer (pre-auth check) */
+    char *crowdsec_bouncer_key;            /* Bouncer API key from cscli bouncers add */
+    char *crowdsec_action;                 /* Action on ban: "reject" or "warn" (default: reject) */
+
+    /* CrowdSec Watcher (post-auth alerts) */
+    char *crowdsec_machine_id;             /* Machine ID from cscli machines add */
+    char *crowdsec_password;               /* Machine password */
+    char *crowdsec_scenario;               /* Scenario name (default: open-bastion/ssh-auth-failure) */
+    bool crowdsec_send_all_alerts;         /* Send all alerts or only bans (default: true) */
+    int crowdsec_max_failures;             /* Auto-ban after N failures, 0=no auto-ban (default: 5) */
+    int crowdsec_block_delay;              /* Time window in seconds for counting (default: 180) */
+    char *crowdsec_ban_duration;           /* Ban duration e.g. "4h" (default: 4h) */
 } pam_openbastion_config_t;
 
 /*
