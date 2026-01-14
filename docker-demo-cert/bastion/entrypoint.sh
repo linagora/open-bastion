@@ -57,7 +57,7 @@ KEY_B64="$3"
 if ! getent passwd "$USERNAME" >/dev/null 2>&1; then
     # Get user info from LLNG
     TOKEN=$(cat /etc/security/llng_server_token 2>/dev/null)
-    PORTAL_URL=$(grep portal_url /etc/nss_llng.conf | cut -d= -f2 | tr -d ' ')
+    PORTAL_URL=$(grep portal_url /etc/open-bastion/nss_openbastion.conf | cut -d= -f2 | tr -d ' ')
 
     if [ -n "$TOKEN" ] && [ -n "$PORTAL_URL" ]; then
         USERINFO=$(curl -s "$PORTAL_URL/pam/userinfo" \
@@ -233,8 +233,9 @@ echo "Server enrollment complete"
 rm -f "$COOKIE_FILE"
 
 # Create PAM LLNG configuration
-cat > /etc/security/pam_llng.conf << EOF
-# LemonLDAP::NG PAM configuration for Bastion
+mkdir -p /etc/open-bastion
+cat > /etc/open-bastion/openbastion.conf << EOF
+# Open Bastion PAM configuration for Bastion
 
 portal_url = $PORTAL_URL
 server_group = $SERVER_GROUP
@@ -252,18 +253,18 @@ verify_ssl = false
 
 # Cache settings
 cache_enabled = true
-cache_dir = /var/cache/pam_llng
+cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
 # Logging
 log_level = info
 EOF
 
-chmod 600 /etc/security/pam_llng.conf
+chmod 600 /etc/open-bastion/openbastion.conf
 
-# Create NSS LLNG configuration
-cat > /etc/nss_llng.conf << EOF
-# LemonLDAP::NG NSS configuration
+# Create NSS Open Bastion configuration
+cat > /etc/open-bastion/nss_openbastion.conf << EOF
+# Open Bastion NSS configuration
 
 portal_url = $PORTAL_URL
 server_token_file = $TOKEN_FILE
@@ -281,13 +282,12 @@ default_shell = /bin/bash
 default_home_base = /home
 EOF
 
-chmod 644 /etc/nss_llng.conf
+chmod 644 /etc/open-bastion/nss_openbastion.conf
 
 # Create SSH proxy configuration for bastion-to-backend connections
-mkdir -p /etc/llng
-cat > /etc/llng/ssh-proxy.conf << EOF
-# LemonLDAP::NG SSH Proxy configuration
-# Used by llng-ssh-proxy to request JWT for bastion-to-backend auth
+cat > /etc/open-bastion/ssh-proxy.conf << EOF
+# Open Bastion SSH Proxy configuration
+# Used by ob-ssh-proxy to request JWT for bastion-to-backend auth
 
 PORTAL_URL=$PORTAL_URL
 SERVER_TOKEN_FILE=$TOKEN_FILE
@@ -298,13 +298,13 @@ VERIFY_SSL=false
 SSH_OPTIONS="-o StrictHostKeyChecking=no"
 DEBUG=false
 EOF
-chmod 644 /etc/llng/ssh-proxy.conf
+chmod 644 /etc/open-bastion/ssh-proxy.conf
 echo "SSH proxy configured for bastion-to-backend authentication"
 
-# Configure NSS to use LLNG for user/group resolution
-sed -i 's/^passwd:.*/passwd:         files llng/' /etc/nsswitch.conf
-sed -i 's/^group:.*/group:          files llng/' /etc/nsswitch.conf
-echo "NSS configured to use LLNG"
+# Configure NSS to use Open Bastion for user/group resolution
+sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
+sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
+echo "NSS configured to use Open Bastion"
 
 # Start nscd for caching NSS lookups (runs as root, can read server token)
 if command -v nscd >/dev/null 2>&1; then
@@ -316,15 +316,16 @@ fi
 
 # Configure PAM to create home directories on first login
 cat > /etc/pam.d/sshd << EOF
-# PAM configuration for SSH with LemonLDAP::NG
+# PAM configuration for SSH with Open Bastion
 auth       required     pam_permit.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
 session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
 EOF
 
 # Fix session recording directory permissions
-chmod 1777 /var/lib/llng-sessions
+mkdir -p /var/lib/open-bastion/sessions
+chmod 1777 /var/lib/open-bastion/sessions
 
 # Ensure sshd_config.d is included
 if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
@@ -350,8 +351,8 @@ echo "SSH listening on port 22"
 echo "Users can connect with SSH certificates from LLNG"
 echo ""
 echo "To connect to backend via bastion:"
-echo "  From bastion: llng-ssh-proxy backend"
-echo "  Or: ssh -o ProxyCommand='llng-ssh-proxy %h %p' backend"
+echo "  From bastion: ob-ssh-proxy backend"
+echo "  Or: ssh -o ProxyCommand='ob-ssh-proxy %h %p' backend"
 
 # Execute the command (sshd)
 exec "$@"

@@ -68,7 +68,7 @@ X11Forwarding no
 PermitRootLogin no
 
 # Accept bastion JWT environment variable from SSH connection
-AcceptEnv LLNG_BASTION_JWT
+AcceptEnv OB_BASTION_JWT
 EOF
 
 # Enroll server via Device Authorization Grant
@@ -190,9 +190,10 @@ fi
 echo "Server enrollment complete"
 rm -f "$COOKIE_FILE"
 
-# Create PAM LLNG configuration
-cat > /etc/security/pam_llng.conf << EOF
-# LemonLDAP::NG PAM configuration for Backend
+# Create PAM Open Bastion configuration
+mkdir -p /etc/open-bastion
+cat > /etc/open-bastion/openbastion.conf << EOF
+# Open Bastion PAM configuration for Backend
 
 portal_url = $PORTAL_URL
 server_group = $SERVER_GROUP
@@ -210,7 +211,7 @@ verify_ssl = false
 
 # Cache settings
 cache_enabled = true
-cache_dir = /var/cache/pam_llng
+cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
 # User creation
@@ -222,7 +223,7 @@ default_shell = /bin/bash
 bastion_jwt_required = true
 bastion_jwt_issuer = $PORTAL_URL
 bastion_jwt_jwks_url = $PORTAL_URL/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
 bastion_jwt_cache_ttl = 3600
 bastion_jwt_clock_skew = 60
 
@@ -230,11 +231,11 @@ bastion_jwt_clock_skew = 60
 log_level = info
 EOF
 
-chmod 600 /etc/security/pam_llng.conf
+chmod 600 /etc/open-bastion/openbastion.conf
 
-# Create NSS LLNG configuration
-cat > /etc/nss_llng.conf << EOF
-# LemonLDAP::NG NSS configuration
+# Create NSS Open Bastion configuration
+cat > /etc/open-bastion/nss_openbastion.conf << EOF
+# Open Bastion NSS configuration
 
 portal_url = $PORTAL_URL
 server_token_file = $TOKEN_FILE
@@ -252,12 +253,12 @@ default_shell = /bin/bash
 default_home_base = /home
 EOF
 
-chmod 644 /etc/nss_llng.conf
+chmod 644 /etc/open-bastion/nss_openbastion.conf
 
-# Configure NSS to use LLNG for user/group resolution
-sed -i 's/^passwd:.*/passwd:         files llng/' /etc/nsswitch.conf
-sed -i 's/^group:.*/group:          files llng/' /etc/nsswitch.conf
-echo "NSS configured to use LLNG"
+# Configure NSS to use Open Bastion for user/group resolution
+sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
+sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
+echo "NSS configured to use Open Bastion"
 
 # Start nscd for caching NSS lookups (runs as root, can read server token)
 if command -v nscd >/dev/null 2>&1; then
@@ -269,9 +270,9 @@ fi
 
 # Configure PAM to create home directories on first login
 cat > /etc/pam.d/sshd << EOF
-# PAM configuration for SSH with LemonLDAP::NG
+# PAM configuration for SSH with Open Bastion
 auth       required     pam_permit.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
 session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
 EOF
