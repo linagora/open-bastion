@@ -151,6 +151,8 @@ void config_init(pam_openbastion_config_t *config)
     config->crowdsec_max_failures = 5;
     config->crowdsec_block_delay = 180;
     config->crowdsec_ban_duration = strdup("4h");
+
+    /* Note: strdup failures for defaults are checked by config_validate() */
 }
 
 /* Secure free: zero memory before freeing */
@@ -619,8 +621,12 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_bouncer_key = strdup(value);
     }
     else if (strcmp(key, "crowdsec_action") == 0) {
-        free(config->crowdsec_action);
-        config->crowdsec_action = strdup(value);
+        /* Validate: only "reject" or "warn" are valid */
+        if (strcmp(value, "reject") == 0 || strcmp(value, "warn") == 0) {
+            free(config->crowdsec_action);
+            config->crowdsec_action = strdup(value);
+        }
+        /* Invalid values are silently ignored, keeping the default */
     }
     else if (strcmp(key, "crowdsec_machine_id") == 0) {
         free(config->crowdsec_machine_id);
@@ -869,6 +875,20 @@ int config_validate(const pam_openbastion_config_t *config)
     /* Create directories for audit log file if needed */
     if (config->audit_enabled && config->audit_log_file) {
         ensure_parent_dir(config->audit_log_file);
+    }
+
+    /* Validate CrowdSec configuration if enabled */
+    if (config->crowdsec_enabled) {
+        /* These fields must not be NULL if CrowdSec is enabled */
+        if (!config->crowdsec_url || !config->crowdsec_scenario ||
+            !config->crowdsec_action || !config->crowdsec_ban_duration) {
+            return -5;  /* CrowdSec configuration incomplete */
+        }
+        /* Validate action is "reject" or "warn" */
+        if (strcmp(config->crowdsec_action, "reject") != 0 &&
+            strcmp(config->crowdsec_action, "warn") != 0) {
+            return -5;  /* Invalid crowdsec_action */
+        }
     }
 
     /* For account management, we need a server token */

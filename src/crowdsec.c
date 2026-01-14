@@ -54,15 +54,17 @@ static void secure_free_str(char *ptr)
     }
 }
 
-/* Initialize response buffer */
-static void init_buffer(response_buffer_t *buf)
+/* Initialize response buffer - returns 0 on success, -1 on failure */
+static int init_buffer(response_buffer_t *buf)
 {
     buf->data = malloc(INITIAL_BUFFER_SIZE);
     buf->size = 0;
     buf->capacity = INITIAL_BUFFER_SIZE;
-    if (buf->data) {
-        buf->data[0] = '\0';
+    if (!buf->data) {
+        return -1;
     }
+    buf->data[0] = '\0';
+    return 0;
 }
 
 /* Free response buffer */
@@ -184,7 +186,13 @@ static int watcher_login(crowdsec_context_t *ctx)
     headers = curl_slist_append(headers, "Accept: application/json");
 
     response_buffer_t buf;
-    init_buffer(&buf);
+    if (init_buffer(&buf) != 0) {
+        snprintf(ctx->error_buf, sizeof(ctx->error_buf),
+                 "Failed to allocate response buffer");
+        json_object_put(req);
+        curl_slist_free_all(headers);
+        return -1;
+    }
     setup_curl(ctx);
 
     curl_easy_setopt(ctx->curl, CURLOPT_URL, url);
@@ -277,7 +285,11 @@ static int get_alerts_count(crowdsec_context_t *ctx, const char *ip)
     headers = curl_slist_append(headers, auth_header);
 
     response_buffer_t buf;
-    init_buffer(&buf);
+    if (init_buffer(&buf) != 0) {
+        explicit_bzero(auth_header, sizeof(auth_header));
+        curl_slist_free_all(headers);
+        return 0;
+    }
     setup_curl(ctx);
 
     curl_easy_setopt(ctx->curl, CURLOPT_URL, url);
@@ -385,6 +397,7 @@ static char *build_alert_payload(crowdsec_context_t *ctx,
     struct json_object *alert = json_object_new_object();
     if (!alert) return NULL;
 
+    /* Add fields - json-c handles NULL from json_object_new_* gracefully */
     json_object_object_add(alert, "scenario",
                            json_object_new_string(ctx->config.scenario));
     json_object_object_add(alert, "scenario_hash",
@@ -403,48 +416,77 @@ static char *build_alert_payload(crowdsec_context_t *ctx,
 
     /* Source */
     struct json_object *source = json_object_new_object();
+    if (!source) {
+        json_object_put(alert);
+        return NULL;
+    }
     json_object_object_add(source, "scope", json_object_new_string("ip"));
     json_object_object_add(source, "value", json_object_new_string(ip));
     json_object_object_add(alert, "source", source);
 
     /* Events with metadata */
     struct json_object *events = json_object_new_array();
+    if (!events) {
+        json_object_put(alert);
+        return NULL;
+    }
     struct json_object *event = json_object_new_object();
+    if (!event) {
+        json_object_put(events);
+        json_object_put(alert);
+        return NULL;
+    }
     json_object_object_add(event, "timestamp", json_object_new_string(timestamp));
 
     struct json_object *meta = json_object_new_array();
+    if (!meta) {
+        json_object_put(event);
+        json_object_put(events);
+        json_object_put(alert);
+        return NULL;
+    }
 
     struct json_object *meta_type = json_object_new_object();
-    json_object_object_add(meta_type, "key", json_object_new_string("log_type"));
-    json_object_object_add(meta_type, "value", json_object_new_string("ssh-auth"));
-    json_object_array_add(meta, meta_type);
+    if (meta_type) {
+        json_object_object_add(meta_type, "key", json_object_new_string("log_type"));
+        json_object_object_add(meta_type, "value", json_object_new_string("ssh-auth"));
+        json_object_array_add(meta, meta_type);
+    }
 
     struct json_object *meta_reason = json_object_new_object();
-    json_object_object_add(meta_reason, "key", json_object_new_string("reason"));
-    json_object_object_add(meta_reason, "value", json_object_new_string("Authentication failed"));
-    json_object_array_add(meta, meta_reason);
+    if (meta_reason) {
+        json_object_object_add(meta_reason, "key", json_object_new_string("reason"));
+        json_object_object_add(meta_reason, "value", json_object_new_string("Authentication failed"));
+        json_object_array_add(meta, meta_reason);
+    }
 
     if (user) {
         struct json_object *meta_login = json_object_new_object();
-        json_object_object_add(meta_login, "key", json_object_new_string("login"));
-        json_object_object_add(meta_login, "value", json_object_new_string(user));
-        json_object_array_add(meta, meta_login);
+        if (meta_login) {
+            json_object_object_add(meta_login, "key", json_object_new_string("login"));
+            json_object_object_add(meta_login, "value", json_object_new_string(user));
+            json_object_array_add(meta, meta_login);
+        }
     }
 
     if (service) {
         struct json_object *meta_service = json_object_new_object();
-        json_object_object_add(meta_service, "key", json_object_new_string("service"));
-        json_object_object_add(meta_service, "value", json_object_new_string(service));
-        json_object_array_add(meta, meta_service);
+        if (meta_service) {
+            json_object_object_add(meta_service, "key", json_object_new_string("service"));
+            json_object_object_add(meta_service, "value", json_object_new_string(service));
+            json_object_array_add(meta, meta_service);
+        }
     }
 
     json_object_object_add(event, "meta", meta);
 
     /* Add source to event as well */
     struct json_object *event_source = json_object_new_object();
-    json_object_object_add(event_source, "scope", json_object_new_string("ip"));
-    json_object_object_add(event_source, "value", json_object_new_string(ip));
-    json_object_object_add(event, "source", event_source);
+    if (event_source) {
+        json_object_object_add(event_source, "scope", json_object_new_string("ip"));
+        json_object_object_add(event_source, "value", json_object_new_string(ip));
+        json_object_object_add(event, "source", event_source);
+    }
 
     json_object_array_add(events, event);
     json_object_object_add(alert, "events", events);
@@ -452,25 +494,36 @@ static char *build_alert_payload(crowdsec_context_t *ctx,
     /* Add decision if remediation is requested */
     if (remediation) {
         struct json_object *decisions = json_object_new_array();
-        struct json_object *decision = json_object_new_object();
-        json_object_object_add(decision, "duration",
-                               json_object_new_string(ctx->config.ban_duration));
-        json_object_object_add(decision, "type", json_object_new_string("ban"));
-        json_object_object_add(decision, "scope", json_object_new_string("ip"));
-        json_object_object_add(decision, "value", json_object_new_string(ip));
-        json_object_object_add(decision, "origin", json_object_new_string("open-bastion"));
-        json_object_object_add(decision, "scenario",
-                               json_object_new_string(ctx->config.scenario));
-        json_object_array_add(decisions, decision);
-        json_object_object_add(alert, "decisions", decisions);
+        if (decisions) {
+            struct json_object *decision = json_object_new_object();
+            if (decision) {
+                json_object_object_add(decision, "duration",
+                                       json_object_new_string(ctx->config.ban_duration));
+                json_object_object_add(decision, "type", json_object_new_string("ban"));
+                json_object_object_add(decision, "scope", json_object_new_string("ip"));
+                json_object_object_add(decision, "value", json_object_new_string(ip));
+                json_object_object_add(decision, "origin", json_object_new_string("open-bastion"));
+                json_object_object_add(decision, "scenario",
+                                       json_object_new_string(ctx->config.scenario));
+                json_object_array_add(decisions, decision);
+            }
+            json_object_object_add(alert, "decisions", decisions);
+        }
     }
 
     /* Wrap in array as LAPI expects */
     struct json_object *alerts_array = json_object_new_array();
+    if (!alerts_array) {
+        json_object_put(alert);
+        return NULL;
+    }
     json_object_array_add(alerts_array, alert);
 
     const char *json_str = json_object_to_json_string(alerts_array);
-    char *result = strdup(json_str);
+    char *result = NULL;
+    if (json_str) {
+        result = strdup(json_str);
+    }
 
     json_object_put(alerts_array);
 
@@ -493,25 +546,57 @@ crowdsec_context_t *crowdsec_init(const crowdsec_config_t *config)
     /* Copy configuration */
     ctx->config.enabled = config->enabled;
     ctx->config.url = config->url ? strdup(config->url) : strdup(CROWDSEC_DEFAULT_URL);
+    if (!ctx->config.url) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
+
     ctx->config.timeout = config->timeout > 0 ? config->timeout : CROWDSEC_DEFAULT_TIMEOUT;
     ctx->config.fail_open = config->fail_open;
     ctx->config.verify_ssl = config->verify_ssl;
     ctx->config.ca_cert = config->ca_cert ? strdup(config->ca_cert) : NULL;
+    if (config->ca_cert && !ctx->config.ca_cert) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
 
     ctx->config.bouncer_key = config->bouncer_key ? strdup(config->bouncer_key) : NULL;
+    if (config->bouncer_key && !ctx->config.bouncer_key) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
     ctx->config.action = config->action;
 
     ctx->config.machine_id = config->machine_id ? strdup(config->machine_id) : NULL;
+    if (config->machine_id && !ctx->config.machine_id) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
     ctx->config.password = config->password ? strdup(config->password) : NULL;
+    if (config->password && !ctx->config.password) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
+
     ctx->config.scenario = config->scenario ? strdup(config->scenario) :
                            strdup(CROWDSEC_DEFAULT_SCENARIO);
+    if (!ctx->config.scenario) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
+
     ctx->config.send_all_alerts = config->send_all_alerts;
     ctx->config.max_failures = config->max_failures > 0 ? config->max_failures :
                                CROWDSEC_DEFAULT_MAX_FAILURES;
     ctx->config.block_delay = config->block_delay > 0 ? config->block_delay :
                               CROWDSEC_DEFAULT_BLOCK_DELAY;
+
     ctx->config.ban_duration = config->ban_duration ? strdup(config->ban_duration) :
                                strdup(CROWDSEC_DEFAULT_BAN_DURATION);
+    if (!ctx->config.ban_duration) {
+        crowdsec_destroy(ctx);
+        return NULL;
+    }
 
     /* Initialize curl */
     ctx->curl = curl_easy_init();
@@ -579,7 +664,13 @@ crowdsec_result_t crowdsec_check_ip(crowdsec_context_t *ctx, const char *ip)
 
     /* Execute request */
     response_buffer_t buf;
-    init_buffer(&buf);
+    if (init_buffer(&buf) != 0) {
+        snprintf(ctx->error_buf, sizeof(ctx->error_buf),
+                 "Failed to allocate response buffer");
+        explicit_bzero(api_key_header, sizeof(api_key_header));
+        curl_slist_free_all(headers);
+        return CS_ERROR;
+    }
     setup_curl(ctx);
 
     curl_easy_setopt(ctx->curl, CURLOPT_URL, url);
@@ -713,7 +804,14 @@ int crowdsec_report_failure(crowdsec_context_t *ctx,
 
     /* Execute request */
     response_buffer_t buf;
-    init_buffer(&buf);
+    if (init_buffer(&buf) != 0) {
+        snprintf(ctx->error_buf, sizeof(ctx->error_buf),
+                 "Failed to allocate response buffer");
+        explicit_bzero(auth_header, sizeof(auth_header));
+        curl_slist_free_all(headers);
+        free(payload);
+        return -1;
+    }
     setup_curl(ctx);
 
     curl_easy_setopt(ctx->curl, CURLOPT_URL, url);

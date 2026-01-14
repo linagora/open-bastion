@@ -72,7 +72,7 @@ void crowdsec_destroy(crowdsec_context_t *ctx);
 /*
  * Check if IP has active ban decision (Bouncer role)
  *
- * Called BEFORE LLNG authentication to fail-fast on banned IPs.
+ * Called BEFORE Open Bastion authentication to fail-fast on banned IPs.
  * Uses GET /v1/decisions?ip=X with X-Api-Key header.
  *
  * @param ctx Context handle
@@ -84,7 +84,7 @@ crowdsec_result_t crowdsec_check_ip(crowdsec_context_t *ctx, const char *ip);
 /*
  * Report authentication failure (Watcher role)
  *
- * Called AFTER LLNG authentication failure. Sends alert to CrowdSec LAPI.
+ * Called AFTER Open Bastion authentication failure. Sends alert to CrowdSec LAPI.
  * If failure count reaches max_failures, includes ban decision in alert.
  *
  * @param ctx Context handle
