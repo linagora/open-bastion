@@ -898,7 +898,21 @@ int crowdsec_report_failure(crowdsec_context_t *ctx,
         return 0;  /* Already banned, no need to report */
     }
 
-    /* Get existing alerts count */
+    /*
+     * Get existing alerts count.
+     *
+     * NOTE: There is an inherent race condition here in concurrent environments.
+     * Multiple PAM processes could simultaneously pass the CS_DENY check above,
+     * count the same number of alerts, and all decide to trigger a ban.
+     * This is acceptable because:
+     * - CrowdSec LAPI handles duplicate decisions idempotently
+     * - Multiple ban decisions for the same IP are merged, not stacked
+     * - Slight over-counting is acceptable for security purposes
+     *
+     * For stricter atomic counting, use CrowdSec's built-in scenarios or
+     * Crowdsieve (https://github.com/linagora/crowdsieve) which handles
+     * aggregation server-side.
+     */
     int count = get_alerts_count(ctx, ip);
 
     /* Determine if this alert should trigger a ban */
