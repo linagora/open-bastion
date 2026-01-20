@@ -631,6 +631,16 @@ home = /var/lib/backup
 - Permissions 0600
 - Not a symlink
 
+**SSH server requirement:**
+The SSH server must have `ExposeAuthInfo yes` in `/etc/ssh/sshd_config` for fingerprint
+validation to work. This allows the PAM module to verify that the SSH key used matches
+the configured fingerprint.
+
+```bash
+# /etc/ssh/sshd_config
+ExposeAuthInfo yes
+```
+
 Get the SSH key fingerprint:
 ```bash
 ssh-keygen -lf /path/to/key.pub
@@ -654,10 +664,12 @@ ssh-keygen -lf /path/to/key.pub
 ### How It Works
 
 1. Service account connects via SSH with its configured key
-2. PAM module checks if user is in `service-accounts.conf`
-3. If found, account is authorized locally (no LLNG call needed)
-4. Account is created automatically if it doesn't exist
-5. sudo permissions are enforced based on configuration
+2. PAM module extracts the SSH key fingerprint from `SSH_USER_AUTH` environment
+3. PAM module checks if user is in `service-accounts.conf`
+4. If found, the SSH key fingerprint is validated against the configured value
+5. If fingerprint matches, account is authorized locally (no LLNG call needed)
+6. Account is created automatically if it doesn't exist
+7. sudo permissions are enforced based on configuration
 
 ### Per-Server Control
 

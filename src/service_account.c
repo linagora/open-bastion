@@ -342,15 +342,21 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
                 continue;
             }
 
-            /* Check if account already exists */
+            /* Check if account already exists - skip duplicate sections */
+            bool is_duplicate = false;
             for (size_t i = 0; i < sa->count; i++) {
                 if (strcmp(sa->accounts[i].name, section_name) == 0) {
                     syslog(LOG_WARNING, "open-bastion: service_accounts: "
-                           "duplicate account '%s' at line %d",
+                           "duplicate account '%s' at line %d (ignoring)",
                            section_name, line_num);
-                    current_account = &sa->accounts[i];
-                    goto next_line;
+                    is_duplicate = true;
+                    break;
                 }
+            }
+            if (is_duplicate) {
+                /* Set current_account to NULL to skip all lines until next section */
+                current_account = NULL;
+                continue;
             }
 
             /* Add new account */
@@ -395,9 +401,6 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
         }
 
         parse_account_line(key, value, current_account);
-
-next_line:
-        continue;
     }
 
     fclose(f);

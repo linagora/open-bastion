@@ -409,6 +409,18 @@ Service accounts are validated against the same security rules as regular users:
 | `home` | Must match `approved_home_prefixes` |
 | `uid`/`gid` | Must be in valid range (0-65534) |
 
+### SSH Server Requirement
+
+**Important:** The SSH server must have `ExposeAuthInfo yes` in `/etc/ssh/sshd_config`:
+
+```bash
+# /etc/ssh/sshd_config
+ExposeAuthInfo yes
+```
+
+This setting allows the PAM module to access the SSH key fingerprint via the `SSH_USER_AUTH`
+environment variable, which is required for fingerprint validation.
+
 ### Authentication Flow
 
 ```mermaid
@@ -419,16 +431,21 @@ sequenceDiagram
 
     SA->>SSH: SSH key authentication
     SSH->>PAM: pam_sm_authenticate
+    Note over SSH: ExposeAuthInfo provides<br/>SSH_USER_AUTH with fingerprint
+    PAM->>PAM: Extract fingerprint from SSH_USER_AUTH
     PAM->>PAM: Check service_accounts.conf
-    Note over PAM: Account found = authorized
+    PAM->>PAM: Validate fingerprint matches config
+    Note over PAM: Fingerprint OK = authorized
     PAM-->>SSH: PAM_SUCCESS
     SSH-->>SA: Session established
 ```
 
 1. Service account connects via SSH with its configured key
-2. PAM module checks if user is in `service_accounts.conf`
-3. If found, account is authorized locally (no LLNG call needed)
-4. sudo permissions are checked from the same configuration file
+2. SSH server exposes key fingerprint via `SSH_USER_AUTH` (requires `ExposeAuthInfo yes`)
+3. PAM module extracts fingerprint and checks if user is in `service_accounts.conf`
+4. PAM module validates that the SSH key fingerprint matches the configured value
+5. If fingerprint matches, account is authorized locally (no LLNG call needed)
+6. sudo permissions are checked from the same configuration file
 
 ### Security Benefits
 

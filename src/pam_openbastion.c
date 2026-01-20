@@ -729,6 +729,88 @@ static const char *get_client_ip(pam_handle_t *pamh)
 }
 
 /*
+ * Extract SSH key fingerprint from PAM environment.
+ * SSH sets SSH_USER_AUTH environment variable when ExposeAuthInfo is enabled.
+ * Format for publickey: "publickey <algorithm> SHA256:<fingerprint>"
+ * For certificates: "publickey <algorithm>-cert-v01@openssh.com SHA256:<fingerprint>"
+ *
+ * Returns allocated string with fingerprint (caller must free), or NULL if not found.
+ */
+static char *extract_ssh_key_fingerprint(pam_handle_t *pamh)
+{
+    /* Get SSH_USER_AUTH from PAM environment */
+    const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
+    if (!ssh_auth || !*ssh_auth) {
+        OB_LOG_DEBUG(pamh, "No SSH_USER_AUTH in environment (ExposeAuthInfo not enabled?)");
+        return NULL;
+    }
+
+    /* Security: Check length before processing */
+    if (strlen(ssh_auth) >= 8192) {
+        OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
+        return NULL;
+    }
+
+    OB_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
+
+    /* Must start with "publickey " */
+    if (strncmp(ssh_auth, "publickey ", 10) != 0) {
+        OB_LOG_DEBUG(pamh, "SSH authentication is not publickey");
+        return NULL;
+    }
+
+    /* Parse: "publickey <algorithm> <fingerprint>" */
+    char *auth_copy = strdup(ssh_auth);
+    if (!auth_copy) {
+        return NULL;
+    }
+
+    char *fingerprint = NULL;
+
+    /* Skip "publickey " prefix */
+    char *p = auth_copy + 10;
+
+    /* Skip algorithm (find next space) */
+    char *space = strchr(p, ' ');
+    if (space) {
+        p = space + 1;
+        /* p now points to the fingerprint (SHA256:xxx or similar) */
+
+        /* Find end of fingerprint (next space, comma, or end of string) */
+        char *end = p;
+        while (*end && *end != ' ' && *end != ',' && *end != ':') {
+            end++;
+        }
+        /* For SHA256:xxx format, include the hash part */
+        if (strncmp(p, "SHA256:", 7) == 0 || strncmp(p, "MD5:", 4) == 0) {
+            /* Find the actual end (space, comma, newline, or end) */
+            end = p;
+            while (*end && *end != ' ' && *end != ',' && *end != '\n') {
+                end++;
+            }
+            size_t len = (size_t)(end - p);
+            if (len > 0 && len < 256) {
+                fingerprint = malloc(len + 1);
+                if (fingerprint) {
+                    memcpy(fingerprint, p, len);
+                    fingerprint[len] = '\0';
+                }
+            }
+        }
+    }
+
+    free(auth_copy);
+
+    if (fingerprint) {
+        OB_LOG_DEBUG(pamh, "Extracted SSH key fingerprint: %s", fingerprint);
+    } else {
+        OB_LOG_DEBUG(pamh, "Could not extract SSH key fingerprint from SSH_USER_AUTH");
+    }
+
+    return fingerprint;
+}
+
+/*
  * Extract SSH certificate info from PAM environment.
  * SSH sets SSH_USER_AUTH environment variable with certificate details.
  * Format: "publickey <algorithm> <fingerprint>:<key_id>:<serial>:<principals>"
@@ -1056,7 +1138,51 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     /* Check if this is a service account */
     if (service_accounts_is_service_account(&data->service_accounts, user)) {
         const service_account_t *sa = service_accounts_find(&data->service_accounts, user);
-        OB_LOG_DEBUG(pamh, "User %s is a service account, using SSH key authentication", user);
+        OB_LOG_DEBUG(pamh, "User %s is a service account, validating SSH key fingerprint", user);
+
+        /*
+         * Security: Validate SSH key fingerprint.
+         * Extract the fingerprint from SSH_USER_AUTH and compare with configured value.
+         * This requires ExposeAuthInfo=yes in sshd_config.
+         */
+        char *ssh_fingerprint = extract_ssh_key_fingerprint(pamh);
+        if (!ssh_fingerprint) {
+            OB_LOG_ERR(pamh, "Service account %s: cannot extract SSH key fingerprint "
+                    "(is ExposeAuthInfo enabled in sshd_config?)", user);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Service account: no SSH fingerprint available";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTH_ERR;
+        }
+
+        /* Validate fingerprint against configured value */
+        int fp_result = service_accounts_validate_key(&data->service_accounts, user, ssh_fingerprint);
+        if (fp_result != 0) {
+            OB_LOG_ERR(pamh, "Service account %s: SSH key fingerprint mismatch "
+                    "(got %s, expected %s)", user, ssh_fingerprint,
+                    sa->key_fingerprint ? sa->key_fingerprint : "(none)");
+            free(ssh_fingerprint);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Service account: SSH key fingerprint mismatch";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTH_ERR;
+        }
+
+        OB_LOG_INFO(pamh, "Service account %s authenticated with fingerprint %s",
+                user, ssh_fingerprint);
+        free(ssh_fingerprint);
 
         /* Store service account attributes for pam_sm_open_session (user creation) */
         if (sa->gecos) {
@@ -1085,7 +1211,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         if (audit_initialized) {
             audit_event.event_type = AUDIT_AUTH_SUCCESS;
             audit_event.result_code = PAM_SUCCESS;
-            audit_event.reason = "Service account (SSH key auth)";
+            audit_event.reason = "Service account (SSH key validated)";
             audit_event_set_end_time(&audit_event);
             audit_log_event(data->audit, &audit_event);
         }

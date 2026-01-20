@@ -1106,6 +1106,17 @@ shell = /bin/sh
 home = /var/lib/backup
 ```
 
+### Prérequis SSH
+
+**Important :** Le serveur SSH doit avoir `ExposeAuthInfo yes` dans `/etc/ssh/sshd_config` :
+
+```bash
+# /etc/ssh/sshd_config
+ExposeAuthInfo yes
+```
+
+Cette option permet au module PAM d'accéder au fingerprint de la clé SSH via la variable `SSH_USER_AUTH`, ce qui est nécessaire pour la validation du fingerprint.
+
 ### Flux d'authentification
 
 ```mermaid
@@ -1116,12 +1127,14 @@ sequenceDiagram
 
     Client->>Srv: 1. ssh ansible@server
     Note over Srv: 2. Authentification SSH<br/>(clé publique/privée)
-    Srv->>PAM: 3. pam_sm_authenticate
-    Note over PAM: 4. Détecte compte de service<br/>(présent dans config)
-    Note over PAM: 5. Valide fingerprint clé SSH
-    PAM-->>Srv: 6. PAM_SUCCESS
-    Note over Srv: 7. PAS d'appel à LLNG<br/>(autorisation locale)
-    Srv-->>Client: 8. Session établie
+    Note over Srv: 3. ExposeAuthInfo expose<br/>fingerprint dans SSH_USER_AUTH
+    Srv->>PAM: 4. pam_sm_authenticate
+    Note over PAM: 5. Extrait fingerprint de<br/>SSH_USER_AUTH
+    Note over PAM: 6. Détecte compte de service<br/>(présent dans config)
+    Note over PAM: 7. Valide fingerprint clé SSH<br/>contre config
+    PAM-->>Srv: 8. PAM_SUCCESS
+    Note over Srv: 9. PAS d'appel à LLNG<br/>(autorisation locale)
+    Srv-->>Client: 10. Session établie
 ```
 
 ### Sécurité
@@ -1129,7 +1142,8 @@ sequenceDiagram
 | Aspect | Mesure |
 |--------|--------|
 | **Fichier config** | Propriétaire root, mode 0600, pas de symlink |
-| **Validation fingerprint** | Format SHA256: ou MD5: vérifié |
+| **Validation fingerprint** | Fingerprint SSH validé contre valeur configurée |
+| **ExposeAuthInfo** | Requis dans sshd_config pour validation fingerprint |
 | **Shells autorisés** | Liste blanche configurable |
 | **Home autorisés** | Préfixes autorisés uniquement |
 | **Noms de compte** | Validation stricte (lowercase, max 32 chars) |
