@@ -946,12 +946,21 @@ int config_validate(const pam_openbastion_config_t *config)
 }
 
 /*
+ * Maximum path length to prevent DoS via very long paths.
+ * Linux PATH_MAX is 4096, but we use a smaller limit for security.
+ */
+#define MAX_SAFE_PATH_LENGTH 1024
+
+/*
  * Check if a path contains dangerous patterns
  * Returns 1 if dangerous, 0 if safe
  */
 static int path_contains_dangerous_patterns(const char *path)
 {
     if (!path) return 1;
+
+    /* Limit path length to prevent DoS - use strnlen to avoid scanning entire string */
+    if (strnlen(path, MAX_SAFE_PATH_LENGTH + 1) > MAX_SAFE_PATH_LENGTH) return 1;
 
     /* Must be absolute path */
     if (path[0] != '/') return 1;

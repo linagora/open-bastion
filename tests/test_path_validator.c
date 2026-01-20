@@ -183,6 +183,22 @@ static int test_double_slashes(void)
     return 1;
 }
 
+/* Test that excessively long paths are rejected (DoS prevention) */
+static int test_path_length_limit(void)
+{
+    /* Create a path longer than MAX_SAFE_PATH_LENGTH (1024) */
+    char long_path[2048];
+    memset(long_path, 'a', sizeof(long_path) - 1);
+    long_path[0] = '/';
+    long_path[sizeof(long_path) - 1] = '\0';
+
+    /* Very long paths should be rejected */
+    if (config_validate_shell(long_path, long_path) == 0) return 0;
+    if (config_validate_home(long_path, long_path) == 0) return 0;
+
+    return 1;
+}
+
 int main(void)
 {
     printf("Path Validator Tests\n");
@@ -208,6 +224,7 @@ int main(void)
     printf("\nEdge cases:\n");
     TEST(null_empty_inputs);
     TEST(double_slashes);
+    TEST(path_length_limit);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
 
