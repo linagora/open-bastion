@@ -217,6 +217,77 @@ static int test_validate_key_not_found(void)
     return ok;
 }
 
+/* Helper to create a test service account structure */
+static void create_test_account(service_accounts_t *sa, const char *name,
+                                 const char *fingerprint)
+{
+    service_accounts_init(sa);
+    sa->accounts = malloc(sizeof(service_account_t));
+    if (sa->accounts) {
+        memset(sa->accounts, 0, sizeof(service_account_t));
+        sa->accounts[0].name = strdup(name);
+        sa->accounts[0].key_fingerprint = fingerprint ? strdup(fingerprint) : NULL;
+        sa->count = 1;
+        sa->capacity = 1;
+    }
+}
+
+/* Test key validation: fingerprint matches */
+static int test_validate_key_match(void)
+{
+    service_accounts_t sa;
+    create_test_account(&sa, "ansible", "SHA256:abc123def456");
+
+    int ret = service_accounts_validate_key(&sa, "ansible", "SHA256:abc123def456");
+
+    int ok = (ret == 0);  /* Fingerprint matches */
+
+    service_accounts_free(&sa);
+    return ok;
+}
+
+/* Test key validation: fingerprint mismatch */
+static int test_validate_key_mismatch(void)
+{
+    service_accounts_t sa;
+    create_test_account(&sa, "ansible", "SHA256:abc123def456");
+
+    int ret = service_accounts_validate_key(&sa, "ansible", "SHA256:wrongfingerprint");
+
+    int ok = (ret == -2);  /* Fingerprint mismatch */
+
+    service_accounts_free(&sa);
+    return ok;
+}
+
+/* Test key validation: no fingerprint configured */
+static int test_validate_key_no_config(void)
+{
+    service_accounts_t sa;
+    create_test_account(&sa, "ansible", NULL);
+
+    int ret = service_accounts_validate_key(&sa, "ansible", "SHA256:abc123def456");
+
+    int ok = (ret == -3);  /* No fingerprint configured */
+
+    service_accounts_free(&sa);
+    return ok;
+}
+
+/* Test key validation: no fingerprint provided */
+static int test_validate_key_no_provided(void)
+{
+    service_accounts_t sa;
+    create_test_account(&sa, "ansible", "SHA256:abc123def456");
+
+    int ret = service_accounts_validate_key(&sa, "ansible", NULL);
+
+    int ok = (ret == -2);  /* No fingerprint provided */
+
+    service_accounts_free(&sa);
+    return ok;
+}
+
 /* Test get_authorization with empty list */
 static int test_get_authorization_not_found(void)
 {
@@ -395,6 +466,10 @@ int main(void)
     TEST(find);
     TEST(is_service_account);
     TEST(validate_key_not_found);
+    TEST(validate_key_match);
+    TEST(validate_key_mismatch);
+    TEST(validate_key_no_config);
+    TEST(validate_key_no_provided);
     TEST(get_authorization_not_found);
     TEST(account_validate_valid);
     TEST(account_validate_invalid_name);

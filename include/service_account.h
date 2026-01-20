@@ -71,11 +71,15 @@ void service_accounts_free(service_accounts_t *sa);
  *   gid = 0
  *
  * Returns 0 on success, negative on error:
- *   -1: File not found or cannot be opened
+ *   0:  Success (file loaded, or file does not exist which is OK)
+ *   -1: Cannot open file or NULL parameters
  *   -2: File not owned by root
  *   -3: File permissions too open
  *   -4: Not a regular file
- *   -5: Parse error
+ *
+ * Note: Malformed lines within the file are logged and skipped.
+ * Invalid accounts (missing fingerprint, unapproved shell, etc.)
+ * are validated and dropped after loading.
  */
 int service_accounts_load(const char *filename, service_accounts_t *sa);
 

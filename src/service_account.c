@@ -239,6 +239,21 @@ static int ensure_capacity(service_accounts_t *sa)
 }
 
 /*
+ * Helper macro to safely duplicate a string field.
+ * On strdup failure, keeps the existing value and logs a warning.
+ */
+#define SAFE_STRDUP_FIELD(field, val) do { \
+    char *_new = strdup(val); \
+    if (_new) { \
+        free(field); \
+        (field) = _new; \
+    } else { \
+        syslog(LOG_WARNING, "open-bastion: service_accounts: " \
+               "strdup failed for %s (out of memory)", #field); \
+    } \
+} while(0)
+
+/*
  * Parse a line within a section
  */
 static void parse_account_line(const char *key, const char *value,
@@ -247,8 +262,7 @@ static void parse_account_line(const char *key, const char *value,
     if (strcmp(key, "key_fingerprint") == 0 ||
         strcmp(key, "fingerprint") == 0 ||
         strcmp(key, "ssh_key") == 0) {
-        free(account->key_fingerprint);
-        account->key_fingerprint = strdup(value);
+        SAFE_STRDUP_FIELD(account->key_fingerprint, value);
     }
     else if (strcmp(key, "sudo_allowed") == 0 || strcmp(key, "sudo") == 0) {
         account->sudo_allowed = parse_bool(value);
@@ -257,16 +271,13 @@ static void parse_account_line(const char *key, const char *value,
         account->sudo_nopasswd = parse_bool(value);
     }
     else if (strcmp(key, "gecos") == 0 || strcmp(key, "description") == 0) {
-        free(account->gecos);
-        account->gecos = strdup(value);
+        SAFE_STRDUP_FIELD(account->gecos, value);
     }
     else if (strcmp(key, "shell") == 0) {
-        free(account->shell);
-        account->shell = strdup(value);
+        SAFE_STRDUP_FIELD(account->shell, value);
     }
     else if (strcmp(key, "home") == 0 || strcmp(key, "home_dir") == 0) {
-        free(account->home);
-        account->home = strdup(value);
+        SAFE_STRDUP_FIELD(account->home, value);
     }
     else if (strcmp(key, "uid") == 0) {
         account->uid = parse_int(value, 0);
@@ -276,6 +287,8 @@ static void parse_account_line(const char *key, const char *value,
     }
     /* Unknown keys are silently ignored */
 }
+
+#undef SAFE_STRDUP_FIELD
 
 int service_accounts_load(const char *filename, service_accounts_t *sa)
 {
@@ -404,6 +417,37 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
     }
 
     fclose(f);
+
+    /*
+     * Validate all loaded accounts and remove invalid ones.
+     * This ensures that accounts with missing fingerprints, unapproved shells,
+     * or other invalid configurations are rejected at load time.
+     */
+    size_t i = 0;
+    while (i < sa->count) {
+        service_account_t *acct = &sa->accounts[i];
+
+        /* Note: Pass NULL for approved_shells/homes to use defaults from config.h */
+        if (service_account_validate(acct, NULL, NULL) != 0) {
+            syslog(LOG_WARNING, "open-bastion: service_accounts: "
+                   "dropping invalid account '%s'",
+                   acct->name ? acct->name : "(unnamed)");
+
+            /* Free the invalid account's resources */
+            service_account_free(acct);
+
+            /* Shift remaining accounts down */
+            if (i + 1 < sa->count) {
+                memmove(&sa->accounts[i], &sa->accounts[i + 1],
+                        (sa->count - i - 1) * sizeof(service_account_t));
+            }
+            sa->count--;
+            /* Don't increment i - next account is now at position i */
+            continue;
+        }
+        i++;
+    }
+
     return 0;
 }
 
