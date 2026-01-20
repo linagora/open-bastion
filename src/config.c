@@ -246,6 +246,21 @@ void config_free(pam_openbastion_config_t *config)
 #define MAX_TOKEN_FILE_PATH 256
 
 /*
+ * Helper macro for safe string field assignment.
+ * Duplicates value and assigns to field, freeing the old value.
+ * Logs a warning if strdup fails but keeps the old value.
+ */
+#define SET_STRING_FIELD(field, value, key) do { \
+    char *_tmp = strdup(value); \
+    if (_tmp) { \
+        free(field); \
+        (field) = _tmp; \
+    } else { \
+        syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key); \
+    } \
+} while (0)
+
+/*
  * Safe integer parsing with validation.
  * Returns the parsed value, or default_val if parsing fails.
  * Unlike atoi(), this detects invalid input and doesn't silently return 0.
@@ -586,13 +601,7 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_enabled = parse_bool(value);
     }
     else if (strcmp(key, "crowdsec_url") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_url);
-            config->crowdsec_url = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_url, value, key);
     }
     else if (strcmp(key, "crowdsec_timeout") == 0) {
         config->crowdsec_timeout = parse_int(value, 5, 1, 60);
@@ -601,53 +610,23 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_fail_open = parse_bool(value);
     }
     else if (strcmp(key, "crowdsec_bouncer_key") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_bouncer_key);
-            config->crowdsec_bouncer_key = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_bouncer_key, value, key);
     }
     else if (strcmp(key, "crowdsec_action") == 0) {
         /* Validate: only "reject" or "warn" are valid */
         if (strcmp(value, "reject") == 0 || strcmp(value, "warn") == 0) {
-            char *tmp = strdup(value);
-            if (tmp) {
-                free(config->crowdsec_action);
-                config->crowdsec_action = tmp;
-            } else {
-                syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-            }
+            SET_STRING_FIELD(config->crowdsec_action, value, key);
         }
         /* Invalid values are silently ignored, keeping the default */
     }
     else if (strcmp(key, "crowdsec_machine_id") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_machine_id);
-            config->crowdsec_machine_id = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_machine_id, value, key);
     }
     else if (strcmp(key, "crowdsec_password") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_password);
-            config->crowdsec_password = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_password, value, key);
     }
     else if (strcmp(key, "crowdsec_scenario") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_scenario);
-            config->crowdsec_scenario = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_scenario, value, key);
     }
     else if (strcmp(key, "crowdsec_send_all_alerts") == 0) {
         config->crowdsec_send_all_alerts = parse_bool(value);
@@ -659,13 +638,7 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->crowdsec_block_delay = parse_int(value, 180, 10, 86400);
     }
     else if (strcmp(key, "crowdsec_ban_duration") == 0) {
-        char *tmp = strdup(value);
-        if (tmp) {
-            free(config->crowdsec_ban_duration);
-            config->crowdsec_ban_duration = tmp;
-        } else {
-            syslog(LOG_WARNING, "open-bastion: strdup failed for %s", key);
-        }
+        SET_STRING_FIELD(config->crowdsec_ban_duration, value, key);
     }
     /* Unknown keys are silently ignored */
 
