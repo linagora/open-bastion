@@ -383,6 +383,83 @@ rm /etc/security/pam_llng.token
 llng-pam-enroll --portal https://auth.example.com --client-id pam-access
 ```
 
+## Service Accounts Security
+
+Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key
+only, bypassing OIDC authentication. They are defined in a local configuration file.
+
+### Configuration File Security
+
+| Requirement | Description |
+|-------------|-------------|
+| Ownership | Must be owned by root (uid 0) |
+| Permissions | Must be 0600 (owner read/write only) |
+| Symlinks | File must not be a symlink (O_NOFOLLOW) |
+| Location | `/etc/open-bastion/service-accounts.conf` (configurable) |
+
+### Account Validation
+
+Service accounts are validated against the same security rules as regular users:
+
+| Field | Validation |
+|-------|------------|
+| `name` | Lowercase letters, digits, underscore, hyphen; max 32 chars |
+| `key_fingerprint` | Must start with `SHA256:` or `MD5:`, valid base64 chars only |
+| `shell` | Must be in `approved_shells` list |
+| `home` | Must match `approved_home_prefixes` |
+| `uid`/`gid` | Must be in valid range (0-65534) |
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant SA as Service Account
+    participant SSH as SSH Server
+    participant PAM as PAM Module
+
+    SA->>SSH: SSH key authentication
+    SSH->>PAM: pam_sm_authenticate
+    PAM->>PAM: Check service_accounts.conf
+    Note over PAM: Account found = authorized
+    PAM-->>SSH: PAM_SUCCESS
+    SSH-->>SA: Session established
+```
+
+1. Service account connects via SSH with its configured key
+2. PAM module checks if user is in `service_accounts.conf`
+3. If found, account is authorized locally (no LLNG call needed)
+4. sudo permissions are checked from the same configuration file
+
+### Security Benefits
+
+| Feature | Benefit |
+|---------|---------|
+| Local configuration | No network dependency for service accounts |
+| Per-server control | Each server explicitly lists allowed service accounts |
+| SSH key binding | Fingerprint validation prevents key substitution |
+| Audit logging | All service account access is logged |
+| sudo control | Fine-grained sudo permissions per account |
+
+### Limitations
+
+| Limitation | Mitigation |
+|------------|------------|
+| No centralized management | Use configuration management (Ansible, Puppet) |
+| Manual key rotation | Implement key rotation procedures |
+| Local file dependency | Monitor file integrity with AIDE/Tripwire |
+
+### Example Configuration
+
+```ini
+[ansible]
+key_fingerprint = SHA256:abc123def456
+sudo_allowed = true
+sudo_nopasswd = true
+gecos = Ansible Automation
+shell = /bin/bash
+home = /var/lib/ansible
+```
+
 ## Threat Mitigations
 
 | Threat | Mitigation |

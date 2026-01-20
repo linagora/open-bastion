@@ -53,6 +53,7 @@ token-based and key-based authorization with server groups.
 %dir %{_sysconfdir}/open-bastion
 %config(noreplace) %{_sysconfdir}/open-bastion/openbastion.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/nss_openbastion.conf.example
+%config(noreplace) %{_sysconfdir}/open-bastion/service-accounts.conf.example
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder

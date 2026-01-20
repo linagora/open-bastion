@@ -42,6 +42,7 @@
 #include "jwks_cache.h"
 #include "jti_cache.h"
 #include "crowdsec.h"
+#include "service_account.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -68,6 +69,7 @@ typedef struct {
     bastion_jwt_verifier_t *bastion_jwt_verifier;  /* Bastion JWT verifier */
     crowdsec_context_t *crowdsec;  /* CrowdSec bouncer/watcher */
     crowdsec_action_t crowdsec_action;  /* Parsed CrowdSec action (reject/warn) */
+    service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -366,6 +368,7 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->crowdsec) {
             crowdsec_destroy(ob_data->crowdsec);
         }
+        service_accounts_free(&ob_data->service_accounts);
         config_free(&ob_data->config);
         free(ob_data);
     }
@@ -664,6 +667,27 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         if (data->config.bastion_jwt_required && !data->bastion_jwt_verifier) {
             OB_LOG_ERR(pamh, "Bastion JWT verification required but failed to initialize");
             goto error;
+        }
+    }
+
+    /* Load service accounts configuration */
+    service_accounts_init(&data->service_accounts);
+    if (data->config.service_accounts_file) {
+        int sa_result = service_accounts_load(data->config.service_accounts_file,
+                                               &data->service_accounts);
+        if (sa_result == -2) {
+            OB_LOG_ERR(pamh, "Security error: service accounts file %s is not owned by root",
+                    data->config.service_accounts_file);
+            goto error;
+        }
+        if (sa_result == -3) {
+            OB_LOG_ERR(pamh, "Security error: service accounts file %s has insecure permissions",
+                    data->config.service_accounts_file);
+            goto error;
+        }
+        if (sa_result == 0 && data->service_accounts.count > 0) {
+            OB_LOG_INFO(pamh, "Loaded %zu service accounts from %s",
+                    data->service_accounts.count, data->config.service_accounts_file);
         }
     }
 
@@ -1029,6 +1053,46 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         /* CS_ALLOW or (CS_ERROR + fail_open): continue with authentication */
     }
 
+    /* Check if this is a service account */
+    if (service_accounts_is_service_account(&data->service_accounts, user)) {
+        const service_account_t *sa = service_accounts_find(&data->service_accounts, user);
+        OB_LOG_DEBUG(pamh, "User %s is a service account, using SSH key authentication", user);
+
+        /* Store service account attributes for pam_sm_open_session (user creation) */
+        if (sa->gecos) {
+            char *gecos_copy = strdup(sa->gecos);
+            if (gecos_copy) {
+                pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
+            }
+        }
+        if (sa->shell) {
+            char *shell_copy = strdup(sa->shell);
+            if (shell_copy) {
+                pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
+            }
+        }
+        if (sa->home) {
+            char *home_copy = strdup(sa->home);
+            if (home_copy) {
+                pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
+            }
+        }
+
+        /* Mark as service account for pam_sm_acct_mgmt */
+        pam_set_data(pamh, "ob_service_account", (void *)1, NULL);
+
+        /* Log success */
+        if (audit_initialized) {
+            audit_event.event_type = AUDIT_AUTH_SUCCESS;
+            audit_event.result_code = PAM_SUCCESS;
+            audit_event.reason = "Service account (SSH key auth)";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
+        return PAM_SUCCESS;
+    }
+
     /* If authorize_only mode, skip password check */
     if (data->config.authorize_only) {
         OB_LOG_DEBUG(pamh, "authorize_only mode, skipping password check");
@@ -1259,6 +1323,68 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     const char *service = NULL;
     if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS || !service) {
         service = "unknown";
+    }
+
+    /*
+     * Handle service accounts (ansible, backup, etc.)
+     * These accounts are authorized locally based on their presence in the
+     * service accounts configuration file.
+     */
+    if (service_accounts_is_service_account(&data->service_accounts, user)) {
+        const service_account_t *sa = service_accounts_find(&data->service_accounts, user);
+
+        /* Initialize audit event for service accounts */
+        if (data->audit) {
+            audit_event_init(&audit_event, AUDIT_AUTHZ_SUCCESS);
+            audit_event.user = user;
+            audit_event.service = service;
+            audit_event.client_ip = client_ip;
+            audit_event.tty = tty;
+            audit_initialized = true;
+        }
+
+        /*
+         * Handle sudo authorization for service accounts.
+         * Check if the service account has sudo_allowed permission.
+         */
+        if (strcmp(service, "sudo") == 0) {
+            if (!sa->sudo_allowed) {
+                OB_LOG_INFO(pamh, "Service account %s not authorized for sudo", user);
+
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_AUTHZ_DENIED;
+                    audit_event.result_code = PAM_PERM_DENIED;
+                    audit_event.reason = "Service account sudo not allowed";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+
+                return PAM_PERM_DENIED;
+            }
+
+            /* Store sudo_nopasswd flag if applicable */
+            if (sa->sudo_nopasswd) {
+                pam_putenv(pamh, "LLNG_SUDO_NOPASSWD=1");
+                OB_LOG_DEBUG(pamh, "Service account %s granted sudo without password", user);
+            }
+        }
+
+        /* Store permissions in PAM environment */
+        if (sa->sudo_allowed) {
+            pam_putenv(pamh, "LLNG_SUDO_ALLOWED=1");
+        }
+
+        /* Success */
+        if (audit_initialized) {
+            audit_event.result_code = PAM_SUCCESS;
+            audit_event.reason = "Service account authorized";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
+        OB_LOG_INFO(pamh, "Service account %s authorized for access%s", user,
+                      sa->sudo_allowed ? " (sudo allowed)" : "");
+        return PAM_SUCCESS;
     }
 
     /*

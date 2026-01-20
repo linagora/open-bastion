@@ -140,5 +140,10 @@ target_link_libraries(test_crowdsec
 )
 add_test(NAME test_crowdsec COMMAND test_crowdsec)
 
+# Test service account management
+add_executable(test_service_account test_service_account.c ../src/service_account.c ../src/config.c)
+target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME test_service_account COMMAND test_service_account)
+
 # Note: Integration tests require a running Open Bastion instance
 # and are meant to be run manually

@@ -130,6 +130,9 @@ void config_init(pam_openbastion_config_t *config)
     config->approved_shells = strdup(DEFAULT_APPROVED_SHELLS);
     config->approved_home_prefixes = strdup(DEFAULT_APPROVED_HOME_PREFIXES);
 
+    /* Service accounts */
+    config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
+
     /* Bastion JWT verification - disabled by default */
     config->bastion_jwt_required = false;
     config->bastion_jwt_verify_local = true;  /* Local verification preferred */
@@ -211,6 +214,9 @@ void config_free(pam_openbastion_config_t *config)
     /* Path validation */
     free(config->approved_shells);
     free(config->approved_home_prefixes);
+
+    /* Service accounts */
+    free(config->service_accounts_file);
 
     /* Bastion JWT verification */
     free(config->bastion_jwt_issuer);
@@ -563,6 +569,12 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     else if (strcmp(key, "approved_home_prefixes") == 0) {
         free(config->approved_home_prefixes);
         config->approved_home_prefixes = strdup(value);
+    }
+    /* Service accounts */
+    else if (strcmp(key, "service_accounts_file") == 0 ||
+             strcmp(key, "service_accounts") == 0) {
+        free(config->service_accounts_file);
+        config->service_accounts_file = strdup(value);
     }
     /* Bastion JWT verification settings */
     else if (strcmp(key, "bastion_jwt_required") == 0 || strcmp(key, "require_bastion") == 0) {

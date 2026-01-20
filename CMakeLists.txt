@@ -43,6 +43,7 @@ set(PAM_MODULE_SOURCES
     src/jwks_cache.c
     src/jti_cache.c
     src/crowdsec.c
+    src/service_account.c
 )
 
 if(ENABLE_CACHE)
@@ -110,10 +111,13 @@ install(TARGETS pam_openbastion
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/security
 )
 
-# Install configuration file
+# Install configuration files
 install(FILES ${CMAKE_SOURCE_DIR}/config/openbastion.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
     RENAME openbastion.conf.example
+)
+install(FILES ${CMAKE_SOURCE_DIR}/config/service-accounts.conf.example
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
 # Install documentation

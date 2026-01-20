@@ -321,3 +321,123 @@ S'assurer qu'un autre administrateur a les accès nécessaires AVANT de révoque
 - Accès au Manager LLNG
 - Accès au `client_secret` (ou capacité à en générer un nouveau)
 - Clé SSH ou certificat valide pour les serveurs
+
+---
+
+## Comptes de Service
+
+### Particularité
+
+Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG** pour l'autorisation. Ils sont définis localement dans `/etc/open-bastion/service-accounts.conf`.
+
+**Conséquence importante :** La révocation du compte LLNG (Phase 1.1) ne bloque **pas** les comptes de service.
+
+```mermaid
+flowchart TB
+    subgraph Revocation["Révocation compte LLNG"]
+        R1[Désactiver compte<br/>dans annuaire]
+    end
+
+    subgraph OIDC["Utilisateurs OIDC"]
+        O1[/pam/authorize/]
+        O2[❌ Accès bloqué]
+        R1 --> O1 --> O2
+    end
+
+    subgraph Service["Comptes de Service"]
+        S1[service-accounts.conf]
+        S2[✅ Accès maintenu]
+        R1 -.->|Pas d'effet| S1 --> S2
+    end
+
+    style O2 fill:#f44336,color:#fff
+    style S2 fill:#4caf50,color:#fff
+```
+
+### Flux de révocation complet
+
+```mermaid
+flowchart LR
+    subgraph J0["Jour J - Immédiat"]
+        A1[Désactiver compte LLNG]
+        A2[Révoquer VPN]
+        A3{A avait accès<br/>aux clés service ?}
+        A4[Rotation clés service]
+    end
+
+    subgraph J1["J+1 à J+7"]
+        B1[Vérifier nouvelles clés]
+        B2[Supprimer anciennes clés]
+        B3[Audit des logs]
+    end
+
+    A1 --> A2 --> A3
+    A3 -->|Oui| A4
+    A3 -->|Non| B3
+    A4 --> B1 --> B2 --> B3
+```
+
+### Actions requises pour les comptes de service
+
+Si la personne partante avait connaissance d'une clé de service ou pouvait la régénérer :
+
+#### Phase 1 : Actions Immédiates (Jour J)
+
+1. **Identifier les comptes de service concernés** :
+   ```bash
+   # Sur chaque serveur
+   cat /etc/open-bastion/service-accounts.conf
+   ```
+
+2. **Rotation des clés de service** (si A avait accès aux clés privées) :
+   ```bash
+   # Générer une nouvelle clé
+   ssh-keygen -t ed25519 -f /secure/ansible_new_key -C "ansible@$(hostname)"
+
+   # Obtenir le fingerprint
+   ssh-keygen -lf /secure/ansible_new_key.pub
+   # Exemple: 256 SHA256:NEW_FINGERPRINT ansible@server (ED25519)
+   ```
+
+3. **Mettre à jour le fichier de configuration** :
+   ```bash
+   sudo vim /etc/open-bastion/service-accounts.conf
+   # Remplacer key_fingerprint par le nouveau fingerprint
+   ```
+
+4. **Déployer la nouvelle clé** :
+   ```bash
+   # Mettre à jour Ansible Vault / HashiCorp Vault
+   # Ou déployer via le système de gestion de configuration
+   ```
+
+#### Phase 2 : Vérification (J+1)
+
+- [ ] Tester que les comptes de service fonctionnent avec les nouvelles clés
+- [ ] Supprimer les anciennes clés de tous les systèmes de stockage (Vault, etc.)
+- [ ] Vérifier que l'ancienne clé ne permet plus l'accès
+
+### Tableau récapitulatif - Comptes de Service
+
+| Action | Délai | Condition |
+|--------|-------|-----------|
+| Rotation clé ansible | Immédiat | Si A avait accès à la clé |
+| Rotation clé backup | Immédiat | Si A avait accès à la clé |
+| Rotation clé deploy | Immédiat | Si A avait accès à la clé |
+| Rotation clé monitoring | Immédiat | Si A avait accès à la clé |
+
+### Checklist Comptes de Service
+
+#### Jour J (si clés compromises)
+
+- [ ] Identifier les comptes de service sur chaque serveur
+- [ ] Générer de nouvelles clés pour les comptes concernés
+- [ ] Mettre à jour les fingerprints dans service-accounts.conf
+- [ ] Déployer les nouvelles clés dans le système de stockage sécurisé
+- [ ] Tester le fonctionnement des automatisations
+
+#### J+7
+
+- [ ] Supprimer définitivement les anciennes clés
+- [ ] Documenter les nouvelles clés (sans exposer le matériel privé)
+- [ ] Auditer les logs pour détecter toute utilisation des anciennes clés

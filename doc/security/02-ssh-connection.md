@@ -1055,3 +1055,160 @@ flowchart LR
 | A → B | Traçabilité, révocation, durée limitée |
 | A → C | Point d'entrée unique, audit centralisé |
 | B/C → D | Cumul des avantages |
+
+---
+
+## 10. Comptes de Service
+
+### Description
+
+Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comptes techniques qui s'authentifient uniquement par clé SSH, **sans passer par LLNG**. Ils sont définis localement dans un fichier de configuration sur chaque serveur.
+
+```mermaid
+flowchart LR
+    subgraph OIDC["Utilisateur OIDC"]
+        direction TB
+        A1[Authentification:<br/>Clé SSH/Certificat]
+        A2[Autorisation:<br/>/pam/authorize<br/>appel LLNG]
+    end
+
+    subgraph Service["Compte de service"]
+        direction TB
+        B1[Authentification:<br/>Clé SSH uniquement]
+        B2[Autorisation:<br/>Fichier local<br/>pas d'appel LLNG]
+    end
+
+    OIDC ~~~ Service
+
+    style OIDC fill:#e1f5fe
+    style Service fill:#fff3e0
+```
+
+### Configuration
+
+```ini
+# /etc/open-bastion/service-accounts.conf
+# DOIT être : propriétaire root, permissions 0600, pas de symlink
+
+[ansible]
+key_fingerprint = SHA256:abc123def456...
+sudo_allowed = true
+sudo_nopasswd = true
+gecos = Ansible Automation
+shell = /bin/bash
+home = /var/lib/ansible
+
+[backup]
+key_fingerprint = SHA256:xyz789...
+sudo_allowed = false
+gecos = Backup Service
+shell = /bin/sh
+home = /var/lib/backup
+```
+
+### Flux d'authentification
+
+```mermaid
+sequenceDiagram
+    participant Client as Client SSH<br/>(clé service)
+    participant Srv as Serveur SSH
+    participant PAM as PAM Open Bastion
+
+    Client->>Srv: 1. ssh ansible@server
+    Note over Srv: 2. Authentification SSH<br/>(clé publique/privée)
+    Srv->>PAM: 3. pam_sm_authenticate
+    Note over PAM: 4. Détecte compte de service<br/>(présent dans config)
+    Note over PAM: 5. Valide fingerprint clé SSH
+    PAM-->>Srv: 6. PAM_SUCCESS
+    Note over Srv: 7. PAS d'appel à LLNG<br/>(autorisation locale)
+    Srv-->>Client: 8. Session établie
+```
+
+### Sécurité
+
+| Aspect | Mesure |
+|--------|--------|
+| **Fichier config** | Propriétaire root, mode 0600, pas de symlink |
+| **Validation fingerprint** | Format SHA256: ou MD5: vérifié |
+| **Shells autorisés** | Liste blanche configurable |
+| **Home autorisés** | Préfixes autorisés uniquement |
+| **Noms de compte** | Validation stricte (lowercase, max 32 chars) |
+
+### Comparaison des flux d'autorisation
+
+```mermaid
+flowchart TB
+    subgraph UserFlow["Utilisateur OIDC"]
+        U1[Client SSH] -->|1. ssh user@server| U2[Serveur SSH]
+        U2 -->|2. PAM authenticate| U3[PAM Module]
+        U3 -->|3. /pam/authorize| U4[Portail LLNG]
+        U4 -->|4. authorized: true| U3
+        U3 -->|5. PAM_SUCCESS| U2
+    end
+
+    subgraph ServiceFlow["Compte de Service"]
+        S1[Client SSH] -->|1. ssh ansible@server| S2[Serveur SSH]
+        S2 -->|2. PAM authenticate| S3[PAM Module]
+        S3 -->|3. Lecture locale| S4[service-accounts.conf]
+        S4 -->|4. Fingerprint OK| S3
+        S3 -->|5. PAM_SUCCESS| S2
+    end
+
+    style U4 fill:#4caf50,color:#fff
+    style S4 fill:#ff9800,color:#fff
+```
+
+### Risques spécifiques
+
+#### R-SA1 - Vol de clé de compte de service
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
+
+**Description :** Si la clé privée d'un compte de service est compromise, l'attaquant obtient un accès permanent tant que la clé publique n'est pas retirée du fichier de configuration.
+
+**Différence avec R-S2 :** Contrairement aux clés utilisateur OIDC, la révocation côté LLNG ne bloque **pas** les comptes de service car ils n'utilisent pas `/pam/authorize`.
+
+**Remédiation :**
+1. Rotation régulière des clés de service
+2. Stockage sécurisé des clés (Ansible Vault, HashiCorp Vault)
+3. Audit des accès avec fingerprint dans les logs
+4. Alerte si même clé utilisée depuis IP inattendue
+
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       2        |
+| **Impact**      | 3 (avec monitoring) |
+
+#### R-SA2 - Compromission du fichier de configuration
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   4   |
+
+**Description :** Si un attaquant peut modifier `/etc/open-bastion/service-accounts.conf`, il peut ajouter son propre compte de service avec sudo.
+
+**Remédiation embarquée :**
+- Vérification propriétaire = root (uid 0)
+- Vérification permissions 0600
+- Refus des symlinks (O_NOFOLLOW)
+
+**Remédiation complémentaire :**
+- File integrity monitoring (AIDE, Tripwire)
+- Audit des modifications sur `/etc/open-bastion/`
+
+|                 | Score résiduel |
+| --------------- | :------------: |
+| **Probabilité** |       1        |
+| **Impact**      |       4        |
+
+### Recommandations
+
+1. **Principe du moindre privilège** : Ne configurer que les comptes de service strictement nécessaires sur chaque serveur
+2. **sudo_nopasswd** : Utiliser avec précaution, uniquement pour les comptes d'automatisation qui ne peuvent pas fournir de mot de passe
+3. **Rotation des clés** : Planifier une rotation périodique (6-12 mois)
+4. **Monitoring** : Logger les connexions des comptes de service avec leur fingerprint
+5. **Ségrégation** : Utiliser des clés différentes par environnement (prod/staging/dev)

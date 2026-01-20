@@ -92,6 +92,9 @@ typedef struct {
     char *approved_shells;          /* Colon-separated approved shells (default: common shells) */
     char *approved_home_prefixes;   /* Colon-separated home prefixes (default: /home:/var/home) */
 
+    /* Service accounts (local accounts like ansible, backup, etc.) */
+    char *service_accounts_file;    /* Path to service accounts config (default: /etc/open-bastion/service-accounts.conf) */
+
     /* Bastion JWT verification (for backend servers) */
     bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */
     bool bastion_jwt_verify_local;  /* Verify JWT locally with JWKS (default: true) */
@@ -179,5 +182,8 @@ int config_validate_skel(const char *skel_path);
 
 /* Default approved home prefixes */
 #define DEFAULT_APPROVED_HOME_PREFIXES "/home:/var/home"
+
+/* Default service accounts configuration file */
+#define DEFAULT_SERVICE_ACCOUNTS_FILE "/etc/open-bastion/service-accounts.conf"
 
 #endif /* CONFIG_H */
