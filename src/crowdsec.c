@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <syslog.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include <openssl/sha.h>
@@ -37,6 +38,9 @@
 
 /* Minimum interval between failed login attempts (avoid hammering LAPI) */
 #define TOKEN_RETRY_INTERVAL 30
+
+/* Maximum number of alerts to process (DoS prevention) */
+#define MAX_ALERTS_TO_PROCESS 1000
 
 /* Cached decision entry */
 typedef struct {
@@ -442,6 +446,16 @@ static int get_alerts_count(crowdsec_context_t *ctx, const char *ip, int max_nee
     time_t time_limit = time(NULL) - ctx->config.block_delay;
     int count = 0;
     int len = json_object_array_length(alerts);
+
+    /*
+     * Security: Limit the number of alerts we process to prevent DoS.
+     * A malicious or misconfigured CrowdSec could return millions of alerts.
+     */
+    if (len > MAX_ALERTS_TO_PROCESS) {
+        syslog(LOG_WARNING, "open-bastion: crowdsec: too many alerts (%d), "
+               "processing only first %d", len, MAX_ALERTS_TO_PROCESS);
+        len = MAX_ALERTS_TO_PROCESS;
+    }
 
     for (int i = 0; i < len; i++) {
         struct json_object *alert = json_object_array_get_idx(alerts, i);
