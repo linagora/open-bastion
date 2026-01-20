@@ -346,8 +346,15 @@ static int ensure_token(crowdsec_context_t *ctx)
     return result;
 }
 
-/* Get count of alerts for IP in the time window */
-static int get_alerts_count(crowdsec_context_t *ctx, const char *ip)
+/*
+ * Get count of alerts for IP in the time window.
+ *
+ * @param ctx CrowdSec context
+ * @param ip IP address to check
+ * @param max_needed Stop counting once this threshold is reached (0 = count all)
+ * @return Number of matching alerts (capped at max_needed if specified)
+ */
+static int get_alerts_count(crowdsec_context_t *ctx, const char *ip, int max_needed)
 {
     if (ensure_token(ctx) != 0) {
         return 0;  /* Can't get count, assume 0 */
@@ -478,6 +485,11 @@ static int get_alerts_count(crowdsec_context_t *ctx, const char *ip)
         }
 
         count++;
+
+        /* Early termination: stop once we've reached the threshold */
+        if (max_needed > 0 && count >= max_needed) {
+            break;
+        }
     }
 
     json_object_put(alerts);
@@ -905,7 +917,11 @@ int crowdsec_report_failure(crowdsec_context_t *ctx,
      * Crowdsieve (https://github.com/linagora/crowdsieve) which handles
      * aggregation server-side.
      */
-    int count = get_alerts_count(ctx, ip);
+    /*
+     * Get alert count with early termination optimization.
+     * We only need to know if we've reached max_failures, so stop counting there.
+     */
+    int count = get_alerts_count(ctx, ip, ctx->config.max_failures);
 
     /* Determine if this alert should trigger a ban */
     bool remediation = (ctx->config.max_failures > 0 &&
