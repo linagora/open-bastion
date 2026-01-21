@@ -793,6 +793,13 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     if (!g_config.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        /* Log warning only once per process to avoid log spam */
+        static int ssl_warning_logged = 0;
+        if (!ssl_warning_logged) {
+            ssl_warning_logged = 1;
+            syslog(LOG_WARNING, "nss_openbastion: SSL verification disabled - "
+                   "vulnerable to MITM attacks");
+        }
     }
 
     CURLcode res = curl_easy_perform(curl);

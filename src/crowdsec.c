@@ -156,6 +156,13 @@ static void setup_curl(crowdsec_context_t *ctx)
     } else {
         curl_easy_setopt(ctx->curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(ctx->curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        /* Log warning only once per process to avoid log spam */
+        static int ssl_warning_logged = 0;
+        if (!ssl_warning_logged) {
+            ssl_warning_logged = 1;
+            syslog(LOG_WARNING, "open-bastion: CrowdSec connection with SSL "
+                   "verification disabled - vulnerable to MITM attacks");
+        }
     }
 }
 

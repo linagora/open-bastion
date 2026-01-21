@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <syslog.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -372,6 +373,13 @@ static int fetch_jwks(jwks_cache_t *cache)
     if (!cache->verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        /* Log warning only once per process to avoid log spam */
+        static int ssl_warning_logged = 0;
+        if (!ssl_warning_logged) {
+            ssl_warning_logged = 1;
+            syslog(LOG_WARNING, "open-bastion: JWKS fetch with SSL verification "
+                   "disabled - vulnerable to MITM attacks");
+        }
     }
 
     if (cache->ca_cert) {

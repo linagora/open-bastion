@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <syslog.h>
 #include <pthread.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
@@ -483,6 +484,13 @@ static void setup_curl(ob_client_t *client)
     if (!client->verify_ssl) {
         curl_easy_setopt(client->curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(client->curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        /* Log warning only once per process to avoid log spam */
+        static int ssl_warning_logged = 0;
+        if (!ssl_warning_logged) {
+            ssl_warning_logged = 1;
+            syslog(LOG_WARNING, "open-bastion: SSL verification disabled - "
+                   "vulnerable to MITM attacks");
+        }
     }
 
     if (client->ca_cert) {
