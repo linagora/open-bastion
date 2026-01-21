@@ -24,4 +24,19 @@ char *str_trim(char *str);
  */
 bool str_parse_bool(const char *value);
 
+/*
+ * Safely extract a string from a json-c object and duplicate it.
+ * Returns NULL if the object is NULL or the string is NULL.
+ * Caller must free the returned string.
+ *
+ * Note: Requires json-c to be included before using this function.
+ */
+#ifdef JSON_C_VERSION
+static inline char *str_json_strdup(struct json_object *obj)
+{
+    const char *str = json_object_get_string(obj);
+    return str ? strdup(str) : NULL;
+}
+#endif
+
 #endif /* STR_UTILS_H */

@@ -57,6 +57,9 @@
 #define SECONDS_PER_DAY 86400
 #define DEFAULT_OFFLINE_CACHE_TTL 86400  /* Default 24 hours for offline cache */
 
+/* Security: Maximum length for SSH_USER_AUTH environment variable */
+#define MAX_SSH_AUTH_LEN 8192
+
 /* Internal data structure */
 typedef struct {
     pam_openbastion_config_t config;
@@ -746,7 +749,7 @@ static char *extract_ssh_key_fingerprint(pam_handle_t *pamh)
     }
 
     /* Security: Check length before processing */
-    if (strlen(ssh_auth) >= 8192) {
+    if (strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
         OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
         return NULL;
     }
@@ -826,12 +829,10 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
     }
 
     /* Security: Check length before processing (fixes #45) */
-    #define MAX_SSH_AUTH_LEN 8192
     if (strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
         OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
         return 0;
     }
-    #undef MAX_SSH_AUTH_LEN
 
     OB_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
 

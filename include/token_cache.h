@@ -71,6 +71,9 @@ int cache_store(token_cache_t *cache,
 
 /*
  * Invalidate a specific token
+ * NOTE: This function is a no-op due to hashing scheme limitations.
+ * Use cache_invalidate_user() instead for user-based invalidation.
+ * Kept for API compatibility.
  */
 void cache_invalidate(token_cache_t *cache, const char *token);
 
