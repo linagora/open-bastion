@@ -18,6 +18,7 @@
 
 #include "ob_client.h"
 #include "jwt_utils.h"
+#include "str_utils.h"
 
 /* TLS version constants for min_tls_version configuration */
 #define TLS_VERSION_1_2 12
@@ -29,12 +30,8 @@
 /* Security: Maximum user groups to prevent DoS via memory exhaustion */
 #define MAX_USER_GROUPS 256
 
-/* Safe strdup from JSON - returns NULL if json string is NULL */
-static inline char *safe_json_strdup(struct json_object *obj)
-{
-    const char *str = json_object_get_string(obj);
-    return str ? strdup(str) : NULL;
-}
+/* Use shared JSON strdup utility */
+#define safe_json_strdup str_json_strdup
 
 /* Forward declaration for internal authorize function */
 static int ob_authorize_user_internal(ob_client_t *client,

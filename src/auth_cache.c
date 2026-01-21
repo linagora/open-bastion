@@ -24,17 +24,14 @@
 #include <json-c/json.h>
 
 #include "auth_cache.h"
+#include "str_utils.h"
 
 /* Cache format version */
 #define AUTH_CACHE_VERSION 3
 #define AUTH_CACHE_MAGIC "LLNGCACHE03"
 
-/* Safe strdup from JSON - returns NULL if json string is NULL */
-static inline char *safe_json_strdup(struct json_object *obj)
-{
-    const char *str = json_object_get_string(obj);
-    return str ? strdup(str) : NULL;
-}
+/* Use shared JSON strdup utility */
+#define safe_json_strdup str_json_strdup
 
 /* Encryption constants (same as token_cache) */
 #define MACHINE_ID_FILE "/etc/machine-id"
