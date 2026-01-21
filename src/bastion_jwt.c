@@ -196,6 +196,10 @@ static int parse_jwt_payload(const char *payload_b64, size_t payload_len,
         claims->iat = (time_t)json_object_get_int64(val);
     }
 
+    if (json_object_object_get_ex(json, "nbf", &val)) {
+        claims->nbf = (time_t)json_object_get_int64(val);
+    }
+
     if (json_object_object_get_ex(json, "jti", &val)) {
         const char *str = json_object_get_string(val);
         if (str) claims->jti = strdup(str);
@@ -300,7 +304,7 @@ bastion_jwt_verifier_t *bastion_jwt_verifier_init(const bastion_jwt_config_t *co
         return NULL;
     }
 
-    verifier->max_clock_skew = config->max_clock_skew > 0 ? config->max_clock_skew : 60;
+    verifier->max_clock_skew = config->max_clock_skew > 0 ? config->max_clock_skew : 30;
 
     if (config->allowed_bastions) {
         verifier->allowed_bastions = strdup(config->allowed_bastions);
@@ -420,8 +424,9 @@ bastion_jwt_result_t bastion_jwt_verify(bastion_jwt_verifier_t *verifier,
         return BASTION_JWT_EXPIRED;
     }
 
-    /* Check not-before (iat) */
-    if (claims->iat > 0 && now < claims->iat - verifier->max_clock_skew) {
+    /* Check not-before (nbf claim takes precedence, fall back to iat) */
+    time_t not_before = claims->nbf > 0 ? claims->nbf : claims->iat;
+    if (not_before > 0 && now < not_before - verifier->max_clock_skew) {
         bastion_jwt_claims_free(claims);
         return BASTION_JWT_NOT_YET_VALID;
     }
@@ -458,9 +463,17 @@ bastion_jwt_result_t bastion_jwt_verify(bastion_jwt_verifier_t *verifier,
                 bastion_jwt_claims_free(claims);
                 return BASTION_JWT_REPLAY_DETECTED;
             } else if (jti_result != JTI_CACHE_OK) {
-                /* Log non-fatal cache errors (full, internal error, etc.) */
+                /* Log non-fatal cache errors (full, internal error, etc.)
+                 * Truncate JTI to avoid leaking full token identifier */
+                char jti_truncated[16];
+                size_t jti_len = strlen(claims->jti);
+                if (jti_len > 8) {
+                    snprintf(jti_truncated, sizeof(jti_truncated), "%.8s...", claims->jti);
+                } else {
+                    snprintf(jti_truncated, sizeof(jti_truncated), "%s", claims->jti);
+                }
                 fprintf(stderr, "bastion_jwt: JTI cache warning: %s (jti=%s)\n",
-                        jti_cache_result_str(jti_result), claims->jti);
+                        jti_cache_result_str(jti_result), jti_truncated);
             }
         } else {
             /* Replay detection configured but token has no jti claim */

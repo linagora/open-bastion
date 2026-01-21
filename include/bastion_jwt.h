@@ -26,6 +26,7 @@ typedef struct {
     char *jti;           /* JWT ID (unique identifier) */
     time_t exp;          /* Expiration time */
     time_t iat;          /* Issued at time */
+    time_t nbf;          /* Not before time (RFC 7519) */
     char *bastion_id;    /* Bastion server ID (client_id) */
     char *bastion_group; /* Bastion server group */
     char *bastion_ip;    /* Bastion IP address */
@@ -39,7 +40,7 @@ typedef struct {
 typedef struct {
     char *issuer;                /* Expected issuer (LLNG portal URL) */
     char *audience;              /* Expected audience (default: "pam:bastion-backend") */
-    int max_clock_skew;          /* Allowed clock skew in seconds (default: 60) */
+    int max_clock_skew;          /* Allowed clock skew in seconds (default: 30) */
     char *allowed_bastions;      /* Comma-separated list of allowed bastion IDs (NULL = all) */
     jwks_cache_t *jwks_cache;    /* JWKS cache for public keys */
     jti_cache_t *jti_cache;      /* JTI cache for replay detection (NULL = disabled) */
