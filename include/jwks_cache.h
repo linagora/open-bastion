@@ -86,4 +86,14 @@ time_t jwks_cache_last_refresh(jwks_cache_t *cache);
  */
 size_t jwks_cache_key_count(jwks_cache_t *cache);
 
+#ifdef JWKS_CACHE_TEST
+/*
+ * Test-only functions to verify rate limiting behavior
+ */
+int jwks_cache_get_min_refresh_interval(void);
+time_t jwks_cache_get_last_fetch_attempt(jwks_cache_t *cache);
+void jwks_cache_set_last_fetch_attempt(jwks_cache_t *cache, time_t t);
+bool jwks_cache_is_rate_limited(jwks_cache_t *cache, time_t now);
+#endif
+
 #endif /* JWKS_CACHE_H */

@@ -116,6 +116,22 @@ target_link_libraries(test_bastion_jwt
 )
 add_test(NAME test_bastion_jwt COMMAND test_bastion_jwt)
 
+# Test JWKS cache rate limiting
+add_executable(test_jwks_cache test_jwks_cache.c ../src/jwks_cache.c)
+target_compile_definitions(test_jwks_cache PRIVATE JWKS_CACHE_TEST)
+target_include_directories(test_jwks_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_jwks_cache
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+add_test(NAME test_jwks_cache COMMAND test_jwks_cache)
+
 # Test JTI cache for replay detection
 add_executable(test_jti_cache test_jti_cache.c ../src/jti_cache.c)
 target_include_directories(test_jti_cache PRIVATE

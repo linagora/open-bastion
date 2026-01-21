@@ -33,6 +33,14 @@
 /* Minimum interval between refresh attempts (rate limit) */
 #define MIN_REFRESH_INTERVAL 300  /* 5 minutes */
 
+/* For unit testing, expose internal functions and constants */
+#ifdef JWKS_CACHE_TEST
+#define JWKS_STATIC_OR_TEST
+int jwks_cache_get_min_refresh_interval(void) { return MIN_REFRESH_INTERVAL; }
+#else
+#define JWKS_STATIC_OR_TEST static
+#endif
+
 /* Cached key entry */
 typedef struct {
     char *kid;           /* Key ID */
@@ -54,6 +62,28 @@ struct jwks_cache {
     time_t last_fetch_attempt;  /* Rate limiting: time of last fetch attempt */
     bool initialized;
 };
+
+#ifdef JWKS_CACHE_TEST
+/*
+ * Test-only functions to manipulate rate limiting state
+ */
+time_t jwks_cache_get_last_fetch_attempt(jwks_cache_t *cache)
+{
+    return cache ? cache->last_fetch_attempt : 0;
+}
+
+void jwks_cache_set_last_fetch_attempt(jwks_cache_t *cache, time_t t)
+{
+    if (cache) cache->last_fetch_attempt = t;
+}
+
+bool jwks_cache_is_rate_limited(jwks_cache_t *cache, time_t now)
+{
+    if (!cache) return true;
+    if (cache->last_fetch_attempt == 0) return false;
+    return (now - cache->last_fetch_attempt) < MIN_REFRESH_INTERVAL;
+}
+#endif
 
 /* CURL write callback data */
 typedef struct {
