@@ -30,9 +30,6 @@
     let selectedSession = null;
     let selectedUser = null;
     let authToken = null;
-    let offlineCheckFailures = 0;
-    let lastOfflineError = null;
-    let lockoutEndTime = null;
 
     // DOM Elements
     const elements = {
@@ -342,8 +339,16 @@
      * Handle messages from SSO iframe
      */
     function handleIframeMessage(event) {
-        // Verify origin
-        if (!event.origin.startsWith(CONFIG.portalUrl)) {
+        // Verify origin - use strict comparison to prevent prefix attacks
+        // e.g., https://auth.example.com.evil.com would bypass startsWith()
+        var portalOrigin;
+        try {
+            portalOrigin = new URL(CONFIG.portalUrl).origin;
+        } catch (e) {
+            console.error('Invalid portal URL:', CONFIG.portalUrl);
+            return;
+        }
+        if (event.origin !== portalOrigin) {
             console.warn('Ignoring message from unknown origin:', event.origin);
             return;
         }

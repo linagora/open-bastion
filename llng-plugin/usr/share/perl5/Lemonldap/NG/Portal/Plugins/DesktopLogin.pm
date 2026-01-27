@@ -13,6 +13,7 @@ package Lemonldap::NG::Portal::Plugins::DesktopLogin;
 use strict;
 use Mouse;
 use JSON qw(from_json to_json);
+use Digest::SHA qw(sha256_hex);
 use Lemonldap::NG::Portal::Main::Constants qw(
   PE_OK
   PE_ERROR
@@ -106,6 +107,10 @@ sub loginPage {
     my $callback = $req->param('callback_url') || '';
     my $state    = $req->param('state')        || '';
 
+    # Generate CSRF token for form protection
+    my $csrf_token = $self->_generateCsrfToken($req);
+    $req->pdata->{desktopCsrfToken} = $csrf_token;
+
     # Store in session for after authentication
     $req->pdata->{desktopCallback} = $callback if $callback;
     $req->pdata->{desktopState}    = $state    if $state;
@@ -118,6 +123,7 @@ sub loginPage {
             CALLBACK_URL => $callback,
             STATE        => $state,
             PORTAL_URL   => $self->conf->{portal},
+            CSRF_TOKEN   => $csrf_token,
         }
     );
 }
@@ -126,10 +132,21 @@ sub loginPage {
 sub doLogin {
     my ( $self, $req ) = @_;
 
-    my $user     = $req->param('user')     || '';
-    my $password = $req->param('password') || '';
-    my $callback = $req->param('callback_url') || $req->pdata->{desktopCallback} || '';
-    my $state    = $req->param('state') || $req->pdata->{desktopState} || '';
+    my $user       = $req->param('user')       || '';
+    my $password   = $req->param('password')   || '';
+    my $csrf_token = $req->param('csrf_token') || '';
+    my $callback   = $req->param('callback_url') || $req->pdata->{desktopCallback} || '';
+    my $state      = $req->param('state') || $req->pdata->{desktopState} || '';
+
+    # Verify CSRF token to prevent cross-site request forgery
+    my $stored_token = $req->pdata->{desktopCsrfToken} || '';
+    unless ( $csrf_token && $stored_token && $csrf_token eq $stored_token ) {
+        $self->logger->warn("Desktop login CSRF token mismatch");
+        return $self->_loginError( $req, 'Invalid request', $callback, $state );
+    }
+
+    # Clear CSRF token after use (one-time use)
+    delete $req->pdata->{desktopCsrfToken};
 
     unless ( $user && $password ) {
         return $self->_loginError( $req, 'Missing credentials', $callback, $state );
@@ -316,6 +333,26 @@ sub refreshToken {
 
 # INTERNAL HELPERS
 
+# Generate CSRF token for form protection
+sub _generateCsrfToken {
+    my ( $self, $req ) = @_;
+
+    # Generate random bytes and hash them with request-specific data
+    my $random = '';
+    if ( open my $fh, '<', '/dev/urandom' ) {
+        read $fh, $random, 32;
+        close $fh;
+    }
+    else {
+        # Fallback to time + process ID if /dev/urandom unavailable
+        $random = time() . $$ . rand(1000000);
+    }
+
+    # Include request-specific data to bind token to this session
+    my $token_data = $random . ( $req->env->{REMOTE_ADDR} || '' ) . time();
+    return sha256_hex($token_data);
+}
+
 # Generate token and return to callback or as JSON
 sub _generateAndReturnToken {
     my ( $self, $req, $callback, $state ) = @_;
@@ -350,15 +387,26 @@ sub _generateAndReturnToken {
         $redirect_url .= "&state=$state" if $state;
 
         # Return HTML page that sends message to parent window
+        # Build JSON message with proper encoding to prevent XSS
+        my $allowed_origin = $self->conf->{portal} || '';
+        my $message_data = {
+            access_token   => $token->{access_token},
+            expires_in     => $token->{expires_in} + 0,  # Force numeric
+            user           => $user,
+            state          => $state,
+            error          => undef,
+            redirect_url   => $redirect_url,
+            allowed_origin => $allowed_origin,
+        };
+        my $message_json = to_json($message_data, { allow_nonref => 1 });
+
         return $self->p->sendHtml(
             $req,
             'desktopCallback',
             params => {
-                ACCESS_TOKEN => $token->{access_token},
-                EXPIRES_IN   => $token->{expires_in},
+                MESSAGE_JSON => $message_json,
+                ACCESS_TOKEN => $token->{access_token},  # Keep for template conditionals
                 USER         => $user,
-                STATE        => $state,
-                REDIRECT_URL => $redirect_url,
             }
         );
     }
@@ -456,13 +504,25 @@ sub _loginError {
         my $redirect_url = $callback . $sep . "error=" . uri_escape($message);
         $redirect_url .= "&state=$state" if $state;
 
+        # Build JSON message with proper encoding to prevent XSS
+        my $allowed_origin = $self->conf->{portal} || '';
+        my $message_data = {
+            access_token   => undef,
+            expires_in     => undef,
+            user           => undef,
+            state          => $state,
+            error          => $message,
+            redirect_url   => $redirect_url,
+            allowed_origin => $allowed_origin,
+        };
+        my $message_json = to_json($message_data, { allow_nonref => 1 });
+
         return $self->p->sendHtml(
             $req,
             'desktopCallback',
             params => {
-                ERROR        => $message,
-                STATE        => $state,
-                REDIRECT_URL => $redirect_url,
+                MESSAGE_JSON => $message_json,
+                ERROR        => $message,  # Keep for template conditionals
             }
         );
     }

@@ -89,6 +89,9 @@ add_test(NAME test_auth_cache COMMAND test_auth_cache)
 
 # Test offline credential cache (Argon2id + AES-256-GCM)
 add_executable(test_offline_cache test_offline_cache.c ../src/offline_cache.c ../src/str_utils.c)
+target_compile_definitions(test_offline_cache PRIVATE
+    $<$<BOOL:${USE_LIBSODIUM}>:HAVE_LIBSODIUM>
+)
 target_include_directories(test_offline_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${JSON_C_INCLUDE_DIRS}

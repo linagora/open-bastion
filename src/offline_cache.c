@@ -207,12 +207,19 @@ static int hash_password(const char *password, size_t password_len,
                          unsigned char *hash, size_t hash_len)
 {
 #ifdef USE_LIBSODIUM
-    /* Use libsodium's Argon2id implementation */
+    /*
+     * Use libsodium's Argon2id implementation with explicit parameters
+     * to ensure cross-backend compatibility with OpenSSL implementation.
+     * Note: libsodium's OPSLIMIT/MEMLIMIT_MODERATE differ from our constants.
+     */
+    unsigned long long opslimit = (unsigned long long)ARGON2_ITERATIONS;
+    size_t memlimit = (size_t)ARGON2_MEMORY_KB * 1024ULL;
+
     if (crypto_pwhash(hash, hash_len,
                       password, password_len,
                       salt,
-                      crypto_pwhash_OPSLIMIT_MODERATE,
-                      crypto_pwhash_MEMLIMIT_MODERATE,
+                      opslimit,
+                      memlimit,
                       crypto_pwhash_ALG_ARGON2ID13) != 0) {
         return -1;
     }

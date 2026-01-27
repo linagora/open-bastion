@@ -131,9 +131,10 @@
 
     <div id="errorMessage" class="error-message"></div>
 
-    <form id="loginForm" method="POST" action="<TMPL_VAR NAME="PORTAL_URL">/desktop/login">
-      <input type="hidden" name="callback_url" value="<TMPL_VAR NAME="CALLBACK_URL">">
-      <input type="hidden" name="state" value="<TMPL_VAR NAME="STATE">">
+    <form id="loginForm" method="POST" action="<TMPL_VAR NAME="PORTAL_URL" ESCAPE="HTML">/desktop/login">
+      <input type="hidden" name="callback_url" value="<TMPL_VAR NAME="CALLBACK_URL" ESCAPE="HTML">">
+      <input type="hidden" name="state" value="<TMPL_VAR NAME="STATE" ESCAPE="HTML">">
+      <input type="hidden" name="csrf_token" value="<TMPL_VAR NAME="CSRF_TOKEN" ESCAPE="HTML">">
 
       <div class="form-group">
         <label for="user">Username</label>

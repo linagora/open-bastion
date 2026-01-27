@@ -2214,6 +2214,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                     audit_event.reason = reason;
                     audit_event_set_end_time(&audit_event);
                     audit_log_event(data->audit, &audit_event);
+                    audit_event.reason = NULL;  /* Clear stack pointer after immediate use */
                 }
 
                 offline_cache_entry_free(&offline_entry);
@@ -2277,6 +2278,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                 audit_event.reason = reason;
                 audit_event_set_end_time(&audit_event);
                 audit_log_event(data->audit, &audit_event);
+                audit_event.reason = NULL;  /* Clear stack pointer after immediate use */
             }
 
             ob_response_free(&response);

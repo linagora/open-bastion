@@ -104,23 +104,23 @@
 
   <script>
     (function() {
-      var accessToken = '<TMPL_VAR NAME="ACCESS_TOKEN">';
-      var expiresIn = '<TMPL_VAR NAME="EXPIRES_IN">';
-      var user = '<TMPL_VAR NAME="USER">';
-      var state = '<TMPL_VAR NAME="STATE">';
-      var error = '<TMPL_VAR NAME="ERROR">';
-      var redirectUrl = '<TMPL_VAR NAME="REDIRECT_URL">';
+      // Message data is passed as pre-encoded JSON from server to prevent XSS
+      // The server encodes sensitive values safely before embedding
+      var messageData = <TMPL_VAR NAME="MESSAGE_JSON">;
 
       // Prepare the message to send to parent window
       var message = {
         type: 'desktop_login_callback',
-        success: !error,
-        error: error || null,
-        access_token: accessToken || null,
-        expires_in: parseInt(expiresIn) || null,
-        user: user || null,
-        state: state || null
+        success: !messageData.error,
+        error: messageData.error || null,
+        access_token: messageData.access_token || null,
+        expires_in: messageData.expires_in || null,
+        user: messageData.user || null,
+        state: messageData.state || null
       };
+
+      // Get the allowed parent origin from server
+      var allowedOrigin = messageData.allowed_origin || null;
 
       // Function to show success state
       function showSuccess() {
@@ -133,12 +133,13 @@
       }
 
       // Try to send message to parent window (for iframe usage)
-      if (window.parent && window.parent !== window) {
+      // SECURITY: Only send to specified origin, never use '*'
+      if (window.parent && window.parent !== window && allowedOrigin) {
         try {
-          window.parent.postMessage(message, '*');
-          console.log('Sent message to parent window:', message);
+          window.parent.postMessage(message, allowedOrigin);
+          // NOTE: Never log tokens or sensitive data
         } catch (e) {
-          console.warn('Failed to post message to parent:', e);
+          console.warn('Failed to post message to parent');
         }
       }
 
@@ -146,45 +147,43 @@
       if (typeof window.lightdm !== 'undefined') {
         // LightDM greeter context
         try {
-          if (accessToken && user) {
+          if (messageData.access_token && messageData.user) {
             // Store credentials for PAM authentication
-            window.lightdm_token = accessToken;
-            window.lightdm_user = user;
-            console.log('Stored credentials for LightDM greeter');
+            window.lightdm_token = messageData.access_token;
+            window.lightdm_user = messageData.user;
           }
         } catch (e) {
-          console.warn('Failed to store credentials for LightDM:', e);
+          console.warn('Failed to store credentials for LightDM');
         }
       }
 
       // Broadcast via BroadcastChannel API if available (same-origin communication)
+      // Note: BroadcastChannel is same-origin only, so it's safe
       if (typeof BroadcastChannel !== 'undefined') {
         try {
           var channel = new BroadcastChannel('desktop_login');
           channel.postMessage(message);
-          console.log('Sent message via BroadcastChannel:', message);
           channel.close();
         } catch (e) {
-          console.warn('BroadcastChannel failed:', e);
+          console.warn('BroadcastChannel failed');
         }
       }
 
       // Store result in localStorage for polling-based communication
       try {
-        if (accessToken) {
+        if (messageData.access_token) {
           localStorage.setItem('desktop_login_result', JSON.stringify(message));
-          console.log('Stored result in localStorage');
         }
       } catch (e) {
-        console.warn('localStorage failed:', e);
+        console.warn('localStorage failed');
       }
 
       // If we have a redirect URL and not in iframe, redirect
-      if (redirectUrl && window.parent === window) {
+      if (messageData.redirect_url && window.parent === window) {
         setTimeout(function() {
-          window.location.href = redirectUrl;
+          window.location.href = messageData.redirect_url;
         }, 1000);
-      } else if (accessToken) {
+      } else if (messageData.access_token) {
         // Show success state after a short delay
         setTimeout(showSuccess, 500);
       }
