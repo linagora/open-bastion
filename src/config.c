@@ -134,6 +134,18 @@ void config_init(pam_openbastion_config_t *config)
     /* Service accounts */
     config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
 
+    /* Desktop SSO / OAuth2 token authentication - disabled by default */
+    config->oauth2_token_auth = false;
+    config->oauth2_token_cache = true;
+    config->oauth2_token_min_ttl = 60;  /* 1 minute minimum remaining TTL */
+
+    /* Offline credential cache - disabled by default */
+    config->offline_cache_enabled = false;
+    config->offline_cache_dir = NULL;  /* Default set in load function */
+    config->offline_cache_ttl = 604800;  /* 7 days */
+    config->offline_cache_max_failures = 5;
+    config->offline_cache_lockout = 300;  /* 5 minutes */
+
     /* Bastion JWT verification - disabled by default */
     config->bastion_jwt_required = false;
     config->bastion_jwt_verify_local = true;  /* Local verification preferred */
@@ -189,6 +201,9 @@ void config_free(pam_openbastion_config_t *config)
     /* Authorization cache settings */
     free(config->auth_cache_dir);
     free(config->auth_cache_force_online);
+
+    /* Offline credential cache */
+    free(config->offline_cache_dir);
 
     /* Audit settings */
     free(config->audit_log_file);
@@ -533,6 +548,32 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
              strcmp(key, "service_accounts") == 0) {
         SET_STRING_FIELD(config->service_accounts_file, value, key);
     }
+    /* Desktop SSO / OAuth2 token authentication */
+    else if (strcmp(key, "oauth2_token_auth") == 0) {
+        config->oauth2_token_auth = parse_bool(value);
+    }
+    else if (strcmp(key, "oauth2_token_cache") == 0) {
+        config->oauth2_token_cache = parse_bool(value);
+    }
+    else if (strcmp(key, "oauth2_token_min_ttl") == 0) {
+        config->oauth2_token_min_ttl = parse_int(value, 60, 0, 3600);
+    }
+    /* Offline credential cache settings */
+    else if (strcmp(key, "offline_cache_enabled") == 0) {
+        config->offline_cache_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "offline_cache_dir") == 0) {
+        SET_STRING_FIELD(config->offline_cache_dir, value, key);
+    }
+    else if (strcmp(key, "offline_cache_ttl") == 0) {
+        config->offline_cache_ttl = parse_int(value, 604800, 3600, 2592000);  /* 1 hour to 30 days */
+    }
+    else if (strcmp(key, "offline_cache_max_failures") == 0) {
+        config->offline_cache_max_failures = parse_int(value, 5, 1, 20);
+    }
+    else if (strcmp(key, "offline_cache_lockout") == 0) {
+        config->offline_cache_lockout = parse_int(value, 300, 60, 86400);  /* 1 min to 24 hours */
+    }
     /* Bastion JWT verification settings */
     else if (strcmp(key, "bastion_jwt_required") == 0 || strcmp(key, "require_bastion") == 0) {
         config->bastion_jwt_required = parse_bool(value);
@@ -774,6 +815,20 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
         }
         else if (strcmp(arg, "no_create_user") == 0 || strcmp(arg, "nocreateuser") == 0) {
             config->create_user_enabled = false;
+        }
+        /* OAuth2 token authentication flags */
+        else if (strcmp(arg, "oauth2_token_auth") == 0) {
+            config->oauth2_token_auth = true;
+        }
+        else if (strcmp(arg, "no_oauth2_token_cache") == 0) {
+            config->oauth2_token_cache = false;
+        }
+        /* Offline credential cache flags */
+        else if (strcmp(arg, "offline_cache") == 0) {
+            config->offline_cache_enabled = true;
+        }
+        else if (strcmp(arg, "no_offline_cache") == 0) {
+            config->offline_cache_enabled = false;
         }
     }
 

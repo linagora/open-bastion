@@ -95,6 +95,18 @@ typedef struct {
     /* Service accounts (local accounts like ansible, backup, etc.) */
     char *service_accounts_file;    /* Path to service accounts config (default: /etc/open-bastion/service-accounts.conf) */
 
+    /* Desktop SSO / OAuth2 token authentication (for LightDM greeter) */
+    bool oauth2_token_auth;         /* Accept OAuth2 access tokens instead of one-time PAM tokens (default: false) */
+    bool oauth2_token_cache;        /* Cache successful OAuth2 token auth for offline mode (default: true) */
+    int oauth2_token_min_ttl;       /* Minimum remaining TTL for token acceptance in seconds (default: 60) */
+
+    /* Offline credential cache (for desktop SSO offline mode) */
+    bool offline_cache_enabled;     /* Enable offline credential caching (default: false) */
+    char *offline_cache_dir;        /* Credential cache directory (default: /var/cache/open-bastion/credentials) */
+    int offline_cache_ttl;          /* Credential cache TTL in seconds (default: 604800 = 7 days) */
+    int offline_cache_max_failures; /* Max failed attempts before lockout (default: 5) */
+    int offline_cache_lockout;      /* Lockout duration in seconds (default: 300) */
+
     /* Bastion JWT verification (for backend servers) */
     bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */
     bool bastion_jwt_verify_local;  /* Verify JWT locally with JWKS (default: true) */
