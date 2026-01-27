@@ -59,6 +59,25 @@ option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
 if(USE_LIBSODIUM)
     pkg_check_modules(SODIUM REQUIRED libsodium)
     add_definitions(-DHAVE_LIBSODIUM)
+else()
+    # Check OpenSSL version >= 3.0 for Argon2id support
+    include(CheckCSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIRS})
+    check_c_source_compiles("
+        #include <openssl/opensslv.h>
+        #if OPENSSL_VERSION_NUMBER < 0x30000000L
+        #error OpenSSL 3.0+ required
+        #endif
+        int main() { return 0; }
+    " HAVE_OPENSSL_3)
+
+    if(NOT HAVE_OPENSSL_3)
+        message(FATAL_ERROR
+            "Offline credential cache requires either:\n"
+            "  - libsodium (recommended): cmake -DUSE_LIBSODIUM=ON ..\n"
+            "  - OpenSSL 3.0+ (detected version is too old)\n"
+            "Please install libsodium-dev or upgrade OpenSSL.")
+    endif()
 endif()
 
 # Build the PAM module as a shared library
