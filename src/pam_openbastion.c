@@ -2209,12 +2209,16 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                 if (audit_initialized) {
                     audit_event.event_type = AUDIT_AUTH_FAILURE;
                     audit_event.result_code = PAM_AUTH_ERR;
-                    char reason[256];
-                    snprintf(reason, sizeof(reason), "Offline auth failed: %s", offline_reason);
-                    audit_event.reason = reason;
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                    audit_event.reason = NULL;  /* Clear stack pointer after immediate use */
+                    char reason_buf[256];
+                    snprintf(reason_buf, sizeof(reason_buf), "Offline auth failed: %s", offline_reason);
+                    char *reason = strdup(reason_buf);
+                    if (reason) {
+                        audit_event.reason = reason;
+                        audit_event_set_end_time(&audit_event);
+                        audit_log_event(data->audit, &audit_event);
+                        free(reason);
+                        audit_event.reason = NULL;
+                    }
                 }
 
                 offline_cache_entry_free(&offline_entry);
@@ -2272,13 +2276,17 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
             if (audit_initialized) {
                 audit_event.result_code = PAM_AUTH_ERR;
-                char reason[128];
-                snprintf(reason, sizeof(reason), "OAuth2 token expires in %d seconds (min %d)",
+                char reason_buf[128];
+                snprintf(reason_buf, sizeof(reason_buf), "OAuth2 token expires in %d seconds (min %d)",
                         response.expires_in, data->config.oauth2_token_min_ttl);
-                audit_event.reason = reason;
-                audit_event_set_end_time(&audit_event);
-                audit_log_event(data->audit, &audit_event);
-                audit_event.reason = NULL;  /* Clear stack pointer after immediate use */
+                char *reason = strdup(reason_buf);
+                if (reason) {
+                    audit_event.reason = reason;
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                    free(reason);
+                    audit_event.reason = NULL;
+                }
             }
 
             ob_response_free(&response);
