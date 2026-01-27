@@ -30,6 +30,7 @@
     let selectedSession = null;
     let selectedUser = null;
     let authToken = null;
+    let pendingPassword = null;  // Closure-scoped, not global
 
     // DOM Elements
     const elements = {
@@ -219,6 +220,23 @@
             channel.addEventListener('message', function(event) {
                 handleLoginCallback(event.data);
             });
+        }
+
+        // Check for pending login result in localStorage (from callback page)
+        // and clear it immediately after reading for security
+        try {
+            var storedResult = localStorage.getItem('desktop_login_result');
+            if (storedResult) {
+                // Remove immediately before processing to minimize exposure
+                localStorage.removeItem('desktop_login_result');
+                var data = JSON.parse(storedResult);
+                if (data && data.type === 'desktop_login_callback') {
+                    handleLoginCallback(data);
+                }
+            }
+        } catch (e) {
+            // Clear any corrupted data
+            localStorage.removeItem('desktop_login_result');
         }
 
         // LightDM callbacks
@@ -411,8 +429,8 @@
             return;
         }
 
-        // Store password for prompt handler
-        window._pendingPassword = password;
+        // Store password in closure-scoped variable (not global for security)
+        pendingPassword = password;
 
         console.log('Starting LightDM authentication for user:', username);
         lightdm.authenticate(username);
@@ -425,9 +443,10 @@
         console.log('LightDM prompt:', text, 'type:', type);
 
         if (type === 1) {  // Password prompt
-            if (window._pendingPassword) {
-                lightdm.respond(window._pendingPassword);
-                delete window._pendingPassword;
+            if (pendingPassword) {
+                lightdm.respond(pendingPassword);
+                // Clear password from memory immediately after use
+                pendingPassword = null;
             } else {
                 console.error('No password available for prompt');
                 showError('Authentication error');

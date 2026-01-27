@@ -138,6 +138,18 @@ sub doLogin {
     my $callback   = $req->param('callback_url') || $req->pdata->{desktopCallback} || '';
     my $state      = $req->param('state') || $req->pdata->{desktopState} || '';
 
+    # Input length validation to prevent DoS and log injection
+    # Username: max 256 chars (reasonable for LDAP/AD usernames)
+    # Password: max 1024 chars (allows for long passphrases)
+    if ( length($user) > 256 ) {
+        $self->logger->warn("Desktop login: username too long");
+        return $self->_loginError( $req, 'Invalid credentials', $callback, $state );
+    }
+    if ( length($password) > 1024 ) {
+        $self->logger->warn("Desktop login: password too long");
+        return $self->_loginError( $req, 'Invalid credentials', $callback, $state );
+    }
+
     # Verify CSRF token to prevent cross-site request forgery
     my $stored_token = $req->pdata->{desktopCsrfToken} || '';
     unless ( $csrf_token && $stored_token && $csrf_token eq $stored_token ) {
