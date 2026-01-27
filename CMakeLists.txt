@@ -45,11 +45,20 @@ set(PAM_MODULE_SOURCES
     src/crowdsec.c
     src/service_account.c
     src/str_utils.c
+    src/offline_cache.c
 )
 
 if(ENABLE_CACHE)
     list(APPEND PAM_MODULE_SOURCES src/token_cache.c)
     add_definitions(-DENABLE_CACHE)
+endif()
+
+# Optional libsodium for Argon2id (preferred) - fallback to OpenSSL 3.0+
+option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
+
+if(USE_LIBSODIUM)
+    pkg_check_modules(SODIUM REQUIRED libsodium)
+    add_definitions(-DHAVE_LIBSODIUM)
 endif()
 
 # Build the PAM module as a shared library
@@ -70,6 +79,7 @@ target_include_directories(pam_openbastion PRIVATE
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIRS}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
 )
 
 # Link libraries
@@ -78,6 +88,7 @@ target_link_libraries(pam_openbastion
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
     ${OPENSSL_LIBRARIES}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
 )
 
 # Compiler flags
@@ -192,6 +203,22 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
     ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
     DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
+)
+
+# Install desktop setup script
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+# Install LightDM greeter theme
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/lightdm/greeter/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/open-bastion/lightdm/greeter
+)
+
+# Install LightDM configuration example
+install(FILES ${CMAKE_SOURCE_DIR}/lightdm/config/lightdm-openbastion.conf
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
+    RENAME lightdm-openbastion.conf.example
 )
 
 # Build NSS module

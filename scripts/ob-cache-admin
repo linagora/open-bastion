@@ -1,0 +1,534 @@
+#!/bin/bash
+#
+# ob-cache-admin - Offline credential cache administration tool
+#
+# This script provides administrative functions for managing the
+# Open Bastion offline credential cache.
+#
+# Usage: ob-cache-admin <command> [options]
+#
+# Commands:
+#   list        - List cached credentials
+#   stats       - Show cache statistics
+#   clear       - Clear all cached credentials
+#   clear-user  - Clear credentials for specific user
+#   expire      - Remove expired credentials
+#   unlock      - Unlock a locked user account
+#   config      - Show cache configuration
+#
+# Copyright (c) 2024 Linagora
+# License: GPL-3.0
+
+set -e
+
+# Default configuration
+CACHE_DIR="${OB_CACHE_DIR:-/var/cache/open-bastion/credentials}"
+CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Print colored output
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Show usage
+usage() {
+    cat << EOF
+ob-cache-admin - Offline credential cache administration tool
+
+USAGE:
+    ob-cache-admin <command> [options]
+
+COMMANDS:
+    list                List all cached credentials
+    stats               Show cache statistics
+    clear               Clear all cached credentials
+    clear-user <user>   Clear credentials for a specific user
+    expire              Remove expired credentials
+    unlock <user>       Unlock a locked user account
+    config              Show cache configuration
+    help                Show this help message
+
+OPTIONS:
+    -d, --cache-dir <dir>   Override cache directory
+    -c, --config <file>     Override configuration file
+    -f, --force             Force operation without confirmation
+    -v, --verbose           Enable verbose output
+    -q, --quiet             Suppress non-error output
+
+EXAMPLES:
+    ob-cache-admin list
+    ob-cache-admin stats
+    ob-cache-admin clear-user johndoe
+    ob-cache-admin unlock johndoe
+    ob-cache-admin expire
+    ob-cache-admin clear --force
+
+CONFIGURATION:
+    Cache directory: $CACHE_DIR
+    Config file: $CONFIG_FILE
+
+    Environment variables:
+        OB_CACHE_DIR    - Override default cache directory
+        OB_CONFIG_FILE  - Override default configuration file
+
+EOF
+    exit 0
+}
+
+# Check root privileges
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        print_error "This command requires root privileges"
+        exit 1
+    fi
+}
+
+# Load configuration from config file
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        local dir
+        dir=$(grep -E "^offline_cache_dir\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || true)
+        if [[ -n "$dir" ]]; then
+            CACHE_DIR="$dir"
+        fi
+    fi
+}
+
+# Check if cache directory exists
+check_cache_dir() {
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        print_warning "Cache directory does not exist: $CACHE_DIR"
+        return 1
+    fi
+    return 0
+}
+
+# Parse cached credential file
+parse_cache_file() {
+    local file="$1"
+    local user
+    user=$(basename "$file" .cache)
+
+    if [[ ! -f "$file" ]]; then
+        return 1
+    fi
+
+    # Read metadata from JSON-like structure
+    # Format: {"user":"...","hash":"...","expires":...,"created":...,"gecos":"...","shell":"...","home":"..."}
+    local content
+    content=$(cat "$file" 2>/dev/null) || return 1
+
+    local expires created gecos shell home
+    expires=$(echo "$content" | grep -oP '"expires":\s*\K\d+' 2>/dev/null || echo "0")
+    created=$(echo "$content" | grep -oP '"created":\s*\K\d+' 2>/dev/null || echo "0")
+    gecos=$(echo "$content" | grep -oP '"gecos":\s*"\K[^"]*' 2>/dev/null || echo "")
+    shell=$(echo "$content" | grep -oP '"shell":\s*"\K[^"]*' 2>/dev/null || echo "")
+    home=$(echo "$content" | grep -oP '"home":\s*"\K[^"]*' 2>/dev/null || echo "")
+
+    local now
+    now=$(date +%s)
+    local status="valid"
+    if [[ $expires -lt $now && $expires -gt 0 ]]; then
+        status="expired"
+    fi
+
+    echo "$user|$expires|$created|$status|$gecos|$shell|$home"
+}
+
+# Check lockout file for user
+check_lockout() {
+    local user="$1"
+    local lockfile="$CACHE_DIR/${user}.lock"
+
+    if [[ -f "$lockfile" ]]; then
+        local content
+        content=$(cat "$lockfile" 2>/dev/null) || return 1
+
+        local failures until_time
+        failures=$(echo "$content" | grep -oP '"failures":\s*\K\d+' 2>/dev/null || echo "0")
+        until_time=$(echo "$content" | grep -oP '"locked_until":\s*\K\d+' 2>/dev/null || echo "0")
+
+        local now
+        now=$(date +%s)
+        if [[ $until_time -gt $now ]]; then
+            local remaining=$((until_time - now))
+            echo "locked|$failures|$remaining"
+        else
+            echo "unlocked|$failures|0"
+        fi
+    else
+        echo "none|0|0"
+    fi
+}
+
+# Command: list
+cmd_list() {
+    check_cache_dir || exit 0
+
+    print_info "Cached credentials in $CACHE_DIR:"
+    echo ""
+
+    printf "%-20s %-12s %-20s %-20s %-10s\n" "USER" "STATUS" "CREATED" "EXPIRES" "LOCKOUT"
+    printf "%-20s %-12s %-20s %-20s %-10s\n" "----" "------" "-------" "-------" "-------"
+
+    local count=0
+    for file in "$CACHE_DIR"/*.cache 2>/dev/null; do
+        [[ -f "$file" ]] || continue
+
+        local data
+        data=$(parse_cache_file "$file") || continue
+
+        IFS='|' read -r user expires created status gecos shell home <<< "$data"
+
+        local created_str expires_str
+        if [[ $created -gt 0 ]]; then
+            created_str=$(date -d "@$created" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "unknown")
+        else
+            created_str="unknown"
+        fi
+
+        if [[ $expires -gt 0 ]]; then
+            expires_str=$(date -d "@$expires" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "unknown")
+        else
+            expires_str="never"
+        fi
+
+        # Check lockout status
+        local lockout
+        lockout=$(check_lockout "$user")
+        IFS='|' read -r lock_status failures remaining <<< "$lockout"
+
+        local lock_str="none"
+        if [[ "$lock_status" == "locked" ]]; then
+            lock_str="${failures}x (${remaining}s)"
+        elif [[ "$lock_status" == "unlocked" && $failures -gt 0 ]]; then
+            lock_str="${failures}x"
+        fi
+
+        # Color status
+        local status_colored
+        if [[ "$status" == "valid" ]]; then
+            status_colored="${GREEN}valid${NC}"
+        else
+            status_colored="${RED}expired${NC}"
+        fi
+
+        printf "%-20s %-12b %-20s %-20s %-10s\n" "$user" "$status_colored" "$created_str" "$expires_str" "$lock_str"
+        ((count++))
+    done
+
+    echo ""
+    print_info "Total: $count cached credential(s)"
+}
+
+# Command: stats
+cmd_stats() {
+    check_cache_dir || {
+        print_info "Cache directory does not exist"
+        exit 0
+    }
+
+    local total=0 valid=0 expired=0 locked=0
+    local total_size=0
+    local now
+    now=$(date +%s)
+
+    for file in "$CACHE_DIR"/*.cache 2>/dev/null; do
+        [[ -f "$file" ]] || continue
+        ((total++))
+
+        local size
+        size=$(stat -c%s "$file" 2>/dev/null || echo "0")
+        ((total_size += size))
+
+        local data
+        data=$(parse_cache_file "$file") || continue
+        IFS='|' read -r user expires created status _ _ _ <<< "$data"
+
+        if [[ "$status" == "valid" ]]; then
+            ((valid++))
+        else
+            ((expired++))
+        fi
+    done
+
+    for file in "$CACHE_DIR"/*.lock 2>/dev/null; do
+        [[ -f "$file" ]] || continue
+
+        local user
+        user=$(basename "$file" .lock)
+        local lockout
+        lockout=$(check_lockout "$user")
+        IFS='|' read -r lock_status _ _ <<< "$lockout"
+
+        if [[ "$lock_status" == "locked" ]]; then
+            ((locked++))
+        fi
+    done
+
+    echo ""
+    echo "  Offline Credential Cache Statistics"
+    echo "  ===================================="
+    echo ""
+    echo "  Cache directory:    $CACHE_DIR"
+    echo "  Total entries:      $total"
+    echo "  Valid entries:      $valid"
+    echo "  Expired entries:    $expired"
+    echo "  Locked accounts:    $locked"
+    echo "  Total size:         $(numfmt --to=iec $total_size 2>/dev/null || echo "${total_size}B")"
+    echo ""
+
+    # Show config
+    if [[ -f "$CONFIG_FILE" ]]; then
+        local ttl max_failures lockout_duration
+        ttl=$(grep -E "^offline_cache_ttl\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "604800")
+        max_failures=$(grep -E "^offline_cache_max_failures\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "5")
+        lockout_duration=$(grep -E "^offline_cache_lockout\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "300")
+
+        echo "  Configuration:"
+        echo "  --------------"
+        echo "  TTL:                $ttl seconds ($(echo "scale=1; $ttl/86400" | bc) days)"
+        echo "  Max failures:       $max_failures"
+        echo "  Lockout duration:   $lockout_duration seconds"
+        echo ""
+    fi
+}
+
+# Command: clear
+cmd_clear() {
+    check_root
+    check_cache_dir || exit 0
+
+    if [[ "$FORCE" != "true" ]]; then
+        echo -n "Are you sure you want to clear ALL cached credentials? [y/N] "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            print_info "Aborted"
+            exit 0
+        fi
+    fi
+
+    local count=0
+    for file in "$CACHE_DIR"/*.cache "$CACHE_DIR"/*.lock 2>/dev/null; do
+        [[ -f "$file" ]] || continue
+        rm -f "$file"
+        ((count++))
+    done
+
+    print_success "Cleared $count file(s) from cache"
+}
+
+# Command: clear-user
+cmd_clear_user() {
+    check_root
+
+    local user="$1"
+    if [[ -z "$user" ]]; then
+        print_error "User argument required"
+        echo "Usage: ob-cache-admin clear-user <username>"
+        exit 1
+    fi
+
+    check_cache_dir || exit 0
+
+    local removed=0
+
+    if [[ -f "$CACHE_DIR/${user}.cache" ]]; then
+        rm -f "$CACHE_DIR/${user}.cache"
+        ((removed++))
+        print_success "Removed credential cache for user: $user"
+    fi
+
+    if [[ -f "$CACHE_DIR/${user}.lock" ]]; then
+        rm -f "$CACHE_DIR/${user}.lock"
+        ((removed++))
+        print_success "Removed lockout file for user: $user"
+    fi
+
+    if [[ $removed -eq 0 ]]; then
+        print_warning "No cache files found for user: $user"
+    fi
+}
+
+# Command: expire
+cmd_expire() {
+    check_root
+    check_cache_dir || exit 0
+
+    local now removed=0
+    now=$(date +%s)
+
+    for file in "$CACHE_DIR"/*.cache 2>/dev/null; do
+        [[ -f "$file" ]] || continue
+
+        local data
+        data=$(parse_cache_file "$file") || continue
+        IFS='|' read -r user expires _ status _ _ _ <<< "$data"
+
+        if [[ "$status" == "expired" ]]; then
+            rm -f "$file"
+            rm -f "$CACHE_DIR/${user}.lock"
+            ((removed++))
+            [[ "$VERBOSE" == "true" ]] && print_info "Removed expired cache for: $user"
+        fi
+    done
+
+    print_success "Removed $removed expired credential(s)"
+}
+
+# Command: unlock
+cmd_unlock() {
+    check_root
+
+    local user="$1"
+    if [[ -z "$user" ]]; then
+        print_error "User argument required"
+        echo "Usage: ob-cache-admin unlock <username>"
+        exit 1
+    fi
+
+    check_cache_dir || exit 0
+
+    local lockfile="$CACHE_DIR/${user}.lock"
+
+    if [[ -f "$lockfile" ]]; then
+        rm -f "$lockfile"
+        print_success "Unlocked user: $user"
+    else
+        print_warning "User $user is not locked"
+    fi
+}
+
+# Command: config
+cmd_config() {
+    echo ""
+    echo "  Offline Cache Configuration"
+    echo "  ============================"
+    echo ""
+    echo "  Cache directory:    $CACHE_DIR"
+    echo "  Config file:        $CONFIG_FILE"
+    echo ""
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+        echo "  Settings from $CONFIG_FILE:"
+        echo "  ----------------------------"
+        grep -E "^offline_cache" "$CONFIG_FILE" 2>/dev/null | while read -r line; do
+            echo "  $line"
+        done
+        echo ""
+    else
+        print_warning "Configuration file not found: $CONFIG_FILE"
+    fi
+
+    # Check directory status
+    if [[ -d "$CACHE_DIR" ]]; then
+        local perms
+        perms=$(stat -c "%a" "$CACHE_DIR")
+        local owner
+        owner=$(stat -c "%U:%G" "$CACHE_DIR")
+        echo "  Directory status:"
+        echo "  -----------------"
+        echo "  Exists:       yes"
+        echo "  Permissions:  $perms"
+        echo "  Owner:        $owner"
+    else
+        echo "  Directory status:"
+        echo "  -----------------"
+        echo "  Exists:       no"
+    fi
+    echo ""
+}
+
+# Parse options
+FORCE="false"
+VERBOSE="false"
+QUIET="false"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -d|--cache-dir)
+            CACHE_DIR="$2"
+            shift 2
+            ;;
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -f|--force)
+            FORCE="true"
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE="true"
+            shift
+            ;;
+        -q|--quiet)
+            QUIET="true"
+            shift
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Load configuration
+load_config
+
+# Execute command
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+    list)
+        cmd_list
+        ;;
+    stats)
+        cmd_stats
+        ;;
+    clear)
+        cmd_clear
+        ;;
+    clear-user)
+        cmd_clear_user "$@"
+        ;;
+    expire)
+        cmd_expire
+        ;;
+    unlock)
+        cmd_unlock "$@"
+        ;;
+    config)
+        cmd_config
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        print_error "Unknown command: $COMMAND"
+        echo "Run 'ob-cache-admin help' for usage"
+        exit 1
+        ;;
+esac

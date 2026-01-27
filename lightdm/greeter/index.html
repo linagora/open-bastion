@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open Bastion - Desktop Login</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="greeter-container">
+        <!-- Background overlay -->
+        <div class="background-overlay"></div>
+
+        <!-- Main greeter content -->
+        <div class="greeter-content">
+            <!-- Logo and title -->
+            <div class="greeter-header">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+                    </svg>
+                </div>
+                <h1 id="hostname">Desktop Login</h1>
+            </div>
+
+            <!-- Login modes: SSO (iframe) or Offline (password) -->
+            <div class="login-container">
+                <!-- SSO Login Mode (default) -->
+                <div id="sso-mode" class="login-mode active">
+                    <div class="mode-header">
+                        <span class="mode-indicator online"></span>
+                        <span>Single Sign-On</span>
+                    </div>
+                    <div class="iframe-container">
+                        <iframe id="sso-iframe" src="" frameborder="0"></iframe>
+                        <div id="iframe-loading" class="iframe-loading">
+                            <div class="spinner"></div>
+                            <p>Connecting to authentication server...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Offline Login Mode -->
+                <div id="offline-mode" class="login-mode">
+                    <div class="mode-header">
+                        <span class="mode-indicator offline"></span>
+                        <span>Offline Mode</span>
+                    </div>
+                    <form id="offline-form" class="offline-form">
+                        <div class="form-group">
+                            <label for="username">Username</label>
+                            <input type="text" id="username" name="username" autocomplete="username" autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Password</label>
+                            <input type="password" id="password" name="password" autocomplete="current-password">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn-login" id="login-btn">
+                                <span class="btn-text">Sign In</span>
+                                <span class="btn-spinner"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Mode toggle -->
+                <div class="mode-toggle">
+                    <button id="toggle-mode" class="btn-toggle">
+                        <span id="toggle-text">Switch to Offline Mode</span>
+                    </button>
+                </div>
+
+                <!-- Error message -->
+                <div id="error-message" class="error-message hidden"></div>
+            </div>
+
+            <!-- Session selector -->
+            <div class="session-selector">
+                <label for="session">Session:</label>
+                <select id="session"></select>
+            </div>
+
+            <!-- System controls -->
+            <div class="system-controls">
+                <button id="btn-shutdown" class="system-btn" title="Shutdown">
+                    <svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>
+                </button>
+                <button id="btn-restart" class="system-btn" title="Restart">
+                    <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+                <button id="btn-suspend" class="system-btn" title="Suspend">
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Clock -->
+        <div class="clock">
+            <div class="clock-time" id="clock-time">00:00</div>
+            <div class="clock-date" id="clock-date">Monday, January 1</div>
+        </div>
+    </div>
+
+    <script src="greeter.js"></script>
+</body>
+</html>
