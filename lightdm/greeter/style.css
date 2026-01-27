@@ -1,0 +1,464 @@
+/* Open Bastion LightDM Webkit Greeter Theme
+ * A modern, responsive greeter with SSO support
+ */
+
+/* CSS Variables for theming */
+:root {
+    --primary-color: #2a5298;
+    --primary-dark: #1e3c72;
+    --accent-color: #10b981;
+    --error-color: #ef4444;
+    --warning-color: #f59e0b;
+    --text-color: #ffffff;
+    --text-muted: rgba(255, 255, 255, 0.7);
+    --card-bg: rgba(255, 255, 255, 0.1);
+    --card-border: rgba(255, 255, 255, 0.2);
+    --input-bg: rgba(255, 255, 255, 0.15);
+    --input-border: rgba(255, 255, 255, 0.3);
+    --overlay-color: rgba(0, 0, 0, 0.4);
+    --shadow-color: rgba(0, 0, 0, 0.3);
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Reset and base styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-family);
+    color: var(--text-color);
+}
+
+body {
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-color) 100%);
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+
+/* Container */
+.greeter-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.background-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--overlay-color);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.greeter-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px;
+    max-width: 500px;
+    width: 100%;
+}
+
+/* Header / Logo */
+.greeter-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.logo {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 15px;
+    padding: 15px;
+    background: var(--card-bg);
+    border-radius: 50%;
+    border: 2px solid var(--card-border);
+    box-shadow: 0 4px 20px var(--shadow-color);
+}
+
+.logo svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--text-color);
+}
+
+.greeter-header h1 {
+    font-size: 1.8em;
+    font-weight: 300;
+    letter-spacing: 1px;
+    text-shadow: 0 2px 4px var(--shadow-color);
+}
+
+/* Login container */
+.login-container {
+    width: 100%;
+    background: var(--card-bg);
+    border-radius: 16px;
+    border: 1px solid var(--card-border);
+    box-shadow: 0 8px 32px var(--shadow-color);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+/* Login modes */
+.login-mode {
+    display: none;
+    padding: 20px;
+}
+
+.login-mode.active {
+    display: block;
+}
+
+.mode-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.mode-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.mode-indicator.online {
+    background: var(--accent-color);
+}
+
+.mode-indicator.offline {
+    background: var(--warning-color);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* SSO iframe */
+.iframe-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #ffffff;
+}
+
+.iframe-container iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+.iframe-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.95);
+    color: #333;
+}
+
+.iframe-loading.hidden {
+    display: none;
+}
+
+/* Offline form */
+.offline-form {
+    padding: 10px 0;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+.form-group input {
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    color: var(--text-color);
+    font-size: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+}
+
+.form-group input::placeholder {
+    color: var(--text-muted);
+}
+
+.form-actions {
+    margin-top: 25px;
+}
+
+.btn-login {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--accent-color) 0%, #059669 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.btn-login:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.btn-login:active {
+    transform: translateY(0);
+}
+
+.btn-login:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-login .btn-spinner {
+    display: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ffffff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-left: 8px;
+}
+
+.btn-login.loading .btn-text {
+    opacity: 0.7;
+}
+
+.btn-login.loading .btn-spinner {
+    display: inline-block;
+}
+
+/* Mode toggle */
+.mode-toggle {
+    padding: 15px 20px;
+    border-top: 1px solid var(--card-border);
+    text-align: center;
+}
+
+.btn-toggle {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.btn-toggle:hover {
+    color: var(--text-color);
+}
+
+/* Error message */
+.error-message {
+    padding: 12px 20px;
+    background: var(--error-color);
+    color: white;
+    font-size: 0.9em;
+}
+
+.error-message.hidden {
+    display: none;
+}
+
+/* Session selector */
+.session-selector {
+    margin-top: 25px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.session-selector select {
+    padding: 8px 12px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    color: var(--text-color);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.session-selector select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+/* System controls */
+.system-controls {
+    position: absolute;
+    bottom: 30px;
+    right: 30px;
+    display: flex;
+    gap: 15px;
+}
+
+.system-btn {
+    width: 44px;
+    height: 44px;
+    padding: 10px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 50%;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+}
+
+.system-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.system-btn svg {
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+}
+
+/* Clock */
+.clock {
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    text-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.clock-time {
+    font-size: 3.5em;
+    font-weight: 300;
+    letter-spacing: 2px;
+}
+
+.clock-date {
+    font-size: 1.2em;
+    color: var(--text-muted);
+    margin-top: 5px;
+}
+
+/* Spinner */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e0e0e0;
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 15px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .greeter-content {
+        padding: 20px;
+    }
+
+    .logo {
+        width: 60px;
+        height: 60px;
+        padding: 12px;
+    }
+
+    .greeter-header h1 {
+        font-size: 1.4em;
+    }
+
+    .iframe-container {
+        height: 350px;
+    }
+
+    .clock {
+        top: 15px;
+        left: 15px;
+    }
+
+    .clock-time {
+        font-size: 2.5em;
+    }
+
+    .clock-date {
+        font-size: 1em;
+    }
+
+    .system-controls {
+        bottom: 15px;
+        right: 15px;
+    }
+
+    .system-btn {
+        width: 38px;
+        height: 38px;
+    }
+}
+
+/* Animation for mode switch */
+.login-mode {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
