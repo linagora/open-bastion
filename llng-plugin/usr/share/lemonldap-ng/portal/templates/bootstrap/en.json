@@ -36,5 +36,14 @@
 "sshPublicKeyHelp":"Paste the contents of your ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub file",
 "sshValidUntil":"Valid until",
 "userCode":"Device Code",
-"userCodeHelp":"Enter the 8-character code shown on your device"
+"userCodeHelp":"Enter the 8-character code shown on your device",
+"desktopLoginTitle":"Desktop Login",
+"desktopLoginInfo":"Sign in to access your desktop.",
+"desktopLoginSuccess":"Authentication Successful",
+"desktopLoginFailed":"Authentication Failed",
+"desktopLoginComplete":"Login Complete",
+"desktopLoginCompleting":"Completing login...",
+"desktopLoginUsername":"Username",
+"desktopLoginPassword":"Password",
+"desktopLoginSignIn":"Sign In"
 }
