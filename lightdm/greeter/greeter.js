@@ -21,7 +21,29 @@
         clockUpdateInterval: 1000,              // Update clock every second
         sessionStorageKey: 'ob_selected_session',
         offlineRetryInterval: 60000,            // Retry online check every 60s when offline
-        maxOfflineCheckRetries: 3               // Number of failed checks before switching to offline
+        maxOfflineCheckRetries: 3,              // Number of failed checks before switching to offline
+        lockoutDisplayInterval: 1000            // Update lockout countdown every second
+    };
+
+    // Offline error codes (must match PAM module)
+    const OFFLINE_ERRORS = {
+        OK: 0,
+        NOT_FOUND: -1,
+        EXPIRED: -2,
+        LOCKED: -3,
+        PASSWORD: -4,
+        CRYPTO: -5,
+        IO: -6
+    };
+
+    // Error messages for offline authentication failures
+    const OFFLINE_ERROR_MESSAGES = {
+        [OFFLINE_ERRORS.NOT_FOUND]: 'No cached credentials found. Please connect to the network and login online first.',
+        [OFFLINE_ERRORS.EXPIRED]: 'Cached credentials have expired. Please connect to the network to refresh.',
+        [OFFLINE_ERRORS.LOCKED]: 'Account temporarily locked due to too many failed attempts.',
+        [OFFLINE_ERRORS.PASSWORD]: 'Invalid password. Please try again.',
+        [OFFLINE_ERRORS.CRYPTO]: 'Credential verification failed. Please try again.',
+        [OFFLINE_ERRORS.IO]: 'Error reading cached credentials. Please contact administrator.'
     };
 
     // State
@@ -33,34 +55,45 @@
     let offlineCheckFailures = 0;
     let lastOfflineError = null;
     let lockoutEndTime = null;
+    let lockoutTimer = null;
+    let onlineCheckTimer = null;
 
-    // DOM Elements
-    const elements = {
-        hostname: document.getElementById('hostname'),
-        ssoMode: document.getElementById('sso-mode'),
-        offlineMode: document.getElementById('offline-mode'),
-        ssoIframe: document.getElementById('sso-iframe'),
-        iframeLoading: document.getElementById('iframe-loading'),
-        offlineForm: document.getElementById('offline-form'),
-        username: document.getElementById('username'),
-        password: document.getElementById('password'),
-        loginBtn: document.getElementById('login-btn'),
-        toggleMode: document.getElementById('toggle-mode'),
-        toggleText: document.getElementById('toggle-text'),
-        errorMessage: document.getElementById('error-message'),
-        sessionSelect: document.getElementById('session'),
-        clockTime: document.getElementById('clock-time'),
-        clockDate: document.getElementById('clock-date'),
-        btnShutdown: document.getElementById('btn-shutdown'),
-        btnRestart: document.getElementById('btn-restart'),
-        btnSuspend: document.getElementById('btn-suspend')
-    };
+    // DOM Elements (initialized in init())
+    let elements = {};
 
     /**
      * Initialize the greeter
      */
     function init() {
         console.log('Initializing Open Bastion Greeter');
+
+        // Cache DOM elements
+        elements = {
+            hostname: document.getElementById('hostname'),
+            ssoMode: document.getElementById('sso-mode'),
+            offlineMode: document.getElementById('offline-mode'),
+            ssoIframe: document.getElementById('sso-iframe'),
+            iframeLoading: document.getElementById('iframe-loading'),
+            offlineForm: document.getElementById('offline-form'),
+            username: document.getElementById('username'),
+            password: document.getElementById('password'),
+            loginBtn: document.getElementById('login-btn'),
+            toggleMode: document.getElementById('toggle-mode'),
+            toggleText: document.getElementById('toggle-text'),
+            errorMessage: document.getElementById('error-message'),
+            sessionSelect: document.getElementById('session'),
+            clockTime: document.getElementById('clock-time'),
+            clockDate: document.getElementById('clock-date'),
+            btnShutdown: document.getElementById('btn-shutdown'),
+            btnRestart: document.getElementById('btn-restart'),
+            btnSuspend: document.getElementById('btn-suspend'),
+            // New offline UI elements
+            offlineBanner: document.getElementById('offline-banner'),
+            offlineStatus: document.getElementById('offline-status'),
+            offlineRetryBtn: document.getElementById('offline-retry-btn'),
+            lockoutMessage: document.getElementById('lockout-message'),
+            lockoutCountdown: document.getElementById('lockout-countdown')
+        };
 
         // Load configuration from lightdm config if available
         loadConfig();
@@ -82,12 +115,11 @@
 
         // Check online status
         checkOnlineStatus();
-        setInterval(checkOnlineStatus, CONFIG.checkOnlineInterval);
 
         // Setup event listeners
         setupEventListeners();
 
-        // Initialize SSO iframe
+        // Initialize mode based on online status
         if (isOnline) {
             initSSOIframe();
         } else {
@@ -213,6 +245,13 @@
             handleOfflineLogin();
         });
 
+        // Offline retry button
+        if (elements.offlineRetryBtn) {
+            elements.offlineRetryBtn.addEventListener('click', function() {
+                checkOnlineStatus(true);
+            });
+        }
+
         // Listen for SSO callback messages from iframe
         window.addEventListener('message', handleIframeMessage);
 
@@ -234,29 +273,80 @@
 
     /**
      * Check if the auth server is reachable
+     * @param {boolean} manual - Whether this is a manual retry
      */
-    function checkOnlineStatus() {
+    function checkOnlineStatus(manual) {
         const testUrl = CONFIG.portalUrl + '/desktop/login?check=1';
+
+        // Show checking status if manual retry
+        if (manual && elements.offlineStatus) {
+            elements.offlineStatus.textContent = 'Checking connection...';
+            elements.offlineStatus.className = 'offline-status checking';
+        }
+
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(function() {
+            controller.abort();
+        }, CONFIG.onlineCheckTimeout);
 
         fetch(testUrl, {
             method: 'HEAD',
             mode: 'no-cors',
-            cache: 'no-cache'
+            cache: 'no-cache',
+            signal: controller.signal
         })
         .then(function() {
+            clearTimeout(timeoutId);
+            offlineCheckFailures = 0;
+
             if (!isOnline) {
                 console.log('Auth server is now online');
                 isOnline = true;
                 updateOnlineStatus();
+
+                // If we were in offline mode due to connectivity, switch to SSO
+                if (currentMode === 'offline') {
+                    switchMode('sso');
+                }
             }
+
+            // Schedule next check
+            scheduleOnlineCheck(CONFIG.checkOnlineInterval);
         })
-        .catch(function() {
-            if (isOnline) {
-                console.log('Auth server is offline');
+        .catch(function(err) {
+            clearTimeout(timeoutId);
+            offlineCheckFailures++;
+
+            console.log('Auth server check failed:', err.message, 'failures:', offlineCheckFailures);
+
+            if (offlineCheckFailures >= CONFIG.maxOfflineCheckRetries && isOnline) {
+                console.log('Auth server is offline after', offlineCheckFailures, 'failures');
                 isOnline = false;
                 updateOnlineStatus();
+
+                // Auto-switch to offline mode
+                if (currentMode === 'sso') {
+                    switchMode('offline');
+                }
             }
+
+            // Schedule next check (more frequent when offline)
+            const interval = isOnline ? CONFIG.checkOnlineInterval : CONFIG.offlineRetryInterval;
+            scheduleOnlineCheck(interval);
         });
+    }
+
+    /**
+     * Schedule the next online status check
+     */
+    function scheduleOnlineCheck(interval) {
+        if (onlineCheckTimer) {
+            clearTimeout(onlineCheckTimer);
+        }
+        onlineCheckTimer = setTimeout(function() {
+            checkOnlineStatus(false);
+        }, interval);
     }
 
     /**
@@ -268,12 +358,36 @@
         if (isOnline) {
             ssoIndicator.classList.remove('offline');
             ssoIndicator.classList.add('online');
+
+            // Hide offline banner
+            if (elements.offlineBanner) {
+                elements.offlineBanner.classList.add('hidden');
+            }
+
+            // Update status text
+            if (elements.offlineStatus) {
+                elements.offlineStatus.textContent = 'Connected';
+                elements.offlineStatus.className = 'offline-status online';
+            }
+
             if (currentMode === 'sso') {
                 initSSOIframe();
             }
         } else {
             ssoIndicator.classList.remove('online');
             ssoIndicator.classList.add('offline');
+
+            // Show offline banner
+            if (elements.offlineBanner) {
+                elements.offlineBanner.classList.remove('hidden');
+            }
+
+            // Update status text
+            if (elements.offlineStatus) {
+                elements.offlineStatus.textContent = 'Server unavailable - using cached credentials';
+                elements.offlineStatus.className = 'offline-status offline';
+            }
+
             if (currentMode === 'sso') {
                 switchMode('offline');
             }
@@ -299,6 +413,9 @@
         elements.ssoIframe.onerror = function() {
             console.error('Failed to load SSO iframe');
             showError('Failed to connect to authentication server');
+            offlineCheckFailures = CONFIG.maxOfflineCheckRetries;
+            isOnline = false;
+            updateOnlineStatus();
             switchMode('offline');
         };
     }
@@ -325,17 +442,41 @@
             elements.ssoMode.classList.add('active');
             elements.offlineMode.classList.remove('active');
             elements.toggleText.textContent = 'Switch to Offline Mode';
+
+            // Clear any lockout timer
+            clearLockoutTimer();
+
             if (isOnline) {
                 initSSOIframe();
+            } else {
+                // Can't use SSO when offline
+                showError('Cannot use SSO mode - server is unavailable');
+                switchMode('offline');
+                return;
             }
         } else {
             elements.offlineMode.classList.add('active');
             elements.ssoMode.classList.remove('active');
             elements.toggleText.textContent = 'Switch to SSO Mode';
+
+            // Show offline info message
+            if (!isOnline) {
+                showOfflineInfo();
+            }
+
             elements.username.focus();
         }
 
         hideError();
+    }
+
+    /**
+     * Show offline mode information
+     */
+    function showOfflineInfo() {
+        if (elements.offlineBanner) {
+            elements.offlineBanner.classList.remove('hidden');
+        }
     }
 
     /**
@@ -388,8 +529,15 @@
             return;
         }
 
+        // Check if account is locked
+        if (lockoutEndTime && Date.now() < lockoutEndTime) {
+            showLockoutError();
+            return;
+        }
+
         console.log('Starting offline authentication for user:', username);
         setLoading(true);
+        hideError();
 
         selectedUser = username;
         startAuthentication(username, password);
@@ -437,9 +585,96 @@
     function handleLightDMMessage(text, type) {
         console.log('LightDM message:', text, 'type:', type);
 
+        // Parse offline error codes from PAM messages
+        const errorMatch = text.match(/OFFLINE_ERROR:(-?\d+)(?::(\d+))?/);
+        if (errorMatch) {
+            const errorCode = parseInt(errorMatch[1], 10);
+            const lockoutTime = errorMatch[2] ? parseInt(errorMatch[2], 10) : null;
+
+            handleOfflineError(errorCode, lockoutTime);
+            return;
+        }
+
         if (type === 1) {  // Error message
             showError(text);
         }
+    }
+
+    /**
+     * Handle offline authentication errors
+     */
+    function handleOfflineError(errorCode, lockoutTime) {
+        lastOfflineError = errorCode;
+
+        if (errorCode === OFFLINE_ERRORS.LOCKED && lockoutTime) {
+            // Set lockout end time
+            lockoutEndTime = Date.now() + (lockoutTime * 1000);
+            showLockoutError();
+            startLockoutTimer();
+        } else {
+            // Show appropriate error message
+            const message = OFFLINE_ERROR_MESSAGES[errorCode] || 'Authentication failed';
+            showError(message);
+        }
+    }
+
+    /**
+     * Show lockout error with countdown
+     */
+    function showLockoutError() {
+        if (!lockoutEndTime) return;
+
+        const remaining = Math.ceil((lockoutEndTime - Date.now()) / 1000);
+        if (remaining <= 0) {
+            clearLockoutTimer();
+            hideError();
+            return;
+        }
+
+        const minutes = Math.floor(remaining / 60);
+        const seconds = remaining % 60;
+        const timeStr = minutes > 0
+            ? minutes + ' minute' + (minutes > 1 ? 's' : '') + ' ' + seconds + ' seconds'
+            : seconds + ' second' + (seconds > 1 ? 's' : '');
+
+        showError('Account locked. Try again in ' + timeStr);
+
+        // Update lockout countdown element if present
+        if (elements.lockoutCountdown) {
+            elements.lockoutCountdown.textContent = timeStr;
+        }
+        if (elements.lockoutMessage) {
+            elements.lockoutMessage.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Start lockout countdown timer
+     */
+    function startLockoutTimer() {
+        clearLockoutTimer();
+        lockoutTimer = setInterval(function() {
+            if (!lockoutEndTime || Date.now() >= lockoutEndTime) {
+                clearLockoutTimer();
+                hideError();
+                if (elements.lockoutMessage) {
+                    elements.lockoutMessage.classList.add('hidden');
+                }
+            } else {
+                showLockoutError();
+            }
+        }, CONFIG.lockoutDisplayInterval);
+    }
+
+    /**
+     * Clear lockout timer
+     */
+    function clearLockoutTimer() {
+        if (lockoutTimer) {
+            clearInterval(lockoutTimer);
+            lockoutTimer = null;
+        }
+        lockoutEndTime = null;
     }
 
     /**
@@ -451,10 +686,19 @@
         setLoading(false);
 
         if (lightdm.is_authenticated) {
+            // Clear any lockout state on success
+            clearLockoutTimer();
+
             console.log('Starting session:', selectedSession);
             lightdm.start_session(selectedSession);
         } else {
-            showError('Authentication failed. Please try again.');
+            // Check if we have a specific offline error
+            if (lastOfflineError !== null) {
+                // Error already shown by handleOfflineError
+                lastOfflineError = null;
+            } else {
+                showError('Authentication failed. Please try again.');
+            }
             elements.password.value = '';
             elements.password.focus();
         }
@@ -482,6 +726,7 @@
     function showError(message) {
         elements.errorMessage.textContent = message;
         elements.errorMessage.classList.remove('hidden');
+        elements.errorMessage.classList.add('show');
     }
 
     /**
@@ -489,6 +734,7 @@
      */
     function hideError() {
         elements.errorMessage.classList.add('hidden');
+        elements.errorMessage.classList.remove('show');
     }
 
     /**
@@ -498,9 +744,13 @@
         if (loading) {
             elements.loginBtn.classList.add('loading');
             elements.loginBtn.disabled = true;
+            elements.username.disabled = true;
+            elements.password.disabled = true;
         } else {
             elements.loginBtn.classList.remove('loading');
             elements.loginBtn.disabled = false;
+            elements.username.disabled = false;
+            elements.password.disabled = false;
         }
     }
 
@@ -534,7 +784,19 @@
             respond: function(response) {
                 console.log('Mock: respond (password provided)');
                 setTimeout(function() {
-                    lightdm.is_authenticated = true;
+                    // Simulate offline error for testing
+                    if (response === 'locked') {
+                        lightdm.show_message('OFFLINE_ERROR:-3:300', 1);
+                        lightdm.is_authenticated = false;
+                    } else if (response === 'expired') {
+                        lightdm.show_message('OFFLINE_ERROR:-2', 1);
+                        lightdm.is_authenticated = false;
+                    } else if (response === 'notfound') {
+                        lightdm.show_message('OFFLINE_ERROR:-1', 1);
+                        lightdm.is_authenticated = false;
+                    } else {
+                        lightdm.is_authenticated = true;
+                    }
                     lightdm.authentication_complete();
                 }, 500);
             },

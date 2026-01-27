@@ -462,3 +462,148 @@ body {
         transform: translateY(0);
     }
 }
+
+/* Offline banner */
+.offline-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-bottom: 15px;
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    border-radius: 8px;
+    animation: fadeIn 0.3s ease;
+}
+
+.offline-banner.hidden {
+    display: none;
+}
+
+.offline-banner-icon {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+}
+
+.offline-banner-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--warning-color);
+}
+
+.offline-banner-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.offline-status {
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.offline-status.offline {
+    color: var(--warning-color);
+}
+
+.offline-status.online {
+    color: var(--accent-color);
+}
+
+.offline-status.checking {
+    color: var(--text-muted);
+}
+
+.offline-retry-btn {
+    align-self: flex-start;
+    padding: 4px 10px;
+    background: rgba(245, 158, 11, 0.3);
+    border: 1px solid rgba(245, 158, 11, 0.5);
+    border-radius: 4px;
+    color: var(--text-color);
+    font-size: 0.75em;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.offline-retry-btn:hover {
+    background: rgba(245, 158, 11, 0.5);
+}
+
+.offline-retry-btn:active {
+    background: rgba(245, 158, 11, 0.6);
+}
+
+/* Lockout message */
+.lockout-message {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    margin-bottom: 15px;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    animation: fadeIn 0.3s ease;
+}
+
+.lockout-message.hidden {
+    display: none;
+}
+
+.lockout-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+}
+
+.lockout-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: var(--error-color);
+}
+
+.lockout-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.9em;
+}
+
+.lockout-content span:first-child {
+    font-weight: 500;
+    color: var(--error-color);
+}
+
+.lockout-content span:last-child {
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+#lockout-countdown {
+    color: var(--error-color);
+}
+
+/* Disabled inputs during lockout */
+.form-group input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Error message animation */
+.error-message.show {
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
