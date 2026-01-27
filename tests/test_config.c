@@ -225,6 +225,116 @@ static int test_parse_no_create_user(void)
     return ok;
 }
 
+/* Test OAuth2 token auth defaults */
+static int test_oauth2_token_auth_defaults(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    int ok = 1;
+    ok = ok && (config.oauth2_token_auth == false);  /* Disabled by default */
+    ok = ok && (config.oauth2_token_cache == true);  /* Enabled by default */
+    ok = ok && (config.oauth2_token_min_ttl == 60);  /* 60 seconds by default */
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test OAuth2 token auth argument parsing */
+static int test_parse_oauth2_token_auth_args(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "portal_url=https://test.example.com",
+        "oauth2_token_auth",
+        "oauth2_token_min_ttl=120"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    int ret = config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.oauth2_token_auth == true);
+    ok = ok && (config.oauth2_token_min_ttl == 120);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test OAuth2 token auth config file parsing */
+static int test_parse_oauth2_token_auth_config(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "oauth2_token_auth=true",
+        "oauth2_token_cache=false",
+        "oauth2_token_min_ttl=300"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    int ret = config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.oauth2_token_auth == true);
+    ok = ok && (config.oauth2_token_cache == false);
+    ok = ok && (config.oauth2_token_min_ttl == 300);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test no_oauth2_token_cache flag */
+static int test_parse_no_oauth2_token_cache(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "no_oauth2_token_cache"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    config_parse_args(argc, argv, &config);
+
+    int ok = (config.oauth2_token_cache == false);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test OAuth2 token min_ttl bounds */
+static int test_oauth2_token_min_ttl_bounds(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    /* Test value above max (3600) - should use default */
+    const char *argv1[] = { "oauth2_token_min_ttl=9999" };
+    config_parse_args(1, argv1, &config);
+    int ok = (config.oauth2_token_min_ttl == 60);  /* Default value */
+
+    /* Test value at max boundary */
+    config_init(&config);
+    const char *argv2[] = { "oauth2_token_min_ttl=3600" };
+    config_parse_args(1, argv2, &config);
+    ok = ok && (config.oauth2_token_min_ttl == 3600);
+
+    /* Test value of 0 (valid) */
+    config_init(&config);
+    const char *argv3[] = { "oauth2_token_min_ttl=0" };
+    config_parse_args(1, argv3, &config);
+    ok = ok && (config.oauth2_token_min_ttl == 0);
+
+    config_free(&config);
+    return ok;
+}
+
 /* Test config file loading
  * Note: This test verifies file permission checks when running as root,
  * or skips permission tests when running as non-root user.
@@ -293,6 +403,11 @@ int main(void)
     TEST(create_user_defaults);
     TEST(parse_create_user_args);
     TEST(parse_no_create_user);
+    TEST(oauth2_token_auth_defaults);
+    TEST(parse_oauth2_token_auth_args);
+    TEST(parse_oauth2_token_auth_config);
+    TEST(parse_no_oauth2_token_cache);
+    TEST(oauth2_token_min_ttl_bounds);
     TEST(load_config_file);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
