@@ -87,6 +87,21 @@ target_link_libraries(test_auth_cache
 )
 add_test(NAME test_auth_cache COMMAND test_auth_cache)
 
+# Test offline credential cache (Argon2id + AES-256-GCM)
+add_executable(test_offline_cache test_offline_cache.c ../src/offline_cache.c ../src/str_utils.c)
+target_include_directories(test_offline_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
+)
+target_link_libraries(test_offline_cache
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
+)
+add_test(NAME test_offline_cache COMMAND test_offline_cache)
+
 # Test JWT utility functions
 add_executable(test_token_manager test_token_manager.c ../src/jwt_utils.c)
 target_compile_definitions(test_token_manager PRIVATE JWT_UTILS_TEST)
