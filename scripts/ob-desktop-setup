@@ -1,0 +1,468 @@
+#!/bin/bash
+#
+# ob-desktop-setup - Configure desktop workstation for Open Bastion SSO
+#
+# This script:
+# 1. Installs the lightdm-webkit2-greeter if not present
+# 2. Copies the Open Bastion greeter theme
+# 3. Configures LightDM to use the webkit greeter
+# 4. Configures PAM for OAuth2 token authentication
+# 5. Optionally configures offline mode
+#
+# Usage: ob-desktop-setup [options]
+#
+# Copyright (C) 2025 Linagora
+# License: AGPL-3.0
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Default values
+PORTAL_URL=""
+THEME_DIR="/usr/share/lightdm-webkit/themes/open-bastion"
+GREETER_CONFIG="/etc/lightdm/lightdm-webkit2-greeter.conf"
+PAM_CONFIG_DIR="/etc/pam.d"
+OB_CONFIG_DIR="/etc/open-bastion"
+OB_CONFIG_FILE="${OB_CONFIG_DIR}/openbastion.conf"
+INSTALL_DIR="/usr/share/open-bastion"
+OFFLINE_MODE=false
+DRY_RUN=false
+FORCE=false
+
+# Logging functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Print usage
+usage() {
+    cat << EOF
+Usage: $(basename "$0") [options]
+
+Configure desktop workstation for Open Bastion SSO via LightDM.
+
+Options:
+  -p, --portal URL      LemonLDAP::NG portal URL (required)
+  -o, --offline         Enable offline mode with credential caching
+  -f, --force           Overwrite existing configuration
+  -n, --dry-run         Show what would be done without making changes
+  -h, --help            Show this help message
+
+Examples:
+  $(basename "$0") -p https://auth.example.com
+  $(basename "$0") -p https://auth.example.com --offline
+  $(basename "$0") -p https://auth.example.com --dry-run
+
+EOF
+    exit 1
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -p|--portal)
+                PORTAL_URL="$2"
+                shift 2
+                ;;
+            -o|--offline)
+                OFFLINE_MODE=true
+                shift
+                ;;
+            -f|--force)
+                FORCE=true
+                shift
+                ;;
+            -n|--dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                usage
+                ;;
+        esac
+    done
+
+    if [[ -z "$PORTAL_URL" ]]; then
+        log_error "Portal URL is required"
+        usage
+    fi
+
+    # Validate URL format
+    if [[ ! "$PORTAL_URL" =~ ^https?:// ]]; then
+        log_error "Portal URL must start with http:// or https://"
+        exit 1
+    fi
+}
+
+# Check if running as root
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This script must be run as root"
+        exit 1
+    fi
+}
+
+# Detect distribution
+detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        DISTRO="$ID"
+        DISTRO_VERSION="$VERSION_ID"
+    else
+        DISTRO="unknown"
+        DISTRO_VERSION="unknown"
+    fi
+    log_info "Detected distribution: $DISTRO $DISTRO_VERSION"
+}
+
+# Install dependencies
+install_dependencies() {
+    log_info "Installing dependencies..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would install: lightdm lightdm-webkit2-greeter"
+        return
+    fi
+
+    case $DISTRO in
+        debian|ubuntu|linuxmint)
+            apt-get update
+            apt-get install -y lightdm lightdm-webkit2-greeter
+            ;;
+        fedora)
+            dnf install -y lightdm lightdm-webkit2-greeter
+            ;;
+        centos|rhel|rocky|almalinux)
+            # Enable EPEL for lightdm-webkit2-greeter
+            dnf install -y epel-release
+            dnf install -y lightdm lightdm-webkit2-greeter
+            ;;
+        arch|manjaro)
+            pacman -S --noconfirm lightdm lightdm-webkit2-greeter
+            ;;
+        opensuse*|sles)
+            zypper install -y lightdm lightdm-webkit2-greeter
+            ;;
+        *)
+            log_warn "Unknown distribution. Please install lightdm-webkit2-greeter manually."
+            ;;
+    esac
+
+    log_success "Dependencies installed"
+}
+
+# Install greeter theme
+install_theme() {
+    log_info "Installing Open Bastion greeter theme..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would copy greeter files to $THEME_DIR"
+        return
+    fi
+
+    # Create theme directory
+    mkdir -p "$THEME_DIR"
+
+    # Find source files
+    local src_dir=""
+    for dir in /usr/share/open-bastion/lightdm/greeter \
+               /usr/local/share/open-bastion/lightdm/greeter \
+               "$(dirname "$0")/../lightdm/greeter"; do
+        if [[ -d "$dir" ]]; then
+            src_dir="$dir"
+            break
+        fi
+    done
+
+    if [[ -z "$src_dir" ]]; then
+        log_error "Could not find greeter theme source files"
+        exit 1
+    fi
+
+    # Copy theme files
+    cp -r "$src_dir"/* "$THEME_DIR/"
+
+    # Create index.theme file
+    cat > "$THEME_DIR/index.theme" << EOF
+[theme]
+name=Open Bastion
+author=Linagora
+version=1.0
+description=Open Bastion SSO greeter for LightDM
+EOF
+
+    log_success "Greeter theme installed to $THEME_DIR"
+}
+
+# Configure LightDM
+configure_lightdm() {
+    log_info "Configuring LightDM..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would configure LightDM to use webkit2-greeter"
+        return
+    fi
+
+    # Configure LightDM to use webkit2-greeter
+    local lightdm_conf="/etc/lightdm/lightdm.conf"
+    if [[ -f "$lightdm_conf" ]] && ! $FORCE; then
+        if grep -q "greeter-session" "$lightdm_conf"; then
+            log_warn "$lightdm_conf already configured, use --force to overwrite"
+        else
+            # Add greeter-session to existing config
+            sed -i '/^\[Seat:\*\]/a greeter-session=lightdm-webkit2-greeter' "$lightdm_conf"
+        fi
+    else
+        cat > "$lightdm_conf" << EOF
+[Seat:*]
+greeter-session=lightdm-webkit2-greeter
+EOF
+    fi
+
+    # Configure webkit2-greeter
+    if [[ -f "$GREETER_CONFIG" ]] && ! $FORCE; then
+        log_warn "$GREETER_CONFIG already exists, use --force to overwrite"
+    else
+        cat > "$GREETER_CONFIG" << EOF
+[greeter]
+webkit_theme = open-bastion
+debug_mode = false
+secure_context_localhost = true
+
+[open-bastion]
+portal_url = $PORTAL_URL
+desktop_login_path = /desktop/login
+check_online_interval = 30000
+offline_mode_enabled = $OFFLINE_MODE
+EOF
+    fi
+
+    log_success "LightDM configured"
+}
+
+# Configure PAM
+configure_pam() {
+    log_info "Configuring PAM for desktop authentication..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would configure PAM for lightdm service"
+        return
+    fi
+
+    # Ensure open-bastion config directory exists
+    mkdir -p "$OB_CONFIG_DIR"
+
+    # Create or update open-bastion config for desktop mode
+    if [[ ! -f "$OB_CONFIG_FILE" ]] || $FORCE; then
+        cat > "$OB_CONFIG_FILE" << EOF
+# Open Bastion Configuration for Desktop SSO
+# Generated by ob-desktop-setup
+
+portal_url = $PORTAL_URL
+
+# Enable OAuth2 token authentication for desktop login
+oauth2_token_auth = true
+oauth2_token_min_ttl = 60
+
+# Cache settings
+cache_enabled = true
+cache_dir = /var/cache/open-bastion
+cache_ttl = 300
+
+# Offline mode
+auth_cache_enabled = $OFFLINE_MODE
+
+# Logging
+log_level = warn
+audit_enabled = true
+EOF
+        chmod 600 "$OB_CONFIG_FILE"
+        log_success "Created $OB_CONFIG_FILE"
+    else
+        log_warn "$OB_CONFIG_FILE already exists, use --force to overwrite"
+    fi
+
+    # Configure PAM for lightdm
+    local pam_lightdm="${PAM_CONFIG_DIR}/lightdm"
+    if [[ -f "$pam_lightdm" ]] && ! $FORCE; then
+        if grep -q "pam_openbastion" "$pam_lightdm"; then
+            log_info "PAM already configured for lightdm"
+        else
+            log_warn "$pam_lightdm exists but doesn't include pam_openbastion"
+            log_warn "Please add the following line manually:"
+            echo "auth    sufficient    pam_openbastion.so oauth2_token_auth"
+        fi
+    else
+        # Backup existing config
+        if [[ -f "$pam_lightdm" ]]; then
+            cp "$pam_lightdm" "${pam_lightdm}.bak"
+            log_info "Backed up existing PAM config to ${pam_lightdm}.bak"
+        fi
+
+        cat > "$pam_lightdm" << EOF
+# PAM configuration for LightDM with Open Bastion SSO
+#
+# This configuration uses OAuth2 tokens from the LLNG greeter
+
+# Open Bastion authentication (OAuth2 token from greeter)
+auth    sufficient    pam_openbastion.so oauth2_token_auth
+
+# Fallback to standard authentication (for offline mode or local accounts)
+auth    include       system-auth
+
+# Account management
+account sufficient    pam_openbastion.so
+account include       system-auth
+
+# Session management
+session optional      pam_openbastion.so
+session include       system-auth
+EOF
+        log_success "Configured PAM for lightdm"
+    fi
+}
+
+# Configure systemd to use LightDM
+configure_display_manager() {
+    log_info "Configuring display manager..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would set lightdm as default display manager"
+        return
+    fi
+
+    # Check if systemd is available
+    if command -v systemctl &> /dev/null; then
+        # Disable other display managers
+        for dm in gdm gdm3 sddm lxdm; do
+            if systemctl is-enabled "$dm" &> /dev/null; then
+                systemctl disable "$dm"
+                log_info "Disabled $dm"
+            fi
+        done
+
+        # Enable lightdm
+        systemctl enable lightdm
+        log_success "LightDM enabled as default display manager"
+    else
+        log_warn "Systemd not available, please configure display manager manually"
+    fi
+}
+
+# Create cache directories
+create_directories() {
+    log_info "Creating required directories..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would create cache directories"
+        return
+    fi
+
+    mkdir -p /var/cache/open-bastion
+    chmod 750 /var/cache/open-bastion
+
+    if $OFFLINE_MODE; then
+        mkdir -p /var/cache/open-bastion/auth
+        chmod 700 /var/cache/open-bastion/auth
+    fi
+
+    mkdir -p /var/log/open-bastion
+    chmod 750 /var/log/open-bastion
+
+    log_success "Directories created"
+}
+
+# Test connectivity to portal
+test_connectivity() {
+    log_info "Testing connectivity to $PORTAL_URL..."
+
+    if $DRY_RUN; then
+        log_info "[DRY-RUN] Would test connectivity to portal"
+        return
+    fi
+
+    if curl -s --connect-timeout 5 "$PORTAL_URL/desktop/login" > /dev/null 2>&1; then
+        log_success "Successfully connected to portal"
+    else
+        log_warn "Could not connect to portal. Please verify the URL and network configuration."
+    fi
+}
+
+# Print summary
+print_summary() {
+    echo ""
+    echo "=============================================="
+    echo "     Open Bastion Desktop SSO Setup"
+    echo "=============================================="
+    echo ""
+    echo "Configuration Summary:"
+    echo "  Portal URL:       $PORTAL_URL"
+    echo "  Theme Directory:  $THEME_DIR"
+    echo "  Offline Mode:     $OFFLINE_MODE"
+    echo ""
+
+    if $DRY_RUN; then
+        echo "This was a dry run. No changes were made."
+    else
+        echo "Setup complete!"
+        echo ""
+        echo "Next steps:"
+        echo "  1. Restart LightDM: systemctl restart lightdm"
+        echo "  2. Or reboot the system"
+        echo ""
+        echo "If you encounter issues:"
+        echo "  - Check logs: journalctl -u lightdm"
+        echo "  - Check PAM logs: journalctl | grep pam_openbastion"
+        echo "  - Verify portal connectivity: curl $PORTAL_URL/desktop/login"
+    fi
+    echo ""
+}
+
+# Main
+main() {
+    echo ""
+    echo "Open Bastion Desktop SSO Setup"
+    echo "=============================="
+    echo ""
+
+    parse_args "$@"
+
+    if ! $DRY_RUN; then
+        check_root
+    fi
+
+    detect_distro
+    install_dependencies
+    install_theme
+    configure_lightdm
+    configure_pam
+    configure_display_manager
+    create_directories
+    test_connectivity
+    print_summary
+}
+
+main "$@"
