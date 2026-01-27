@@ -470,6 +470,11 @@ sub _validateCallbackUrl {
     # Must start with http:// or https://
     return 0 unless $url =~ m{^https?://};
 
+    # Reject URLs with credentials (user:pass@ or user@ before host)
+    # This prevents bypass attacks like http://localhost:fake@attacker.com/
+    # where "localhost:fake" becomes credentials and attacker.com is the real host
+    return 0 if $url =~ m{^https?://[^/]*@};
+
     # Get allowed callback patterns from config
     my $allowed = $self->conf->{desktopLoginAllowedCallbacks} || [];
 
