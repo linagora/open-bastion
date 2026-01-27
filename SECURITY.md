@@ -497,46 +497,105 @@ These parameters follow OWASP guidelines for high-security password storage.
 
 **Data Encryption (AES-256-GCM):**
 
+```
+File format:
+[Magic: OBCRED01 (8 bytes)][AES-256-GCM encrypted JSON]
+```
+
 | Component | Description |
 |-----------|-------------|
 | Algorithm | AES-256-GCM authenticated encryption |
-| Key derivation | PBKDF2-SHA256 (100,000 iterations) |
-| Key material | Machine-id + random salt |
+| Key source | Root-only key file (`/etc/open-bastion/cache.key`), fallback to machine-id derivation |
+| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-file salt |
 | IV | 12 bytes, random per encryption |
 | Auth tag | 16 bytes, prevents tampering |
 
+**GCM authentication** ensures any tampering (bit flips, truncation) is detected
+and the entry is rejected.
+
 ### Machine Binding
 
-The encryption key is derived from `/etc/machine-id`, ensuring:
+The encryption key is derived from a root-only key file or `/etc/machine-id`, ensuring:
 
 - **Portability prevention**: Cache files are useless on other machines
 - **Cloning detection**: VM clones with same machine-id must re-enroll
-- **Hardware binding**: Physical theft of disk provides no access
+- **Hardware binding**: Physical theft of disk provides no access without key file
 
-**Impact of machine-id change:**
+**Impact of machine-id/key change:**
 - All cached credentials become permanently unreadable
 - Users must authenticate online to re-cache credentials
 - No security risk (encrypted data remains encrypted)
+
+### Cache Entry Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Stored: Successful online auth
+    Stored --> Verified: Correct password (offline)
+    Stored --> Failed: Wrong password
+    Failed --> Failed: Increment failures
+    Failed --> Locked: Max attempts reached
+    Locked --> Stored: Lockout expires
+    Stored --> Expired: TTL exceeded
+    Expired --> [*]: Entry removed
+    Verified --> [*]: User authenticated
+```
 
 ### Brute Force Mitigation
 
 | Protection | Description |
 |------------|-------------|
 | Per-user lockout | 5 failed attempts triggers lockout |
-| Lockout duration | 5 minutes (configurable) |
-| Failure persistence | Stored encrypted in cache file |
+| Lockout duration | 5 minutes |
+| Failure persistence | Stored encrypted in cache file (`failed_attempts`, `locked_until`) |
 | Timing attack prevention | Constant-time hash comparison |
+
+Lockout state is stored within the encrypted cache entry, ensuring it cannot be
+reset by file manipulation.
+
+### Error Codes
+
+The greeter and PAM module communicate via structured error codes
+(must match `include/offline_cache.h`):
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | OK | Success |
+| -1 | NOMEM | Out of memory |
+| -2 | IO | File system error |
+| -3 | CRYPTO | Decryption failed |
+| -4 | NOTFOUND | User not in cache |
+| -5 | EXPIRED | Cache entry expired |
+| -6 | LOCKED | Account locked out |
+| -7 | INVALID | Invalid cache data |
+| -8 | PASSWORD | Password mismatch |
+
+The PAM module sends structured messages (`OFFLINE_ERROR:code[:locktime]`) via
+PAM conversation so the greeter can display appropriate feedback.
+
+### File System Security
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Directory permissions | 0700 (owner only) |
+| File permissions | 0600 (owner read/write) |
+| Symlink protection | O_NOFOLLOW on all opens |
+| Race condition | Atomic file operations (rename) |
+| Filename | SHA-256("cred:username") to prevent enumeration |
+| Secure deletion | `shred` used by admin tool |
 
 ### Security Boundaries
 
 | Threat Vector | Protection |
 |---------------|------------|
-| Cache file theft | AES-256-GCM + machine binding |
+| Cache file theft | AES-256-GCM + machine/key binding |
 | Memory analysis | Secure memory clearing (explicit_bzero/sodium_memzero) |
 | Timing attacks | Constant-time comparison for hashes |
 | Symlink attacks | O_NOFOLLOW on all file operations |
 | Race conditions | Atomic file operations (rename) |
 | Privilege escalation | Cache directory is 0700 root-owned |
+| Lockout bypass | Lockout state encrypted in cache |
+| User enumeration | SHA-256 hashed filenames |
 
 ### Operational Considerations
 
@@ -563,6 +622,36 @@ touch /etc/open-bastion/force_online
 ob-cache-admin invalidate-all
 ```
 
+### Administrative Controls
+
+The `ob-cache-admin` tool provides secure cache management:
+
+```bash
+# List cached credentials (metadata only, no secrets)
+ob-cache-admin list
+
+# Show details for a specific user
+ob-cache-admin show username
+
+# Invalidate specific user's cache (secure deletion)
+ob-cache-admin invalidate username
+
+# Invalidate all cached credentials
+ob-cache-admin invalidate-all
+
+# Unlock a locked account
+ob-cache-admin unlock username
+
+# Remove invalid/orphaned files
+ob-cache-admin cleanup
+```
+
+**Security notes:**
+- Requires root privileges (cache files owned by root)
+- Never displays passwords or hashes
+- Uses `shred` for secure file deletion
+- Unlock cannot modify encrypted lockout state directly; offers invalidation instead
+
 ### Audit and Monitoring
 
 Offline authentication events are logged to:
@@ -573,6 +662,22 @@ Look for:
 - `offline_auth_success`: User authenticated via cache
 - `offline_auth_failure`: Failed offline authentication attempt
 - `offline_cache_locked`: User locked out due to failed attempts
+
+### Recommendations
+
+1. **Generate a key file**: Use `ob-desktop-setup --offline` or create manually
+   (`dd if=/dev/urandom of=/etc/open-bastion/cache.key bs=32 count=1`)
+
+2. **Set appropriate TTL**: Default 7 days; reduce for high-security environments
+
+3. **Enable disk encryption**: Use LUKS or similar for the system drive
+
+4. **Monitor lockouts**: Check `ob-cache-admin stats` for unusual patterns
+
+5. **Regular cleanup**: Run `ob-cache-admin cleanup` periodically via cron
+
+6. **Disable when not needed**: Set `auth_cache_enabled = false` to eliminate
+   the attack surface entirely
 
 ## Threat Mitigations
 
