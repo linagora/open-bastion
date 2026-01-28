@@ -414,14 +414,15 @@ sub _generateAndReturnToken {
         }
 
         # Build redirect URL with token in fragment (not query params for security)
+        # All values are URI-escaped to prevent fragment parsing issues
         my $sep = $callback =~ /#/ ? '&' : '#';
         my $redirect_url = $callback
           . $sep
-          . "access_token=$token->{access_token}"
+          . "access_token=" . uri_escape($token->{access_token})
           . "&token_type=Bearer"
-          . "&expires_in=$token->{expires_in}"
-          . "&user=$user";
-        $redirect_url .= "&state=$state" if $state;
+          . "&expires_in=" . uri_escape($token->{expires_in})
+          . "&user=" . uri_escape($user);
+        $redirect_url .= "&state=" . uri_escape($state) if $state;
 
         # Return HTML page that sends message to parent window
         # Build JSON message with proper encoding to prevent XSS
