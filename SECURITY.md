@@ -477,6 +477,104 @@ shell = /bin/bash
 home = /var/lib/ansible
 ```
 
+## Offline Credential Cache Security
+
+The offline cache enables Desktop SSO authentication when the LLNG server is unreachable.
+This section describes the security architecture and considerations.
+
+### Cryptographic Design
+
+**Password Hashing (Argon2id):**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Memory cost | 64 MiB | Prevents GPU/ASIC attacks |
+| Iterations | 3 | Balance of security and latency |
+| Parallelism | 4 | Utilizes multi-core CPUs |
+| Hash length | 32 bytes | 256-bit output |
+| Salt length | 16 bytes | Unique per user, random |
+
+These parameters follow OWASP guidelines for high-security password storage.
+
+**Data Encryption (AES-256-GCM):**
+
+| Component | Description |
+|-----------|-------------|
+| Algorithm | AES-256-GCM authenticated encryption |
+| Key derivation | PBKDF2-SHA256 (100,000 iterations) |
+| Key material | Machine-id + random salt |
+| IV | 12 bytes, random per encryption |
+| Auth tag | 16 bytes, prevents tampering |
+
+### Machine Binding
+
+The encryption key is derived from `/etc/machine-id`, ensuring:
+
+- **Portability prevention**: Cache files are useless on other machines
+- **Cloning detection**: VM clones with same machine-id must re-enroll
+- **Hardware binding**: Physical theft of disk provides no access
+
+**Impact of machine-id change:**
+- All cached credentials become permanently unreadable
+- Users must authenticate online to re-cache credentials
+- No security risk (encrypted data remains encrypted)
+
+### Brute Force Mitigation
+
+| Protection | Description |
+|------------|-------------|
+| Per-user lockout | 5 failed attempts triggers lockout |
+| Lockout duration | 5 minutes (configurable) |
+| Failure persistence | Stored encrypted in cache file |
+| Timing attack prevention | Constant-time hash comparison |
+
+### Security Boundaries
+
+| Threat Vector | Protection |
+|---------------|------------|
+| Cache file theft | AES-256-GCM + machine binding |
+| Memory analysis | Secure memory clearing (explicit_bzero/sodium_memzero) |
+| Timing attacks | Constant-time comparison for hashes |
+| Symlink attacks | O_NOFOLLOW on all file operations |
+| Race conditions | Atomic file operations (rename) |
+| Privilege escalation | Cache directory is 0700 root-owned |
+
+### Operational Considerations
+
+**When to enable offline mode:**
+- Corporate workstations with network reliability concerns
+- Laptops used in areas with poor connectivity
+- Business continuity during LLNG maintenance
+
+**When NOT to enable offline mode:**
+- High-security environments requiring real-time authorization
+- Shared/public workstations
+- Systems requiring immediate access revocation
+
+**Emergency procedures:**
+
+```bash
+# Immediate user revocation
+ob-cache-admin invalidate username
+
+# Force online-only authentication
+touch /etc/open-bastion/force_online
+
+# Complete cache flush
+ob-cache-admin invalidate-all
+```
+
+### Audit and Monitoring
+
+Offline authentication events are logged to:
+- Syslog (via PAM)
+- Structured audit log (`/var/log/open-bastion/audit.json`)
+
+Look for:
+- `offline_auth_success`: User authenticated via cache
+- `offline_auth_failure`: Failed offline authentication attempt
+- `offline_cache_locked`: User locked out due to failed attempts
+
 ## Threat Mitigations
 
 | Threat | Mitigation |
@@ -495,6 +593,9 @@ home = /var/lib/ansible
 | Client secret exposure | JWT Client Assertion (RFC 7523) - secret never transmitted |
 | Bastion bypass | Bastion JWT verification on backends (RS256 signed) |
 | Direct backend access | JWT required + JWKS-based offline verification |
+| Offline cache theft | AES-256-GCM encryption + machine-id binding |
+| Offline brute force | Argon2id + per-user lockout after 5 attempts |
+| Stale offline credentials | Configurable TTL (default 7 days) |
 
 ## Security Reporting
 

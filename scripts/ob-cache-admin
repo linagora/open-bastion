@@ -1,0 +1,506 @@
+#!/bin/bash
+#
+# ob-cache-admin - Manage Open Bastion offline credential cache
+#
+# This script provides administrative commands for managing the
+# offline credential cache used for Desktop SSO.
+#
+# Usage: ob-cache-admin <command> [options]
+#
+# Copyright (C) 2025 Linagora
+# License: AGPL-3.0
+
+set -e
+
+# Configuration
+CACHE_DIR="${OB_CACHE_DIR:-/var/cache/open-bastion/credentials}"
+CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Magic header for cache files
+CACHE_MAGIC="OBCRED01"
+
+# Logging
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# Check root
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This command must be run as root"
+        exit 1
+    fi
+}
+
+# Load cache directory from config
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        local dir
+        dir=$(grep -E "^\s*offline_cache_dir\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' | head -1)
+        if [[ -n "$dir" ]]; then
+            CACHE_DIR="$dir"
+        fi
+    fi
+}
+
+# Print usage
+usage() {
+    cat << 'EOF'
+Usage: ob-cache-admin <command> [arguments]
+
+Manage the Open Bastion offline credential cache for Desktop SSO.
+
+Commands:
+  stats                  Show cache statistics
+  list                   List all cached users
+  show <username>        Show details for a cached user
+  invalidate <username>  Remove cached credentials for a user
+  invalidate-all         Remove all cached credentials (emergency)
+  unlock <username>      Reset failed attempts for a locked user
+  cleanup                Remove expired cache entries
+  help                   Show this help message
+
+Options:
+  -c, --config FILE      Use alternate config file
+  -d, --cache-dir DIR    Override cache directory
+  -q, --quiet            Quiet mode (less output)
+  -h, --help             Show this help message
+
+Examples:
+  ob-cache-admin stats
+  ob-cache-admin list
+  ob-cache-admin show jdoe
+  ob-cache-admin invalidate jdoe
+  ob-cache-admin unlock jdoe
+  ob-cache-admin cleanup
+
+Environment Variables:
+  OB_CACHE_DIR     Override cache directory
+  OB_CONFIG_FILE   Override config file path
+
+EOF
+    exit 0
+}
+
+# Count cache files
+count_cache_files() {
+    local count=0
+    if [[ -d "$CACHE_DIR" ]]; then
+        count=$(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f 2>/dev/null | wc -l)
+    fi
+    echo "$count"
+}
+
+# Get cache file for a user (hashed filename)
+get_cache_file() {
+    local user="$1"
+    # Hash the username the same way the C code does
+    local hash
+    hash=$(echo -n "cred:$user" | sha256sum | cut -c1-32)
+    echo "$CACHE_DIR/$hash.cred"
+}
+
+# Check if cache file is valid (has magic header)
+is_valid_cache() {
+    local file="$1"
+    if [[ ! -f "$file" ]]; then
+        return 1
+    fi
+    local magic
+    magic=$(head -c 8 "$file" 2>/dev/null)
+    [[ "$magic" == "$CACHE_MAGIC" ]]
+}
+
+# Stats command
+cmd_stats() {
+    check_root
+
+    echo ""
+    echo "Open Bastion Offline Cache Statistics"
+    echo "======================================"
+    echo ""
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        log_warn "Cache directory does not exist: $CACHE_DIR"
+        echo ""
+        echo "Total entries:  0"
+        echo "Active:         0"
+        echo "Expired:        0"
+        echo "Locked:         0"
+        echo ""
+        return 0
+    fi
+
+    local total=0
+    local valid=0
+    local expired=0
+    local locked=0
+    local now
+    now=$(date +%s)
+
+    while IFS= read -r -d '' file; do
+        ((total++)) || true
+
+        if is_valid_cache "$file"; then
+            ((valid++)) || true
+            # Note: We can't easily check expiration without decryption
+            # The C library handles this; here we just count valid files
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null)
+
+    echo "Cache directory: $CACHE_DIR"
+    echo ""
+    echo "Total entries:   $total"
+    echo "Valid format:    $valid"
+    echo ""
+
+    # Show disk usage
+    if [[ $total -gt 0 ]]; then
+        local size
+        size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1)
+        echo "Disk usage:      $size"
+    fi
+    echo ""
+
+    # Show oldest and newest files
+    if [[ $total -gt 0 ]]; then
+        local oldest newest
+        oldest=$(ls -t "$CACHE_DIR"/*.cred 2>/dev/null | tail -1)
+        newest=$(ls -t "$CACHE_DIR"/*.cred 2>/dev/null | head -1)
+
+        if [[ -n "$oldest" ]]; then
+            echo "Oldest entry:    $(stat -c '%y' "$oldest" 2>/dev/null | cut -d'.' -f1)"
+        fi
+        if [[ -n "$newest" ]]; then
+            echo "Newest entry:    $(stat -c '%y' "$newest" 2>/dev/null | cut -d'.' -f1)"
+        fi
+        echo ""
+    fi
+}
+
+# List command
+cmd_list() {
+    check_root
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        log_warn "Cache directory does not exist: $CACHE_DIR"
+        return 0
+    fi
+
+    local count=0
+    echo ""
+    echo "Cached credential entries:"
+    echo "--------------------------"
+
+    while IFS= read -r -d '' file; do
+        if is_valid_cache "$file"; then
+            local basename
+            basename=$(basename "$file" .cred)
+            local mtime
+            mtime=$(stat -c '%y' "$file" 2>/dev/null | cut -d'.' -f1)
+            local size
+            size=$(stat -c '%s' "$file" 2>/dev/null)
+
+            printf "  %-32s  %s  (%d bytes)\n" "$basename" "$mtime" "$size"
+            ((count++)) || true
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null | sort -z)
+
+    echo ""
+    echo "Total: $count entries"
+    echo ""
+    echo "Note: Filenames are SHA256 hashes of usernames."
+    echo "Use 'ob-cache-admin show <username>' to check a specific user."
+    echo ""
+}
+
+# Show command
+cmd_show() {
+    local user="$1"
+
+    if [[ -z "$user" ]]; then
+        log_error "Usage: ob-cache-admin show <username>"
+        exit 1
+    fi
+
+    check_root
+
+    local cache_file
+    cache_file=$(get_cache_file "$user")
+
+    echo ""
+    echo "Cache entry for user: $user"
+    echo "=========================="
+    echo ""
+
+    if [[ ! -f "$cache_file" ]]; then
+        echo -e "Status:     ${YELLOW}NOT CACHED${NC}"
+        echo "Cache file: $cache_file"
+        echo ""
+        echo "This user does not have cached credentials."
+        echo "They must authenticate online first."
+        echo ""
+        return 0
+    fi
+
+    if ! is_valid_cache "$cache_file"; then
+        echo -e "Status:     ${RED}INVALID${NC}"
+        echo "Cache file: $cache_file"
+        echo ""
+        echo "The cache file exists but has invalid format."
+        echo "It will be ignored by the PAM module."
+        echo ""
+        return 1
+    fi
+
+    echo -e "Status:     ${GREEN}CACHED${NC}"
+    echo "Cache file: $cache_file"
+    echo ""
+
+    # Show file metadata
+    echo "File details:"
+    stat "$cache_file" 2>/dev/null | grep -E "Size|Access:|Modify:" | sed 's/^/  /'
+    echo ""
+
+    # Note about encrypted content
+    echo "Note: Cache content is encrypted with AES-256-GCM."
+    echo "To inspect actual entry details (expiration, lock status),"
+    echo "the PAM module must be used."
+    echo ""
+}
+
+# Invalidate command
+cmd_invalidate() {
+    local user="$1"
+
+    if [[ -z "$user" ]]; then
+        log_error "Usage: ob-cache-admin invalidate <username>"
+        exit 1
+    fi
+
+    check_root
+
+    local cache_file
+    cache_file=$(get_cache_file "$user")
+
+    if [[ ! -f "$cache_file" ]]; then
+        log_warn "No cached credentials found for user: $user"
+        return 0
+    fi
+
+    # Securely remove the file
+    if shred -u "$cache_file" 2>/dev/null || rm -f "$cache_file"; then
+        log_success "Invalidated cached credentials for user: $user"
+    else
+        log_error "Failed to remove cache file: $cache_file"
+        return 1
+    fi
+}
+
+# Invalidate all command
+cmd_invalidate_all() {
+    check_root
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        log_warn "Cache directory does not exist: $CACHE_DIR"
+        return 0
+    fi
+
+    local count=0
+
+    while IFS= read -r -d '' file; do
+        if shred -u "$file" 2>/dev/null || rm -f "$file"; then
+            ((count++)) || true
+        else
+            log_warn "Failed to remove: $file"
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null)
+
+    # Also remove the salt file to force new key derivation
+    local salt_file="$CACHE_DIR/.cred_salt"
+    if [[ -f "$salt_file" ]]; then
+        shred -u "$salt_file" 2>/dev/null || rm -f "$salt_file"
+    fi
+
+    log_success "Invalidated $count cached credential entries"
+}
+
+# Unlock command (reset failed attempts)
+# Note: This requires decrypting and re-encrypting the cache file,
+# which is not possible from shell. We provide a stub that explains this.
+cmd_unlock() {
+    local user="$1"
+
+    if [[ -z "$user" ]]; then
+        log_error "Usage: ob-cache-admin unlock <username>"
+        exit 1
+    fi
+
+    check_root
+
+    local cache_file
+    cache_file=$(get_cache_file "$user")
+
+    if [[ ! -f "$cache_file" ]]; then
+        log_warn "No cached credentials found for user: $user"
+        return 0
+    fi
+
+    # The cache files are encrypted, so we can't modify them from shell.
+    # The best we can do is note when the lockout expires (typically 5 min).
+    log_warn "Cannot unlock from shell (cache is encrypted)"
+    echo ""
+    echo "Options to unlock user '$user':"
+    echo "  1. Wait for lockout to expire (default: 5 minutes)"
+    echo "  2. Invalidate and re-cache: ob-cache-admin invalidate $user"
+    echo "     (User must authenticate online next time)"
+    echo "  3. Force online auth: touch /etc/open-bastion/force_online"
+    echo ""
+
+    # Offer to invalidate instead
+    read -rp "Would you like to invalidate the cache entry instead? [y/N] " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        cmd_invalidate "$user"
+    fi
+}
+
+# Cleanup command
+cmd_cleanup() {
+    check_root
+
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        log_warn "Cache directory does not exist: $CACHE_DIR"
+        return 0
+    fi
+
+    local removed=0
+
+    # Remove files without valid magic header
+    while IFS= read -r -d '' file; do
+        if ! is_valid_cache "$file"; then
+            if rm -f "$file"; then
+                ((removed++)) || true
+                log_info "Removed invalid: $(basename "$file")"
+            fi
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null)
+
+    # Remove empty files
+    while IFS= read -r -d '' file; do
+        if rm -f "$file"; then
+            ((removed++)) || true
+            log_info "Removed empty: $(basename "$file")"
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -empty -print0 2>/dev/null)
+
+    # Remove orphaned temp files
+    while IFS= read -r -d '' file; do
+        if rm -f "$file"; then
+            ((removed++)) || true
+            log_info "Removed temp: $(basename "$file")"
+        fi
+    done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.tmp*" -type f -print0 2>/dev/null)
+
+    if [[ $removed -gt 0 ]]; then
+        log_success "Cleaned up $removed invalid/temp files"
+    else
+        log_success "Cache is clean, no invalid entries found"
+    fi
+
+    echo ""
+    echo "Note: Expired entries are checked by the PAM module at runtime."
+    echo "This command only removes obviously invalid files."
+    echo ""
+}
+
+# Parse arguments
+QUIET=false
+COMMAND=""
+CMD_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        -d|--cache-dir)
+            CACHE_DIR="$2"
+            shift 2
+            ;;
+        -q|--quiet)
+            QUIET=true
+            shift
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        stats|list|show|invalidate|invalidate-all|unlock|cleanup)
+            COMMAND="$1"
+            shift
+            # Collect remaining positional arguments for the command
+            CMD_ARGS=("$@")
+            break
+            ;;
+        *)
+            log_error "Unknown option or command: $1"
+            echo "Use 'ob-cache-admin help' for usage information."
+            exit 1
+            ;;
+    esac
+done
+
+# Load configuration
+load_config
+
+# Execute command
+case "${COMMAND:-}" in
+    stats)
+        cmd_stats
+        ;;
+    list)
+        cmd_list
+        ;;
+    show)
+        cmd_show "${CMD_ARGS[0]:-}"
+        ;;
+    invalidate)
+        cmd_invalidate "${CMD_ARGS[0]:-}"
+        ;;
+    invalidate-all)
+        echo ""
+        log_warn "This will remove ALL cached credentials!"
+        echo "All users will need to authenticate online next time."
+        echo ""
+        read -rp "Are you sure? Type 'yes' to confirm: " answer
+        if [[ "$answer" == "yes" ]]; then
+            cmd_invalidate_all
+        else
+            echo "Aborted."
+            exit 1
+        fi
+        ;;
+    unlock)
+        cmd_unlock "${CMD_ARGS[0]:-}"
+        ;;
+    cleanup)
+        cmd_cleanup
+        ;;
+    "")
+        usage
+        ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        echo "Use 'ob-cache-admin help' for usage information."
+        exit 1
+        ;;
+esac

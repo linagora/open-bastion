@@ -26,3 +26,21 @@ Description: Open Bastion PAM/NSS module for SSH bastion authentication
  This PAM module enables Linux servers to authenticate users via
  Open Bastion, supporting both token-based authentication and
  key-based authorization with server groups support.
+
+Package: lightdm-openbastion-greeter
+Architecture: all
+Depends: ${misc:Depends}
+ , lightdm
+ , lightdm-webkit2-greeter
+ , libpam-openbastion
+Recommends: fonts-noto
+Description: Open Bastion LightDM greeter for Desktop SSO
+ A LightDM webkit2 greeter theme that enables desktop workstations to
+ authenticate users via LemonLDAP::NG Single Sign-On.
+ .
+ Features:
+  - SSO authentication via embedded LLNG portal iframe
+  - Offline mode with cached credentials when server is unreachable
+  - Multi-factor authentication support (TOTP, WebAuthn, etc.)
+  - Session selection for multiple desktop environments
+  - Modern, responsive design

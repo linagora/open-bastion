@@ -43,6 +43,7 @@
 #include "jti_cache.h"
 #include "crowdsec.h"
 #include "service_account.h"
+#include "offline_cache.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -73,6 +74,7 @@ typedef struct {
     crowdsec_context_t *crowdsec;  /* CrowdSec bouncer/watcher */
     crowdsec_action_t crowdsec_action;  /* Parsed CrowdSec action (reject/warn) */
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
+    offline_cache_t *offline_cache;  /* Offline credential cache for Desktop SSO */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -350,6 +352,9 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->auth_cache) {
             auth_cache_destroy(ob_data->auth_cache);
         }
+        if (ob_data->offline_cache) {
+            offline_cache_destroy(ob_data->offline_cache);
+        }
         if (ob_data->bastion_jwt_verifier) {
             bastion_jwt_verifier_destroy(ob_data->bastion_jwt_verifier);
         }
@@ -562,6 +567,23 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         data->auth_cache = auth_cache_init(data->config.auth_cache_dir);
         if (!data->auth_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize auth cache, offline mode disabled");
+        }
+    }
+
+    /* Initialize offline credential cache (for Desktop SSO offline mode) */
+    if (data->config.offline_cache_enabled) {
+        const char *offline_dir = data->config.offline_cache_dir;
+        if (!offline_dir) {
+            offline_dir = "/var/cache/open-bastion/credentials";
+        }
+        data->offline_cache = offline_cache_init(offline_dir, data->config.offline_cache_key_file);
+        if (!data->offline_cache) {
+            OB_LOG_WARN(pamh, "Failed to initialize offline credential cache, offline auth disabled");
+        } else {
+            /* Apply configured lockout parameters (0 = use compile-time defaults) */
+            offline_cache_set_lockout(data->offline_cache,
+                                      data->config.offline_cache_max_failures,
+                                      data->config.offline_cache_lockout);
         }
     }
 
@@ -1274,77 +1296,288 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     }
 
     /*
-     * Verify the one-time PAM token via /pam/verify
-     * The token is destroyed after successful verification (single-use).
-     * Note: Cache is not used for one-time tokens.
+     * Token verification: two modes available
+     *
+     * 1. Default mode (oauth2_token_auth=false):
+     *    Verify the one-time PAM token via /pam/verify
+     *    The token is destroyed after successful verification (single-use).
+     *
+     * 2. OAuth2 token mode (oauth2_token_auth=true):
+     *    Introspect a standard OAuth2 access token via /oauth2/introspect
+     *    Used for Desktop SSO (LightDM greeter) where the user authenticates
+     *    via LLNG iframe and receives a reusable OAuth2 token.
      */
     ob_response_t response = {0};
-    if (ob_verify_token(data->client, password, &response) != 0) {
-        OB_LOG_ERR(pamh, "Token verification failed: %s",
-                ob_client_error(data->client));
 
-        if (audit_initialized) {
-            audit_event.event_type = AUDIT_SERVER_ERROR;
-            audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
-            audit_event.reason = ob_client_error(data->client);
-            audit_event_set_end_time(&audit_event);
-            audit_log_event(data->audit, &audit_event);
+    if (data->config.oauth2_token_auth) {
+        /*
+         * OAuth2 token authentication mode (Desktop SSO)
+         * Introspect the access token to verify it's valid and get user info.
+         */
+        OB_LOG_DEBUG(pamh, "Using OAuth2 token authentication mode");
+
+        /*
+         * Check if the password carries the OFFLINE: prefix set by the
+         * greeter's offline form.  When present the user typed a real
+         * password (not an OAuth2 token), so we can skip token
+         * introspection and go straight to offline cache verification.
+         */
+        const char *offline_prefix = "OFFLINE:";
+        const size_t prefix_len = 8;
+        bool is_offline_password = (strncmp(password, offline_prefix, prefix_len) == 0);
+        const char *actual_password = is_offline_password ? password + prefix_len : password;
+
+        if (is_offline_password && data->offline_cache) {
+            /* Greeter signalled offline mode – verify against cached credentials */
+            OB_LOG_INFO(pamh, "Offline password received, verifying cached credentials for %s", user);
+
+            offline_cache_entry_t offline_entry;
+            int offline_result = offline_cache_verify(data->offline_cache, user, actual_password, &offline_entry);
+
+            if (offline_result == OFFLINE_CACHE_OK) {
+                OB_LOG_INFO(pamh, "Offline authentication successful for user %s", user);
+
+                if (offline_entry.gecos) {
+                    char *gecos_copy = strdup(offline_entry.gecos);
+                    if (gecos_copy)
+                        pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
+                }
+                if (offline_entry.shell) {
+                    char *shell_copy = strdup(offline_entry.shell);
+                    if (shell_copy)
+                        pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
+                }
+                if (offline_entry.home) {
+                    char *home_copy = strdup(offline_entry.home);
+                    if (home_copy)
+                        pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
+                }
+
+                pam_set_data(pamh, "ob_offline_auth", (void *)1, NULL);
+
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_AUTH_SUCCESS;
+                    audit_event.result_code = PAM_SUCCESS;
+                    audit_event.reason = "Offline authentication (greeter offline mode)";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+
+                if (data->rate_limiter)
+                    rate_limiter_reset(data->rate_limiter, rate_key);
+
+                offline_cache_entry_free(&offline_entry);
+                return PAM_SUCCESS;
+            }
+
+            const char *offline_reason = offline_cache_strerror(offline_result);
+            OB_LOG_INFO(pamh, "Offline authentication failed for %s: %s", user, offline_reason);
+
+            if (offline_result == OFFLINE_CACHE_ERR_PASSWORD && data->rate_limiter)
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                char reason_buf[256];
+                snprintf(reason_buf, sizeof(reason_buf), "Offline auth failed: %s", offline_reason);
+                char *reason = strdup(reason_buf);
+                if (reason) {
+                    audit_event.reason = reason;
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                    free(reason);
+                    audit_event.reason = NULL;
+                }
+            }
+
+            return (offline_result == OFFLINE_CACHE_ERR_LOCKED) ? PAM_MAXTRIES : PAM_AUTH_ERR;
         }
 
-        return PAM_AUTHINFO_UNAVAIL;
-    }
-
-    /* Check if token is valid (active field from response) */
-    if (!response.active) {
-        OB_LOG_INFO(pamh, "Token is not valid for user %s: %s", user,
-                 response.reason ? response.reason : "unknown reason");
-        pam_result = PAM_AUTH_ERR;
-
-        if (data->rate_limiter) {
-            rate_limiter_record_failure(data->rate_limiter, rate_key);
+        if (is_offline_password && !data->offline_cache) {
+            OB_LOG_ERR(pamh, "Offline password received but offline cache is not enabled");
+            return PAM_AUTHINFO_UNAVAIL;
         }
 
-        /* Report auth failure to CrowdSec watcher */
-        if (data->crowdsec) {
-            crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+        if (ob_introspect_token(data->client, password, &response) != 0) {
+            /*
+             * Server unreachable - but we received an OAuth2 token (no
+             * OFFLINE: prefix), so we cannot fall back to offline cache
+             * (the token is not a password).  Return server unavailable.
+             */
+            if (data->offline_cache) {
+                OB_LOG_INFO(pamh, "Server unreachable with OAuth2 token for %s, cannot use offline cache", user);
+            }
+
+            /* No offline cache - return server unavailable */
+            OB_LOG_ERR(pamh, "OAuth2 token introspection failed: %s",
+                    ob_client_error(data->client));
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SERVER_ERROR;
+                audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+                audit_event.reason = ob_client_error(data->client);
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTHINFO_UNAVAIL;
         }
 
-        if (audit_initialized) {
-            audit_event.result_code = PAM_AUTH_ERR;
-            audit_event.reason = response.reason ? response.reason : "Token not valid";
-            audit_event_set_end_time(&audit_event);
-            audit_log_event(data->audit, &audit_event);
+        /* Check if token is active */
+        if (!response.active) {
+            OB_LOG_INFO(pamh, "OAuth2 token is not active for user %s", user);
+            pam_result = PAM_AUTH_ERR;
+
+            if (data->rate_limiter) {
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+            }
+
+            if (data->crowdsec) {
+                crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+            }
+
+            if (audit_initialized) {
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "OAuth2 token not active";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            ob_response_free(&response);
+            return pam_result;
         }
 
-        ob_response_free(&response);
-        return pam_result;
-    }
+        /* Check minimum TTL requirement (avoid accepting nearly-expired tokens) */
+        if (response.expires_in < data->config.oauth2_token_min_ttl) {
+            OB_LOG_INFO(pamh, "OAuth2 token for user %s expires too soon (%d seconds, min %d)",
+                    user, response.expires_in, data->config.oauth2_token_min_ttl);
+            pam_result = PAM_AUTH_ERR;
 
-    /* Verify user matches */
-    if (!response.user || strcmp(response.user, user) != 0) {
-        OB_LOG_WARN(pamh, "Token user mismatch: expected %s, got %s",
-                 user, response.user ? response.user : "(null)");
-        pam_result = PAM_AUTH_ERR;
+            if (data->rate_limiter) {
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+            }
 
-        if (data->rate_limiter) {
-            rate_limiter_record_failure(data->rate_limiter, rate_key);
+            if (audit_initialized) {
+                audit_event.result_code = PAM_AUTH_ERR;
+                char reason_buf[128];
+                snprintf(reason_buf, sizeof(reason_buf), "OAuth2 token expires in %d seconds (min %d)",
+                        response.expires_in, data->config.oauth2_token_min_ttl);
+                char *reason = strdup(reason_buf);
+                if (reason) {
+                    audit_event.reason = reason;
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                    free(reason);
+                    audit_event.reason = NULL;
+                }
+            }
+
+            ob_response_free(&response);
+            return pam_result;
         }
 
-        /* Report auth failure to CrowdSec watcher (potential impersonation attempt) */
-        if (data->crowdsec) {
-            crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+        /* Verify user matches (response.user comes from 'sub' claim) */
+        if (!response.user || strcmp(response.user, user) != 0) {
+            OB_LOG_WARN(pamh, "OAuth2 token user mismatch: expected %s, got %s",
+                    user, response.user ? response.user : "(null)");
+            pam_result = PAM_AUTH_ERR;
+
+            if (data->rate_limiter) {
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+            }
+
+            if (data->crowdsec) {
+                crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+            }
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SECURITY_ERROR;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "OAuth2 token user mismatch";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            ob_response_free(&response);
+            return pam_result;
         }
 
-        if (audit_initialized) {
-            audit_event.event_type = AUDIT_SECURITY_ERROR;
-            audit_event.result_code = PAM_AUTH_ERR;
-            audit_event.reason = "Token user mismatch";
-            audit_event_set_end_time(&audit_event);
-            audit_log_event(data->audit, &audit_event);
+        OB_LOG_DEBUG(pamh, "OAuth2 token verified for user %s (expires in %d seconds)",
+                user, response.expires_in);
+    } else {
+        /*
+         * Default mode: Verify the one-time PAM token via /pam/verify
+         * The token is destroyed after successful verification (single-use).
+         * Note: Cache is not used for one-time tokens.
+         */
+        if (ob_verify_token(data->client, password, &response) != 0) {
+            OB_LOG_ERR(pamh, "Token verification failed: %s",
+                    ob_client_error(data->client));
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SERVER_ERROR;
+                audit_event.result_code = PAM_AUTHINFO_UNAVAIL;
+                audit_event.reason = ob_client_error(data->client);
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTHINFO_UNAVAIL;
         }
 
-        ob_response_free(&response);
-        return pam_result;
+        /* Check if token is valid (active field from response) */
+        if (!response.active) {
+            OB_LOG_INFO(pamh, "Token is not valid for user %s: %s", user,
+                    response.reason ? response.reason : "unknown reason");
+            pam_result = PAM_AUTH_ERR;
+
+            if (data->rate_limiter) {
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+            }
+
+            /* Report auth failure to CrowdSec watcher */
+            if (data->crowdsec) {
+                crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+            }
+
+            if (audit_initialized) {
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = response.reason ? response.reason : "Token not valid";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            ob_response_free(&response);
+            return pam_result;
+        }
+
+        /* Verify user matches */
+        if (!response.user || strcmp(response.user, user) != 0) {
+            OB_LOG_WARN(pamh, "Token user mismatch: expected %s, got %s",
+                    user, response.user ? response.user : "(null)");
+            pam_result = PAM_AUTH_ERR;
+
+            if (data->rate_limiter) {
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+            }
+
+            /* Report auth failure to CrowdSec watcher (potential impersonation attempt) */
+            if (data->crowdsec) {
+                crowdsec_report_failure(data->crowdsec, client_ip, user, service);
+            }
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_SECURITY_ERROR;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Token user mismatch";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            ob_response_free(&response);
+            return pam_result;
+        }
     }
 
     /* Success - reset rate limiter */
