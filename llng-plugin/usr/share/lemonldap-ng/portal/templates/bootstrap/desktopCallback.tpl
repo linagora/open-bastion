@@ -170,9 +170,18 @@
       }
 
       // Store result in localStorage for polling-based communication
+      // SECURITY: Never persist access tokens in Web Storage (XSS risk)
       try {
         if (messageData.access_token) {
-          localStorage.setItem('desktop_login_result', JSON.stringify(message));
+          var storageMessage = {
+            type: message.type,
+            success: message.success,
+            error: message.error,
+            expires_in: message.expires_in,
+            user: message.user,
+            state: message.state
+          };
+          localStorage.setItem('desktop_login_result', JSON.stringify(storageMessage));
         }
       } catch (e) {
         console.warn('localStorage failed');

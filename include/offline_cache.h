@@ -28,8 +28,14 @@
 /* Cache format version */
 #define OFFLINE_CACHE_VERSION 1
 
-/* Argon2id parameters (OWASP recommended for high security) */
-#define ARGON2_MEMORY_KB    65536   /* 64 MiB memory cost */
+/*
+ * Argon2id parameters (OWASP recommended for high security)
+ *
+ * ARGON2_MEMORY_KB is expressed in KiB (64 MiB = 65536 KiB):
+ *   - libsodium/crypto_pwhash: convert to bytes with (size_t)ARGON2_MEMORY_KB * 1024ULL
+ *   - OpenSSL Argon2: pass ARGON2_MEMORY_KB directly (expects KiB)
+ */
+#define ARGON2_MEMORY_KB    65536   /* 64 MiB memory cost, in KiB */
 #define ARGON2_ITERATIONS   3       /* Time cost (iterations) */
 #define ARGON2_PARALLELISM  4       /* Parallelism factor */
 #define ARGON2_HASH_LEN     32      /* Output hash length */

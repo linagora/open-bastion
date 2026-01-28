@@ -485,7 +485,9 @@ sub _validateCallbackUrl {
     # Reject URLs with credentials (user:pass@ or user@ before host)
     # This prevents bypass attacks like http://localhost:fake@attacker.com/
     # where "localhost:fake" becomes credentials and attacker.com is the real host
-    return 0 if $url =~ m{^https?://[^/]*@};
+    # Match @ that appears before the first / in the authority component,
+    # accounting for optional port numbers (e.g., host:8080@attacker.com)
+    return 0 if $url =~ m{^https?://[^/?#]*@};
 
     # Get allowed callback patterns from config
     my $allowed = $self->conf->{desktopLoginAllowedCallbacks} || [];
@@ -515,8 +517,8 @@ sub _validateCallbackUrl {
 sub _loginError {
     my ( $self, $req, $message, $callback, $state ) = @_;
 
-    # If callback provided, redirect with error
-    if ($callback) {
+    # If callback provided, validate it before redirecting (prevent open redirect)
+    if ($callback && $self->_validateCallbackUrl($callback)) {
         my $sep = $callback =~ /#/ ? '&' : '#';
         my $redirect_url = $callback . $sep . "error=" . uri_escape($message);
         $redirect_url .= "&state=$state" if $state;

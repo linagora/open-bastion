@@ -167,21 +167,29 @@
       });
 
       // Check for error in URL hash
+      // Sanitize and display error from URL (max 200 chars, alphanumeric + basic punctuation)
+      function sanitizeError(raw) {
+        if (!raw) return null;
+        var decoded = decodeURIComponent(raw);
+        if (decoded.length > 200) decoded = decoded.substring(0, 200);
+        return decoded.replace(/[^\w\s.,!?:;\-()'/]/g, '');
+      }
+
       var hash = window.location.hash.substring(1);
       if (hash) {
         var params = new URLSearchParams(hash);
-        var error = params.get('error');
+        var error = sanitizeError(params.get('error'));
         if (error) {
-          errorDiv.textContent = decodeURIComponent(error);
+          errorDiv.textContent = error;
           errorDiv.classList.add('visible');
         }
       }
 
       // Check for error query parameter
       var urlParams = new URLSearchParams(window.location.search);
-      var errorParam = urlParams.get('error');
+      var errorParam = sanitizeError(urlParams.get('error'));
       if (errorParam) {
-        errorDiv.textContent = decodeURIComponent(errorParam);
+        errorDiv.textContent = errorParam;
         errorDiv.classList.add('visible');
       }
     })();

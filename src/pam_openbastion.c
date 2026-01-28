@@ -2221,7 +2221,6 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                     }
                 }
 
-                offline_cache_entry_free(&offline_entry);
                 return (offline_result == OFFLINE_CACHE_ERR_LOCKED) ? PAM_MAXTRIES : PAM_AUTH_ERR;
             }
 

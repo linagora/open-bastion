@@ -233,7 +233,7 @@ configure_lightdm() {
             log_warn "$lightdm_conf already configured, use --force to overwrite"
         else
             # Add greeter-session to existing config
-            sed -i '/^\[Seat:\*\]/a greeter-session=lightdm-webkit2-greeter' "$lightdm_conf"
+            sed -i '/^[[:space:]]*\[Seat:\*\][[:space:]]*$/a greeter-session=lightdm-webkit2-greeter' "$lightdm_conf"
         fi
     else
         cat > "$lightdm_conf" << EOF
