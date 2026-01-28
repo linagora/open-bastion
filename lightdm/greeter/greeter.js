@@ -21,8 +21,16 @@
         clockUpdateInterval: 1000,              // Update clock every second
         sessionStorageKey: 'ob_selected_session',
         offlineRetryInterval: 60000,            // Retry online check every 60s when offline
-        maxOfflineCheckRetries: 3               // Number of failed checks before switching to offline
+        maxOfflineCheckRetries: 3,              // Number of failed checks before switching to offline
+        debug: false                            // Enable debug logging (set via greeter config)
     };
+
+    // Gated debug logger - avoids leaking sensitive data in production
+    function debugLog() {
+        if (CONFIG.debug) {
+            console.log.apply(console, arguments);
+        }
+    }
 
     // State
     let isOnline = true;
@@ -58,7 +66,7 @@
      * Initialize the greeter
      */
     function init() {
-        console.log('Initializing Open Bastion Greeter');
+        debugLog('Initializing Open Bastion Greeter');
 
         // Load configuration from lightdm config if available
         loadConfig();
@@ -92,7 +100,7 @@
             switchMode('offline');
         }
 
-        console.log('Greeter initialized');
+        debugLog('Greeter initialized');
     }
 
     /**
@@ -120,7 +128,7 @@
             }
         }
 
-        console.log('Loaded config:', CONFIG);
+        debugLog('Loaded config:', CONFIG);
     }
 
     /**
@@ -263,14 +271,14 @@
         })
         .then(function() {
             if (!isOnline) {
-                console.log('Auth server is now online');
+                debugLog('Auth server is now online');
                 isOnline = true;
                 updateOnlineStatus();
             }
         })
         .catch(function() {
             if (isOnline) {
-                console.log('Auth server is offline');
+                debugLog('Auth server is offline');
                 isOnline = false;
                 updateOnlineStatus();
             }
@@ -306,7 +314,7 @@
             '?callback_url=' + encodeURIComponent(window.location.origin + '/callback') +
             '&state=' + generateState();
 
-        console.log('Loading SSO iframe:', iframeUrl);
+        debugLog('Loading SSO iframe');
         elements.iframeLoading.classList.remove('hidden');
         elements.ssoIframe.src = iframeUrl;
 
@@ -336,7 +344,7 @@
      * Switch between SSO and offline modes
      */
     function switchMode(mode) {
-        console.log('Switching to mode:', mode);
+        debugLog('Switching to mode:', mode);
         currentMode = mode;
 
         if (mode === 'sso') {
@@ -384,7 +392,7 @@
      * Handle login callback (from SSO or iframe)
      */
     function handleLoginCallback(data) {
-        console.log('Received login callback:', data);
+        debugLog('Received login callback');
 
         if (data.error) {
             showError(data.error);
@@ -439,7 +447,7 @@
         // Store password in closure-scoped variable (not global for security)
         pendingPassword = password;
 
-        console.log('Starting LightDM authentication for user:', username);
+        debugLog('Starting LightDM authentication for user:', username);
         lightdm.authenticate(username);
     }
 
@@ -447,7 +455,7 @@
      * Handle LightDM prompt (password request)
      */
     function handleLightDMPrompt(text, type) {
-        console.log('LightDM prompt:', text, 'type:', type);
+        debugLog('LightDM prompt type:', type);
 
         if (type === 1) {  // Password prompt
             if (pendingPassword) {
@@ -466,7 +474,7 @@
      * Handle LightDM message
      */
     function handleLightDMMessage(text, type) {
-        console.log('LightDM message:', text, 'type:', type);
+        debugLog('LightDM message type:', type);
 
         if (type === 1) {  // Error message
             showError(text);
@@ -477,12 +485,12 @@
      * Handle authentication completion
      */
     function handleAuthenticationComplete() {
-        console.log('Authentication complete, is_authenticated:', lightdm.is_authenticated);
+        debugLog('Authentication complete, is_authenticated:', lightdm.is_authenticated);
 
         setLoading(false);
 
         if (lightdm.is_authenticated) {
-            console.log('Starting session:', selectedSession);
+            debugLog('Starting session:', selectedSession);
             lightdm.start_session(selectedSession);
         } else {
             showError('Authentication failed. Please try again.');
