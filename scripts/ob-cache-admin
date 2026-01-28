@@ -424,6 +424,8 @@ cmd_cleanup() {
 
 # Parse arguments
 QUIET=false
+COMMAND=""
+CMD_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -445,6 +447,8 @@ while [[ $# -gt 0 ]]; do
         stats|list|show|invalidate|invalidate-all|unlock|cleanup)
             COMMAND="$1"
             shift
+            # Collect remaining positional arguments for the command
+            CMD_ARGS=("$@")
             break
             ;;
         *)
@@ -467,10 +471,10 @@ case "${COMMAND:-}" in
         cmd_list
         ;;
     show)
-        cmd_show "$1"
+        cmd_show "${CMD_ARGS[0]:-}"
         ;;
     invalidate)
-        cmd_invalidate "$1"
+        cmd_invalidate "${CMD_ARGS[0]:-}"
         ;;
     invalidate-all)
         echo ""
@@ -486,7 +490,7 @@ case "${COMMAND:-}" in
         fi
         ;;
     unlock)
-        cmd_unlock "$1"
+        cmd_unlock "${CMD_ARGS[0]:-}"
         ;;
     cleanup)
         cmd_cleanup
