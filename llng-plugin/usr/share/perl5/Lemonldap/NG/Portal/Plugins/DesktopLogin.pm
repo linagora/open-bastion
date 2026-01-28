@@ -288,16 +288,22 @@ sub tokenExchange {
         );
     }
 
+    # Generate refresh token for offline rotation
+    my $refresh = $self->_createRefreshToken($user);
+
     $self->logger->info("Desktop token exchange successful for user '$user'");
+
+    my $response = {
+        access_token => $token->{access_token},
+        token_type   => 'Bearer',
+        expires_in   => $token->{expires_in},
+        user         => $user,
+    };
+    $response->{refresh_token} = $refresh->{refresh_token} if $refresh;
 
     return $self->p->sendJSONresponse(
         $req,
-        {
-            access_token => $token->{access_token},
-            token_type   => 'Bearer',
-            expires_in   => $token->{expires_in},
-            user         => $user,
-        }
+        $response
     );
 }
 
@@ -337,6 +343,9 @@ sub refreshToken {
 
     my $user = $refreshSession->data->{_desktopUser};
 
+    # Invalidate old refresh token (one-time use / rotation)
+    $refreshSession->remove;
+
     # Generate new access token
     my $token = $self->_createAccessToken($user);
     unless ($token) {
@@ -347,15 +356,26 @@ sub refreshToken {
         );
     }
 
-    $self->logger->info("Desktop token refresh successful for user '$user'");
+    # Generate new refresh token (rotation)
+    my $new_refresh = $self->_createRefreshToken($user);
+    unless ($new_refresh) {
+        return $self->p->sendJSONresponse(
+            $req,
+            { error => 'Refresh token generation failed' },
+            code => 500
+        );
+    }
+
+    $self->logger->info("Desktop token refresh successful for user '$user' (token rotated)");
 
     return $self->p->sendJSONresponse(
         $req,
         {
-            access_token => $token->{access_token},
-            token_type   => 'Bearer',
-            expires_in   => $token->{expires_in},
-            user         => $user,
+            access_token  => $token->{access_token},
+            token_type    => 'Bearer',
+            expires_in    => $token->{expires_in},
+            refresh_token => $new_refresh->{refresh_token},
+            user          => $user,
         }
     );
 }
@@ -450,15 +470,52 @@ sub _generateAndReturnToken {
     }
 
     # No callback, return JSON directly
-    return $self->p->sendJSONresponse(
-        $req,
-        {
-            access_token => $token->{access_token},
-            token_type   => 'Bearer',
-            expires_in   => $token->{expires_in},
-            user         => $user,
-        }
+    my $refresh = $self->_createRefreshToken($user);
+    my $json_response = {
+        access_token => $token->{access_token},
+        token_type   => 'Bearer',
+        expires_in   => $token->{expires_in},
+        user         => $user,
+    };
+    $json_response->{refresh_token} = $refresh->{refresh_token} if $refresh;
+
+    return $self->p->sendJSONresponse( $req, $json_response );
+}
+
+# Create refresh token for desktop SSO (single-use, rotated on each refresh)
+sub _createRefreshToken {
+    my ( $self, $user ) = @_;
+
+    my $now = time();
+    # Refresh tokens live longer than access tokens (default: 30 days)
+    my $duration = $self->conf->{desktopLoginRefreshDuration} || 2592000;
+
+    my $refreshInfo = {
+        _type              => 'desktoprefresh',
+        _utime             => $now,
+        _desktopUser       => $user,
+        _desktopCreatedAt  => $now,
+        _desktopExpiresAt  => $now + $duration,
+    };
+
+    my $refreshSession = $self->p->getApacheSession(
+        undef,
+        info => $refreshInfo,
+        kind => 'DESKTOPREFRESH'
     );
+
+    unless ( $refreshSession && $refreshSession->id ) {
+        $self->logger->error('Failed to create desktop refresh token session');
+        return;
+    }
+
+    $self->logger->info(
+        "Desktop refresh token generated for user $user (TTL: ${duration}s)");
+
+    return {
+        refresh_token => $refreshSession->id,
+        refresh_expires_in => $duration,
+    };
 }
 
 # Create access token for desktop SSO
