@@ -722,6 +722,12 @@ static int read_cache_entry(offline_cache_t *cache, const char *user,
         return OFFLINE_CACHE_ERR_NOTFOUND;
     }
 
+    /* Sanity check: cache files should never exceed 1 MiB */
+    if (st.st_size > 1024 * 1024) {
+        close(fd);
+        return OFFLINE_CACHE_ERR_INVALID;
+    }
+
     unsigned char *data = malloc(st.st_size + 1);
     if (!data) {
         close(fd);
