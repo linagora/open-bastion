@@ -181,6 +181,15 @@ int offline_cache_stats(offline_cache_t *cache,
                         int *locked);
 
 /*
+ * Configure lockout parameters (overrides compile-time defaults)
+ * max_failures: Max failed attempts before lockout (0 = default)
+ * lockout_duration: Lockout duration in seconds (0 = default)
+ */
+void offline_cache_set_lockout(offline_cache_t *cache,
+                                int max_failures,
+                                int lockout_duration);
+
+/*
  * Free entry contents
  * Securely clears sensitive data
  */

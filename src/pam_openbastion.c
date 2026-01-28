@@ -579,6 +579,11 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         data->offline_cache = offline_cache_init(offline_dir);
         if (!data->offline_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize offline credential cache, offline auth disabled");
+        } else {
+            /* Apply configured lockout parameters (0 = use compile-time defaults) */
+            offline_cache_set_lockout(data->offline_cache,
+                                      data->config.offline_cache_max_failures,
+                                      data->config.offline_cache_lockout);
         }
     }
 

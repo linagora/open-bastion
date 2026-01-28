@@ -64,6 +64,8 @@ struct offline_cache {
     char *cache_dir;
     unsigned char derived_key[KEY_SIZE];
     bool key_derived;
+    int max_failed_attempts;    /* 0 = use compile-time default */
+    int lockout_duration;       /* 0 = use compile-time default */
 #ifdef USE_LIBSODIUM
     bool sodium_initialized;
 #endif
@@ -532,6 +534,15 @@ void offline_cache_destroy(offline_cache_t *cache)
     free(cache);
 }
 
+void offline_cache_set_lockout(offline_cache_t *cache,
+                               int max_failures,
+                               int lockout_duration)
+{
+    if (!cache) return;
+    cache->max_failed_attempts = max_failures;
+    cache->lockout_duration = lockout_duration;
+}
+
 void offline_cache_entry_free(offline_cache_entry_t *entry)
 {
     if (!entry) return;
@@ -929,8 +940,13 @@ int offline_cache_verify(offline_cache_t *cache,
         json_object_object_del(json, "failed_attempts");
         json_object_object_add(json, "failed_attempts", json_object_new_int(failed_attempts));
 
-        if (failed_attempts >= OFFLINE_CACHE_MAX_FAILED_ATTEMPTS) {
-            time_t lockout_until = now + OFFLINE_CACHE_LOCKOUT_DURATION;
+        int max_attempts = cache->max_failed_attempts > 0
+            ? cache->max_failed_attempts : OFFLINE_CACHE_MAX_FAILED_ATTEMPTS;
+        int lockout_secs = cache->lockout_duration > 0
+            ? cache->lockout_duration : OFFLINE_CACHE_LOCKOUT_DURATION;
+
+        if (failed_attempts >= max_attempts) {
+            time_t lockout_until = now + lockout_secs;
             json_object_object_del(json, "locked_until");
             json_object_object_add(json, "locked_until", json_object_new_int64(lockout_until));
         }
