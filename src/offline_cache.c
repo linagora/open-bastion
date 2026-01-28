@@ -648,8 +648,8 @@ int offline_cache_store(offline_cache_t *cache,
     char path[PATH_MAX];
     build_cache_path(cache, user, path, sizeof(path));
 
-    char temp_path[PATH_MAX + 8];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+    char temp_path[PATH_MAX + 16];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", path, (int)getpid());
 
     int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) {
@@ -790,8 +790,8 @@ static int update_cache_entry(offline_cache_t *cache, const char *user,
     char path[PATH_MAX];
     build_cache_path(cache, user, path, sizeof(path));
 
-    char temp_path[PATH_MAX + 8];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+    char temp_path[PATH_MAX + 16];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", path, (int)getpid());
 
     int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) {
