@@ -106,6 +106,7 @@ typedef struct {
     int offline_cache_ttl;          /* Credential cache TTL in seconds (default: 604800 = 7 days) */
     int offline_cache_max_failures; /* Max failed attempts before lockout (default: 5) */
     int offline_cache_lockout;      /* Lockout duration in seconds (default: 300) */
+    char *offline_cache_key_file;   /* Secret key file for cache encryption (default: /etc/open-bastion/cache.key, mode 0600) */
 
     /* Bastion JWT verification (for backend servers) */
     bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */

@@ -23,6 +23,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <syslog.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/kdf.h>
@@ -53,6 +54,8 @@
 
 /* Encryption constants */
 #define MACHINE_ID_FILE "/etc/machine-id"
+#define DEFAULT_CACHE_KEY_FILE "/etc/open-bastion/cache.key"
+#define KEY_FILE_SIZE 32  /* Expected key file size in bytes */
 #define KEY_SIZE 32
 #define IV_SIZE 12
 #define TAG_SIZE 16
@@ -62,6 +65,7 @@
 /* Cache structure */
 struct offline_cache {
     char *cache_dir;
+    char *key_file;             /* Path to secret key file (root-only) */
     unsigned char derived_key[KEY_SIZE];
     bool key_derived;
     int max_failed_attempts;    /* 0 = use compile-time default */
@@ -171,32 +175,106 @@ static int load_or_generate_salt(const char *cache_dir, unsigned char *salt, siz
     return 0;
 }
 
-/* Derive encryption key from machine-id */
+/*
+ * Read a root-only secret key file (e.g., /etc/open-bastion/cache.key).
+ * The file must be exactly KEY_FILE_SIZE bytes, owned by root, mode 0600.
+ * Returns 0 on success, -1 if not available or invalid.
+ */
+static int read_key_file(const char *path, unsigned char *buf, size_t buf_size)
+{
+    if (!path) return -1;
+
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) return -1;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    /* Verify ownership and permissions */
+    if (st.st_uid != 0 || (st.st_mode & 077) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    if ((size_t)st.st_size != buf_size) {
+        close(fd);
+        return -1;
+    }
+
+    ssize_t bytes_read = read(fd, buf, buf_size);
+    close(fd);
+
+    return (bytes_read == (ssize_t)buf_size) ? 0 : -1;
+}
+
+/*
+ * Derive encryption key.
+ * Priority: secret key file → machine-id fallback (with warning).
+ *
+ * When a key file is available, it is combined with machine-id via
+ * PBKDF2 so that the cache is bound to both the secret and the machine.
+ * When no key file exists, machine-id alone is used (world-readable,
+ * weaker protection — a syslog warning is emitted).
+ */
 static int derive_cache_key(offline_cache_t *cache)
 {
-    char machine_id[64] = {0};
+    unsigned char key_material[KEY_FILE_SIZE + 64];
+    size_t key_material_len = 0;
+    bool have_key_file = false;
 
+    /* Try key file first */
+    const char *kf = cache->key_file ? cache->key_file : DEFAULT_CACHE_KEY_FILE;
+    unsigned char file_key[KEY_FILE_SIZE];
+    if (read_key_file(kf, file_key, KEY_FILE_SIZE) == 0) {
+        memcpy(key_material, file_key, KEY_FILE_SIZE);
+        key_material_len = KEY_FILE_SIZE;
+        secure_clear(file_key, sizeof(file_key));
+        have_key_file = true;
+    } else {
+        secure_clear(file_key, sizeof(file_key));
+    }
+
+    /* Always include machine-id to bind cache to this machine */
+    char machine_id[64] = {0};
     if (read_machine_id(machine_id, sizeof(machine_id)) != 0) {
+        secure_clear(key_material, sizeof(key_material));
         return -1;
+    }
+
+    size_t mid_len = strlen(machine_id);
+    memcpy(key_material + key_material_len, machine_id, mid_len);
+    key_material_len += mid_len;
+    secure_clear(machine_id, sizeof(machine_id));
+
+    if (!have_key_file) {
+        /* Emit syslog warning: key derived from world-readable machine-id only */
+        syslog(LOG_WARNING,
+               "open-bastion: offline cache key derived from machine-id only "
+               "(no key file at %s). Generate one with: "
+               "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
+               kf, kf, kf);
     }
 
     unsigned char pbkdf_salt[SALT_SIZE];
     if (load_or_generate_salt(cache->cache_dir, pbkdf_salt, SALT_SIZE) != 0) {
-        secure_clear(machine_id, sizeof(machine_id));
+        secure_clear(key_material, sizeof(key_material));
         return -1;
     }
 
-    if (PKCS5_PBKDF2_HMAC(machine_id, strlen(machine_id),
+    if (PKCS5_PBKDF2_HMAC((char *)key_material, key_material_len,
                           pbkdf_salt, SALT_SIZE,
                           PBKDF2_ITERATIONS,
                           EVP_sha256(),
                           KEY_SIZE, cache->derived_key) != 1) {
-        secure_clear(machine_id, sizeof(machine_id));
+        secure_clear(key_material, sizeof(key_material));
         secure_clear(pbkdf_salt, sizeof(pbkdf_salt));
         return -1;
     }
 
-    secure_clear(machine_id, sizeof(machine_id));
+    secure_clear(key_material, sizeof(key_material));
     secure_clear(pbkdf_salt, sizeof(pbkdf_salt));
 
     cache->key_derived = true;
@@ -483,7 +561,7 @@ static unsigned char *base64_decode(const char *data, size_t *out_len)
     return out;
 }
 
-offline_cache_t *offline_cache_init(const char *cache_dir)
+offline_cache_t *offline_cache_init(const char *cache_dir, const char *key_file)
 {
     if (!cache_dir) return NULL;
 
@@ -503,6 +581,8 @@ offline_cache_t *offline_cache_init(const char *cache_dir)
         free(cache);
         return NULL;
     }
+
+    cache->key_file = key_file ? strdup(key_file) : NULL;
 
     /* Create directory if needed */
     struct stat st;
@@ -529,9 +609,17 @@ void offline_cache_destroy(offline_cache_t *cache)
     if (!cache) return;
 
     free(cache->cache_dir);
+    free(cache->key_file);
     secure_clear(cache->derived_key, sizeof(cache->derived_key));
     secure_clear(cache, sizeof(*cache));
     free(cache);
+}
+
+void offline_cache_set_key_file(offline_cache_t *cache, const char *key_file)
+{
+    if (!cache) return;
+    free(cache->key_file);
+    cache->key_file = key_file ? strdup(key_file) : NULL;
 }
 
 void offline_cache_set_lockout(offline_cache_t *cache,

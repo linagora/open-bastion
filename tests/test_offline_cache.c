@@ -135,7 +135,7 @@ static void cleanup_test_dir(void)
 static int test_init_destroy(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
     offline_cache_destroy(cache);
     return 1;
@@ -144,7 +144,7 @@ static int test_init_destroy(void)
 /* Test: Init with NULL directory fails */
 static int test_init_null(void)
 {
-    offline_cache_t *cache = offline_cache_init(NULL);
+    offline_cache_t *cache = offline_cache_init(NULL, NULL);
     ASSERT(cache == NULL);
     return 1;
 }
@@ -153,7 +153,7 @@ static int test_init_null(void)
 static int test_store_verify(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store credentials */
@@ -180,7 +180,7 @@ static int test_store_verify(void)
 static int test_wrong_password(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store credentials */
@@ -207,7 +207,7 @@ static int test_wrong_password(void)
 static int test_user_not_found(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     int ret = offline_cache_verify(cache, "nonexistent", "anypass", NULL);
@@ -221,7 +221,7 @@ static int test_user_not_found(void)
 static int test_expiration(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store with 1 second TTL */
@@ -248,7 +248,7 @@ static int test_expiration(void)
 static int test_invalidate(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store credentials */
@@ -274,7 +274,7 @@ static int test_invalidate(void)
 static int test_lockout(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store credentials */
@@ -300,7 +300,7 @@ static int test_lockout(void)
 static int test_reset_failures(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store credentials */
@@ -343,7 +343,7 @@ static int test_cleanup(void)
     snprintf(fresh_dir, sizeof(fresh_dir), "%s/cleanup_%d", test_dir, getpid());
     mkdir(fresh_dir, 0700);
 
-    offline_cache_t *cache = offline_cache_init(fresh_dir);
+    offline_cache_t *cache = offline_cache_init(fresh_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store some entries */
@@ -369,7 +369,7 @@ static int test_cleanup(void)
 static int test_stats(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store some entries */
@@ -398,7 +398,7 @@ static int test_invalidate_all(void)
     snprintf(fresh_dir, sizeof(fresh_dir), "%s/fresh_%d", test_dir, getpid());
     mkdir(fresh_dir, 0700);
 
-    offline_cache_t *cache = offline_cache_init(fresh_dir);
+    offline_cache_t *cache = offline_cache_init(fresh_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store some entries */
@@ -425,7 +425,7 @@ static int test_invalidate_all(void)
 static int test_overwrite(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store initial credentials */
@@ -485,7 +485,7 @@ static int test_strerror(void)
 static int test_store_null_params(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* NULL cache */
@@ -508,7 +508,7 @@ static int test_store_null_params(void)
 static int test_full_entry(void)
 {
     if (!has_machine_id()) return 2;
-    offline_cache_t *cache = offline_cache_init(test_dir);
+    offline_cache_t *cache = offline_cache_init(test_dir, NULL);
     ASSERT(cache != NULL);
 
     /* Store with all fields */

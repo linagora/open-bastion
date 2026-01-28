@@ -1324,7 +1324,7 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         if (!offline_dir) {
             offline_dir = "/var/cache/open-bastion/credentials";
         }
-        data->offline_cache = offline_cache_init(offline_dir);
+        data->offline_cache = offline_cache_init(offline_dir, data->config.offline_cache_key_file);
         if (!data->offline_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize offline credential cache, offline auth disabled");
         } else {

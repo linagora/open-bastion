@@ -82,9 +82,10 @@ typedef struct offline_cache offline_cache_t;
 /*
  * Initialize offline credential cache
  * cache_dir: Directory for cache files (e.g., /var/cache/open-bastion/credentials)
+ * key_file: Path to 32-byte secret key file (NULL = use default, fallback to machine-id)
  * Returns NULL on failure
  */
-offline_cache_t *offline_cache_init(const char *cache_dir);
+offline_cache_t *offline_cache_init(const char *cache_dir, const char *key_file);
 
 /*
  * Destroy cache and free resources
@@ -179,6 +180,13 @@ int offline_cache_stats(offline_cache_t *cache,
                         int *total,
                         int *active,
                         int *locked);
+
+/*
+ * Set secret key file path for cache encryption
+ * key_file: Path to 32-byte root-only file (NULL = use default /etc/open-bastion/cache.key)
+ * If file is absent or invalid, falls back to machine-id with syslog warning.
+ */
+void offline_cache_set_key_file(offline_cache_t *cache, const char *key_file);
 
 /*
  * Configure lockout parameters (overrides compile-time defaults)
