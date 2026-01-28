@@ -663,6 +663,28 @@ int offline_cache_store(offline_cache_t *cache,
 
     if (ttl <= 0) ttl = OFFLINE_CACHE_DEFAULT_TTL;
 
+    /* Enforce maximum entries limit (skip check if user already has an entry) */
+    char existing_path[PATH_MAX];
+    build_cache_path(cache, user, existing_path, sizeof(existing_path));
+    if (access(existing_path, F_OK) != 0) {
+        /* New user — count existing .cred files */
+        DIR *dir = opendir(cache->cache_dir);
+        if (dir) {
+            int count = 0;
+            struct dirent *de;
+            while ((de = readdir(dir)) != NULL) {
+                if (strstr(de->d_name, ".cred") != NULL)
+                    count++;
+            }
+            closedir(dir);
+            if (count >= OFFLINE_CACHE_MAX_ENTRIES) {
+                syslog(LOG_WARNING, "offline_cache: max entries (%d) reached, refusing store for new user",
+                       OFFLINE_CACHE_MAX_ENTRIES);
+                return OFFLINE_CACHE_ERR_INVALID;
+            }
+        }
+    }
+
     /* Generate random salt for Argon2id */
     unsigned char salt[ARGON2_SALT_LEN];
     if (RAND_bytes(salt, sizeof(salt)) != 1) {
