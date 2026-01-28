@@ -32,7 +32,9 @@
                         <span>Single Sign-On</span>
                     </div>
                     <div class="iframe-container">
-                        <iframe id="sso-iframe" src="" frameborder="0"></iframe>
+                        <!-- allow attribute enables WebAuthn/FIDO2 in the iframe for 2FA -->
+                        <iframe id="sso-iframe" src="" frameborder="0"
+                                allow="publickey-credentials-get *; publickey-credentials-create *"></iframe>
                         <div id="iframe-loading" class="iframe-loading">
                             <div class="spinner"></div>
                             <p>Connecting to authentication server...</p>
