@@ -115,6 +115,12 @@ parse_args() {
         log_error "Portal URL must start with http:// or https://"
         exit 1
     fi
+
+    # Sanitize: only allow safe URL characters (prevent injection in config files / sed)
+    if [[ "$PORTAL_URL" =~ [^a-zA-Z0-9:/._~@!$\&\'*+,\;=%-] ]]; then
+        log_error "Portal URL contains invalid characters"
+        exit 1
+    fi
 }
 
 # Check if running as root
