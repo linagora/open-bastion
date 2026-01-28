@@ -222,8 +222,11 @@
             });
         }
 
-        // Check for pending login result in localStorage (from callback page)
-        // and clear it immediately after reading for security
+        // Check for pending login result in localStorage (from callback page).
+        // NOTE: For security, the callback page does NOT store access_token in
+        // localStorage (XSS risk). The localStorage path only carries metadata
+        // (success, user, state) and is used as a signal that SSO completed.
+        // The actual token is delivered via postMessage or BroadcastChannel.
         try {
             var storedResult = localStorage.getItem('desktop_login_result');
             if (storedResult) {
@@ -392,10 +395,13 @@
             authToken = data.access_token;
             selectedUser = data.user;
 
-            console.log('SSO authentication successful for user:', selectedUser);
-
             // Start LightDM authentication with the token as password
             startAuthentication(selectedUser, authToken);
+        } else if (data.success && data.user && !data.access_token) {
+            // SSO succeeded but token was not included (e.g. localStorage path
+            // which excludes tokens for security). Reload SSO iframe to get a
+            // fresh token via postMessage.
+            initSSOIframe();
         }
     }
 
