@@ -678,6 +678,8 @@ int offline_cache_store(offline_cache_t *cache,
         return OFFLINE_CACHE_ERR_IO;
     }
 
+    /* Ensure data is persisted before rename to prevent data loss on crash */
+    fsync(fd);
     close(fd);
 
     if (rename(temp_path, path) != 0) {
@@ -819,6 +821,8 @@ static int update_cache_entry(offline_cache_t *cache, const char *user,
         return OFFLINE_CACHE_ERR_IO;
     }
 
+    /* Ensure data is persisted before rename to prevent data loss on crash */
+    fsync(fd);
     close(fd);
 
     if (rename(temp_path, path) != 0) {
