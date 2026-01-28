@@ -51,6 +51,13 @@ has tokenDuration => (
     default => sub { $_[0]->conf->{desktopLoginTokenDuration} || 28800 },
 );
 
+# Allow insecure CSRF fallback when /dev/urandom is unavailable (default: false)
+has allowInsecureCsrf => (
+    is      => 'ro',
+    lazy    => 1,
+    default => sub { $_[0]->conf->{desktopLoginAllowInsecureCsrf} || 0 },
+);
+
 # INITIALIZATION
 
 sub init {
@@ -349,14 +356,22 @@ sub refreshToken {
 sub _generateCsrfToken {
     my ( $self, $req ) = @_;
 
-    # Generate random bytes and hash them with request-specific data
+    # Generate random bytes from /dev/urandom (cryptographically secure)
     my $random = '';
     if ( open my $fh, '<', '/dev/urandom' ) {
         read $fh, $random, 32;
         close $fh;
     }
     else {
-        # Fallback to time + process ID if /dev/urandom unavailable
+        unless ( $self->allowInsecureCsrf ) {
+            $self->logger->error(
+                "Cannot open /dev/urandom for CSRF token generation. "
+                . "Set desktopLoginAllowInsecureCsrf to allow insecure fallback."
+            );
+            return;
+        }
+        $self->logger->warn(
+            "Using insecure CSRF fallback (no /dev/urandom)");
         $random = time() . $$ . rand(1000000);
     }
 
