@@ -411,11 +411,12 @@
             return;
         }
 
-        console.log('Starting offline authentication for user:', username);
         setLoading(true);
 
         selectedUser = username;
-        startAuthentication(username, password);
+        // Prefix with OFFLINE: so the PAM module can distinguish offline
+        // passwords from OAuth2 tokens when the server is unreachable
+        startAuthentication(username, 'OFFLINE:' + password);
     }
 
     /**

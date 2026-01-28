@@ -2140,88 +2140,97 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          */
         OB_LOG_DEBUG(pamh, "Using OAuth2 token authentication mode");
 
-        if (ob_introspect_token(data->client, password, &response) != 0) {
-            /*
-             * Server unreachable - try offline authentication if enabled.
-             * In offline mode, the 'password' is the actual user password
-             * (from the greeter's offline form), not an OAuth2 token.
-             */
-            if (data->offline_cache) {
-                OB_LOG_INFO(pamh, "Server unreachable, attempting offline authentication for %s", user);
+        /*
+         * Check if the password carries the OFFLINE: prefix set by the
+         * greeter's offline form.  When present the user typed a real
+         * password (not an OAuth2 token), so we can skip token
+         * introspection and go straight to offline cache verification.
+         */
+        const char *offline_prefix = "OFFLINE:";
+        const size_t prefix_len = 8;
+        bool is_offline_password = (strncmp(password, offline_prefix, prefix_len) == 0);
+        const char *actual_password = is_offline_password ? password + prefix_len : password;
 
-                offline_cache_entry_t offline_entry;
-                int offline_result = offline_cache_verify(data->offline_cache, user, password, &offline_entry);
+        if (is_offline_password && data->offline_cache) {
+            /* Greeter signalled offline mode – verify against cached credentials */
+            OB_LOG_INFO(pamh, "Offline password received, verifying cached credentials for %s", user);
 
-                if (offline_result == OFFLINE_CACHE_OK) {
-                    OB_LOG_INFO(pamh, "Offline authentication successful for user %s", user);
+            offline_cache_entry_t offline_entry;
+            int offline_result = offline_cache_verify(data->offline_cache, user, actual_password, &offline_entry);
 
-                    /* Store user attributes from cached entry */
-                    if (offline_entry.gecos) {
-                        char *gecos_copy = strdup(offline_entry.gecos);
-                        if (gecos_copy) {
-                            pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
-                        }
-                    }
-                    if (offline_entry.shell) {
-                        char *shell_copy = strdup(offline_entry.shell);
-                        if (shell_copy) {
-                            pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
-                        }
-                    }
-                    if (offline_entry.home) {
-                        char *home_copy = strdup(offline_entry.home);
-                        if (home_copy) {
-                            pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
-                        }
-                    }
+            if (offline_result == OFFLINE_CACHE_OK) {
+                OB_LOG_INFO(pamh, "Offline authentication successful for user %s", user);
 
-                    /* Mark as offline auth for logging */
-                    pam_set_data(pamh, "ob_offline_auth", (void *)1, NULL);
-
-                    if (audit_initialized) {
-                        audit_event.event_type = AUDIT_AUTH_SUCCESS;
-                        audit_event.result_code = PAM_SUCCESS;
-                        audit_event.reason = "Offline authentication (server unreachable)";
-                        audit_event_set_end_time(&audit_event);
-                        audit_log_event(data->audit, &audit_event);
-                    }
-
-                    /* Reset rate limiter on success */
-                    if (data->rate_limiter) {
-                        rate_limiter_reset(data->rate_limiter, rate_key);
-                    }
-
-                    offline_cache_entry_free(&offline_entry);
-                    return PAM_SUCCESS;
+                if (offline_entry.gecos) {
+                    char *gecos_copy = strdup(offline_entry.gecos);
+                    if (gecos_copy)
+                        pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
+                }
+                if (offline_entry.shell) {
+                    char *shell_copy = strdup(offline_entry.shell);
+                    if (shell_copy)
+                        pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
+                }
+                if (offline_entry.home) {
+                    char *home_copy = strdup(offline_entry.home);
+                    if (home_copy)
+                        pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
                 }
 
-                /* Offline auth failed - log specific reason */
-                const char *offline_reason = offline_cache_strerror(offline_result);
-                OB_LOG_INFO(pamh, "Offline authentication failed for %s: %s", user, offline_reason);
-
-                if (offline_result == OFFLINE_CACHE_ERR_PASSWORD) {
-                    /* Wrong password - count as failure for rate limiting */
-                    if (data->rate_limiter) {
-                        rate_limiter_record_failure(data->rate_limiter, rate_key);
-                    }
-                }
+                pam_set_data(pamh, "ob_offline_auth", (void *)1, NULL);
 
                 if (audit_initialized) {
-                    audit_event.event_type = AUDIT_AUTH_FAILURE;
-                    audit_event.result_code = PAM_AUTH_ERR;
-                    char reason_buf[256];
-                    snprintf(reason_buf, sizeof(reason_buf), "Offline auth failed: %s", offline_reason);
-                    char *reason = strdup(reason_buf);
-                    if (reason) {
-                        audit_event.reason = reason;
-                        audit_event_set_end_time(&audit_event);
-                        audit_log_event(data->audit, &audit_event);
-                        free(reason);
-                        audit_event.reason = NULL;
-                    }
+                    audit_event.event_type = AUDIT_AUTH_SUCCESS;
+                    audit_event.result_code = PAM_SUCCESS;
+                    audit_event.reason = "Offline authentication (greeter offline mode)";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
                 }
 
-                return (offline_result == OFFLINE_CACHE_ERR_LOCKED) ? PAM_MAXTRIES : PAM_AUTH_ERR;
+                if (data->rate_limiter)
+                    rate_limiter_reset(data->rate_limiter, rate_key);
+
+                offline_cache_entry_free(&offline_entry);
+                return PAM_SUCCESS;
+            }
+
+            const char *offline_reason = offline_cache_strerror(offline_result);
+            OB_LOG_INFO(pamh, "Offline authentication failed for %s: %s", user, offline_reason);
+
+            if (offline_result == OFFLINE_CACHE_ERR_PASSWORD && data->rate_limiter)
+                rate_limiter_record_failure(data->rate_limiter, rate_key);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                char reason_buf[256];
+                snprintf(reason_buf, sizeof(reason_buf), "Offline auth failed: %s", offline_reason);
+                char *reason = strdup(reason_buf);
+                if (reason) {
+                    audit_event.reason = reason;
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                    free(reason);
+                    audit_event.reason = NULL;
+                }
+            }
+
+            return (offline_result == OFFLINE_CACHE_ERR_LOCKED) ? PAM_MAXTRIES : PAM_AUTH_ERR;
+        }
+
+        if (is_offline_password && !data->offline_cache) {
+            OB_LOG_ERR(pamh, "Offline password received but offline cache is not enabled");
+            return PAM_AUTHINFO_UNAVAIL;
+        }
+
+        if (ob_introspect_token(data->client, password, &response) != 0) {
+            /*
+             * Server unreachable - but we received an OAuth2 token (no
+             * OFFLINE: prefix), so we cannot fall back to offline cache
+             * (the token is not a password).  Return server unavailable.
+             */
+            if (data->offline_cache) {
+                OB_LOG_INFO(pamh, "Server unreachable with OAuth2 token for %s, cannot use offline cache", user);
             }
 
             /* No offline cache - return server unavailable */
