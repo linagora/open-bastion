@@ -606,7 +606,7 @@ sub _loginError {
     if ($callback && $self->_validateCallbackUrl($callback)) {
         my $sep = $callback =~ /#/ ? '&' : '#';
         my $redirect_url = $callback . $sep . "error=" . uri_escape($message);
-        $redirect_url .= "&state=$state" if $state;
+        $redirect_url .= "&state=" . uri_escape($state) if $state;
 
         # Build JSON message with proper encoding to prevent XSS
         my $allowed_origin = $self->conf->{portal} || '';
