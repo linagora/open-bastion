@@ -1,0 +1,45 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create theme metadata if not exists
+        if [ ! -f /usr/share/lightdm-webkit/themes/open-bastion/index.theme ]; then
+            cat > /usr/share/lightdm-webkit/themes/open-bastion/index.theme << 'EOF'
+[theme]
+name=Open Bastion
+author=Linagora
+version=1.0
+description=Open Bastion Desktop SSO greeter for LightDM
+EOF
+        fi
+
+        # Create cache directory for offline credentials
+        mkdir -p /var/cache/open-bastion/credentials
+        chmod 0700 /var/cache/open-bastion/credentials
+
+        echo ""
+        echo "Open Bastion LightDM greeter installed."
+        echo ""
+        echo "To complete setup, run:"
+        echo "  sudo ob-desktop-setup -p https://your-llng-portal.example.com"
+        echo ""
+        echo "Or configure manually:"
+        echo "  1. Edit /etc/lightdm/lightdm-webkit2-greeter.conf"
+        echo "  2. Set webkit_theme = open-bastion"
+        echo "  3. Configure portal_url in [open-bastion] section"
+        echo ""
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

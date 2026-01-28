@@ -1,0 +1,16 @@
+# Open Bastion LightDM greeter files
+
+# Greeter theme files
+lightdm/greeter/index.html usr/share/lightdm-webkit/themes/open-bastion/
+lightdm/greeter/greeter.js usr/share/lightdm-webkit/themes/open-bastion/
+lightdm/greeter/style.css usr/share/lightdm-webkit/themes/open-bastion/
+lightdm/greeter/index.theme usr/share/lightdm-webkit/themes/open-bastion/
+
+# LightDM configuration example
+lightdm/config/lightdm-openbastion.conf usr/share/doc/lightdm-openbastion-greeter/examples/
+
+# Desktop setup script
+scripts/ob-desktop-setup usr/sbin/
+
+# Cache admin script
+scripts/ob-cache-admin usr/sbin/

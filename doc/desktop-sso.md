@@ -262,6 +262,94 @@ Set these parameters in the Manager:
 - **Iframe Security:** Only localhost callbacks are allowed by default
 - **Token Scope:** Desktop tokens have limited `desktop pam` scope
 
+## Multi-Factor Authentication (2FA)
+
+Desktop SSO fully supports LLNG's multi-factor authentication. Since the login
+happens inside an iframe displaying the full LLNG portal, all 2FA methods
+configured in LLNG work seamlessly.
+
+### Supported 2FA Methods
+
+| Method | Status | Notes |
+|--------|--------|-------|
+| TOTP (Google Authenticator) | Fully supported | No configuration needed |
+| SMS/Email OTP | Fully supported | No configuration needed |
+| Push notifications | Fully supported | No configuration needed |
+| WebAuthn/FIDO2/U2F | Supported | Requires `allow` attribute on iframe |
+| SSL client certificates | Supported | Requires PKCS#11 configuration |
+
+### WebAuthn/FIDO2 Configuration
+
+WebAuthn (hardware security keys like YubiKey) requires the iframe to have
+the `publickey-credentials-get` permission. This is already configured in the
+Open Bastion greeter:
+
+```html
+<iframe id="sso-iframe"
+        allow="publickey-credentials-get *; publickey-credentials-create *"
+        src="..." frameborder="0">
+</iframe>
+```
+
+If you're customizing the greeter, ensure this `allow` attribute is present.
+
+### SSL Client Certificates (Smart Cards)
+
+For smart card authentication:
+
+1. **Install PKCS#11 module** (e.g., OpenSC):
+   ```bash
+   apt install opensc-pkcs11
+   ```
+
+2. **Configure p11-kit** for WebKitGTK:
+   ```bash
+   # /etc/pkcs11/modules/opensc.module
+   module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+   ```
+
+3. **Configure LLNG** to accept client certificates
+
+The WebKitGTK engine used by lightdm-webkit2-greeter will automatically
+present client certificates when the server requests them.
+
+### 2FA Flow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                  Desktop SSO with 2FA                             │
+│                                                                   │
+│  1. User enters username/password in LLNG iframe                 │
+│                          │                                        │
+│                          ▼                                        │
+│  2. LLNG validates first factor                                  │
+│                          │                                        │
+│                          ▼                                        │
+│  3. LLNG prompts for second factor (TOTP, WebAuthn, etc.)       │
+│                          │                                        │
+│                          ▼                                        │
+│  4. User provides 2FA (enters code, touches key, etc.)          │
+│                          │                                        │
+│                          ▼                                        │
+│  5. LLNG validates all factors and issues OAuth2 token          │
+│                          │                                        │
+│                          ▼                                        │
+│  6. Token is passed to PAM module for session creation          │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 2FA and Offline Mode
+
+When using offline mode (cached credentials), 2FA is **bypassed** because:
+
+- The LLNG server is unreachable
+- The password was validated during the original online authentication
+- The cached credential was created only after successful 2FA
+
+**Security consideration**: If 2FA is critical for your environment, you may
+want to disable offline mode or set a very short `offline_cache_ttl`.
+
 ## Offline Mode
 
 When the LLNG server is unreachable, the greeter can fall back to offline
