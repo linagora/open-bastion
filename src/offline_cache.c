@@ -648,7 +648,7 @@ void offline_cache_entry_free(offline_cache_entry_t *entry)
     free(entry->shell);
     free(entry->home);
 
-    memset(entry, 0, sizeof(*entry));
+    secure_clear(entry, sizeof(*entry));
 }
 
 int offline_cache_store(offline_cache_t *cache,
