@@ -224,6 +224,16 @@ sub authCallback {
     my $callback = $req->param('callback_url') || $req->pdata->{desktopCallback} || '';
     my $state    = $req->param('state') || $req->pdata->{desktopState} || '';
 
+    # Verify state parameter matches stored value to prevent CSRF token generation
+    my $stored_state = $req->pdata->{desktopState} || '';
+    if ( $state && $stored_state && $state ne $stored_state ) {
+        $self->logger->warn("Desktop callback: state parameter mismatch");
+        return $self->_loginError( $req, 'Invalid state', $callback, $state );
+    }
+
+    # Clear stored state after use (one-time)
+    delete $req->pdata->{desktopState};
+
     return $self->_generateAndReturnToken( $req, $callback, $state );
 }
 
