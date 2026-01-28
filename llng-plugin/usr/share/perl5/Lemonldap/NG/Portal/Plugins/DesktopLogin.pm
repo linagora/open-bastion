@@ -457,6 +457,8 @@ sub _generateAndReturnToken {
             allowed_origin => $allowed_origin,
         };
         my $message_json = to_json($message_data, { allow_nonref => 1 });
+        # Prevent XSS: escape </ to prevent </script> breakout in inline JS
+        $message_json =~ s{</}{<\\/}g;
 
         return $self->p->sendHtml(
             $req,
@@ -618,6 +620,8 @@ sub _loginError {
             allowed_origin => $allowed_origin,
         };
         my $message_json = to_json($message_data, { allow_nonref => 1 });
+        # Prevent XSS: escape </ to prevent </script> breakout in inline JS
+        $message_json =~ s{</}{<\\/}g;
 
         return $self->p->sendHtml(
             $req,
