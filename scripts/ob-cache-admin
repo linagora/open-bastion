@@ -149,7 +149,9 @@ cmd_stats() {
     # shellcheck disable=SC2034
     local locked=0
     # shellcheck disable=SC2034
-    local now; now=$(date +%s)
+    local now
+    # shellcheck disable=SC2034
+    now=$(date +%s)
 
     while IFS= read -r -d '' file; do
         ((total++)) || true
