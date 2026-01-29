@@ -356,6 +356,42 @@ When the LLNG server is unreachable, the greeter can fall back to offline
 authentication using cached credentials. See [offline-mode.md](offline-mode.md)
 for details.
 
+## Screen Unlock Token Refresh
+
+When a user locks their screen, the OAuth2 access token may expire before they
+return (default TTL: 8 hours). The greeter handles this gracefully:
+
+### Refresh Flow
+
+1. **Token still valid**: Greeter reuses the existing access token (seamless)
+2. **Token expired, refresh available**: Greeter calls `/desktop/refresh` with
+   the stored refresh token to get a fresh access token (seamless)
+3. **Refresh fails, online**: Greeter reloads the SSO iframe for full re-auth
+4. **Offline**: Greeter falls back to password prompt with offline cache
+
+### How It Works
+
+The greeter stores three pieces of state from the initial SSO login:
+- `authToken`: The OAuth2 access token
+- `refreshToken`: The OAuth2 refresh token (new)
+- `tokenExpiresAt`: Token expiration timestamp (new)
+
+On screen unlock (greeter re-initialization), before loading the SSO iframe,
+the greeter checks whether a token refresh is needed. If the access token
+expires within 5 minutes, it calls `/desktop/refresh` to obtain a fresh token.
+Token rotation is supported — the refresh token is updated if the server
+provides a new one.
+
+### PAM-Level Revalidation
+
+At the PAM level, when a user enters their password to unlock and an offline
+session marker exists, the PAM module transparently attempts online LLNG
+authentication with the entered password. This:
+- Refreshes the offline credential cache
+- Removes the offline session marker
+- Validates the account is still active on LLNG
+- All without interrupting the user's session
+
 ## Troubleshooting
 
 ### Greeter Doesn't Load
