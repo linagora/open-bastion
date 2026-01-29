@@ -143,19 +143,9 @@
         }
       }
 
-      // Also try to communicate with LightDM webkit greeter
-      if (typeof window.lightdm !== 'undefined') {
-        // LightDM greeter context
-        try {
-          if (messageData.access_token && messageData.user) {
-            // Store credentials for PAM authentication
-            window.lightdm_token = messageData.access_token;
-            window.lightdm_user = messageData.user;
-          }
-        } catch (e) {
-          console.warn('Failed to store credentials for LightDM');
-        }
-      }
+      // Token delivery to the greeter uses postMessage and BroadcastChannel
+      // (above). Do NOT store tokens in global window properties — any script
+      // in the same webkit context could read them.
 
       // Broadcast via BroadcastChannel API if available (same-origin communication)
       // Note: BroadcastChannel is same-origin only, so it's safe
