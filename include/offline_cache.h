@@ -41,6 +41,11 @@
 #define ARGON2_HASH_LEN     32      /* Output hash length */
 #define ARGON2_SALT_LEN     16      /* Salt length */
 
+/* Protocol constant: prefix prepended by the greeter to offline passwords.
+ * Must be kept in sync with lightdm/greeter/greeter.js */
+#define OFFLINE_PASSWORD_PREFIX  "OFFLINE:"
+#define OFFLINE_PASSWORD_PREFIX_LEN  8
+
 /* Security limits */
 #define OFFLINE_CACHE_MAX_FAILED_ATTEMPTS  5     /* Max failed attempts before entry lockout */
 #define OFFLINE_CACHE_LOCKOUT_DURATION     300   /* Lockout duration in seconds (5 min) */
