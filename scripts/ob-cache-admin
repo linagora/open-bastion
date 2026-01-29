@@ -21,6 +21,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+# shellcheck disable=SC2034
 CYAN='\033[0;36m'
 NC='\033[0m'
 
@@ -142,8 +143,12 @@ cmd_stats() {
 
     local total=0
     local valid=0
+    # TODO: expired/locked/now reserved for future use when decryption is available
+    # shellcheck disable=SC2034
     local expired=0
+    # shellcheck disable=SC2034
     local locked=0
+    # shellcheck disable=SC2034
     local now
     now=$(date +%s)
 
@@ -423,6 +428,7 @@ cmd_cleanup() {
 }
 
 # Parse arguments
+# shellcheck disable=SC2034
 QUIET=false
 COMMAND=""
 CMD_ARGS=()
@@ -438,6 +444,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -q|--quiet)
+            # shellcheck disable=SC2034
             QUIET=true
             shift
             ;;
