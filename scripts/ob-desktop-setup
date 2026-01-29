@@ -30,6 +30,7 @@ GREETER_CONFIG="/etc/lightdm/lightdm-webkit2-greeter.conf"
 PAM_CONFIG_DIR="/etc/pam.d"
 OB_CONFIG_DIR="/etc/open-bastion"
 OB_CONFIG_FILE="${OB_CONFIG_DIR}/openbastion.conf"
+# shellcheck disable=SC2034
 INSTALL_DIR="/usr/share/open-bastion"
 OFFLINE_MODE=false
 DRY_RUN=false
