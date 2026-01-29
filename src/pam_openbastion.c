@@ -61,6 +61,9 @@
 /* Security: Maximum length for SSH_USER_AUTH environment variable */
 #define MAX_SSH_AUTH_LEN 8192
 
+/* Offline session marker directory (for ob-session-monitor) */
+#define OFFLINE_SESSION_MARKER_DIR "/run/open-bastion/offline_sessions"
+
 /* Internal data structure */
 typedef struct {
     pam_openbastion_config_t config;
@@ -118,6 +121,106 @@ static void pam_send_info(pam_handle_t *pamh, const char *msg)
 
     conv->conv(1, &msgp, &resp, conv->appdata_ptr);
     free(resp);
+}
+
+/*
+ * Create an offline session marker file for ob-session-monitor.
+ * The marker is created in /run/open-bastion/offline_sessions/<username>
+ * and contains the session timestamp.
+ */
+static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
+{
+    /* Create marker directory if it doesn't exist */
+    struct stat st;
+    if (stat(OFFLINE_SESSION_MARKER_DIR, &st) != 0) {
+        if (mkdir("/run/open-bastion", 0755) != 0 && errno != EEXIST) {
+            OB_LOG_WARN(pamh, "Cannot create /run/open-bastion: %s", strerror(errno));
+            return;
+        }
+        if (mkdir(OFFLINE_SESSION_MARKER_DIR, 0700) != 0 && errno != EEXIST) {
+            OB_LOG_WARN(pamh, "Cannot create offline marker dir: %s", strerror(errno));
+            return;
+        }
+    }
+
+    /* Validate username (no path traversal) */
+    for (const char *p = user; *p; p++) {
+        if (*p == '/' || *p == '.' || *p == '\0') {
+            OB_LOG_WARN(pamh, "Invalid username for offline marker: %s", user);
+            return;
+        }
+    }
+
+    char marker_path[PATH_MAX];
+    int n = snprintf(marker_path, sizeof(marker_path), "%s/%s", OFFLINE_SESSION_MARKER_DIR, user);
+    if (n < 0 || (size_t)n >= sizeof(marker_path)) {
+        OB_LOG_WARN(pamh, "Offline marker path too long for user %s", user);
+        return;
+    }
+
+    int fd = open(marker_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        OB_LOG_WARN(pamh, "Cannot create offline marker for %s: %s", user, strerror(errno));
+        return;
+    }
+
+    /* Write timestamp */
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%ld\n", (long)time(NULL));
+    if (len > 0) {
+        /* Ignore write errors - marker is best effort */
+        (void)write(fd, buf, (size_t)len);
+    }
+    close(fd);
+
+    OB_LOG_DEBUG(pamh, "Created offline session marker for %s", user);
+}
+
+/*
+ * Remove the offline session marker for a user.
+ */
+static void remove_offline_session_marker(pam_handle_t *pamh, const char *user)
+{
+    /* Validate username (no path traversal) */
+    for (const char *p = user; *p; p++) {
+        if (*p == '/' || *p == '.') {
+            return;
+        }
+    }
+
+    char marker_path[PATH_MAX];
+    int n = snprintf(marker_path, sizeof(marker_path), "%s/%s", OFFLINE_SESSION_MARKER_DIR, user);
+    if (n < 0 || (size_t)n >= sizeof(marker_path)) {
+        return;
+    }
+
+    if (unlink(marker_path) == 0) {
+        OB_LOG_DEBUG(pamh, "Removed offline session marker for %s", user);
+    }
+    /* ENOENT is fine - marker might not exist */
+}
+
+/*
+ * Check if an offline session marker exists for a user.
+ * Returns 1 if marker exists, 0 otherwise.
+ */
+static int has_offline_session_marker(const char *user)
+{
+    /* Validate username */
+    for (const char *p = user; *p; p++) {
+        if (*p == '/' || *p == '.') {
+            return 0;
+        }
+    }
+
+    char marker_path[PATH_MAX];
+    int n = snprintf(marker_path, sizeof(marker_path), "%s/%s", OFFLINE_SESSION_MARKER_DIR, user);
+    if (n < 0 || (size_t)n >= sizeof(marker_path)) {
+        return 0;
+    }
+
+    struct stat st;
+    return (stat(marker_path, &st) == 0);
 }
 
 /*
@@ -1345,6 +1448,91 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         bool is_offline_password = (strncmp(password, OFFLINE_PASSWORD_PREFIX, OFFLINE_PASSWORD_PREFIX_LEN) == 0);
         const char *actual_password = is_offline_password ? password + OFFLINE_PASSWORD_PREFIX_LEN : password;
 
+        /*
+         * Part C: Transparent online revalidation on screen unlock.
+         * If the user was authenticated offline (marker exists) and the
+         * network is now available, check if the user is still authorized
+         * via /pam/authorize. On success, refresh the offline cache and
+         * remove the marker. On explicit denial, reject authentication.
+         */
+        if (is_offline_password && data->offline_cache && has_offline_session_marker(user)) {
+            OB_LOG_DEBUG(pamh, "Offline marker exists for %s, attempting online revalidation", user);
+
+            ob_response_t reval_response = {0};
+
+            /* Try to authorize user via LLNG (uses server token) */
+            const char *reval_host = "localhost";
+            const char *reval_service = service ? service : "lightdm";
+
+            if (ob_authorize_user(data->client, user, reval_host, reval_service, &reval_response) == 0) {
+                if (reval_response.authorized) {
+                    /* User is still authorized on LLNG - refresh offline cache */
+                    OB_LOG_INFO(pamh, "User %s revalidated online on unlock", user);
+
+                    /* Refresh offline cache with entered password and fresh attributes */
+                    int cache_ttl = reval_response.has_offline && reval_response.offline.ttl > 0
+                        ? reval_response.offline.ttl
+                        : data->config.offline_cache_ttl;
+                    offline_cache_store(data->offline_cache, user, actual_password,
+                                       cache_ttl,
+                                       reval_response.gecos, reval_response.shell,
+                                       reval_response.home);
+
+                    /* Remove offline session marker */
+                    remove_offline_session_marker(pamh, user);
+
+                    /* Store user attributes */
+                    if (reval_response.gecos) {
+                        char *g = strdup(reval_response.gecos);
+                        if (g) pam_set_data(pamh, "ob_gecos", g, cleanup_string);
+                    }
+                    if (reval_response.shell) {
+                        char *s = strdup(reval_response.shell);
+                        if (s) pam_set_data(pamh, "ob_shell", s, cleanup_string);
+                    }
+                    if (reval_response.home) {
+                        char *h = strdup(reval_response.home);
+                        if (h) pam_set_data(pamh, "ob_home", h, cleanup_string);
+                    }
+
+                    if (audit_initialized) {
+                        audit_event.event_type = AUDIT_AUTH_SUCCESS;
+                        audit_event.result_code = PAM_SUCCESS;
+                        audit_event.reason = "Online revalidation on unlock";
+                        audit_event_set_end_time(&audit_event);
+                        audit_log_event(data->audit, &audit_event);
+                    }
+
+                    if (data->rate_limiter)
+                        rate_limiter_reset(data->rate_limiter, rate_key);
+
+                    ob_response_free(&reval_response);
+
+                    /* Still need to verify the password against offline cache
+                     * before granting access (authorization != authentication) */
+                    /* Fall through to offline cache verification below */
+                } else {
+                    /* User is no longer authorized on LLNG */
+                    OB_LOG_WARN(pamh, "User %s failed online revalidation (no longer authorized)", user);
+
+                    if (audit_initialized) {
+                        audit_event.event_type = AUDIT_AUTH_FAILURE;
+                        audit_event.result_code = PAM_AUTH_ERR;
+                        audit_event.reason = "Online revalidation failed (user no longer authorized)";
+                        audit_event_set_end_time(&audit_event);
+                        audit_log_event(data->audit, &audit_event);
+                    }
+
+                    ob_response_free(&reval_response);
+                    return PAM_AUTH_ERR;
+                }
+            } else {
+                /* Server unreachable - fall through to offline cache */
+                OB_LOG_DEBUG(pamh, "Portal unreachable for revalidation, falling back to offline cache");
+                ob_response_free(&reval_response);
+            }
+        }
+
         if (is_offline_password && data->offline_cache) {
             /* Greeter signalled offline mode – verify against cached credentials */
             OB_LOG_INFO(pamh, "Offline password received, verifying cached credentials for %s", user);
@@ -1372,6 +1560,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                 }
 
                 pam_set_data(pamh, "ob_offline_auth", (void *)1, NULL);
+
+                /* Create offline session marker for ob-session-monitor */
+                create_offline_session_marker(pamh, user);
 
                 if (audit_initialized) {
                     audit_event.event_type = AUDIT_AUTH_SUCCESS;
@@ -2533,6 +2724,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
         OB_LOG_DEBUG(pamh, "Invalidating cache for user %s on session close", user);
         cache_invalidate_user(data->cache, user);
     }
+
+    /* Remove offline session marker on session close */
+    remove_offline_session_marker(pamh, user);
 
     return PAM_SUCCESS;
 }
