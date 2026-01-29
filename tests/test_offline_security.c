@@ -202,8 +202,9 @@ static int test_timing_resistance(void)
     for (int round = 0; round < 7; round++) {
         for (int i = 0; i < 3 && idx_a < 21; i++) {
             long long start = get_time_us();
-            offline_cache_verify(cache, "timing_a", "incorrect_passwd_AAA", NULL);
+            int rc = offline_cache_verify(cache, "timing_a", "incorrect_passwd_AAA", NULL);
             times_wrong_a[idx_a++] = get_time_us() - start;
+            ASSERT(rc == OFFLINE_CACHE_ERR_PASSWORD);
         }
         /* Reset failed attempts by re-storing */
         offline_cache_store(cache, "timing_a", stored_pw, 3600, NULL, NULL, NULL);
@@ -214,8 +215,9 @@ static int test_timing_resistance(void)
     for (int round = 0; round < 7; round++) {
         for (int i = 0; i < 3 && idx_b < 21; i++) {
             long long start = get_time_us();
-            offline_cache_verify(cache, "timing_b", "incorrect_passwd_BBB", NULL);
+            int rc = offline_cache_verify(cache, "timing_b", "incorrect_passwd_BBB", NULL);
             times_wrong_b[idx_b++] = get_time_us() - start;
+            ASSERT(rc == OFFLINE_CACHE_ERR_PASSWORD);
         }
         offline_cache_store(cache, "timing_b", stored_pw, 3600, NULL, NULL, NULL);
     }
