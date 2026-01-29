@@ -2242,8 +2242,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
             {
                 char errmsg[64];
                 if (offline_result == OFFLINE_CACHE_ERR_LOCKED) {
+                    int lockout_secs = data->config.offline_cache_lockout > 0
+                        ? data->config.offline_cache_lockout
+                        : OFFLINE_CACHE_LOCKOUT_DURATION;
                     snprintf(errmsg, sizeof(errmsg), "OFFLINE_ERROR:%d:%d",
-                             offline_result, OFFLINE_CACHE_LOCKOUT_DURATION);
+                             offline_result, lockout_secs);
                 } else {
                     snprintf(errmsg, sizeof(errmsg), "OFFLINE_ERROR:%d", offline_result);
                 }
