@@ -163,6 +163,7 @@ jobs:
           libcurl-devel \
           json-c-devel \
           openssl-devel \
+          libsodium-devel \
           rpm-build \
           systemd-rpm-macros
 
