@@ -146,6 +146,11 @@ void config_init(pam_openbastion_config_t *config)
     config->offline_cache_max_failures = 5;
     config->offline_cache_lockout = 300;  /* 5 minutes */
 
+    /* Offline session revalidation - enabled by default */
+    config->offline_revalidation_enabled = true;
+    config->offline_revalidation_grace = 14400;  /* 4 hours */
+    config->offline_max_sso_unreachable = 3600;  /* 1 hour */
+
     /* Bastion JWT verification - disabled by default */
     config->bastion_jwt_required = false;
     config->bastion_jwt_verify_local = true;  /* Local verification preferred */
@@ -573,6 +578,15 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     }
     else if (strcmp(key, "offline_cache_lockout") == 0) {
         config->offline_cache_lockout = parse_int(value, 300, 60, 86400);  /* 1 min to 24 hours */
+    }
+    else if (strcmp(key, "offline_revalidation_enabled") == 0) {
+        config->offline_revalidation_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "offline_revalidation_grace") == 0) {
+        config->offline_revalidation_grace = parse_int(value, 14400, 600, 86400);  /* 10 min to 24 hours */
+    }
+    else if (strcmp(key, "offline_max_sso_unreachable") == 0) {
+        config->offline_max_sso_unreachable = parse_int(value, 3600, 600, 86400);  /* 10 min to 24 hours */
     }
     /* Bastion JWT verification settings */
     else if (strcmp(key, "bastion_jwt_required") == 0 || strcmp(key, "require_bastion") == 0) {

@@ -137,6 +137,28 @@ log_level = warn
 # offline_cache_lockout = 300
 
 # ==============================================================================
+# Offline Session Revalidation (for ob-session-monitor service)
+# ==============================================================================
+# When enabled, the ob-session-monitor service checks whether offline-authenticated
+# sessions are still valid when network connectivity returns.
+
+# Enable network revalidation of offline sessions
+# Default: true
+# offline_revalidation_enabled = true
+
+# Grace period in seconds: if offline cache is older than this, force online
+# re-authentication on next screen unlock
+# Range: 600 (10 minutes) to 86400 (24 hours)
+# Default: 14400 (4 hours)
+# offline_revalidation_grace = 14400
+
+# Maximum time SSO portal can be unreachable while general network is up
+# before terminating all offline sessions (anti-firewall-bypass protection)
+# Range: 600 (10 minutes) to 86400 (24 hours)
+# Default: 3600 (1 hour)
+# offline_max_sso_unreachable = 3600
+
+# ==============================================================================
 # Bastion JWT Verification (for backend servers)
 # ==============================================================================
 
