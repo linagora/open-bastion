@@ -117,7 +117,6 @@ target_link_libraries(test_offline_security
     ${JSON_C_LIBRARIES}
     ${OPENSSL_LIBRARIES}
     $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
-    m  # for math functions in timing tests
 )
 add_test(NAME test_offline_security COMMAND test_offline_security)
 

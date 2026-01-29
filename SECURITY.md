@@ -550,6 +550,11 @@ stateDiagram-v2
 | Failure persistence | Stored encrypted in cache file (`failed_attempts`, `locked_until`) |
 | Timing attack prevention | Constant-time hash comparison |
 
+> **Note:** The lockout thresholds (5 attempts, 5 minutes) are compile-time constants
+> defined in `offline_cache.h` (`OFFLINE_CACHE_MAX_FAILED_ATTEMPTS` and
+> `OFFLINE_CACHE_LOCKOUT_DURATION`). For environments requiring stricter lockout,
+> recompile with lower thresholds (minimum recommended: 3 attempts, 15 minutes).
+
 Lockout state is stored within the encrypted cache entry, ensuring it cannot be
 reset by file manipulation.
 
