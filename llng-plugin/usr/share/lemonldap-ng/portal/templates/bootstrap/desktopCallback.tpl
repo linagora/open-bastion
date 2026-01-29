@@ -82,13 +82,13 @@
         </svg>
       </div>
       <h1>Authentication Failed</h1>
-      <p><TMPL_VAR NAME="ERROR"></p>
+      <p><TMPL_VAR NAME="ERROR" ESCAPE="HTML"></p>
     <TMPL_ELSE>
       <!-- Success state -->
       <div id="loadingState">
         <div class="spinner"></div>
         <h1>Authentication Successful</h1>
-        <p>Completing login for <strong><TMPL_VAR NAME="USER"></strong>...</p>
+        <p>Completing login for <strong><TMPL_VAR NAME="USER" ESCAPE="HTML"></strong>...</p>
       </div>
       <div id="successState" class="hidden">
         <div class="success-icon">
