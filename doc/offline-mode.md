@@ -408,8 +408,8 @@ Three complementary mechanisms provide revalidation:
 1. **Screen unlock revalidation (Part C)**: When the user unlocks their screen
    with a password, the PAM module detects the offline session marker and
    attempts a real online LLNG authentication. On success, the offline cache is
-   refreshed and the marker removed. On failure (revoked account), the session
-   is terminated.
+   refreshed and the marker removed. On failure (revoked account), the unlock
+   is refused; session termination is handled by `ob-session-monitor`.
 
 2. **Token refresh (Part B)**: The LightDM greeter stores the OAuth2 refresh
    token. On screen unlock, if the access token has expired, the greeter calls

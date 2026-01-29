@@ -20,6 +20,14 @@ MAX_SSO_UNREACHABLE=3600    # 1 hour
 # State
 sso_unreachable_since=0
 
+# Verify required dependencies
+for cmd in curl jq loginctl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: required command '$cmd' not found" >&2
+        exit 1
+    fi
+done
+
 # Logging
 log_info() {
     logger -t ob-session-monitor -p auth.info "$@"
@@ -45,38 +53,38 @@ read_config() {
     fi
 
     local portal_url_val
-    portal_url_val=$(grep -E '^\s*portal_url\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | tr -d '[:space:]')
+    portal_url_val=$(grep -E '^\s*portal_url\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$portal_url_val" ]; then
         PORTAL_URL="$portal_url_val"
     fi
 
     local server_token_file_val
-    server_token_file_val=$(grep -E '^\s*server_token_file\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | tr -d '[:space:]')
+    server_token_file_val=$(grep -E '^\s*server_token_file\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$server_token_file_val" ] && [ -f "$server_token_file_val" ]; then
         SERVER_TOKEN=$(cat "$server_token_file_val" 2>/dev/null)
     fi
 
     local reval_enabled
-    reval_enabled=$(grep -E '^\s*offline_revalidation_enabled\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '[:space:]')
+    reval_enabled=$(grep -E '^\s*offline_revalidation_enabled\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ "$reval_enabled" = "false" ] || [ "$reval_enabled" = "0" ] || [ "$reval_enabled" = "no" ]; then
         log_info "Offline revalidation disabled in configuration"
         exit 0
     fi
 
     local grace_val
-    grace_val=$(grep -E '^\s*offline_revalidation_grace\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '[:space:]')
+    grace_val=$(grep -E '^\s*offline_revalidation_grace\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$grace_val" ] && [ "$grace_val" -gt 0 ] 2>/dev/null; then
         REVALIDATION_GRACE=$grace_val
     fi
 
     local max_unreachable_val
-    max_unreachable_val=$(grep -E '^\s*offline_max_sso_unreachable\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '[:space:]')
+    max_unreachable_val=$(grep -E '^\s*offline_max_sso_unreachable\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$max_unreachable_val" ] && [ "$max_unreachable_val" -gt 0 ] 2>/dev/null; then
         MAX_SSO_UNREACHABLE=$max_unreachable_val
     fi
 
     local force_online_val
-    force_online_val=$(grep -E '^\s*auth_cache_force_online\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | tr -d '[:space:]')
+    force_online_val=$(grep -E '^\s*auth_cache_force_online\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$force_online_val" ]; then
         FORCE_ONLINE_FILE="$force_online_val"
     fi
@@ -95,7 +103,10 @@ check_portal() {
 check_network() {
     local hostname
     hostname=$(echo "$PORTAL_URL" | sed -E 's|https?://([^/:]+).*|\1|')
-    if host "$hostname" >/dev/null 2>&1; then
+    if [ -z "$hostname" ]; then
+        return 1
+    fi
+    if command -v host >/dev/null 2>&1 && host "$hostname" >/dev/null 2>&1; then
         return 0
     fi
     # Fallback: try a simple network check
@@ -113,11 +124,14 @@ check_user_valid() {
         auth_header="Authorization: Bearer $SERVER_TOKEN"
     fi
 
+    local payload
+    payload=$(jq -n --arg u "$user" '{user: $u}')
+
     local response
     response=$(curl -sf -m 10 \
         -H "Content-Type: application/json" \
         ${auth_header:+-H "$auth_header"} \
-        -d "{\"user\": \"$user\"}" \
+        -d "$payload" \
         "${PORTAL_URL}/pam/userinfo" 2>/dev/null) || return 1
 
     # Check if user is found
@@ -202,8 +216,13 @@ revalidate_sessions() {
             cache_age=$(get_cache_age "$user")
             if [ "$cache_age" -gt "$REVALIDATION_GRACE" ]; then
                 log_info "User $user: offline cache age ($cache_age seconds) exceeds grace period ($REVALIDATION_GRACE seconds), forcing online re-auth"
-                # Write user to force_online file to require online auth on next unlock
-                echo "$user" >> "$FORCE_ONLINE_FILE"
+                # Write user to force_online file with locking and deduplication
+                {
+                    flock -x 200
+                    if ! grep -qxF "$user" "$FORCE_ONLINE_FILE" 2>/dev/null; then
+                        printf '%s\n' "$user" >> "$FORCE_ONLINE_FILE"
+                    fi
+                } 200>"$FORCE_ONLINE_FILE.lock"
             fi
         else
             # User no longer valid - terminate session
@@ -282,6 +301,16 @@ main() {
         log_crit "portal_url not configured, exiting"
         exit 1
     fi
+
+    # Validate portal URL format
+    case "$PORTAL_URL" in
+        https://*|http://*)
+            ;;
+        *)
+            log_crit "Invalid portal_url format (must start with http:// or https://): $PORTAL_URL"
+            exit 1
+            ;;
+    esac
 
     log_info "Portal URL: $PORTAL_URL"
     log_info "Revalidation grace period: ${REVALIDATION_GRACE}s"

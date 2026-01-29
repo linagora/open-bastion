@@ -133,7 +133,7 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
     /* Create marker directory if it doesn't exist */
     struct stat st;
     if (stat(OFFLINE_SESSION_MARKER_DIR, &st) != 0) {
-        if (mkdir("/run/open-bastion", 0755) != 0 && errno != EEXIST) {
+        if (mkdir("/run/open-bastion", 0700) != 0 && errno != EEXIST) {
             OB_LOG_WARN(pamh, "Cannot create /run/open-bastion: %s", strerror(errno));
             return;
         }
@@ -145,7 +145,7 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
 
     /* Validate username (no path traversal) */
     for (const char *p = user; *p; p++) {
-        if (*p == '/' || *p == '.' || *p == '\0') {
+        if (*p == '/' || *p == '.') {
             OB_LOG_WARN(pamh, "Invalid username for offline marker: %s", user);
             return;
         }
@@ -158,6 +158,7 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
         return;
     }
 
+    /* O_TRUNC is intentional: in concurrent scenarios, the latest timestamp wins */
     int fd = open(marker_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
     if (fd < 0) {
         OB_LOG_WARN(pamh, "Cannot create offline marker for %s: %s", user, strerror(errno));
