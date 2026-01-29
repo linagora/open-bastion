@@ -76,6 +76,8 @@ token-based and key-based authorization with server groups.
 %{_datadir}/open-bastion/lightdm/greeter/style.css
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
+%{_sbindir}/ob-session-monitor
+%{_unitdir}/ob-session-monitor.service
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
@@ -87,12 +89,15 @@ token-based and key-based authorization with server groups.
 
 %post
 %systemd_post ob-heartbeat.timer
+%systemd_post ob-session-monitor.service
 
 %preun
 %systemd_preun ob-heartbeat.timer
+%systemd_preun ob-session-monitor.service
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
+%systemd_postun_with_restart ob-session-monitor.service
 
 %changelog
 * Sun Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
