@@ -152,16 +152,24 @@ revalidate_sessions() {
         return
     fi
 
-    local markers
-    markers=$(ls "$MARKER_DIR" 2>/dev/null) || return
-    if [ -z "$markers" ]; then
+    local found=false
+    for marker_path in "$MARKER_DIR"/*; do
+        [ -e "$marker_path" ] || continue
+        found=true
+        break
+    done
+    if [ "$found" = "false" ]; then
         return
     fi
 
-    for user_file in $markers; do
+    for marker_path in "$MARKER_DIR"/*; do
+        [ -e "$marker_path" ] || continue
+        local user_file
+        user_file=$(basename "$marker_path")
+
         # Sanitize: skip files with dots or slashes
         case "$user_file" in
-            */* | *.* ) continue ;;
+            *.* ) continue ;;
         esac
 
         local user="$user_file"
@@ -234,9 +242,12 @@ handle_sso_unreachable() {
         log_crit "SSO portal unreachable for ${unreachable_duration}s despite network, terminating all offline sessions"
 
         if [ -d "$MARKER_DIR" ]; then
-            for user_file in $(ls "$MARKER_DIR" 2>/dev/null); do
+            for marker_path in "$MARKER_DIR"/*; do
+                [ -e "$marker_path" ] || continue
+                local user_file
+                user_file=$(basename "$marker_path")
                 case "$user_file" in
-                    */* | *.* ) continue ;;
+                    *.* ) continue ;;
                 esac
 
                 local user="$user_file"
