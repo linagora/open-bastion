@@ -169,7 +169,8 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
     int len = snprintf(buf, sizeof(buf), "%ld\n", (long)time(NULL));
     if (len > 0) {
         /* Ignore write errors - marker is best effort */
-        (void)write(fd, buf, (size_t)len);
+        ssize_t written = write(fd, buf, (size_t)len);
+        (void)written;
     }
     close(fd);
 
