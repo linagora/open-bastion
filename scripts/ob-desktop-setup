@@ -394,6 +394,14 @@ create_directories() {
     if $OFFLINE_MODE; then
         mkdir -p /var/cache/open-bastion/auth
         chmod 700 /var/cache/open-bastion/auth
+
+        # Generate encryption key for offline credential cache
+        local key_file="${OB_CONFIG_DIR}/cache.key"
+        if [[ ! -f "$key_file" ]]; then
+            dd if=/dev/urandom of="$key_file" bs=32 count=1 status=none
+            chmod 600 "$key_file"
+            log_success "Generated cache encryption key: $key_file"
+        fi
     fi
 
     mkdir -p /var/log/open-bastion
