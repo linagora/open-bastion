@@ -66,6 +66,8 @@
     let selectedUser = null;
     let authToken = null;
     let pendingPassword = null;  // Closure-scoped, not global
+    let refreshToken = null;         // OAuth2 refresh token for screen unlock
+    let tokenExpiresAt = null;       // Token expiration timestamp (ms)
     let offlineCheckFailures = 0;
     let lastOfflineError = null;
     let lockoutEndTime = null;
@@ -134,7 +136,18 @@
         setupEventListeners();
 
         // Initialize mode based on online status
-        if (isOnline) {
+        // On screen unlock (greeter re-init), try refreshing the token first
+        if (refreshToken && tokenExpiresAt) {
+            debugLog('Screen unlock detected with stored refresh token');
+            if (!tryRefreshToken()) {
+                // Token still valid or no user — fall through to normal init
+                if (isOnline) {
+                    initSSOIframe();
+                } else {
+                    switchMode('offline');
+                }
+            }
+        } else if (isOnline) {
             initSSOIframe();
         } else {
             switchMode('offline');
@@ -429,6 +442,64 @@
     }
 
     /**
+     * Try to refresh the OAuth2 token using the stored refresh_token.
+     * Used on screen unlock when the access_token has expired.
+     * Returns true if refresh succeeded and authentication was started.
+     */
+    function tryRefreshToken() {
+        // Only attempt refresh if we have a refresh token and the access token
+        // is expired or expiring within 5 minutes
+        if (!refreshToken || !tokenExpiresAt) {
+            return false;
+        }
+        if (Date.now() < tokenExpiresAt - 300000) {
+            // Token still valid for > 5 minutes, use it directly
+            if (authToken && selectedUser) {
+                startAuthentication(selectedUser, authToken);
+                return true;
+            }
+            return false;
+        }
+
+        debugLog('Access token expired or expiring soon, attempting refresh');
+
+        fetch(CONFIG.portalUrl + '/desktop/refresh', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({refresh_token: refreshToken})
+        })
+        .then(function(response) {
+            if (!response.ok) throw new Error('Refresh failed: ' + response.status);
+            return response.json();
+        })
+        .then(function(data) {
+            if (data.access_token) {
+                debugLog('Token refresh successful');
+                authToken = data.access_token;
+                refreshToken = data.refresh_token || refreshToken;  // rotation
+                tokenExpiresAt = data.expires_in
+                    ? Date.now() + (data.expires_in * 1000)
+                    : null;
+                startAuthentication(selectedUser, authToken);
+            } else {
+                debugLog('Token refresh returned no access_token, falling back');
+                initSSOIframe();
+            }
+        })
+        .catch(function(err) {
+            debugLog('Token refresh failed:', err.message, '- falling back to SSO');
+            // Fall through to normal flow: SSO iframe or offline
+            if (isOnline) {
+                initSSOIframe();
+            } else {
+                switchMode('offline');
+            }
+        });
+
+        return true;  // Refresh attempt initiated (async)
+    }
+
+    /**
      * Initialize the SSO iframe
      */
     function initSSOIframe() {
@@ -565,6 +636,10 @@
 
         if (data.access_token && data.user) {
             authToken = data.access_token;
+            refreshToken = data.refresh_token || null;
+            tokenExpiresAt = data.expires_in
+                ? Date.now() + (data.expires_in * 1000)
+                : null;
             selectedUser = data.user;
 
             // Start LightDM authentication with the token as password
