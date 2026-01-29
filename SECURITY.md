@@ -477,6 +477,229 @@ shell = /bin/bash
 home = /var/lib/ansible
 ```
 
+## Offline Credential Cache Security
+
+The offline cache enables Desktop SSO authentication when the LLNG server is unreachable.
+This section describes the security architecture and considerations.
+
+### Cryptographic Design
+
+**Password Hashing (Argon2id):**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Memory cost | 64 MiB | Prevents GPU/ASIC attacks |
+| Iterations | 3 | Balance of security and latency |
+| Parallelism | 4 | Utilizes multi-core CPUs |
+| Hash length | 32 bytes | 256-bit output |
+| Salt length | 16 bytes | Unique per user, random |
+
+These parameters follow OWASP guidelines for high-security password storage.
+
+**Data Encryption (AES-256-GCM):**
+
+```
+File format:
+[Magic: OBCRED01 (8 bytes)][AES-256-GCM encrypted JSON]
+```
+
+| Component | Description |
+|-----------|-------------|
+| Algorithm | AES-256-GCM authenticated encryption |
+| Key source | Root-only key file (`/etc/open-bastion/cache.key`), fallback to machine-id derivation |
+| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-cache-directory salt |
+| IV | 12 bytes, random per encryption |
+| Auth tag | 16 bytes, prevents tampering |
+
+**GCM authentication** ensures any tampering (bit flips, truncation) is detected
+and the entry is rejected.
+
+### Machine Binding
+
+The encryption key is derived from a root-only key file or `/etc/machine-id`, ensuring:
+
+- **Portability prevention**: Cache files are useless on other machines
+- **Cloning detection**: VM clones with same machine-id must re-enroll
+- **Hardware binding**: Physical theft of disk provides no access without key file
+
+**Impact of machine-id/key change:**
+- All cached credentials become permanently unreadable
+- Users must authenticate online to re-cache credentials
+- No security risk (encrypted data remains encrypted)
+
+### Cache Entry Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Stored: Successful online auth
+    Stored --> Verified: Correct password (offline)
+    Stored --> Failed: Wrong password
+    Failed --> Failed: Increment failures
+    Failed --> Locked: Max attempts reached
+    Locked --> Stored: Lockout expires
+    Stored --> Expired: TTL exceeded
+    Expired --> [*]: Entry removed
+    Verified --> [*]: User authenticated
+```
+
+### Brute Force Mitigation
+
+| Protection | Description |
+|------------|-------------|
+| Per-user lockout | 5 failed attempts triggers lockout |
+| Lockout duration | 5 minutes |
+| Failure persistence | Stored encrypted in cache file (`failed_attempts`, `locked_until`) |
+| Timing attack prevention | Constant-time hash comparison |
+
+> **Note:** The lockout thresholds (5 attempts, 5 minutes) are compile-time constants
+> defined in `offline_cache.h` (`OFFLINE_CACHE_MAX_FAILED_ATTEMPTS` and
+> `OFFLINE_CACHE_LOCKOUT_DURATION`). For environments requiring stricter lockout,
+> recompile with lower thresholds (minimum recommended: 3 attempts, 15 minutes).
+
+Lockout state is stored within the encrypted cache entry, ensuring it cannot be
+reset by file manipulation.
+
+### Error Codes
+
+The greeter and PAM module communicate via structured error codes
+(must match `include/offline_cache.h`):
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | OFFLINE_CACHE_OK | Success |
+| -1 | OFFLINE_CACHE_ERR_NOMEM | Out of memory |
+| -2 | OFFLINE_CACHE_ERR_IO | File system error |
+| -3 | OFFLINE_CACHE_ERR_CRYPTO | Decryption failed |
+| -4 | OFFLINE_CACHE_ERR_NOTFOUND | User not in cache |
+| -5 | OFFLINE_CACHE_ERR_EXPIRED | Cache entry expired |
+| -6 | OFFLINE_CACHE_ERR_LOCKED | Account locked out |
+| -7 | OFFLINE_CACHE_ERR_INVALID | Invalid cache data |
+| -8 | OFFLINE_CACHE_ERR_PASSWORD | Password mismatch |
+
+The PAM module sends structured messages (`OFFLINE_ERROR:code[:locktime]`) via
+PAM conversation so the greeter can display appropriate feedback.
+
+### File System Security
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Directory permissions | 0700 (owner only) |
+| File permissions | 0600 (owner read/write) |
+| Symlink protection | O_NOFOLLOW on all opens |
+| Race condition | Atomic file operations (rename) |
+| Filename | SHA-256("cred:username") to prevent enumeration |
+| Secure deletion | `shred` used by admin tool |
+
+### Security Boundaries
+
+| Threat Vector | Protection |
+|---------------|------------|
+| Cache file theft | AES-256-GCM + machine/key binding |
+| Memory analysis | Secure memory clearing (explicit_bzero/sodium_memzero) |
+| Timing attacks | Constant-time comparison for hashes |
+| Symlink attacks | O_NOFOLLOW on all file operations |
+| Race conditions | Atomic file operations (rename) |
+| Privilege escalation | Cache directory is 0700 root-owned |
+| Lockout bypass | Lockout state encrypted in cache |
+| User enumeration | SHA-256 hashed filenames |
+
+### Operational Considerations
+
+**When to enable offline mode:**
+- Corporate workstations with network reliability concerns
+- Laptops used in areas with poor connectivity
+- Business continuity during LLNG maintenance
+
+**When NOT to enable offline mode:**
+- High-security environments requiring real-time authorization
+- Shared/public workstations
+- Systems requiring immediate access revocation
+
+**Emergency procedures:**
+
+```bash
+# Immediate user revocation
+ob-cache-admin invalidate username
+
+# Force online-only authentication
+touch /etc/open-bastion/force_online
+
+# Complete cache flush
+ob-cache-admin invalidate-all
+```
+
+### Administrative Controls
+
+The `ob-cache-admin` tool provides secure cache management:
+
+```bash
+# List cached credentials (metadata only, no secrets)
+ob-cache-admin list
+
+# Show details for a specific user
+ob-cache-admin show username
+
+# Invalidate specific user's cache (secure deletion)
+ob-cache-admin invalidate username
+
+# Invalidate all cached credentials
+ob-cache-admin invalidate-all
+
+# Unlock a locked account
+ob-cache-admin unlock username
+
+# Remove invalid/orphaned files
+ob-cache-admin cleanup
+```
+
+**Security notes:**
+- Requires root privileges (cache files owned by root)
+- Never displays passwords or hashes
+- Uses `shred` for secure file deletion
+- Unlock cannot modify encrypted lockout state directly; offers invalidation instead
+
+### Audit and Monitoring
+
+Offline authentication events are logged to:
+- Syslog (via PAM)
+- Structured audit log (`/var/log/open-bastion/audit.json`)
+
+Look for:
+- `offline_auth_success`: User authenticated via cache
+- `offline_auth_failure`: Failed offline authentication attempt
+- `offline_cache_locked`: User locked out due to failed attempts
+
+### Recommendations
+
+1. **Generate a key file**: Use `ob-desktop-setup --offline` or create manually
+   (`dd if=/dev/urandom of=/etc/open-bastion/cache.key bs=32 count=1`)
+
+2. **Set appropriate TTL**: Default 7 days; reduce for high-security environments
+
+3. **Enable disk encryption**: Use LUKS or similar for the system drive
+
+4. **Monitor lockouts**: Check `ob-cache-admin stats` for unusual patterns
+
+5. **Regular cleanup**: Run `ob-cache-admin cleanup` periodically via cron
+
+6. **Disable when not needed**: Set `auth_cache_enabled = false` to eliminate
+   the attack surface entirely
+
+### Network Revalidation
+
+When a user authenticates offline and the network returns, the system
+revalidates the session via three mechanisms:
+
+| Mechanism | Trigger | Action |
+|-----------|---------|--------|
+| Screen unlock (PAM) | User enters password | Online LLNG auth attempted |
+| Token refresh (Greeter) | Screen unlock | Refresh token exchanged for new access token |
+| ob-session-monitor | Periodic (60s) | Check user validity via `/pam/userinfo` |
+
+**Anti-firewall-bypass protection**: If the SSO portal is unreachable despite
+network being available (possible local firewall manipulation), all offline
+sessions are terminated after `offline_max_sso_unreachable` seconds (default: 1h).
+
 ## Threat Mitigations
 
 | Threat | Mitigation |
@@ -495,6 +718,9 @@ home = /var/lib/ansible
 | Client secret exposure | JWT Client Assertion (RFC 7523) - secret never transmitted |
 | Bastion bypass | Bastion JWT verification on backends (RS256 signed) |
 | Direct backend access | JWT required + JWKS-based offline verification |
+| Offline cache theft | AES-256-GCM encryption + machine-id binding |
+| Offline brute force | Argon2id + per-user lockout after 5 attempts |
+| Stale offline credentials | Configurable TTL (default 7 days) |
 
 ## Security Reporting
 

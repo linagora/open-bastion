@@ -1,0 +1,5 @@
+[theme]
+name=Open Bastion
+author=Linagora
+version=1.0
+description=Open Bastion Desktop SSO greeter for LightDM

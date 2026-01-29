@@ -14,6 +14,7 @@ BuildRequires:  pam-devel
 BuildRequires:  libcurl-devel
 BuildRequires:  pkgconfig(json-c)
 BuildRequires:  pkgconfig(openssl)
+BuildRequires:  pkgconfig(libsodium)
 BuildRequires:  pkgconfig
 BuildRequires:  systemd-rpm-macros
 
@@ -21,6 +22,7 @@ Requires:       pam
 Requires:       libcurl
 Requires:       json-c
 Requires:       openssl-libs
+Requires:       libsodium
 Requires:       curl
 Requires:       jq
 Requires:       nscd
@@ -38,6 +40,7 @@ token-based and key-based authorization with server groups.
 %set_build_flags
 %cmake \
     -DENABLE_CACHE=ON \
+    -DUSE_LIBSODIUM=ON \
     -DBUILD_TESTING=OFF \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
@@ -59,12 +62,22 @@ token-based and key-based authorization with server groups.
 %{_sbindir}/ob-session-recorder
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-backend-setup
+%{_sbindir}/ob-desktop-setup
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh-proxy
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
+%config(noreplace) %{_sysconfdir}/open-bastion/lightdm-openbastion.conf.example
+%dir %{_datadir}/open-bastion/lightdm
+%dir %{_datadir}/open-bastion/lightdm/greeter
+%{_datadir}/open-bastion/lightdm/greeter/greeter.js
+%{_datadir}/open-bastion/lightdm/greeter/index.html
+%{_datadir}/open-bastion/lightdm/greeter/index.theme
+%{_datadir}/open-bastion/lightdm/greeter/style.css
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
+%{_sbindir}/ob-session-monitor
+%{_unitdir}/ob-session-monitor.service
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
@@ -76,14 +89,17 @@ token-based and key-based authorization with server groups.
 
 %post
 %systemd_post ob-heartbeat.timer
+%systemd_post ob-session-monitor.service
 
 %preun
 %systemd_preun ob-heartbeat.timer
+%systemd_preun ob-session-monitor.service
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
+%systemd_postun_with_restart ob-session-monitor.service
 
 %changelog
-* Sat Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
+* Sun Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
 - Initial RPM package
 - Renamed project from pam-llng to open-bastion

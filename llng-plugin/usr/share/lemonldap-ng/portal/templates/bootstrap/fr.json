@@ -36,5 +36,14 @@
 "sshPublicKeyHelp":"Collez le contenu de votre fichier ~/.ssh/id_ed25519.pub ou ~/.ssh/id_rsa.pub",
 "sshValidUntil":"Valide jusqu'au",
 "userCode":"Code de l'appareil",
-"userCodeHelp":"Entrez le code à 8 caractères affiché sur votre appareil"
+"userCodeHelp":"Entrez le code à 8 caractères affiché sur votre appareil",
+"desktopLoginTitle":"Connexion Bureau",
+"desktopLoginInfo":"Connectez-vous pour accéder à votre bureau.",
+"desktopLoginSuccess":"Authentification réussie",
+"desktopLoginFailed":"Échec de l'authentification",
+"desktopLoginComplete":"Connexion terminée",
+"desktopLoginCompleting":"Connexion en cours...",
+"desktopLoginUsername":"Nom d'utilisateur",
+"desktopLoginPassword":"Mot de passe",
+"desktopLoginSignIn":"Se connecter"
 }
