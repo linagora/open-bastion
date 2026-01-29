@@ -14,6 +14,7 @@ BuildRequires:  pam-devel
 BuildRequires:  libcurl-devel
 BuildRequires:  pkgconfig(json-c)
 BuildRequires:  pkgconfig(openssl)
+BuildRequires:  pkgconfig(libsodium)
 BuildRequires:  pkgconfig
 BuildRequires:  systemd-rpm-macros
 
@@ -21,6 +22,7 @@ Requires:       pam
 Requires:       libcurl
 Requires:       json-c
 Requires:       openssl-libs
+Requires:       libsodium
 Requires:       curl
 Requires:       jq
 Requires:       nscd
@@ -38,6 +40,7 @@ token-based and key-based authorization with server groups.
 %set_build_flags
 %cmake \
     -DENABLE_CACHE=ON \
+    -DUSE_LIBSODIUM=ON \
     -DBUILD_TESTING=ON \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
