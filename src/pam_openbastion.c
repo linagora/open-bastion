@@ -1322,10 +1322,8 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          * password (not an OAuth2 token), so we can skip token
          * introspection and go straight to offline cache verification.
          */
-        const char *offline_prefix = "OFFLINE:";
-        const size_t prefix_len = 8;
-        bool is_offline_password = (strncmp(password, offline_prefix, prefix_len) == 0);
-        const char *actual_password = is_offline_password ? password + prefix_len : password;
+        bool is_offline_password = (strncmp(password, OFFLINE_PASSWORD_PREFIX, OFFLINE_PASSWORD_PREFIX_LEN) == 0);
+        const char *actual_password = is_offline_password ? password + OFFLINE_PASSWORD_PREFIX_LEN : password;
 
         if (is_offline_password && data->offline_cache) {
             /* Greeter signalled offline mode – verify against cached credentials */

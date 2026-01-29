@@ -429,7 +429,8 @@
 
         selectedUser = username;
         // Prefix with OFFLINE: so the PAM module can distinguish offline
-        // passwords from OAuth2 tokens when the server is unreachable
+        // passwords from OAuth2 tokens when the server is unreachable.
+        // This constant must match OFFLINE_PASSWORD_PREFIX in include/offline_cache.h
         startAuthentication(username, 'OFFLINE:' + password);
     }
 
