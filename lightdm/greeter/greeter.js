@@ -436,6 +436,20 @@
             '?callback_url=' + encodeURIComponent(window.location.origin + '/callback') +
             '&state=' + generateState();
 
+        /* Validate URL scheme before assigning to iframe src (CodeQL: DOM text as HTML) */
+        try {
+            const parsed = new URL(iframeUrl);
+            if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+                console.error('Refusing non-HTTP(S) iframe URL:', parsed.protocol);
+                showError('Invalid authentication server URL');
+                return;
+            }
+        } catch (e) {
+            console.error('Invalid iframe URL:', e.message);
+            showError('Invalid authentication server URL');
+            return;
+        }
+
         debugLog('Loading SSO iframe');
         elements.iframeLoading.classList.remove('hidden');
         elements.ssoIframe.src = iframeUrl;
