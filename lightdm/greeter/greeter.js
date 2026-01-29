@@ -257,7 +257,9 @@
         // Offline retry button
         if (elements.offlineRetryBtn) {
             elements.offlineRetryBtn.addEventListener('click', function() {
+                elements.offlineRetryBtn.disabled = true;
                 checkOnlineStatus(true);
+                setTimeout(function() { elements.offlineRetryBtn.disabled = false; }, 3000);
             });
         }
 
@@ -313,18 +315,16 @@
             elements.offlineStatus.className = 'offline-status checking';
         }
 
-        // Create abort controller for timeout
-        const controller = new AbortController();
+        // Create abort controller for timeout (guard for older webkit2gtk)
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timeoutId = setTimeout(function() {
-            controller.abort();
+            if (controller) controller.abort();
         }, CONFIG.onlineCheckTimeout);
 
-        fetch(testUrl, {
-            method: 'HEAD',
-            mode: 'no-cors',
-            cache: 'no-cache',
-            signal: controller.signal
-        })
+        const fetchOpts = { method: 'HEAD', mode: 'no-cors', cache: 'no-cache' };
+        if (controller) fetchOpts.signal = controller.signal;
+
+        fetch(testUrl, fetchOpts)
         .then(function() {
             clearTimeout(timeoutId);
             offlineCheckFailures = 0;
@@ -472,8 +472,9 @@
             elements.offlineMode.classList.remove('active');
             elements.toggleText.textContent = 'Switch to Offline Mode';
 
-            // Clear any lockout timer
-            clearLockoutTimer();
+            // Stop lockout display timer but preserve lockoutEndTime —
+            // if user switches back to offline, the lockout is still active.
+            stopLockoutDisplay();
 
             if (isOnline) {
                 initSSOIframe();
@@ -569,7 +570,8 @@
             return;
         }
 
-        // Check if account is locked
+        // UX-only lockout guard — the PAM module is the authoritative enforcer
+        // (via OFFLINE_CACHE_ERR_LOCKED). This just avoids unnecessary round-trips.
         if (lockoutEndTime && Date.now() < lockoutEndTime) {
             showLockoutError();
             return;
@@ -677,8 +679,8 @@
         const minutes = Math.floor(remaining / 60);
         const seconds = remaining % 60;
         const timeStr = minutes > 0
-            ? minutes + ' minute' + (minutes > 1 ? 's' : '') + ' ' + seconds + ' seconds'
-            : seconds + ' second' + (seconds > 1 ? 's' : '');
+            ? minutes + ' minute' + (minutes !== 1 ? 's' : '') + ' ' + seconds + ' second' + (seconds !== 1 ? 's' : '')
+            : seconds + ' second' + (seconds !== 1 ? 's' : '');
 
         showError('Account locked. Try again in ' + timeStr);
 
@@ -710,13 +712,21 @@
     }
 
     /**
-     * Clear lockout timer
+     * Stop the lockout display interval (without clearing lockoutEndTime)
      */
-    function clearLockoutTimer() {
+    function stopLockoutDisplay() {
         if (lockoutTimer) {
             clearInterval(lockoutTimer);
             lockoutTimer = null;
         }
+    }
+
+    /**
+     * Clear lockout state entirely (timer + end time)
+     * Only call on actual expiry or successful authentication.
+     */
+    function clearLockoutTimer() {
+        stopLockoutDisplay();
         lockoutEndTime = null;
     }
 
@@ -796,6 +806,15 @@
             elements.password.disabled = false;
         }
     }
+
+    // Cleanup timers on page unload to prevent leaks
+    window.addEventListener('beforeunload', function() {
+        clearLockoutTimer();
+        if (onlineCheckTimer) {
+            clearTimeout(onlineCheckTimer);
+            onlineCheckTimer = null;
+        }
+    });
 
     // Initialize when DOM is ready
     if (document.readyState === 'loading') {
