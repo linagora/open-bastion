@@ -1,7 +1,7 @@
 [Unit]
 Description=Open Bastion Offline Session Monitor
 Documentation=man:ob-session-monitor(8)
-After=network-online.target lightdm.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -24,9 +24,8 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 
 # Requires read access to config and write access to runtime dir
-ReadOnlyPaths=/etc/open-bastion
-ReadWritePaths=/run/open-bastion
-ReadWritePaths=/etc/open-bastion/force_online
+ReadOnlyPaths=/etc/open-bastion/openbastion.conf
+ReadWritePaths=/run/open-bastion /etc/open-bastion/force_online
 
 # Network access required
 PrivateNetwork=no

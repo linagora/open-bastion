@@ -461,6 +461,11 @@
             return false;
         }
 
+        if (!selectedUser) {
+            debugLog('No selected user for token refresh');
+            return false;
+        }
+
         debugLog('Access token expired or expiring soon, attempting refresh');
 
         fetch(CONFIG.portalUrl + '/desktop/refresh', {
