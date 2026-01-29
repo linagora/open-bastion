@@ -108,6 +108,11 @@ typedef struct {
     int offline_cache_lockout;      /* Lockout duration in seconds (default: 300) */
     char *offline_cache_key_file;   /* Secret key file for cache encryption (default: /etc/open-bastion/cache.key, mode 0600) */
 
+    /* Offline session revalidation (for ob-session-monitor) */
+    bool offline_revalidation_enabled;  /* Enable network revalidation of offline sessions (default: true) */
+    int offline_revalidation_grace;     /* Grace period before forcing re-auth in seconds (default: 14400 = 4h) */
+    int offline_max_sso_unreachable;    /* Max time SSO can be unreachable while network is up (default: 3600 = 1h) */
+
     /* Bastion JWT verification (for backend servers) */
     bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */
     bool bastion_jwt_verify_local;  /* Verify JWT locally with JWKS (default: true) */
