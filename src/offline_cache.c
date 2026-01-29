@@ -292,6 +292,7 @@ static int hash_password(const char *password, size_t password_len,
      * to ensure cross-backend compatibility with OpenSSL implementation.
      * Note: libsodium's OPSLIMIT/MEMLIMIT_MODERATE differ from our constants.
      */
+    (void)salt_len; /* libsodium uses crypto_pwhash_SALTBYTES internally */
     unsigned long long opslimit = (unsigned long long)ARGON2_ITERATIONS;
     size_t memlimit = (size_t)ARGON2_MEMORY_KB * 1024ULL;
 
