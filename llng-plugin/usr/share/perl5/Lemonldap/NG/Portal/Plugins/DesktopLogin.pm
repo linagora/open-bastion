@@ -572,7 +572,7 @@ sub _validateCallbackUrl {
     # where "localhost:fake" becomes credentials and attacker.com is the real host
     # Match @ that appears before the first / in the authority component,
     # accounting for optional port numbers (e.g., host:8080@attacker.com)
-    return 0 if $url =~ m{^https?://[^/?#]*@};
+    return 0 if $url =~ m{^https?://[^@/]*@};
 
     # Get allowed callback patterns from config
     my $allowed = $self->conf->{desktopLoginAllowedCallbacks} || [];
