@@ -396,6 +396,72 @@ pam_openbastion[1237]: LLNG unreachable, switching to offline mode
 4. **MFA bypass**: Offline mode uses password only (MFA is not available offline)
 5. **Session attributes**: Limited attributes available offline (only what was cached)
 
+## Network Revalidation
+
+When a user authenticates offline and the network later returns, the system
+revalidates the session to ensure the user's account is still valid on LLNG.
+
+### How It Works
+
+Three complementary mechanisms provide revalidation:
+
+1. **Screen unlock revalidation (Part C)**: When the user unlocks their screen
+   with a password, the PAM module detects the offline session marker and
+   attempts a real online LLNG authentication. On success, the offline cache is
+   refreshed and the marker removed. On failure (revoked account), the session
+   is terminated.
+
+2. **Token refresh (Part B)**: The LightDM greeter stores the OAuth2 refresh
+   token. On screen unlock, if the access token has expired, the greeter calls
+   `/desktop/refresh` to get a fresh token before falling back to the SSO iframe
+   or offline mode.
+
+3. **Background monitor (ob-session-monitor)**: A systemd service that polls the
+   LLNG portal. When connectivity returns, it checks all offline sessions against
+   LLNG's `/pam/userinfo` endpoint. Revoked users have their sessions terminated.
+   Users with old caches are forced to re-authenticate online on next unlock.
+
+### Anti-Firewall-Bypass Protection
+
+If a malicious user blocks the SSO portal with a local firewall rule while
+maintaining general network access, `ob-session-monitor` detects this condition.
+After a configurable timeout (`offline_max_sso_unreachable`, default 1 hour),
+all offline sessions are terminated.
+
+| Network | SSO Portal | Duration | Action |
+|---------|-----------|----------|--------|
+| Down | Down | Any | Normal offline mode |
+| Up | Up | — | Revalidate sessions |
+| Up | Down | < timeout | Warning logged |
+| Up | Down | ≥ timeout | Terminate all offline sessions |
+
+### Configuration
+
+```ini
+# Enable network revalidation (default: true)
+offline_revalidation_enabled = true
+
+# Grace period before forcing online re-auth (default: 4 hours)
+offline_revalidation_grace = 14400
+
+# Max SSO unreachable time before terminating sessions (default: 1 hour)
+offline_max_sso_unreachable = 3600
+```
+
+### ob-session-monitor Service
+
+```bash
+# Enable the service
+sudo systemctl enable ob-session-monitor
+sudo systemctl start ob-session-monitor
+
+# Check status
+sudo systemctl status ob-session-monitor
+
+# View logs
+journalctl -u ob-session-monitor
+```
+
 ## Related Documentation
 
 - [Security Architecture](../SECURITY.md#offline-credential-cache-security)

@@ -685,6 +685,21 @@ Look for:
 6. **Disable when not needed**: Set `auth_cache_enabled = false` to eliminate
    the attack surface entirely
 
+### Network Revalidation
+
+When a user authenticates offline and the network returns, the system
+revalidates the session via three mechanisms:
+
+| Mechanism | Trigger | Action |
+|-----------|---------|--------|
+| Screen unlock (PAM) | User enters password | Online LLNG auth attempted |
+| Token refresh (Greeter) | Screen unlock | Refresh token exchanged for new access token |
+| ob-session-monitor | Periodic (60s) | Check user validity via `/pam/userinfo` |
+
+**Anti-firewall-bypass protection**: If the SSO portal is unreachable despite
+network being available (possible local firewall manipulation), all offline
+sessions are terminated after `offline_max_sso_unreachable` seconds (default: 1h).
+
 ## Threat Mitigations
 
 | Threat | Mitigation |
