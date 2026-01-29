@@ -507,7 +507,7 @@ File format:
 |-----------|-------------|
 | Algorithm | AES-256-GCM authenticated encryption |
 | Key source | Root-only key file (`/etc/open-bastion/cache.key`), fallback to machine-id derivation |
-| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-file salt |
+| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-cache-directory salt |
 | IV | 12 bytes, random per encryption |
 | Auth tag | 16 bytes, prevents tampering |
 
@@ -566,15 +566,15 @@ The greeter and PAM module communicate via structured error codes
 
 | Code | Constant | Meaning |
 |------|----------|---------|
-| 0 | OK | Success |
-| -1 | NOMEM | Out of memory |
-| -2 | IO | File system error |
-| -3 | CRYPTO | Decryption failed |
-| -4 | NOTFOUND | User not in cache |
-| -5 | EXPIRED | Cache entry expired |
-| -6 | LOCKED | Account locked out |
-| -7 | INVALID | Invalid cache data |
-| -8 | PASSWORD | Password mismatch |
+| 0 | OFFLINE_CACHE_OK | Success |
+| -1 | OFFLINE_CACHE_ERR_NOMEM | Out of memory |
+| -2 | OFFLINE_CACHE_ERR_IO | File system error |
+| -3 | OFFLINE_CACHE_ERR_CRYPTO | Decryption failed |
+| -4 | OFFLINE_CACHE_ERR_NOTFOUND | User not in cache |
+| -5 | OFFLINE_CACHE_ERR_EXPIRED | Cache entry expired |
+| -6 | OFFLINE_CACHE_ERR_LOCKED | Account locked out |
+| -7 | OFFLINE_CACHE_ERR_INVALID | Invalid cache data |
+| -8 | OFFLINE_CACHE_ERR_PASSWORD | Password mismatch |
 
 The PAM module sends structured messages (`OFFLINE_ERROR:code[:locktime]`) via
 PAM conversation so the greeter can display appropriate feedback.
