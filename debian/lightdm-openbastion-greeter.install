@@ -14,3 +14,7 @@ scripts/ob-desktop-setup usr/sbin/
 
 # Cache admin script
 scripts/ob-cache-admin usr/sbin/
+
+# Session monitor service
+scripts/ob-session-monitor usr/sbin/
+systemd/ob-session-monitor.service lib/systemd/system/
