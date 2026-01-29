@@ -45,8 +45,8 @@ When a user successfully authenticates online, their credentials are cached:
 
 1. **Password hashing**: Password is hashed using Argon2id (memory-hard algorithm)
 2. **Encryption**: The cache entry is encrypted with AES-256-GCM
-3. **Key derivation**: Encryption key is derived from `/etc/machine-id`
-4. **Storage**: Encrypted entry saved to `/var/cache/open-bastion/offline/`
+3. **Key derivation**: Encryption key derived via PBKDF2-SHA256 from a root-only key file (`/etc/open-bastion/cache.key`) or `/etc/machine-id`
+4. **Storage**: Encrypted entry saved to `/var/cache/open-bastion/credentials/`
 
 ### Offline Authentication
 
@@ -63,8 +63,8 @@ When the LLNG portal is unreachable:
 ### Cache Refresh
 
 - Credentials are refreshed on every successful online login
-- Cache entries have a configurable TTL (default: 24 hours)
-- Expired entries are automatically removed
+- Cache entries have a configurable TTL (default: 7 days)
+- Expired entries are rejected at runtime by the PAM module
 
 ## Configuration
 
@@ -73,47 +73,39 @@ When the LLNG portal is unreachable:
 Add to `/etc/open-bastion/openbastion.conf`:
 
 ```ini
-# Enable offline authentication
-offline_mode = enabled
+# Enable offline credential caching
+offline_cache_enabled = true
 
-# Cache directory
-offline_cache_dir = /var/cache/open-bastion/offline
+# Cache directory (default: /var/cache/open-bastion/credentials)
+offline_cache_dir = /var/cache/open-bastion/credentials
 
-# Cache TTL in seconds (default: 86400 = 24 hours)
-offline_cache_ttl = 86400
+# Cache TTL in seconds (default: 604800 = 7 days, range: 3600–2592000)
+offline_cache_ttl = 604800
 
-# Maximum cache TTL (absolute limit)
-offline_cache_max_ttl = 604800
+# Maximum failed attempts before lockout (default: 5, range: 1–20)
+offline_cache_max_failures = 5
 
-# Connection timeout before switching to offline (seconds)
-offline_timeout = 5
+# Lockout duration in seconds (default: 300 = 5 min, range: 60–86400)
+offline_cache_lockout = 300
+```
 
-# Cleanup expired entries interval (seconds)
-offline_cache_cleanup_interval = 3600
+Or via PAM module arguments:
+
+```
+auth sufficient pam_openbastion.so oauth2_token_auth offline_cache
 ```
 
 ### Disable Offline Mode
 
-To disable offline authentication completely:
-
 ```ini
-offline_mode = disabled
+# Disable offline credential caching
+offline_cache_enabled = false
 ```
 
-### Security Settings
+Or via PAM module arguments:
 
-```ini
-# Maximum failed attempts before lockout
-offline_max_attempts = 5
-
-# Initial lockout duration (seconds)
-offline_lockout_initial = 30
-
-# Maximum lockout duration (seconds)
-offline_lockout_max = 3600
-
-# Lockout backoff multiplier
-offline_lockout_multiplier = 2.0
+```
+auth sufficient pam_openbastion.so oauth2_token_auth no_offline_cache
 ```
 
 ## LightDM Desktop Integration
@@ -141,78 +133,86 @@ and switches to offline mode.
 
 ### Greeter Configuration
 
-Edit `/etc/lightdm/lightdm-openbastion.conf`:
+Edit `/etc/lightdm/lightdm-webkit2-greeter.conf`:
 
 ```ini
-[greeter]
+[open-bastion]
+# LemonLDAP::NG Portal URL
 portal_url = https://auth.example.com
+
+# Desktop login endpoint path (relative to portal_url)
 desktop_login_path = /desktop/login
 
-# Online check interval (ms)
+# Check online status interval (ms)
 check_online_interval = 30000
 
-# Timeout for online check (ms)
-online_check_timeout = 5000
-
-# Retry interval when offline (ms)
-offline_retry_interval = 60000
+# Enable offline mode fallback
+offline_mode_enabled = true
 ```
 
 ## Administration
 
 ### Cache Management Tool
 
-Use `ob-cache-admin` to manage the offline cache:
+Use `ob-cache-admin` to manage the offline cache (requires root):
 
 ```bash
-# List all cached credentials
-ob-cache-admin list
-
 # Show cache statistics
 ob-cache-admin stats
 
-# Remove specific user's cache
-ob-cache-admin clear-user username
+# List all cached credential entries
+ob-cache-admin list
 
-# Clear all cached credentials
-ob-cache-admin clear
+# Show details for a specific user
+ob-cache-admin show username
 
-# Unlock a locked account
+# Remove specific user's cache (secure deletion)
+ob-cache-admin invalidate username
+
+# Remove all cached credentials (requires confirmation)
+ob-cache-admin invalidate-all
+
+# Reset failed attempts for a locked user
 ob-cache-admin unlock username
 
-# Remove expired entries
-ob-cache-admin expire
-
-# Show configuration
-ob-cache-admin config
+# Remove invalid/orphaned cache files
+ob-cache-admin cleanup
 ```
 
 ### Example Output
 
 ```
-$ ob-cache-admin list
-Username        Status    Expires              Failed  Locked
---------------------------------------------------------------
-alice           ACTIVE    2025-01-28 14:30:00  0       No
-bob             ACTIVE    2025-01-28 10:15:00  2       No
-charlie         LOCKED    2025-01-27 20:00:00  5       Yes (29m left)
---------------------------------------------------------------
-Total: 3 entries (2 active, 1 locked)
+$ sudo ob-cache-admin list
+
+Cached credential entries:
+--------------------------
+  a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6  2025-06-15 09:30:12  (512 bytes)
+  d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1  2025-06-14 14:00:45  (498 bytes)
+
+Total: 2 entries
+
+Note: Filenames are SHA256 hashes of usernames.
+Use 'ob-cache-admin show <username>' to check a specific user.
 ```
 
 ```
-$ ob-cache-admin stats
-Offline Cache Statistics
-========================
-Cache directory: /var/cache/open-bastion/offline
-Total entries:   45
-Active entries:  42
-Expired entries: 2
-Locked accounts: 1
-Total size:      1.2 MB
-Oldest entry:    2025-01-21 08:00:00
-Newest entry:    2025-01-27 16:45:00
+$ sudo ob-cache-admin stats
+
+Open Bastion Offline Cache Statistics
+======================================
+
+Cache directory: /var/cache/open-bastion/credentials
+
+Total entries:   2
+Valid format:    2
+
+Disk usage:      12K
+
+Oldest entry:    2025-06-14 14:00:45
+Newest entry:    2025-06-15 09:30:12
 ```
+
+See [Cache Administration](offline-cache-admin.md) for full documentation.
 
 ## Security Considerations
 
@@ -221,8 +221,8 @@ Newest entry:    2025-01-27 16:45:00
 | Component | Algorithm | Purpose |
 |-----------|-----------|---------|
 | Password hash | Argon2id | Prevent offline cracking |
-| Encryption | AES-256-GCM | Protect cached data |
-| Key derivation | PBKDF2-SHA256 | Derive encryption key |
+| Encryption | AES-256-GCM | Protect cached data at rest |
+| Key derivation | PBKDF2-SHA256 | Derive cache encryption key from key file or machine-id |
 | Filename | SHA-256 | Prevent user enumeration |
 
 ### Argon2id Parameters
@@ -232,6 +232,8 @@ Newest entry:    2025-01-27 16:45:00
 | Memory | 64 MB | Prevents GPU/ASIC attacks |
 | Iterations | 3 | Balanced time cost |
 | Parallelism | 4 | Multi-core utilization |
+| Hash length | 32 bytes | 256-bit output |
+| Salt length | 16 bytes | Unique per user, random |
 
 These parameters follow OWASP recommendations for password storage.
 
@@ -241,13 +243,15 @@ These parameters follow OWASP recommendations for password storage.
 |------|-------------|---------|
 | Cache directory | 0700 | Owner only |
 | Cache files | 0600 | Owner read/write |
+| Key file | 0600 | Root read/write only |
 
-### Machine-ID Dependency
+### Machine-ID / Key File Dependency
 
-The encryption key is derived from `/etc/machine-id`. This means:
+The encryption key is derived from a root-only key file (`/etc/open-bastion/cache.key`)
+or falls back to `/etc/machine-id`. This means:
 
 - **Pros**: Cache files are useless if stolen (key is machine-specific)
-- **Cons**: Changing machine-id invalidates all cached credentials
+- **Cons**: Changing key file or machine-id invalidates all cached credentials
 
 **Important scenarios:**
 
@@ -255,22 +259,18 @@ The encryption key is derived from `/etc/machine-id`. This means:
 |----------|--------|------------|
 | VM cloning | All caches invalid | Regenerate machine-id after clone |
 | System reinstall | All caches invalid | Users re-authenticate online |
-| Machine-id modification | All caches invalid | Avoid modifying machine-id |
+| Key file rotation | All caches invalid | Users re-authenticate online |
 
 ### Brute-Force Protection
 
-The lockout mechanism prevents brute-force attacks:
+After 5 failed password attempts, the account is locked for 5 minutes.
+These are compile-time constants defined in `offline_cache.h`
+(`OFFLINE_CACHE_MAX_FAILED_ATTEMPTS` and `OFFLINE_CACHE_LOCKOUT_DURATION`).
+They can also be configured at runtime via `offline_cache_max_failures` and
+`offline_cache_lockout` in the configuration file.
 
-```
-Attempt 1-5:   Normal authentication
-Attempt 6:     Locked for 30 seconds
-Attempt 7:     Locked for 60 seconds
-Attempt 8:     Locked for 120 seconds
-...
-Maximum:       Locked for 1 hour
-```
-
-Lockout state is stored encrypted within the cache entry, preventing bypass.
+Lockout state is stored encrypted within the cache entry, preventing bypass
+by file manipulation.
 
 ## Troubleshooting
 
@@ -280,26 +280,31 @@ Lockout state is stored encrypted within the cache entry, preventing bypass.
 
 **Causes:**
 1. User never logged in online (no cached credentials)
-2. Cache expired
+2. Cache expired (TTL exceeded)
 3. Cache was manually cleared
 
 **Solution:**
 1. User must login online at least once before offline mode works
-2. Check cache TTL settings
-3. Verify user exists: `ob-cache-admin list | grep username`
+2. Check cache TTL: `grep offline_cache_ttl /etc/open-bastion/openbastion.conf`
+3. Verify user exists: `sudo ob-cache-admin show username`
 
 ### Account Locked
 
 **Symptom:** User sees "Account temporarily locked"
 
 **Causes:**
-- Too many failed password attempts
+- Too many failed password attempts (5 by default)
 
 **Solution:**
 ```bash
-# Unlock the account
-ob-cache-admin unlock username
+# Check lock status and options
+sudo ob-cache-admin unlock username
 ```
+
+Note: The unlock command cannot modify the encrypted lockout state directly.
+It offers to invalidate the cache entry instead, requiring the user to
+authenticate online next time. Alternatively, wait for the lockout to expire
+(5 minutes by default).
 
 ### Cache Not Working
 
@@ -308,48 +313,49 @@ ob-cache-admin unlock username
 **Debugging:**
 ```bash
 # Check if cache directory exists and has correct permissions
-ls -la /var/cache/open-bastion/offline/
+ls -la /var/cache/open-bastion/credentials/
 
 # Check if user has cached credentials
-ob-cache-admin list
+sudo ob-cache-admin show username
 
 # Check PAM configuration
-grep offline /etc/open-bastion/openbastion.conf
+grep offline_cache /etc/open-bastion/openbastion.conf
 
 # Check syslog for errors
-journalctl -u sshd | grep -i offline
+journalctl | grep pam_openbastion
 ```
 
-### Machine-ID Changed
+### Machine-ID or Key File Changed
 
-**Symptom:** All users get "Decryption failed"
+**Symptom:** All users get decryption errors
 
-**Cause:** `/etc/machine-id` was modified or regenerated
+**Cause:** `/etc/machine-id` or `/etc/open-bastion/cache.key` was modified
 
 **Solution:**
 1. All users must re-authenticate online
-2. Clear the invalid cache: `ob-cache-admin clear`
+2. Clear the invalid cache: `sudo ob-cache-admin invalidate-all`
 
 ## Best Practices
 
 ### For Desktop Workstations
 
 1. **Enable offline mode** for laptop users who may travel
-2. **Set reasonable TTL** (24-72 hours) to balance convenience and security
-3. **Train users** to login online periodically to refresh cache
-4. **Monitor lockouts** via `ob-cache-admin stats`
+2. **Set reasonable TTL** (1–7 days) to balance convenience and security
+3. **Generate a key file**: `ob-desktop-setup --offline` or manually
+4. **Train users** to login online periodically to refresh cache
+5. **Monitor lockouts** via `ob-cache-admin stats`
 
 ### For Servers
 
 1. **Disable offline mode** if not needed (reduces attack surface)
-2. **Use shorter TTL** (8 hours) for sensitive systems
+2. **Use shorter TTL** if enabled
 3. **Enable audit logging** to track offline authentications
-4. **Regular cleanup** of expired entries
+4. **Regular cleanup** of expired entries via cron
 
 ### For High-Security Environments
 
 1. Consider **disabling offline mode entirely**
-2. If required, use **very short TTL** (1-4 hours)
+2. If required, use **very short TTL** (hours, not days)
 3. **Monitor** for unusual offline authentication patterns
 4. **Alert** on repeated lockouts (possible attack indicator)
 
@@ -357,20 +363,20 @@ journalctl -u sshd | grep -i offline
 
 ### Syslog Messages
 
-The PAM module logs offline events to syslog:
+The PAM module logs offline events to syslog (`auth` facility):
 
 ```
 # Successful offline auth
-pam_openbastion: offline auth success for user 'alice' (cached 6h ago)
+pam_openbastion[1234]: Offline authentication successful for user johndoe
 
 # Failed offline auth
-pam_openbastion: offline auth failed for user 'bob' (password mismatch, attempt 3/5)
+pam_openbastion[1235]: Offline authentication failed for johndoe: Password does not match
 
 # Account locked
-pam_openbastion: offline auth blocked for user 'charlie' (locked for 120s)
+pam_openbastion[1236]: Offline authentication failed for johndoe: Entry locked
 
 # Fallback to offline
-pam_openbastion: LLNG unreachable, switching to offline mode for user 'alice'
+pam_openbastion[1237]: LLNG unreachable, switching to offline mode
 ```
 
 ### Metrics to Monitor
@@ -379,20 +385,20 @@ pam_openbastion: LLNG unreachable, switching to offline mode for user 'alice'
 |--------|-----------------|----------------|
 | Offline auth count | Sudden spike | Network outage |
 | Lockout count | > 5/hour | Brute-force attempt |
-| Cache size | > 1000 entries | Cleanup not running |
-| Expired entries | > 10% of total | Users not refreshing |
+| Cache size | Unusually large | Cleanup not running |
+| Expired entries | Accumulating | Users not refreshing |
 
 ## Limitations
 
 1. **First login must be online**: Users without cached credentials cannot login offline
-2. **Password changes**: If user changes password online, old password still works offline until cache refreshes
+2. **Password changes**: If user changes password online, old cached password still works offline until the cache is refreshed by a new online login
 3. **Group changes**: Group membership changes require online login to propagate
-4. **MFA bypass**: Offline mode uses password only (no MFA)
+4. **MFA bypass**: Offline mode uses password only (MFA is not available offline)
 5. **Session attributes**: Limited attributes available offline (only what was cached)
 
 ## Related Documentation
 
 - [Security Architecture](../SECURITY.md#offline-credential-cache-security)
 - [Cache Administration](offline-cache-admin.md)
-- [LightDM Greeter](desktop-sso.md)
+- [LightDM Desktop SSO](desktop-sso.md)
 - [Administrator Guide](admin-guide.md)
