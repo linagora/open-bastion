@@ -107,6 +107,26 @@ static void invalidate_nscd_cache(void);
 static int validate_username(const char *user);
 
 /*
+ * Send an info message to the PAM client via conversation.
+ * Used to pass structured error codes to the LightDM greeter.
+ */
+static void pam_send_info(pam_handle_t *pamh, const char *msg)
+{
+    const struct pam_conv *conv = NULL;
+    if (pam_get_item(pamh, PAM_CONV, (const void **)&conv) != PAM_SUCCESS || !conv || !conv->conv)
+        return;
+
+    struct pam_message pmsg;
+    pmsg.msg_style = PAM_TEXT_INFO;
+    pmsg.msg = msg;
+    const struct pam_message *msgp = &pmsg;
+    struct pam_response *resp = NULL;
+
+    conv->conv(1, &msgp, &resp, conv->appdata_ptr);
+    free(resp);
+}
+
+/*
  * Security: Re-verify token file permissions periodically (fixes #46)
  * Returns 0 if OK, -1 if security violation detected
  */
@@ -2216,6 +2236,18 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
                     free(reason);
                     audit_event.reason = NULL;
                 }
+            }
+
+            /* Send structured error to greeter via PAM conversation */
+            {
+                char errmsg[64];
+                if (offline_result == OFFLINE_CACHE_ERR_LOCKED) {
+                    snprintf(errmsg, sizeof(errmsg), "OFFLINE_ERROR:%d:%d",
+                             offline_result, OFFLINE_CACHE_LOCKOUT_DURATION);
+                } else {
+                    snprintf(errmsg, sizeof(errmsg), "OFFLINE_ERROR:%d", offline_result);
+                }
+                pam_send_info(pamh, errmsg);
             }
 
             return (offline_result == OFFLINE_CACHE_ERR_LOCKED) ? PAM_MAXTRIES : PAM_AUTH_ERR;

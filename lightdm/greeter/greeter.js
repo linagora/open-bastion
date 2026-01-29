@@ -27,24 +27,29 @@
     };
 
     // Offline error codes (must match PAM module)
+    // Offline error codes (must match include/offline_cache.h)
     const OFFLINE_ERRORS = {
         OK: 0,
-        NOT_FOUND: -1,
-        EXPIRED: -2,
-        LOCKED: -3,
-        PASSWORD: -4,
-        CRYPTO: -5,
-        IO: -6
+        NOMEM: -1,       // OFFLINE_CACHE_ERR_NOMEM
+        IO: -2,          // OFFLINE_CACHE_ERR_IO
+        CRYPTO: -3,      // OFFLINE_CACHE_ERR_CRYPTO
+        NOT_FOUND: -4,   // OFFLINE_CACHE_ERR_NOTFOUND
+        EXPIRED: -5,     // OFFLINE_CACHE_ERR_EXPIRED
+        LOCKED: -6,      // OFFLINE_CACHE_ERR_LOCKED
+        INVALID: -7,     // OFFLINE_CACHE_ERR_INVALID
+        PASSWORD: -8     // OFFLINE_CACHE_ERR_PASSWORD
     };
 
     // Error messages for offline authentication failures
     const OFFLINE_ERROR_MESSAGES = {
+        [OFFLINE_ERRORS.NOMEM]: 'System resources are low. Please try again or contact your administrator.',
+        [OFFLINE_ERRORS.IO]: 'Error reading cached credentials. Please contact administrator.',
+        [OFFLINE_ERRORS.CRYPTO]: 'Credential verification failed. Please try again.',
         [OFFLINE_ERRORS.NOT_FOUND]: 'No cached credentials found. Please connect to the network and login online first.',
         [OFFLINE_ERRORS.EXPIRED]: 'Cached credentials have expired. Please connect to the network to refresh.',
         [OFFLINE_ERRORS.LOCKED]: 'Account temporarily locked due to too many failed attempts.',
-        [OFFLINE_ERRORS.PASSWORD]: 'Invalid password. Please try again.',
-        [OFFLINE_ERRORS.CRYPTO]: 'Credential verification failed. Please try again.',
-        [OFFLINE_ERRORS.IO]: 'Error reading cached credentials. Please contact administrator.'
+        [OFFLINE_ERRORS.INVALID]: 'Cached credential data is invalid. Please connect to the network and login again.',
+        [OFFLINE_ERRORS.PASSWORD]: 'Invalid password. Please try again.'
     };
 
     // Gated debug logger - avoids leaking sensitive data in production
@@ -684,6 +689,10 @@
 
         showError('Account locked. Try again in ' + timeStr);
 
+        // Disable inputs during lockout
+        if (elements.username) elements.username.disabled = true;
+        if (elements.password) elements.password.disabled = true;
+
         // Update lockout countdown element if present
         if (elements.lockoutCountdown) {
             elements.lockoutCountdown.textContent = timeStr;
@@ -728,6 +737,9 @@
     function clearLockoutTimer() {
         stopLockoutDisplay();
         lockoutEndTime = null;
+        // Re-enable inputs after lockout expires
+        if (elements.username) elements.username.disabled = false;
+        if (elements.password) elements.password.disabled = false;
     }
 
     /**
@@ -848,13 +860,13 @@
                 setTimeout(function() {
                     // Simulate offline error for testing
                     if (response === 'locked') {
-                        lightdm.show_message('OFFLINE_ERROR:-3:300', 1);
+                        lightdm.show_message('OFFLINE_ERROR:-6:300', 1);
                         lightdm.is_authenticated = false;
                     } else if (response === 'expired') {
-                        lightdm.show_message('OFFLINE_ERROR:-2', 1);
+                        lightdm.show_message('OFFLINE_ERROR:-5', 1);
                         lightdm.is_authenticated = false;
                     } else if (response === 'notfound') {
-                        lightdm.show_message('OFFLINE_ERROR:-1', 1);
+                        lightdm.show_message('OFFLINE_ERROR:-4', 1);
                         lightdm.is_authenticated = false;
                     } else {
                         lightdm.is_authenticated = true;
