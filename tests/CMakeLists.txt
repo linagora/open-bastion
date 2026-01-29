@@ -104,6 +104,21 @@ target_link_libraries(test_offline_cache
 )
 add_test(NAME test_offline_cache COMMAND test_offline_cache)
 
+# Test offline cache security properties (timing, encryption, tampering)
+add_executable(test_offline_security test_offline_security.c ../src/offline_cache.c ../src/str_utils.c)
+target_include_directories(test_offline_security PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
+)
+target_link_libraries(test_offline_security
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
+)
+add_test(NAME test_offline_security COMMAND test_offline_security)
+
 # Test JWT utility functions
 add_executable(test_token_manager test_token_manager.c ../src/jwt_utils.c)
 target_compile_definitions(test_token_manager PRIVATE JWT_UTILS_TEST)
