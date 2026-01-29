@@ -226,9 +226,15 @@ if(INSTALL_SYSTEMD)
     install(FILES
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-session-monitor.service
         DESTINATION lib/systemd/system
     )
 endif()
+
+# Install session monitor script
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-monitor
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
 
 # Install desktop setup script
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
