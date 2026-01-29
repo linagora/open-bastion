@@ -444,12 +444,14 @@ static int test_oauth2_token_min_ttl_bounds(void)
     int ok = (config.oauth2_token_min_ttl == 60);  /* Default value */
 
     /* Test value at max boundary */
+    config_free(&config);
     config_init(&config);
     const char *argv2[] = { "oauth2_token_min_ttl=3600" };
     config_parse_args(1, argv2, &config);
     ok = ok && (config.oauth2_token_min_ttl == 3600);
 
     /* Test value of 0 (valid) */
+    config_free(&config);
     config_init(&config);
     const char *argv3[] = { "oauth2_token_min_ttl=0" };
     config_parse_args(1, argv3, &config);
