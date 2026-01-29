@@ -338,3 +338,15 @@ Credentials are only cached after a successful online authentication. Ensure:
 - Encryption key is stored in a root-only file (or derived from machine-specific data)
 - No credentials are transmitted or stored externally
 - Cache can be cleared instantly with `ob-cache-admin invalidate-all`
+
+## Session Monitoring
+
+The `ob-session-monitor` systemd service provides automatic session revalidation
+for offline-authenticated users. When the LLNG portal becomes reachable again:
+
+- Users with valid accounts continue working normally
+- Users with revoked accounts have their sessions terminated
+- Users with old cached credentials are prompted for online re-authentication
+
+See [Offline Mode - Network Revalidation](offline-mode.md#network-revalidation)
+for configuration details.
