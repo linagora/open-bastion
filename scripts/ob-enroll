@@ -511,14 +511,13 @@ save_token() {
 
     (
         umask 077
-        cat > "$TOKEN_FILE" << TOKENEOF
-{
-  "access_token": "$ACCESS_TOKEN",
-  "refresh_token": "${REFRESH_TOKEN:-}",
-  "expires_at": $expires_at,
-  "enrolled_at": $now
-}
-TOKENEOF
+        jq -n \
+            --arg access_token "$ACCESS_TOKEN" \
+            --arg refresh_token "${REFRESH_TOKEN:-}" \
+            --argjson expires_at "$expires_at" \
+            --argjson enrolled_at "$now" \
+            '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at, enrolled_at: $enrolled_at}' \
+            > "$TOKEN_FILE"
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
         log_info "You may need to run this script as root"
