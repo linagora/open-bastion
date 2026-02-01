@@ -640,14 +640,14 @@ main() {
     fi
 
     check_requirements
+    load_config
+    parse_args "$@"
 
-    # Accept client_secret from environment variable (preferred over CLI)
+    # Accept client_secret from environment variable (highest priority)
     if [ -n "${OB_CLIENT_SECRET:-}" ]; then
         CLIENT_SECRET="$OB_CLIENT_SECRET"
     fi
 
-    load_config
-    parse_args "$@"
     validate_config
 
     echo ""
