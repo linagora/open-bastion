@@ -69,15 +69,32 @@ load_config() {
             exit 1
         fi
 
-        # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
-
-        # Convert legacy SSH_OPTIONS string to array (backward compatibility)
-        if [ -n "${SSH_OPTIONS:-}" ]; then
-            # shellcheck disable=SC2206
-            SSH_OPTIONS_ARRAY=($SSH_OPTIONS)
-            unset SSH_OPTIONS
-        fi
+        # Parse config file safely (no sourcing to prevent code injection)
+        local key value
+        while IFS='=' read -r key value || [ -n "$key" ]; do
+            # Skip comments and empty lines
+            key="${key%%#*}"
+            key="${key// /}"
+            [ -z "$key" ] && continue
+            # Remove surrounding quotes from value
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value#\"}" ; value="${value%\"}"
+            value="${value#\'}" ; value="${value%\'}"
+            case "$key" in
+                PORTAL_URL)          PORTAL_URL="$value" ;;
+                SERVER_TOKEN_FILE)   SERVER_TOKEN_FILE="$value" ;;
+                SERVER_GROUP)        SERVER_GROUP="$value" ;;
+                TARGET_GROUP)        TARGET_GROUP="$value" ;;
+                TIMEOUT)             TIMEOUT="$value" ;;
+                VERIFY_SSL)          VERIFY_SSL="$value" ;;
+                DEBUG)               DEBUG="$value" ;;
+                SSH_OPTIONS)
+                    # shellcheck disable=SC2206
+                    SSH_OPTIONS_ARRAY=($value)
+                    ;;
+            esac
+        done < "$CONFIG_FILE"
     fi
 }
 
