@@ -162,5 +162,33 @@ add_executable(test_service_account test_service_account.c ../src/service_accoun
 target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_service_account COMMAND test_service_account)
 
+# Test token cache (encryption, salt, persistence)
+add_executable(test_token_cache test_token_cache.c ../src/token_cache.c)
+target_include_directories(test_token_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_token_cache
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+add_test(NAME test_token_cache COMMAND test_token_cache)
+
+# Test token manager file I/O (load/save, symlink rejection)
+add_executable(test_token_manager_io test_token_manager_io.c ../src/token_manager.c ../src/jwt_utils.c)
+target_include_directories(test_token_manager_io PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_token_manager_io
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+add_test(NAME test_token_manager_io COMMAND test_token_manager_io)
+
 # Note: Integration tests require a running Open Bastion instance
 # and are meant to be run manually

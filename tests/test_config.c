@@ -225,6 +225,59 @@ static int test_parse_no_create_user(void)
     return ok;
 }
 
+/* Test that verify_ssl=false allows HTTP and triggers validation path */
+static int test_validate_verify_ssl_false_allows_http(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("http://test.example.com");
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+    config.verify_ssl = false;
+
+    /* Should succeed - HTTP allowed when verify_ssl=false */
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == 0);
+}
+
+/* Test that verify_ssl=true rejects HTTP URLs */
+static int test_validate_verify_ssl_true_rejects_http(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    config.portal_url = strdup("http://test.example.com");
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+    config.verify_ssl = true;
+
+    /* Should fail - HTTP not allowed when verify_ssl=true */
+    int ret = config_validate(&config);
+
+    config_free(&config);
+    return (ret == -4);
+}
+
+/* Test insecure PAM flag disables SSL verification */
+static int test_parse_insecure_flag(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    int ok = (config.verify_ssl == true);  /* Default should be true */
+
+    const char *argv[] = { "insecure" };
+    config_parse_args(1, argv, &config);
+
+    ok = ok && (config.verify_ssl == false);  /* Should now be false */
+
+    config_free(&config);
+    return ok;
+}
+
 /* Test config file loading
  * Note: This test verifies file permission checks when running as root,
  * or skips permission tests when running as non-root user.
@@ -290,6 +343,9 @@ int main(void)
     TEST(validate_complete);
     TEST(validate_https_required);
     TEST(validate_http_allowed_insecure);
+    TEST(validate_verify_ssl_false_allows_http);
+    TEST(validate_verify_ssl_true_rejects_http);
+    TEST(parse_insecure_flag);
     TEST(create_user_defaults);
     TEST(parse_create_user_args);
     TEST(parse_no_create_user);
