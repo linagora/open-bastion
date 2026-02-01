@@ -37,7 +37,7 @@ SERVER_GROUP="bastion"
 TARGET_GROUP="default"
 TIMEOUT=10
 VERIFY_SSL=true
-SSH_OPTIONS=""
+SSH_OPTIONS_ARRAY=()
 DEBUG=false
 
 # Configuration file (must be owned by root and not group/world-writable)
@@ -71,6 +71,13 @@ load_config() {
 
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
+
+        # Convert legacy SSH_OPTIONS string to array (backward compatibility)
+        if [ -n "${SSH_OPTIONS:-}" ]; then
+            # shellcheck disable=SC2206
+            SSH_OPTIONS_ARRAY=($SSH_OPTIONS)
+            unset SSH_OPTIONS
+        fi
     fi
 }
 
@@ -184,10 +191,9 @@ proxy_command_mode() {
     # The backend's sshd must have AcceptEnv LLNG_BASTION_JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              -W "$target_host:$target_port" \
              "$target_host"
 }
@@ -237,10 +243,9 @@ force_command_mode() {
     # Connect to backend with JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              ${target_user:+-l "$target_user"} \
              "$target_host"
 }
@@ -270,10 +275,9 @@ interactive_mode() {
     # Connect to backend with JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              "$target_host"
 }
 
@@ -305,7 +309,7 @@ Configuration:
     TARGET_GROUP="default"
     TIMEOUT=10
     VERIFY_SSL=true
-    SSH_OPTIONS="-o ConnectTimeout=10"
+    SSH_OPTIONS_ARRAY=(-o ConnectTimeout=10)
     DEBUG=false
 
 SSH Configuration (bastion ~/.ssh/config):
