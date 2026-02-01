@@ -44,12 +44,19 @@ read_config() {
     local file="$2"
 
     if [ -f "$file" ]; then
-        grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null | \
-            sed -E 's/^[^=]+=\s*//' | \
-            sed -E 's/^["'\'']//' | \
-            sed -E 's/["'\'']$//' | \
-            sed -E 's/\s*#.*$//' | \
-            tail -1
+        awk -F '=' -v key="$key" '
+            $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+                val = substr($0, index($0, "=") + 1)
+                # Trim leading whitespace
+                gsub(/^[[:space:]]+/, "", val)
+                # Remove inline comments (not inside quotes)
+                gsub(/[[:space:]]*#.*$/, "", val)
+                # Remove surrounding quotes
+                gsub(/^["'\'']|["'\'']$/, "", val)
+                result = val
+            }
+            END { if (result != "") print result }
+        ' "$file"
     fi
 }
 

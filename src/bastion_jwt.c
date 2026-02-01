@@ -17,6 +17,7 @@
 #include "bastion_jwt.h"
 #include "jwks_cache.h"
 #include "jti_cache.h"
+#include "str_utils.h"
 
 /* For unit testing, expose internal functions */
 #ifdef BASTION_JWT_TEST
@@ -96,74 +97,10 @@ STATIC_OR_TEST bastion_jwt_result_t bastion_jwt_validate_time(
     return BASTION_JWT_OK;
 }
 
-/* Base64url decode (RFC 4648 section 5) */
+/* Base64url decode - delegates to shared implementation */
 static unsigned char *base64url_decode(const char *input, size_t input_len, size_t *out_len)
 {
-    if (!input || input_len == 0) return NULL;
-
-    /* Security check */
-    if (input_len > MAX_JWT_LENGTH) return NULL;
-
-    static const unsigned char b64_table[256] = {
-        ['A'] = 0,  ['B'] = 1,  ['C'] = 2,  ['D'] = 3,  ['E'] = 4,  ['F'] = 5,
-        ['G'] = 6,  ['H'] = 7,  ['I'] = 8,  ['J'] = 9,  ['K'] = 10, ['L'] = 11,
-        ['M'] = 12, ['N'] = 13, ['O'] = 14, ['P'] = 15, ['Q'] = 16, ['R'] = 17,
-        ['S'] = 18, ['T'] = 19, ['U'] = 20, ['V'] = 21, ['W'] = 22, ['X'] = 23,
-        ['Y'] = 24, ['Z'] = 25, ['a'] = 26, ['b'] = 27, ['c'] = 28, ['d'] = 29,
-        ['e'] = 30, ['f'] = 31, ['g'] = 32, ['h'] = 33, ['i'] = 34, ['j'] = 35,
-        ['k'] = 36, ['l'] = 37, ['m'] = 38, ['n'] = 39, ['o'] = 40, ['p'] = 41,
-        ['q'] = 42, ['r'] = 43, ['s'] = 44, ['t'] = 45, ['u'] = 46, ['v'] = 47,
-        ['w'] = 48, ['x'] = 49, ['y'] = 50, ['z'] = 51, ['0'] = 52, ['1'] = 53,
-        ['2'] = 54, ['3'] = 55, ['4'] = 56, ['5'] = 57, ['6'] = 58, ['7'] = 59,
-        ['8'] = 60, ['9'] = 61, ['-'] = 62, ['_'] = 63,
-    };
-
-    /* Calculate output size (roughly input_len * 3/4) */
-    size_t padding = 0;
-    while (input_len > 0 && input[input_len - 1] == '=') {
-        padding++;
-        input_len--;
-    }
-
-    /* Base64url doesn't require padding, but handle if present */
-    size_t out_size = ((input_len + 3) / 4) * 3;
-    if (out_size < padding) return NULL;
-    out_size -= padding;
-
-    unsigned char *out = malloc(out_size + 1);
-    if (!out) return NULL;
-
-    size_t i, j;
-    for (i = 0, j = 0; i < input_len; i += 4) {
-        unsigned int val = 0;
-        size_t k;
-        for (k = 0; k < 4 && i + k < input_len; k++) {
-            unsigned char c = (unsigned char)input[i + k];
-            if (c > 127 || (b64_table[c] == 0 && c != 'A')) {
-                free(out);
-                return NULL;
-            }
-            val = (val << 6) | b64_table[c];
-        }
-        /* Shift for missing characters */
-        for (; k < 4; k++) {
-            val <<= 6;
-        }
-
-        /* Calculate how many bytes to write for this block:
-         * - Full 4-char block produces 3 bytes
-         * - 3-char block (1 padding) produces 2 bytes
-         * - 2-char block (2 padding) produces 1 byte
-         * Use remaining space as upper bound */
-        size_t remaining = out_size - j;
-        if (remaining >= 1) out[j++] = (val >> 16) & 0xff;
-        if (remaining >= 2) out[j++] = (val >> 8) & 0xff;
-        if (remaining >= 3) out[j++] = val & 0xff;
-    }
-
-    out[j] = '\0';
-    *out_len = j;
-    return out;
+    return str_base64url_decode(input, input_len, out_len);
 }
 
 /* Parse JWT header to get algorithm and key ID */

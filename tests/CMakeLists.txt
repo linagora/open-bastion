@@ -75,7 +75,7 @@ target_link_libraries(test_ob_client
 add_test(NAME test_ob_client COMMAND test_ob_client)
 
 # Test authorization cache
-add_executable(test_auth_cache test_auth_cache.c ../src/auth_cache.c)
+add_executable(test_auth_cache test_auth_cache.c ../src/auth_cache.c ../src/cache_key.c)
 target_include_directories(test_auth_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${JSON_C_INCLUDE_DIRS}
@@ -102,7 +102,7 @@ target_link_libraries(test_token_manager
 add_test(NAME test_token_manager COMMAND test_token_manager)
 
 # Test bastion JWT verification
-add_executable(test_bastion_jwt test_bastion_jwt.c ../src/bastion_jwt.c ../src/jwks_cache.c ../src/jti_cache.c)
+add_executable(test_bastion_jwt test_bastion_jwt.c ../src/bastion_jwt.c ../src/jwks_cache.c ../src/jti_cache.c ../src/str_utils.c)
 target_compile_definitions(test_bastion_jwt PRIVATE BASTION_JWT_TEST)
 target_include_directories(test_bastion_jwt PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -119,7 +119,7 @@ target_link_libraries(test_bastion_jwt
 add_test(NAME test_bastion_jwt COMMAND test_bastion_jwt)
 
 # Test JWKS cache rate limiting
-add_executable(test_jwks_cache test_jwks_cache.c ../src/jwks_cache.c)
+add_executable(test_jwks_cache test_jwks_cache.c ../src/jwks_cache.c ../src/str_utils.c)
 target_compile_definitions(test_jwks_cache PRIVATE JWKS_CACHE_TEST)
 target_include_directories(test_jwks_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -164,7 +164,7 @@ target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/incl
 add_test(NAME test_service_account COMMAND test_service_account)
 
 # Test token cache (encryption, salt, persistence)
-add_executable(test_token_cache test_token_cache.c ../src/token_cache.c)
+add_executable(test_token_cache test_token_cache.c ../src/token_cache.c ../src/cache_key.c)
 target_include_directories(test_token_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${JSON_C_INCLUDE_DIRS}

@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "cache_key.h"
+
 /* Authorization cache entry */
 typedef struct {
     int version;            /* Cache format version (3) */
@@ -38,6 +40,18 @@ typedef struct auth_cache auth_cache_t;
  * Returns NULL on failure
  */
 auth_cache_t *auth_cache_init(const char *cache_dir);
+
+/*
+ * Initialize authorization cache with pre-derived key
+ * cache_dir: Directory for cache files
+ * key: Pre-derived encryption key (from cache_derive_key)
+ * Returns NULL on failure
+ *
+ * This function allows sharing a single PBKDF2 key derivation between
+ * multiple caches, eliminating 50-100ms overhead per cache initialization.
+ */
+auth_cache_t *auth_cache_init_with_key(const char *cache_dir,
+                                       const cache_derived_key_t *key);
 
 /*
  * Destroy cache and free resources

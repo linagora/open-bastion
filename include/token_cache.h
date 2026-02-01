@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "cache_key.h"
+
 /* Cache entry structure */
 typedef struct {
     char *token_hash;      /* SHA256 hash of the token */
@@ -35,6 +37,18 @@ typedef struct token_cache token_cache_t;
  * Returns NULL on failure
  */
 token_cache_t *cache_init_config(const cache_config_t *config);
+
+/*
+ * Initialize the token cache with configuration and pre-derived key
+ * config: Cache configuration
+ * key: Pre-derived encryption key (from cache_derive_key)
+ * Returns NULL on failure
+ *
+ * This function allows sharing a single PBKDF2 key derivation between
+ * multiple caches, eliminating 50-100ms overhead per cache initialization.
+ */
+token_cache_t *cache_init_config_with_key(const cache_config_t *config,
+                                          const cache_derived_key_t *key);
 
 /*
  * Initialize the token cache (legacy, encryption disabled)

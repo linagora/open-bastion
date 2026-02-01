@@ -24,6 +24,7 @@
 #include <json-c/json.h>
 
 #include "auth_cache.h"
+#include "cache_key.h"
 #include "str_utils.h"
 
 /* Cache format version */
@@ -54,119 +55,26 @@ struct auth_cache {
     bool key_derived;
 };
 
-/* Read machine-id */
-static int read_machine_id(char *buf, size_t buf_size)
-{
-    FILE *f = fopen(MACHINE_ID_FILE, "r");
-    if (!f) return -1;
-
-    if (!fgets(buf, buf_size, f)) {
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') {
-        buf[len - 1] = '\0';
-    }
-    return 0;
-}
-
 /*
- * Load or generate random salt for PBKDF2.
- * Security improvement: use random salt instead of deterministic machine-id hash.
- * The salt is stored in a protected file and generated once per installation.
- * Salt doesn't need to be secret - it just prevents precomputation attacks.
+ * Derive encryption key from machine-id using PBKDF2 with random salt.
+ * This is the legacy implementation - now uses the shared cache_key module.
  */
-static int load_or_generate_salt(const char *cache_dir, unsigned char *salt, size_t salt_size)
-{
-    char salt_path[512];
-    snprintf(salt_path, sizeof(salt_path), "%s/.auth_salt", cache_dir);
-
-    /* Try to load existing salt */
-    int fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
-    if (fd >= 0) {
-        ssize_t bytes_read = read(fd, salt, salt_size);
-        close(fd);
-        if (bytes_read == (ssize_t)salt_size) {
-            return 0;  /* Successfully loaded existing salt */
-        }
-        /* Salt file corrupted or wrong size - regenerate */
-    }
-
-    /* Generate new random salt */
-    if (RAND_bytes(salt, salt_size) != 1) {
-        return -1;  /* Failed to generate random bytes */
-    }
-
-    /* Save salt to file (atomic write via temp file) */
-    char temp_path[520];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", salt_path, (int)getpid());
-
-    /* Security: use O_EXCL to prevent symlink/race attacks on temp file */
-    fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0) {
-        /* If file exists (stale temp), try to remove and retry */
-        if (errno == EEXIST) {
-            unlink(temp_path);
-            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        }
-        if (fd < 0) {
-            return -1;  /* Can't create salt file */
-        }
-    }
-
-    ssize_t written = write(fd, salt, salt_size);
-    close(fd);
-
-    if (written != (ssize_t)salt_size) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    if (rename(temp_path, salt_path) != 0) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Derive encryption key from machine-id using PBKDF2 with random salt */
 static int derive_auth_cache_key(auth_cache_t *cache)
 {
-    char machine_id[64] = {0};
+    cache_derived_key_t derived_key;
 
-    if (read_machine_id(machine_id, sizeof(machine_id)) != 0) {
+    /* Use shared key derivation with .auth_salt */
+    if (cache_derive_key(cache->cache_dir, ".auth_salt", &derived_key) != 0) {
         return -1;
     }
 
-    /*
-     * Security: use random salt for PBKDF2 instead of deterministic derivation.
-     * This prevents precomputation attacks even if machine-id is known.
-     * The salt is stored in the cache directory and generated once.
-     */
-    unsigned char pbkdf_salt[SALT_SIZE];
-    if (load_or_generate_salt(cache->cache_dir, pbkdf_salt, SALT_SIZE) != 0) {
-        explicit_bzero(machine_id, sizeof(machine_id));
-        return -1;
-    }
+    /* Copy key to cache structure */
+    memcpy(cache->derived_key, derived_key.key, KEY_SIZE);
+    cache->key_derived = derived_key.derived;
 
-    if (PKCS5_PBKDF2_HMAC(machine_id, strlen(machine_id),
-                          pbkdf_salt, SALT_SIZE,
-                          PBKDF2_ITERATIONS,
-                          EVP_sha256(),
-                          KEY_SIZE, cache->derived_key) != 1) {
-        explicit_bzero(machine_id, sizeof(machine_id));
-        explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
-        return -1;
-    }
+    /* Securely clear temporary key */
+    explicit_bzero(&derived_key, sizeof(derived_key));
 
-    explicit_bzero(machine_id, sizeof(machine_id));
-    explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
-
-    cache->key_derived = true;
     return 0;
 }
 
@@ -201,10 +109,7 @@ static void hash_cache_key(const char *user, const char *server_group,
 
     /* Convert to hex (first 16 bytes = 32 hex chars) */
     if (out_size >= 33 && hash_len >= 16) {
-        for (int i = 0; i < 16; i++) {
-            snprintf(out + (i * 2), 3, "%02x", hash[i]);
-        }
-        out[32] = '\0';
+        str_bytes_to_hex(hash, 16, out);
     } else if (out_size > 0) {
         out[0] = '\0';
     }
@@ -359,6 +264,37 @@ auth_cache_t *auth_cache_init(const char *cache_dir)
     return cache;
 }
 
+auth_cache_t *auth_cache_init_with_key(const char *cache_dir,
+                                       const cache_derived_key_t *key)
+{
+    if (!cache_dir || !key || !key->derived) return NULL;
+
+    auth_cache_t *cache = calloc(1, sizeof(auth_cache_t));
+    if (!cache) return NULL;
+
+    cache->cache_dir = strdup(cache_dir);
+    if (!cache->cache_dir) {
+        free(cache);
+        return NULL;
+    }
+
+    /* Create directory if needed */
+    struct stat st;
+    if (stat(cache_dir, &st) != 0) {
+        if (mkdir(cache_dir, 0700) != 0 && errno != EEXIST) {
+            free(cache->cache_dir);
+            free(cache);
+            return NULL;
+        }
+    }
+
+    /* Use pre-derived key instead of deriving it again */
+    memcpy(cache->derived_key, key->key, KEY_SIZE);
+    cache->key_derived = true;
+
+    return cache;
+}
+
 void auth_cache_destroy(auth_cache_t *cache)
 {
     if (!cache) return;
@@ -424,10 +360,31 @@ bool auth_cache_lookup(auth_cache_t *cache,
     }
     data[st.st_size] = '\0';
 
+    /* Skip plaintext expiration header (optimization: "expires_at\n" prefix) */
+    unsigned char *payload_start = data;
+    size_t payload_size = st.st_size;
+    char *nl = memchr(data, '\n', st.st_size);
+    if (nl) {
+        /* Quick expiration check from plaintext header */
+        char line[64] = {0};
+        size_t hdr_len = nl - (char *)data;
+        if (hdr_len < sizeof(line)) {
+            memcpy(line, data, hdr_len);
+            time_t hdr_expires;
+            if (sscanf(line, "%ld", &hdr_expires) == 1 && time(NULL) >= hdr_expires) {
+                free(data);
+                unlink(path);
+                return false;
+            }
+        }
+        payload_start = (unsigned char *)(nl + 1);
+        payload_size = st.st_size - (payload_start - data);
+    }
+
     /* Check magic */
     size_t magic_len = strlen(AUTH_CACHE_MAGIC);
-    if ((size_t)st.st_size <= magic_len ||
-        memcmp(data, AUTH_CACHE_MAGIC, magic_len) != 0) {
+    if (payload_size <= magic_len ||
+        memcmp(payload_start, AUTH_CACHE_MAGIC, magic_len) != 0) {
         free(data);
         unlink(path);
         return false;
@@ -437,7 +394,7 @@ bool auth_cache_lookup(auth_cache_t *cache,
     unsigned char *decrypted = NULL;
     size_t decrypted_len = 0;
 
-    if (decrypt_data(cache, data + magic_len, st.st_size - magic_len,
+    if (decrypt_data(cache, payload_start + magic_len, payload_size - magic_len,
                      &decrypted, &decrypted_len) != 0) {
         explicit_bzero(data, st.st_size);
         free(data);
@@ -615,8 +572,27 @@ int auth_cache_store(auth_cache_t *cache,
         return -1;
     }
 
+    /* Write plaintext expiration header for fast cleanup (no decryption needed) */
+    char expires_header[32];
+    int hdr_len = snprintf(expires_header, sizeof(expires_header), "%ld\n", expires_at);
+    if (hdr_len < 0 || hdr_len >= (int)sizeof(expires_header)) {
+        close(fd);
+        unlink(temp_path);
+        explicit_bzero(encrypted, encrypted_len);
+        free(encrypted);
+        return -1;
+    }
+    ssize_t written = write(fd, expires_header, hdr_len);
+    if (written != hdr_len) {
+        close(fd);
+        unlink(temp_path);
+        explicit_bzero(encrypted, encrypted_len);
+        free(encrypted);
+        return -1;
+    }
+
     /* Write magic + encrypted data */
-    ssize_t written = write(fd, AUTH_CACHE_MAGIC, strlen(AUTH_CACHE_MAGIC));
+    written = write(fd, AUTH_CACHE_MAGIC, strlen(AUTH_CACHE_MAGIC));
     if (written != (ssize_t)strlen(AUTH_CACHE_MAGIC)) {
         close(fd);
         unlink(temp_path);
@@ -740,6 +716,7 @@ int auth_cache_cleanup(auth_cache_t *cache)
     if (!dir) return 0;
 
     int removed = 0;
+    time_t now = time(NULL);
     struct dirent *entry;
 
     while ((entry = readdir(dir)) != NULL) {
@@ -748,90 +725,41 @@ int auth_cache_cleanup(auth_cache_t *cache)
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/%s", cache->cache_dir, entry->d_name);
 
-        /* Try to read and check expiration */
-        int fd = open(path, O_RDONLY | O_NOFOLLOW);
-        if (fd < 0) {
-            if (errno == ELOOP) {
-                /* Symlink - remove it */
-                unlink(path);
-                removed++;
-            }
-            continue;
-        }
-
-        struct stat st;
-        if (fstat(fd, &st) != 0 || st.st_size == 0) {
-            close(fd);
+        /* Quick expiration check: read only the first line (plaintext timestamp) */
+        FILE *f = fopen(path, "r");
+        if (!f) {
             unlink(path);
             removed++;
             continue;
         }
 
-        unsigned char *data = malloc(st.st_size + 1);
-        if (!data) {
-            close(fd);
-            continue;
-        }
-
-        ssize_t bytes_read = read(fd, data, st.st_size);
-        close(fd);
-
-        if (bytes_read != st.st_size) {
-            free(data);
+        char line[64];
+        if (!fgets(line, sizeof(line), f)) {
+            fclose(f);
             unlink(path);
             removed++;
             continue;
         }
-        data[st.st_size] = '\0';
+        fclose(f);
 
-        /* Check magic */
-        size_t magic_len = strlen(AUTH_CACHE_MAGIC);
-        if ((size_t)st.st_size <= magic_len ||
-            memcmp(data, AUTH_CACHE_MAGIC, magic_len) != 0) {
-            free(data);
+        /* Validate that we got a complete line with newline */
+        if (!strchr(line, '\n') && strlen(line) >= sizeof(line) - 1) {
             unlink(path);
             removed++;
             continue;
         }
 
-        /* Decrypt and check expiration */
-        unsigned char *decrypted = NULL;
-        size_t decrypted_len = 0;
+        time_t expires_at;
+        if (sscanf(line, "%ld", &expires_at) != 1) {
+            /* Old format without header or corrupted - try to keep for now */
+            continue;
+        }
 
-        if (decrypt_data(cache, data + magic_len, st.st_size - magic_len,
-                         &decrypted, &decrypted_len) != 0) {
-            explicit_bzero(data, st.st_size);
-            free(data);
+        if (now >= expires_at) {
             unlink(path);
             removed++;
             continue;
         }
-
-        explicit_bzero(data, st.st_size);
-        free(data);
-
-        struct json_object *json = json_tokener_parse((char *)decrypted);
-        explicit_bzero(decrypted, decrypted_len);
-        free(decrypted);
-
-        if (!json) {
-            unlink(path);
-            removed++;
-            continue;
-        }
-
-        struct json_object *val;
-        if (json_object_object_get_ex(json, "expires_at", &val)) {
-            time_t expires_at = (time_t)json_object_get_int64(val);
-            if (time(NULL) >= expires_at) {
-                json_object_put(json);
-                unlink(path);
-                removed++;
-                continue;
-            }
-        }
-
-        json_object_put(json);
     }
 
     closedir(dir);
