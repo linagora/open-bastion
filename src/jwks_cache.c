@@ -498,6 +498,10 @@ jwks_cache_t *jwks_cache_init(const jwks_cache_config_t *config)
 
     /* Initialize persistent curl handle for TLS session reuse */
     cache->curl = curl_easy_init();
+    if (!cache->curl) {
+        syslog(LOG_WARNING,
+               "jwks_cache: curl_easy_init() failed; JWKS fetching may be impaired");
+    }
 
     /* Try to load from cache file first */
     if (load_jwks_from_file(cache) != 0) {

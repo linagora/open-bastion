@@ -253,8 +253,9 @@ static void invalidate_nscd_cache(void)
     }
 
     /* Wait for both children */
-    if (pid1 > 0) { int status; waitpid(pid1, &status, 0); }
-    if (pid2 > 0) { int status; waitpid(pid2, &status, 0); }
+    int status;
+    if (pid1 > 0) waitpid(pid1, &status, 0);
+    if (pid2 > 0) waitpid(pid2, &status, 0);
 }
 
 /*

@@ -292,6 +292,10 @@ token_cache_t *cache_init_config_with_key(const cache_config_t *config,
     }
 
     cache->cache_dir = strdup(config->cache_dir);
+    if (!cache->cache_dir) {
+        free(cache);
+        return NULL;
+    }
     cache->default_ttl = config->ttl > 0 ? config->ttl : 300;
     cache->encrypt = config->encrypt;
 

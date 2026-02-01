@@ -49,10 +49,25 @@ read_config() {
                 val = substr($0, index($0, "=") + 1)
                 # Trim leading whitespace
                 gsub(/^[[:space:]]+/, "", val)
-                # Remove inline comments (not inside quotes)
-                gsub(/[[:space:]]*#.*$/, "", val)
-                # Remove surrounding quotes
-                gsub(/^["'\'']|["'\'']$/, "", val)
+                # Remove inline comments (quote-aware)
+                in_sq = 0; in_dq = 0; out = ""
+                for (i = 1; i <= length(val); i++) {
+                    c = substr(val, i, 1)
+                    if (c == "\"" && in_sq == 0) in_dq = 1 - in_dq
+                    else if (c == "'"'"'" && in_dq == 0) in_sq = 1 - in_sq
+                    if (c == "#" && in_sq == 0 && in_dq == 0) break
+                    out = out c
+                }
+                val = out
+                gsub(/[[:space:]]+$/, "", val)
+                # Remove surrounding matching quote pairs
+                while (length(val) >= 2) {
+                    first = substr(val, 1, 1)
+                    last  = substr(val, length(val), 1)
+                    if ((first == last) && (first == "\"" || first == "'"'"'")) {
+                        val = substr(val, 2, length(val) - 2)
+                    } else break
+                }
                 result = val
             }
             END { if (result != "") print result }
