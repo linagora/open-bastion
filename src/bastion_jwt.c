@@ -464,16 +464,16 @@ bastion_jwt_result_t bastion_jwt_verify(bastion_jwt_verifier_t *verifier,
         return time_result;
     }
 
-    /* Verify issuer if configured */
-    if (verifier->issuer && claims->iss) {
-        if (strcmp(claims->iss, verifier->issuer) != 0) {
+    /* Verify issuer */
+    if (verifier->issuer) {
+        if (!claims->iss || strcmp(claims->iss, verifier->issuer) != 0) {
             bastion_jwt_claims_free(claims);
             return BASTION_JWT_INVALID_ISSUER;
         }
     }
 
-    /* Verify audience */
-    if (claims->aud && strcmp(claims->aud, verifier->audience) != 0) {
+    /* Verify audience - reject JWTs without aud claim */
+    if (!claims->aud || strcmp(claims->aud, verifier->audience) != 0) {
         bastion_jwt_claims_free(claims);
         return BASTION_JWT_INVALID_AUDIENCE;
     }
