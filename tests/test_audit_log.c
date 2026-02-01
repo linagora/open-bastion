@@ -348,13 +348,14 @@ static int test_log_rejects_world_writable(void)
     /* Create file with world-writable permissions */
     int fd = open(bad_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0) return 0;
-    close(fd);
 
     /* Explicitly set world-writable permissions (umask might have masked it) */
-    if (chmod(bad_file, 0666) != 0) {
+    if (fchmod(fd, 0666) != 0) {
+        close(fd);
         unlink(bad_file);
         return 0;
     }
+    close(fd);
 
     audit_config_t config = {
         .enabled = true,
