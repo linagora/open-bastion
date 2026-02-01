@@ -190,5 +190,21 @@ target_link_libraries(test_token_manager_io
 )
 add_test(NAME test_token_manager_io COMMAND test_token_manager_io)
 
+# Test webhook notifications
+add_executable(test_notify test_notify.c ../src/notify.c ../src/audit_log.c)
+target_include_directories(test_notify PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_notify
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_notify COMMAND test_notify)
+
 # Note: Integration tests require a running Open Bastion instance
 # and are meant to be run manually
