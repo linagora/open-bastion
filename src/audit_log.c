@@ -244,20 +244,20 @@ int audit_log_event(audit_context_t *ctx, const audit_event_t *event)
     json_object_object_add(jobj, "module", json_object_new_string("pam_llng"));
     json_object_object_add(jobj, "host", json_object_new_string(ctx->hostname));
     json_object_object_add(jobj, "user",
-                           event->user ? json_object_new_string(event->user) : NULL);
+                           json_object_new_string(event->user ? event->user : ""));
     json_object_object_add(jobj, "service",
-                           event->service ? json_object_new_string(event->service) : NULL);
+                           json_object_new_string(event->service ? event->service : ""));
     json_object_object_add(jobj, "client_ip",
-                           event->client_ip ? json_object_new_string(event->client_ip) : NULL);
+                           json_object_new_string(event->client_ip ? event->client_ip : ""));
     json_object_object_add(jobj, "tty",
-                           event->tty ? json_object_new_string(event->tty) : NULL);
+                           json_object_new_string(event->tty ? event->tty : ""));
     json_object_object_add(jobj, "result_code", json_object_new_int(event->result_code));
     json_object_object_add(jobj, "cache_hit", json_object_new_boolean(event->cache_hit));
     json_object_object_add(jobj, "latency_ms", json_object_new_int64(latency));
     json_object_object_add(jobj, "reason",
-                           event->reason ? json_object_new_string(event->reason) : NULL);
+                           json_object_new_string(event->reason ? event->reason : ""));
     json_object_object_add(jobj, "details",
-                           event->details ? json_object_new_string(event->details) : NULL);
+                           json_object_new_string(event->details ? event->details : ""));
 
     const char *json_str = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 

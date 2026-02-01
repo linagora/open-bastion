@@ -68,7 +68,7 @@ load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         # Security: verify config file permissions before parsing
         local file_stat
-        file_stat=$(stat -c '%u:%a' "$CONFIG_FILE" 2>/dev/null)
+        file_stat=$(stat -c '%u:%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%u:%Lp' "$CONFIG_FILE" 2>/dev/null)
         if [ -n "$file_stat" ]; then
             local owner="${file_stat%%:*}"
             local perms="${file_stat##*:}"

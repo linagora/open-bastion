@@ -138,39 +138,39 @@ test_insecure_flag() {
     fi
 }
 
-# ── Test 8: curl_opts without/with insecure ──
-test_curl_opts_default() {
+# ── Test 8: build_curl_opts without/with insecure ──
+test_build_curl_opts_default() {
     (
         source_script "ob-ssh-cert"
-        local opts
-        opts=$(curl_opts)
+        build_curl_opts
+        local opts="${CURL_OPTS[*]}"
         if echo "$opts" | grep -q "\-k"; then
             exit 1
         fi
         exit 0
     )
     if [ $? -eq 0 ]; then
-        pass "curl_opts without insecure has no -k"
+        pass "build_curl_opts without insecure has no -k"
     else
-        fail "curl_opts without insecure has no -k"
+        fail "build_curl_opts without insecure has no -k"
     fi
 }
 
-test_curl_opts_insecure() {
+test_build_curl_opts_insecure() {
     (
         source_script "ob-ssh-cert"
         VERIFY_SSL=false
-        local opts
-        opts=$(curl_opts)
+        build_curl_opts
+        local opts="${CURL_OPTS[*]}"
         if echo "$opts" | grep -q "\-k"; then
             exit 0
         fi
         exit 1
     )
     if [ $? -eq 0 ]; then
-        pass "curl_opts with insecure has -k"
+        pass "build_curl_opts with insecure has -k"
     else
-        fail "curl_opts with insecure has -k"
+        fail "build_curl_opts with insecure has -k"
     fi
 }
 
@@ -270,8 +270,8 @@ run_test test_validity_abc
 run_test test_validity_zero
 run_test test_validity_negative
 run_test test_insecure_flag
-run_test test_curl_opts_default
-run_test test_curl_opts_insecure
+run_test test_build_curl_opts_default
+run_test test_build_curl_opts_insecure
 run_test test_get_key_from_file
 run_test test_get_key_from_file_missing
 run_test test_trailing_slash
