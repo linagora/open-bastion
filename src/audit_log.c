@@ -341,39 +341,35 @@ int audit_log_event(audit_context_t *ctx, const audit_event_t *event)
         pthread_mutex_lock(&ctx->lock);
 
         /*
-         * Open with secure permissions (0640: owner rw, group r).
-         * If the file already exists, verify it has secure permissions.
+         * Security: open file first with O_NOFOLLOW to prevent symlink attacks,
+         * then use fstat on the opened fd to avoid TOCTOU race conditions.
          */
-        struct stat st;
-        bool permissions_ok = true;
+        int fd = open(ctx->config.log_file,
+                      O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW, 0640);
+        if (fd >= 0) {
+            struct stat st;
+            bool permissions_ok = true;
 
-        if (stat(ctx->config.log_file, &st) == 0) {
-            /* File exists - check permissions and ownership */
-            if (st.st_mode & S_IWOTH) {
-                /* World-writable is a security risk - refuse to write */
+            if (fstat(fd, &st) == 0) {
+                if (st.st_mode & S_IWOTH) {
+                    permissions_ok = false;
+                }
+                if (st.st_mode & S_IWGRP) {
+                    permissions_ok = false;
+                }
+                if (st.st_uid != geteuid()) {
+                    permissions_ok = false;
+                }
+            } else {
                 permissions_ok = false;
             }
-            if (st.st_mode & S_IWGRP) {
-                /* Group-writable is a security risk - refuse to write */
-                permissions_ok = false;
-            }
-            if (st.st_uid != geteuid()) {
-                /* File not owned by effective user - refuse to write */
-                permissions_ok = false;
-            }
-        }
 
-        if (permissions_ok) {
-            int fd = open(ctx->config.log_file, O_WRONLY | O_APPEND | O_CREAT, 0640);
-            if (fd >= 0) {
-                /* Ensure file permissions are correct (in case of umask issues) */
+            if (permissions_ok) {
                 fchmod(fd, 0640);
-
-                /* Write and ignore result - audit logging should not fail auth */
                 ssize_t ret = write(fd, json_line, strlen(json_line));
                 (void)ret;  /* Intentionally ignore write errors for audit */
-                close(fd);
             }
+            close(fd);
         }
 
         pthread_mutex_unlock(&ctx->lock);
