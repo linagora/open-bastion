@@ -28,6 +28,7 @@
 #endif
 
 #include "jwks_cache.h"
+#include "str_utils.h"
 
 /* Maximum response size from JWKS endpoint */
 #define MAX_JWKS_RESPONSE_SIZE (64 * 1024)
@@ -57,6 +58,7 @@ struct jwks_cache {
     int timeout;
     bool verify_ssl;
     char *ca_cert;
+    CURL *curl;          /* Persistent curl handle for TLS session reuse */
 
     jwks_key_entry_t keys[JWKS_MAX_KEYS];
     size_t key_count;
@@ -127,61 +129,13 @@ static size_t jwks_curl_write_cb(void *contents, size_t size, size_t nmemb, void
     return realsize;
 }
 
-/* Base64url decode for JWK parameters */
+/* Base64url decode for JWK parameters - delegates to shared implementation */
 static unsigned char *base64url_decode_jwk(const char *input, size_t *out_len)
 {
     if (!input || !out_len) return NULL;
-
     size_t input_len = strlen(input);
-    if (input_len == 0 || input_len > 2048) return NULL;
-
-    static const unsigned char b64_table[256] = {
-        ['A'] = 0,  ['B'] = 1,  ['C'] = 2,  ['D'] = 3,  ['E'] = 4,  ['F'] = 5,
-        ['G'] = 6,  ['H'] = 7,  ['I'] = 8,  ['J'] = 9,  ['K'] = 10, ['L'] = 11,
-        ['M'] = 12, ['N'] = 13, ['O'] = 14, ['P'] = 15, ['Q'] = 16, ['R'] = 17,
-        ['S'] = 18, ['T'] = 19, ['U'] = 20, ['V'] = 21, ['W'] = 22, ['X'] = 23,
-        ['Y'] = 24, ['Z'] = 25, ['a'] = 26, ['b'] = 27, ['c'] = 28, ['d'] = 29,
-        ['e'] = 30, ['f'] = 31, ['g'] = 32, ['h'] = 33, ['i'] = 34, ['j'] = 35,
-        ['k'] = 36, ['l'] = 37, ['m'] = 38, ['n'] = 39, ['o'] = 40, ['p'] = 41,
-        ['q'] = 42, ['r'] = 43, ['s'] = 44, ['t'] = 45, ['u'] = 46, ['v'] = 47,
-        ['w'] = 48, ['x'] = 49, ['y'] = 50, ['z'] = 51, ['0'] = 52, ['1'] = 53,
-        ['2'] = 54, ['3'] = 55, ['4'] = 56, ['5'] = 57, ['6'] = 58, ['7'] = 59,
-        ['8'] = 60, ['9'] = 61, ['-'] = 62, ['_'] = 63,
-    };
-
-    size_t out_size = ((input_len + 3) / 4) * 3;
-    unsigned char *out = malloc(out_size + 1);
-    if (!out) return NULL;
-
-    size_t i, j;
-    for (i = 0, j = 0; i < input_len; i += 4) {
-        unsigned int val = 0;
-        size_t k;
-        for (k = 0; k < 4 && i + k < input_len; k++) {
-            unsigned char c = (unsigned char)input[i + k];
-            if (c > 127) {
-                free(out);
-                return NULL;
-            }
-            val = (val << 6) | b64_table[c];
-        }
-        for (; k < 4; k++) {
-            val <<= 6;
-        }
-
-        if (j < out_size) out[j++] = (val >> 16) & 0xff;
-        if (j < out_size && i + 2 <= input_len) out[j++] = (val >> 8) & 0xff;
-        if (j < out_size && i + 3 <= input_len) out[j++] = val & 0xff;
-    }
-
-    /* Adjust for base64url without padding */
-    size_t mod = input_len % 4;
-    if (mod == 2) j -= 2;
-    else if (mod == 3) j -= 1;
-
-    out[j] = '\0';
-    *out_len = j;
-    return out;
+    if (input_len > 2048) return NULL;
+    return str_base64url_decode(input, input_len, out_len);
 }
 
 /* Parse a single RSA JWK and create EVP_PKEY */
@@ -391,8 +345,13 @@ static int fetch_jwks(jwks_cache_t *cache)
     }
     cache->last_fetch_attempt = now;
 
-    CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    /* Ensure curl handle exists */
+    if (!cache->curl) {
+        cache->curl = curl_easy_init();
+    }
+    if (!cache->curl) return -1;
+
+    CURL *curl = cache->curl;
 
     curl_buffer_t buf = {
         .data = malloc(4096),
@@ -401,9 +360,11 @@ static int fetch_jwks(jwks_cache_t *cache)
     };
 
     if (!buf.data) {
-        curl_easy_cleanup(curl);
         return -1;
     }
+
+    /* Reset curl state but keep TLS session cache */
+    curl_easy_reset(curl);
 
     curl_easy_setopt(curl, CURLOPT_URL, cache->jwks_url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, jwks_curl_write_cb);
@@ -432,7 +393,6 @@ static int fetch_jwks(jwks_cache_t *cache)
     }
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
         free(buf.data);
@@ -536,6 +496,13 @@ jwks_cache_t *jwks_cache_init(const jwks_cache_config_t *config)
         cache->ca_cert = strdup(config->ca_cert);
     }
 
+    /* Initialize persistent curl handle for TLS session reuse */
+    cache->curl = curl_easy_init();
+    if (!cache->curl) {
+        syslog(LOG_WARNING,
+               "jwks_cache: curl_easy_init() failed; JWKS fetching may be impaired");
+    }
+
     /* Try to load from cache file first */
     if (load_jwks_from_file(cache) != 0) {
         /* Cache miss or expired, fetch from URL */
@@ -556,6 +523,11 @@ void jwks_cache_destroy(jwks_cache_t *cache)
     for (size_t i = 0; i < cache->key_count; i++) {
         free(cache->keys[i].kid);
         EVP_PKEY_free(cache->keys[i].key);
+    }
+
+    /* Clean up persistent curl handle */
+    if (cache->curl) {
+        curl_easy_cleanup(cache->curl);
     }
 
     free(cache->jwks_url);

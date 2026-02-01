@@ -15,6 +15,7 @@
 #include <fcntl.h>
 
 #include "../include/auth_cache.h"
+#include "../include/cache_key.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -405,6 +406,64 @@ static int test_entry_free_null(void)
     return 1;
 }
 
+/* Test: Init with pre-derived key (optimization) */
+static int test_init_with_key(void)
+{
+    if (!has_machine_id()) return 2;  /* SKIP */
+
+    /* Derive key once */
+    cache_derived_key_t key;
+    int ret = cache_derive_key(test_dir, ".auth_salt", &key);
+    ASSERT(ret == 0);
+    ASSERT(key.derived == true);
+
+    /* Use pre-derived key to initialize cache */
+    auth_cache_t *cache = auth_cache_init_with_key(test_dir, &key);
+    ASSERT(cache != NULL);
+
+    /* Verify cache works by storing and looking up an entry */
+    auth_cache_entry_t entry = {
+        .version = 3,
+        .user = "keytest",
+        .authorized = true,
+        .groups = NULL,
+        .groups_count = 0,
+        .sudo_allowed = false,
+        .sudo_nopasswd = false,
+        .gecos = NULL,
+        .shell = NULL,
+        .home = NULL
+    };
+
+    ret = auth_cache_store(cache, "keytest", "default", "localhost", &entry, 300);
+    ASSERT(ret == 0);
+
+    /* Lookup the entry */
+    auth_cache_entry_t lookup = {0};
+    int found = auth_cache_lookup(cache, "keytest", "default", "localhost", &lookup);
+    ASSERT(found == true);
+    ASSERT(lookup.authorized == true);
+    ASSERT(strcmp(lookup.user, "keytest") == 0);
+
+    auth_cache_entry_free(&lookup);
+    auth_cache_destroy(cache);
+    explicit_bzero(&key, sizeof(key));
+
+    return 1;
+}
+
+/* Test: Init with invalid key fails gracefully */
+static int test_init_with_invalid_key(void)
+{
+    cache_derived_key_t invalid_key = {0};
+    invalid_key.derived = false;  /* Not derived */
+
+    auth_cache_t *cache = auth_cache_init_with_key(test_dir, &invalid_key);
+    ASSERT(cache == NULL);
+
+    return 1;
+}
+
 int main(void)
 {
     printf("=== Authorization Cache Tests ===\n\n");
@@ -416,6 +475,8 @@ int main(void)
 
     TEST(init_destroy);
     TEST(init_null);
+    TEST(init_with_key);
+    TEST(init_with_invalid_key);
     TEST(store_lookup);
     TEST(lookup_missing);
     TEST(lookup_different_group);

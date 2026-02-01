@@ -39,6 +39,7 @@ set(PAM_MODULE_SOURCES
     src/notify.c
     src/secret_store.c
     src/auth_cache.c
+    src/cache_key.c
     src/bastion_jwt.c
     src/jwks_cache.c
     src/jti_cache.c
@@ -89,6 +90,8 @@ target_compile_options(pam_openbastion PRIVATE
     -fstack-protector-strong      # Stack buffer overflow protection
     -Wformat -Wformat-security    # Format string vulnerability detection
     -fvisibility=hidden           # Hide internal symbols, reduce attack surface
+    # Link-Time Optimization for Release builds
+    $<$<CONFIG:Release>:-flto>
 )
 
 # _FORTIFY_SOURCE requires optimization (-O1 or higher) to be effective
@@ -102,6 +105,8 @@ target_link_options(pam_openbastion PRIVATE
     -Wl,-z,relro                  # RELRO (with -z,now = Full RELRO)
     -Wl,-z,now                    # Resolve symbols at load time (completes Full RELRO)
     -Wl,-z,noexecstack            # Non-executable stack
+    # Link-Time Optimization for Release builds
+    $<$<CONFIG:Release>:-flto>
 )
 
 # Installation

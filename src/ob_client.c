@@ -220,8 +220,8 @@ static void generate_request_signature(const char *secret,
     }
 
     /* Convert to hex string */
-    for (unsigned int i = 0; i < hmac_len && (i * 2 + 2) < sig_size; i++) {
-        snprintf(signature + (i * 2), 3, "%02x", hmac[i]);
+    if (hmac_len * 2 + 1 <= sig_size) {
+        str_bytes_to_hex(hmac, hmac_len, signature);
     }
 
     /* Clear HMAC buffer */

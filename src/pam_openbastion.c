@@ -37,6 +37,7 @@
 #include "audit_log.h"
 #include "rate_limiter.h"
 #include "auth_cache.h"
+#include "cache_key.h"
 #include "token_manager.h"
 #include "bastion_jwt.h"
 #include "jwks_cache.h"
@@ -224,10 +225,11 @@ static int group_exists_locally(gid_t gid)
  */
 static void invalidate_nscd_cache(void)
 {
-    /* Try to invalidate nscd cache - ignore errors if nscd isn't running */
-    pid_t pid = fork();
-    if (pid == 0) {
-        /* Child: run nscd --invalidate */
+    pid_t pid1 = -1, pid2 = -1;
+
+    /* Fork both children first for parallel execution */
+    pid1 = fork();
+    if (pid1 == 0) {
         int null_fd = open("/dev/null", O_WRONLY);
         if (null_fd >= 0) {
             dup2(null_fd, STDOUT_FILENO);
@@ -235,15 +237,11 @@ static void invalidate_nscd_cache(void)
             close(null_fd);
         }
         execl("/usr/sbin/nscd", "nscd", "--invalidate", "passwd", NULL);
-        _exit(0);  /* Exit silently if nscd not found */
-    } else if (pid > 0) {
-        int status;
-        waitpid(pid, &status, 0);
+        _exit(0);
     }
 
-    /* Also invalidate group cache */
-    pid = fork();
-    if (pid == 0) {
+    pid2 = fork();
+    if (pid2 == 0) {
         int null_fd = open("/dev/null", O_WRONLY);
         if (null_fd >= 0) {
             dup2(null_fd, STDOUT_FILENO);
@@ -252,10 +250,12 @@ static void invalidate_nscd_cache(void)
         }
         execl("/usr/sbin/nscd", "nscd", "--invalidate", "group", NULL);
         _exit(0);
-    } else if (pid > 0) {
-        int status;
-        waitpid(pid, &status, 0);
     }
+
+    /* Wait for both children */
+    int status;
+    if (pid1 > 0) waitpid(pid1, &status, 0);
+    if (pid2 > 0) waitpid(pid2, &status, 0);
 }
 
 /*
@@ -516,11 +516,47 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         goto error;
     }
 
+    /*
+     * Optimization: Derive cache encryption keys upfront to avoid duplicate
+     * PBKDF2 overhead (100K iterations = 50-100ms per derivation).
+     * Each cache uses a different directory/salt combination, so we derive
+     * both keys here and pass them to the init functions.
+     */
+    cache_derived_key_t token_cache_key = {0};
+    cache_derived_key_t auth_cache_key = {0};
+
+#ifdef ENABLE_CACHE
+    /* Derive token cache key if enabled and encrypted */
+    if (data->config.cache_enabled && data->config.cache_encrypted) {
+        if (cache_derive_key(data->config.cache_dir, ".cache_salt", &token_cache_key) != 0) {
+            OB_LOG_WARN(pamh, "Failed to derive token cache key, encryption will be disabled");
+        }
+    }
+#endif
+
+    /* Derive auth cache key if enabled */
+    if (data->config.auth_cache_enabled) {
+        if (cache_derive_key(data->config.auth_cache_dir, ".auth_salt", &auth_cache_key) != 0) {
+            OB_LOG_WARN(pamh, "Failed to derive auth cache key");
+        }
+    }
+
 #ifdef ENABLE_CACHE
     /* Initialize cache if enabled */
     if (data->config.cache_enabled) {
-        data->cache = cache_init(data->config.cache_dir,
-                                 data->config.cache_ttl);
+        if (token_cache_key.derived) {
+            /* Use pre-derived key */
+            cache_config_t cache_cfg = {
+                .cache_dir = data->config.cache_dir,
+                .ttl = data->config.cache_ttl,
+                .encrypt = data->config.cache_encrypted
+            };
+            data->cache = cache_init_config_with_key(&cache_cfg, &token_cache_key);
+        } else {
+            /* Fall back to standard init */
+            data->cache = cache_init(data->config.cache_dir,
+                                     data->config.cache_ttl);
+        }
         if (!data->cache) {
             OB_LOG_WARN(pamh, "Failed to initialize cache, continuing without");
         }
@@ -559,11 +595,22 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
 
     /* Initialize authorization cache (for offline mode) */
     if (data->config.auth_cache_enabled) {
-        data->auth_cache = auth_cache_init(data->config.auth_cache_dir);
+        if (auth_cache_key.derived) {
+            /* Use pre-derived key */
+            data->auth_cache = auth_cache_init_with_key(data->config.auth_cache_dir,
+                                                        &auth_cache_key);
+        } else {
+            /* Fall back to standard init */
+            data->auth_cache = auth_cache_init(data->config.auth_cache_dir);
+        }
         if (!data->auth_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize auth cache, offline mode disabled");
         }
     }
+
+    /* Securely clear derived keys */
+    explicit_bzero(&token_cache_key, sizeof(token_cache_key));
+    explicit_bzero(&auth_cache_key, sizeof(auth_cache_key));
 
     /* Initialize CrowdSec integration */
     if (data->config.crowdsec_enabled) {

@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include "token_cache.h"
+#include "cache_key.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -363,11 +364,95 @@ static int test_salt_persistence(void)
     return ok;
 }
 
+/* Test: Init with pre-derived key (optimization) */
+static int test_init_with_key(void)
+{
+    char temp_dir[] = "/tmp/cache_test_XXXXXX";
+    if (create_temp_dir(temp_dir) != 0) {
+        return 0;
+    }
+
+    /* Check if machine-id exists */
+    struct stat st;
+    if (stat("/etc/machine-id", &st) != 0) {
+        cleanup_dir(temp_dir);
+        return 1;  /* Skip test if no machine-id */
+    }
+
+    /* Derive key once */
+    cache_derived_key_t key;
+    int ret = cache_derive_key(temp_dir, ".cache_salt", &key);
+    if (ret != 0 || !key.derived) {
+        cleanup_dir(temp_dir);
+        return 0;
+    }
+
+    /* Use pre-derived key to initialize cache */
+    cache_config_t config = {
+        .cache_dir = temp_dir,
+        .ttl = 300,
+        .encrypt = true
+    };
+
+    token_cache_t *cache = cache_init_config_with_key(&config, &key);
+    if (!cache) {
+        explicit_bzero(&key, sizeof(key));
+        cleanup_dir(temp_dir);
+        return 0;
+    }
+
+    /* Verify cache works by storing and looking up an entry */
+    ret = cache_store(cache, "test_token_123", "testuser", true, 300);
+    if (ret != 0) {
+        cache_destroy(cache);
+        explicit_bzero(&key, sizeof(key));
+        cleanup_dir(temp_dir);
+        return 0;
+    }
+
+    cache_entry_t entry = {0};
+    int found = cache_lookup(cache, "test_token_123", "testuser", &entry);
+    int ok = found && entry.authorized;
+
+    cache_entry_free(&entry);
+    cache_destroy(cache);
+    explicit_bzero(&key, sizeof(key));
+    cleanup_dir(temp_dir);
+
+    return ok;
+}
+
+/* Test: Init with invalid key fails gracefully */
+static int test_init_with_invalid_key(void)
+{
+    char temp_dir[] = "/tmp/cache_test_XXXXXX";
+    if (create_temp_dir(temp_dir) != 0) {
+        return 0;
+    }
+
+    cache_derived_key_t invalid_key = {0};
+    invalid_key.derived = false;  /* Not derived */
+
+    cache_config_t config = {
+        .cache_dir = temp_dir,
+        .ttl = 300,
+        .encrypt = true
+    };
+
+    token_cache_t *cache = cache_init_config_with_key(&config, &invalid_key);
+    int ok = (cache == NULL);  /* Should fail */
+
+    cleanup_dir(temp_dir);
+    return ok;
+}
+
 int main(void)
 {
     printf("Running token cache tests...\n\n");
 
     TEST(init_destroy);
+    TEST(init_with_key);
+    TEST(init_with_invalid_key);
     TEST(store_and_lookup);
     TEST(lookup_nonexistent);
     TEST(store_encrypted);

@@ -23,6 +23,8 @@
 #include <openssl/rand.h>
 
 #include "token_cache.h"
+#include "cache_key.h"
+#include "str_utils.h"
 
 /* Maximum number of cache entries to prevent DoS */
 #define MAX_CACHE_ENTRIES 10000
@@ -63,10 +65,7 @@ static void hash_token(const char *token, const char *user, char *out, size_t ou
 
     /* Convert to hex string (use first 16 bytes = 32 hex chars) */
     if (out_size >= 33 && hash_len >= 16) {
-        for (int i = 0; i < 16; i++) {
-            snprintf(out + (i * 2), 3, "%02x", hash[i]);
-        }
-        out[32] = '\0';
+        str_bytes_to_hex(hash, 16, out);
     } else if (out_size > 0) {
         out[0] = '\0';
     }
@@ -84,123 +83,26 @@ struct token_cache {
     bool key_derived;                    /* True if key was successfully derived */
 };
 
-/* Read machine-id */
-static int read_machine_id(char *buf, size_t buf_size)
-{
-    FILE *f = fopen(MACHINE_ID_FILE, "r");
-    if (!f) return -1;
-
-    if (!fgets(buf, buf_size, f)) {
-        fclose(f);
-        return -1;
-    }
-
-    fclose(f);
-
-    /* Remove trailing newline */
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') {
-        buf[len - 1] = '\0';
-    }
-
-    return 0;
-}
-
 /*
- * Load or generate random salt for PBKDF2.
- * Salt is stored in the cache directory and generated once.
+ * Derive encryption key from machine-id using PBKDF2 with random salt.
+ * This is the legacy implementation - now uses the shared cache_key module.
  */
-static int load_or_generate_cache_salt(const char *cache_dir, unsigned char *salt, size_t salt_size)
-{
-    char salt_path[512];
-    snprintf(salt_path, sizeof(salt_path), "%s/.cache_salt", cache_dir);
-
-    /* Try to load existing salt */
-    int fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
-    if (fd >= 0) {
-        ssize_t bytes_read = read(fd, salt, salt_size);
-        close(fd);
-        if (bytes_read == (ssize_t)salt_size) {
-            return 0;
-        }
-    }
-
-    /* Generate new random salt */
-    if (RAND_bytes(salt, salt_size) != 1) {
-        return -1;
-    }
-
-    /* Save salt atomically */
-    char temp_path[520];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", salt_path, (int)getpid());
-
-    fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0) {
-        if (errno == EEXIST) {
-            unlink(temp_path);
-            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        }
-        if (fd < 0) return -1;
-    }
-
-    ssize_t written = write(fd, salt, salt_size);
-    close(fd);
-
-    if (written != (ssize_t)salt_size) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    if (rename(temp_path, salt_path) != 0) {
-        unlink(temp_path);
-        /*
-         * Another process may have won the race and created the salt file.
-         * Try loading it instead of failing.
-         */
-        fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
-        if (fd >= 0) {
-            ssize_t bytes_read = read(fd, salt, salt_size);
-            close(fd);
-            if (bytes_read == (ssize_t)salt_size) {
-                return 0;
-            }
-        }
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Derive encryption key from machine-id using PBKDF2 with random salt */
 static int derive_cache_key(token_cache_t *cache)
 {
-    char machine_id[64] = {0};
+    cache_derived_key_t derived_key;
 
-    if (read_machine_id(machine_id, sizeof(machine_id)) != 0) {
+    /* Use shared key derivation with .cache_salt */
+    if (cache_derive_key(cache->cache_dir, ".cache_salt", &derived_key) != 0) {
         return -1;
     }
 
-    unsigned char pbkdf_salt[SALT_SIZE];
-    if (load_or_generate_cache_salt(cache->cache_dir, pbkdf_salt, SALT_SIZE) != 0) {
-        explicit_bzero(machine_id, sizeof(machine_id));
-        return -1;
-    }
+    /* Copy key to cache structure */
+    memcpy(cache->derived_key, derived_key.key, KEY_SIZE);
+    cache->key_derived = derived_key.derived;
 
-    /* Derive key using PBKDF2 */
-    if (PKCS5_PBKDF2_HMAC(machine_id, strlen(machine_id),
-                          pbkdf_salt, SALT_SIZE,
-                          PBKDF2_ITERATIONS,
-                          EVP_sha256(),
-                          KEY_SIZE, cache->derived_key) != 1) {
-        explicit_bzero(machine_id, sizeof(machine_id));
-        explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
-        return -1;
-    }
+    /* Securely clear temporary key */
+    explicit_bzero(&derived_key, sizeof(derived_key));
 
-    explicit_bzero(machine_id, sizeof(machine_id));
-    explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
-
-    cache->key_derived = true;
     return 0;
 }
 
@@ -372,6 +274,45 @@ token_cache_t *cache_init_config(const cache_config_t *config)
             cache->encrypt = false;
             cache->key_derived = false;
         }
+    }
+
+    return cache;
+}
+
+token_cache_t *cache_init_config_with_key(const cache_config_t *config,
+                                          const cache_derived_key_t *key)
+{
+    if (!config || !config->cache_dir || !key || !key->derived) {
+        return NULL;
+    }
+
+    token_cache_t *cache = calloc(1, sizeof(token_cache_t));
+    if (!cache) {
+        return NULL;
+    }
+
+    cache->cache_dir = strdup(config->cache_dir);
+    if (!cache->cache_dir) {
+        free(cache);
+        return NULL;
+    }
+    cache->default_ttl = config->ttl > 0 ? config->ttl : 300;
+    cache->encrypt = config->encrypt;
+
+    /* Create cache directory if it doesn't exist */
+    struct stat st;
+    if (stat(config->cache_dir, &st) != 0) {
+        if (mkdir(config->cache_dir, 0700) != 0 && errno != EEXIST) {
+            free(cache->cache_dir);
+            free(cache);
+            return NULL;
+        }
+    }
+
+    /* Use pre-derived key if encryption is enabled */
+    if (cache->encrypt) {
+        memcpy(cache->derived_key, key->key, KEY_SIZE);
+        cache->key_derived = true;
     }
 
     return cache;
