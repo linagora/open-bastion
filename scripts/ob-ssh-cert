@@ -71,14 +71,12 @@ debug() {
 }
 
 # Build curl options
-curl_opts() {
-    local opts=("-s" "--connect-timeout" "$TIMEOUT")
+build_curl_opts() {
+    CURL_OPTS=("-s" "--connect-timeout" "$TIMEOUT")
 
     if [ "$VERIFY_SSL" = "false" ]; then
-        opts+=("-k")
+        CURL_OPTS+=("-k")
     fi
-
-    echo "${opts[@]}"
 }
 
 # Get public key from SSH agent
@@ -124,11 +122,9 @@ device_auth_flow() {
 
     # Step 1: Request device code
     local device_response
-    local curl_options
-    curl_options=$(curl_opts)
+    build_curl_opts
 
-    # shellcheck disable=SC2086
-    device_response=$(curl $curl_options -X POST "${PORTAL_URL}/oauth2/device" \
+    device_response=$(curl "${CURL_OPTS[@]}" -X POST "${PORTAL_URL}/oauth2/device" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         --data-urlencode "client_id=${CLIENT_ID}" \
         --data-urlencode "scope=${SCOPE}") || {
@@ -136,7 +132,7 @@ device_auth_flow() {
         return 1
     }
 
-    debug "Device response: $device_response"
+    debug "Device response: $(echo "$device_response" | jq -c '{user_code, verification_uri, expires_in, interval}' 2>/dev/null || echo '[redacted]')"
 
     # Parse response
     local device_code user_code verification_uri expires_in interval
@@ -194,14 +190,13 @@ device_auth_flow() {
         sleep "$interval"
 
         local token_response
-        # shellcheck disable=SC2086
-        token_response=$(curl $curl_options -X POST "${PORTAL_URL}/oauth2/token" \
+        token_response=$(curl "${CURL_OPTS[@]}" -X POST "${PORTAL_URL}/oauth2/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
             --data-urlencode "device_code=${device_code}" \
             --data-urlencode "client_id=${CLIENT_ID}" 2>/dev/null) || continue
 
-        debug "Token response: $token_response"
+        debug "Token response: $(echo "$token_response" | jq -c '{error, error_description, token_type, expires_in}' 2>/dev/null || echo '[redacted]')"
 
         local error_code
         error_code=$(echo "$token_response" | jq -r '.error // empty')
@@ -245,8 +240,7 @@ sign_public_key() {
 
     info "Requesting certificate from LLNG..."
 
-    local curl_options
-    curl_options=$(curl_opts)
+    build_curl_opts
 
     # Build JSON payload
     local payload
@@ -261,8 +255,7 @@ sign_public_key() {
     debug "Sign request: $payload"
 
     local response
-    # shellcheck disable=SC2086
-    response=$(curl $curl_options -X POST "${PORTAL_URL}/ssh/sign" \
+    response=$(curl "${CURL_OPTS[@]}" -X POST "${PORTAL_URL}/ssh/sign" \
         -H "Authorization: Bearer ${access_token}" \
         -H "Content-Type: application/json" \
         -d "$payload") || {
@@ -462,6 +455,11 @@ main() {
 
     # Remove trailing slash from portal URL
     PORTAL_URL="${PORTAL_URL%/}"
+
+    # Security: warn if not using HTTPS (credentials sent in clear)
+    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+        warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
+    fi
 
     # Check dependencies
     for cmd in curl jq ssh-add; do
