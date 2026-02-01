@@ -153,6 +153,18 @@ static int load_or_generate_cache_salt(const char *cache_dir, unsigned char *sal
 
     if (rename(temp_path, salt_path) != 0) {
         unlink(temp_path);
+        /*
+         * Another process may have won the race and created the salt file.
+         * Try loading it instead of failing.
+         */
+        fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
+        if (fd >= 0) {
+            ssize_t bytes_read = read(fd, salt, salt_size);
+            close(fd);
+            if (bytes_read == (ssize_t)salt_size) {
+                return 0;
+            }
+        }
         return -1;
     }
 
