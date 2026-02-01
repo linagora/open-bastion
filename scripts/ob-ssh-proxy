@@ -90,8 +90,7 @@ load_config() {
                 VERIFY_SSL)          VERIFY_SSL="$value" ;;
                 DEBUG)               DEBUG="$value" ;;
                 SSH_OPTIONS)
-                    # shellcheck disable=SC2206
-                    SSH_OPTIONS_ARRAY=($value)
+                    read -r -a SSH_OPTIONS_ARRAY <<<"$value"
                     ;;
             esac
         done < "$CONFIG_FILE"
