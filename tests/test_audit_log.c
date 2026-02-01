@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <fcntl.h>
 
 #include "audit_log.h"
 
@@ -282,6 +283,115 @@ static int test_audit_log_convenience(void)
     return ok;
 }
 
+/* Test that audit log rejects symlinks (O_NOFOLLOW protection) */
+static int test_log_rejects_symlink(void)
+{
+    cleanup();
+
+    /* Create a real file that we don't want written to */
+    const char *target_file = "/tmp/test_pam_llng_audit_target.json";
+    FILE *target = fopen(target_file, "w");
+    if (target) fclose(target);
+
+    /* Create symlink from log path to target */
+    const char *symlink_path = "/tmp/test_pam_llng_audit_symlink.json";
+    unlink(symlink_path);
+    if (symlink(target_file, symlink_path) != 0) {
+        unlink(target_file);
+        return 0;  /* Can't create symlink, test fails */
+    }
+
+    audit_config_t config = {
+        .enabled = true,
+        .log_file = (char *)symlink_path,
+        .log_to_syslog = false,
+        .level = 2
+    };
+
+    audit_context_t *ctx = audit_init(&config);
+    if (!ctx) {
+        unlink(symlink_path);
+        unlink(target_file);
+        return 0;
+    }
+
+    audit_event_t event;
+    audit_event_init(&event, AUDIT_SECURITY_ERROR);
+    event.user = "attacker";
+    event.service = "sshd";
+    event.client_ip = "10.0.0.1";
+    event.result_code = 1;
+    audit_event_set_end_time(&event);
+
+    audit_log_event(ctx, &event);
+    audit_destroy(ctx);
+
+    /* Target file should remain empty (symlink was not followed) */
+    struct stat st;
+    int target_empty = 0;
+    if (stat(target_file, &st) == 0) {
+        target_empty = (st.st_size == 0);
+    } else {
+        target_empty = 1;  /* File doesn't exist = not written to */
+    }
+
+    unlink(symlink_path);
+    unlink(target_file);
+    return target_empty;
+}
+
+/* Test that audit log rejects world-writable files */
+static int test_log_rejects_world_writable(void)
+{
+    const char *bad_file = "/tmp/test_pam_llng_audit_worldwrite.json";
+
+    /* Create file with world-writable permissions */
+    int fd = open(bad_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return 0;
+
+    /* Explicitly set world-writable permissions (umask might have masked it) */
+    if (fchmod(fd, 0666) != 0) {
+        close(fd);
+        unlink(bad_file);
+        return 0;
+    }
+    close(fd);
+
+    audit_config_t config = {
+        .enabled = true,
+        .log_file = (char *)bad_file,
+        .log_to_syslog = false,
+        .level = 2
+    };
+
+    audit_context_t *ctx = audit_init(&config);
+    if (!ctx) {
+        unlink(bad_file);
+        return 0;
+    }
+
+    audit_event_t event;
+    audit_event_init(&event, AUDIT_SECURITY_ERROR);
+    event.user = "attacker";
+    event.service = "sshd";
+    event.client_ip = "10.0.0.1";
+    event.result_code = 1;
+    audit_event_set_end_time(&event);
+
+    audit_log_event(ctx, &event);
+    audit_destroy(ctx);
+
+    /* File should remain empty (world-writable check rejected it) */
+    struct stat st;
+    int still_empty = 0;
+    if (stat(bad_file, &st) == 0) {
+        still_empty = (st.st_size == 0);
+    }
+
+    unlink(bad_file);
+    return still_empty;
+}
+
 int main(void)
 {
     printf("Running audit log tests...\n\n");
@@ -298,6 +408,8 @@ int main(void)
     TEST(level_filtering);
     TEST(disabled);
     TEST(audit_log_convenience);
+    TEST(log_rejects_symlink);
+    TEST(log_rejects_world_writable);
 
     cleanup();
 

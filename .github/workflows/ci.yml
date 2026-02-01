@@ -54,8 +54,19 @@ jobs:
         nm -D build/pam_openbastion.so.* | grep -E "pam_sm_(authenticate|setcred|acct_mgmt)" || exit 1
         echo "All required PAM symbols found"
 
-    - name: Verify enrollment script syntax
-      run: bash -n scripts/ob-enroll
+    - name: Verify all script syntax
+      run: |
+        for script in scripts/ob-*; do
+          echo "Checking syntax: $script"
+          bash -n "$script"
+        done
+
+    - name: Run script unit tests
+      run: |
+        for test in tests/test_ob_*.sh; do
+          echo "Running: $test"
+          bash "$test"
+        done
 
   build-debug:
     name: Build Debug with Sanitizers
