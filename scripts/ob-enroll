@@ -512,12 +512,11 @@ save_token() {
 
     (
         umask 077
+        ACCESS_TOKEN="$ACCESS_TOKEN" REFRESH_TOKEN="${REFRESH_TOKEN:-}" \
         jq -n \
-            --arg access_token "$ACCESS_TOKEN" \
-            --arg refresh_token "${REFRESH_TOKEN:-}" \
             --argjson expires_at "$expires_at" \
             --argjson enrolled_at "$now" \
-            '{access_token: $access_token, refresh_token: $refresh_token, expires_at: $expires_at, enrolled_at: $enrolled_at}' \
+            '{access_token: env.ACCESS_TOKEN, refresh_token: env.REFRESH_TOKEN, expires_at: $expires_at, enrolled_at: $enrolled_at}' \
             > "$TOKEN_FILE"
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
