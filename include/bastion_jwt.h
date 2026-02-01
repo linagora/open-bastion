@@ -132,6 +132,10 @@ bool bastion_jwt_is_bastion_allowed(const char *bastion_id, const char *allowed_
  */
 bastion_jwt_result_t bastion_jwt_validate_time(
     time_t exp, time_t nbf, time_t iat, time_t now, int max_clock_skew);
+
+bastion_jwt_result_t bastion_jwt_validate_issuer_audience(
+    const char *iss, const char *aud,
+    const char *expected_issuer, const char *expected_audience);
 #endif
 
 #endif /* BASTION_JWT_H */

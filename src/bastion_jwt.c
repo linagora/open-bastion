@@ -57,6 +57,28 @@ struct bastion_jwt_verifier {
  *   BASTION_JWT_EXPIRED if token expired
  *   BASTION_JWT_NOT_YET_VALID if token not yet valid
  */
+/*
+ * Validate JWT issuer and audience claims (exposed for unit testing)
+ */
+STATIC_OR_TEST bastion_jwt_result_t bastion_jwt_validate_issuer_audience(
+    const char *iss, const char *aud,
+    const char *expected_issuer, const char *expected_audience)
+{
+    /* Verify issuer if configured */
+    if (expected_issuer) {
+        if (!iss || strcmp(iss, expected_issuer) != 0) {
+            return BASTION_JWT_INVALID_ISSUER;
+        }
+    }
+
+    /* Verify audience - always required */
+    if (!aud || strcmp(aud, expected_audience) != 0) {
+        return BASTION_JWT_INVALID_AUDIENCE;
+    }
+
+    return BASTION_JWT_OK;
+}
+
 STATIC_OR_TEST bastion_jwt_result_t bastion_jwt_validate_time(
     time_t exp, time_t nbf, time_t iat, time_t now, int max_clock_skew)
 {
@@ -464,18 +486,12 @@ bastion_jwt_result_t bastion_jwt_verify(bastion_jwt_verifier_t *verifier,
         return time_result;
     }
 
-    /* Verify issuer if configured */
-    if (verifier->issuer && claims->iss) {
-        if (strcmp(claims->iss, verifier->issuer) != 0) {
-            bastion_jwt_claims_free(claims);
-            return BASTION_JWT_INVALID_ISSUER;
-        }
-    }
-
-    /* Verify audience */
-    if (claims->aud && strcmp(claims->aud, verifier->audience) != 0) {
+    /* Verify issuer and audience */
+    bastion_jwt_result_t iss_aud_result = bastion_jwt_validate_issuer_audience(
+        claims->iss, claims->aud, verifier->issuer, verifier->audience);
+    if (iss_aud_result != BASTION_JWT_OK) {
         bastion_jwt_claims_free(claims);
-        return BASTION_JWT_INVALID_AUDIENCE;
+        return iss_aud_result;
     }
 
     /* Verify bastion is in allowed list */

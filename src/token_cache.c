@@ -106,7 +106,72 @@ static int read_machine_id(char *buf, size_t buf_size)
     return 0;
 }
 
-/* Derive encryption key from machine-id using PBKDF2 */
+/*
+ * Load or generate random salt for PBKDF2.
+ * Salt is stored in the cache directory and generated once.
+ */
+static int load_or_generate_cache_salt(const char *cache_dir, unsigned char *salt, size_t salt_size)
+{
+    char salt_path[512];
+    snprintf(salt_path, sizeof(salt_path), "%s/.cache_salt", cache_dir);
+
+    /* Try to load existing salt */
+    int fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
+    if (fd >= 0) {
+        ssize_t bytes_read = read(fd, salt, salt_size);
+        close(fd);
+        if (bytes_read == (ssize_t)salt_size) {
+            return 0;
+        }
+    }
+
+    /* Generate new random salt */
+    if (RAND_bytes(salt, salt_size) != 1) {
+        return -1;
+    }
+
+    /* Save salt atomically */
+    char temp_path[520];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", salt_path, (int)getpid());
+
+    fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        if (errno == EEXIST) {
+            unlink(temp_path);
+            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        }
+        if (fd < 0) return -1;
+    }
+
+    ssize_t written = write(fd, salt, salt_size);
+    close(fd);
+
+    if (written != (ssize_t)salt_size) {
+        unlink(temp_path);
+        return -1;
+    }
+
+    if (rename(temp_path, salt_path) != 0) {
+        unlink(temp_path);
+        /*
+         * Another process may have won the race and created the salt file.
+         * Try loading it instead of failing.
+         */
+        fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
+        if (fd >= 0) {
+            ssize_t bytes_read = read(fd, salt, salt_size);
+            close(fd);
+            if (bytes_read == (ssize_t)salt_size) {
+                return 0;
+            }
+        }
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Derive encryption key from machine-id using PBKDF2 with random salt */
 static int derive_cache_key(token_cache_t *cache)
 {
     char machine_id[64] = {0};
@@ -115,29 +180,11 @@ static int derive_cache_key(token_cache_t *cache)
         return -1;
     }
 
-    /*
-     * Derive a unique salt from machine-id for cache encryption.
-     * Different from secret_store salt to use independent keys.
-     */
     unsigned char pbkdf_salt[SALT_SIZE];
-    EVP_MD_CTX *md_ctx = EVP_MD_CTX_new();
-    unsigned char salt_hash[EVP_MAX_MD_SIZE];
-    unsigned int salt_hash_len = 0;
-
-    if (!md_ctx ||
-        EVP_DigestInit_ex(md_ctx, EVP_sha256(), NULL) != 1 ||
-        EVP_DigestUpdate(md_ctx, "pam_llng_cache_salt:", 20) != 1 ||
-        EVP_DigestUpdate(md_ctx, machine_id, strlen(machine_id)) != 1 ||
-        EVP_DigestFinal_ex(md_ctx, salt_hash, &salt_hash_len) != 1) {
-        if (md_ctx) EVP_MD_CTX_free(md_ctx);
+    if (load_or_generate_cache_salt(cache->cache_dir, pbkdf_salt, SALT_SIZE) != 0) {
         explicit_bzero(machine_id, sizeof(machine_id));
         return -1;
     }
-    EVP_MD_CTX_free(md_ctx);
-
-    /* Use first SALT_SIZE bytes of hash as salt */
-    memcpy(pbkdf_salt, salt_hash, SALT_SIZE);
-    explicit_bzero(salt_hash, sizeof(salt_hash));
 
     /* Derive key using PBKDF2 */
     if (PKCS5_PBKDF2_HMAC(machine_id, strlen(machine_id),

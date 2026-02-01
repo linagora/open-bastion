@@ -68,7 +68,7 @@ Enroll this server with LemonLDAP::NG for PAM authentication.
 Options:
   -p, --portal URL       LemonLDAP::NG portal URL (required if not in config)
   -c, --client-id ID     OIDC client ID (default: pam-access)
-  -s, --client-secret S  OIDC client secret (required if not in config)
+  -s, --client-secret S  OIDC client secret (prefer OB_CLIENT_SECRET env var)
   -g, --server-group G   Server group name (default: default)
   -t, --token-file FILE  Where to save the token (default: $TOKEN_FILE)
   -C, --config FILE      Read settings from config file (default: $CONFIG_FILE)
@@ -246,6 +246,7 @@ parse_args() {
                 shift 2
                 ;;
             -s|--client-secret)
+                log_warn "Passing secrets via CLI is insecure (visible in /proc). Use OB_CLIENT_SECRET env var instead."
                 CLIENT_SECRET="$2"
                 shift 2
                 ;;
@@ -315,15 +316,13 @@ validate_config() {
     PORTAL_URL="${PORTAL_URL%/}"
 }
 
-# Build curl options
-curl_opts() {
-    local opts=("-s" "-f")
+# Build curl options array
+build_curl_opts() {
+    CURL_OPTS=("-s" "-f")
 
-    if [ -n "$INSECURE" ]; then
-        opts+=("-k")
+    if [ -n "${INSECURE:-}" ]; then
+        CURL_OPTS+=("-k")
     fi
-
-    echo "${opts[@]}"
 }
 
 # Step 1: Initiate Device Authorization flow
@@ -337,9 +336,8 @@ initiate_device_auth() {
     local response
     local http_code
 
-    local curl_options
-    curl_options=$(curl_opts)
-    response=$(curl $curl_options -w "\n%{http_code}" \
+    build_curl_opts
+    response=$(curl "${CURL_OPTS[@]}" -w "\n%{http_code}" \
         -X POST "${PORTAL_URL}/oauth2/device" \
         -d "client_id=${CLIENT_ID}" \
         -d "scope=${SCOPE}" \
@@ -424,8 +422,7 @@ poll_for_token() {
 
         sleep "$POLL_INTERVAL"
 
-        local curl_options
-        curl_options=$(curl_opts)
+        build_curl_opts
 
         # Generate JWT for client_secret_jwt authentication (RFC 7523)
         # This avoids sending client_secret in plaintext over the network
@@ -433,7 +430,7 @@ poll_for_token() {
         local client_jwt
         client_jwt=$(generate_client_jwt "$CLIENT_ID" "$CLIENT_SECRET" "$token_endpoint")
 
-        response=$(curl $curl_options \
+        response=$(curl "${CURL_OPTS[@]}" \
             -X POST "$token_endpoint" \
             -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
             -d "device_code=${DEVICE_CODE}" \
@@ -515,14 +512,12 @@ save_token() {
 
     (
         umask 077
-        cat > "$TOKEN_FILE" << TOKENEOF
-{
-  "access_token": "$ACCESS_TOKEN",
-  "refresh_token": "${REFRESH_TOKEN:-}",
-  "expires_at": $expires_at,
-  "enrolled_at": $now
-}
-TOKENEOF
+        ACCESS_TOKEN="$ACCESS_TOKEN" REFRESH_TOKEN="${REFRESH_TOKEN:-}" \
+        jq -n \
+            --argjson expires_at "$expires_at" \
+            --argjson enrolled_at "$now" \
+            '{access_token: env.ACCESS_TOKEN, refresh_token: env.REFRESH_TOKEN, expires_at: $expires_at, enrolled_at: $enrolled_at}' \
+            > "$TOKEN_FILE"
     ) || {
         log_error "Failed to write token to $TOKEN_FILE"
         log_info "You may need to run this script as root"
@@ -588,9 +583,8 @@ verify_enrollment() {
         '{user: $user, host: $host, server_group: $server_group}')
 
     # Try to call /pam/authorize to verify the token works
-    local curl_options
-    curl_options=$(curl_opts)
-    response=$(curl $curl_options \
+    build_curl_opts
+    response=$(curl "${CURL_OPTS[@]}" \
         -X POST "${PORTAL_URL}/pam/authorize" \
         -H "Authorization: Bearer ${ACCESS_TOKEN}" \
         -H "Content-Type: application/json" \
@@ -647,6 +641,12 @@ main() {
     check_requirements
     load_config
     parse_args "$@"
+
+    # Accept client_secret from environment variable (highest priority)
+    if [ -n "${OB_CLIENT_SECRET:-}" ]; then
+        CLIENT_SECRET="$OB_CLIENT_SECRET"
+    fi
+
     validate_config
 
     echo ""

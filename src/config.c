@@ -822,6 +822,9 @@ int config_validate(const pam_openbastion_config_t *config)
         if (strncmp(config->portal_url, "https://", 8) != 0) {
             return -4;  /* HTTPS required when verify_ssl is enabled */
         }
+    } else {
+        syslog(LOG_WARNING, "open-bastion: WARNING: verify_ssl is disabled - "
+               "TLS certificate verification is OFF, connections are vulnerable to MITM attacks");
     }
 
     /* For authorize endpoint, we need client credentials for introspection */

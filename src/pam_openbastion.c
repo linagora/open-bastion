@@ -2093,7 +2093,7 @@ static int create_unix_user(pam_handle_t *pamh,
             snprintf(owner_str, sizeof(owner_str), "%d:%d", uid, gid);
             pid_t pid = fork();
             if (pid == 0) {
-                execl("/bin/chown", "chown", "-R", owner_str, home_dir, NULL);
+                execl("/bin/chown", "chown", "-Rh", owner_str, home_dir, NULL);
                 _exit(127);
             } else if (pid > 0) {
                 int status;

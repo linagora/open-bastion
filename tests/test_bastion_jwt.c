@@ -407,6 +407,66 @@ static int test_exp_and_nbf_combined(void)
     return 1;
 }
 
+/*
+ * Test issuer and audience validation
+ */
+static int test_valid_issuer_and_audience(void)
+{
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        "https://auth.example.com", "pam:bastion",
+        "https://auth.example.com", "pam:bastion");
+    ASSERT(r == BASTION_JWT_OK);
+    return 1;
+}
+
+static int test_missing_issuer_rejected(void)
+{
+    /* NULL iss when issuer is required should be rejected */
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        NULL, "pam:bastion",
+        "https://auth.example.com", "pam:bastion");
+    ASSERT(r == BASTION_JWT_INVALID_ISSUER);
+    return 1;
+}
+
+static int test_wrong_issuer_rejected(void)
+{
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        "https://evil.com", "pam:bastion",
+        "https://auth.example.com", "pam:bastion");
+    ASSERT(r == BASTION_JWT_INVALID_ISSUER);
+    return 1;
+}
+
+static int test_issuer_not_checked_when_null(void)
+{
+    /* No expected issuer means any issuer is accepted */
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        "https://anything.com", "pam:bastion",
+        NULL, "pam:bastion");
+    ASSERT(r == BASTION_JWT_OK);
+    return 1;
+}
+
+static int test_missing_audience_rejected(void)
+{
+    /* NULL aud should always be rejected */
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        "https://auth.example.com", NULL,
+        "https://auth.example.com", "pam:bastion");
+    ASSERT(r == BASTION_JWT_INVALID_AUDIENCE);
+    return 1;
+}
+
+static int test_wrong_audience_rejected(void)
+{
+    bastion_jwt_result_t r = bastion_jwt_validate_issuer_audience(
+        "https://auth.example.com", "wrong-audience",
+        "https://auth.example.com", "pam:bastion");
+    ASSERT(r == BASTION_JWT_INVALID_AUDIENCE);
+    return 1;
+}
+
 int main(void)
 {
     printf("Running bastion JWT tests:\n\n");
@@ -435,6 +495,14 @@ int main(void)
     TEST(verify_null_verifier);
     TEST(verify_null_jwt);
     TEST(verify_invalid_format);
+
+    printf("\nTesting bastion_jwt_validate_issuer_audience:\n");
+    TEST(valid_issuer_and_audience);
+    TEST(missing_issuer_rejected);
+    TEST(wrong_issuer_rejected);
+    TEST(issuer_not_checked_when_null);
+    TEST(missing_audience_rejected);
+    TEST(wrong_audience_rejected);
 
     printf("\nTesting bastion_jwt_validate_time (nbf validation):\n");
     TEST(nbf_future);

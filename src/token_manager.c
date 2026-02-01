@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <linux/limits.h>
 #include <curl/curl.h>
@@ -545,8 +546,14 @@ int token_manager_load_file(const char *filepath, token_info_t *info)
 
     memset(info, 0, sizeof(*info));
 
-    FILE *fp = fopen(filepath, "r");
-    if (!fp) return -1;
+    int load_fd = open(filepath, O_RDONLY | O_NOFOLLOW);
+    if (load_fd < 0) return -1;
+
+    FILE *fp = fdopen(load_fd, "r");
+    if (!fp) {
+        close(load_fd);
+        return -1;
+    }
 
     /* Read first character to detect format */
     int c = fgetc(fp);
@@ -679,8 +686,17 @@ int token_manager_save_file(const char *filepath, const token_info_t *info)
     /* Set restrictive umask */
     mode_t old_umask = umask(077);
 
-    FILE *fp = fopen(tmppath, "w");
+    int save_fd = open(tmppath, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (save_fd < 0) {
+        umask(old_umask);
+        json_object_put(root);
+        return -1;
+    }
+
+    FILE *fp = fdopen(save_fd, "w");
     if (!fp) {
+        close(save_fd);
+        unlink(tmppath);
         umask(old_umask);
         json_object_put(root);
         return -1;

@@ -37,7 +37,7 @@ SERVER_GROUP="bastion"
 TARGET_GROUP="default"
 TIMEOUT=10
 VERIFY_SSL=true
-SSH_OPTIONS=""
+SSH_OPTIONS_ARRAY=()
 DEBUG=false
 
 # Configuration file (must be owned by root and not group/world-writable)
@@ -69,8 +69,31 @@ load_config() {
             exit 1
         fi
 
-        # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
+        # Parse config file safely (no sourcing to prevent code injection)
+        local key value
+        while IFS='=' read -r key value || [ -n "$key" ]; do
+            # Skip comments and empty lines
+            key="${key%%#*}"
+            key="${key// /}"
+            [ -z "$key" ] && continue
+            # Remove surrounding quotes from value
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value#\"}" ; value="${value%\"}"
+            value="${value#\'}" ; value="${value%\'}"
+            case "$key" in
+                PORTAL_URL)          PORTAL_URL="$value" ;;
+                SERVER_TOKEN_FILE)   SERVER_TOKEN_FILE="$value" ;;
+                SERVER_GROUP)        SERVER_GROUP="$value" ;;
+                TARGET_GROUP)        TARGET_GROUP="$value" ;;
+                TIMEOUT)             TIMEOUT="$value" ;;
+                VERIFY_SSL)          VERIFY_SSL="$value" ;;
+                DEBUG)               DEBUG="$value" ;;
+                SSH_OPTIONS)
+                    read -r -a SSH_OPTIONS_ARRAY <<<"$value"
+                    ;;
+            esac
+        done < "$CONFIG_FILE"
     fi
 }
 
@@ -184,10 +207,9 @@ proxy_command_mode() {
     # The backend's sshd must have AcceptEnv LLNG_BASTION_JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              -W "$target_host:$target_port" \
              "$target_host"
 }
@@ -237,10 +259,9 @@ force_command_mode() {
     # Connect to backend with JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              ${target_user:+-l "$target_user"} \
              "$target_host"
 }
@@ -270,10 +291,9 @@ interactive_mode() {
     # Connect to backend with JWT
     export LLNG_BASTION_JWT="$jwt"
 
-    # shellcheck disable=SC2086
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
-             $SSH_OPTIONS \
+             "${SSH_OPTIONS_ARRAY[@]}" \
              "$target_host"
 }
 
@@ -305,7 +325,7 @@ Configuration:
     TARGET_GROUP="default"
     TIMEOUT=10
     VERIFY_SSL=true
-    SSH_OPTIONS="-o ConnectTimeout=10"
+    SSH_OPTIONS_ARRAY=(-o ConnectTimeout=10)
     DEBUG=false
 
 SSH Configuration (bastion ~/.ssh/config):
