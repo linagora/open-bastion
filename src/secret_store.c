@@ -566,7 +566,7 @@ bool secret_store_exists(secret_store_t *store, const char *key)
     build_path(store, key, path, sizeof(path));
 
     struct stat st;
-    return stat(path, &st) == 0;
+    return lstat(path, &st) == 0;
 }
 
 int secret_store_rotate_key(secret_store_t *store)

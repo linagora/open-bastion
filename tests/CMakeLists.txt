@@ -18,9 +18,10 @@ add_test(NAME test_rate_limiter COMMAND test_rate_limiter)
 add_executable(test_audit_log test_audit_log.c ../src/audit_log.c)
 target_include_directories(test_audit_log PRIVATE
     ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIRS}
 )
-target_link_libraries(test_audit_log pthread ${OPENSSL_LIBRARIES})
+target_link_libraries(test_audit_log pthread ${JSON_C_LIBRARIES} ${OPENSSL_LIBRARIES})
 add_test(NAME test_audit_log COMMAND test_audit_log)
 
 # Test client context
@@ -199,10 +200,10 @@ target_include_directories(test_notify PRIVATE
     ${OPENSSL_INCLUDE_DIRS}
 )
 target_link_libraries(test_notify
+    pthread
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
     ${OPENSSL_LIBRARIES}
-    pthread
 )
 add_test(NAME test_notify COMMAND test_notify)
 

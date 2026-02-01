@@ -104,6 +104,11 @@ debug() {
     fi
 }
 
+# Warning logging
+warn() {
+    echo "[WARN] $*" >&2
+}
+
 # Error logging
 error() {
     echo "[ERROR] $*" >&2
@@ -191,11 +196,28 @@ request_bastion_jwt() {
     echo "$jwt"
 }
 
+# Validate hostname to prevent SSH option injection
+# Only allows: alphanumeric, dots, hyphens, colons (IPv6), brackets
+validate_hostname() {
+    local host="$1"
+    if [[ ! "$host" =~ ^[a-zA-Z0-9.:_\[\]-]+$ ]]; then
+        error "Invalid hostname: $host"
+        exit 1
+    fi
+    # Reject hostnames starting with '-' (SSH option injection)
+    if [[ "$host" == -* ]]; then
+        error "Invalid hostname (starts with dash): $host"
+        exit 1
+    fi
+}
+
 # Main function for ProxyCommand mode
 proxy_command_mode() {
     local target_host="$1"
     local target_port="${2:-22}"
     local user="${USER:-$(whoami)}"
+
+    validate_hostname "$target_host"
 
     # Request JWT
     local jwt
@@ -211,7 +233,7 @@ proxy_command_mode() {
              -o StrictHostKeyChecking=accept-new \
              "${SSH_OPTIONS_ARRAY[@]}" \
              -W "$target_host:$target_port" \
-             "$target_host"
+             -- "$target_host"
 }
 
 # Main function for ForceCommand mode
@@ -250,6 +272,8 @@ force_command_mode() {
         exit 1
     fi
 
+    validate_hostname "$target_host"
+
     # Request JWT
     local jwt
     jwt=$(request_bastion_jwt "$user" "$target_host")
@@ -263,7 +287,7 @@ force_command_mode() {
              -o StrictHostKeyChecking=accept-new \
              "${SSH_OPTIONS_ARRAY[@]}" \
              ${target_user:+-l "$target_user"} \
-             "$target_host"
+             -- "$target_host"
 }
 
 # Interactive shell mode (user connects to bastion directly)
@@ -282,6 +306,8 @@ interactive_mode() {
         exit 1
     fi
 
+    validate_hostname "$target_host"
+
     # Request JWT
     local jwt
     jwt=$(request_bastion_jwt "$user" "$target_host")
@@ -294,7 +320,7 @@ interactive_mode() {
     exec ssh -o SendEnv=LLNG_BASTION_JWT \
              -o StrictHostKeyChecking=accept-new \
              "${SSH_OPTIONS_ARRAY[@]}" \
-             "$target_host"
+             -- "$target_host"
 }
 
 # Show usage
@@ -383,6 +409,11 @@ main() {
     if [ -z "$PORTAL_URL" ]; then
         error "PORTAL_URL not configured. Set it in $CONFIG_FILE"
         exit 1
+    fi
+
+    # Security: warn if not using HTTPS (credentials sent in clear)
+    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+        warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 
     # Determine mode based on arguments and environment

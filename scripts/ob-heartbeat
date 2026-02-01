@@ -24,6 +24,10 @@ log_info() {
     logger -t "$PROG_NAME" -p auth.info "$*"
 }
 
+log_warn() {
+    logger -t "$PROG_NAME" -p auth.warning "$*"
+}
+
 log_error() {
     logger -t "$PROG_NAME" -p auth.err "$*"
 }
@@ -77,6 +81,11 @@ load_config() {
 
     # Remove trailing slash
     PORTAL_URL="${PORTAL_URL%/}"
+
+    # Security: warn if not using HTTPS (credentials sent in clear)
+    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+        log_warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
+    fi
 }
 
 # Read token file (JSON format)
@@ -112,14 +121,12 @@ get_stats() {
 }
 
 # Build curl options
-curl_opts() {
-    local opts=("-s" "-f" "--connect-timeout" "$TIMEOUT")
+build_curl_opts() {
+    CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
 
     if [ "$VERIFY_SSL" = "false" ] || [ "$VERIFY_SSL" = "0" ]; then
-        opts+=("-k")
+        CURL_OPTS+=("-k")
     fi
-
-    echo "${opts[@]}"
 }
 
 # Send heartbeat
@@ -151,13 +158,12 @@ send_heartbeat() {
             stats: $stats
         }')
 
-    local curl_options
-    curl_options=$(curl_opts)
+    build_curl_opts
 
     local response
     local http_code
 
-    response=$(curl $curl_options -w "\n%{http_code}" \
+    response=$(curl "${CURL_OPTS[@]}" -w "\n%{http_code}" \
         -X POST "${PORTAL_URL}/pam/heartbeat" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>&1) || {

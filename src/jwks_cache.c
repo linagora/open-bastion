@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdatomic.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include <openssl/evp.h>
@@ -409,16 +410,18 @@ static int fetch_jwks(jwks_cache_t *cache)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, cache->timeout);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, cache->timeout);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+    /* Security: disable redirects to prevent SSRF attacks.
+     * The JWKS URL should be stable and not redirect to internal services
+     * (e.g., cloud metadata endpoints at 169.254.169.254). */
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
 
     if (!cache->verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
         /* Log warning only once per process to avoid log spam */
-        static int ssl_warning_logged = 0;
+        static _Atomic int ssl_warning_logged = 0;
         if (!ssl_warning_logged) {
-            ssl_warning_logged = 1;
+            ssl_warning_logged = 1;  /* Benign race: worst case is duplicate log */
             syslog(LOG_WARNING, "open-bastion: JWKS fetch with SSL verification "
                    "disabled - vulnerable to MITM attacks");
         }
@@ -443,7 +446,8 @@ static int fetch_jwks(jwks_cache_t *cache)
         char temp_path[1024];
         snprintf(temp_path, sizeof(temp_path), "%s.tmp", cache->cache_file);
 
-        int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        unlink(temp_path);  /* Remove any pre-existing file/symlink */
+        int fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
         if (fd >= 0) {
             ssize_t written = write(fd, buf.data, buf.size);
             close(fd);

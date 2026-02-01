@@ -66,6 +66,21 @@ generate_session_id() {
 # Load configuration file
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
+        # Security: verify config file permissions before parsing
+        local file_stat
+        file_stat=$(stat -c '%u:%a' "$CONFIG_FILE" 2>/dev/null || stat -f '%u:%Lp' "$CONFIG_FILE" 2>/dev/null)
+        if [ -n "$file_stat" ]; then
+            local owner="${file_stat%%:*}"
+            local perms="${file_stat##*:}"
+            if [ "$owner" != "0" ]; then
+                log_warn "Config file not owned by root: $CONFIG_FILE (ignoring)"
+                return
+            fi
+            if [ $((perms % 100 / 10 & 2)) -ne 0 ] || [ $((perms % 10 & 2)) -ne 0 ]; then
+                log_warn "Config file is group/world-writable: $CONFIG_FILE (ignoring)"
+                return
+            fi
+        fi
         while IFS= read -r line; do
             # Skip comments and empty lines
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
@@ -310,6 +325,12 @@ parse_args() {
 # Main
 main() {
     parse_args "$@"
+
+    # Security: session recorder should not run as root
+    if [ "$(id -u)" -eq 0 ]; then
+        log_warn "Session recorder should not run as root"
+    fi
+
     load_config
 
     # Generate session ID and timestamps

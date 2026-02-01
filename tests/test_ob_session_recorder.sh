@@ -75,6 +75,9 @@ max_duration = 3600
 CONF
     (
         source_script "ob-session-recorder"
+        # Override stat to simulate root-owned config for testing
+        stat() { echo "0:644"; }
+        export -f stat
         CONFIG_FILE="$tmpconf"
         load_config
         local ok=true
@@ -104,6 +107,9 @@ sessions_dir = /tmp/test
 CONF
     (
         source_script "ob-session-recorder"
+        # Override stat to simulate root-owned config for testing
+        stat() { echo "0:644"; }
+        export -f stat
         SESSIONS_DIR="/default"
         CONFIG_FILE="$tmpconf"
         load_config
