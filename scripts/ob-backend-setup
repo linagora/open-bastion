@@ -95,24 +95,21 @@ confirm() {
 }
 
 # Build curl options
-curl_opts() {
-    local opts=("-s" "-f" "--connect-timeout" "$TIMEOUT")
+build_curl_opts() {
+    CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
     if [ "$VERIFY_SSL" = "false" ]; then
-        opts+=("-k")
+        CURL_OPTS+=("-k")
     fi
-    echo "${opts[@]}"
 }
 
 # Download SSH CA public key
 download_ca_key() {
     step "Downloading SSH CA public key from LLNG..."
 
-    local curl_options
-    curl_options=$(curl_opts)
+    build_curl_opts
 
     local ca_key
-    # shellcheck disable=SC2086
-    ca_key=$(curl $curl_options "${PORTAL_URL}/ssh/ca") || {
+    ca_key=$(curl "${CURL_OPTS[@]}" "${PORTAL_URL}/ssh/ca") || {
         error "Failed to download CA public key from ${PORTAL_URL}/ssh/ca"
         error "Make sure sshCaActivation is enabled in LLNG"
         return 1
@@ -618,6 +615,11 @@ main() {
 
     # Remove trailing slash
     PORTAL_URL="${PORTAL_URL%/}"
+
+    # Security: warn if not using HTTPS (credentials sent in clear)
+    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+        warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
+    fi
 
     # Check root
     check_root

@@ -104,6 +104,11 @@ debug() {
     fi
 }
 
+# Warning logging
+warn() {
+    echo "[WARN] $*" >&2
+}
+
 # Error logging
 error() {
     echo "[ERROR] $*" >&2
@@ -404,6 +409,11 @@ main() {
     if [ -z "$PORTAL_URL" ]; then
         error "PORTAL_URL not configured. Set it in $CONFIG_FILE"
         exit 1
+    fi
+
+    # Security: warn if not using HTTPS (credentials sent in clear)
+    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+        warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 
     # Determine mode based on arguments and environment
