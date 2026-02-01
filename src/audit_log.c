@@ -15,6 +15,7 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <openssl/rand.h>
+#include <json-c/json.h>
 
 #include "audit_log.h"
 
@@ -151,42 +152,6 @@ long audit_event_latency_ms(const audit_event_t *event)
     return (sec_diff * 1000) + (nsec_diff / 1000000);
 }
 
-/* Escape a string for JSON output */
-static void json_escape_string(const char *input, char *output, size_t output_size)
-{
-    if (!input || !output || output_size == 0) {
-        if (output && output_size > 0) output[0] = '\0';
-        return;
-    }
-
-    size_t j = 0;
-    for (size_t i = 0; input[i] && j < output_size - 1; i++) {
-        char c = input[i];
-        if (c == '"' || c == '\\') {
-            if (j + 2 >= output_size) break;
-            output[j++] = '\\';
-            output[j++] = c;
-        } else if (c == '\n') {
-            if (j + 2 >= output_size) break;
-            output[j++] = '\\';
-            output[j++] = 'n';
-        } else if (c == '\r') {
-            if (j + 2 >= output_size) break;
-            output[j++] = '\\';
-            output[j++] = 'r';
-        } else if (c == '\t') {
-            if (j + 2 >= output_size) break;
-            output[j++] = '\\';
-            output[j++] = 't';
-        } else if ((unsigned char)c < 0x20) {
-            /* Skip other control characters */
-            continue;
-        } else {
-            output[j++] = c;
-        }
-    }
-    output[j] = '\0';
-}
 
 /* Format timestamp as ISO 8601 with milliseconds */
 static void format_timestamp(const struct timespec *ts, char *buf, size_t buf_size)
@@ -262,79 +227,50 @@ int audit_log_event(audit_context_t *ctx, const audit_event_t *event)
         return 0;  /* Filtered out */
     }
 
-    /* Build JSON */
+    /* Build JSON using json-c for proper escaping */
     char timestamp[32];
     format_timestamp(&event->start_time, timestamp, sizeof(timestamp));
 
-    char user_escaped[260] = "null";
-    char service_escaped[132] = "null";
-    char client_ip_escaped[132] = "null";
-    char tty_escaped[132] = "null";
-    char reason_escaped[520] = "null";
-    char details_escaped[1032] = "null";
-
-    if (event->user) {
-        char tmp[256];
-        json_escape_string(event->user, tmp, sizeof(tmp));
-        snprintf(user_escaped, sizeof(user_escaped), "\"%s\"", tmp);
-    }
-    if (event->service) {
-        char tmp[128];
-        json_escape_string(event->service, tmp, sizeof(tmp));
-        snprintf(service_escaped, sizeof(service_escaped), "\"%s\"", tmp);
-    }
-    if (event->client_ip) {
-        char tmp[128];
-        json_escape_string(event->client_ip, tmp, sizeof(tmp));
-        snprintf(client_ip_escaped, sizeof(client_ip_escaped), "\"%s\"", tmp);
-    }
-    if (event->tty) {
-        char tmp[128];
-        json_escape_string(event->tty, tmp, sizeof(tmp));
-        snprintf(tty_escaped, sizeof(tty_escaped), "\"%s\"", tmp);
-    }
-    if (event->reason) {
-        char tmp[512];
-        json_escape_string(event->reason, tmp, sizeof(tmp));
-        snprintf(reason_escaped, sizeof(reason_escaped), "\"%s\"", tmp);
-    }
-    if (event->details) {
-        char tmp[1024];
-        json_escape_string(event->details, tmp, sizeof(tmp));
-        snprintf(details_escaped, sizeof(details_escaped), "\"%s\"", tmp);
-    }
-
     long latency = audit_event_latency_ms(event);
 
-    char json_line[4096];
-    snprintf(json_line, sizeof(json_line),
-             "{\"timestamp\":\"%s\","
-             "\"event_type\":\"%s\","
-             "\"correlation_id\":\"%s\","
-             "\"module\":\"pam_llng\","
-             "\"host\":\"%s\","
-             "\"user\":%s,"
-             "\"service\":%s,"
-             "\"client_ip\":%s,"
-             "\"tty\":%s,"
-             "\"result_code\":%d,"
-             "\"cache_hit\":%s,"
-             "\"latency_ms\":%ld,"
-             "\"reason\":%s,"
-             "\"details\":%s}\n",
-             timestamp,
-             audit_event_type_str(event->event_type),
-             event->correlation_id,
-             ctx->hostname,
-             user_escaped,
-             service_escaped,
-             client_ip_escaped,
-             tty_escaped,
-             event->result_code,
-             event->cache_hit ? "true" : "false",
-             latency,
-             reason_escaped,
-             details_escaped);
+    json_object *jobj = json_object_new_object();
+    if (!jobj) return -1;
+
+    json_object_object_add(jobj, "timestamp", json_object_new_string(timestamp));
+    json_object_object_add(jobj, "event_type",
+                           json_object_new_string(audit_event_type_str(event->event_type)));
+    json_object_object_add(jobj, "correlation_id",
+                           json_object_new_string(event->correlation_id));
+    json_object_object_add(jobj, "module", json_object_new_string("pam_llng"));
+    json_object_object_add(jobj, "host", json_object_new_string(ctx->hostname));
+    json_object_object_add(jobj, "user",
+                           event->user ? json_object_new_string(event->user) : NULL);
+    json_object_object_add(jobj, "service",
+                           event->service ? json_object_new_string(event->service) : NULL);
+    json_object_object_add(jobj, "client_ip",
+                           event->client_ip ? json_object_new_string(event->client_ip) : NULL);
+    json_object_object_add(jobj, "tty",
+                           event->tty ? json_object_new_string(event->tty) : NULL);
+    json_object_object_add(jobj, "result_code", json_object_new_int(event->result_code));
+    json_object_object_add(jobj, "cache_hit", json_object_new_boolean(event->cache_hit));
+    json_object_object_add(jobj, "latency_ms", json_object_new_int64(latency));
+    json_object_object_add(jobj, "reason",
+                           event->reason ? json_object_new_string(event->reason) : NULL);
+    json_object_object_add(jobj, "details",
+                           event->details ? json_object_new_string(event->details) : NULL);
+
+    const char *json_str = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
+
+    /* Build the complete line with newline */
+    size_t json_len = strlen(json_str);
+    char *json_line = malloc(json_len + 2);
+    if (!json_line) {
+        json_object_put(jobj);
+        return -1;
+    }
+    memcpy(json_line, json_str, json_len);
+    json_line[json_len] = '\n';
+    json_line[json_len + 1] = '\0';
 
     /* Write to file */
     if (ctx->config.log_file) {
@@ -402,6 +338,9 @@ int audit_log_event(audit_context_t *ctx, const audit_event_t *event)
                event->client_ip ? event->client_ip : "-",
                event->result_code);
     }
+
+    free(json_line);
+    json_object_put(jobj);
 
     return 0;
 }
