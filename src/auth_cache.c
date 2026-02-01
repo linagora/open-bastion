@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <json-c/json.h>
 
@@ -41,6 +42,7 @@
 #define TAG_SIZE 16
 #define SALT_SIZE 16
 #define PBKDF2_ITERATIONS 100000
+#define HMAC_SIZE 32  /* SHA-256 HMAC for expiration header authentication */
 
 /* Maximum cache entries */
 #define MAX_AUTH_CACHE_ENTRIES 10000
@@ -231,6 +233,52 @@ static int decrypt_data(auth_cache_t *cache,
     return 0;
 }
 
+/* Compute HMAC-SHA256 of data using the derived key */
+static int compute_hmac(const unsigned char *key, const unsigned char *data,
+                        size_t data_len, unsigned char *out)
+{
+    unsigned int hmac_len = 0;
+    if (!HMAC(EVP_sha256(), key, KEY_SIZE, data, data_len, out, &hmac_len)) {
+        return -1;
+    }
+    return (hmac_len == HMAC_SIZE) ? 0 : -1;
+}
+
+/* Verify HMAC of expiration header: "<expires_at> <hex_hmac>\n" */
+static bool verify_expiration_hmac(const unsigned char *key,
+                                   const char *line, time_t *expires_out)
+{
+    /* Parse: "<timestamp> <64 hex chars>" */
+    time_t ts;
+    char hmac_hex[65] = {0};
+    if (sscanf(line, "%ld %64s", &ts, hmac_hex) != 2) {
+        return false;
+    }
+    if (strlen(hmac_hex) != 64) {
+        return false;
+    }
+
+    /* Recompute HMAC over the timestamp string */
+    char ts_str[32];
+    int ts_len = snprintf(ts_str, sizeof(ts_str), "%ld", ts);
+    if (ts_len <= 0) return false;
+
+    unsigned char expected_hmac[HMAC_SIZE];
+    if (compute_hmac(key, (unsigned char *)ts_str, ts_len, expected_hmac) != 0) {
+        return false;
+    }
+
+    /* Convert expected to hex and compare in constant time */
+    char expected_hex[65];
+    str_bytes_to_hex(expected_hmac, HMAC_SIZE, expected_hex);
+    if (CRYPTO_memcmp(expected_hex, hmac_hex, 64) != 0) {
+        return false;
+    }
+
+    *expires_out = ts;
+    return true;
+}
+
 auth_cache_t *auth_cache_init(const char *cache_dir)
 {
     if (!cache_dir) return NULL;
@@ -360,22 +408,24 @@ bool auth_cache_lookup(auth_cache_t *cache,
     }
     data[st.st_size] = '\0';
 
-    /* Skip plaintext expiration header (optimization: "expires_at\n" prefix) */
+    /* Skip HMAC-authenticated expiration header: "<expires_at> <hmac>\n" */
     unsigned char *payload_start = data;
     size_t payload_size = st.st_size;
     char *nl = memchr(data, '\n', st.st_size);
     if (nl) {
-        /* Quick expiration check from plaintext header */
-        char line[64] = {0};
+        char line[128] = {0};
         size_t hdr_len = nl - (char *)data;
         if (hdr_len < sizeof(line)) {
             memcpy(line, data, hdr_len);
             time_t hdr_expires;
-            if (sscanf(line, "%ld", &hdr_expires) == 1 && time(NULL) >= hdr_expires) {
-                free(data);
-                unlink(path);
-                return false;
+            if (verify_expiration_hmac(cache->derived_key, line, &hdr_expires)) {
+                if (time(NULL) >= hdr_expires) {
+                    free(data);
+                    unlink(path);
+                    return false;
+                }
             }
+            /* If HMAC fails, ignore header and fall through to full decrypt */
         }
         payload_start = (unsigned char *)(nl + 1);
         payload_size = st.st_size - (payload_start - data);
@@ -572,9 +622,28 @@ int auth_cache_store(auth_cache_t *cache,
         return -1;
     }
 
-    /* Write plaintext expiration header for fast cleanup (no decryption needed) */
-    char expires_header[32];
-    int hdr_len = snprintf(expires_header, sizeof(expires_header), "%ld\n", expires_at);
+    /* Write HMAC-authenticated expiration header for fast cleanup */
+    char ts_str[32];
+    int ts_len = snprintf(ts_str, sizeof(ts_str), "%ld", expires_at);
+    if (ts_len <= 0 || ts_len >= (int)sizeof(ts_str)) {
+        close(fd);
+        unlink(temp_path);
+        explicit_bzero(encrypted, encrypted_len);
+        free(encrypted);
+        return -1;
+    }
+    unsigned char hmac_bytes[HMAC_SIZE];
+    if (compute_hmac(cache->derived_key, (unsigned char *)ts_str, ts_len, hmac_bytes) != 0) {
+        close(fd);
+        unlink(temp_path);
+        explicit_bzero(encrypted, encrypted_len);
+        free(encrypted);
+        return -1;
+    }
+    char hmac_hex[65];
+    str_bytes_to_hex(hmac_bytes, HMAC_SIZE, hmac_hex);
+    char expires_header[128];
+    int hdr_len = snprintf(expires_header, sizeof(expires_header), "%s %s\n", ts_str, hmac_hex);
     if (hdr_len < 0 || hdr_len >= (int)sizeof(expires_header)) {
         close(fd);
         unlink(temp_path);
@@ -725,33 +794,37 @@ int auth_cache_cleanup(auth_cache_t *cache)
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/%s", cache->cache_dir, entry->d_name);
 
-        /* Quick expiration check: read only the first line (plaintext timestamp) */
-        FILE *f = fopen(path, "r");
-        if (!f) {
-            unlink(path);
+        /* Open with O_NOFOLLOW to prevent symlink attacks */
+        int cfd = open(path, O_RDONLY | O_NOFOLLOW);
+        if (cfd < 0) {
+            if (errno == ELOOP) unlink(path);
             removed++;
             continue;
         }
 
-        char line[64];
-        if (!fgets(line, sizeof(line), f)) {
-            fclose(f);
+        /* Read first line for HMAC-authenticated expiration check */
+        char line[128];
+        ssize_t nr = read(cfd, line, sizeof(line) - 1);
+        close(cfd);
+        if (nr <= 0) {
             unlink(path);
             removed++;
             continue;
         }
-        fclose(f);
+        line[nr] = '\0';
 
-        /* Validate that we got a complete line with newline */
-        if (!strchr(line, '\n') && strlen(line) >= sizeof(line) - 1) {
+        /* Extract first line */
+        char *eol = strchr(line, '\n');
+        if (!eol) {
             unlink(path);
             removed++;
             continue;
         }
+        *eol = '\0';
 
         time_t expires_at;
-        if (sscanf(line, "%ld", &expires_at) != 1) {
-            /* Old format without header or corrupted - try to keep for now */
+        if (!verify_expiration_hmac(cache->derived_key, line, &expires_at)) {
+            /* Invalid HMAC or old format - skip (don't remove, may be valid old entry) */
             continue;
         }
 

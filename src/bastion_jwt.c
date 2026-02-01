@@ -97,9 +97,10 @@ STATIC_OR_TEST bastion_jwt_result_t bastion_jwt_validate_time(
     return BASTION_JWT_OK;
 }
 
-/* Base64url decode - delegates to shared implementation */
+/* Base64url decode - delegates to shared implementation with JWT size limit */
 static unsigned char *base64url_decode(const char *input, size_t input_len, size_t *out_len)
 {
+    if (input_len > MAX_JWT_LENGTH) return NULL;
     return str_base64url_decode(input, input_len, out_len);
 }
 
