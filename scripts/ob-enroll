@@ -68,7 +68,7 @@ Enroll this server with LemonLDAP::NG for PAM authentication.
 Options:
   -p, --portal URL       LemonLDAP::NG portal URL (required if not in config)
   -c, --client-id ID     OIDC client ID (default: pam-access)
-  -s, --client-secret S  OIDC client secret (required if not in config)
+  -s, --client-secret S  OIDC client secret (prefer OB_CLIENT_SECRET env var)
   -g, --server-group G   Server group name (default: default)
   -t, --token-file FILE  Where to save the token (default: $TOKEN_FILE)
   -C, --config FILE      Read settings from config file (default: $CONFIG_FILE)
@@ -246,6 +246,7 @@ parse_args() {
                 shift 2
                 ;;
             -s|--client-secret)
+                log_warn "Passing secrets via CLI is insecure (visible in /proc). Use OB_CLIENT_SECRET env var instead."
                 CLIENT_SECRET="$2"
                 shift 2
                 ;;
@@ -639,6 +640,12 @@ main() {
     fi
 
     check_requirements
+
+    # Accept client_secret from environment variable (preferred over CLI)
+    if [ -n "${OB_CLIENT_SECRET:-}" ]; then
+        CLIENT_SECRET="$OB_CLIENT_SECRET"
+    fi
+
     load_config
     parse_args "$@"
     validate_config
