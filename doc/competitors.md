@@ -19,13 +19,13 @@ LemonLDAP::NG's bastion feature, provides Privileged Access Management capabilit
 
 These are alternative PAM modules for centralizing SSH authentication:
 
-| Solution | Protocol | Features | Limitations |
-|----------|----------|----------|-------------|
-| **pam_sss (SSSD)** | LDAP, Kerberos | Widely deployed, FreeIPA integration | No web SSO, complex setup |
-| **pam_krb5** | Kerberos | Strong enterprise auth | Requires Kerberos infrastructure |
-| **pam_ldap** | LDAP | Simple, direct LDAP auth | No SSO, no MFA integration |
-| **pam_cas** | CAS | Apereo CAS integration | Limited to CAS protocol |
-| **pam_oauth2** | OAuth2 | Modern protocol | Community-maintained, limited features |
+| Solution           | Protocol       | Features                             | Limitations                            |
+| ------------------ | -------------- | ------------------------------------ | -------------------------------------- |
+| **pam_sss (SSSD)** | LDAP, Kerberos | Widely deployed, FreeIPA integration | No web SSO, complex setup              |
+| **pam_krb5**       | Kerberos       | Strong enterprise auth               | Requires Kerberos infrastructure       |
+| **pam_ldap**       | LDAP           | Simple, direct LDAP auth             | No SSO, no MFA integration             |
+| **pam_cas**        | CAS            | Apereo CAS integration               | Limited to CAS protocol                |
+| **pam_oauth2**     | OAuth2         | Modern protocol                      | Community-maintained, limited features |
 
 ### LLNG-PAM-MODULE Advantages
 
@@ -41,13 +41,13 @@ These are alternative PAM modules for centralizing SSH authentication:
 
 Complete Identity and Access Management solutions with system integration:
 
-| Solution | Type | PAM Integration | Web SSO | Session Recording |
-|----------|------|-----------------|---------|-------------------|
-| **LemonLDAP::NG + PAM Module** | Open source | Native | ✅ | ✅ (bastion) |
-| **FreeIPA** | Open source | Via SSSD | Limited | ❌ |
-| **Keycloak** | Open source | Third-party | ✅ | ❌ |
-| **Authentik** | Open source | Limited | ✅ | ❌ |
-| **Apereo CAS** | Open source | pam_cas | ✅ | ❌ |
+| Solution                       | Type        | PAM Integration | Web SSO | Session Recording |
+| ------------------------------ | ----------- | --------------- | ------- | ----------------- |
+| **LemonLDAP::NG + PAM Module** | Open source | Native          | ✅      | ✅ (bastion)      |
+| **FreeIPA**                    | Open source | Via SSSD        | Limited | ❌                |
+| **Keycloak**                   | Open source | Third-party     | ✅      | ❌                |
+| **Authentik**                  | Open source | Limited         | ✅      | ❌                |
+| **Apereo CAS**                 | Open source | pam_cas         | ✅      | ❌                |
 
 ### Key Differentiators
 
@@ -64,31 +64,31 @@ LemonLDAP::NG with LLNG-PAM-MODULE is unique in providing:
 
 Enterprise solutions focused on privileged access control and session recording:
 
-| Solution | License | Cost | Web SSO | Session Recording | SSH Auth |
-|----------|---------|------|---------|-------------------|----------|
-| **LLNG + Bastion** | AGPL | Free | ✅ | ✅ | ✅ |
-| **Wallix Bastion** | Proprietary | €€€ | ❌ | ✅ | ✅ |
-| **CyberArk** | Proprietary | €€€€ | ❌ | ✅ | ✅ |
-| **BeyondTrust** | Proprietary | €€€€ | ❌ | ✅ | ✅ |
-| **Delinea (Thycotic)** | Proprietary | €€€ | ❌ | ✅ | ✅ |
+| Solution               | License     | Cost | Web SSO | Session Recording | SSH Auth |
+| ---------------------- | ----------- | ---- | ------- | ----------------- | -------- |
+| **LLNG + Bastion**     | AGPL        | Free | ✅      | ✅                | ✅       |
+| **Wallix Bastion**     | Proprietary | €€€  | ❌      | ✅                | ✅       |
+| **CyberArk**           | Proprietary | €€€€ | ❌      | ✅                | ✅       |
+| **BeyondTrust**        | Proprietary | €€€€ | ❌      | ✅                | ✅       |
+| **Delinea (Thycotic)** | Proprietary | €€€  | ❌      | ✅                | ✅       |
 
 ### Feature Comparison with Wallix
 
 Wallix is a French company whose Wallix Bastion product is often considered in the same market.
 Here's a detailed comparison:
 
-| Feature | LLNG + Bastion | Wallix Bastion |
-|---------|----------------|----------------|
-| **SSH Session Recording** | ✅ | ✅ |
-| **Session Playback** | ✅ | ✅ |
-| **Multi-Factor Authentication** | ✅ (built-in) | ✅ (add-on) |
-| **Web Single Sign-On** | ✅ | ❌ |
-| **SAML/OIDC Provider** | ✅ | Limited |
-| **Centralized Access Policies** | ✅ | ✅ |
-| **Password Vault** | Unneeded (SSH CA) | ✅ |
-| **RDP Recording** | ❌ | ✅ |
-| **License** | AGPL (Free) | Proprietary |
-| **Typical Cost** | Free | 50-100€/user/year |
+| Feature                         | LLNG + Bastion    | Wallix Bastion    |
+| ------------------------------- | ----------------- | ----------------- |
+| **SSH Session Recording**       | ✅                | ✅                |
+| **Session Playback**            | ✅                | ✅                |
+| **Multi-Factor Authentication** | ✅ (built-in)     | ✅ (add-on)       |
+| **Web Single Sign-On**          | ✅                | ❌                |
+| **SAML/OIDC Provider**          | ✅                | Limited           |
+| **Centralized Access Policies** | ✅                | ✅                |
+| **Password Vault**              | Unneeded (SSH CA) | ✅                |
+| **RDP Recording**               | ❌                | ✅                |
+| **License**                     | AGPL (Free)       | Proprietary       |
+| **Typical Cost**                | Free              | 50-100€/user/year |
 
 ### When to Choose LLNG
 

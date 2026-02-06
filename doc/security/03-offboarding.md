@@ -6,14 +6,14 @@ Ce document décrit la procédure de révocation des accès lorsqu'un administra
 
 Un administrateur SSH (appelé "A" dans ce document) dispose généralement de :
 
-| Accès | Description |
-|-------|-------------|
-| Compte annuaire | Compte LDAP/AD avec appartenance aux groupes autorisés |
-| `client_secret` | Secret du client OIDC utilisé pour les enrôlements |
-| Clés SSH | Clé privée SSH + clé publique déployée sur les serveurs |
-| Certificats SSH | Si SSH CA : certificats signés par la CA LLNG |
-| Accès réseau | VPN ou accès réseau interne vers les serveurs |
-| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés |
+| Accès           | Description                                             |
+| --------------- | ------------------------------------------------------- |
+| Compte annuaire | Compte LDAP/AD avec appartenance aux groupes autorisés  |
+| `client_secret` | Secret du client OIDC utilisé pour les enrôlements      |
+| Clés SSH        | Clé privée SSH + clé publique déployée sur les serveurs |
+| Certificats SSH | Si SSH CA : certificats signés par la CA LLNG           |
+| Accès réseau    | VPN ou accès réseau interne vers les serveurs           |
+| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés   |
 
 ## Principe : Défense en Profondeur
 
@@ -69,6 +69,7 @@ EOF
 ```
 
 **Effet** :
+
 - A ne peut plus s'authentifier sur le portail LLNG
 - A ne peut plus approuver de nouveaux enrôlements
 - `/pam/authorize` refusera A pour toute connexion SSH
@@ -137,6 +138,7 @@ Si les certificats ont une durée de vie courte (30-60 minutes), il suffit d'att
 Le plugin SSH CA de LLNG fournit une interface d'administration pour révoquer les certificats :
 
 1. **Accéder à l'interface d'administration** :
+
    ```
    https://auth.example.com/ssh/admin
    ```
@@ -198,11 +200,13 @@ Ces actions ne sont pas urgentes mais doivent être planifiées.
 A connaissait le `client_secret` du client OIDC. Bien que la révocation LLNG empêche son utilisation malveillante, une rotation est recommandée :
 
 1. **Générer un nouveau secret dans le Manager LLNG** :
+
    ```
    OIDC → Relying Parties → pam-prod → Options → Client secret → Générer
    ```
 
 2. **Mettre à jour la configuration sur tous les serveurs de la zone** :
+
    ```bash
    # /etc/open-bastion/openbastion.conf
    client_secret = <nouveau_secret>
@@ -211,6 +215,7 @@ A connaissait le `client_secret` du client OIDC. Bien que la révocation LLNG em
 3. **Redémarrer le service PAM** (si applicable) ou tester une connexion.
 
 **Note** : Cette rotation peut être faite lors de la prochaine fenêtre de maintenance. Elle n'est pas urgente car :
+
 - A ne peut plus s'authentifier sur LLNG (compte désactivé)
 - A ne peut plus atteindre les serveurs (VPN révoqué)
 
@@ -218,11 +223,11 @@ A connaissait le `client_secret` du client OIDC. Bien que la révocation LLNG em
 
 Indépendamment des offboardings, planifier une rotation régulière :
 
-| Élément | Fréquence recommandée |
-|---------|----------------------|
-| `client_secret` | Tous les 6 mois |
-| Clé CA SSH | Tous les 2 ans (avec période de transition) |
-| Tokens machines | Rotation automatique via `refresh_token` |
+| Élément         | Fréquence recommandée                       |
+| --------------- | ------------------------------------------- |
+| `client_secret` | Tous les 6 mois                             |
+| Clé CA SSH      | Tous les 2 ans (avec période de transition) |
+| Tokens machines | Rotation automatique via `refresh_token`    |
 
 ---
 
@@ -230,42 +235,42 @@ Indépendamment des offboardings, planifier une rotation régulière :
 
 ### Architecture A : Serveur Isolé (Clés SSH)
 
-| Phase | Action | Délai | Effet |
-|-------|--------|-------|-------|
-| 1 | Désactiver compte LLNG | Immédiat | Bloque `/pam/authorize` |
-| 1 | Révoquer VPN | Immédiat | Bloque accès réseau |
-| 2 | Supprimer clé SSH | < 24h | Bloque authentification SSH |
-| 3 | Rotation `client_secret` | < 30 jours | Limite exposition |
+| Phase | Action                   | Délai      | Effet                       |
+| ----- | ------------------------ | ---------- | --------------------------- |
+| 1     | Désactiver compte LLNG   | Immédiat   | Bloque `/pam/authorize`     |
+| 1     | Révoquer VPN             | Immédiat   | Bloque accès réseau         |
+| 2     | Supprimer clé SSH        | < 24h      | Bloque authentification SSH |
+| 3     | Rotation `client_secret` | < 30 jours | Limite exposition           |
 
 ### Architecture B : Serveur + SSH CA
 
-| Phase | Action | Délai | Effet |
-|-------|--------|-------|-------|
-| 1 | Désactiver compte LLNG | Immédiat | Bloque nouveaux certificats |
-| 1 | Révoquer VPN | Immédiat | Bloque accès réseau |
-| 2 | Révoquer via `/ssh/admin` | Immédiat | Ajoute certificats à la KRL |
-| 2 | Expiration naturelle | 30-60 min | Certificats invalides (si pas de révocation) |
-| 3 | Rotation `client_secret` | < 30 jours | Limite exposition |
+| Phase | Action                    | Délai      | Effet                                        |
+| ----- | ------------------------- | ---------- | -------------------------------------------- |
+| 1     | Désactiver compte LLNG    | Immédiat   | Bloque nouveaux certificats                  |
+| 1     | Révoquer VPN              | Immédiat   | Bloque accès réseau                          |
+| 2     | Révoquer via `/ssh/admin` | Immédiat   | Ajoute certificats à la KRL                  |
+| 2     | Expiration naturelle      | 30-60 min  | Certificats invalides (si pas de révocation) |
+| 3     | Rotation `client_secret`  | < 30 jours | Limite exposition                            |
 
 ### Architecture C : Bastion + Backends (Clés SSH)
 
-| Phase | Action | Délai | Effet |
-|-------|--------|-------|-------|
-| 1 | Désactiver compte LLNG | Immédiat | Bloque `/pam/authorize` |
-| 1 | Révoquer VPN | Immédiat | Bloque accès bastion |
-| 2 | Supprimer clé SSH (bastion) | < 24h | Bloque accès bastion |
-| 2 | Supprimer clé SSH (backends) | < 24h | Défense en profondeur |
-| 3 | Rotation `client_secret` | < 30 jours | Limite exposition |
+| Phase | Action                       | Délai      | Effet                   |
+| ----- | ---------------------------- | ---------- | ----------------------- |
+| 1     | Désactiver compte LLNG       | Immédiat   | Bloque `/pam/authorize` |
+| 1     | Révoquer VPN                 | Immédiat   | Bloque accès bastion    |
+| 2     | Supprimer clé SSH (bastion)  | < 24h      | Bloque accès bastion    |
+| 2     | Supprimer clé SSH (backends) | < 24h      | Défense en profondeur   |
+| 3     | Rotation `client_secret`     | < 30 jours | Limite exposition       |
 
 ### Architecture D : Bastion + SSH CA
 
-| Phase | Action | Délai | Effet |
-|-------|--------|-------|-------|
-| 1 | Désactiver compte LLNG | Immédiat | Bloque nouveaux certificats |
-| 1 | Révoquer VPN | Immédiat | Bloque accès bastion |
-| 2 | Révoquer via `/ssh/admin` | Immédiat | Ajoute certificats à la KRL |
-| 2 | Expiration naturelle | 30-60 min | Certificats invalides (si pas de révocation) |
-| 3 | Rotation `client_secret` | < 30 jours | Limite exposition |
+| Phase | Action                    | Délai      | Effet                                        |
+| ----- | ------------------------- | ---------- | -------------------------------------------- |
+| 1     | Désactiver compte LLNG    | Immédiat   | Bloque nouveaux certificats                  |
+| 1     | Révoquer VPN              | Immédiat   | Bloque accès bastion                         |
+| 2     | Révoquer via `/ssh/admin` | Immédiat   | Ajoute certificats à la KRL                  |
+| 2     | Expiration naturelle      | 30-60 min  | Certificats invalides (si pas de révocation) |
+| 3     | Rotation `client_secret`  | < 30 jours | Limite exposition                            |
 
 ---
 
@@ -318,6 +323,7 @@ curl -X POST https://auth.example.com/admintokenrevoke \
 ### A était le seul administrateur d'une zone
 
 S'assurer qu'un autre administrateur a les accès nécessaires AVANT de révoquer A :
+
 - Accès au Manager LLNG
 - Accès au `client_secret` (ou capacité à en générer un nouveau)
 - Clé SSH ou certificat valide pour les serveurs
@@ -384,12 +390,14 @@ Si la personne partante avait connaissance d'une clé de service ou pouvait la r
 #### Phase 1 : Actions Immédiates (Jour J)
 
 1. **Identifier les comptes de service concernés** :
+
    ```bash
    # Sur chaque serveur
    cat /etc/open-bastion/service-accounts.conf
    ```
 
 2. **Rotation des clés de service** (si A avait accès aux clés privées) :
+
    ```bash
    # Générer une nouvelle clé
    ssh-keygen -t ed25519 -f /secure/ansible_new_key -C "ansible@$(hostname)"
@@ -400,6 +408,7 @@ Si la personne partante avait connaissance d'une clé de service ou pouvait la r
    ```
 
 3. **Mettre à jour le fichier de configuration** :
+
    ```bash
    sudo vim /etc/open-bastion/service-accounts.conf
    # Remplacer key_fingerprint par le nouveau fingerprint
@@ -419,11 +428,11 @@ Si la personne partante avait connaissance d'une clé de service ou pouvait la r
 
 ### Tableau récapitulatif - Comptes de Service
 
-| Action | Délai | Condition |
-|--------|-------|-----------|
-| Rotation clé ansible | Immédiat | Si A avait accès à la clé |
-| Rotation clé backup | Immédiat | Si A avait accès à la clé |
-| Rotation clé deploy | Immédiat | Si A avait accès à la clé |
+| Action                  | Délai    | Condition                 |
+| ----------------------- | -------- | ------------------------- |
+| Rotation clé ansible    | Immédiat | Si A avait accès à la clé |
+| Rotation clé backup     | Immédiat | Si A avait accès à la clé |
+| Rotation clé deploy     | Immédiat | Si A avait accès à la clé |
 | Rotation clé monitoring | Immédiat | Si A avait accès à la clé |
 
 ### Checklist Comptes de Service

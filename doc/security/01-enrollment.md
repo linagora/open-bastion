@@ -6,12 +6,12 @@ L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). 
 
 ### Acteurs
 
-| Acteur                   | Rôle                                                               |
-| ------------------------ | ------------------------------------------------------------------ |
-| **Opérateur**            | Personne exécutant `ob-enroll` sur le serveur à enrôler      |
-| **Administrateur LLNG**  | Personne habilitée à approuver les enrôlements sur le portail LLNG |
-| **Serveur cible**        | Machine à enrôler pour l'authentification PAM                      |
-| **Portail LLNG**         | Serveur LemonLDAP::NG fournissant les endpoints OAuth2             |
+| Acteur                  | Rôle                                                               |
+| ----------------------- | ------------------------------------------------------------------ |
+| **Opérateur**           | Personne exécutant `ob-enroll` sur le serveur à enrôler            |
+| **Administrateur LLNG** | Personne habilitée à approuver les enrôlements sur le portail LLNG |
+| **Serveur cible**       | Machine à enrôler pour l'authentification PAM                      |
+| **Portail LLNG**        | Serveur LemonLDAP::NG fournissant les endpoints OAuth2             |
 
 ### Prérequis (côté LLNG)
 
@@ -64,6 +64,7 @@ sudo chown root:root /etc/open-bastion/openbastion.conf
 ```
 
 **Points de sécurité :**
+
 - Le fichier de configuration contient le `client_secret` → permissions strictes (0600)
 - Le `client_secret` ne doit PAS être transmis par email ou canal non chiffré
 - Idéalement, utiliser un gestionnaire de secrets (Vault, Ansible Vault) pour le déploiement
@@ -114,6 +115,7 @@ sequenceDiagram
 ```
 
 **Rôle de PKCE (RFC 7636) dans ce flux :**
+
 - Le `code_verifier` est un secret généré localement (32 octets aléatoires, base64url)
 - Le `code_challenge` est le hash SHA256 du `code_verifier` (envoyé à l'étape 2)
 - Seul le serveur légitime possède le `code_verifier` (jamais transmis avant l'étape 10)
@@ -180,6 +182,7 @@ The code expires in 5 minutes.
 ```
 
 **L'opérateur doit alors transmettre ce code à un administrateur LLNG** par un canal externe :
+
 - Email
 - Téléphone
 - Messagerie instantanée (Slack, Teams, etc.)
@@ -190,6 +193,7 @@ The code expires in 5 minutes.
 #### Étape 6-9 : Approbation par l'administrateur
 
 L'administrateur LLNG :
+
 1. Ouvre `https://auth.example.com/device` dans son navigateur
 2. S'authentifie sur LLNG (avec potentiellement MFA)
 3. Saisit le `user_code` reçu de l'opérateur
@@ -198,6 +202,7 @@ L'administrateur LLNG :
 #### Étape 10-11 : Obtention du token avec validation PKCE
 
 Pendant ce temps, le script poll toutes les 5 secondes avec :
+
 - Authentification `client_secret_jwt` (RFC 7523)
 - Le `code_verifier` PKCE pour prouver la possession du secret initial
 
@@ -219,6 +224,7 @@ Le serveur vérifie que `SHA256(code_verifier) == code_challenge` (envoyé à l'
 Si la vérification échoue, le serveur retourne `{"error": "invalid_grant", "error_description": "PKCE validation failed"}`.
 
 **Le JWT (`client_assertion`) contient :**
+
 - `iss` et `sub` : le `client_id` (pam-access)
 - `aud` : l'URL du token endpoint
 - `exp` : expiration (maintenant + 60 secondes)
@@ -228,6 +234,7 @@ Si la vérification échoue, le serveur retourne `{"error": "invalid_grant", "er
 Le `client_secret` sert uniquement à signer le JWT avec HMAC-SHA256. Il n'est jamais transmis sur le réseau.
 
 Réponses possibles :
+
 - `{"error": "authorization_pending"}` → continuer à poll
 - `{"error": "slow_down"}` → augmenter l'intervalle
 - `{"error": "expired_token"}` → le code a expiré, recommencer
@@ -313,6 +320,7 @@ Le JWT d'authentification est généré à chaque requête avec un nouveau `jti`
 ```
 
 **Avantages de la rotation :**
+
 - L'ancien `refresh_token` est invalidé immédiatement
 - Limite la fenêtre d'exploitation en cas de vol
 - Détection d'utilisation concurrente (si un token est utilisé deux fois, le second échoue)
@@ -325,6 +333,7 @@ token_rotate_refresh = true   # Activé par défaut
 ```
 
 Ou en argument PAM :
+
 ```
 auth required pam_openbastion.so no_rotate_refresh  # Pour désactiver (non recommandé)
 ```
@@ -356,6 +365,7 @@ sequenceDiagram
 ```
 
 **Points de sécurité :**
+
 - Le `refresh_token` change à chaque renouvellement → pas de valeur statique à long terme
 - Si le serveur LLNG est indisponible, le cache local permet de continuer l'authentification
 - L'ancien `refresh_token` devient inutilisable dès qu'un nouveau est émis
@@ -385,6 +395,7 @@ sequenceDiagram
 **Description :** Le `client_secret` doit être transmis de l'administrateur LLNG à l'administrateur système du serveur cible lors de la phase d'initialisation. Ce secret pourrait être intercepté.
 
 **Vecteurs d'attaque :**
+
 - Transmission par email non chiffré
 - Stockage dans un wiki ou documentation partagée non sécurisée
 - Copier-coller via un canal non sécurisé (Slack, Teams sans chiffrement E2E)
@@ -392,17 +403,20 @@ sequenceDiagram
 **Analyse d'impact (limité) :**
 
 Le `client_secret` seul ne permet PAS de :
+
 - Obtenir un token sans approbation de l'administrateur LLNG (flux Device Authorization)
 - Accéder aux données des utilisateurs
 - Valider des authentifications
 
 **Le vrai risque** : Un attaquant qui possède le `client_secret` ET qui peut usurper l'adresse IP d'un serveur légitime pourrait :
+
 1. Initier un flux d'enrôlement
 2. Obtenir un `user_code`
 3. Convaincre l'admin LLNG d'approuver (social engineering)
 4. Recevoir un token pour son serveur malveillant qui se fait passer pour le serveur légitime
 
 Ce scénario nécessite plusieurs conditions :
+
 - Possession du `client_secret`
 - Capacité d'usurpation IP (ARP spoofing sur LAN, BGP hijacking, compromission DNS)
 - Social engineering réussi sur l'admin LLNG
@@ -419,16 +433,19 @@ IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
 Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisateur ignore explicitement l'avertissement.
 
 **Remédiation embarquée :**
+
 - Le `client_secret` n'est utile que combiné au flux Device Authorization avec approbation humaine
 - Le scope `pam:server` limite les actions possibles
 
 **Remédiation configuration :**
+
 - Utiliser un gestionnaire de secrets (Vault, Ansible Vault) pour le déploiement
 - Ne jamais stocker le secret dans un wiki, email ou fichier partagé
 - Rotation périodique du `client_secret` côté LLNG
 - Utiliser `client_secret_jwt` (implémenté) pour éviter la transmission du secret en clair dans les requêtes HTTP
 
 **Remédiation procédurale :**
+
 - L'admin LLNG génère le secret et le transmet via un canal chiffré (Signal, GPG)
 - Le secret est saisi directement sur le serveur cible, pas copié dans des documents intermédiaires
 
@@ -449,6 +466,7 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 **Description :** Le `user_code` (ex: `ABCD-1234`) doit être transmis de l'opérateur à l'administrateur LLNG par un canal externe (email, téléphone, Slack...). Ce canal peut être compromis.
 
 **Vecteurs d'attaque :**
+
 - Interception email (SMTP non chiffré, compromission boîte mail)
 - Écoute téléphonique
 - Compromission du canal de messagerie
@@ -457,17 +475,20 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 **Conséquence :** Un attaquant ayant le `user_code` peut l'utiliser avant l'administrateur légitime et faire approuver un serveur malveillant.
 
 **Remédiation embarquée :**
+
 - Expiration courte du code (5 minutes par défaut, `expires_in`)
 - Format court et lisible (8 caractères) limitant les erreurs de transmission
 - Le code seul ne suffit pas : il faut que l'admin l'approuve activement
 
 **Remédiation configuration :**
+
 - Utiliser des canaux de communication chiffrés (Signal, email chiffré)
 - Vérifier verbalement l'identité de l'opérateur avant approbation
 - Réduire `expires_in` côté LLNG si le risque est élevé
 - Limiter le nombre de tentatives de saisie du `user_code`
 
 **Remédiation procédurale :**
+
 - L'administrateur doit vérifier que la demande est légitime (ticket, appel téléphonique de confirmation)
 - Documenter qui a demandé l'enrôlement et pourquoi
 
@@ -488,25 +509,28 @@ Ce mécanisme SSH natif rend l'attaque très visible et nécessite que l'utilisa
 **Description :** Le `user_code` est court (8 caractères, typiquement alphanumériques). Un attaquant pourrait tenter de le deviner.
 
 **Vecteurs d'attaque :**
+
 - Attaque automatisée sur `/device` avec différents codes
 - Tentatives multiples avant expiration
 
 **Calcul RFC 8628 :** Avec un code de 8 caractères base-20 et max 5 tentatives : probabilité de succès = 2^-32 (négligeable).
 
 **Remédiation embarquée (LLNG) :**
+
 - Format `user_code` conforme RFC 8628 §6.1 : base-20 sans voyelles (`BCDFGHJKLMNPQRSTVWXZ`)
 - Expiration courte (10 minutes par défaut, configurable)
 - Intégration CrowdSec : chaque tentative invalide est signalée (scénario `llng/device-auth-bruteforce`)
 
 **Remédiation configuration (côté LLNG) :**
+
 ```yaml
 # FORTEMENT RECOMMANDÉ : Activer CrowdSec pour le rate-limiting IP
 crowdsec: 1
 crowdsecAgent: 1
 
 # Optionnel : ajuster les paramètres
-oidcServiceDeviceAuthorizationExpiration: 300      # TTL en secondes (défaut: 600)
-oidcServiceDeviceAuthorizationUserCodeLength: 8    # Longueur du code (défaut: 8)
+oidcServiceDeviceAuthorizationExpiration: 300 # TTL en secondes (défaut: 600)
+oidcServiceDeviceAuthorizationUserCodeLength: 8 # Longueur du code (défaut: 8)
 ```
 
 **Note :** Sans CrowdSec activé, LLNG affiche un warning au démarrage. Le rate-limiting IP est délégué à CrowdSec qui gère le lockout automatique après N échecs
@@ -528,12 +552,14 @@ oidcServiceDeviceAuthorizationUserCodeLength: 8    # Longueur du code (défaut: 
 **Description :** Le `client_secret` OIDC est utilisé pour authentifier le client lors des requêtes vers `/oauth2/token`. Une interception permettrait de créer des tokens serveur frauduleux pour n'importe quel `device_code` futur.
 
 **Vecteurs d'attaque :**
+
 - MITM sur le réseau (ARP spoofing, DNS spoofing, proxy malveillant)
 - Compromission d'un équipement réseau
 - Configuration `verify_ssl=false` (désactive la vérification TLS)
 - Lecture des arguments de la commande (`ps aux` montre `-s secret`)
 
 **Remédiation embarquée :**
+
 - **Authentification `client_secret_jwt` (RFC 7523)** : Le secret n'est plus transmis en clair dans les requêtes. À la place, un JWT signé avec HMAC-SHA256 est généré :
   - Le JWT contient les claims `iss`, `sub`, `aud`, `exp`, `iat`, `jti`
   - Le `jti` (JWT ID) est un UUID unique pour chaque requête, empêchant le replay
@@ -544,6 +570,7 @@ oidcServiceDeviceAuthorizationUserCodeLength: 8    # Longueur du code (défaut: 
 - Le secret n'apparaît pas dans les logs du script
 
 **Flux d'authentification `client_secret_jwt` :**
+
 ```http
 POST /oauth2/token HTTP/1.1
 Content-Type: application/x-www-form-urlencoded
@@ -558,6 +585,7 @@ grant_type=urn:ietf:params:oauth:grant-type:device_code
 Le JWT (`client_assertion`) est signé avec le `client_secret` mais celui-ci n'est jamais envoyé directement.
 
 **Remédiation configuration :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf
 verify_ssl = true          # Ne JAMAIS mettre false en production
@@ -574,9 +602,9 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 - Stocker `client_secret` dans le fichier de config plutôt que le passer en CLI
 - Protéger le fichier de config (`chmod 600`)
 
-|                 | Score résiduel                                                              |
-| --------------- | :-------------------------------------------------------------------------: |
-| **Probabilité** |                                      1                                      |
+|                 |                                Score résiduel                                |
+| --------------- | :--------------------------------------------------------------------------: |
+| **Probabilité** |                                      1                                       |
 | **Impact**      | 3 (avec `client_secret_jwt`, le secret intercepté est un JWT à usage unique) |
 
 ---
@@ -591,16 +619,19 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 **Description :** Le fichier `/etc/open-bastion/token` contient l'`access_token` du serveur. Sa compromission permet d'usurper l'identité du serveur auprès de LLNG.
 
 **Vecteurs d'attaque :**
+
 - Accès root compromis (malware, exploit, insider)
 - Backup non chiffré incluant le fichier
 - Mauvaises permissions sur le fichier (erreur de configuration)
 - Accès physique à la machine (boot USB, extraction disque)
 
 **Conséquence :** L'attaquant peut :
+
 - Valider des authentifications pour n'importe quel utilisateur sur ce server_group
 - Obtenir les attributs des utilisateurs (groupes, permissions sudo)
 
 **Remédiation embarquée :**
+
 - Création avec permissions 0600 (`scripts/ob-enroll:447`)
 - Vérification propriétaire root à l'utilisation (`src/pam_openbastion.c:134-138`)
 - Vérification permissions à l'utilisation (`src/pam_openbastion.c:141-146`)
@@ -609,6 +640,7 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 - Écriture atomique via fichier temporaire + rename (`src/token_manager.c:632-663`)
 
 **Remédiation configuration :**
+
 ```bash
 # Vérifier les permissions
 chmod 0600 /etc/open-bastion/token
@@ -623,16 +655,18 @@ auditctl -w /etc/open-bastion/token -p rwa -k pam_token_access
 ```
 
 **Remédiation infrastructure :**
+
 - Chiffrement du disque (LUKS)
 - Exclure le fichier des backups ou chiffrer les backups
 - Restreindre l'accès root (sudo avec justification)
 
 **Réduction d'impact par segmentation :**
+
 - Utiliser des `server_group` distincts (prod, staging, dev, par département...)
 - Un token compromis ne permet d'usurper que les serveurs du même `server_group`
 - Impact réduit de 4 → 3 si segmentation fine appliquée
 
-|                 | Score résiduel                          |
+|                 |             Score résiduel              |
 | --------------- | :-------------------------------------: |
 | **Probabilité** |                    1                    |
 | **Impact**      | 4 (ou 3 avec segmentation server_group) |
@@ -647,22 +681,26 @@ auditctl -w /etc/open-bastion/token -p rwa -k pam_token_access
 | **Impact**      |   4   |
 
 **Description :** Un attaquant pourrait se faire passer pour le serveur LLNG et :
+
 - Capturer le `client_secret` envoyé pendant le polling
 - Délivrer un faux token permettant de contrôler les authentifications
 
 **Vecteurs d'attaque :**
+
 - DNS spoofing (attaquant redirige auth.example.com vers son serveur)
 - Compromission de la chaîne de certificats (CA compromise)
 - Configuration `verify_ssl=false`
 - Absence de certificate pinning
 
 **Remédiation embarquée :**
+
 - Vérification SSL obligatoire par défaut
 - Validation du format HTTPS dans la configuration (`src/config.c:659-663`)
 - Support du certificate pinning (`CURLOPT_PINNEDPUBLICKEY`)
 - Validation du format du pin à l'initialisation (`src/llng_client.c:298-359`)
 
 **Remédiation configuration :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf
 portal_url = https://auth.example.com  # HTTPS obligatoire
@@ -672,6 +710,7 @@ ca_cert = /etc/ssl/certs/internal-ca.pem  # Si CA interne
 ```
 
 Pour obtenir le pin SHA256 du certificat LLNG :
+
 ```bash
 openssl s_client -connect auth.example.com:443 2>/dev/null | \
   openssl x509 -pubkey -noout | \
@@ -697,15 +736,18 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 **Description :** Le `device_code` expire après 5 minutes (par défaut). Si l'administrateur tarde à approuver, l'enrôlement échoue.
 
 **Vecteurs d'attaque :**
+
 - DoS : empêcher l'administrateur d'approuver à temps
 - Confusion : l'opérateur relance le script, créant plusieurs codes
 
 **Remédiation embarquée :**
+
 - Affichage du temps restant (`scripts/ob-enroll:320`)
 - Message clair en cas d'expiration (`expired_token` → "Please run this script again")
 - Gestion de l'erreur `slow_down` (augmentation de l'intervalle de polling)
 
 **Remédiation procédurale :**
+
 - Coordonner avec l'administrateur avant de lancer le script
 - S'assurer que l'administrateur est disponible et prêt
 
@@ -726,6 +768,7 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 **Description :** Un attaquant pourrait enrôler un serveur non autorisé et obtenir un token valide.
 
 **Vecteurs d'attaque :**
+
 - Vol des credentials OIDC (`client_id`/`client_secret`) → l'attaquant peut initier un flux d'enrôlement
 - Social engineering de l'administrateur LLNG ("Salut, j'ai besoin que tu approuves le code WXYZ-5678 pour le nouveau serveur")
 - Compromission d'un serveur déjà enrôlé → utilisation de ses credentials
@@ -733,28 +776,32 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 **Conséquence :** Le serveur malveillant peut valider des authentifications pour tout utilisateur du `server_group`.
 
 **Remédiation embarquée :**
+
 - Le flux RFC 8628 nécessite une approbation humaine sur le portail
 - Le `user_code` doit être saisi manuellement
 - Le scope `pam:server` limite les permissions du token
 - Le `server_group` permet de segmenter les autorisations
 
 **Remédiation configuration (côté LLNG) :**
+
 - Restreindre qui peut approuver les enrôlements (ACL sur `/device`)
 - Activer les notifications lors des approbations
 - Audit log des enrôlements avec IP source
 - Rotation périodique du `client_secret`
 
 **Remédiation procédurale :**
+
 - L'administrateur doit vérifier l'identité de l'opérateur (callback téléphonique, ticket)
 - Utiliser des `server_group` distincts par environnement (prod, staging, dev)
 - Inventaire des serveurs enrôlés avec revue périodique
 
 **Réduction d'impact par segmentation :**
+
 - La segmentation par `server_group` limite le blast radius
 - Un serveur malveillant ne peut usurper que les serveurs de son groupe
 - Impact réduit de 4 → 3 avec segmentation
 
-|                 | Score résiduel                     |
+|                 |           Score résiduel           |
 | --------------- | :--------------------------------: |
 | **Probabilité** |                 1                  |
 | **Impact**      | 3 (avec segmentation server_group) |
@@ -771,18 +818,21 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 **Description :** Le token pourrait être extrait de la mémoire du processus PAM ou du script d'enrôlement.
 
 **Vecteurs d'attaque :**
+
 - Core dump du processus
 - Lecture `/proc/<pid>/mem` ou `/proc/<pid>/environ`
 - Attaque cold boot (lecture RAM après reboot)
 - Swap non chiffré
 
 **Remédiation embarquée :**
+
 - `explicit_bzero()` sur tous les secrets après usage (`src/llng_client.c:468-470`)
 - Effacement des buffers HMAC (`src/llng_client.c:203,220`)
 - Effacement des headers Authorization (`src/llng_client.c:576,884`)
 - Fonction `secure_free()` pour libération sécurisée (`src/token_manager.c:449-456`)
 
 **Remédiation configuration :**
+
 ```bash
 # Désactiver les core dumps
 echo "* hard core 0" >> /etc/security/limits.conf
@@ -812,21 +862,25 @@ cryptsetup luksFormat /dev/swap_partition
 **Description :** Un attaquant pourrait empêcher les enrôlements légitimes.
 
 **Vecteurs d'attaque :**
+
 - Flood du endpoint `/oauth2/device` → épuisement des ressources LLNG
 - Flood avec des `client_id` valides → rate limiting déclenché pour tout le monde
 - Blocage réseau entre le serveur et LLNG
 
 **Remédiation embarquée :**
+
 - Timeout sur les requêtes (évite les blocages infinis)
 - Respect de l'intervalle de polling RFC 8628
 - Gestion du `slow_down` (augmentation de l'intervalle)
 
 **Remédiation configuration (côté LLNG) :**
+
 - Rate limiting par IP sur `/oauth2/device` et `/oauth2/token`
 - Monitoring des requêtes d'enrôlement
 - Alerting sur les volumes anormaux
 
 **Remédiation infrastructure :**
+
 - WAF devant LLNG
 - Procédure d'enrôlement alternative (hors-ligne) documentée
 
@@ -847,6 +901,7 @@ cryptsetup luksFormat /dev/swap_partition
 **Description :** L'`access_token` du serveur a une durée de vie limitée (ex: 1 heure). S'il expire sans être rafraîchi, les authentifications échouent.
 
 **Vecteurs d'attaque :**
+
 - Serveur LLNG indisponible au moment du refresh
 - Horloge désynchronisée (le serveur pense que le token est encore valide)
 - Refresh token révoqué côté LLNG
@@ -854,12 +909,14 @@ cryptsetup luksFormat /dev/swap_partition
 **Conséquence :** Les utilisateurs ne peuvent plus s'authentifier sur le serveur.
 
 **Remédiation embarquée :**
+
 - Stockage de `expires_at` dans le fichier token
 - Support du refresh token (`src/token_manager.c:202-326`)
 - Rotation automatique du refresh token (si configuré côté LLNG)
 - Détection HTTP 401 → message "Re-enrollment required"
 
 **Remédiation configuration :**
+
 ```bash
 # Synchronisation NTP
 timedatectl set-ntp true
@@ -869,6 +926,7 @@ timedatectl set-ntp true
 ```
 
 **Remédiation procédurale :**
+
 - Monitoring de l'expiration des tokens
 - Procédure de ré-enrôlement d'urgence documentée
 
@@ -889,34 +947,40 @@ timedatectl set-ntp true
 **Description :** Le `refresh_token` est stocké avec l'`access_token` dans `/etc/open-bastion/token`. Contrairement à l'`access_token` qui expire rapidement (ex: 1h), le `refresh_token` a une durée de vie longue et permet d'obtenir de nouveaux `access_token` sans ré-enrôlement.
 
 **Vecteurs d'attaque :**
+
 - Mêmes que R4 (vol du fichier token)
 - Interception lors du refresh (MITM)
 - Le `refresh_token` reste valide même si l'`access_token` est révoqué
 
 **Conséquence :** Un attaquant avec le `refresh_token` peut :
+
 - Obtenir des `access_token` valides indéfiniment (jusqu'à révocation explicite)
 - Maintenir un accès persistant même après détection et rotation de l'`access_token`
 
 **Remédiation embarquée :**
+
 - Stockage sécurisé (mêmes protections que l'`access_token`)
 - Support de la rotation du refresh token (`src/token_manager.c:202-326`)
 - Effacement sécurisé en mémoire après usage
 
 **Remédiation configuration (côté LLNG) :**
+
 - Activer la rotation du `refresh_token` (chaque refresh génère un nouveau refresh_token)
 - Limiter la durée de vie du `refresh_token`
 - Permettre la révocation par serveur/server_group
 - Audit des opérations de refresh
 
 **Remédiation procédurale :**
+
 - En cas de compromission suspectée : révoquer le refresh_token côté LLNG ET ré-enrôler
 - Rotation périodique des tokens (ré-enrôlement planifié)
 
 **Réduction d'impact par segmentation :**
+
 - Mêmes bénéfices que R4 : le token ne permet d'usurper que les serveurs du `server_group`
 - Impact réduit de 4 → 3 avec segmentation
 
-|                 | Score résiduel                     |
+|                 |           Score résiduel           |
 | --------------- | :--------------------------------: |
 | **Probabilité** |                 1                  |
 | **Impact**      | 3 (avec segmentation server_group) |
@@ -933,6 +997,7 @@ timedatectl set-ntp true
 **Description :** Si un serveur enrôlé ne poll pas le SSO pendant une longue période (serveur éteint, déconnecté, décommissionné mais pas dé-enrôlé), son `refresh_token` reste valide indéfiniment.
 
 **Vecteurs d'attaque :**
+
 - Vol du fichier token sur un serveur inactif (backup ancien, accès physique)
 - Le serveur a été décommissionné mais le token n'a pas été révoqué
 - Serveur compromis puis isolé du réseau : l'attaquant conserve un token valide
@@ -940,27 +1005,31 @@ timedatectl set-ntp true
 **Conséquence :** Un attaquant peut utiliser un token "dormant" des mois après sa compromission, sans qu'aucune activité suspecte ne soit détectée entre-temps.
 
 **Remédiation embarquée (LLNG) :**
+
 - **Implémenté** : Paramètre `oidcRPMetaDataOptionsRtActivity` pour révoquer automatiquement les refresh tokens inactifs
 - Le timestamp `_oidcRtUpdate` est mis à jour à chaque utilisation du refresh token
 - La purge des sessions (WebCron ou cron) supprime les tokens inactifs
 
 **Configuration LLNG recommandée :**
+
 ```yaml
 # LLNG Manager → OIDC → Relying Parties → pam-access → Options
-oidcRPMetaDataOptionsRtActivity: 2592000  # 30 jours en secondes (0 = désactivé)
+oidcRPMetaDataOptionsRtActivity: 2592000 # 30 jours en secondes (0 = désactivé)
 ```
 
 **Remédiation PAM :**
+
 - **Implémenté** : Heartbeat périodique via `ob-heartbeat.timer` (toutes les 5 minutes)
 - Le heartbeat maintient le token actif et détecte les pertes de connectivité
 - Activation : `systemctl enable --now ob-heartbeat.timer`
 
 **Remédiation procédurale :**
+
 - Procédure de dé-enrôlement lors du décommissionnement d'un serveur
 - Inventaire régulier des serveurs enrôlés vs serveurs actifs
 - Révocation manuelle des tokens des serveurs inactifs (si timeout non configuré)
 
-|                 | Score résiduel                                    |
+|                 |                  Score résiduel                   |
 | --------------- | :-----------------------------------------------: |
 | **Probabilité** | 1 (avec `oidcRPMetaDataOptionsRtActivity` activé) |
 | **Impact**      |                         3                         |
@@ -977,6 +1046,7 @@ oidcRPMetaDataOptionsRtActivity: 2592000  # 30 jours en secondes (0 = désactiv�
 **Description :** Sans PKCE, un attaquant qui intercepte le `device_code` sur le réseau peut l'échanger contre un token avant le serveur légitime, même sans connaître le `code_verifier`.
 
 **Vecteurs d'attaque :**
+
 - MITM sur le réseau lors de l'appel POST `/oauth2/device`
 - Interception de la réponse contenant le `device_code`
 - L'attaquant poll `/oauth2/token` avec le `device_code` volé
@@ -985,10 +1055,12 @@ oidcRPMetaDataOptionsRtActivity: 2592000  # 30 jours en secondes (0 = désactiv�
 **Conséquence :** L'attaquant obtient un token serveur valide, le serveur légitime échoue car le `device_code` a été consommé.
 
 **Remédiation embarquée :**
+
 - **PKCE (RFC 7636)** : Le script `ob-enroll` génère un `code_verifier` secret qui n'est jamais transmis lors de la requête initiale. Seul le `code_challenge` (hash SHA256) est envoyé.
 - Sans le `code_verifier`, l'attaquant ne peut pas échanger le `device_code` volé.
 
 **Remédiation configuration (côté LLNG) :**
+
 ```yaml
 # OIDC → Relying Parties → pam-access → Options
 # FORTEMENT RECOMMANDÉ pour les clients Device Flow
@@ -1020,7 +1092,7 @@ sequenceDiagram
 |                 | Score résiduel (avec PKCE) |
 | --------------- | :------------------------: |
 | **Probabilité** |             1              |
-| **Impact**      |  1 (attaque impossible)    |
+| **Impact**      |   1 (attaque impossible)   |
 
 ---
 
@@ -1029,7 +1101,7 @@ sequenceDiagram
 ### Avant remédiation
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         |                     | R3 R5 R7 R11 R13 | R4           |                   |
 | **3 - Important**        |                     | R8 R10           | R1 R2 R12    |                   |
 | **2 - Limité**           |                     | R0 R6 R9         |              |                   |
@@ -1038,7 +1110,7 @@ sequenceDiagram
 ### Après remédiation
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R5                  |                  |              |                   |
 | **3 - Important**        | R1 R3 R8 R12        | R2               |              |                   |
 | **2 - Limité**           | R4 R7 R9 R10 R11    | R6               |              |                   |
@@ -1046,27 +1118,28 @@ sequenceDiagram
 
 **Remédiations appliquées :**
 
-| Remédiation | Risques impactés | Effet |
-|-------------|------------------|-------|
-| **PKCE obligatoire** | R13 | I=4 → I=1 : Sans `code_verifier`, l'interception du `device_code` est inutile |
-| **`client_secret_jwt`** | R3 | I=4 → I=3 : JWT à usage unique (anti-rejeu via `jti`) |
-| **Segmentation `server_group`** | R4 R7 R11 | I=4 → I=3 : Blast radius limité au groupe |
-| **Clients OIDC distincts** | R0 R4 R7 R11 | I supplémentaire −1 : Isolation complète par zone |
-| **CrowdSec** | R2 | P=3 → P=2 : Rate-limiting IP sur brute-force `user_code` |
-| **`RtActivity`** | R12 | P=3 → P=1 : Révocation automatique des tokens inactifs |
+| Remédiation                     | Risques impactés | Effet                                                                         |
+| ------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| **PKCE obligatoire**            | R13              | I=4 → I=1 : Sans `code_verifier`, l'interception du `device_code` est inutile |
+| **`client_secret_jwt`**         | R3               | I=4 → I=3 : JWT à usage unique (anti-rejeu via `jti`)                         |
+| **Segmentation `server_group`** | R4 R7 R11        | I=4 → I=3 : Blast radius limité au groupe                                     |
+| **Clients OIDC distincts**      | R0 R4 R7 R11     | I supplémentaire −1 : Isolation complète par zone                             |
+| **CrowdSec**                    | R2               | P=3 → P=2 : Rate-limiting IP sur brute-force `user_code`                      |
+| **`RtActivity`**                | R12              | P=3 → P=1 : Révocation automatique des tokens inactifs                        |
 
 **Détail des améliorations avec clients OIDC distincts (voir section 5.2) :**
 
-| Risque | Sans clients distincts | Avec clients distincts | Amélioration |
-|--------|------------------------|------------------------|--------------|
-| **R0** | P=1, I=2               | **P=1, I=1**           | Le secret compromis ne peut initier d'enrôlements que dans sa zone |
-| **R4** | P=1, I=3               | **P=1, I=2**           | Le token volé n'est valide que pour le scope de sa zone |
-| **R7** | P=1, I=3               | **P=1, I=2**           | Le serveur malveillant ne peut usurper que sa zone |
-| **R11**| P=1, I=3               | **P=1, I=2**           | Le refresh_token compromis est limité à sa zone |
+| Risque  | Sans clients distincts | Avec clients distincts | Amélioration                                                       |
+| ------- | ---------------------- | ---------------------- | ------------------------------------------------------------------ |
+| **R0**  | P=1, I=2               | **P=1, I=1**           | Le secret compromis ne peut initier d'enrôlements que dans sa zone |
+| **R4**  | P=1, I=3               | **P=1, I=2**           | Le token volé n'est valide que pour le scope de sa zone            |
+| **R7**  | P=1, I=3               | **P=1, I=2**           | Le serveur malveillant ne peut usurper que sa zone                 |
+| **R11** | P=1, I=3               | **P=1, I=2**           | Le refresh_token compromis est limité à sa zone                    |
 
 **Résultat :** Seul R5 (usurpation du serveur LLNG) reste critique - c'est le point unique de défaillance irréductible.
 
 **Légende :**
+
 - Zone verte (P≤1, I≤2) : Risque acceptable
 - Zone jaune (P≤2, I≤3) : Risque à surveiller
 - Zone orange (P≤2, I=4 ou P=3, I=3) : Risque à traiter
@@ -1176,15 +1249,18 @@ flowchart TB
 ```
 
 **Avantages :**
+
 - Configuration simple côté LLNG (un seul client)
 - Gestion centralisée des autorisations
 
 **Limites :**
+
 - Le `client_secret` est partagé entre tous les environnements
 - Si le secret est compromis sur un serveur dev, un attaquant peut initier un enrôlement pour n'importe quel `server_group`
 - Rotation du secret = mise à jour de TOUS les serveurs
 
 **Impact sur les risques :**
+
 - R4, R7, R11 : Le token compromis ne permet d'usurper que les serveurs du même `server_group` → Impact 4 → 3
 - R0 : Le `client_secret` compromis permet d'initier des enrôlements pour TOUS les `server_group` → pas de réduction
 
@@ -1208,6 +1284,7 @@ flowchart TB
 ```
 
 **Avantages :**
+
 - **Isolation complète** : compromission d'un secret n'affecte qu'une zone
 - **Rotation indépendante** : renouveler le secret d'un environnement sans toucher aux autres
 - **Audit granulaire** : identifier quel client (donc quel environnement) a initié chaque action
@@ -1217,13 +1294,14 @@ flowchart TB
 **Impact sur les risques :**
 
 | Risque | Sans segmentation | Avec `server_group` | Avec clients distincts |
-|--------|-------------------|---------------------|------------------------|
+| ------ | ----------------- | ------------------- | ---------------------- |
 | R0     | P=2, I=2          | P=2, I=2            | **P=2, I=1**           |
 | R4     | P=3, I=4          | P=1, I=3            | **P=1, I=2**           |
 | R7     | P=2, I=4          | P=1, I=3            | **P=1, I=2**           |
 | R11    | P=2, I=4          | P=1, I=3            | **P=1, I=2**           |
 
 **Explication :**
+
 - **R0 (compromission client_secret)** : Avec clients distincts, le secret compromis ne permet d'enrôler que dans sa zone → Impact 2 → 1
 - **R4, R7, R11** : Le blast radius est doublement limité (secret + server_group) → Impact 3 → 2
 
@@ -1245,7 +1323,7 @@ oidcRPMetaDataOptions:
     oidcRPMetaDataOptionsScopeRules:
       pam:prod: 1
 
-# Client Staging
+  # Client Staging
   pam-staging:
     oidcRPMetaDataOptionsClientID: pam-staging
     oidcRPMetaDataOptionsClientSecret: <STAGING_SECRET>
@@ -1254,7 +1332,7 @@ oidcRPMetaDataOptions:
     oidcRPMetaDataOptionsScopeRules:
       pam:staging: 1
 
-# Client Dev
+  # Client Dev
   pam-dev:
     oidcRPMetaDataOptionsClientID: pam-dev
     oidcRPMetaDataOptionsClientSecret: <DEV_SECRET>
@@ -1277,7 +1355,7 @@ server_group = prod
 ### 5.4 Matrice de décision
 
 | Critère                              | `server_group` seul | Clients OIDC distincts |
-|--------------------------------------|---------------------|------------------------|
+| ------------------------------------ | ------------------- | ---------------------- |
 | Nombre de serveurs                   | < 20                | > 20                   |
 | Environnements critiques séparés     | Non                 | **Oui**                |
 | Exigences de conformité (ISO, SOC2)  | Basique             | **Élevées**            |
@@ -1286,6 +1364,7 @@ server_group = prod
 | Complexité de configuration LLNG     | Simple              | Moyenne                |
 
 **Recommandation :**
+
 - **Petite infrastructure** (< 20 serveurs, même équipe) : `server_group` suffisant
 - **Infrastructure moyenne à grande** : Clients OIDC distincts par environnement (prod/staging/dev)
 - **Haute sécurité** : Clients OIDC distincts + segmentation fine des `server_group` au sein de chaque client
@@ -1327,6 +1406,7 @@ flowchart TB
 ```
 
 **Bénéfice :** Si `DEV_S3CR3T` est compromis, l'attaquant ne peut :
+
 - Ni enrôler un serveur prod (mauvais `client_id`/`client_secret`)
 - Ni usurper un token prod (scope `pam:dev` ≠ `pam:prod`)
 
@@ -1386,17 +1466,17 @@ Référence : [Issue LLNG #3030](https://gitlab.ow2.org/lemonldap-ng/lemonldap-n
 
 ### Fonctionnalités de sécurité implémentées
 
-| Recommandation                   | Référence | Statut           | Implémentation                                    |
-| -------------------------------- | --------- | ---------------- | ------------------------------------------------- |
-| Authentification JWT du client   | R8, R8+   | ✅ Implémenté    | `client_secret_jwt` (RFC 7523) avec HMAC-SHA256   |
-| Protection anti-rejeu JWT        | -         | ✅ Implémenté    | Claim `jti` (UUID unique) dans chaque JWT         |
-| Codes aléatoires                 | R18, R24  | ✅ LLNG          | Génération côté serveur LLNG                      |
-| Désactivation code après usage   | R30       | ✅ LLNG          | Géré par le serveur LLNG                          |
-| Limitation TTL access_token      | R33       | ✅ Configuration | Configurable côté LLNG                            |
-| Pas de token dans les logs       | R32       | ✅ Implémenté    | Aucun token dans les logs PAM                     |
-| PKCE pour Device Flow            | Extension | ✅ Implémenté    | `code_verifier` / `code_challenge` (S256)         |
-| PKCE obligatoire                 | Extension | ✅ Configuration | `oidcRPMetaDataOptionsRequirePKCE: 1` côté LLNG   |
-| Stockage hashé des tokens        | R21, R25  | ✅ Configuration | `Hashed session storage` côté LLNG (2.19.0+)      |
+| Recommandation                 | Référence | Statut           | Implémentation                                  |
+| ------------------------------ | --------- | ---------------- | ----------------------------------------------- |
+| Authentification JWT du client | R8, R8+   | ✅ Implémenté    | `client_secret_jwt` (RFC 7523) avec HMAC-SHA256 |
+| Protection anti-rejeu JWT      | -         | ✅ Implémenté    | Claim `jti` (UUID unique) dans chaque JWT       |
+| Codes aléatoires               | R18, R24  | ✅ LLNG          | Génération côté serveur LLNG                    |
+| Désactivation code après usage | R30       | ✅ LLNG          | Géré par le serveur LLNG                        |
+| Limitation TTL access_token    | R33       | ✅ Configuration | Configurable côté LLNG                          |
+| Pas de token dans les logs     | R32       | ✅ Implémenté    | Aucun token dans les logs PAM                   |
+| PKCE pour Device Flow          | Extension | ✅ Implémenté    | `code_verifier` / `code_challenge` (S256)       |
+| PKCE obligatoire               | Extension | ✅ Configuration | `oidcRPMetaDataOptionsRequirePKCE: 1` côté LLNG |
+| Stockage hashé des tokens      | R21, R25  | ✅ Configuration | `Hashed session storage` côté LLNG (2.19.0+)    |
 
 ### Configuration LLNG recommandée (côté serveur)
 
@@ -1441,6 +1521,7 @@ General Parameters → Advanced Parameters → Security → Hashed session stora
 ```
 
 **Avertissements :**
+
 - Non activé par défaut car cela casse les sessions OIDC offline existantes
 - **Incompatible avec l'authentification "Proxy" en mode SOAP**
 - Pour migrer les sessions existantes, utiliser le script `convertToHashSessionStorage` fourni par LemonLDAP::NG
@@ -1453,11 +1534,11 @@ Lorsque cette option est activée, le serveur LLNG rejette les requêtes d'enrô
 
 Certaines recommandations ANSSI concernent le flux Authorization Code classique et ne s'appliquent pas au Device Authorization Grant (RFC 8628) :
 
-| Recommandation         | Référence | Raison                                             |
-| ---------------------- | --------- | -------------------------------------------------- |
-| Envoi de `state`       | R10, R12  | Le Device Flow n'utilise pas de redirection HTTP   |
-| Envoi de `nonce`       | R14, R16  | Pas d'`id_token` dans le flux device code          |
-| Vérification `state`   | R22       | Pas de `state` dans le Device Flow                 |
+| Recommandation       | Référence | Raison                                           |
+| -------------------- | --------- | ------------------------------------------------ |
+| Envoi de `state`     | R10, R12  | Le Device Flow n'utilise pas de redirection HTTP |
+| Envoi de `nonce`     | R14, R16  | Pas d'`id_token` dans le flux device code        |
+| Vérification `state` | R22       | Pas de `state` dans le Device Flow               |
 
 ### PKCE pour Device Flow
 
@@ -1479,21 +1560,22 @@ flowchart TB
 ```
 
 **Avantages de PKCE pour le Device Flow :**
+
 - Protection contre l'interception du `device_code` sur le réseau
 - Le `code_verifier` n'est jamais transmis avant l'échange du token
 - Même si un attaquant intercepte le `device_code`, il ne peut pas l'échanger sans le `code_verifier`
 
 ### Tableau de synthèse sécurité
 
-| Couche       | Protection        | Mécanisme                                                 |
-| ------------ | ----------------- | --------------------------------------------------------- |
-| Transport    | Confidentialité   | TLS 1.3 obligatoire                                       |
-| Transport    | Intégrité         | Certificate pinning (optionnel)                           |
-| Client       | Authentification  | `client_secret_jwt` (RFC 7523)                            |
-| Client       | Anti-rejeu        | JWT avec `jti` unique                                     |
-| Device Flow  | Anti-interception | PKCE obligatoire (`oidcRPMetaDataOptionsRequirePKCE: 1`)  |
-| Token        | Confidentialité   | PKCE (`code_verifier` / `code_challenge`)                 |
-| Token        | Rotation          | Refresh token rotatif                                     |
-| Stockage     | Confidentialité   | Permissions 0600, `Hashed session storage` côté LLNG      |
-| Segmentation | Blast radius (niveau 1) | `server_group` par environnement                    |
-| Segmentation | Blast radius (niveau 2) | Clients OIDC distincts par zone (recommandé)        |
+| Couche       | Protection              | Mécanisme                                                |
+| ------------ | ----------------------- | -------------------------------------------------------- |
+| Transport    | Confidentialité         | TLS 1.3 obligatoire                                      |
+| Transport    | Intégrité               | Certificate pinning (optionnel)                          |
+| Client       | Authentification        | `client_secret_jwt` (RFC 7523)                           |
+| Client       | Anti-rejeu              | JWT avec `jti` unique                                    |
+| Device Flow  | Anti-interception       | PKCE obligatoire (`oidcRPMetaDataOptionsRequirePKCE: 1`) |
+| Token        | Confidentialité         | PKCE (`code_verifier` / `code_challenge`)                |
+| Token        | Rotation                | Refresh token rotatif                                    |
+| Stockage     | Confidentialité         | Permissions 0600, `Hashed session storage` côté LLNG     |
+| Segmentation | Blast radius (niveau 1) | `server_group` par environnement                         |
+| Segmentation | Blast radius (niveau 2) | Clients OIDC distincts par zone (recommandé)             |

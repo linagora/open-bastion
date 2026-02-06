@@ -10,6 +10,7 @@ author: Linagora
 ![](linagora.png)
 
 Authenticate and authorize Linux users via **LemonLDAP::NG** for:
+
 - SSH connections
 - Other PAM services
 
@@ -85,15 +86,15 @@ Token generated → Used once → Destroyed
 
 # LLNG Portal Endpoints
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET/POST /pam` | User interface (token generation) |
-| `POST /pam/verify` | One-time token validation |
-| `POST /pam/authorize` | Authorization check |
-| `POST /pam/userinfo` | User info for NSS |
-| `POST /pam/heartbeat` | Server heartbeat |
-| `POST /oauth2/device` | Device Authorization Grant |
-| `POST /oauth2/token` | Token exchange |
+| Endpoint              | Purpose                           |
+| --------------------- | --------------------------------- |
+| `GET/POST /pam`       | User interface (token generation) |
+| `POST /pam/verify`    | One-time token validation         |
+| `POST /pam/authorize` | Authorization check               |
+| `POST /pam/userinfo`  | User info for NSS                 |
+| `POST /pam/heartbeat` | Server heartbeat                  |
+| `POST /oauth2/device` | Device Authorization Grant        |
+| `POST /oauth2/token`  | Token exchange                    |
 
 <!-- end_slide -->
 
@@ -476,12 +477,12 @@ sudo llng-pam-enroll
 
 ## Components
 
-| Component | Function |
-|-----------|----------|
-| `pam_llng.so` | PAM authentication & authorization |
-| `libnss_llng.so` | User resolution before PAM |
-| `llng-pam-enroll` | Server enrollment |
-| `llng-pam-heartbeat` | Server monitoring |
+| Component            | Function                           |
+| -------------------- | ---------------------------------- |
+| `pam_llng.so`        | PAM authentication & authorization |
+| `libnss_llng.so`     | User resolution before PAM         |
+| `llng-pam-enroll`    | Server enrollment                  |
+| `llng-pam-heartbeat` | Server monitoring                  |
 
 <!-- end_slide -->
 

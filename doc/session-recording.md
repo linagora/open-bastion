@@ -116,8 +116,15 @@ This is the default format because `script` is available on all systems.
 Requires `asciinema` package to be installed.
 
 Example header:
+
 ```json
-{"version": 2, "width": 80, "height": 24, "timestamp": 1702742400, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}
+{
+  "version": 2,
+  "width": 80,
+  "height": 24,
+  "timestamp": 1702742400,
+  "env": { "SHELL": "/bin/bash", "TERM": "xterm-256color" }
+}
 ```
 
 ### ttyrec
@@ -129,44 +136,43 @@ Example header:
 
 Requires `ttyrec` package to be installed.
 
-
 ## Session Metadata
 
 Each recording has an accompanying JSON metadata file (`.json`):
 
 ```json
 {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
-    "user": "dwho",
-    "client_ip": "192.168.1.100",
-    "tty": "/dev/pts/0",
-    "start_time": "2025-12-16T10:30:00Z",
-    "end_time": "2025-12-16T11:45:23Z",
-    "status": "completed",
-    "original_command": "",
-    "format": "asciinema",
-    "recording_file": "20251216-103000_550e8400-e29b-41d4-a716-446655440000.cast",
-    "hostname": "bastion.example.com",
-    "version": "1.0.0"
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "user": "dwho",
+  "client_ip": "192.168.1.100",
+  "tty": "/dev/pts/0",
+  "start_time": "2025-12-16T10:30:00Z",
+  "end_time": "2025-12-16T11:45:23Z",
+  "status": "completed",
+  "original_command": "",
+  "format": "asciinema",
+  "recording_file": "20251216-103000_550e8400-e29b-41d4-a716-446655440000.cast",
+  "hostname": "bastion.example.com",
+  "version": "1.0.0"
 }
 ```
 
 ### Metadata Fields
 
-| Field | Description |
-|-------|-------------|
-| `session_id` | Unique UUID for the session |
-| `user` | Unix username |
-| `client_ip` | Client IP address (from SSH_CLIENT) |
-| `tty` | TTY device |
-| `start_time` | Session start (ISO 8601 UTC) |
-| `end_time` | Session end (ISO 8601 UTC) |
-| `status` | `active`, `completed`, or `error:<code>` |
-| `original_command` | SSH_ORIGINAL_COMMAND if any |
-| `format` | Recording format used |
-| `recording_file` | Name of the recording file |
-| `hostname` | Bastion hostname |
-| `version` | Recorder version |
+| Field              | Description                              |
+| ------------------ | ---------------------------------------- |
+| `session_id`       | Unique UUID for the session              |
+| `user`             | Unix username                            |
+| `client_ip`        | Client IP address (from SSH_CLIENT)      |
+| `tty`              | TTY device                               |
+| `start_time`       | Session start (ISO 8601 UTC)             |
+| `end_time`         | Session end (ISO 8601 UTC)               |
+| `status`           | `active`, `completed`, or `error:<code>` |
+| `original_command` | SSH_ORIGINAL_COMMAND if any              |
+| `format`           | Recording format used                    |
+| `recording_file`   | Name of the recording file               |
+| `hostname`         | Bastion hostname                         |
+| `version`          | Recorder version                         |
 
 ## Directory Structure
 
@@ -231,6 +237,7 @@ scriptreplay timing.txt recording.typescript
 ### Network Security
 
 When uploading to LLNG (future feature):
+
 - Use TLS for all transfers
 - Authenticate with server token
 - Consider bandwidth implications
@@ -249,12 +256,12 @@ journalctl -t ob-session-recorder
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| No recording created | ForceCommand not active | Check sshd_config Match rules |
-| Empty recording | Session ended immediately | Check for shell issues |
-| Permission denied | Wrong directory permissions | `chmod 700 /var/lib/open-bastion/sessions` |
-| Format not available | ttyrec not installed | Install ttyrec or use asciinema |
+| Issue                | Cause                       | Solution                                   |
+| -------------------- | --------------------------- | ------------------------------------------ |
+| No recording created | ForceCommand not active     | Check sshd_config Match rules              |
+| Empty recording      | Session ended immediately   | Check for shell issues                     |
+| Permission denied    | Wrong directory permissions | `chmod 700 /var/lib/open-bastion/sessions` |
+| Format not available | ttyrec not installed        | Install ttyrec or use asciinema            |
 
 ### Debug mode
 
@@ -268,12 +275,12 @@ cat /etc/llng/session-recorder.conf
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `LLNG_RECORDER_CONFIG` | Config file path |
-| `LLNG_SESSIONS_DIR` | Override sessions directory |
-| `LLNG_RECORDER_FORMAT` | Override recording format |
-| `LLNG_MAX_SESSION` | Override max session duration |
+| Variable               | Description                   |
+| ---------------------- | ----------------------------- |
+| `LLNG_RECORDER_CONFIG` | Config file path              |
+| `LLNG_SESSIONS_DIR`    | Override sessions directory   |
+| `LLNG_RECORDER_FORMAT` | Override recording format     |
+| `LLNG_MAX_SESSION`     | Override max session duration |
 
 ## Integration with LLNG
 

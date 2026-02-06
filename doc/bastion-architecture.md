@@ -65,22 +65,22 @@ Central identity and access management:
 
 Jump servers that users connect to first:
 
-| Component | Purpose |
-|-----------|---------|
-| `pam_openbastion.so` | Authenticate users via LLNG tokens or authorize SSH key users |
-| `libnss_openbastion.so` | Resolve LLNG users before local account exists |
-| `ob-session-recorder` | Record all SSH sessions for audit |
-| SSH CA | Optional: sign user certificates |
+| Component               | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `pam_openbastion.so`    | Authenticate users via LLNG tokens or authorize SSH key users |
+| `libnss_openbastion.so` | Resolve LLNG users before local account exists                |
+| `ob-session-recorder`   | Record all SSH sessions for audit                             |
+| SSH CA                  | Optional: sign user certificates                              |
 
 ### Backend Servers
 
 Internal servers accessed through bastions:
 
-| Component | Purpose |
-|-----------|---------|
-| `pam_openbastion.so` | Authorize access based on server_group |
-| `libnss_openbastion.so` | Resolve users, auto-create accounts |
-| Standard SSH | ProxyJump through bastion |
+| Component               | Purpose                                |
+| ----------------------- | -------------------------------------- |
+| `pam_openbastion.so`    | Authorize access based on server_group |
+| `libnss_openbastion.so` | Resolve users, auto-create accounts    |
+| Standard SSH            | ProxyJump through bastion              |
 
 ## Authentication Flow
 
@@ -151,6 +151,7 @@ sequenceDiagram
 ```
 
 The bastion JWT contains:
+
 - `sub`: Username being proxied
 - `iss`: LLNG portal URL
 - `exp`: Expiration time (short-lived)
@@ -165,13 +166,13 @@ Server groups allow different authorization rules for different environments:
 
 **LLNG Manager Configuration** → Server Groups:
 
-| Group Name | Authorization Rule |
-|------------|-------------------|
-| `production` | `$hGroup->{sre} or $hGroup->{oncall}` |
-| `staging` | `$hGroup->{sre} or $hGroup->{dev}` |
-| `development` | `$hGroup->{dev}` |
-| `bastion` | `$hGroup->{employees}` |
-| `default` | `0` (deny all) |
+| Group Name    | Authorization Rule                    |
+| ------------- | ------------------------------------- |
+| `production`  | `$hGroup->{sre} or $hGroup->{oncall}` |
+| `staging`     | `$hGroup->{sre} or $hGroup->{dev}`    |
+| `development` | `$hGroup->{dev}`                      |
+| `bastion`     | `$hGroup->{employees}`                |
+| `default`     | `0` (deny all)                        |
 
 Each server enrolls with its server_group:
 
@@ -218,6 +219,7 @@ shadow: files
 ### NSS Configuration
 
 `/etc/open-bastion/nss_openbastion.conf`:
+
 ```ini
 portal_url = https://auth.example.com
 server_token_file = /etc/llng/server_token
@@ -241,6 +243,7 @@ When a user connects for the first time:
 ### Configuration
 
 In `/etc/open-bastion/openbastion.conf`:
+
 ```ini
 create_user = true
 create_user_home_base = /home
@@ -249,6 +252,7 @@ create_user_skel = /etc/skel
 ```
 
 In `/etc/pam.d/sshd`:
+
 ```
 session required pam_openbastion.so
 session required pam_unix.so
@@ -334,6 +338,7 @@ sudo ob-bastion-setup --portal https://auth.example.com --server-group bastion
 ```
 
 This script:
+
 - Downloads SSH CA public key from LLNG
 - Configures sshd with `TrustedUserCAKeys`
 - Enables session recording via `ForceCommand`
@@ -358,6 +363,7 @@ sudo ob-backend-setup --portal https://auth.example.com --server-group productio
 ```
 
 This script:
+
 - Downloads SSH CA public key from LLNG
 - Configures sshd for certificate authentication
 - Configures PAM with automatic user creation
@@ -403,6 +409,7 @@ sudo ob-bastion-setup --portal https://auth.example.com
 ```
 
 Or manually:
+
 - [ ] `pam_openbastion.so` installed
 - [ ] Server enrolled (`ob-enroll`)
 - [ ] PAM configured in `/etc/pam.d/sshd`
@@ -417,6 +424,7 @@ sudo ob-backend-setup --portal https://auth.example.com -g production
 ```
 
 Or manually:
+
 - [ ] `pam_openbastion.so` installed
 - [ ] `libnss_openbastion.so` installed
 - [ ] Server enrolled with correct server_group
@@ -431,6 +439,7 @@ servers originate from authorized bastion servers.
 ### Why Bastion JWT?
 
 Without bastion JWT verification, an attacker who:
+
 - Obtains valid LLNG credentials, or
 - Compromises a backend server's network access
 
@@ -438,6 +447,7 @@ Without bastion JWT verification, an attacker who:
 and audit controls.
 
 With bastion JWT:
+
 - Backends cryptographically verify the connection source
 - Direct connections are rejected, even with valid credentials
 - All access is forced through audited bastion channels
@@ -508,26 +518,27 @@ The JWKS cache allows backends to verify JWT signatures without contacting LLNG:
 4. Cache is refreshed when TTL expires or key ID not found
 
 This enables:
+
 - Faster verification (no network latency)
 - Resilience to LLNG outages
 - Reduced load on LLNG portal
 
 ### JWT Claims
 
-| Claim | Description |
-|-------|-------------|
-| `iss` | LLNG portal URL (issuer) |
-| `sub` | Username being proxied |
-| `aud` | `pam:bastion-backend` |
-| `exp` | Expiration timestamp |
-| `iat` | Issued-at timestamp |
-| `jti` | Unique token ID |
-| `bastion_id` | Bastion server identifier |
-| `bastion_group` | Bastion's server group |
-| `bastion_ip` | Bastion's IP address |
-| `target_host` | Target backend hostname |
-| `target_group` | Target server group |
-| `user_groups` | User's LLNG groups |
+| Claim           | Description               |
+| --------------- | ------------------------- |
+| `iss`           | LLNG portal URL (issuer)  |
+| `sub`           | Username being proxied    |
+| `aud`           | `pam:bastion-backend`     |
+| `exp`           | Expiration timestamp      |
+| `iat`           | Issued-at timestamp       |
+| `jti`           | Unique token ID           |
+| `bastion_id`    | Bastion server identifier |
+| `bastion_group` | Bastion's server group    |
+| `bastion_ip`    | Bastion's IP address      |
+| `target_host`   | Target backend hostname   |
+| `target_group`  | Target server group       |
+| `user_groups`   | User's LLNG groups        |
 
 ## See Also
 

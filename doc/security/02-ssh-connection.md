@@ -4,24 +4,24 @@
 
 Cette analyse couvre quatre architectures de déploiement SSH avec le module PAM LLNG :
 
-| Architecture | Description                  | Niveau de sécurité |
-| ------------ | ---------------------------- | ------------------ |
-| **A**        | Serveur isolé                | Base               |
-| **B**        | Serveur isolé + SSH CA       | Amélioré           |
-| **C**        | Bastion + backends           | Élevé              |
-| **D**        | Bastion + backends + SSH CA  | Optimal            |
+| Architecture | Description                 | Niveau de sécurité |
+| ------------ | --------------------------- | ------------------ |
+| **A**        | Serveur isolé               | Base               |
+| **B**        | Serveur isolé + SSH CA      | Amélioré           |
+| **C**        | Bastion + backends          | Élevé              |
+| **D**        | Bastion + backends + SSH CA | Optimal            |
 
 ### Acteurs
 
-| Acteur            | Rôle                                              |
-| ----------------- | ------------------------------------------------- |
-| **Utilisateur**   | Personne se connectant en SSH                     |
-| **Client SSH**    | Machine de l'utilisateur (laptop, workstation)    |
-| **Serveur SSH**   | Serveur cible avec PAM LLNG                       |
-| **Bastion**       | Point d'entrée unique pour les connexions SSH     |
-| **Backend**       | Serveur accessible uniquement via le bastion      |
-| **Portail LLNG**  | Serveur d'authentification/autorisation           |
-| **SSH CA**        | Autorité de certification pour les clés SSH       |
+| Acteur           | Rôle                                           |
+| ---------------- | ---------------------------------------------- |
+| **Utilisateur**  | Personne se connectant en SSH                  |
+| **Client SSH**   | Machine de l'utilisateur (laptop, workstation) |
+| **Serveur SSH**  | Serveur cible avec PAM LLNG                    |
+| **Bastion**      | Point d'entrée unique pour les connexions SSH  |
+| **Backend**      | Serveur accessible uniquement via le bastion   |
+| **Portail LLNG** | Serveur d'authentification/autorisation        |
+| **SSH CA**       | Autorité de certification pour les clés SSH    |
 
 ---
 
@@ -46,17 +46,20 @@ sequenceDiagram
 ### Authentification
 
 L'utilisateur s'authentifie auprès du serveur SSH avec :
+
 - Clé SSH publique/privée (méthode recommandée)
 - Mot de passe (déconseillé, voir R-A1)
 
 ### Autorisation
 
 Le module PAM LLNG appelle `/pam/authorize` avec :
+
 - `user` : nom d'utilisateur
 - `host` : hostname du serveur
 - `service` : "sshd"
 
 LLNG vérifie :
+
 - L'utilisateur existe et est actif
 - L'utilisateur est autorisé à accéder à ce serveur/server_group
 - Les groupes et attributs de l'utilisateur
@@ -100,6 +103,7 @@ sequenceDiagram
 ### Certificat SSH
 
 Le certificat SSH contient :
+
 - `key_id` : identifiant unique du certificat
 - `serial` : numéro de série
 - `principals` : liste des usernames autorisés
@@ -109,6 +113,7 @@ Le certificat SSH contient :
 ### Extraction des informations de certificat
 
 Le module PAM extrait les informations via les variables d'environnement SSH :
+
 - `SSH_USER_AUTH` : méthode d'authentification (contient "-cert-" pour certificat)
 - `SSH_CERT_KEY_ID` : identifiant du certificat
 - `SSH_CERT_SERIAL` : numéro de série
@@ -125,12 +130,12 @@ const char *ca_fp = pam_getenv(pamh, "SSH_CERT_CA_KEY_FP");
 
 ### Avantages vs Architecture A
 
-| Aspect           | Architecture A       | Architecture B               |
-| ---------------- | -------------------- | ---------------------------- |
-| Traçabilité      | Username seul        | key_id, serial, principals   |
-| Révocation       | Impossible sans LLNG | Possible via CRL ou LLNG |
-| Durée de vie clé | Illimitée            | Limitée par certificat       |
-| Audit            | Basique              | Complet avec serial          |
+| Aspect           | Architecture A       | Architecture B             |
+| ---------------- | -------------------- | -------------------------- |
+| Traçabilité      | Username seul        | key_id, serial, principals |
+| Révocation       | Impossible sans LLNG | Possible via CRL ou LLNG   |
+| Durée de vie clé | Illimitée            | Limitée par certificat     |
+| Audit            | Basique              | Complet avec serial        |
 
 ### Durée de vie des certificats SSH
 
@@ -159,11 +164,11 @@ Avec le module PAM LLNG, la durée de vie du certificat SSH a peu d'impact sur l
 
 #### Comparaison des durées
 
-| Durée certificat | Avantages | Inconvénients |
-|------------------|-----------|---------------|
-| **Courte (1h-8h)** | Révocation "naturelle" par expiration | Renouvellement fréquent, friction utilisateur |
-| **Moyenne (1-7 jours)** | Bon compromis, renouvellement quotidien/hebdo | KRL nécessaire pour révocation urgente |
-| **Longue (1-12 mois)** | UX optimale, pas de friction | KRL obligatoire, révocation via `/ssh/admin` |
+| Durée certificat        | Avantages                                     | Inconvénients                                 |
+| ----------------------- | --------------------------------------------- | --------------------------------------------- |
+| **Courte (1h-8h)**      | Révocation "naturelle" par expiration         | Renouvellement fréquent, friction utilisateur |
+| **Moyenne (1-7 jours)** | Bon compromis, renouvellement quotidien/hebdo | KRL nécessaire pour révocation urgente        |
+| **Longue (1-12 mois)**  | UX optimale, pas de friction                  | KRL obligatoire, révocation via `/ssh/admin`  |
 
 #### Recommandation
 
@@ -217,6 +222,7 @@ ExposeAuthInfo yes   # Requis pour SSH_CERT_* variables
 ### Description
 
 Les serveurs backends ne sont accessibles que via un bastion. Cette architecture offre :
+
 - Point d'entrée unique et auditable
 - Réduction de la surface d'attaque des backends
 - Possibilité de segmentation réseau
@@ -262,6 +268,7 @@ ListenAddress 10.0.0.0    # IP privée uniquement
 ```
 
 Ou via groupe de sécurité (AWS/GCP/Azure) :
+
 - Backends : SSH (22) autorisé uniquement depuis le security group du bastion
 
 ### Avantages sécurité
@@ -284,6 +291,7 @@ server_group = backend-prod
 ```
 
 Côté LLNG, définir les autorisations :
+
 - Groupe "ops" → accès bastion + backend-prod
 - Groupe "dev" → accès bastion + backend-dev
 - Groupe "admin" → accès bastion + tous backends
@@ -295,6 +303,7 @@ Côté LLNG, définir les autorisations :
 ### Description
 
 Architecture optimale combinant :
+
 - Bastion comme point d'entrée unique
 - Certificats SSH pour traçabilité et révocation
 - Double vérification PAM sur bastion et backends
@@ -339,25 +348,30 @@ flowchart TB
 ### Agent forwarding vs ProxyJump
 
 **Option 1 : Agent forwarding** (déconseillé)
+
 ```bash
 ssh -A bastion
 # puis sur bastion:
 ssh backend
 ```
+
 ⚠️ Risque : Si le bastion est compromis, l'attaquant peut utiliser l'agent.
 
 **Option 2 : ProxyJump** (recommandé)
+
 ```bash
 ssh -J bastion backend
 # ou dans ~/.ssh/config:
 Host backend
     ProxyJump bastion
 ```
+
 ✓ La clé privée ne quitte jamais le client.
 
 ### Configuration complète
 
 **CA SSH :**
+
 ```bash
 # Générer la CA
 ssh-keygen -t ed25519 -f /etc/ssh/ca_key -C "SSH CA"
@@ -372,6 +386,7 @@ ssh-keygen -s /etc/ssh/ca_key \
 ```
 
 **Serveurs (bastion et backends) :**
+
 ```bash
 # /etc/ssh/sshd_config
 TrustedUserCAKeys /etc/ssh/ca_user_key.pub
@@ -381,6 +396,7 @@ RevokedKeys /etc/ssh/revoked_keys
 ```
 
 **Backends uniquement :**
+
 ```bash
 # Restreindre l'accès au bastion
 # /etc/ssh/sshd_config
@@ -414,12 +430,14 @@ ListenAddress 10.0.0.0  # Réseau privé uniquement
 **Description :** L'authentification SSH par mot de passe est vulnérable aux attaques par force brute et au phishing.
 
 **Vecteurs d'attaque :**
+
 - Brute-force du mot de passe
 - Credential stuffing (mots de passe réutilisés)
 - Phishing pour obtenir le mot de passe
 - Keylogger sur le client
 
 **Remédiation configuration :**
+
 ```bash
 # /etc/ssh/sshd_config
 PasswordAuthentication no
@@ -442,14 +460,15 @@ crowdsec_block_delay = 180               # Fenêtre de 3 minutes
 ```
 
 Avec CrowdSec activé :
+
 - Les IPs connues pour attaques SSH sont bloquées avant toute tentative (via la communauté CrowdSec)
 - Les échecs d'authentification déclenchent un auto-ban local
 - Les alertes peuvent être centralisées via [Crowdsieve](https://github.com/linagora/crowdsieve)
 
-|                 | Score résiduel             |
-| --------------- | :------------------------: |
-| **Probabilité** | 1 (avec clés uniquement)   |
-| **Impact**      |             4              |
+|                 |      Score résiduel      |
+| --------------- | :----------------------: |
+| **Probabilité** | 1 (avec clés uniquement) |
+| **Impact**      |            4             |
 
 ---
 
@@ -465,6 +484,7 @@ Avec CrowdSec activé :
 **Description :** Une clé SSH privée volée permet un accès illimité jusqu'à sa suppression manuelle des authorized_keys.
 
 **Vecteurs d'attaque :**
+
 - Compromission du poste client
 - Backup non chiffré contenant la clé
 - Clé sans passphrase
@@ -473,10 +493,12 @@ Avec CrowdSec activé :
 **Conséquence :** Accès permanent à tous les serveurs où la clé est autorisée.
 
 **Remédiation embarquée :**
+
 - PAM LLNG vérifie l'autorisation à chaque connexion (l'utilisateur peut être désactivé)
 - Audit des connexions avec IP source
 
 **Remédiation configuration :**
+
 ```bash
 # Clés avec passphrase obligatoire
 ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519
@@ -487,12 +509,13 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 ```
 
 **Remédiation architecturale :**
+
 - Passer à l'architecture B ou D (certificats avec durée de vie limitée)
 
-|                 | Score résiduel                                    |
-| --------------- | :-----------------------------------------------: |
-| **Probabilité** |                         2                         |
-| **Impact**      | 3 (avec désactivation utilisateur LLNG possible)  |
+|                 |                  Score résiduel                  |
+| --------------- | :----------------------------------------------: |
+| **Probabilité** |                        2                         |
+| **Impact**      | 3 (avec désactivation utilisateur LLNG possible) |
 
 ---
 
@@ -508,25 +531,29 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 **Description :** Un certificat SSH volé permet un accès limité dans le temps (durée de validité du certificat).
 
 **Vecteurs d'attaque :**
+
 - Mêmes que R-S2 (compromission poste client)
 
 **Facteurs atténuants :**
+
 - Durée de vie courte du certificat (8h-24h recommandé)
 - Révocation possible via LLNG ou CRL SSH
 - Le serial permet d'identifier précisément le certificat compromis
 
 **Remédiation embarquée :**
+
 - PAM LLNG envoie le serial à LLNG pour vérification de révocation
 - Audit complet avec key_id et serial
 
 **Remédiation configuration (côté LLNG) :**
+
 - Liste de révocation par serial
 - Alerte si même certificat utilisé depuis IPs différentes
 
-|                 | Score résiduel                        |
-| --------------- | :-----------------------------------: |
-| **Probabilité** | 1 (avec durée courte + révocation)    |
-| **Impact**      |          2 (durée limitée)            |
+|                 |           Score résiduel           |
+| --------------- | :--------------------------------: |
+| **Probabilité** | 1 (avec durée courte + révocation) |
+| **Impact**      |         2 (durée limitée)          |
 
 ---
 
@@ -542,6 +569,7 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 **Description :** Si la clé privée de la CA SSH est compromise, l'attaquant peut émettre des certificats pour n'importe quel utilisateur.
 
 **Vecteurs d'attaque :**
+
 - Compromission du serveur hébergeant la CA
 - Backup non chiffré de la clé CA
 - Insider malveillant
@@ -549,6 +577,7 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 **Conséquence :** Accès total à tous les serveurs faisant confiance à cette CA.
 
 **Remédiation configuration :**
+
 ```bash
 # CA sur machine air-gapped ou HSM
 # Clé CA avec passphrase forte
@@ -559,11 +588,13 @@ chmod 400 /secure/ca_key
 ```
 
 **Remédiation procédurale :**
+
 - CA sur machine dédiée, non connectée au réseau
 - Signature des certificats via processus audité
 - Rotation périodique de la CA
 
 **Remédiation architecturale :**
+
 - Utiliser un HSM pour stocker la clé CA
 - Short-lived CA (renouvellement régulier)
 
@@ -586,16 +617,19 @@ chmod 400 /secure/ca_key
 **Description :** Si les backends sont accessibles directement (sans passer par le bastion), la sécurité du bastion est contournée.
 
 **Vecteurs d'attaque :**
+
 - Backends avec SSH ouvert sur IP publique
 - Règles firewall permissives
 - VPN donnant accès direct au réseau des backends
 
 **Conséquence :**
+
 - Perte de l'audit centralisé
 - Surface d'attaque élargie
 - Attaques directes sur les backends
 
 **Remédiation configuration (CRITIQUE) - Option 1 : Restriction réseau :**
+
 ```bash
 # Sur les backends : /etc/ssh/sshd_config
 ListenAddress 10.0.0.0  # Réseau privé uniquement
@@ -629,11 +663,13 @@ AcceptEnv OB_BASTION_JWT
 ```
 
 Avec le JWT bastion :
+
 - Même avec un accès réseau direct au backend, la connexion est refusée sans JWT valide
 - Le JWT prouve cryptographiquement que la connexion vient d'un bastion autorisé
 - Le JWT est vérifié localement (cache JWKS) → fonctionne même si LLNG est temporairement indisponible
 
 **Vérification :**
+
 ```bash
 # Depuis l'extérieur, doit échouer même avec credentials valides :
 ssh -o ConnectTimeout=5 backend.internal.example.com
@@ -644,10 +680,10 @@ ob-ssh-proxy backend.internal.example.com
 # Connexion établie
 ```
 
-|                 | Score résiduel                               |
-| --------------- | :------------------------------------------: |
-| **Probabilité** | 1 (avec JWT bastion + restriction réseau)    |
-| **Impact**      |               3                              |
+|                 |              Score résiduel               |
+| --------------- | :---------------------------------------: |
+| **Probabilité** | 1 (avec JWT bastion + restriction réseau) |
+| **Impact**      |                     3                     |
 
 ---
 
@@ -663,20 +699,24 @@ ob-ssh-proxy backend.internal.example.com
 **Description :** Si le bastion est compromis, l'attaquant a potentiellement accès à tous les backends.
 
 **Vecteurs d'attaque :**
+
 - Exploit sur le bastion (vulnérabilité SSH, système)
 - Credentials volés d'un admin bastion
 - Supply chain attack
 
 **Conséquence :**
+
 - Interception des connexions transitant par le bastion
 - Pivot vers les backends
 - Vol de clés si agent forwarding utilisé
 
 **Remédiation embarquée :**
+
 - PAM LLNG sur les backends = double vérification
 - Même si le bastion est compromis, l'attaquant doit avoir des credentials valides pour chaque backend
 
 **Remédiation configuration :**
+
 ```bash
 # Interdire l'agent forwarding sur le bastion
 # /etc/ssh/sshd_config
@@ -689,18 +729,20 @@ Host backend
 ```
 
 **Remédiation procédurale :**
+
 - Bastion durci (CIS benchmark)
 - Pas de comptes utilisateurs sur le bastion (passage uniquement)
 - Monitoring renforcé du bastion
 
 **Réduction d'impact avec PAM LLNG sur backends :**
+
 - Même depuis un bastion compromis, chaque accès backend est vérifié
 - L'attaquant doit compromettre AUSSI les credentials utilisateur
 
-|                 | Score résiduel                      |
-| --------------- | :---------------------------------: |
-| **Probabilité** |                  2                  |
-| **Impact**      | 3 (avec PAM LLNG sur backends)      |
+|                 |         Score résiduel         |
+| --------------- | :----------------------------: |
+| **Probabilité** |               2                |
+| **Impact**      | 3 (avec PAM LLNG sur backends) |
 
 ---
 
@@ -716,6 +758,7 @@ Host backend
 **Description :** Si LLNG est indisponible, les nouvelles connexions SSH ne peuvent pas être autorisées (sauf cache).
 
 **Vecteurs d'attaque :**
+
 - Panne réseau entre serveurs SSH et LLNG
 - DoS sur LLNG
 - Maintenance LLNG
@@ -723,10 +766,12 @@ Host backend
 **Conséquence :** Les utilisateurs ne peuvent plus se connecter aux serveurs.
 
 **Remédiation embarquée :**
+
 - Cache d'authentification offline (`src/auth_cache.c`)
 - Les utilisateurs précédemment autorisés peuvent continuer à se connecter
 
 **Remédiation configuration :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf
 auth_cache = true
@@ -735,13 +780,14 @@ auth_cache_offline_ttl = 86400  # 24h si LLNG indisponible
 ```
 
 **Remédiation infrastructure :**
+
 - LLNG en haute disponibilité
 - Plusieurs portails LLNG (failover)
 
-|                 | Score résiduel           |
-| --------------- | :----------------------: |
-| **Probabilité** |      1 (avec HA)         |
-| **Impact**      | 2 (avec cache offline)   |
+|                 |     Score résiduel     |
+| --------------- | :--------------------: |
+| **Probabilité** |      1 (avec HA)       |
+| **Impact**      | 2 (avec cache offline) |
 
 ---
 
@@ -757,12 +803,14 @@ auth_cache_offline_ttl = 86400  # 24h si LLNG indisponible
 **Description :** Une session SSH déjà établie n'est pas terminée si l'utilisateur est révoqué dans LLNG.
 
 **Vecteurs d'attaque :**
+
 - Utilisateur révoqué maintient une session ouverte
 - Screen/tmux avec session persistante
 
 **Conséquence :** L'utilisateur révoqué conserve son accès tant que la session est active.
 
 **Remédiation configuration :**
+
 ```bash
 # /etc/ssh/sshd_config
 ClientAliveInterval 300      # Ping toutes les 5 min
@@ -774,7 +822,9 @@ TMOUT=3600  # Déconnexion après 1h d'inactivité
 ```
 
 **Remédiation procédurale :**
+
 - Script de révocation qui tue les sessions actives :
+
 ```bash
 # Lors de la révocation d'un utilisateur
 pkill -u $USERNAME -KILL
@@ -799,23 +849,27 @@ pkill -u $USERNAME -KILL
 **Description :** Un attaquant qui intercepte un JWT bastion en transit pourrait le rejouer pour usurper une connexion dans la fenêtre de validité du token (5 minutes par défaut).
 
 **Vecteurs d'attaque :**
+
 - MITM entre bastion et backend (rare si réseau interne)
 - Lecture de la variable d'environnement `OB_BASTION_JWT` sur le bastion
 - Logs applicatifs exposant le JWT
 
 **Facteurs atténuants :**
+
 - Le JWT a une durée de vie très courte (300s par défaut)
 - Le JWT contient `target_host` : utilisable uniquement vers ce backend spécifique
 - Le JWT contient `bastion_ip` : le backend peut vérifier la cohérence IP (warning si différent)
 - Le `jti` (JWT ID) est unique et généré avec `Crypt::URandom` ou `/dev/urandom`
 
 **Remédiation embarquée :**
+
 - TTL court configurable via `pamAccessBastionJwtTtl` (défaut: 300s)
 - Claim `target_host` limite le scope du JWT à un seul backend
 - UUID cryptographiquement sécurisé pour le `jti`
 - **Cache JTI pour détection de replay** : chaque `jti` utilisé est stocké localement jusqu'à expiration
 
 **Configuration détection replay (activée par défaut) :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf (backend)
 bastion_jwt_replay_detection = true   # Activer la détection (défaut: true)
@@ -824,6 +878,7 @@ bastion_jwt_replay_cleanup_interval = 60  # Nettoyage toutes les N sec (défaut:
 ```
 
 **Remédiation configuration :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf (backend) - Réduire le TTL accepté
 bastion_jwt_clock_skew = 30   # Réduire la tolérance (défaut: 60s)
@@ -831,13 +886,13 @@ bastion_jwt_clock_skew = 30   # Réduire la tolérance (défaut: 60s)
 
 ```yaml
 # LLNG Manager - Réduire la durée de vie du JWT
-pamAccessBastionJwtTtl: 60    # 1 minute au lieu de 5
+pamAccessBastionJwtTtl: 60 # 1 minute au lieu de 5
 ```
 
-|                 | Score résiduel                                        |
-| --------------- | :---------------------------------------------------: |
-| **Probabilité** | 1 (avec détection replay + TTL court)                 |
-| **Impact**      |               2 (usurpation de session si bypass)     |
+|                 |            Score résiduel             |
+| --------------- | :-----------------------------------: |
+| **Probabilité** | 1 (avec détection replay + TTL court) |
+| **Impact**      |  2 (usurpation de session si bypass)  |
 
 ---
 
@@ -855,16 +910,19 @@ pamAccessBastionJwtTtl: 60    # 1 minute au lieu de 5
 **Remédiation embarquée (LLNG) :**
 
 LemonLDAP::NG gère la rotation des clés de manière sécurisée :
+
 1. **Publication anticipée** : La future clé est publiée dans le JWKS avant d'être utilisée pour signer
 2. **Maintien de l'ancienne** : L'ancienne clé reste dans le JWKS après rotation pour les JWT en cours de validité
 3. **Transition transparente** : Avec un refresh du cache JWKS au moins quotidien, la rotation est automatique
 
 **Remédiation embarquée (PAM) :**
+
 - TTL du cache JWKS configurable (défaut: 3600s = 1h)
 - Refresh automatique du cache si `kid` (Key ID) non trouvé
 - Vérification du claim `iss` (issuer) pour éviter les JWT d'autres sources
 
 **Configuration recommandée :**
+
 ```ini
 # /etc/open-bastion/openbastion.conf (backend)
 # Le TTL par défaut (1h) est suffisant grâce à la publication anticipée LLNG
@@ -874,14 +932,15 @@ bastion_jwt_cache_ttl = 3600
 **Cas particulier - Compromission clé LLNG :**
 
 En cas de compromission de la clé privée LLNG (urgence), purger manuellement les caches :
+
 ```bash
 rm -f /var/cache/open-bastion/jwks.json
 ```
 
-|                 | Score résiduel                                         |
-| --------------- | :----------------------------------------------------: |
-| **Probabilité** | 1 (rotation transparente grâce à publication anticipée)|
-| **Impact**      |               1 (en fonctionnement normal)             |
+|                 |                     Score résiduel                      |
+| --------------- | :-----------------------------------------------------: |
+| **Probabilité** | 1 (rotation transparente grâce à publication anticipée) |
+| **Impact**      |              1 (en fonctionnement normal)               |
 
 ---
 
@@ -892,7 +951,7 @@ rm -f /var/cache/open-bastion/jwks.json
 **Avant remédiation :**
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         |                     | R-S2             | R-S1         |                   |
 | **3 - Important**        |                     | R-S7             | R-S8         |                   |
 | **2 - Limité**           |                     |                  |              |                   |
@@ -901,7 +960,7 @@ rm -f /var/cache/open-bastion/jwks.json
 **Après remédiation :**
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S1                |                  |              |                   |
 | **3 - Important**        |                     | R-S2             |              |                   |
 | **2 - Limité**           | R-S7                | R-S8             |              |                   |
@@ -914,7 +973,7 @@ rm -f /var/cache/open-bastion/jwks.json
 **Avant remédiation :**
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4                |                  | R-S1         |                   |
 | **3 - Important**        |                     | R-S3 R-S7        | R-S8         |                   |
 | **2 - Limité**           |                     |                  |              |                   |
@@ -923,7 +982,7 @@ rm -f /var/cache/open-bastion/jwks.json
 **Après remédiation :**
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|------------------|--------------|-------------------|
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S1 R-S4           |                  |              |                   |
 | **3 - Important**        |                     |                  |              |                   |
 | **2 - Limité**           | R-S3 R-S7           | R-S8             |              |                   |
@@ -937,21 +996,21 @@ rm -f /var/cache/open-bastion/jwks.json
 
 **Avant remédiation :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable     | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|----------------------|--------------|-------------------|
-| **4 - Critique**         |                     | R-S6                 | R-S1         |                   |
-| **3 - Important**        |                     | R-S2 R-S7            | R-S5 R-S8    |                   |
-| **2 - Limité**           |                     | R-S9 R-S10           |              |                   |
-| **1 - Négligeable**      |                     |                      |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         |                     | R-S6             | R-S1         |                   |
+| **3 - Important**        |                     | R-S2 R-S7        | R-S5 R-S8    |                   |
+| **2 - Limité**           |                     | R-S9 R-S10       |              |                   |
+| **1 - Négligeable**      |                     |                  |              |                   |
 
 **Après remédiation (avec restriction réseau backends + JWT bastion) :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable     | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|-------------------------|------------------|--------------|-------------------|
-| **4 - Critique**         | R-S1                    |                  |              |                   |
-| **3 - Important**        | R-S5                    | R-S2 R-S6        |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10         | R-S8             |              |                   |
-| **1 - Négligeable**      |                         |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S1                |                  |              |                   |
+| **3 - Important**        | R-S5                | R-S2 R-S6        |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10     | R-S8             |              |                   |
+| **1 - Négligeable**      |                     |                  |              |                   |
 
 **Bénéfice restriction réseau :** R-S5 (contournement bastion) passe de P=3 à P=1.
 **Bénéfice JWT bastion :** R-S9 et R-S10 sont à faible risque grâce au TTL court et vérification JWKS.
@@ -962,23 +1021,24 @@ rm -f /var/cache/open-bastion/jwks.json
 
 **Avant remédiation :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable     | 3 - Probable | 4 - Très probable |
-|--------------------------|---------------------|----------------------|--------------|-------------------|
-| **4 - Critique**         | R-S4                | R-S6                 | R-S1         |                   |
-| **3 - Important**        |                     | R-S3 R-S7            | R-S5 R-S8    |                   |
-| **2 - Limité**           |                     | R-S9 R-S10           |              |                   |
-| **1 - Négligeable**      |                     |                      |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6             | R-S1         |                   |
+| **3 - Important**        |                     | R-S3 R-S7        | R-S5 R-S8    |                   |
+| **2 - Limité**           |                     | R-S9 R-S10       |              |                   |
+| **1 - Négligeable**      |                     |                  |              |                   |
 
 **Après remédiation complète :**
 
-| Impact ↓ / Probabilité → | 1 - Très improbable      | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-|--------------------------|--------------------------|------------------|--------------|-------------------|
-| **4 - Critique**         | R-S1 R-S4                |                  |              |                   |
-| **3 - Important**        | R-S5                     | R-S6             |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable  | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S1 R-S4            |                  |              |                   |
+| **3 - Important**        | R-S5                 | R-S6             |              |                   |
 | **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 | R-S8             |              |                   |
 | **1 - Négligeable**      |                      |                  |              |                   |
 
 **Architecture D = meilleur profil de risque :**
+
 - Tous les risques critiques en P=1
 - Certificats → durée de vie limitée
 - Bastion → point d'entrée unique
@@ -1001,6 +1061,7 @@ rm -f /var/cache/open-bastion/jwks.json
 ### Checklist Architecture B (Serveur Isolé + SSH CA)
 
 Tout de A, plus :
+
 - [ ] CA SSH sur machine sécurisée (air-gap ou HSM)
 - [ ] `TrustedUserCAKeys` configuré
 - [ ] `ExposeAuthInfo yes` dans sshd_config
@@ -1010,6 +1071,7 @@ Tout de A, plus :
 ### Checklist Architecture C (Bastion + Backends)
 
 Tout de A, plus :
+
 - [ ] **CRITIQUE** : Backends accessibles UNIQUEMENT depuis le bastion
 - [ ] Firewall/Security Groups configurés
 - [ ] `AllowAgentForwarding no` sur le bastion
@@ -1020,6 +1082,7 @@ Tout de A, plus :
 ### Checklist Architecture D (Bastion + Backends + SSH CA)
 
 Tout de B et C, plus :
+
 - [ ] CA SSH signant les certificats utilisateur
 - [ ] Même CA de confiance sur bastion et backends
 - [ ] Révocation centralisée via LLNG
@@ -1031,8 +1094,8 @@ Tout de B et C, plus :
 
 ### Choix d'architecture
 
-|               Contexte               |     Architecture recommandée     |
-|--------------------------------------|----------------------------------|
+| Contexte                             | Architecture recommandée         |
+| ------------------------------------ | -------------------------------- |
 | Petit projet, peu de serveurs        | A (avec clés + PAM LLNG)         |
 | Conformité audit renforcé            | B (certificats pour traçabilité) |
 | Infrastructure importante            | C (bastion obligatoire)          |
@@ -1050,11 +1113,11 @@ flowchart LR
     style D fill:#90EE90
 ```
 
-| Transition | Gain |
-|------------|------|
-| A → B | Traçabilité, révocation, durée limitée |
-| A → C | Point d'entrée unique, audit centralisé |
-| B/C → D | Cumul des avantages |
+| Transition | Gain                                    |
+| ---------- | --------------------------------------- |
+| A → B      | Traçabilité, révocation, durée limitée  |
+| A → C      | Point d'entrée unique, audit centralisé |
+| B/C → D    | Cumul des avantages                     |
 
 ---
 
@@ -1139,14 +1202,14 @@ sequenceDiagram
 
 ### Sécurité
 
-| Aspect | Mesure |
-|--------|--------|
-| **Fichier config** | Propriétaire root, mode 0600, pas de symlink |
-| **Validation fingerprint** | Fingerprint SSH validé contre valeur configurée |
-| **ExposeAuthInfo** | Requis dans sshd_config pour validation fingerprint |
-| **Shells autorisés** | Liste blanche configurable |
-| **Home autorisés** | Préfixes autorisés uniquement |
-| **Noms de compte** | Validation stricte (lowercase, max 32 chars) |
+| Aspect                     | Mesure                                              |
+| -------------------------- | --------------------------------------------------- |
+| **Fichier config**         | Propriétaire root, mode 0600, pas de symlink        |
+| **Validation fingerprint** | Fingerprint SSH validé contre valeur configurée     |
+| **ExposeAuthInfo**         | Requis dans sshd_config pour validation fingerprint |
+| **Shells autorisés**       | Liste blanche configurable                          |
+| **Home autorisés**         | Préfixes autorisés uniquement                       |
+| **Noms de compte**         | Validation stricte (lowercase, max 32 chars)        |
 
 ### Comparaison des flux d'autorisation
 
@@ -1186,14 +1249,15 @@ flowchart TB
 **Différence avec R-S2 :** Contrairement aux clés utilisateur OIDC, la révocation côté LLNG ne bloque **pas** les comptes de service car ils n'utilisent pas `/pam/authorize`.
 
 **Remédiation :**
+
 1. Rotation régulière des clés de service
 2. Stockage sécurisé des clés (Ansible Vault, HashiCorp Vault)
 3. Audit des accès avec fingerprint dans les logs
 4. Alerte si même clé utilisée depuis IP inattendue
 
-|                 | Score résiduel |
-| --------------- | :------------: |
-| **Probabilité** |       2        |
+|                 |   Score résiduel    |
+| --------------- | :-----------------: |
+| **Probabilité** |          2          |
 | **Impact**      | 3 (avec monitoring) |
 
 #### R-SA2 - Compromission du fichier de configuration
@@ -1206,11 +1270,13 @@ flowchart TB
 **Description :** Si un attaquant peut modifier `/etc/open-bastion/service-accounts.conf`, il peut ajouter son propre compte de service avec sudo.
 
 **Remédiation embarquée :**
+
 - Vérification propriétaire = root (uid 0)
 - Vérification permissions 0600
 - Refus des symlinks (O_NOFOLLOW)
 
 **Remédiation complémentaire :**
+
 - File integrity monitoring (AIDE, Tripwire)
 - Audit des modifications sur `/etc/open-bastion/`
 

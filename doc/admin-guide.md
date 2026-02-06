@@ -7,11 +7,11 @@ and authorize users via LemonLDAP::NG.
 
 There are three typical deployment scenarios:
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Standalone** | Single server with direct LLNG auth | Web servers, databases, isolated systems |
-| **Bastion** | Jump host with session recording | Entry point for all SSH access |
-| **Backend** | Internal server behind bastion | Production servers, accessed via ProxyJump |
+| Type           | Description                         | Use Case                                   |
+| -------------- | ----------------------------------- | ------------------------------------------ |
+| **Standalone** | Single server with direct LLNG auth | Web servers, databases, isolated systems   |
+| **Bastion**    | Jump host with session recording    | Entry point for all SSH access             |
+| **Backend**    | Internal server behind bastion      | Production servers, accessed via ProxyJump |
 
 ## Prerequisites
 
@@ -138,6 +138,7 @@ ssh user@server
 ## Bastion Configuration
 
 A bastion is a hardened jump host that:
+
 - Authenticates all users via LLNG
 - Records all SSH sessions
 - Proxies connections to backend servers
@@ -283,6 +284,7 @@ chmod 644 /etc/open-bastion/ssh-proxy.conf
 ```
 
 Users can then connect to backends using:
+
 ```bash
 # Direct command
 ob-ssh-proxy backend-server
@@ -511,14 +513,14 @@ General Parameters > Plugins > PAM Access > Server Groups
 
 Example configuration:
 
-| Server Group | Rule | Description |
-|--------------|------|-------------|
-| `bastion` | `$hGroup->{employees}` | All employees can access bastions |
-| `production` | `$hGroup->{sre} or $hGroup->{oncall}` | Only SRE and on-call can access prod |
-| `staging` | `$hGroup->{sre} or $hGroup->{dev}` | SRE and developers |
-| `development` | `$hGroup->{dev}` | Only developers |
-| `database` | `$hGroup->{dba}` | Only DBAs |
-| `default` | `0` | Deny by default |
+| Server Group  | Rule                                  | Description                          |
+| ------------- | ------------------------------------- | ------------------------------------ |
+| `bastion`     | `$hGroup->{employees}`                | All employees can access bastions    |
+| `production`  | `$hGroup->{sre} or $hGroup->{oncall}` | Only SRE and on-call can access prod |
+| `staging`     | `$hGroup->{sre} or $hGroup->{dev}`    | SRE and developers                   |
+| `development` | `$hGroup->{dev}`                      | Only developers                      |
+| `database`    | `$hGroup->{dba}`                      | Only DBAs                            |
+| `default`     | `0`                                   | Deny by default                      |
 
 ## LLNG OIDC Client Security Settings
 
@@ -534,15 +536,17 @@ Automatically revoke refresh tokens that haven't been used within a specified pe
 
 ```yaml
 # Revoke refresh tokens after 30 days of inactivity (recommended)
-oidcRPMetaDataOptionsRtActivity: 2592000  # seconds (0 = disabled)
+oidcRPMetaDataOptionsRtActivity: 2592000 # seconds (0 = disabled)
 ```
 
 This setting protects against:
+
 - Stolen tokens from inactive/decommissioned servers
 - Dormant tokens in old backups
 - Forgotten enrolled servers
 
 **Important**: Ensure the PAM heartbeat timer is enabled to keep tokens active:
+
 ```bash
 systemctl enable --now libpam-openbastion-heartbeat.timer
 ```
@@ -621,25 +625,25 @@ ls -la /home/username
 
 ### File Locations
 
-| File | Purpose |
-|------|---------|
-| `/etc/open-bastion/openbastion.conf` | PAM module configuration |
-| `/etc/open-bastion/token` | Server enrollment token |
-| `/etc/open-bastion/nss_openbastion.conf` | NSS module configuration |
-| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration |
-| `/etc/open-bastion/ssh-proxy.conf` | SSH proxy configuration (bastion) |
-| `/var/lib/open-bastion/sessions/` | Session recordings |
-| `/var/cache/open-bastion/jwks.json` | JWKS cache for JWT verification |
-| `/var/log/open-bastion/audit.json` | Audit log |
+| File                                      | Purpose                           |
+| ----------------------------------------- | --------------------------------- |
+| `/etc/open-bastion/openbastion.conf`      | PAM module configuration          |
+| `/etc/open-bastion/token`                 | Server enrollment token           |
+| `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration          |
+| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration    |
+| `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion) |
+| `/var/lib/open-bastion/sessions/`         | Session recordings                |
+| `/var/cache/open-bastion/jwks.json`       | JWKS cache for JWT verification   |
+| `/var/log/open-bastion/audit.json`        | Audit log                         |
 
 ### Commands
 
-| Command | Purpose |
-|---------|---------|
-| `ob-enroll` | Enroll server with LLNG |
-| `ob-enroll -g GROUP` | Enroll with specific server group |
-| `ob-session-recorder` | Record SSH session (ForceCommand) |
-| `ob-ssh-proxy HOST` | Connect to backend with bastion JWT |
+| Command               | Purpose                             |
+| --------------------- | ----------------------------------- |
+| `ob-enroll`           | Enroll server with LLNG             |
+| `ob-enroll -g GROUP`  | Enroll with specific server group   |
+| `ob-session-recorder` | Record SSH session (ForceCommand)   |
+| `ob-ssh-proxy HOST`   | Connect to backend with bastion JWT |
 
 ## CrowdSec Integration
 
@@ -734,6 +738,7 @@ crowdsec_url = http://crowdsieve.internal:8080
 ### Monitoring
 
 Check CrowdSec decisions:
+
 ```bash
 # List current bans
 cscli decisions list
