@@ -128,6 +128,12 @@ typedef struct {
     int crowdsec_max_failures;             /* Auto-ban after N failures, 0=no auto-ban (default: 5) */
     int crowdsec_block_delay;              /* Time window in seconds for counting (default: 180) */
     char *crowdsec_ban_duration;           /* Ban duration e.g. "4h" (default: 4h) */
+
+    /* SSH key policy (optional restrictions on allowed key types) */
+    bool ssh_key_policy_enabled;           /* Enable SSH key type restrictions (default: false) */
+    char *ssh_key_allowed_types;           /* Comma-separated allowed types: ed25519,ecdsa,rsa (default: all) */
+    int ssh_key_min_rsa_bits;              /* Minimum RSA key size in bits (default: 2048) */
+    int ssh_key_min_ecdsa_bits;            /* Minimum ECDSA key size in bits (default: 256) */
 } pam_openbastion_config_t;
 
 /*

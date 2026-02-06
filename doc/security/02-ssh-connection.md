@@ -1057,6 +1057,7 @@ rm -f /var/cache/open-bastion/jwks.json
 - [ ] PAM LLNG configuré avec `server_group`
 - [ ] Cache offline activé
 - [ ] Monitoring des connexions
+- [ ] Politique de clés SSH activée (ssh_key_policy_enabled)
 
 ### Checklist Architecture B (Serveur Isolé + SSH CA)
 
@@ -1067,6 +1068,7 @@ Tout de A, plus :
 - [ ] `ExposeAuthInfo yes` dans sshd_config
 - [ ] Certificats avec durée de vie courte (8-24h)
 - [ ] Processus de révocation documenté
+- [ ] Politique de clés SSH pour la CA (types autorisés dans les certificats)
 
 ### Checklist Architecture C (Bastion + Backends)
 
@@ -1121,7 +1123,72 @@ flowchart LR
 
 ---
 
-## 10. Comptes de Service
+## 10. Politique de Clés SSH
+
+### R-S11 - Utilisation de clés SSH faibles ou obsolètes
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
+
+**Architectures concernées :** A, B, C, D
+
+**Description :** Des utilisateurs peuvent se connecter avec des clés SSH utilisant des algorithmes cryptographiques faibles ou obsolètes (DSA, RSA-1024), exposant l'infrastructure à des attaques cryptographiques.
+
+**Vecteurs d'attaque :**
+
+- Clés DSA (taille fixe 1024 bits, considérées obsolètes)
+- Clés RSA de moins de 2048 bits
+- Clés générées avec des algorithmes compromis
+
+**Conséquence :** Un attaquant pourrait casser une clé faible et usurper l'identité d'un utilisateur légitime.
+
+**Remédiation embarquée (IMPLÉMENTÉE) :**
+
+Le module PAM peut appliquer une politique de restriction des types de clés SSH :
+
+```ini
+# /etc/open-bastion/openbastion.conf
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, ecdsa, rsa, sk-ed25519, sk-ecdsa
+ssh_key_min_rsa_bits = 2048
+ssh_key_min_ecdsa_bits = 256
+```
+
+**Types de clés supportés :**
+
+| Type         | Description             | Recommandation                  |
+| ------------ | ----------------------- | ------------------------------- |
+| `ed25519`    | Curve25519              | **Recommandé**                  |
+| `sk-ed25519` | Ed25519 + FIDO2         | **Recommandé** (clé matérielle) |
+| `sk-ecdsa`   | ECDSA + FIDO2           | **Recommandé** (clé matérielle) |
+| `ecdsa`      | ECDSA P-256/P-384/P-521 | Acceptable                      |
+| `rsa`        | RSA                     | Acceptable si ≥2048 bits        |
+| `dsa`        | DSA                     | **À désactiver**                |
+
+**Configuration recommandée (haute sécurité) :**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa
+```
+
+**Prérequis SSH :**
+
+```bash
+# /etc/ssh/sshd_config
+ExposeAuthInfo yes   # Requis pour accéder au type de clé
+```
+
+|                 |           Score résiduel           |
+| --------------- | :--------------------------------: |
+| **Probabilité** | 1 (avec politique de clés activée) |
+| **Impact**      |    3 (si clé faible compromise)    |
+
+---
+
+## 11. Comptes de Service
 
 ### Description
 

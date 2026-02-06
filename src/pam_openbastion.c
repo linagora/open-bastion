@@ -44,6 +44,7 @@
 #include "jti_cache.h"
 #include "crowdsec.h"
 #include "service_account.h"
+#include "ssh_key_policy.h"
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -74,6 +75,7 @@ typedef struct {
     crowdsec_context_t *crowdsec;  /* CrowdSec bouncer/watcher */
     crowdsec_action_t crowdsec_action;  /* Parsed CrowdSec action (reject/warn) */
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
+    ssh_key_policy_t ssh_key_policy;  /* SSH key type/size policy (#91) */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -741,6 +743,25 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         }
     }
 
+    /* Initialize SSH key policy (#91) */
+    ssh_key_policy_init(&data->ssh_key_policy);
+    data->ssh_key_policy.enabled = data->config.ssh_key_policy_enabled;
+    if (data->config.ssh_key_allowed_types) {
+        if (ssh_key_policy_parse_types(&data->ssh_key_policy,
+                                       data->config.ssh_key_allowed_types) != 0) {
+            OB_LOG_WARN(pamh, "Failed to parse ssh_key_allowed_types, using defaults");
+        }
+    }
+    data->ssh_key_policy.min_rsa_bits = data->config.ssh_key_min_rsa_bits;
+    data->ssh_key_policy.min_ecdsa_bits = data->config.ssh_key_min_ecdsa_bits;
+
+    if (data->ssh_key_policy.enabled) {
+        OB_LOG_INFO(pamh, "SSH key policy enabled: RSA>=%d, ECDSA>=%d, types=%s",
+                data->ssh_key_policy.min_rsa_bits,
+                data->ssh_key_policy.min_ecdsa_bits,
+                data->config.ssh_key_allowed_types ? data->config.ssh_key_allowed_types : "all");
+    }
+
     /* Store data for later calls */
     if (pam_set_data(pamh, PAM_OPENBASTION_DATA, data, cleanup_data) != PAM_SUCCESS) {
         OB_LOG_ERR(pamh, "Failed to store module data");
@@ -853,6 +874,54 @@ static char *extract_ssh_key_fingerprint(pam_handle_t *pamh)
     }
 
     return fingerprint;
+}
+
+/*
+ * Extract SSH algorithm from PAM environment.
+ * SSH sets SSH_USER_AUTH environment variable when ExposeAuthInfo is enabled.
+ * Format for publickey: "publickey <algorithm> SHA256:<fingerprint>"
+ * For certificates: "publickey <algorithm>-cert-v01@openssh.com SHA256:<fingerprint>"
+ *
+ * Returns allocated string with algorithm (caller must free), or NULL if not found.
+ */
+static char *extract_ssh_algorithm(pam_handle_t *pamh)
+{
+    /* Get SSH_USER_AUTH from PAM environment */
+    const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
+    if (!ssh_auth || !*ssh_auth) {
+        return NULL;
+    }
+
+    /* Security: Check length before processing */
+    if (strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
+        OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
+        return NULL;
+    }
+
+    /* Must start with "publickey " */
+    if (strncmp(ssh_auth, "publickey ", 10) != 0) {
+        return NULL;
+    }
+
+    /* Parse: "publickey <algorithm> <fingerprint>" */
+    const char *algo_start = ssh_auth + 10;
+    const char *algo_end = strchr(algo_start, ' ');
+    if (!algo_end) {
+        return NULL;
+    }
+
+    size_t algo_len = (size_t)(algo_end - algo_start);
+    if (algo_len == 0 || algo_len > 128) {
+        return NULL;
+    }
+
+    char *algorithm = malloc(algo_len + 1);
+    if (algorithm) {
+        memcpy(algorithm, algo_start, algo_len);
+        algorithm[algo_len] = '\0';
+    }
+
+    return algorithm;
 }
 
 /*
@@ -1505,6 +1574,55 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     const char *service = NULL;
     if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS || !service) {
         service = "unknown";
+    }
+
+    /*
+     * SSH key policy validation (#91)
+     * If ssh_key_policy is enabled and this is an SSH connection with a key,
+     * verify the key type and size match the policy requirements.
+     */
+    if (data->ssh_key_policy.enabled &&
+        (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0)) {
+
+        char *ssh_algorithm = extract_ssh_algorithm(pamh);
+        if (ssh_algorithm) {
+            ssh_key_validation_result_t validation_result;
+            bool allowed = ssh_key_policy_check(&data->ssh_key_policy,
+                                                ssh_algorithm,
+                                                &validation_result);
+
+            OB_LOG_DEBUG(pamh, "SSH key policy check: algorithm=%s type=%s bits=%d allowed=%s",
+                    ssh_algorithm,
+                    ssh_key_type_name(validation_result.type),
+                    validation_result.key_bits,
+                    allowed ? "yes" : "no");
+
+            if (!allowed) {
+                OB_LOG_ERR(pamh, "SSH key rejected by policy for user %s: %s (algorithm: %s)",
+                        user,
+                        validation_result.error ? validation_result.error : "unknown error",
+                        ssh_algorithm);
+
+                if (data->audit) {
+                    audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);
+                    audit_event.user = user;
+                    audit_event.service = service;
+                    audit_event.client_ip = client_ip;
+                    audit_event.tty = tty;
+                    audit_event.result_code = PAM_PERM_DENIED;
+                    audit_event.reason = validation_result.error
+                        ? validation_result.error
+                        : "SSH key type not allowed by policy";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+
+                free(ssh_algorithm);
+                return PAM_PERM_DENIED;
+            }
+
+            free(ssh_algorithm);
+        }
     }
 
     /*

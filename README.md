@@ -44,9 +44,11 @@ The module supports two authentication methods:
 ## Requirements
 
 Globally:
+
 - A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](./llng-plugin) installed and enabled
 
 On each SSH servers to protect:
+
 - libcurl
 - json-c
 - OpenSSL
@@ -79,9 +81,10 @@ sudo cp -r llng-plugin/usr/share/* /usr/share/
 ```
 
 This installs the 3 Open Bastion plugins for LemonLDAP::NG:
+
 - **PamAccess** - Main plugin: token generation interface and authorization endpoints (`/pam/authorize`, `/pam/bastion-token`)
 - **OIDCDeviceAuthorization** - Server enrollment via OAuth 2.0 Device Authorization Grant (RFC 8628)
-- **SSHCA** *(optional)* - SSH Certificate Authority for certificate-based authentication
+- **SSHCA** _(optional)_ - SSH Certificate Authority for certificate-based authentication
 
 ### Step 2: Create the OIDC Relying Party
 
@@ -98,13 +101,15 @@ In the LLNG Manager, create a new OIDC Relying Party:
 
 Use `customPlugins` inside `lemonldap-ng.ini`, section `[portal]`:
 
-* without SSHCA:
+- without SSHCA:
+
 ```ini
 [portal]
 customPlugins = ::Plugin::OIDCDeviceAuthorization, ::Plugins::PamAccess
 ```
 
-* with SSHCA
+- with SSHCA
+
 ```ini
 [portal]
 customPlugins = ::Plugin::OIDCDeviceAuthorization, ::Plugins::PamAccess, ::Plugins::SSHCA
@@ -113,25 +118,26 @@ customPlugins = ::Plugin::OIDCDeviceAuthorization, ::Plugins::PamAccess, ::Plugi
 ### Step 4: Plugins parameters
 
 Additional and optional parameters that can be inserted into `lemonldap-ng.ini`, section `[portal]`:
-* `oidcServiceDeviceAuthorizationExpiration` _(default `600` == 10mn)_
-* `oidcServiceDeviceAuthorizationPollingInterval` _(default `5`)_
-* `oidcServiceDeviceAuthorizationUserCodeLength` _(default `8`)_
-* `portalDisplayPamAccess` _(default `0`)_: set to 1 _(or a rule)_ to display PAM tab into Lemonldap-NG module, useless if you're using SSHCA
-* `pamAccessRp` _(default `pam-access`)_
-* `pamAccessTokenDuration` _(default `600` == 10mn)_
-* `pamAccessMaxDuration` _(default `3600` == 1h)_
-* `pamAccessExportedVars` _(default `{}`)_
-* `pamAccessOfflineTtl` _(default `86400` == 1d)_
-* `pamAccessSshRules` _(default `{}`)_
-* `pamAccessServerGroups` _(default `{}`)_
-* `pamAccessSudoRules` _(default `{}`)_
-* `pamAccessOfflineEnabled` _(default `0`)_
-* `pamAccessHeartbeatInterval` _(default `300` == 5mn)_
-* `portalDisplaySshCa` _(default `0`)_: set to 1 _(or a rule)_ to display SSHCA tab into Lemonldap-NG module if you're using SSHCA
-* `sshCaCertMaxValidity` _(default `365` == 1y)_
-* `sshCaSerialPath` _(default "")_: set it to the path where the certificates serial will be stored _(`/var/lib/lemonldap-ng/ssh` for example)_
-* `sshCaPrincipalSources` _(default `$uid`)_
-* `sshCaKrlPath` _(default "")_: set it to the path where the Certificate Revocation List will be stored
+
+- `oidcServiceDeviceAuthorizationExpiration` _(default `600` == 10mn)_
+- `oidcServiceDeviceAuthorizationPollingInterval` _(default `5`)_
+- `oidcServiceDeviceAuthorizationUserCodeLength` _(default `8`)_
+- `portalDisplayPamAccess` _(default `0`)_: set to 1 _(or a rule)_ to display PAM tab into Lemonldap-NG module, useless if you're using SSHCA
+- `pamAccessRp` _(default `pam-access`)_
+- `pamAccessTokenDuration` _(default `600` == 10mn)_
+- `pamAccessMaxDuration` _(default `3600` == 1h)_
+- `pamAccessExportedVars` _(default `{}`)_
+- `pamAccessOfflineTtl` _(default `86400` == 1d)_
+- `pamAccessSshRules` _(default `{}`)_
+- `pamAccessServerGroups` _(default `{}`)_
+- `pamAccessSudoRules` _(default `{}`)_
+- `pamAccessOfflineEnabled` _(default `0`)_
+- `pamAccessHeartbeatInterval` _(default `300` == 5mn)_
+- `portalDisplaySshCa` _(default `0`)_: set to 1 _(or a rule)_ to display SSHCA tab into Lemonldap-NG module if you're using SSHCA
+- `sshCaCertMaxValidity` _(default `365` == 1y)_
+- `sshCaSerialPath` _(default "")_: set it to the path where the certificates serial will be stored _(`/var/lib/lemonldap-ng/ssh` for example)_
+- `sshCaPrincipalSources` _(default `$uid`)_
+- `sshCaKrlPath` _(default "")_: set it to the path where the Certificate Revocation List will be stored
 
 #### Step 4.1: Generate and Import the SSH CA Key (optional)
 
@@ -169,6 +175,7 @@ openssl pkey -in ssh-ca.key -pubout -out ssh-ca.pub
 5. Save the configuration
 
 Then configure the SSH CA plugin to use this key inside `lemonldap-ng.ini`, section `[portal]`:
+
 ```ini
 [portal]
 sshCaKeyRef = ssh-ca
@@ -211,6 +218,7 @@ sudo make install
 ```
 
 This installs:
+
 - `/usr/lib/security/pam_openbastion.so` - The PAM module
 - `/usr/sbin/ob-enroll` - Server enrollment script
 - `/etc/open-bastion/openbastion.conf.example` - Example configuration
@@ -226,6 +234,7 @@ sudo nano /etc/open-bastion/openbastion.conf
 ```
 
 Configure at minimum:
+
 ```ini
 portal_url = https://auth.example.com
 client_id = pam-access
@@ -242,6 +251,7 @@ sudo ob-enroll
 ```
 
 The script will:
+
 1. Initiate a Device Authorization request
 2. Display a user code for administrator approval
 3. Wait for the administrator to approve the server
@@ -329,6 +339,7 @@ session    required     pam_unix.so
 ```
 
 For this mode, configure `/etc/ssh/sshd_config`:
+
 ```
 PasswordAuthentication no
 PubkeyAuthentication yes
@@ -363,12 +374,12 @@ session    required     pam_unix.so
 
 #### Summary Table
 
-| Mode | Unix Password | LLNG Token | SSH Key | LLNG Authorization |
-|------|---------------|------------|---------|-------------------|
-| A - LLNG Only | ❌ Rejected | ✅ Required | Optional* | ✅ Required |
-| B - LLNG + Unix | ✅ Fallback | ✅ Preferred | Optional* | ✅ Required |
-| C - SSH Key Only | ❌ Disabled | ❌ Not used | ✅ Required | ✅ Required |
-| D - All Methods | ✅ Accepted | ✅ Accepted | Optional* | ✅ Required |
+| Mode             | Unix Password | LLNG Token   | SSH Key     | LLNG Authorization |
+| ---------------- | ------------- | ------------ | ----------- | ------------------ |
+| A - LLNG Only    | ❌ Rejected   | ✅ Required  | Optional\*  | ✅ Required        |
+| B - LLNG + Unix  | ✅ Fallback   | ✅ Preferred | Optional\*  | ✅ Required        |
+| C - SSH Key Only | ❌ Disabled   | ❌ Not used  | ✅ Required | ✅ Required        |
+| D - All Methods  | ✅ Accepted   | ✅ Accepted  | Optional\*  | ✅ Required        |
 
 \* SSH key authentication depends on `PubkeyAuthentication` in sshd_config
 
@@ -441,17 +452,17 @@ sudo ob-enroll [OPTIONS]
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `-p, --portal URL` | LemonLDAP::NG portal URL |
-| `-c, --client-id ID` | OIDC client ID (default: pam-access) |
-| `-s, --client-secret SECRET` | OIDC client secret |
-| `-g, --server-group GROUP` | Server group name (default: default) |
-| `-t, --token-file FILE` | Where to save the token (default: /etc/open-bastion/token) |
-| `-C, --config FILE` | Configuration file (default: /etc/open-bastion/openbastion.conf) |
-| `-k, --insecure` | Skip SSL certificate verification |
-| `-q, --quiet` | Quiet mode |
-| `-h, --help` | Show help |
+| Option                       | Description                                                      |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `-p, --portal URL`           | LemonLDAP::NG portal URL                                         |
+| `-c, --client-id ID`         | OIDC client ID (default: pam-access)                             |
+| `-s, --client-secret SECRET` | OIDC client secret                                               |
+| `-g, --server-group GROUP`   | Server group name (default: default)                             |
+| `-t, --token-file FILE`      | Where to save the token (default: /etc/open-bastion/token)       |
+| `-C, --config FILE`          | Configuration file (default: /etc/open-bastion/openbastion.conf) |
+| `-k, --insecure`             | Skip SSL certificate verification                                |
+| `-q, --quiet`                | Quiet mode                                                       |
+| `-h, --help`                 | Show help                                                        |
 
 ### Examples
 
@@ -482,6 +493,7 @@ curl -X POST https://auth.example.com/oauth2/device \
 ```
 
 Response:
+
 ```json
 {
   "device_code": "...",
@@ -571,18 +583,18 @@ Arguments can be passed directly in PAM configuration:
 auth required pam_openbastion.so portal_url=https://auth.example.com debug
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `conf=/path/to/file` | Use alternate config file |
-| `portal_url=URL` | Override portal URL |
-| `server_group=GROUP` | Override server group |
-| `debug` | Enable debug logging |
-| `authorize_only` | Skip password check (for SSH key mode) |
-| `no_cache` | Disable token caching |
-| `insecure` | Skip SSL verification |
-| `no_audit` | Disable audit logging |
-| `no_rate_limit` | Disable rate limiting |
-| `no_bind_ip` | Disable IP binding for tokens |
+| Argument             | Description                            |
+| -------------------- | -------------------------------------- |
+| `conf=/path/to/file` | Use alternate config file              |
+| `portal_url=URL`     | Override portal URL                    |
+| `server_group=GROUP` | Override server group                  |
+| `debug`              | Enable debug logging                   |
+| `authorize_only`     | Skip password check (for SSH key mode) |
+| `no_cache`           | Disable token caching                  |
+| `insecure`           | Skip SSL verification                  |
+| `no_audit`           | Disable audit logging                  |
+| `no_rate_limit`      | Disable rate limiting                  |
+| `no_bind_ip`         | Disable IP binding for tokens          |
 
 ## Service Accounts
 
@@ -592,12 +604,14 @@ only, without OIDC authentication. They are defined in a local configuration fil
 ### Why Service Accounts?
 
 Some accounts don't correspond to real users and can't authenticate via OIDC:
+
 - **Automation tools**: Ansible, Puppet, Chef
 - **Backup systems**: rsync, borg, restic
 - **CI/CD pipelines**: GitLab Runner, GitHub Actions
 - **Monitoring agents**: Prometheus, Zabbix
 
 These accounts need:
+
 - SSH key authentication (no interactive login)
 - Fine-grained sudo permissions
 - Automatic account creation
@@ -627,6 +641,7 @@ home = /var/lib/backup
 ```
 
 **Security requirements for this file:**
+
 - Owned by root (uid 0)
 - Permissions 0600
 - Not a symlink
@@ -642,6 +657,7 @@ ExposeAuthInfo yes
 ```
 
 Get the SSH key fingerprint:
+
 ```bash
 ssh-keygen -lf /path/to/key.pub
 # Output: 256 SHA256:abc123def456 user@host (ED25519)
@@ -650,16 +666,16 @@ ssh-keygen -lf /path/to/key.pub
 
 ### Configuration Options
 
-| Option | Required | Description |
-|--------|----------|-------------|
-| `key_fingerprint` | Yes | SSH key fingerprint (SHA256:... or MD5:...) |
-| `sudo_allowed` | No | Allow sudo access (default: false) |
-| `sudo_nopasswd` | No | Sudo without password (default: false) |
-| `gecos` | No | User description |
-| `shell` | No | Login shell (must be in approved_shells) |
-| `home` | No | Home directory (must match approved_home_prefixes) |
-| `uid` | No | Fixed UID (0 = auto-assign) |
-| `gid` | No | Fixed GID (0 = auto-assign) |
+| Option            | Required | Description                                        |
+| ----------------- | -------- | -------------------------------------------------- |
+| `key_fingerprint` | Yes      | SSH key fingerprint (SHA256:... or MD5:...)        |
+| `sudo_allowed`    | No       | Allow sudo access (default: false)                 |
+| `sudo_nopasswd`   | No       | Sudo without password (default: false)             |
+| `gecos`           | No       | User description                                   |
+| `shell`           | No       | Login shell (must be in approved_shells)           |
+| `home`            | No       | Home directory (must match approved_home_prefixes) |
+| `uid`             | No       | Fixed UID (0 = auto-assign)                        |
+| `gid`             | No       | Fixed GID (0 = auto-assign)                        |
 
 ### How It Works
 
@@ -823,15 +839,15 @@ AcceptEnv OB_BASTION_JWT
 
 ### Configuration Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `bastion_jwt_required` | `false` | Enable bastion JWT verification |
-| `bastion_jwt_issuer` | (portal_url) | Expected JWT issuer |
-| `bastion_jwt_jwks_url` | (auto) | URL to fetch public keys |
-| `bastion_jwt_jwks_cache` | `/var/cache/open-bastion/jwks.json` | Local JWKS cache file |
-| `bastion_jwt_cache_ttl` | `3600` | JWKS cache TTL in seconds |
-| `bastion_jwt_clock_skew` | `60` | Allowed clock skew in seconds |
-| `bastion_jwt_allowed_bastions` | (none) | Comma-separated list of allowed bastion IDs |
+| Option                         | Default                             | Description                                 |
+| ------------------------------ | ----------------------------------- | ------------------------------------------- |
+| `bastion_jwt_required`         | `false`                             | Enable bastion JWT verification             |
+| `bastion_jwt_issuer`           | (portal_url)                        | Expected JWT issuer                         |
+| `bastion_jwt_jwks_url`         | (auto)                              | URL to fetch public keys                    |
+| `bastion_jwt_jwks_cache`       | `/var/cache/open-bastion/jwks.json` | Local JWKS cache file                       |
+| `bastion_jwt_cache_ttl`        | `3600`                              | JWKS cache TTL in seconds                   |
+| `bastion_jwt_clock_skew`       | `60`                                | Allowed clock skew in seconds               |
+| `bastion_jwt_allowed_bastions` | (none)                              | Comma-separated list of allowed bastion IDs |
 
 ## User Experience
 
@@ -874,6 +890,7 @@ sudo journalctl -u sshd -f
 ### Enable Debug Mode
 
 In `/etc/open-bastion/openbastion.conf`:
+
 ```ini
 log_level = debug
 ```
@@ -897,13 +914,13 @@ curl -X POST https://auth.example.com/pam/authorize \
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| `PAM unable to load module` | Module not in path | Check `/lib/security/` or `/lib64/security/` |
-| `Token introspection failed` | Wrong credentials | Verify client_id and client_secret |
-| `Server not enrolled` | Missing/invalid token | Run `ob-enroll` |
-| `User not authorized` | Server group rules | Check LLNG Manager configuration |
-| `Connection refused` | Portal unreachable | Check network and portal_url |
+| Issue                        | Cause                 | Solution                                     |
+| ---------------------------- | --------------------- | -------------------------------------------- |
+| `PAM unable to load module`  | Module not in path    | Check `/lib/security/` or `/lib64/security/` |
+| `Token introspection failed` | Wrong credentials     | Verify client_id and client_secret           |
+| `Server not enrolled`        | Missing/invalid token | Run `ob-enroll`                              |
+| `User not authorized`        | Server group rules    | Check LLNG Manager configuration             |
+| `Connection refused`         | Portal unreachable    | Check network and portal_url                 |
 
 ### Re-enrollment
 
@@ -976,21 +993,88 @@ crowdsec_url = http://crowdsieve.internal:8080
 
 ### Configuration Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `crowdsec_enabled` | `false` | Enable CrowdSec integration |
-| `crowdsec_url` | `http://127.0.0.1:8080` | CrowdSec LAPI URL |
-| `crowdsec_timeout` | `5` | HTTP timeout in seconds |
-| `crowdsec_fail_open` | `true` | Allow auth if CrowdSec unavailable |
-| `crowdsec_bouncer_key` | (none) | Bouncer API key for IP checking |
-| `crowdsec_action` | `reject` | Action on ban: `reject` or `warn` |
-| `crowdsec_machine_id` | (none) | Machine ID for alert reporting |
-| `crowdsec_password` | (none) | Machine password |
-| `crowdsec_scenario` | `open-bastion/ssh-auth-failure` | Scenario name for alerts |
-| `crowdsec_send_all_alerts` | `true` | Send all alerts or only bans |
-| `crowdsec_max_failures` | `5` | Auto-ban after N failures (0=disabled) |
-| `crowdsec_block_delay` | `180` | Time window for counting failures |
-| `crowdsec_ban_duration` | `4h` | Ban duration (e.g., `4h`, `1d`) |
+| Option                     | Default                         | Description                            |
+| -------------------------- | ------------------------------- | -------------------------------------- |
+| `crowdsec_enabled`         | `false`                         | Enable CrowdSec integration            |
+| `crowdsec_url`             | `http://127.0.0.1:8080`         | CrowdSec LAPI URL                      |
+| `crowdsec_timeout`         | `5`                             | HTTP timeout in seconds                |
+| `crowdsec_fail_open`       | `true`                          | Allow auth if CrowdSec unavailable     |
+| `crowdsec_bouncer_key`     | (none)                          | Bouncer API key for IP checking        |
+| `crowdsec_action`          | `reject`                        | Action on ban: `reject` or `warn`      |
+| `crowdsec_machine_id`      | (none)                          | Machine ID for alert reporting         |
+| `crowdsec_password`        | (none)                          | Machine password                       |
+| `crowdsec_scenario`        | `open-bastion/ssh-auth-failure` | Scenario name for alerts               |
+| `crowdsec_send_all_alerts` | `true`                          | Send all alerts or only bans           |
+| `crowdsec_max_failures`    | `5`                             | Auto-ban after N failures (0=disabled) |
+| `crowdsec_block_delay`     | `180`                           | Time window for counting failures      |
+| `crowdsec_ban_duration`    | `4h`                            | Ban duration (e.g., `4h`, `1d`)        |
+
+## SSH Key Policy
+
+Open Bastion can optionally restrict which SSH key types and sizes are allowed for authentication. This is useful for enforcing security policies that require modern key types or minimum key sizes.
+
+### Configuration
+
+```ini
+# Enable SSH key policy enforcement
+ssh_key_policy_enabled = true
+
+# Only allow Ed25519 and ECDSA keys (no RSA)
+ssh_key_allowed_types = ed25519,ecdsa
+
+# Require at least 3072-bit RSA keys (if RSA is allowed)
+ssh_key_min_rsa_bits = 3072
+
+# Require at least P-384 for ECDSA (if ECDSA is allowed)
+ssh_key_min_ecdsa_bits = 384
+```
+
+### Allowed Key Types
+
+| Type      | Description                           |
+| --------- | ------------------------------------- |
+| `ed25519` | Ed25519 keys (recommended, 256-bit)   |
+| `ecdsa`   | ECDSA keys (P-256, P-384, P-521)      |
+| `rsa`     | RSA keys (variable size)              |
+| `dsa`     | DSA keys (deprecated, 1024-bit)       |
+| `sk`      | FIDO2/Security keys (hardware tokens) |
+| `all`     | All types except DSA                  |
+
+### Example Policies
+
+**Strict Modern (Ed25519 only):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519
+```
+
+**FIPS-like (ECDSA P-384+ or RSA 3072+):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ecdsa,rsa
+ssh_key_min_ecdsa_bits = 384
+ssh_key_min_rsa_bits = 3072
+```
+
+**No RSA (modern keys only):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519,ecdsa,sk
+```
+
+### Configuration Options
+
+| Option                   | Default | Description                       |
+| ------------------------ | ------- | --------------------------------- |
+| `ssh_key_policy_enabled` | `false` | Enable SSH key policy enforcement |
+| `ssh_key_allowed_types`  | (all)   | Comma-separated allowed types     |
+| `ssh_key_min_rsa_bits`   | `2048`  | Minimum RSA key size in bits      |
+| `ssh_key_min_ecdsa_bits` | `256`   | Minimum ECDSA key size in bits    |
+
+**Note:** This feature requires `ExposeAuthInfo yes` in `sshd_config` to function.
 
 ## License
 

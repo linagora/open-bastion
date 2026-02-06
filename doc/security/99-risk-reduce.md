@@ -7,7 +7,7 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 | Impact ↓ / Probabilité → | 1 - Très improbable                           | 2 - Peu probable |
 | ------------------------ | --------------------------------------------- | ---------------- |
 | **4 - Critique**         | R5, R-S1, R-S4, R-SA2                         | R-SA1            |
-| **3 - Important**        | R1, R3, R8, R12, R-S5                         | R-S6             |
+| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                  | R-S6             |
 | **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10 | R6, R-S8         |
 | **1 - Négligeable**      | R0, R13                                       |                  |
 
@@ -21,6 +21,10 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 - **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 - détection replay réduit P)
 - **R-S10** : Rotation des clés JWKS non propagée (P=1, I=1 - atténué par publication anticipée LLNG)
+
+**Nouveau risque identifié (PR #91 - Politique de clés SSH) :**
+
+- **R-S11** : Utilisation de clés SSH faibles (P=1, I=3 - atténué par politique de clés)
 
 **Risques spécifiques aux comptes de service :**
 
@@ -286,3 +290,47 @@ Le module PAM vérifie avant de charger `/etc/open-bastion/service-accounts.conf
 - `AUDIT_AUTHZ_DENIED` : Échecs d'autorisation (subject mismatch, bastion non autorisé)
 
 → Meilleure classification des incidents pour le SIEM.
+
+### Politique de clés SSH - **IMPLÉMENTÉ**
+
+Le module PAM peut appliquer une politique de restriction des types de clés SSH autorisés :
+
+```c
+// src/ssh_key_policy.c - Valide le type et la taille de la clé
+ssh_key_validation_result_t result;
+if (!ssh_key_policy_check(&policy, algorithm, &result)) {
+    // Clé rejetée : type non autorisé ou taille insuffisante
+}
+```
+
+**Configuration :**
+
+```ini
+# /etc/open-bastion/openbastion.conf
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, ecdsa, rsa, sk-ed25519, sk-ecdsa
+ssh_key_min_rsa_bits = 2048
+ssh_key_min_ecdsa_bits = 256
+```
+
+**Types de clés supportés :**
+
+| Type         | Sécurité   | Recommandation           |
+| ------------ | ---------- | ------------------------ |
+| `ed25519`    | Forte      | **Recommandé**           |
+| `sk-ed25519` | Très forte | **Recommandé** (FIDO2)   |
+| `sk-ecdsa`   | Très forte | **Recommandé** (FIDO2)   |
+| `ecdsa`      | Bonne      | Acceptable               |
+| `rsa`        | Moyenne    | Acceptable si ≥2048 bits |
+| `dsa`        | Faible     | **À désactiver**         |
+
+**Bénéfices sécurité :**
+
+- Empêche l'utilisation de clés DSA obsolètes
+- Impose une taille minimale pour RSA et ECDSA
+- Encourage l'adoption de clés modernes (Ed25519, FIDO2)
+- Audit des rejets de clés non conformes
+
+**Risque impacté :**
+
+- **R-S11** : Réduction de P grâce à l'interdiction des algorithmes faibles

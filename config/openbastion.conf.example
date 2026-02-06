@@ -199,3 +199,39 @@ log_level = warn
 # Ban duration (e.g., 4h, 1d, 1w)
 # Default: 4h
 # crowdsec_ban_duration = 4h
+
+# ==============================================================================
+# SSH Key Policy (optional restrictions on allowed key types)
+# ==============================================================================
+# Optionally restrict which SSH key types and sizes are allowed for
+# authentication. This is useful for enforcing security policies that
+# require modern key types or minimum key sizes.
+
+# Enable SSH key policy enforcement
+# When enabled, connections with non-compliant keys are rejected
+# Default: false
+# ssh_key_policy_enabled = false
+
+# Allowed key types (comma-separated)
+# Valid values: ed25519, ecdsa, rsa, dsa, sk (FIDO2), all
+# Note: "all" does not include DSA (deprecated) - must be explicitly added
+# Default: all (when policy is disabled)
+# Examples:
+#   ssh_key_allowed_types = ed25519            # Only Ed25519 (most secure)
+#   ssh_key_allowed_types = ed25519,ecdsa      # Modern curves only
+#   ssh_key_allowed_types = ed25519,ecdsa,rsa  # Common secure types
+#   ssh_key_allowed_types = all                # All types except DSA
+# ssh_key_allowed_types = ed25519,ecdsa,rsa
+
+# Minimum RSA key size in bits
+# Common values: 2048 (minimum recommended), 3072 (recommended), 4096 (high security)
+# Note: RSA key size cannot always be determined from the connection;
+# this is enforced when size information is available.
+# Default: 2048
+# ssh_key_min_rsa_bits = 2048
+
+# Minimum ECDSA key size in bits
+# Valid values: 256 (P-256), 384 (P-384), 521 (P-521)
+# Note: P-256 provides ~128-bit security, P-384 ~192-bit, P-521 ~256-bit
+# Default: 256
+# ssh_key_min_ecdsa_bits = 256

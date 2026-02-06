@@ -491,6 +491,48 @@ shell = /bin/bash
 home = /var/lib/ansible
 ```
 
+## SSH Key Policy
+
+The PAM module can enforce restrictions on which SSH key types are allowed and their minimum sizes.
+This prevents connections using weak or deprecated cryptographic algorithms.
+
+### Configuration
+
+| Setting                  | Default | Description                               |
+| ------------------------ | ------- | ----------------------------------------- |
+| `ssh_key_policy_enabled` | false   | Enable SSH key type restrictions          |
+| `ssh_key_allowed_types`  | all     | Comma-separated list of allowed key types |
+| `ssh_key_min_rsa_bits`   | 2048    | Minimum RSA key size in bits              |
+| `ssh_key_min_ecdsa_bits` | 256     | Minimum ECDSA key size in bits            |
+
+### Supported Key Types
+
+| Type         | Algorithm                 | Recommendation                         |
+| ------------ | ------------------------- | -------------------------------------- |
+| `ed25519`    | Ed25519                   | **Recommended** - Modern, fast, secure |
+| `sk-ed25519` | Ed25519 with FIDO2        | **Recommended** - Hardware-bound       |
+| `sk-ecdsa`   | ECDSA with FIDO2          | **Recommended** - Hardware-bound       |
+| `ecdsa`      | ECDSA (P-256/P-384/P-521) | Acceptable                             |
+| `rsa`        | RSA                       | Acceptable with ≥3072 bits             |
+| `dsa`        | DSA                       | **Deprecated** - Should be disabled    |
+
+### Security Considerations
+
+- **DSA keys**: Should be disabled. DSA is considered deprecated and has fixed 1024-bit key size.
+- **RSA keys**: Should require at least 2048 bits, preferably 3072 bits for long-term security.
+- **ECDSA keys**: P-256 (256 bits) is the minimum recommended curve.
+- **Ed25519 keys**: Always 256 bits, no size configuration needed.
+- **FIDO2/Security Keys**: `sk-ed25519` and `sk-ecdsa` provide hardware-bound private keys.
+
+### Example: High Security Configuration
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa
+```
+
+This configuration only allows Ed25519 keys and FIDO2 hardware security keys.
+
 ## Threat Mitigations
 
 | Threat                 | Mitigation                                                       |
@@ -509,6 +551,7 @@ home = /var/lib/ansible
 | Client secret exposure | JWT Client Assertion (RFC 7523) - secret never transmitted       |
 | Bastion bypass         | Bastion JWT verification on backends (RS256 signed)              |
 | Direct backend access  | JWT required + JWKS-based offline verification                   |
+| Weak SSH keys          | SSH key policy enforcement with type/size restrictions           |
 
 ## Security Reporting
 
