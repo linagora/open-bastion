@@ -157,6 +157,12 @@ void config_init(pam_openbastion_config_t *config)
     config->crowdsec_block_delay = 180;
     config->crowdsec_ban_duration = strdup("4h");
 
+    /* SSH key policy - disabled by default (allows all key types) */
+    config->ssh_key_policy_enabled = false;
+    config->ssh_key_allowed_types = NULL;  /* NULL means all types allowed */
+    config->ssh_key_min_rsa_bits = 2048;   /* NIST recommendation minimum */
+    config->ssh_key_min_ecdsa_bits = 256;  /* P-256 minimum */
+
     /* Note: strdup failures for defaults are checked by config_validate() */
 }
 
@@ -233,6 +239,9 @@ void config_free(pam_openbastion_config_t *config)
     secure_free_str(config->crowdsec_password);
     free(config->crowdsec_scenario);
     free(config->crowdsec_ban_duration);
+
+    /* SSH key policy */
+    free(config->ssh_key_allowed_types);
 
     explicit_bzero(config, sizeof(*config));
 }
@@ -611,6 +620,25 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     }
     else if (strcmp(key, "crowdsec_ban_duration") == 0) {
         SET_STRING_FIELD(config->crowdsec_ban_duration, value, key);
+    }
+    /* SSH key policy options */
+    else if (strcmp(key, "ssh_key_policy_enabled") == 0 ||
+             strcmp(key, "ssh_key_policy") == 0) {
+        config->ssh_key_policy_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "ssh_key_allowed_types") == 0 ||
+             strcmp(key, "ssh_allowed_types") == 0) {
+        SET_STRING_FIELD(config->ssh_key_allowed_types, value, key);
+    }
+    else if (strcmp(key, "ssh_key_min_rsa_bits") == 0 ||
+             strcmp(key, "ssh_min_rsa_bits") == 0) {
+        /* Valid RSA sizes: 1024 (weak), 2048 (minimum recommended), 3072, 4096 */
+        config->ssh_key_min_rsa_bits = parse_int(value, 2048, 1024, 16384);
+    }
+    else if (strcmp(key, "ssh_key_min_ecdsa_bits") == 0 ||
+             strcmp(key, "ssh_min_ecdsa_bits") == 0) {
+        /* Valid ECDSA sizes: 256 (P-256), 384 (P-384), 521 (P-521) */
+        config->ssh_key_min_ecdsa_bits = parse_int(value, 256, 256, 521);
     }
     /* Unknown keys are silently ignored */
 

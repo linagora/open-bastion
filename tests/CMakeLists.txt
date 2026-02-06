@@ -207,5 +207,10 @@ target_link_libraries(test_notify
 )
 add_test(NAME test_notify COMMAND test_notify)
 
+# Test SSH key policy
+add_executable(test_ssh_key_policy test_ssh_key_policy.c ../src/ssh_key_policy.c)
+target_include_directories(test_ssh_key_policy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME test_ssh_key_policy COMMAND test_ssh_key_policy)
+
 # Note: Integration tests require a running Open Bastion instance
 # and are meant to be run manually

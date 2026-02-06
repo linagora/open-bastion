@@ -621,6 +621,94 @@ grep username /etc/passwd
 ls -la /home/username
 ```
 
+## SSH Key Policy
+
+Open Bastion can enforce restrictions on SSH key types and minimum key sizes. This helps ensure
+users connect with cryptographically strong keys, preventing the use of weak or deprecated
+algorithms.
+
+### Configuration
+
+```ini
+# /etc/open-bastion/openbastion.conf
+
+# Enable SSH key policy enforcement
+ssh_key_policy_enabled = true
+
+# Allowed key types (comma-separated)
+# Supported: rsa, ed25519, ecdsa, dsa, sk (FIDO2), all
+ssh_key_allowed_types = ed25519, rsa, ecdsa, sk
+
+# Minimum RSA key size in bits (default: 2048)
+ssh_key_min_rsa_bits = 3072
+
+# Minimum ECDSA key size in bits (default: 256)
+ssh_key_min_ecdsa_bits = 256
+```
+
+### Key Type Aliases
+
+The following aliases are recognized:
+
+| Alias        | Key Types Included              |
+| ------------ | ------------------------------- |
+| `ecdsa`      | ecdsa-256, ecdsa-384, ecdsa-521 |
+| `ecdsa-256`  | ecdsa-sha2-nistp256             |
+| `ecdsa-384`  | ecdsa-sha2-nistp384             |
+| `ecdsa-521`  | ecdsa-sha2-nistp521             |
+| `sk-ecdsa`   | sk-ecdsa-sha2-nistp256 (FIDO2)  |
+| `sk-ed25519` | sk-ssh-ed25519 (FIDO2)          |
+
+### SSH Server Requirement
+
+For SSH key policy to work, the SSH server must expose authentication information:
+
+```bash
+# /etc/ssh/sshd_config
+ExposeAuthInfo yes
+```
+
+### Example Configurations
+
+**High Security (Ed25519 and FIDO2 only):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa
+```
+
+**Balanced (Modern algorithms, strong RSA):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, ecdsa, rsa, sk-ed25519, sk-ecdsa
+ssh_key_min_rsa_bits = 3072
+ssh_key_min_ecdsa_bits = 256
+```
+
+**Legacy compatibility (allows RSA-2048):**
+
+```ini
+ssh_key_policy_enabled = true
+ssh_key_allowed_types = ed25519, ecdsa, rsa
+ssh_key_min_rsa_bits = 2048
+```
+
+### Troubleshooting
+
+If users are rejected due to key policy:
+
+```bash
+# Check audit logs for rejection reason
+journalctl -u sshd | grep "SSH key policy"
+
+# Common errors:
+# - "Key type not allowed: ssh-dss" → DSA keys are disabled
+# - "RSA key too small: 1024 bits" → User needs a larger key
+```
+
+---
+
 ## Quick Reference
 
 ### File Locations
