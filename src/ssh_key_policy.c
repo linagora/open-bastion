@@ -328,6 +328,12 @@ bool ssh_key_policy_check(const ssh_key_policy_t *policy,
             if (result) *result = local_result;
             return false;
         }
+        /* SK_ECDSA is always P-256 (256 bits), check minimum requirement */
+        if (local_result.key_bits < policy->min_ecdsa_bits) {
+            local_result.error = "ECDSA key size below minimum required";
+            if (result) *result = local_result;
+            return false;
+        }
         local_result.valid = true;
         break;
 

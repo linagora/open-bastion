@@ -636,8 +636,8 @@ algorithms.
 ssh_key_policy_enabled = true
 
 # Allowed key types (comma-separated)
-# Supported: rsa, ed25519, ecdsa, ecdsa-256, ecdsa-384, ecdsa-521, dsa, sk-ed25519, sk-ecdsa
-ssh_key_allowed_types = ed25519, rsa, ecdsa, sk-ed25519, sk-ecdsa
+# Supported: rsa, ed25519, ecdsa, dsa, sk (FIDO2), all
+ssh_key_allowed_types = ed25519, rsa, ecdsa, sk
 
 # Minimum RSA key size in bits (default: 2048)
 ssh_key_min_rsa_bits = 3072

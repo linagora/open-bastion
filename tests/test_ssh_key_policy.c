@@ -335,6 +335,27 @@ TEST(policy_check_fido2_denied)
     ASSERT(result.valid == false);
 }
 
+/* Test SK_ECDSA respects min_ecdsa_bits (Copilot review feedback) */
+TEST(policy_check_sk_ecdsa_min_bits)
+{
+    ssh_key_policy_t policy;
+    ssh_key_policy_init(&policy);
+    policy.enabled = true;
+    policy.min_ecdsa_bits = 384;  /* Require P-384 or higher */
+
+    ssh_key_validation_result_t result;
+    /* SK_ECDSA is always P-256 (256 bits), should fail with min_ecdsa_bits=384 */
+    ASSERT(ssh_key_policy_check(&policy, "sk-ecdsa-sha2-nistp256@openssh.com", &result) == false);
+    ASSERT(result.valid == false);
+    ASSERT(result.type == SSH_KEY_TYPE_SK_ECDSA);
+    ASSERT(result.key_bits == 256);
+
+    /* With min_ecdsa_bits=256, SK_ECDSA should pass */
+    policy.min_ecdsa_bits = 256;
+    ASSERT(ssh_key_policy_check(&policy, "sk-ecdsa-sha2-nistp256@openssh.com", &result) == true);
+    ASSERT(result.valid == true);
+}
+
 TEST(policy_check_certificate)
 {
     ssh_key_policy_t policy;
@@ -482,6 +503,7 @@ int main(void)
     RUN_TEST(policy_check_dsa_denied_by_default);
     RUN_TEST(policy_check_fido2_allowed);
     RUN_TEST(policy_check_fido2_denied);
+    RUN_TEST(policy_check_sk_ecdsa_min_bits);
     RUN_TEST(policy_check_certificate);
     RUN_TEST(policy_check_unknown_rejected);
     RUN_TEST(policy_check_null_result);
