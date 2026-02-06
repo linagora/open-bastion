@@ -35,6 +35,7 @@ docker compose up -d
 ```
 
 Wait for all services to be healthy:
+
 ```bash
 docker compose ps
 ```
@@ -42,17 +43,20 @@ docker compose ps
 ### 2. Login to get a session
 
 Using the `llng` CLI tool:
+
 ```bash
 llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
 ```
 
 Or via browser at http://localhost:80 with credentials:
+
 - Username: `dwho`, `rtyler`, or `msmith`
 - Password: same as username
 
 ### 3. Get an SSH certificate
 
 First, ensure you have an SSH key pair. If not, create one:
+
 ```bash
 # Create an Ed25519 key (if you don't have one)
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
@@ -107,11 +111,11 @@ even with a valid SSH certificate. This ensures backends only accept connections
 
 ## Demo Users
 
-| User    | Password | SSH Access        | Sudo on Backend |
-|---------|----------|-------------------|-----------------|
-| dwho    | dwho     | bastion, backend  | No              |
-| rtyler  | rtyler   | bastion, backend  | Yes             |
-| msmith  | msmith   | bastion, backend  | No              |
+| User   | Password | SSH Access       | Sudo on Backend |
+| ------ | -------- | ---------------- | --------------- |
+| dwho   | dwho     | bastion, backend | No              |
+| rtyler | rtyler   | bastion, backend | Yes             |
+| msmith | msmith   | bastion, backend | No              |
 
 ## SSH Certificate Authority (CA) Trust Model
 
@@ -144,6 +148,7 @@ sequenceDiagram
 2. **CA Public Key Distribution**: Each SSH server downloads the CA public key from `/ssh/ca` endpoint at startup
 
 3. **Server Trust Configuration**: SSH servers are configured to trust this CA:
+
    ```
    # In /etc/ssh/sshd_config.d/llng-*.conf
    TrustedUserCAKeys /etc/ssh/llng_ca.pub
@@ -165,6 +170,7 @@ sequenceDiagram
 ### Certificate contents
 
 A typical certificate contains:
+
 ```bash
 $ ssh-keygen -L -f ~/.ssh/id_ed25519-cert.pub
         Type: ssh-ed25519-cert-v01@openssh.com user certificate
@@ -280,6 +286,7 @@ docker exec -it llng-backend-new llng-pam-enroll
 ```
 
 The script will:
+
 1. Read configuration from `/etc/security/pam_llng.conf`
 2. Request a device authorization code from the portal
 3. Display a **user code** (e.g., `WXYZ-1234`)
@@ -295,6 +302,7 @@ While the script is waiting, open a browser:
 4. **Click Approve**
 
 After approval, the script will:
+
 - Save the token to `/etc/security/pam_llng.token`
 - Update the PAM configuration with `server_token_file`
 - Verify the enrollment
@@ -347,6 +355,7 @@ The `llng-pam-enroll` script automates the entire Device Authorization flow:
 7. **Verifies enrollment** by calling `/pam/authorize`
 
 Options:
+
 ```bash
 llng-pam-enroll --help
 
@@ -465,21 +474,22 @@ sequenceDiagram
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/ssh` | GET | Web interface to sign SSH keys (requires auth) |
-| `/ssh/ca` | GET | Get SSH CA public key |
-| `/ssh/sign` | POST | Sign a user's public key |
-| `/pam/authorize` | POST | Check user authorization |
-| `/pam/bastion-token` | POST | Get signed JWT for bastion-to-backend auth |
-| `/oauth2/device` | POST | Start device authorization |
-| `/device` | GET/POST | User device verification page |
-| `/oauth2/token` | POST | Exchange device code for token |
-| `/.well-known/jwks.json` | GET | Public keys for JWT verification |
+| Endpoint                 | Method   | Description                                    |
+| ------------------------ | -------- | ---------------------------------------------- |
+| `/ssh`                   | GET      | Web interface to sign SSH keys (requires auth) |
+| `/ssh/ca`                | GET      | Get SSH CA public key                          |
+| `/ssh/sign`              | POST     | Sign a user's public key                       |
+| `/pam/authorize`         | POST     | Check user authorization                       |
+| `/pam/bastion-token`     | POST     | Get signed JWT for bastion-to-backend auth     |
+| `/oauth2/device`         | POST     | Start device authorization                     |
+| `/device`                | GET/POST | User device verification page                  |
+| `/oauth2/token`          | POST     | Exchange device code for token                 |
+| `/.well-known/jwks.json` | GET      | Public keys for JWT verification               |
 
 ## Troubleshooting
 
 ### Check container logs
+
 ```bash
 docker logs llng-sso
 docker logs llng-bastion
@@ -487,6 +497,7 @@ docker logs llng-backend
 ```
 
 ### Test PAM authorization manually
+
 ```bash
 docker exec llng-bastion curl -s http://sso/pam/authorize \
   -H "Authorization: Bearer <token>" \
@@ -495,12 +506,14 @@ docker exec llng-bastion curl -s http://sso/pam/authorize \
 ```
 
 ### Verify SSH CA trust
+
 ```bash
 docker exec llng-bastion cat /etc/ssh/llng_ca.pub
 curl http://localhost:80/ssh/ca
 ```
 
 ### Check certificate validity
+
 ```bash
 ssh-keygen -L -f ~/.ssh/id_ed25519-cert.pub
 ```
@@ -513,6 +526,7 @@ This demo does NOT use persistent Docker volumes. All data is reset when contain
 This ensures a clean slate for each demo run.
 
 To reset everything:
+
 ```bash
 docker compose down
 docker compose up -d
@@ -521,6 +535,7 @@ docker compose up -d
 ### SSO Sessions
 
 User authentication sessions are stored in the SSO container:
+
 ```bash
 # List active sessions
 docker exec llng-sso ls -la /var/lib/lemonldap-ng/sessions/
@@ -531,6 +546,7 @@ docker exec llng-sso ls -la /var/lib/lemonldap-ng/sessions/
 ### SSH CA Keys
 
 The SSH Certificate Authority keys are stored in the SSO:
+
 ```bash
 # View CA storage
 docker exec llng-sso ls -la /var/lib/lemonldap-ng/ssh/
@@ -544,6 +560,7 @@ docker exec llng-sso ls -la /var/lib/lemonldap-ng/ssh/
 ### Session Recordings (optional)
 
 When session recording is enabled on the bastion (via `ForceCommand`), recordings are stored in:
+
 ```bash
 # List recordings
 docker exec llng-bastion ls -la /var/lib/llng-sessions/
@@ -553,6 +570,7 @@ docker exec llng-bastion ls -la /var/lib/llng-sessions/
 ```
 
 Note: In this demo, session recording is disabled to allow ProxyJump. To enable it, add to sshd config:
+
 ```
 ForceCommand /usr/sbin/llng-session-recorder
 ```
@@ -560,6 +578,7 @@ ForceCommand /usr/sbin/llng-session-recorder
 ### PAM Authorization Cache
 
 Each SSH server caches authorization responses for offline mode:
+
 ```bash
 # Cache location
 docker exec llng-bastion ls -la /var/cache/pam_llng/

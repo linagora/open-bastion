@@ -37,6 +37,7 @@ docker compose up -d
 ```
 
 Wait for all services to be healthy:
+
 ```bash
 docker compose ps
 ```
@@ -44,6 +45,7 @@ docker compose ps
 ### 2. Get an access token
 
 Using the `llng` CLI tool:
+
 ```bash
 llng --llng-url http://localhost:80 --login dwho --password dwho access_token
 ```
@@ -51,6 +53,7 @@ llng --llng-url http://localhost:80 --login dwho --password dwho access_token
 Copy the access token - you'll use it as your SSH password.
 
 Or via browser at http://localhost:80 with credentials:
+
 - Username: `dwho`, `rtyler`, or `msmith`
 - Password: same as username
 
@@ -81,11 +84,11 @@ even with a valid user token. This ensures backends only accept connections from
 
 ## Demo Users
 
-| User    | Password | SSH Access        | Sudo on Backend |
-|---------|----------|-------------------|-----------------|
-| dwho    | dwho     | bastion, backend  | No              |
-| rtyler  | rtyler   | bastion, backend  | Yes             |
-| msmith  | msmith   | bastion, backend  | No              |
+| User   | Password | SSH Access       | Sudo on Backend |
+| ------ | -------- | ---------------- | --------------- |
+| dwho   | dwho     | bastion, backend | No              |
+| rtyler | rtyler   | bastion, backend | Yes             |
+| msmith | msmith   | bastion, backend | No              |
 
 ## How Token Authentication Works
 
@@ -115,13 +118,13 @@ sequenceDiagram
 
 ## Comparison with Certificate Authentication
 
-| Feature | Token Auth | Certificate Auth |
-|---------|------------|------------------|
-| **Security** | Good | Better (no password in transit) |
-| **User experience** | Must paste token | Transparent with SSH agent |
-| **Key management** | Token expires automatically | Certificate expires automatically |
-| **Server setup** | Only PAM module needed | PAM module + CA trust |
-| **Offline support** | Limited (cached auth) | Full (cert is self-contained) |
+| Feature             | Token Auth                  | Certificate Auth                  |
+| ------------------- | --------------------------- | --------------------------------- |
+| **Security**        | Good                        | Better (no password in transit)   |
+| **User experience** | Must paste token            | Transparent with SSH agent        |
+| **Key management**  | Token expires automatically | Certificate expires automatically |
+| **Server setup**    | Only PAM module needed      | PAM module + CA trust             |
+| **Offline support** | Limited (cached auth)       | Full (cert is self-contained)     |
 
 For production environments, we recommend **certificate authentication** (`docker-demo-cert/`).
 
@@ -158,18 +161,19 @@ sequenceDiagram
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/pam/authorize` | POST | Check user authorization |
-| `/pam/bastion-token` | POST | Get signed JWT for bastion-to-backend auth |
-| `/oauth2/device` | POST | Start device authorization |
-| `/device` | GET/POST | User device verification page |
-| `/oauth2/token` | POST | Exchange device code for token |
-| `/.well-known/jwks.json` | GET | Public keys for JWT verification |
+| Endpoint                 | Method   | Description                                |
+| ------------------------ | -------- | ------------------------------------------ |
+| `/pam/authorize`         | POST     | Check user authorization                   |
+| `/pam/bastion-token`     | POST     | Get signed JWT for bastion-to-backend auth |
+| `/oauth2/device`         | POST     | Start device authorization                 |
+| `/device`                | GET/POST | User device verification page              |
+| `/oauth2/token`          | POST     | Exchange device code for token             |
+| `/.well-known/jwks.json` | GET      | Public keys for JWT verification           |
 
 ## Troubleshooting
 
 ### Check container logs
+
 ```bash
 docker logs ob-token-sso
 docker logs ob-token-bastion
@@ -177,6 +181,7 @@ docker logs ob-token-backend
 ```
 
 ### Test PAM authorization manually
+
 ```bash
 docker exec ob-token-bastion curl -s http://sso/pam/authorize \
   -H "Authorization: Bearer <token>" \
