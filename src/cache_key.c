@@ -115,8 +115,21 @@ static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t
         return -1;
     }
 
-    f = fopen(temp_path, "w");
+    /* Use O_CREAT|O_EXCL|O_NOFOLLOW to prevent symlink attacks and races */
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        /* File exists (race) or symlink attack - clean up and retry */
+        unlink(temp_path);
+        fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        if (fd < 0) {
+            return -1;
+        }
+    }
+
+    f = fdopen(fd, "w");
     if (!f) {
+        close(fd);
+        unlink(temp_path);
         return -1;
     }
 
@@ -125,10 +138,12 @@ static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t
         unlink(temp_path);
         return -1;
     }
-    fclose(f);
 
-    /* Set restrictive permissions */
-    chmod(temp_path, 0600);
+    /* Check fclose() return - flush errors (ENOSPC, NFS) would be missed otherwise */
+    if (fclose(f) != 0) {
+        unlink(temp_path);
+        return -1;
+    }
 
     if (rename(temp_path, id_path) != 0) {
         unlink(temp_path);
