@@ -469,8 +469,9 @@ static int test_whitelist_match(void)
     };
 
     crowdsec_context_t *ctx = crowdsec_init(&config);
+    /* Free original entries - crowdsec_init made a deep copy */
+    crowdsec_free_whitelist(entries);
     if (!ctx) {
-        crowdsec_free_whitelist(entries);
         return 0;
     }
 
