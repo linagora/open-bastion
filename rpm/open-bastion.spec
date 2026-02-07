@@ -38,9 +38,12 @@ token-based and key-based authorization with server groups.
 %set_build_flags
 %cmake \
     -DENABLE_CACHE=ON \
-    -DBUILD_TESTING=OFF \
+    -DBUILD_TESTING=ON \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
+
+%check
+%ctest
 
 %install
 %cmake_install
