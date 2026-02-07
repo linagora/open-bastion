@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Supplementary groups synchronization** (#95): LLNG can now manage Unix supplementary
   groups on target servers via the `managed_groups` configuration
-- **Local whitelist for managed groups** (`allowed_managed_groups`): Defense-in-depth
-  option to restrict which groups LLNG can modify on each server
+  - **Local whitelist for managed groups** (`allowed_managed_groups`): Defense-in-depth
+    option to restrict which groups LLNG can modify on each server
 - **CrowdSec IP/CIDR whitelist** (#96): New `crowdsec_whitelist` option to bypass
   CrowdSec checks for trusted IPs/networks (VPN exit nodes, corporate NAT)
   - Supports IPv4, IPv6, and CIDR notation
