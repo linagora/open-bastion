@@ -47,8 +47,11 @@ target_link_options(nss_openbastion PRIVATE
 )
 
 # Install NSS module to the same libdir as PAM module
+# NAMELINK_SKIP prevents installing the .so symlink (only needed for development)
+# NSS modules are loaded by versioned name (libnss_NAME.so.2)
 install(TARGETS nss_openbastion
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    NAMELINK_SKIP
 )
 
 # Install config file template

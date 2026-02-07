@@ -13,8 +13,6 @@ override_dh_auto_configure:
 
 override_dh_auto_install:
 	dh_auto_install
-	# Remove development symlink (libnss modules don't need it)
-	rm -f debian/libpam-llng/usr/lib/*/libnss_llng.so
 
 # NSS and PAM modules need ldconfig but no development symlinks
 override_dh_makeshlibs:

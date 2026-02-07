@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: pam-llng
 Upstream-Contact: Xavier Guimard <xguimard@linagora.com>
-Source: https://github.com/LemonLDAPNG/llng-pam-module
+Source: https://github.com/linagora/open-bastion
 
 Files: *
 Copyright: 2025 Linagora
@@ -12,14 +12,6 @@ License: AGPL-3.0+
  it under the terms of the GNU Affero General Public License as published
  by the Free Software Foundation, either version 3 of the License, or
  (at your option) any later version.
- .
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- GNU Affero General Public License for more details.
- .
- You should have received a copy of the GNU Affero General Public License
- along with this program. If not, see <https://www.gnu.org/licenses/>.
  .
  On Debian systems, the complete text of the GNU Affero General Public
  License version 3 can be found in "/usr/share/common-licenses/AGPL-3".
