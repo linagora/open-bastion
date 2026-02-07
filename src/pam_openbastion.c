@@ -617,24 +617,28 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
     /* Initialize cache rate limiter for brute-force protection (#92) */
     if (data->config.cache_rate_limit_enabled && data->auth_cache) {
         char cache_rl_dir[PATH_MAX];
-        snprintf(cache_rl_dir, sizeof(cache_rl_dir), "%s/ratelimit",
-                 data->config.auth_cache_dir);
-
-        rate_limiter_config_t cache_rl_cfg = {
-            .enabled = true,
-            .state_dir = cache_rl_dir,
-            .max_attempts = data->config.cache_rate_limit_max_attempts,
-            .initial_lockout_sec = data->config.cache_rate_limit_lockout_sec,
-            .max_lockout_sec = data->config.cache_rate_limit_max_lockout_sec,
-            .backoff_multiplier = 2.0  /* Fixed exponential backoff */
-        };
-        data->cache_rate_limiter = rate_limiter_init(&cache_rl_cfg);
-        if (!data->cache_rate_limiter) {
-            OB_LOG_WARN(pamh, "Failed to initialize cache rate limiter, continuing without");
+        int n = snprintf(cache_rl_dir, sizeof(cache_rl_dir), "%s/ratelimit",
+                         data->config.auth_cache_dir);
+        if (n < 0 || (size_t)n >= sizeof(cache_rl_dir)) {
+            OB_LOG_WARN(pamh,
+                        "Auth cache directory path too long, cache rate limiter disabled");
         } else {
-            OB_LOG_DEBUG(pamh, "Cache rate limiter enabled: max_attempts=%d, lockout=%ds",
-                    data->config.cache_rate_limit_max_attempts,
-                    data->config.cache_rate_limit_lockout_sec);
+            rate_limiter_config_t cache_rl_cfg = {
+                .enabled = true,
+                .state_dir = cache_rl_dir,
+                .max_attempts = data->config.cache_rate_limit_max_attempts,
+                .initial_lockout_sec = data->config.cache_rate_limit_lockout_sec,
+                .max_lockout_sec = data->config.cache_rate_limit_max_lockout_sec,
+                .backoff_multiplier = 2.0  /* Fixed exponential backoff */
+            };
+            data->cache_rate_limiter = rate_limiter_init(&cache_rl_cfg);
+            if (!data->cache_rate_limiter) {
+                OB_LOG_WARN(pamh, "Failed to initialize cache rate limiter, continuing without");
+            } else {
+                OB_LOG_DEBUG(pamh, "Cache rate limiter enabled: max_attempts=%d, lockout=%ds",
+                        data->config.cache_rate_limit_max_attempts,
+                        data->config.cache_rate_limit_lockout_sec);
+            }
         }
     }
 
@@ -1911,17 +1915,29 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                         audit_event_set_end_time(&audit_event);
                         audit_log_event(data->audit, &audit_event);
                     }
+
+                    /* Return immediately to keep PAM status consistent with audit */
+                    return PAM_MAXTRIES;
                 }
             }
 
             if (!cache_rate_limited) {
+                /* Record cache lookup attempt BEFORE the lookup to prevent enumeration.
+                 * This ensures all attempts (hits + misses) are counted, preventing
+                 * attackers from discovering cached usernames without penalty. (#92) */
+                if (data->cache_rate_limiter) {
+                    (void)rate_limiter_record_failure(data->cache_rate_limiter, user);
+                }
+
                 auth_cache_entry_t cache_entry = {0};
                 if (auth_cache_lookup(data->auth_cache, user,
                                       data->config.server_group, hostname, &cache_entry)) {
                     OB_LOG_INFO(pamh, "Server unavailable, using cached authorization for %s", user);
 
-                    /* Reset rate limiter on successful cache lookup */
-                    if (data->cache_rate_limiter) {
+                    /* Only reset rate limiter on authorized cache hit.
+                     * This allows legitimate users to continue but prevents
+                     * attackers from resetting by finding any cached user. */
+                    if (data->cache_rate_limiter && cache_entry.authorized) {
                         rate_limiter_reset(data->cache_rate_limiter, user);
                     }
 
@@ -1952,15 +1968,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                     auth_result = 0;  /* Cache hit is success */
                 } else {
                     OB_LOG_WARN(pamh, "Server unavailable and no valid cache for %s", user);
-
-                    /* Record failed cache lookup for rate limiting (#92) */
-                    if (data->cache_rate_limiter) {
-                        int lockout = rate_limiter_record_failure(data->cache_rate_limiter, user);
-                        if (lockout > 0) {
-                            OB_LOG_WARN(pamh, "Cache lookup failures exceeded, user %s locked out for %d sec",
-                                    user, lockout);
-                        }
-                    }
+                    /* Attempt already recorded above, no need to record again on miss */
                 }
             }
         }
