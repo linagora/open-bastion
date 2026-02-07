@@ -1200,6 +1200,7 @@ ExposeAuthInfo yes   # Requis pour accéder au type de clé
 **Architectures concernées :** A, B, C, D (avec cache offline activé)
 
 **Description :** Lorsque le serveur LLNG est indisponible, le module PAM utilise un cache local des autorisations. Un attaquant avec accès local pourrait tenter de nombreux noms d'utilisateurs contre ce cache pour :
+
 - Découvrir quels utilisateurs ont des entrées en cache (énumération)
 - Tenter de se connecter en boucle jusqu'à trouver un utilisateur valide
 
@@ -1225,20 +1226,20 @@ cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
 
 **Caractéristiques de protection :**
 
-| Aspect                      | Mesure                                                     |
-| --------------------------- | ---------------------------------------------------------- |
+| Aspect                      | Mesure                                                          |
+| --------------------------- | --------------------------------------------------------------- |
 | **Comptage des tentatives** | TOUTES les tentatives (hits + misses) pour éviter l'énumération |
-| **Rate limiting**           | Par utilisateur (attaque locale, pas par IP)               |
-| **Backoff exponentiel**     | 60s → 120s → 240s → ... → 3600s max                        |
-| **Réinitialisation**        | Uniquement sur cache hit autorisé                          |
-| **Persistance**             | État sur disque (survit aux redémarrages)                  |
+| **Rate limiting**           | Par utilisateur (attaque locale, pas par IP)                    |
+| **Backoff exponentiel**     | 60s → 120s → 240s → ... → 3600s max                             |
+| **Réinitialisation**        | Uniquement sur cache hit autorisé                               |
+| **Persistance**             | État sur disque (survit aux redémarrages)                       |
 
 **Différence avec R-S7 :** R-S7 traite de l'indisponibilité LLNG et de la continuité de service. R-S12 traite de la sécurité du cache lui-même contre les attaques locales.
 
-|                 |           Score résiduel            |
-| --------------- | :---------------------------------: |
+|                 |              Score résiduel              |
+| --------------- | :--------------------------------------: |
 | **Probabilité** | 1 (avec rate limiting toutes tentatives) |
-| **Impact**      | 2 (attaque locale limitée par lockout)  |
+| **Impact**      |  2 (attaque locale limitée par lockout)  |
 
 ---
 

@@ -1106,12 +1106,12 @@ cache_rate_limit_max_lockout_sec = 3600
 
 ### Configuration Options
 
-| Option                           | Default | Description                         |
-| -------------------------------- | ------- | ----------------------------------- |
-| `cache_rate_limit_enabled`       | `false` | Enable cache lookup rate limiting   |
-| `cache_rate_limit_max_attempts`  | `3`     | Cache lookup attempts before lockout |
-| `cache_rate_limit_lockout_sec`   | `60`    | Initial lockout duration in seconds |
-| `cache_rate_limit_max_lockout_sec` | `3600` | Maximum lockout duration in seconds |
+| Option                             | Default | Description                          |
+| ---------------------------------- | ------- | ------------------------------------ |
+| `cache_rate_limit_enabled`         | `false` | Enable cache lookup rate limiting    |
+| `cache_rate_limit_max_attempts`    | `3`     | Cache lookup attempts before lockout |
+| `cache_rate_limit_lockout_sec`     | `60`    | Initial lockout duration in seconds  |
+| `cache_rate_limit_max_lockout_sec` | `3600`  | Maximum lockout duration in seconds  |
 
 ## License
 

@@ -4,12 +4,12 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 ### Matrice des Risques Après Remédiation (avec clients OIDC distincts + JWT bastion)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                    | 2 - Peu probable |
-| ------------------------ | ------------------------------------------------------ | ---------------- |
-| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                                  | R-SA1            |
-| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                           | R-S6             |
-| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12   | R6, R-S8         |
-| **1 - Négligeable**      | R0, R13                                                |                  |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                  | 2 - Peu probable |
+| ------------------------ | ---------------------------------------------------- | ---------------- |
+| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                                | R-SA1            |
+| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                         | R-S6             |
+| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12 | R6, R-S8         |
+| **1 - Négligeable**      | R0, R13                                              |                  |
 
 **Zones de risque :**
 

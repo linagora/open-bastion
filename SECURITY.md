@@ -307,6 +307,25 @@ Audit events include:
 - Rate limit triggers
 - User creation events
 
+### Event Type Classification
+
+Audit events use differentiated codes for SIEM integration:
+
+| Event Type             | Description                                                       |
+| ---------------------- | ----------------------------------------------------------------- |
+| `AUDIT_AUTH_SUCCESS`   | Successful authentication                                         |
+| `AUDIT_AUTH_FAILURE`   | Failed authentication                                             |
+| `AUDIT_AUTHZ_DENIED`   | Authorization denied (valid user, no permission)                  |
+| `AUDIT_SECURITY_ERROR` | Cryptographic/security failure (invalid signature, malformed JWT) |
+| `AUDIT_RATE_LIMITED`   | Rate limit triggered                                              |
+| `AUDIT_USER_CREATED`   | Local user account created                                        |
+| `AUDIT_SERVER_ERROR`   | Backend communication error                                       |
+
+This classification enables security teams to distinguish between:
+
+- Authorization failures (user lacks permission) → `AUDIT_AUTHZ_DENIED`
+- Security incidents (attack attempt) → `AUDIT_SECURITY_ERROR`
+
 ## Webhook Notifications
 
 For real-time security monitoring:
@@ -337,6 +356,36 @@ Recommended permissions:
 | Server token file    | 0600        | root  |
 | Cache directory      | 0700        | root  |
 | Rate limit state dir | 0700        | root  |
+
+## Script Security
+
+The shell scripts (`ob-ssh-proxy`, `ob-enroll`, `ob-ssh-cert`) implement security measures:
+
+### JSON Construction
+
+Scripts use `jq` for JSON payload construction instead of string interpolation:
+
+```bash
+# Safe - uses jq argument passing
+json_payload=$(jq -n --arg user "$user" --arg host "$host" '{user: $user, host: $host}')
+
+# Unsafe - vulnerable to injection (NOT USED)
+# json_payload="{\"user\": \"$user\"}"
+```
+
+This prevents JSON injection attacks where malicious input could break out of string context.
+
+### Configuration File Validation
+
+Scripts verify configuration file security before sourcing:
+
+```bash
+# Check owner is root
+# Check no group/world write permissions
+# Refuse to source if checks fail
+```
+
+This prevents privilege escalation via malicious configuration injection.
 
 ## Operational Security Considerations
 
