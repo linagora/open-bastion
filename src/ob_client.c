@@ -686,6 +686,26 @@ int ob_verify_token(ob_client_t *client,
         }
     }
 
+    /* Parse managed_groups - pool of groups LLNG manages for this server */
+    if (json_object_object_get_ex(json, "managed_groups", &val)) {
+        if (json_object_is_type(val, json_type_array)) {
+            size_t count = json_object_array_length(val);
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
+            response->managed_groups = calloc(count + 1, sizeof(char *));
+            if (response->managed_groups) {
+                response->managed_groups_count = count;
+                for (size_t i = 0; i < count; i++) {
+                    struct json_object *g = json_object_array_get_idx(val, i);
+                    if (g) {
+                        response->managed_groups[i] = safe_json_strdup(g);
+                    }
+                }
+            }
+        }
+    }
+
     /* User attributes for account creation (from attrs object) */
     struct json_object *attrs_obj;
     if (json_object_object_get_ex(json, "attrs", &attrs_obj)) {
@@ -1038,6 +1058,26 @@ static int ob_authorize_user_internal(ob_client_t *client,
         }
     }
 
+    /* Parse managed_groups - pool of groups LLNG manages for this server */
+    if (json_object_object_get_ex(json, "managed_groups", &val)) {
+        if (json_object_is_type(val, json_type_array)) {
+            size_t count = json_object_array_length(val);
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
+            response->managed_groups = calloc(count + 1, sizeof(char *));
+            if (response->managed_groups) {
+                response->managed_groups_count = count;
+                for (size_t i = 0; i < count; i++) {
+                    struct json_object *g = json_object_array_get_idx(val, i);
+                    if (g) {
+                        response->managed_groups[i] = safe_json_strdup(g);
+                    }
+                }
+            }
+        }
+    }
+
     /* Parse permissions object */
     struct json_object *perms_obj;
     if (json_object_object_get_ex(json, "permissions", &perms_obj)) {
@@ -1112,6 +1152,13 @@ void ob_response_free(ob_response_t *response)
             free(response->groups[i]);
         }
         free(response->groups);
+    }
+
+    if (response->managed_groups) {
+        for (size_t i = 0; i < response->managed_groups_count; i++) {
+            free(response->managed_groups[i]);
+        }
+        free(response->managed_groups);
     }
 
     memset(response, 0, sizeof(*response));

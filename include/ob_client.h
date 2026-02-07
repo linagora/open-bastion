@@ -38,6 +38,8 @@ typedef struct {
     char *user;
     char **groups;
     size_t groups_count;
+    char **managed_groups;      /* Pool of groups managed by LLNG for this server */
+    size_t managed_groups_count;
     char *reason;
     int expires_in;
     bool active;  /* For introspection */

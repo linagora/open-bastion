@@ -29,8 +29,8 @@
 #include "str_utils.h"
 
 /* Cache format version */
-#define AUTH_CACHE_VERSION 3
-#define AUTH_CACHE_MAGIC "LLNGCACHE03"
+#define AUTH_CACHE_VERSION 4
+#define AUTH_CACHE_MAGIC "LLNGCACHE04"
 
 /* Use shared JSON strdup utility */
 #define safe_json_strdup str_json_strdup
@@ -526,6 +526,25 @@ bool auth_cache_lookup(auth_cache_t *cache,
         }
     }
 
+    if (json_object_object_get_ex(json, "managed_groups", &val)) {
+        if (json_object_is_type(val, json_type_array)) {
+            size_t count = json_object_array_length(val);
+            if (count > MAX_USER_GROUPS) {
+                count = MAX_USER_GROUPS;
+            }
+            entry->managed_groups = calloc(count + 1, sizeof(char *));
+            if (entry->managed_groups) {
+                entry->managed_groups_count = count;
+                for (size_t i = 0; i < count; i++) {
+                    struct json_object *g = json_object_array_get_idx(val, i);
+                    if (g) {
+                        entry->managed_groups[i] = safe_json_strdup(g);
+                    }
+                }
+            }
+        }
+    }
+
     if (json_object_object_get_ex(json, "sudo_allowed", &val)) {
         entry->sudo_allowed = json_object_get_boolean(val);
     }
@@ -581,6 +600,16 @@ int auth_cache_store(auth_cache_t *cache,
             }
         }
         json_object_object_add(json, "groups", groups);
+    }
+
+    if (entry->managed_groups && entry->managed_groups_count > 0) {
+        struct json_object *managed_groups = json_object_new_array();
+        for (size_t i = 0; i < entry->managed_groups_count; i++) {
+            if (entry->managed_groups[i]) {
+                json_object_array_add(managed_groups, json_object_new_string(entry->managed_groups[i]));
+            }
+        }
+        json_object_object_add(json, "managed_groups", managed_groups);
     }
 
     if (entry->gecos) {
@@ -772,6 +801,13 @@ void auth_cache_entry_free(auth_cache_entry_t *entry)
             free(entry->groups[i]);
         }
         free(entry->groups);
+    }
+
+    if (entry->managed_groups) {
+        for (size_t i = 0; i < entry->managed_groups_count; i++) {
+            free(entry->managed_groups[i]);
+        }
+        free(entry->managed_groups);
     }
 
     memset(entry, 0, sizeof(*entry));

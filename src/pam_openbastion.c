@@ -99,8 +99,10 @@ typedef struct {
 #define OB_LOG_DEBUG(handle, fmt, ...) \
     pam_syslog(handle, LOG_DEBUG, fmt, ##__VA_ARGS__)
 
-/* Forward declaration */
+/* Forward declarations */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
+static void invalidate_nscd_cache(void);
+static int validate_username(const char *user);
 
 /*
  * Security: Re-verify token file permissions periodically (fixes #46)
@@ -223,6 +225,672 @@ static int group_exists_locally(gid_t gid)
 }
 
 /*
+ * Check if a group exists by name in /etc/group.
+ * Returns 1 if group exists, 0 otherwise.
+ */
+static int group_exists_by_name(const char *groupname)
+{
+    if (!groupname || !*groupname) return 0;
+
+    FILE *f = fopen("/etc/group", "r");
+    if (!f) return 0;
+
+    char line[1024];
+    size_t namelen = strlen(groupname);
+
+    while (fgets(line, sizeof(line), f)) {
+        /* Format: groupname:x:gid:members */
+        /* Check if line starts with "groupname:" */
+        if (strncmp(line, groupname, namelen) == 0 && line[namelen] == ':') {
+            fclose(f);
+            return 1;
+        }
+    }
+
+    fclose(f);
+    return 0;
+}
+
+/*
+ * Find next available GID >= 1000 that's not in use.
+ * Returns 0 on error.
+ */
+static gid_t find_next_gid(void)
+{
+    gid_t candidate = 1000;
+    gid_t max_gid = 60000;  /* Stay below common system limits */
+
+    /* Collect all used GIDs */
+    FILE *f = fopen("/etc/group", "r");
+    if (!f) return 0;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Parse GID from third field */
+        char *p = line;
+        int field = 0;
+        char *start = p;
+
+        while (*p && field < 3) {
+            if (*p == ':') {
+                if (field == 2) {
+                    *p = '\0';
+                    char *endptr;
+                    errno = 0;
+                    unsigned long parsed_gid = strtoul(start, &endptr, 10);
+                    if (errno == 0 && endptr != start && parsed_gid <= max_gid) {
+                        gid_t gid = (gid_t)parsed_gid;
+                        if (gid >= candidate) {
+                            candidate = gid + 1;
+                        }
+                    }
+                    break;
+                }
+                field++;
+                start = p + 1;
+            }
+            p++;
+        }
+    }
+
+    fclose(f);
+
+    if (candidate > max_gid) return 0;
+    return candidate;
+}
+
+/*
+ * Validate group name for safe use.
+ * Returns 1 if valid, 0 if invalid.
+ */
+static int validate_groupname(const char *group)
+{
+    if (!group || !*group) return 0;
+
+    size_t len = strlen(group);
+    /* POSIX group name max is typically 16-32 characters */
+    if (len > 32 || len == 0) return 0;
+
+    /* First character must be lowercase letter or underscore */
+    if (!islower((unsigned char)group[0]) && group[0] != '_') return 0;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = group[i];
+        /* Allow lowercase, digits, underscore, hyphen */
+        if (!islower((unsigned char)c) && !isdigit((unsigned char)c) &&
+            c != '_' && c != '-') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*
+ * Create a local group in /etc/group.
+ * Returns 0 on success, -1 on error.
+ */
+static int create_local_group(pam_handle_t *pamh, const char *groupname)
+{
+    if (!validate_groupname(groupname)) {
+        OB_LOG_ERR(pamh, "Invalid group name: %s", groupname);
+        return -1;
+    }
+
+    gid_t gid = find_next_gid();
+    if (gid == 0) {
+        OB_LOG_ERR(pamh, "Cannot find available GID for group %s", groupname);
+        return -1;
+    }
+
+    int fd = open("/etc/group", O_RDWR | O_APPEND);
+    if (fd < 0) {
+        OB_LOG_ERR(pamh, "Cannot open /etc/group: %s", strerror(errno));
+        return -1;
+    }
+
+    if (flock(fd, LOCK_EX) < 0) {
+        OB_LOG_ERR(pamh, "Cannot lock /etc/group: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    /* Re-check if group exists after locking (TOCTOU protection) */
+    if (group_exists_by_name(groupname)) {
+        OB_LOG_DEBUG(pamh, "Group %s was created by another process", groupname);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return 0;
+    }
+
+    /* Re-check GID is still available */
+    if (group_exists_locally(gid)) {
+        /* Try to find another GID */
+        gid = find_next_gid();
+        if (gid == 0 || group_exists_locally(gid)) {
+            OB_LOG_ERR(pamh, "GID conflict creating group %s", groupname);
+            flock(fd, LOCK_UN);
+            close(fd);
+            return -1;
+        }
+    }
+
+    FILE *f = fdopen(fd, "a");
+    if (!f) {
+        OB_LOG_ERR(pamh, "Cannot fdopen /etc/group: %s", strerror(errno));
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    /* Format: groupname:x:gid: */
+    if (fprintf(f, "%s:x:%d:\n", groupname, gid) < 0) {
+        OB_LOG_ERR(pamh, "Cannot write to /etc/group: %s", strerror(errno));
+        fclose(f);
+        return -1;
+    }
+
+    if (fflush(f) != 0) {
+        OB_LOG_ERR(pamh, "Cannot flush /etc/group: %s", strerror(errno));
+        fclose(f);
+        return -1;
+    }
+
+    fclose(f);  /* Also releases lock */
+
+    OB_LOG_INFO(pamh, "Created local group: %s (gid=%d)", groupname, gid);
+    return 0;
+}
+
+/*
+ * Check if user is a member of a group in /etc/group.
+ * Returns 1 if member, 0 otherwise.
+ */
+static int user_in_group_locally(const char *username, const char *groupname)
+{
+    if (!username || !groupname) return 0;
+
+    FILE *f = fopen("/etc/group", "r");
+    if (!f) return 0;
+
+    char line[4096];  /* Groups can have long member lists */
+    size_t namelen = strlen(groupname);
+    size_t userlen = strlen(username);
+
+    while (fgets(line, sizeof(line), f)) {
+        /* Format: groupname:x:gid:member1,member2,... */
+        if (strncmp(line, groupname, namelen) != 0 || line[namelen] != ':') {
+            continue;
+        }
+
+        /* Find the fourth field (members) */
+        char *p = line + namelen + 1;  /* Skip groupname: */
+        int colons = 0;
+        while (*p && colons < 2) {
+            if (*p == ':') colons++;
+            p++;
+        }
+
+        /* Now p points to the members field */
+        /* Parse comma-separated list */
+        char *member = p;
+        while (*p) {
+            if (*p == ',' || *p == '\n' || *p == '\0') {
+                size_t memlen = p - member;
+                if (memlen == userlen && strncmp(member, username, userlen) == 0) {
+                    fclose(f);
+                    return 1;
+                }
+                if (*p == '\0' || *p == '\n') break;
+                member = p + 1;
+            }
+            p++;
+        }
+    }
+
+    fclose(f);
+    return 0;
+}
+
+/*
+ * Add user to a group by modifying /etc/group.
+ * Returns 0 on success, -1 on error.
+ */
+static int add_user_to_group(pam_handle_t *pamh, const char *username, const char *groupname)
+{
+    if (!validate_username(username) || !validate_groupname(groupname)) {
+        return -1;
+    }
+
+    int fd = open("/etc/group", O_RDWR);
+    if (fd < 0) {
+        OB_LOG_ERR(pamh, "Cannot open /etc/group: %s", strerror(errno));
+        return -1;
+    }
+
+    if (flock(fd, LOCK_EX) < 0) {
+        OB_LOG_ERR(pamh, "Cannot lock /etc/group: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    /* Re-check if user is already member after locking */
+    if (user_in_group_locally(username, groupname)) {
+        OB_LOG_DEBUG(pamh, "User %s already in group %s", username, groupname);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return 0;
+    }
+
+    /* Read the entire file */
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        OB_LOG_ERR(pamh, "Cannot stat /etc/group: %s", strerror(errno));
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    char *content = malloc(st.st_size + 1);
+    if (!content) {
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    if (read(fd, content, st.st_size) != st.st_size) {
+        OB_LOG_ERR(pamh, "Cannot read /etc/group: %s", strerror(errno));
+        free(content);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+    content[st.st_size] = '\0';
+
+    /* Build new content */
+    size_t newsize = st.st_size + strlen(username) + 2;  /* +2 for comma and possible newline */
+    char *newcontent = malloc(newsize);
+    if (!newcontent) {
+        free(content);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    size_t namelen = strlen(groupname);
+    char *dst = newcontent;
+    char *line = content;
+    int modified = 0;
+
+    while (*line) {
+        char *eol = strchr(line, '\n');
+        if (!eol) eol = line + strlen(line);
+
+        size_t linelen = eol - line;
+
+        /* Check if this is the target group */
+        if (linelen > namelen && strncmp(line, groupname, namelen) == 0 && line[namelen] == ':') {
+            /* Copy the line up to the newline */
+            memcpy(dst, line, linelen);
+            dst += linelen;
+
+            /* Check if line ends with ':' (no members) or has members */
+            if (dst[-1] == ':') {
+                /* No members, just add username */
+            } else {
+                /* Has members, add comma first */
+                *dst++ = ',';
+            }
+
+            /* Add the username */
+            size_t userlen = strlen(username);
+            memcpy(dst, username, userlen);
+            dst += userlen;
+
+            modified = 1;
+        } else {
+            /* Copy line unchanged */
+            memcpy(dst, line, linelen);
+            dst += linelen;
+        }
+
+        /* Add newline if present */
+        if (*eol == '\n') {
+            *dst++ = '\n';
+            line = eol + 1;
+        } else {
+            break;
+        }
+    }
+    *dst = '\0';
+
+    if (!modified) {
+        OB_LOG_WARN(pamh, "Group %s not found in /etc/group", groupname);
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    /* Write the new content */
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        OB_LOG_ERR(pamh, "Cannot seek /etc/group: %s", strerror(errno));
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    size_t newlen = dst - newcontent;
+    if (write(fd, newcontent, newlen) != (ssize_t)newlen) {
+        OB_LOG_ERR(pamh, "Cannot write /etc/group: %s", strerror(errno));
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    /* Truncate if new content is shorter */
+    if (ftruncate(fd, newlen) < 0) {
+        OB_LOG_WARN(pamh, "Cannot truncate /etc/group: %s", strerror(errno));
+    }
+
+    free(content);
+    free(newcontent);
+    flock(fd, LOCK_UN);
+    close(fd);
+
+    OB_LOG_INFO(pamh, "Added user %s to group %s", username, groupname);
+    return 0;
+}
+
+/*
+ * Remove user from a group by modifying /etc/group.
+ * Returns 0 on success, -1 on error.
+ */
+static int remove_user_from_group(pam_handle_t *pamh, const char *username, const char *groupname)
+{
+    if (!validate_username(username) || !validate_groupname(groupname)) {
+        return -1;
+    }
+
+    int fd = open("/etc/group", O_RDWR);
+    if (fd < 0) {
+        OB_LOG_ERR(pamh, "Cannot open /etc/group: %s", strerror(errno));
+        return -1;
+    }
+
+    if (flock(fd, LOCK_EX) < 0) {
+        OB_LOG_ERR(pamh, "Cannot lock /etc/group: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    /* Re-check if user is actually a member after locking */
+    if (!user_in_group_locally(username, groupname)) {
+        OB_LOG_DEBUG(pamh, "User %s not in group %s", username, groupname);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return 0;
+    }
+
+    /* Read the entire file */
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        OB_LOG_ERR(pamh, "Cannot stat /etc/group: %s", strerror(errno));
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    char *content = malloc(st.st_size + 1);
+    if (!content) {
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    if (read(fd, content, st.st_size) != st.st_size) {
+        OB_LOG_ERR(pamh, "Cannot read /etc/group: %s", strerror(errno));
+        free(content);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+    content[st.st_size] = '\0';
+
+    /* Build new content */
+    char *newcontent = malloc(st.st_size + 1);
+    if (!newcontent) {
+        free(content);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    size_t namelen = strlen(groupname);
+    size_t userlen = strlen(username);
+    char *dst = newcontent;
+    char *line = content;
+    int modified = 0;
+
+    while (*line) {
+        char *eol = strchr(line, '\n');
+        if (!eol) eol = line + strlen(line);
+
+        size_t linelen = eol - line;
+
+        /* Check if this is the target group */
+        if (linelen > namelen && strncmp(line, groupname, namelen) == 0 && line[namelen] == ':') {
+            /* Find the fourth field (members) */
+            char *p = line + namelen + 1;
+            int colons = 0;
+            while (*p && p < eol && colons < 2) {
+                if (*p == ':') colons++;
+                p++;
+            }
+
+            /* Copy everything up to members */
+            size_t prefix_len = p - line;
+            memcpy(dst, line, prefix_len);
+            dst += prefix_len;
+
+            /* Parse and filter members */
+            int first = 1;
+            char *member = p;
+            while (p <= eol) {
+                if (*p == ',' || p == eol || *p == '\n') {
+                    size_t memlen = p - member;
+                    /* Skip the user we're removing */
+                    if (memlen != userlen || strncmp(member, username, userlen) != 0) {
+                        if (!first && memlen > 0) {
+                            *dst++ = ',';
+                        }
+                        if (memlen > 0) {
+                            memcpy(dst, member, memlen);
+                            dst += memlen;
+                            first = 0;
+                        }
+                    } else {
+                        modified = 1;
+                    }
+                    if (p == eol || *p == '\n') break;
+                    member = p + 1;
+                }
+                p++;
+            }
+        } else {
+            /* Copy line unchanged */
+            memcpy(dst, line, linelen);
+            dst += linelen;
+        }
+
+        /* Add newline if present */
+        if (*eol == '\n') {
+            *dst++ = '\n';
+            line = eol + 1;
+        } else {
+            break;
+        }
+    }
+    *dst = '\0';
+
+    if (!modified) {
+        /* User wasn't actually in the group member list */
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return 0;
+    }
+
+    /* Write the new content */
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        OB_LOG_ERR(pamh, "Cannot seek /etc/group: %s", strerror(errno));
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    size_t newlen = dst - newcontent;
+    if (write(fd, newcontent, newlen) != (ssize_t)newlen) {
+        OB_LOG_ERR(pamh, "Cannot write /etc/group: %s", strerror(errno));
+        free(content);
+        free(newcontent);
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    /* Truncate if new content is shorter */
+    if (ftruncate(fd, newlen) < 0) {
+        OB_LOG_WARN(pamh, "Cannot truncate /etc/group: %s", strerror(errno));
+    }
+
+    free(content);
+    free(newcontent);
+    flock(fd, LOCK_UN);
+    close(fd);
+
+    OB_LOG_INFO(pamh, "Removed user %s from group %s", username, groupname);
+    return 0;
+}
+
+/*
+ * Check if a group is in the managed groups pool.
+ */
+static int is_in_managed_pool(const char *group, char **managed_groups, size_t managed_count)
+{
+    if (!group || !managed_groups) return 0;
+
+    for (size_t i = 0; i < managed_count; i++) {
+        if (managed_groups[i] && strcmp(group, managed_groups[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Check if a group name is in the LLNG groups list.
+ */
+static int is_in_llng_groups(const char *group, char **llng_groups, size_t llng_count)
+{
+    return is_in_managed_pool(group, llng_groups, llng_count);
+}
+
+/*
+ * Synchronize user's Unix groups with LLNG groups.
+ *
+ * Algorithm:
+ * 1. For each group in llng_groups that's in managed_groups:
+ *    - Create group if it doesn't exist
+ *    - Add user if not already a member
+ * 2. For each group the user is currently in:
+ *    - If it's in managed_groups but NOT in llng_groups: remove user
+ *
+ * Returns 0 on success, -1 on error.
+ */
+static int sync_user_groups(pam_handle_t *pamh,
+                            const char *username,
+                            char **llng_groups,
+                            size_t llng_groups_count,
+                            char **managed_groups,
+                            size_t managed_groups_count)
+{
+    int ret = 0;
+
+    if (!username || !managed_groups || managed_groups_count == 0) {
+        /* Nothing to sync */
+        return 0;
+    }
+
+    OB_LOG_DEBUG(pamh, "Syncing groups for user %s (%zu LLNG groups, %zu managed)",
+                 username, llng_groups_count, managed_groups_count);
+
+    /* Step 1: Add user to groups they should be in */
+    for (size_t i = 0; i < llng_groups_count && llng_groups; i++) {
+        const char *group = llng_groups[i];
+        if (!group) continue;
+
+        /* Only sync groups that are in the managed pool */
+        if (!is_in_managed_pool(group, managed_groups, managed_groups_count)) {
+            OB_LOG_DEBUG(pamh, "Group %s not in managed pool, skipping", group);
+            continue;
+        }
+
+        /* Create group if it doesn't exist */
+        if (!group_exists_by_name(group)) {
+            OB_LOG_INFO(pamh, "Creating managed group %s for user %s", group, username);
+            if (create_local_group(pamh, group) != 0) {
+                OB_LOG_ERR(pamh, "Failed to create group %s", group);
+                ret = -1;
+                continue;
+            }
+        }
+
+        /* Add user to group if not already a member */
+        if (!user_in_group_locally(username, group)) {
+            OB_LOG_INFO(pamh, "Adding user %s to managed group %s", username, group);
+            if (add_user_to_group(pamh, username, group) != 0) {
+                OB_LOG_ERR(pamh, "Failed to add user %s to group %s", username, group);
+                ret = -1;
+            }
+        }
+    }
+
+    /* Step 2: Remove user from managed groups they're no longer in */
+    for (size_t i = 0; i < managed_groups_count; i++) {
+        const char *managed = managed_groups[i];
+        if (!managed) continue;
+
+        /* Skip if user should be in this group */
+        if (is_in_llng_groups(managed, llng_groups, llng_groups_count)) {
+            continue;
+        }
+
+        /* User should NOT be in this managed group */
+        if (user_in_group_locally(username, managed)) {
+            OB_LOG_INFO(pamh, "Removing user %s from managed group %s (no longer assigned)",
+                        username, managed);
+            if (remove_user_from_group(pamh, username, managed) != 0) {
+                OB_LOG_ERR(pamh, "Failed to remove user %s from group %s", username, managed);
+                ret = -1;
+            }
+        }
+    }
+
+    /* Invalidate nscd cache so changes are visible immediately */
+    invalidate_nscd_cache();
+
+    return ret;
+}
+
+/*
  * Invalidate nscd cache for passwd and group databases.
  * This ensures that subsequent NSS lookups see the newly created user.
  */
@@ -335,6 +1003,82 @@ static void cleanup_string(pam_handle_t *pamh, void *data, int error_status)
     (void)pamh;
     (void)error_status;
     free(data);
+}
+
+/*
+ * Structure to hold groups array for PAM data storage.
+ * This allows passing groups between PAM phases (acct_mgmt -> open_session).
+ */
+typedef struct {
+    char **groups;
+    size_t count;
+} pam_groups_data_t;
+
+/* Cleanup function for pam_set_data (groups array) */
+static void cleanup_groups_data(pam_handle_t *pamh, void *data, int error_status)
+{
+    (void)pamh;
+    (void)error_status;
+
+    pam_groups_data_t *gdata = (pam_groups_data_t *)data;
+    if (gdata) {
+        if (gdata->groups) {
+            for (size_t i = 0; i < gdata->count; i++) {
+                free(gdata->groups[i]);
+            }
+            free(gdata->groups);
+        }
+        free(gdata);
+    }
+}
+
+/*
+ * Helper to store groups array in PAM data.
+ * Makes a deep copy of the groups array.
+ * Returns 0 on success, -1 on error.
+ */
+static int store_groups_in_pam_data(pam_handle_t *pamh,
+                                    const char *key,
+                                    char **groups,
+                                    size_t count)
+{
+    if (!groups || count == 0) {
+        return 0;  /* Nothing to store */
+    }
+
+    pam_groups_data_t *gdata = calloc(1, sizeof(*gdata));
+    if (!gdata) {
+        return -1;
+    }
+
+    gdata->groups = calloc(count + 1, sizeof(char *));
+    if (!gdata->groups) {
+        free(gdata);
+        return -1;
+    }
+
+    gdata->count = count;
+    for (size_t i = 0; i < count; i++) {
+        if (groups[i]) {
+            gdata->groups[i] = strdup(groups[i]);
+            if (!gdata->groups[i]) {
+                /* Cleanup on error */
+                for (size_t j = 0; j < i; j++) {
+                    free(gdata->groups[j]);
+                }
+                free(gdata->groups);
+                free(gdata);
+                return -1;
+            }
+        }
+    }
+
+    if (pam_set_data(pamh, key, gdata, cleanup_groups_data) != PAM_SUCCESS) {
+        cleanup_groups_data(pamh, gdata, 0);
+        return -1;
+    }
+
+    return 0;
 }
 
 /* Cleanup function for pam_set_data (module data) */
@@ -1958,6 +2702,14 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                         cache_entry.groups_count = 0;
                     }
 
+                    /* Copy managed_groups */
+                    if (cache_entry.managed_groups && cache_entry.managed_groups_count > 0) {
+                        response.managed_groups = cache_entry.managed_groups;
+                        response.managed_groups_count = cache_entry.managed_groups_count;
+                        cache_entry.managed_groups = NULL;  /* Ownership transferred */
+                        cache_entry.managed_groups_count = 0;
+                    }
+
                     /* Copy user attributes */
                     response.gecos = cache_entry.gecos ? strdup(cache_entry.gecos) : NULL;
                     response.shell = cache_entry.shell ? strdup(cache_entry.shell) : NULL;
@@ -2015,11 +2767,13 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     if (!from_cache && use_cache && response.has_offline && response.offline.enabled) {
         int ttl = response.offline.ttl > 0 ? response.offline.ttl : DEFAULT_OFFLINE_CACHE_TTL;
         auth_cache_entry_t cache_entry = {
-            .version = 3,
+            .version = 4,
             .user = (char *)user,
             .authorized = response.authorized,
             .groups = response.groups,
             .groups_count = response.groups_count,
+            .managed_groups = response.managed_groups,
+            .managed_groups_count = response.managed_groups_count,
             .sudo_allowed = response.has_permissions ? response.permissions.sudo_allowed : false,
             .sudo_nopasswd = response.has_permissions ? response.permissions.sudo_nopasswd : false,
             .gecos = response.gecos,
@@ -2067,6 +2821,23 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     if (response.has_permissions) {
         if (response.permissions.sudo_allowed) {
             pam_putenv(pamh, "LLNG_SUDO_ALLOWED=1");
+        }
+    }
+
+    /*
+     * Store groups and managed_groups in PAM data for pam_sm_open_session.
+     * This allows group synchronization to happen during session setup.
+     */
+    if (response.groups && response.groups_count > 0) {
+        if (store_groups_in_pam_data(pamh, "ob_groups",
+                                     response.groups, response.groups_count) != 0) {
+            OB_LOG_WARN(pamh, "Failed to store groups in PAM data");
+        }
+    }
+    if (response.managed_groups && response.managed_groups_count > 0) {
+        if (store_groups_in_pam_data(pamh, "ob_managed_groups",
+                                     response.managed_groups, response.managed_groups_count) != 0) {
+            OB_LOG_WARN(pamh, "Failed to store managed_groups in PAM data");
         }
     }
 
@@ -2375,6 +3146,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
 
     const char *user = NULL;
     int ret;
+    int user_created = 0;
 
     /* Get username */
     ret = pam_get_user(pamh, &user, NULL);
@@ -2411,46 +3183,85 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
     /* Check if user already exists in local /etc/passwd (not via NSS)
      * This is important because libnss_openbastion may report the user as existing
      * even though no local Unix account has been created yet. */
-    if (user_exists_locally(user)) {
-        OB_LOG_DEBUG(pamh, "User %s already exists locally", user);
-        return PAM_SUCCESS;
+    if (!user_exists_locally(user)) {
+        /* User doesn't exist - get user info from PAM data if available */
+        const char *gecos = NULL;
+        const char *shell = NULL;
+        const char *home = NULL;
+
+        /* Try to get LLNG user info stored during authentication */
+        const void *ob_gecos = NULL;
+        const void *ob_shell = NULL;
+        const void *ob_home = NULL;
+
+        pam_get_data(pamh, "ob_gecos", &ob_gecos);
+        pam_get_data(pamh, "ob_shell", &ob_shell);
+        pam_get_data(pamh, "ob_home", &ob_home);
+
+        gecos = (const char *)ob_gecos;
+        shell = (const char *)ob_shell;
+        home = (const char *)ob_home;
+
+        /* Create the user */
+        OB_LOG_INFO(pamh, "User %s does not exist, creating account", user);
+
+        if (create_unix_user(pamh, user, &data->config, gecos, shell, home) != 0) {
+            OB_LOG_ERR(pamh, "Failed to create Unix user: %s", user);
+            return PAM_SESSION_ERR;
+        }
+
+        user_created = 1;
+
+        /* Log success to audit */
+        if (data->audit) {
+            audit_event_t audit_event;
+            audit_event_init(&audit_event, AUDIT_USER_CREATED);
+            audit_event.user = user;
+            audit_event.result_code = PAM_SUCCESS;
+            audit_event.reason = "Unix account created";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
     }
 
-    /* User doesn't exist - get user info from PAM data if available */
-    const char *gecos = NULL;
-    const char *shell = NULL;
-    const char *home = NULL;
+    /*
+     * Synchronize user's Unix groups with LLNG groups (#38).
+     * This happens on every login to ensure group membership is up-to-date.
+     * We only sync groups that are in the managed_groups pool.
+     */
+    const void *ob_groups_data = NULL;
+    const void *ob_managed_groups_data = NULL;
 
-    /* Try to get LLNG user info stored during authentication */
-    const void *ob_gecos = NULL;
-    const void *ob_shell = NULL;
-    const void *ob_home = NULL;
+    pam_get_data(pamh, "ob_groups", &ob_groups_data);
+    pam_get_data(pamh, "ob_managed_groups", &ob_managed_groups_data);
 
-    pam_get_data(pamh, "ob_gecos", &ob_gecos);
-    pam_get_data(pamh, "ob_shell", &ob_shell);
-    pam_get_data(pamh, "ob_home", &ob_home);
+    if (ob_managed_groups_data) {
+        const pam_groups_data_t *managed = (const pam_groups_data_t *)ob_managed_groups_data;
+        const pam_groups_data_t *groups = (const pam_groups_data_t *)ob_groups_data;
 
-    gecos = (const char *)ob_gecos;
-    shell = (const char *)ob_shell;
-    home = (const char *)ob_home;
+        char **llng_groups = groups ? groups->groups : NULL;
+        size_t llng_count = groups ? groups->count : 0;
 
-    /* Create the user */
-    OB_LOG_INFO(pamh, "User %s does not exist, creating account", user);
+        OB_LOG_DEBUG(pamh, "Syncing groups for user %s (%zu groups, %zu managed)",
+                     user, llng_count, managed->count);
 
-    if (create_unix_user(pamh, user, &data->config, gecos, shell, home) != 0) {
-        OB_LOG_ERR(pamh, "Failed to create Unix user: %s", user);
-        return PAM_SESSION_ERR;
-    }
+        if (sync_user_groups(pamh, user,
+                            llng_groups, llng_count,
+                            managed->groups, managed->count) != 0) {
+            OB_LOG_WARN(pamh, "Failed to sync some groups for user %s", user);
+            /* Don't fail the session, group sync is best-effort */
+        }
 
-    /* Log success to audit */
-    if (data->audit) {
-        audit_event_t audit_event;
-        audit_event_init(&audit_event, AUDIT_USER_CREATED);
-        audit_event.user = user;
-        audit_event.result_code = PAM_SUCCESS;
-        audit_event.reason = "Unix account created";
-        audit_event_set_end_time(&audit_event);
-        audit_log_event(data->audit, &audit_event);
+        /* Log group sync to audit */
+        if (data->audit && (llng_count > 0 || managed->count > 0)) {
+            audit_event_t audit_event;
+            audit_event_init(&audit_event, user_created ? AUDIT_USER_CREATED : AUDIT_AUTHZ_SUCCESS);
+            audit_event.user = user;
+            audit_event.result_code = PAM_SUCCESS;
+            audit_event.reason = "Groups synchronized";
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
     }
 
     return PAM_SUCCESS;
