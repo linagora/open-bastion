@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Options
 option(ENABLE_CACHE "Enable token caching" ON)
 option(BUILD_TESTING "Build tests" ON)
+option(INSTALL_SYSTEMD "Install systemd unit files" ON)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -193,12 +194,14 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
-# Install systemd units
-install(FILES
-    ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
-    ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/system
-)
+# Install systemd units (disabled for Debian packaging which uses dh_installsystemd)
+if(INSTALL_SYSTEMD)
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
+        ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
+        DESTINATION lib/systemd/system
+    )
+endif()
 
 # Build NSS module
 add_subdirectory(nss)

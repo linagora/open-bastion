@@ -1,9 +1,9 @@
 [Unit]
-Description=PAM LLNG Heartbeat Timer
-Documentation=man:llng-pam-heartbeat(8)
+Description=Open Bastion Heartbeat Timer
+Documentation=man:ob-heartbeat(8)
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/security/pam_llng.token
+ConditionPathExists=/etc/open-bastion/token
 
 [Timer]
 # First heartbeat 1 minute after boot

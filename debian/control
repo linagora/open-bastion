@@ -1,27 +1,26 @@
 Source: open-bastion
+Standards-Version: 4.7.3
 Maintainer: Xavier Guimard <xguimard@linagora.com>
 Section: admin
-Priority: optional
-Standards-Version: 4.7.0
+Build-Depends: debhelper-compat (= 13),
+ cmake,
+ libcurl4-openssl-dev,
+ libjson-c-dev,
+ libpam0g-dev,
+ libssl-dev,
+ pkgconf,
 Homepage: https://github.com/linagora/open-bastion
-Build-Depends: debhelper-compat (= 13)
- , cmake
- , libcurl4-openssl-dev
- , libjson-c-dev
- , libpam0g-dev
- , libssl-dev
- , pkgconf
 
 Package: libpam-openbastion
 Architecture: any
 Multi-Arch: same
-Pre-Depends: ${misc:Pre-Depends}
-Depends: ${misc:Depends}
- , ${shlibs:Depends}
- , curl
- , jq
- , nscd
- , debconf (>= 0.5) | debconf-2.0
+Depends: ${misc:Depends},
+ ${shlibs:Depends},
+ curl,
+ jq,
+ nscd,
+ debconf | debconf-2.0,
+Pre-Depends: ${misc:Pre-Depends},
 Description: Open Bastion PAM/NSS module for SSH bastion authentication
  This PAM module enables Linux servers to authenticate users via
  Open Bastion, supporting both token-based authentication and
