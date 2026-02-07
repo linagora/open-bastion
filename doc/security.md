@@ -73,6 +73,7 @@ ssh_key_allowed_types = ed25519,ecdsa,sk
 | `ssh_key_min_ecdsa_bits` | `256`   | Minimum ECDSA key size in bits    |
 
 **Note:** This feature requires `ExposeAuthInfo yes` in `sshd_config` to function.
+This is also required for [Service Accounts](service-accounts.md) fingerprint validation.
 
 ## Cache Brute-Force Protection
 
@@ -147,3 +148,11 @@ notify_enabled = true
 notify_url = https://alerts.example.com/webhook
 notify_secret = your-hmac-secret
 ```
+
+## See Also
+
+- [Configuration Reference](configuration.md) - All configuration options
+- [CrowdSec Integration](crowdsec.md) - IP blocking and alerts
+- [Service Accounts](service-accounts.md) - SSH key authentication
+- [Security Architecture](security/00-architecture.md) - Detailed security analysis
+- [Admin Guide](admin-guide.md) - Complete administration guide

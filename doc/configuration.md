@@ -51,6 +51,11 @@ rate_limit_max_lockout = 3600
 # notify_secret = your-hmac-secret
 ```
 
+For detailed documentation on specific features:
+
+- [Cache Brute-Force Protection](security.md#cache-brute-force-protection)
+- [Rate Limiting](security.md#rate-limiting)
+
 ## PAM Module Arguments
 
 Arguments can be passed directly in PAM configuration:
@@ -155,3 +160,11 @@ curl -X POST https://auth.example.com/oauth2/token \
 echo "<access_token>" | sudo tee /etc/open-bastion/token
 sudo chmod 600 /etc/open-bastion/token
 ```
+
+## See Also
+
+- [LemonLDAP::NG Configuration](llng-configuration.md) - Server-side LLNG setup
+- [PAM Authentication Modes](pam-modes.md) - PAM configurations
+- [Service Accounts](service-accounts.md) - Service account configuration
+- [CrowdSec Integration](crowdsec.md) - CrowdSec configuration
+- [Security Features](security.md) - Security options

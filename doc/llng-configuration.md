@@ -68,6 +68,9 @@ Additional and optional parameters that can be inserted into `lemonldap-ng.ini`,
 | `pamAccessOfflineEnabled`                       | `0`          | Enable offline mode                     |
 | `pamAccessHeartbeatInterval`                    | `300` (5mn)  | Heartbeat interval                      |
 
+When offline mode is enabled, the server-side cache is protected by
+[Cache Brute-Force Protection](security.md#cache-brute-force-protection).
+
 ### SSH CA Parameters (optional)
 
 | Parameter               | Default    | Description                               |
@@ -175,3 +178,9 @@ Or during enrollment:
 ```bash
 sudo ob-enroll -g production
 ```
+
+## See Also
+
+- [PAM Authentication Modes](pam-modes.md) - Configure PAM on servers
+- [Configuration Reference](configuration.md) - All configuration options
+- [Admin Guide](admin-guide.md) - Complete administration guide

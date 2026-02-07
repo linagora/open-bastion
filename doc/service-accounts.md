@@ -51,7 +51,8 @@ home = /var/lib/backup
 **SSH server requirement:**
 The SSH server must have `ExposeAuthInfo yes` in `/etc/ssh/sshd_config` for fingerprint
 validation to work. This allows the PAM module to verify that the SSH key used matches
-the configured fingerprint.
+the configured fingerprint. See also [SSH Key Policy](security.md#ssh-key-policy) for
+restricting allowed key types.
 
 ```bash
 # /etc/ssh/sshd_config
@@ -108,3 +109,9 @@ In `/etc/open-bastion/openbastion.conf`:
 ```ini
 service_accounts_file = /etc/open-bastion/service-accounts.conf
 ```
+
+## See Also
+
+- [Configuration Reference](configuration.md) - All configuration options
+- [PAM Authentication Modes](pam-modes.md) - PAM configurations
+- [Security Features](security.md) - SSH key policies

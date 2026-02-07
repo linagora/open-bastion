@@ -68,3 +68,9 @@ crowdsec_url = http://crowdsieve.internal:8080
 | `crowdsec_max_failures`    | `5`                             | Auto-ban after N failures (0=disabled) |
 | `crowdsec_block_delay`     | `180`                           | Time window for counting failures      |
 | `crowdsec_ban_duration`    | `4h`                            | Ban duration (e.g., `4h`, `1d`)        |
+
+## See Also
+
+- [Configuration Reference](configuration.md) - All configuration options
+- [Security Features](security.md) - Other security features
+- [Admin Guide](admin-guide.md) - Complete administration guide

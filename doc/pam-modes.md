@@ -58,6 +58,7 @@ session    required     pam_unix.so
 
 Users authenticate with SSH keys. PAM doesn't handle password authentication,
 but LLNG verifies the user has permission to access this server.
+You can restrict allowed key types with [SSH Key Policy](security.md#ssh-key-policy).
 
 ```
 # /etc/pam.d/sshd
@@ -161,3 +162,10 @@ Restart SSH after changes:
 ```bash
 sudo systemctl restart sshd
 ```
+
+## See Also
+
+- [LemonLDAP::NG Configuration](llng-configuration.md) - Server-side setup
+- [Configuration Reference](configuration.md) - All configuration options
+- [Service Accounts](service-accounts.md) - SSH key authentication for automation
+- [Security Features](security.md) - Key policies and rate limiting

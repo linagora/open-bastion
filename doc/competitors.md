@@ -142,3 +142,9 @@ LLNG-PAM-MODULE with LemonLDAP::NG provides a unique combination:
 
 For organizations primarily using Linux/SSH infrastructure and needing web SSO,
 LemonLDAP::NG offers the most comprehensive and cost-effective solution.
+
+## See Also
+
+- [Bastion Architecture](bastion-architecture.md) - JWT-based bastion authentication
+- [Session Recording](session-recording.md) - SSH session recording
+- [Admin Guide](admin-guide.md) - Complete administration guide
