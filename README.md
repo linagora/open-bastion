@@ -70,9 +70,12 @@ sudo dnf install libcurl-devel json-c-devel pam-devel openssl-devel keyutils-lib
 
 ## Installation
 
-### From APT Repository (Debian/Ubuntu)
+### From Package Repository
 
-Pre-built packages are available for Debian 12, Debian 13, and Ubuntu 24.04.
+Pre-built packages are available for:
+
+- **Debian/Ubuntu**: Debian 12, Debian 13, Ubuntu 24.04
+- **RHEL/Rocky Linux**: Rocky Linux 9, Rocky Linux 10
 
 See installation instructions at: **https://linagora.github.io/open-bastion/**
 
