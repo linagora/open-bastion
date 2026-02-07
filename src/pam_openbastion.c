@@ -524,6 +524,137 @@ static int is_in_llng_groups(const char *group, char **llng_groups, size_t llng_
 }
 
 /*
+ * Check if a group name is in the local whitelist.
+ * The whitelist is a comma-separated string (e.g., "docker,developers,readonly").
+ * If whitelist is NULL or empty, all groups are allowed.
+ */
+static int is_group_in_whitelist(const char *group, const char *whitelist)
+{
+    if (!group || !*group) return 0;
+
+    /* If no whitelist configured, all groups are allowed */
+    if (!whitelist || !*whitelist) return 1;
+
+    size_t group_len = strlen(group);
+    const char *current = whitelist;
+
+    while (current && *current) {
+        /* Skip leading commas and whitespace */
+        while (*current == ',' || *current == ' ' || *current == '\t') {
+            current++;
+        }
+        if (!*current) break;
+
+        /* Find end of current token */
+        const char *end = current;
+        while (*end && *end != ',' && *end != ' ' && *end != '\t') {
+            end++;
+        }
+
+        size_t token_len = end - current;
+        if (token_len == group_len && strncmp(group, current, token_len) == 0) {
+            return 1;  /* Found */
+        }
+
+        current = end;
+    }
+
+    return 0;  /* Not in whitelist */
+}
+
+/*
+ * Filter managed_groups against the local whitelist.
+ * Returns a newly allocated filtered array, or NULL on error.
+ * The caller must free both the array and its elements.
+ * Sets *filtered_count to the number of groups in the result.
+ */
+static char **filter_managed_groups(pam_handle_t *pamh,
+                                    char **managed_groups,
+                                    size_t managed_count,
+                                    const char *whitelist,
+                                    size_t *filtered_count)
+{
+    *filtered_count = 0;
+
+    /* If no whitelist, return a copy of the original */
+    if (!whitelist || !*whitelist) {
+        if (!managed_groups || managed_count == 0) {
+            return NULL;
+        }
+
+        char **result = calloc(managed_count, sizeof(char *));
+        if (!result) return NULL;
+
+        for (size_t i = 0; i < managed_count; i++) {
+            if (managed_groups[i]) {
+                result[i] = strdup(managed_groups[i]);
+                if (!result[i]) {
+                    /* Cleanup on failure */
+                    for (size_t j = 0; j < i; j++) {
+                        free(result[j]);
+                    }
+                    free(result);
+                    return NULL;
+                }
+            }
+        }
+        *filtered_count = managed_count;
+        return result;
+    }
+
+    /* Count matching groups first */
+    size_t match_count = 0;
+    for (size_t i = 0; i < managed_count; i++) {
+        if (managed_groups[i] && is_group_in_whitelist(managed_groups[i], whitelist)) {
+            match_count++;
+        }
+    }
+
+    if (match_count == 0) {
+        return NULL;
+    }
+
+    /* Allocate and fill result array */
+    char **result = calloc(match_count, sizeof(char *));
+    if (!result) return NULL;
+
+    size_t idx = 0;
+    for (size_t i = 0; i < managed_count && idx < match_count; i++) {
+        if (managed_groups[i] && is_group_in_whitelist(managed_groups[i], whitelist)) {
+            result[idx] = strdup(managed_groups[i]);
+            if (!result[idx]) {
+                /* Cleanup on failure */
+                for (size_t j = 0; j < idx; j++) {
+                    free(result[j]);
+                }
+                free(result);
+                return NULL;
+            }
+
+            OB_LOG_DEBUG(pamh, "Managed group %s is in local whitelist", managed_groups[i]);
+            idx++;
+        } else if (managed_groups[i]) {
+            OB_LOG_DEBUG(pamh, "Managed group %s filtered out by local whitelist", managed_groups[i]);
+        }
+    }
+
+    *filtered_count = match_count;
+    return result;
+}
+
+/*
+ * Free a filtered groups array.
+ */
+static void free_filtered_groups(char **groups, size_t count)
+{
+    if (!groups) return;
+    for (size_t i = 0; i < count; i++) {
+        free(groups[i]);
+    }
+    free(groups);
+}
+
+/*
  * Synchronize user's Unix groups with LLNG groups.
  *
  * Algorithm:
@@ -2954,7 +3085,8 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
     /*
      * Synchronize user's Unix groups with LLNG groups (#38).
      * This happens on every login to ensure group membership is up-to-date.
-     * We only sync groups that are in the managed_groups pool.
+     * We only sync groups that are in the managed_groups pool AND
+     * (optionally) the local allowed_managed_groups whitelist.
      */
     const void *ob_groups_data = NULL;
     const void *ob_managed_groups_data = NULL;
@@ -2969,26 +3101,48 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         char **llng_groups = groups ? groups->groups : NULL;
         size_t llng_count = groups ? groups->count : 0;
 
-        OB_LOG_DEBUG(pamh, "Syncing groups for user %s (%zu groups, %zu managed)",
-                     user, llng_count, managed->count);
+        /*
+         * Filter managed_groups against local whitelist (defense-in-depth).
+         * If allowed_managed_groups is not configured, all groups are allowed.
+         */
+        size_t filtered_count = 0;
+        char **filtered_managed = filter_managed_groups(pamh,
+                                                        managed->groups,
+                                                        managed->count,
+                                                        data->config.allowed_managed_groups,
+                                                        &filtered_count);
 
-        if (sync_user_groups(pamh, user,
-                            llng_groups, llng_count,
-                            managed->groups, managed->count) != 0) {
-            OB_LOG_WARN(pamh, "Failed to sync some groups for user %s", user);
-            /* Don't fail the session, group sync is best-effort */
+        if (data->config.allowed_managed_groups && *data->config.allowed_managed_groups) {
+            OB_LOG_DEBUG(pamh, "Filtered managed groups: %zu of %zu allowed by local whitelist",
+                         filtered_count, managed->count);
         }
 
-        /* Log group sync to audit */
-        if (data->audit && (llng_count > 0 || managed->count > 0)) {
+        OB_LOG_DEBUG(pamh, "Syncing groups for user %s (%zu groups, %zu managed)",
+                     user, llng_count, filtered_count);
+
+        int sync_result = 0;
+        if (filtered_count > 0 || llng_count > 0) {
+            sync_result = sync_user_groups(pamh, user,
+                                           llng_groups, llng_count,
+                                           filtered_managed, filtered_count);
+            if (sync_result != 0) {
+                OB_LOG_WARN(pamh, "Failed to sync some groups for user %s", user);
+                /* Don't fail the session, group sync is best-effort */
+            }
+        }
+
+        /* Log group sync to audit with actual result */
+        if (data->audit && (llng_count > 0 || filtered_count > 0)) {
             audit_event_t audit_event;
             audit_event_init(&audit_event, AUDIT_GROUP_SYNC);
             audit_event.user = user;
-            audit_event.result_code = PAM_SUCCESS;
-            audit_event.reason = "Groups synchronized";
+            audit_event.result_code = (sync_result == 0) ? PAM_SUCCESS : PAM_SYSTEM_ERR;
+            audit_event.reason = (sync_result == 0) ? "Groups synchronized" : "Group sync partial failure";
             audit_event_set_end_time(&audit_event);
             audit_log_event(data->audit, &audit_event);
         }
+
+        free_filtered_groups(filtered_managed, filtered_count);
     }
 
     return PAM_SUCCESS;

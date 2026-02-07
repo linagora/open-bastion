@@ -45,6 +45,11 @@ rate_limit_max_attempts = 5
 rate_limit_initial_lockout = 30
 rate_limit_max_lockout = 3600
 
+# Group synchronization (#38)
+# Local whitelist of groups allowed to be managed (optional, defense-in-depth)
+# If configured, only groups in this list AND in LLNG's managed_groups will be synced
+# allowed_managed_groups = docker,developers,readonly
+
 # Webhook notifications (optional)
 # notify_enabled = true
 # notify_url = https://alerts.example.com/webhook

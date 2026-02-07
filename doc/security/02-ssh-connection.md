@@ -1267,17 +1267,16 @@ cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
 
 Le module PAM implémente plusieurs contrôles de sécurité :
 
-| Mesure de sécurité            | Description                                                               |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| **Groupes gérés explicites**  | Seuls les groupes listés dans `managed_groups` peuvent être modifiés      |
-| **Validation des noms**       | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement) |
-| **Protection symlink**        | `/etc/group` ouvert avec `O_NOFOLLOW` et vérifié via `fstat()`            |
-| **Vérification propriétaire** | `/etc/group` doit appartenir à root (uid=0)                               |
-| **Verrouillage fichier**      | `flock(LOCK_EX)` pendant les modifications                                |
-| **Cache chiffré**             | Les groupes sont stockés en cache avec AES-256-GCM                        |
-| **Audit GROUP_SYNC**          | Toutes les modifications de groupes sont journalisées                     |
+| Mesure de sécurité             | Description                                                                   |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| **Groupes gérés explicites**   | Seuls les groupes listés dans `managed_groups` peuvent être modifiés          |
+| **Liste blanche locale**       | `allowed_managed_groups` permet de restreindre davantage côté serveur         |
+| **Validation des noms**        | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement)     |
+| **Utilisation outils système** | `groupadd`/`gpasswd` pour manipulation atomique de /etc/group et /etc/gshadow |
+| **Cache chiffré**              | Les groupes sont stockés en cache avec AES-256-GCM                            |
+| **Audit GROUP_SYNC**           | Toutes les modifications de groupes sont journalisées                         |
 
-**Configuration recommandée :**
+**Configuration LLNG (server-side) :**
 
 ```yaml
 # Configuration LLNG Manager
@@ -1287,16 +1286,31 @@ pamAccessManagedGroups:
   default: "" # Pas de sync par défaut
 ```
 
+**Configuration locale (defense-in-depth) :**
+
+```ini
+# /etc/open-bastion/openbastion.conf
+# Liste blanche locale optionnelle - restreint les groupes que LLNG peut gérer
+allowed_managed_groups = docker,developers,readonly
+```
+
+La liste blanche locale offre une défense en profondeur :
+
+- Les groupes doivent être dans LLNG `managed_groups` ET dans `allowed_managed_groups` local
+- Permet aux administrateurs serveur de contrôler ce que LLNG peut modifier
+- Protection contre une configuration LLNG erronée ou compromise
+
 **Principe de moindre privilège :**
 
 - Ne pas inclure les groupes critiques (wheel, sudo, root, admin) dans `managed_groups`
 - Créer des groupes dédiés pour les accès applicatifs (ex: app-users, db-readers)
 - Utiliser des `server_group` différents pour segmenter les accès
+- Configurer `allowed_managed_groups` sur les serveurs sensibles
 
-|                 |                     Score résiduel                     |
-| --------------- | :----------------------------------------------------: |
-| **Probabilité** | 1 (avec managed_groups restrictifs et validation noms) |
-| **Impact**      |            2 (groupes critiques non gérés)             |
+|                 |                                Score résiduel                                |
+| --------------- | :--------------------------------------------------------------------------: |
+| **Probabilité** | 1 (avec managed_groups restrictifs, liste blanche locale et validation noms) |
+| **Impact**      |                       2 (groupes critiques non gérés)                        |
 
 ---
 
