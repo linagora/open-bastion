@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include <syslog.h>
+#include <arpa/inet.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include <openssl/sha.h>
@@ -672,6 +673,221 @@ static char *build_alert_payload(crowdsec_context_t *ctx,
     return result;
 }
 
+/* Whitelist parsing and matching */
+
+/* Maximum number of whitelist entries to prevent DoS */
+#define MAX_WHITELIST_ENTRIES 1000
+
+/*
+ * Parse a single IP or CIDR entry into a whitelist entry structure.
+ * Supports IPv4, IPv6, and CIDR notation for both.
+ * Returns 0 on success, -1 on error.
+ */
+static int parse_whitelist_entry(const char *str, crowdsec_whitelist_entry_t *entry)
+{
+    if (!str || !entry) return -1;
+
+    /* Skip leading whitespace */
+    while (*str == ' ' || *str == '\t') str++;
+
+    /* Copy to work buffer, trim trailing whitespace */
+    char buf[64];
+    size_t len = strlen(str);
+    if (len >= sizeof(buf)) return -1;  /* Too long */
+    strncpy(buf, str, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    /* Trim trailing whitespace */
+    char *end = buf + strlen(buf) - 1;
+    while (end > buf && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
+        *end-- = '\0';
+    }
+
+    if (buf[0] == '\0') return -1;  /* Empty string */
+
+    /* Check for CIDR notation */
+    char *slash = strchr(buf, '/');
+    int prefix_len = -1;
+
+    if (slash) {
+        *slash = '\0';
+        char *endptr;
+        long prefix = strtol(slash + 1, &endptr, 10);
+        if (*endptr != '\0' || prefix < 0) {
+            return -1;  /* Invalid prefix */
+        }
+        prefix_len = (int)prefix;
+    }
+
+    /* Try to parse as IPv4 */
+    struct in_addr addr4;
+    if (inet_pton(AF_INET, buf, &addr4) == 1) {
+        entry->family = AF_INET;
+        memset(entry->addr, 0, sizeof(entry->addr));
+        memcpy(entry->addr, &addr4, sizeof(addr4));
+        if (prefix_len == -1) {
+            entry->prefix_len = 32;  /* Single IPv4 address */
+        } else if (prefix_len > 32) {
+            return -1;  /* Invalid IPv4 prefix */
+        } else {
+            entry->prefix_len = prefix_len;
+        }
+        return 0;
+    }
+
+    /* Try to parse as IPv6 */
+    struct in6_addr addr6;
+    if (inet_pton(AF_INET6, buf, &addr6) == 1) {
+        entry->family = AF_INET6;
+        memcpy(entry->addr, &addr6, sizeof(addr6));
+        if (prefix_len == -1) {
+            entry->prefix_len = 128;  /* Single IPv6 address */
+        } else if (prefix_len > 128) {
+            return -1;  /* Invalid IPv6 prefix */
+        } else {
+            entry->prefix_len = prefix_len;
+        }
+        return 0;
+    }
+
+    return -1;  /* Failed to parse */
+}
+
+/*
+ * Check if an IP address matches a whitelist entry.
+ * Returns 1 if match, 0 if no match.
+ */
+static int ip_matches_entry(const char *ip, const crowdsec_whitelist_entry_t *entry)
+{
+    if (!ip || !entry) return 0;
+
+    /* Parse the IP address */
+    struct in_addr addr4;
+    struct in6_addr addr6;
+    int family;
+    unsigned char *addr_bytes;
+
+    if (inet_pton(AF_INET, ip, &addr4) == 1) {
+        family = AF_INET;
+        addr_bytes = (unsigned char *)&addr4;
+    } else if (inet_pton(AF_INET6, ip, &addr6) == 1) {
+        family = AF_INET6;
+        addr_bytes = (unsigned char *)&addr6;
+    } else {
+        return 0;  /* Invalid IP */
+    }
+
+    /* Family must match */
+    if (family != entry->family) {
+        return 0;
+    }
+
+    /* Compare addresses with prefix mask */
+    int addr_bytes_count = (family == AF_INET) ? 4 : 16;
+    int prefix_len = entry->prefix_len;
+
+    /* Compare full bytes */
+    int full_bytes = prefix_len / 8;
+    if (memcmp(addr_bytes, entry->addr, full_bytes) != 0) {
+        return 0;
+    }
+
+    /* Compare remaining bits */
+    int remaining_bits = prefix_len % 8;
+    if (remaining_bits > 0 && full_bytes < addr_bytes_count) {
+        unsigned char mask = (0xFF << (8 - remaining_bits)) & 0xFF;
+        if ((addr_bytes[full_bytes] & mask) != (entry->addr[full_bytes] & mask)) {
+            return 0;
+        }
+    }
+
+    return 1;  /* Match */
+}
+
+int crowdsec_parse_whitelist(const char *whitelist_str,
+                             crowdsec_whitelist_entry_t **entries,
+                             int *count)
+{
+    if (!entries || !count) return -1;
+
+    *entries = NULL;
+    *count = 0;
+
+    if (!whitelist_str || whitelist_str[0] == '\0') {
+        return 0;  /* Empty whitelist is valid */
+    }
+
+    /* Count commas to estimate array size */
+    int estimated_count = 1;
+    for (const char *p = whitelist_str; *p; p++) {
+        if (*p == ',') estimated_count++;
+    }
+
+    if (estimated_count > MAX_WHITELIST_ENTRIES) {
+        syslog(LOG_WARNING, "open-bastion: crowdsec whitelist too large (%d entries), "
+               "limiting to %d", estimated_count, MAX_WHITELIST_ENTRIES);
+        estimated_count = MAX_WHITELIST_ENTRIES;
+    }
+
+    /* Allocate array */
+    crowdsec_whitelist_entry_t *arr = calloc(estimated_count, sizeof(crowdsec_whitelist_entry_t));
+    if (!arr) return -1;
+
+    /* Parse entries */
+    char *str_copy = strdup(whitelist_str);
+    if (!str_copy) {
+        free(arr);
+        return -1;
+    }
+
+    int parsed_count = 0;
+    char *saveptr;
+    char *token = strtok_r(str_copy, ",", &saveptr);
+
+    while (token && parsed_count < estimated_count) {
+        if (parse_whitelist_entry(token, &arr[parsed_count]) == 0) {
+            parsed_count++;
+        } else {
+            syslog(LOG_WARNING, "open-bastion: crowdsec whitelist: invalid entry '%s', skipping",
+                   token);
+        }
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    free(str_copy);
+
+    if (parsed_count == 0) {
+        free(arr);
+        *entries = NULL;
+        *count = 0;
+        return 0;
+    }
+
+    *entries = arr;
+    *count = parsed_count;
+
+    syslog(LOG_INFO, "open-bastion: crowdsec whitelist loaded with %d entries", parsed_count);
+    return 0;
+}
+
+void crowdsec_free_whitelist(crowdsec_whitelist_entry_t *entries)
+{
+    free(entries);
+}
+
+bool crowdsec_is_whitelisted(crowdsec_context_t *ctx, const char *ip)
+{
+    if (!ctx || !ip) return false;
+
+    for (int i = 0; i < ctx->config.whitelist_count; i++) {
+        if (ip_matches_entry(ip, &ctx->config.whitelist[i])) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /* Public API */
 
 crowdsec_context_t *crowdsec_init(const crowdsec_config_t *config)
@@ -740,6 +956,10 @@ crowdsec_context_t *crowdsec_init(const crowdsec_config_t *config)
         return NULL;
     }
 
+    /* Copy whitelist */
+    ctx->config.whitelist = config->whitelist;
+    ctx->config.whitelist_count = config->whitelist_count;
+
     /* Initialize curl */
     ctx->curl = curl_easy_init();
     if (!ctx->curl) {
@@ -767,6 +987,7 @@ void crowdsec_destroy(crowdsec_context_t *ctx)
     secure_free_str(ctx->config.password);
     free(ctx->config.scenario);
     free(ctx->config.ban_duration);
+    crowdsec_free_whitelist(ctx->config.whitelist);
     secure_free_str(ctx->token);
 
     explicit_bzero(ctx, sizeof(*ctx));
@@ -786,7 +1007,12 @@ crowdsec_result_t crowdsec_check_ip(crowdsec_context_t *ctx, const char *ip)
 
     ctx->error_buf[0] = '\0';
 
-    /* Check cache first to avoid hammering LAPI */
+    /* Check whitelist first - bypass CrowdSec for whitelisted IPs */
+    if (crowdsec_is_whitelisted(ctx, ip)) {
+        return CS_ALLOW;
+    }
+
+    /* Check cache to avoid hammering LAPI */
     crowdsec_result_t cached_result;
     if (cache_lookup(ctx, ip, &cached_result)) {
         return cached_result;
@@ -912,6 +1138,11 @@ int crowdsec_report_failure(crowdsec_context_t *ctx,
 
     if (!ctx->config.machine_id || !ctx->config.password) {
         /* Watcher credentials not configured */
+        return 0;
+    }
+
+    /* Skip whitelisted IPs - don't report failures for trusted sources */
+    if (crowdsec_is_whitelisted(ctx, ip)) {
         return 0;
     }
 

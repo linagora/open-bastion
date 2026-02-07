@@ -128,6 +128,7 @@ typedef struct {
     int crowdsec_max_failures;             /* Auto-ban after N failures, 0=no auto-ban (default: 5) */
     int crowdsec_block_delay;              /* Time window in seconds for counting (default: 180) */
     char *crowdsec_ban_duration;           /* Ban duration e.g. "4h" (default: 4h) */
+    char *crowdsec_whitelist;              /* Comma-separated list of IPs/CIDRs to bypass CrowdSec */
 
     /* SSH key policy (optional restrictions on allowed key types) */
     bool ssh_key_policy_enabled;           /* Enable SSH key type restrictions (default: false) */

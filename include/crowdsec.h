@@ -28,6 +28,13 @@ typedef enum {
     CS_ERROR                    /* API error occurred */
 } crowdsec_result_t;
 
+/* Whitelist entry (parsed IP or CIDR) */
+typedef struct {
+    int family;                 /* AF_INET or AF_INET6 */
+    unsigned char addr[16];     /* Network address (4 bytes for IPv4, 16 for IPv6) */
+    int prefix_len;             /* CIDR prefix length (-1 for single IP) */
+} crowdsec_whitelist_entry_t;
+
 /* CrowdSec configuration */
 typedef struct {
     bool enabled;               /* Enable CrowdSec integration (default: false) */
@@ -49,6 +56,10 @@ typedef struct {
     int max_failures;           /* Auto-ban after N failures (0 = no auto-ban) */
     int block_delay;            /* Time window in seconds for counting failures */
     char *ban_duration;         /* Ban duration (e.g., "4h", "1d") */
+
+    /* Whitelist (IPs/CIDRs that bypass CrowdSec checks) */
+    crowdsec_whitelist_entry_t *whitelist;  /* Parsed whitelist entries */
+    int whitelist_count;                     /* Number of whitelist entries */
 } crowdsec_config_t;
 
 /* Opaque context handle */
@@ -105,6 +116,37 @@ int crowdsec_report_failure(crowdsec_context_t *ctx,
  * @return Error message string (empty if no error)
  */
 const char *crowdsec_error(crowdsec_context_t *ctx);
+
+/*
+ * Check if IP is in whitelist (bypass CrowdSec)
+ *
+ * @param ctx Context handle
+ * @param ip Client IP address to check
+ * @return true if IP is whitelisted, false otherwise
+ */
+bool crowdsec_is_whitelisted(crowdsec_context_t *ctx, const char *ip);
+
+/*
+ * Parse whitelist string into entries array
+ *
+ * Parses a comma-separated list of IPs and CIDRs (IPv4 and IPv6).
+ * Examples: "192.168.1.0/24,10.0.0.1,2001:db8::/32,::1"
+ *
+ * @param whitelist_str Comma-separated list of IPs/CIDRs
+ * @param entries Output array (allocated by this function)
+ * @param count Output count of parsed entries
+ * @return 0 on success, -1 on error
+ */
+int crowdsec_parse_whitelist(const char *whitelist_str,
+                             crowdsec_whitelist_entry_t **entries,
+                             int *count);
+
+/*
+ * Free whitelist entries array
+ *
+ * @param entries Array to free
+ */
+void crowdsec_free_whitelist(crowdsec_whitelist_entry_t *entries);
 
 /* Default configuration values */
 #define CROWDSEC_DEFAULT_URL "http://127.0.0.1:8080"
