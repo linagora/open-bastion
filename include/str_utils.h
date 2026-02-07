@@ -37,6 +37,60 @@ static inline char *str_json_strdup(struct json_object *obj)
     const char *str = json_object_get_string(obj);
     return str ? strdup(str) : NULL;
 }
+
+/*
+ * Parse a JSON array of strings into a dynamically allocated string array.
+ * Only string elements are copied; non-strings are skipped.
+ * Returns the array on success (caller must free each element and the array),
+ * NULL on failure or empty array.
+ * Sets *out_count to the number of valid strings copied.
+ */
+static inline char **str_json_parse_string_array(struct json_object *arr,
+                                                  size_t max_count,
+                                                  size_t *out_count)
+{
+    *out_count = 0;
+
+    if (!arr || !json_object_is_type(arr, json_type_array)) {
+        return NULL;
+    }
+
+    size_t count = json_object_array_length(arr);
+    if (count > max_count) {
+        count = max_count;
+    }
+    if (count == 0) {
+        return NULL;
+    }
+
+    char **result = calloc(count + 1, sizeof(char *));
+    if (!result) {
+        return NULL;
+    }
+
+    size_t valid_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        struct json_object *elem = json_object_array_get_idx(arr, i);
+        /* Only accept string elements, skip non-strings */
+        if (elem && json_object_is_type(elem, json_type_string)) {
+            const char *str = json_object_get_string(elem);
+            if (str) {
+                result[valid_count] = strdup(str);
+                if (result[valid_count]) {
+                    valid_count++;
+                }
+            }
+        }
+    }
+
+    if (valid_count == 0) {
+        free(result);
+        return NULL;
+    }
+
+    *out_count = valid_count;
+    return result;
+}
 #endif
 
 /*

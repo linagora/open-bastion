@@ -18,12 +18,14 @@
 
 /* Authorization cache entry */
 typedef struct {
-    int version;            /* Cache format version (3) */
+    int version;            /* Cache format version (4) */
     time_t expires_at;      /* Expiration timestamp */
     char *user;             /* Username */
     bool authorized;        /* Authorization result */
     char **groups;          /* User groups */
     size_t groups_count;    /* Number of groups */
+    char **managed_groups;      /* Pool of groups managed by LLNG */
+    size_t managed_groups_count;
     bool sudo_allowed;      /* Sudo permission */
     bool sudo_nopasswd;     /* Sudo without password */
     char *gecos;            /* Full name / GECOS */

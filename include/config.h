@@ -140,6 +140,9 @@ typedef struct {
     int cache_rate_limit_max_attempts;     /* Max failed lookups before lockout (default: 3) */
     int cache_rate_limit_lockout_sec;      /* Initial lockout in seconds (default: 60) */
     int cache_rate_limit_max_lockout_sec;  /* Maximum lockout in seconds (default: 3600) */
+
+    /* Group synchronization (#38) */
+    char *allowed_managed_groups;          /* Comma-separated whitelist of groups allowed to be managed locally (optional) */
 } pam_openbastion_config_t;
 
 /*

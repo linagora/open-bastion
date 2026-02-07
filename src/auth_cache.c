@@ -2,7 +2,7 @@
  * auth_cache.c - Authorization cache for offline mode
  *
  * Caches authorization responses from LLNG server for offline use.
- * Uses JSON format (LLNGCACHE03) with AES-256-GCM encryption.
+ * Uses JSON format (LLNGCACHE04) with AES-256-GCM encryption.
  *
  * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
@@ -29,8 +29,8 @@
 #include "str_utils.h"
 
 /* Cache format version */
-#define AUTH_CACHE_VERSION 3
-#define AUTH_CACHE_MAGIC "LLNGCACHE03"
+#define AUTH_CACHE_VERSION 4
+#define AUTH_CACHE_MAGIC "LLNGCACHE04"
 
 /* Use shared JSON strdup utility */
 #define safe_json_strdup str_json_strdup
@@ -507,23 +507,13 @@ bool auth_cache_lookup(auth_cache_t *cache,
     }
 
     if (json_object_object_get_ex(json, "groups", &val)) {
-        if (json_object_is_type(val, json_type_array)) {
-            size_t count = json_object_array_length(val);
-            /* Security: Limit groups to prevent DoS via memory exhaustion */
-            if (count > MAX_USER_GROUPS) {
-                count = MAX_USER_GROUPS;
-            }
-            entry->groups = calloc(count + 1, sizeof(char *));
-            if (entry->groups) {
-                entry->groups_count = count;
-                for (size_t i = 0; i < count; i++) {
-                    struct json_object *g = json_object_array_get_idx(val, i);
-                    if (g) {
-                        entry->groups[i] = safe_json_strdup(g);
-                    }
-                }
-            }
-        }
+        entry->groups = str_json_parse_string_array(val, MAX_USER_GROUPS,
+                                                     &entry->groups_count);
+    }
+
+    if (json_object_object_get_ex(json, "managed_groups", &val)) {
+        entry->managed_groups = str_json_parse_string_array(val, MAX_USER_GROUPS,
+                                                             &entry->managed_groups_count);
     }
 
     if (json_object_object_get_ex(json, "sudo_allowed", &val)) {
@@ -581,6 +571,16 @@ int auth_cache_store(auth_cache_t *cache,
             }
         }
         json_object_object_add(json, "groups", groups);
+    }
+
+    if (entry->managed_groups && entry->managed_groups_count > 0) {
+        struct json_object *managed_groups = json_object_new_array();
+        for (size_t i = 0; i < entry->managed_groups_count; i++) {
+            if (entry->managed_groups[i]) {
+                json_object_array_add(managed_groups, json_object_new_string(entry->managed_groups[i]));
+            }
+        }
+        json_object_object_add(json, "managed_groups", managed_groups);
     }
 
     if (entry->gecos) {
@@ -772,6 +772,13 @@ void auth_cache_entry_free(auth_cache_entry_t *entry)
             free(entry->groups[i]);
         }
         free(entry->groups);
+    }
+
+    if (entry->managed_groups) {
+        for (size_t i = 0; i < entry->managed_groups_count; i++) {
+            free(entry->managed_groups[i]);
+        }
+        free(entry->managed_groups);
     }
 
     memset(entry, 0, sizeof(*entry));

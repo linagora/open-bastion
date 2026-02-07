@@ -162,7 +162,7 @@ static int test_store_lookup(void)
 
     /* Create entry */
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "testuser",
         .authorized = true,
         .groups = NULL,
@@ -219,7 +219,7 @@ static int test_lookup_different_group(void)
 
     /* Store for group "web" */
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "webuser",
         .authorized = true,
         .sudo_allowed = false
@@ -250,7 +250,7 @@ static int test_invalidate(void)
 
     /* Store entry */
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "invaliduser",
         .authorized = true
     };
@@ -284,7 +284,7 @@ static int test_entry_with_groups(void)
     /* Create groups array */
     char *groups[] = {"admins", "developers", "users"};
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "groupuser",
         .authorized = true,
         .groups = groups,
@@ -304,6 +304,54 @@ static int test_entry_with_groups(void)
     ASSERT(strcmp(lookup.groups[0], "admins") == 0);
     ASSERT(strcmp(lookup.groups[1], "developers") == 0);
     ASSERT(strcmp(lookup.groups[2], "users") == 0);
+
+    auth_cache_entry_free(&lookup);
+    auth_cache_destroy(cache);
+    return 1;
+}
+
+/* Test: Entry with managed_groups (#38) */
+static int test_entry_with_managed_groups(void)
+{
+    if (!has_machine_id()) return 2;  /* SKIP */
+    auth_cache_t *cache = auth_cache_init(test_dir);
+    ASSERT(cache != NULL);
+
+    /* Create groups and managed_groups arrays */
+    char *groups[] = {"admins", "developers"};
+    char *managed[] = {"admins", "developers", "docker", "sudo"};
+    auth_cache_entry_t entry = {
+        .version = 4,
+        .user = "managed_user",
+        .authorized = true,
+        .groups = groups,
+        .groups_count = 2,
+        .managed_groups = managed,
+        .managed_groups_count = 4,
+        .sudo_allowed = true
+    };
+
+    int ret = auth_cache_store(cache, "managed_user", "production", "host3", &entry, 60);
+    ASSERT(ret == 0);
+
+    /* Lookup and verify both groups and managed_groups */
+    auth_cache_entry_t lookup = {0};
+    int found = auth_cache_lookup(cache, "managed_user", "production", "host3", &lookup);
+    ASSERT(found == true);
+
+    /* Verify groups */
+    ASSERT(lookup.groups_count == 2);
+    ASSERT(lookup.groups != NULL);
+    ASSERT(strcmp(lookup.groups[0], "admins") == 0);
+    ASSERT(strcmp(lookup.groups[1], "developers") == 0);
+
+    /* Verify managed_groups */
+    ASSERT(lookup.managed_groups_count == 4);
+    ASSERT(lookup.managed_groups != NULL);
+    ASSERT(strcmp(lookup.managed_groups[0], "admins") == 0);
+    ASSERT(strcmp(lookup.managed_groups[1], "developers") == 0);
+    ASSERT(strcmp(lookup.managed_groups[2], "docker") == 0);
+    ASSERT(strcmp(lookup.managed_groups[3], "sudo") == 0);
 
     auth_cache_entry_free(&lookup);
     auth_cache_destroy(cache);
@@ -373,7 +421,7 @@ static int test_cleanup_expired(void)
 
     /* Store entry with 1 second TTL */
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "expireuser",
         .authorized = true
     };
@@ -423,7 +471,7 @@ static int test_init_with_key(void)
 
     /* Verify cache works by storing and looking up an entry */
     auth_cache_entry_t entry = {
-        .version = 3,
+        .version = 4,
         .user = "keytest",
         .authorized = true,
         .groups = NULL,
@@ -482,6 +530,7 @@ int main(void)
     TEST(lookup_different_group);
     TEST(invalidate);
     TEST(entry_with_groups);
+    TEST(entry_with_managed_groups);
     TEST(force_online_empty_file);
     TEST(force_online_specific_users);
     TEST(force_online_no_file);

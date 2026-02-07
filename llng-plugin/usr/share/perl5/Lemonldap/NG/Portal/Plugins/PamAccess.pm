@@ -321,9 +321,9 @@ sub authorize {
     my $authorized   = $result->{authorized};
     my $sudo_allowed = $result->{sudo_allowed};
 
-    # Get groups for response
+    # Get groups for response (filter empty strings)
     my $groups    = $req->sessionInfo->{groups} || '';
-    my @groupList = split /[,;\s]+/, $groups;
+    my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
 
     $self->logger->info( "PAM authorize: user '$user' "
           . ( $authorized ? 'granted' : 'denied' )
@@ -368,6 +368,16 @@ sub authorize {
         user       => $user,
         groups     => \@groupList,
     };
+
+    # Add managed_groups for group synchronization (#38)
+    # managed_groups defines which groups LLNG manages for this server group
+    my $managed_groups = $self->_getManagedGroups($server_group);
+    if ($managed_groups && @$managed_groups) {
+        $response->{managed_groups} = $managed_groups;
+        $self->logger->debug(
+            "PAM authorize: managed_groups for server_group '$server_group': " .
+            join(', ', @$managed_groups));
+    }
 
     # Add permissions for authorized users
     if ($authorized) {
@@ -540,6 +550,35 @@ sub _evaluateOfflineMode {
     return $result ? 1 : 0;
 }
 
+# Get managed groups for a server group (#38)
+# These are the groups that LLNG manages for Unix group synchronization
+sub _getManagedGroups {
+    my ( $self, $server_group ) = @_;
+
+    $server_group ||= 'default';
+
+    my $managed_groups_config = $self->conf->{pamAccessManagedGroups} || {};
+
+    # 1. Look for managed groups for the specific server_group
+    my $groups_str;
+    if ( exists $managed_groups_config->{$server_group} ) {
+        $groups_str = $managed_groups_config->{$server_group};
+    }
+    # 2. Fallback to 'default' group
+    elsif ( exists $managed_groups_config->{default} ) {
+        $groups_str = $managed_groups_config->{default};
+    }
+    # 3. No managed groups configured
+    else {
+        return [];
+    }
+
+    # Parse comma/space/semicolon separated list (filter empty strings)
+    return [] unless defined $groups_str && $groups_str ne '';
+    my @groups = grep { length $_ } split /[,;\s]+/, $groups_str;
+    return \@groups;
+}
+
 sub _unauthorizedResponse {
     my ( $self, $req, $message ) = @_;
     $message ||= 'Unauthorized';
@@ -693,7 +732,7 @@ sub verifyToken {
     # 6. Extract user info
     my $user      = $tokenSession->data->{_pamUser}   || '';
     my $groups    = $tokenSession->data->{_pamGroups} || '';
-    my @groupList = $groups ? split( /[,;\s]+/, $groups ) : ();
+    my @groupList = $groups ? grep { length $_ } split( /[,;\s]+/, $groups ) : ();
 
     # Extract exported attributes (prefixed with _pamAttr_)
     my %attrs;
@@ -718,17 +757,26 @@ sub verifyToken {
         groups    => \@groupList,
     );
 
-    # 8. Return success with user info and exported attributes
-    return $self->p->sendJSONresponse(
-        $req,
-        {
-            valid  => JSON::true,
-            user   => $user,
-            groups => \@groupList,
-            ( %attrs ? ( attrs => \%attrs ) : () ),
-        },
-        code => 200
-    );
+    # 8. Get managed_groups for group synchronization (#38)
+    # Note: For /pam/verify, we use 'default' server_group since the
+    # server_group is not known at this point. The actual server_group
+    # is determined during /pam/authorize.
+    my $managed_groups = $self->_getManagedGroups('default');
+
+    # 9. Return success with user info and exported attributes
+    my $response = {
+        valid  => JSON::true,
+        user   => $user,
+        groups => \@groupList,
+        ( %attrs ? ( attrs => \%attrs ) : () ),
+    };
+
+    # Add managed_groups if configured
+    if ($managed_groups && @$managed_groups) {
+        $response->{managed_groups} = $managed_groups;
+    }
+
+    return $self->p->sendJSONresponse( $req, $response, code => 200 );
 }
 
 # POST /pam/heartbeat - Server heartbeat for monitoring
@@ -879,9 +927,9 @@ sub userinfo {
         $attrs{$key} = $value if defined $value && $value ne '';
     }
 
-    # Always include basic info
+    # Always include basic info (filter empty strings)
     my $groups    = $req->sessionInfo->{groups} || '';
-    my @groupList = split /[,;\s]+/, $groups;
+    my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
 
     $self->logger->debug("PAM userinfo: Found user '$user'");
 
@@ -956,7 +1004,7 @@ sub bastionToken {
     # 4. Verify server is in a bastion group
     my $server_group   = $tokenSession->data->{server_group}   || 'default';
     my $bastion_groups = $self->conf->{pamAccessBastionGroups} || 'bastion';
-    my @allowed_groups = split /[,;\s]+/, $bastion_groups;
+    my @allowed_groups = grep { length $_ } split /[,;\s]+/, $bastion_groups;
 
     my $is_bastion = 0;
     for my $allowed (@allowed_groups) {
@@ -1039,7 +1087,7 @@ sub bastionToken {
     my $error = $self->p->process($req);
     if ( $error == PE_OK ) {
         my $groups    = $req->sessionInfo->{groups} || '';
-        my @groupList = split /[,;\s]+/, $groups;
+        my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
         $claims->{user_groups} = \@groupList if @groupList;
     }
     else {
@@ -1348,6 +1396,24 @@ Example:
     "staging"    => '$hGroup->{ops} or $hGroup->{dev}',
     "dev"        => '$hGroup->{dev} or $uid eq "admin"',
     "default"    => '1'
+  }
+
+=item pamAccessManagedGroups
+
+Hash of server group names to comma-separated list of managed Unix groups.
+When group synchronization is enabled on PAM servers, these groups will be
+automatically created and synchronized with LLNG groups.
+
+Groups listed here are the pool of groups that LLNG can manage. Users will
+be added to groups they belong to and removed from groups they no longer
+belong to (but only within this managed pool).
+
+Example:
+  {
+    "production" => 'admins,ops,developers,docker',
+    "staging"    => 'admins,ops,developers,docker,testers',
+    "dev"        => 'admins,developers,docker',
+    "default"    => 'admins,developers'
   }
 
 =item pamAccessRp

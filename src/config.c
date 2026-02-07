@@ -249,6 +249,9 @@ void config_free(pam_openbastion_config_t *config)
     /* SSH key policy */
     free(config->ssh_key_allowed_types);
 
+    /* Group synchronization */
+    free(config->allowed_managed_groups);
+
     explicit_bzero(config, sizeof(*config));
 }
 
@@ -661,6 +664,10 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     else if (strcmp(key, "cache_rate_limit_max_lockout_sec") == 0 ||
              strcmp(key, "cache_rate_limit_max_lockout") == 0) {
         config->cache_rate_limit_max_lockout_sec = parse_int(value, 3600, 60, 86400);
+    }
+    /* Group synchronization (#38) */
+    else if (strcmp(key, "allowed_managed_groups") == 0) {
+        SET_STRING_FIELD(config->allowed_managed_groups, value, key);
     }
     /* Unknown keys are silently ignored */
 

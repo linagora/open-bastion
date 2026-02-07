@@ -32,6 +32,11 @@ The module supports two authentication methods:
   - Auto-create Unix accounts on first login
   - Configurable shell, home directory, UID/GID ranges
   - Skeleton directory support
+- **[Group synchronization](doc/llng-configuration.md#group-synchronization)**:
+  - Sync Unix supplementary groups from LLNG on each login
+  - Automatic group creation if needed
+  - Local whitelist for defense-in-depth (`allowed_managed_groups`)
+  - Groups outside managed pool are never modified
 - **[Service accounts](doc/service-accounts.md)** (ansible, backup, etc.):
   - SSH key authentication without OIDC
   - Per-server configuration file
