@@ -1267,15 +1267,15 @@ cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
 
 Le module PAM implémente plusieurs contrôles de sécurité :
 
-| Mesure de sécurité | Description |
-| --- | --- |
-| **Groupes gérés explicites** | Seuls les groupes listés dans `managed_groups` peuvent être modifiés |
-| **Validation des noms** | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement) |
-| **Protection symlink** | `/etc/group` ouvert avec `O_NOFOLLOW` et vérifié via `fstat()` |
-| **Vérification propriétaire** | `/etc/group` doit appartenir à root (uid=0) |
-| **Verrouillage fichier** | `flock(LOCK_EX)` pendant les modifications |
-| **Cache chiffré** | Les groupes sont stockés en cache avec AES-256-GCM |
-| **Audit GROUP_SYNC** | Toutes les modifications de groupes sont journalisées |
+| Mesure de sécurité            | Description                                                               |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| **Groupes gérés explicites**  | Seuls les groupes listés dans `managed_groups` peuvent être modifiés      |
+| **Validation des noms**       | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement) |
+| **Protection symlink**        | `/etc/group` ouvert avec `O_NOFOLLOW` et vérifié via `fstat()`            |
+| **Vérification propriétaire** | `/etc/group` doit appartenir à root (uid=0)                               |
+| **Verrouillage fichier**      | `flock(LOCK_EX)` pendant les modifications                                |
+| **Cache chiffré**             | Les groupes sont stockés en cache avec AES-256-GCM                        |
+| **Audit GROUP_SYNC**          | Toutes les modifications de groupes sont journalisées                     |
 
 **Configuration recommandée :**
 
@@ -1284,7 +1284,7 @@ Le module PAM implémente plusieurs contrôles de sécurité :
 pamAccessManagedGroups:
   production: "docker,developers,readonly"
   bastion: "operators,auditors"
-  default: ""  # Pas de sync par défaut
+  default: "" # Pas de sync par défaut
 ```
 
 **Principe de moindre privilège :**
@@ -1293,10 +1293,10 @@ pamAccessManagedGroups:
 - Créer des groupes dédiés pour les accès applicatifs (ex: app-users, db-readers)
 - Utiliser des `server_group` différents pour segmenter les accès
 
-|                 |                     Score résiduel                      |
-| --------------- | :-----------------------------------------------------: |
+|                 |                     Score résiduel                     |
+| --------------- | :----------------------------------------------------: |
 | **Probabilité** | 1 (avec managed_groups restrictifs et validation noms) |
-| **Impact**      |              2 (groupes critiques non gérés)            |
+| **Impact**      |            2 (groupes critiques non gérés)             |
 
 ---
 
