@@ -26,6 +26,10 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 - **R-S11** : Utilisation de clés SSH faibles (P=1, I=3 - atténué par politique de clés)
 
+**Nouveau risque identifié (PR #92 - Protection brute-force du cache) :**
+
+- **R-S12** : Brute-force du cache offline (P=1, I=2 - atténué par rate limiting)
+
 **Risques spécifiques aux comptes de service :**
 
 - **R-SA1** : Vol de clé de compte de service (P=2, I=4 → I=3 avec monitoring)
@@ -334,3 +338,45 @@ ssh_key_min_ecdsa_bits = 256
 **Risque impacté :**
 
 - **R-S11** : Réduction de P grâce à l'interdiction des algorithmes faibles
+
+### Protection brute-force du cache offline - **IMPLÉMENTÉ**
+
+Le mode offline utilise un cache local des autorisations. Sans protection, un attaquant
+avec accès local pourrait tenter de nombreux utilisateurs contre le cache pour découvrir
+des comptes valides. Le module PAM applique maintenant un rate limiting aux lookups de cache :
+
+```c
+// src/pam_openbastion.c - Vérifie le rate limit avant lookup
+int lockout = rate_limiter_check(data->cache_rate_limiter, user);
+if (lockout > 0) {
+    // Utilisateur bloqué, pas de lookup cache
+}
+```
+
+**Configuration :**
+
+```ini
+# /etc/open-bastion/openbastion.conf
+cache_rate_limit_enabled = true
+cache_rate_limit_max_attempts = 3       # Lockout après 3 échecs
+cache_rate_limit_lockout_sec = 60       # 1 minute initial
+cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
+```
+
+**Caractéristiques :**
+
+- Rate limiting par utilisateur (pas par IP, car attaque locale)
+- Backoff exponentiel (60s → 120s → 240s → ... → 3600s max)
+- Réinitialisation sur succès de lookup
+- État persistant sur disque (survit aux redémarrages)
+
+**Bénéfices sécurité :**
+
+- Empêche l'énumération d'utilisateurs via le cache
+- Ralentit drastiquement les tentatives de brute-force
+- Seuils plus stricts que le rate limiting réseau (3 vs 5 tentatives)
+- Audit des lockouts pour détection d'intrusion
+
+**Risque impacté :**
+
+- **R-S12** : Réduction de P grâce au rate limiting des lookups cache

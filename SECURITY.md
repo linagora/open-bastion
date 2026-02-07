@@ -552,6 +552,7 @@ This configuration only allows Ed25519 keys and FIDO2 hardware security keys.
 | Bastion bypass         | Bastion JWT verification on backends (RS256 signed)              |
 | Direct backend access  | JWT required + JWKS-based offline verification                   |
 | Weak SSH keys          | SSH key policy enforcement with type/size restrictions           |
+| Cache brute-force      | Rate limiting for offline cache lookups with exponential backoff |
 
 ## Security Reporting
 

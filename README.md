@@ -1076,6 +1076,43 @@ ssh_key_allowed_types = ed25519,ecdsa,sk
 
 **Note:** This feature requires `ExposeAuthInfo yes` in `sshd_config` to function.
 
+## Cache Brute-Force Protection
+
+When the LLNG server is unavailable, Open Bastion uses cached authorization data (offline mode). This feature adds rate limiting to cache lookups to prevent brute-force attacks against the cache.
+
+### Configuration
+
+```ini
+# Enable cache rate limiting
+cache_rate_limit_enabled = true
+
+# Lock out after 3 failed cache lookups (default)
+cache_rate_limit_max_attempts = 3
+
+# Initial lockout: 60 seconds (uses exponential backoff)
+cache_rate_limit_lockout_sec = 60
+
+# Maximum lockout: 1 hour
+cache_rate_limit_max_lockout_sec = 3600
+```
+
+### How It Works
+
+1. When the LLNG server is unreachable, cache lookups are attempted
+2. Each failed cache lookup (user not in cache) is counted
+3. After `max_attempts` failures, the user is locked out from cache lookups
+4. Lockout duration doubles on each subsequent violation (exponential backoff)
+5. Successful cache lookups reset the failure counter
+
+### Configuration Options
+
+| Option                           | Default | Description                         |
+| -------------------------------- | ------- | ----------------------------------- |
+| `cache_rate_limit_enabled`       | `false` | Enable cache lookup rate limiting   |
+| `cache_rate_limit_max_attempts`  | `3`     | Failed lookups before lockout       |
+| `cache_rate_limit_lockout_sec`   | `60`    | Initial lockout duration in seconds |
+| `cache_rate_limit_max_lockout_sec` | `3600` | Maximum lockout duration in seconds |
+
 ## License
 
 AGPL-3.0

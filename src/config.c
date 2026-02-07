@@ -163,6 +163,12 @@ void config_init(pam_openbastion_config_t *config)
     config->ssh_key_min_rsa_bits = 2048;   /* NIST recommendation minimum */
     config->ssh_key_min_ecdsa_bits = 256;  /* P-256 minimum */
 
+    /* Cache brute-force protection - disabled by default (#92) */
+    config->cache_rate_limit_enabled = false;
+    config->cache_rate_limit_max_attempts = 3;      /* Stricter than network rate limit */
+    config->cache_rate_limit_lockout_sec = 60;      /* 1 minute initial lockout */
+    config->cache_rate_limit_max_lockout_sec = 3600; /* 1 hour max lockout */
+
     /* Note: strdup failures for defaults are checked by config_validate() */
 }
 
@@ -639,6 +645,22 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
              strcmp(key, "ssh_min_ecdsa_bits") == 0) {
         /* Valid ECDSA sizes: 256 (P-256), 384 (P-384), 521 (P-521) */
         config->ssh_key_min_ecdsa_bits = parse_int(value, 256, 256, 521);
+    }
+    /* Cache brute-force protection (#92) */
+    else if (strcmp(key, "cache_rate_limit_enabled") == 0 ||
+             strcmp(key, "cache_rate_limit") == 0) {
+        config->cache_rate_limit_enabled = parse_bool(value);
+    }
+    else if (strcmp(key, "cache_rate_limit_max_attempts") == 0) {
+        config->cache_rate_limit_max_attempts = parse_int(value, 3, 1, 100);
+    }
+    else if (strcmp(key, "cache_rate_limit_lockout_sec") == 0 ||
+             strcmp(key, "cache_rate_limit_lockout") == 0) {
+        config->cache_rate_limit_lockout_sec = parse_int(value, 60, 1, 86400);
+    }
+    else if (strcmp(key, "cache_rate_limit_max_lockout_sec") == 0 ||
+             strcmp(key, "cache_rate_limit_max_lockout") == 0) {
+        config->cache_rate_limit_max_lockout_sec = parse_int(value, 3600, 60, 86400);
     }
     /* Unknown keys are silently ignored */
 
