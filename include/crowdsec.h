@@ -32,7 +32,7 @@ typedef enum {
 typedef struct {
     int family;                 /* AF_INET or AF_INET6 */
     unsigned char addr[16];     /* Network address (4 bytes for IPv4, 16 for IPv6) */
-    int prefix_len;             /* CIDR prefix length (-1 for single IP) */
+    int prefix_len;             /* CIDR prefix length (32 for single IPv4, 128 for single IPv6) */
 } crowdsec_whitelist_entry_t;
 
 /* CrowdSec configuration */

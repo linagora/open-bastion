@@ -1351,9 +1351,10 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
             .whitelist_count = whitelist_count
         };
         data->crowdsec = crowdsec_init(&cs_cfg);
+        /* Free parsed whitelist - crowdsec_init made a deep copy */
+        crowdsec_free_whitelist(whitelist_entries);
         if (!data->crowdsec) {
             OB_LOG_WARN(pamh, "Failed to initialize CrowdSec, continuing without");
-            crowdsec_free_whitelist(whitelist_entries);
         }
     }
 

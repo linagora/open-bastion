@@ -698,12 +698,15 @@ static int parse_whitelist_entry(const char *str, crowdsec_whitelist_entry_t *en
     buf[sizeof(buf) - 1] = '\0';
 
     /* Trim trailing whitespace */
-    char *end = buf + strlen(buf) - 1;
+    size_t buflen = strlen(buf);
+    if (buflen == 0) return -1;  /* Empty string after leading whitespace trim */
+
+    char *end = buf + buflen - 1;
     while (end > buf && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
         *end-- = '\0';
     }
 
-    if (buf[0] == '\0') return -1;  /* Empty string */
+    if (buf[0] == '\0') return -1;  /* Empty string after trailing whitespace trim */
 
     /* Check for CIDR notation */
     char *slash = strchr(buf, '/');
@@ -956,9 +959,20 @@ crowdsec_context_t *crowdsec_init(const crowdsec_config_t *config)
         return NULL;
     }
 
-    /* Copy whitelist */
-    ctx->config.whitelist = config->whitelist;
-    ctx->config.whitelist_count = config->whitelist_count;
+    /* Deep copy whitelist (caller retains ownership of original) */
+    ctx->config.whitelist = NULL;
+    ctx->config.whitelist_count = 0;
+    if (config->whitelist && config->whitelist_count > 0) {
+        ctx->config.whitelist = calloc(config->whitelist_count,
+                                       sizeof(crowdsec_whitelist_entry_t));
+        if (!ctx->config.whitelist) {
+            crowdsec_destroy(ctx);
+            return NULL;
+        }
+        memcpy(ctx->config.whitelist, config->whitelist,
+               config->whitelist_count * sizeof(crowdsec_whitelist_entry_t));
+        ctx->config.whitelist_count = config->whitelist_count;
+    }
 
     /* Initialize curl */
     ctx->curl = curl_easy_init();
