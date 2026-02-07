@@ -143,13 +143,16 @@ Password: <paste LLNG token from portal>
 
 ## Documentation
 
+See the full [documentation index](doc/README.md) or jump directly to:
+
 | Document                                                 | Description                            |
 | -------------------------------------------------------- | -------------------------------------- |
 | [LemonLDAP::NG Configuration](doc/llng-configuration.md) | Server-side LLNG setup and plugins     |
 | [PAM Authentication Modes](doc/pam-modes.md)             | All 4 PAM configurations with examples |
+| [Configuration Reference](doc/configuration.md)          | All configuration options              |
 | [Service Accounts](doc/service-accounts.md)              | Ansible, backup, CI/CD accounts        |
 | [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend JWT authentication  |
-| [Configuration Reference](doc/configuration.md)          | All configuration options              |
+| [Session Recording](doc/session-recording.md)            | SSH session recording for audit        |
 | [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting        |
 | [Security Features](doc/security.md)                     | Key policies, rate limiting, audit     |
 | [Admin Guide](doc/admin-guide.md)                        | Complete administration guide          |
