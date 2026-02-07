@@ -225,6 +225,77 @@ static int test_parse_no_create_user(void)
     return ok;
 }
 
+/* Test cache rate limit defaults (#92) */
+static int test_cache_rate_limit_defaults(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    int ok = 1;
+    ok = ok && (config.cache_rate_limit_enabled == false);
+    ok = ok && (config.cache_rate_limit_max_attempts == 3);
+    ok = ok && (config.cache_rate_limit_lockout_sec == 60);
+    ok = ok && (config.cache_rate_limit_max_lockout_sec == 3600);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test cache rate limit argument parsing (#92) */
+static int test_parse_cache_rate_limit_args(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    const char *argv[] = {
+        "portal_url=https://test.example.com",
+        "cache_rate_limit_enabled=true",
+        "cache_rate_limit_max_attempts=5",
+        "cache_rate_limit_lockout_sec=120",
+        "cache_rate_limit_max_lockout_sec=7200"
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    int ret = config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (ret == 0);
+    ok = ok && (config.cache_rate_limit_enabled == true);
+    ok = ok && (config.cache_rate_limit_max_attempts == 5);
+    ok = ok && (config.cache_rate_limit_lockout_sec == 120);
+    ok = ok && (config.cache_rate_limit_max_lockout_sec == 7200);
+
+    config_free(&config);
+    return ok;
+}
+
+/* Test cache rate limit bounds validation (#92) */
+static int test_cache_rate_limit_bounds(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    /* Test that out-of-bounds values are clamped.
+     * Bounds: max_attempts [1,100], lockout_sec [1,86400], max_lockout_sec [60,86400] */
+    const char *argv[] = {
+        "portal_url=https://test.example.com",
+        "cache_rate_limit_max_attempts=0",   /* Below minimum (1) */
+        "cache_rate_limit_lockout_sec=0",    /* Below minimum (1) */
+        "cache_rate_limit_max_lockout_sec=100000"  /* Above maximum (86400) */
+    };
+    int argc = sizeof(argv) / sizeof(argv[0]);
+
+    config_parse_args(argc, argv, &config);
+
+    int ok = 1;
+    ok = ok && (config.cache_rate_limit_max_attempts >= 1);
+    ok = ok && (config.cache_rate_limit_lockout_sec >= 1);
+    ok = ok && (config.cache_rate_limit_max_lockout_sec <= 86400);
+
+    config_free(&config);
+    return ok;
+}
+
 /* Test that verify_ssl=false allows HTTP and triggers validation path */
 static int test_validate_verify_ssl_false_allows_http(void)
 {
@@ -349,6 +420,9 @@ int main(void)
     TEST(create_user_defaults);
     TEST(parse_create_user_args);
     TEST(parse_no_create_user);
+    TEST(cache_rate_limit_defaults);
+    TEST(parse_cache_rate_limit_args);
+    TEST(cache_rate_limit_bounds);
     TEST(load_config_file);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);

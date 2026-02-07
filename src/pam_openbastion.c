@@ -76,6 +76,7 @@ typedef struct {
     crowdsec_action_t crowdsec_action;  /* Parsed CrowdSec action (reject/warn) */
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
     ssh_key_policy_t ssh_key_policy;  /* SSH key type/size policy (#91) */
+    rate_limiter_t *cache_rate_limiter;  /* Brute-force protection for cache (#92) */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -373,6 +374,9 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->crowdsec) {
             crowdsec_destroy(ob_data->crowdsec);
         }
+        if (ob_data->cache_rate_limiter) {
+            rate_limiter_destroy(ob_data->cache_rate_limiter);
+        }
         service_accounts_free(&ob_data->service_accounts);
         config_free(&ob_data->config);
         free(ob_data);
@@ -607,6 +611,34 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         }
         if (!data->auth_cache) {
             OB_LOG_WARN(pamh, "Failed to initialize auth cache, offline mode disabled");
+        }
+    }
+
+    /* Initialize cache rate limiter for brute-force protection (#92) */
+    if (data->config.cache_rate_limit_enabled && data->auth_cache) {
+        char cache_rl_dir[PATH_MAX];
+        int n = snprintf(cache_rl_dir, sizeof(cache_rl_dir), "%s/ratelimit",
+                         data->config.auth_cache_dir);
+        if (n < 0 || (size_t)n >= sizeof(cache_rl_dir)) {
+            OB_LOG_WARN(pamh,
+                        "Auth cache directory path too long, cache rate limiter disabled");
+        } else {
+            rate_limiter_config_t cache_rl_cfg = {
+                .enabled = true,
+                .state_dir = cache_rl_dir,
+                .max_attempts = data->config.cache_rate_limit_max_attempts,
+                .initial_lockout_sec = data->config.cache_rate_limit_lockout_sec,
+                .max_lockout_sec = data->config.cache_rate_limit_max_lockout_sec,
+                .backoff_multiplier = 2.0  /* Fixed exponential backoff */
+            };
+            data->cache_rate_limiter = rate_limiter_init(&cache_rl_cfg);
+            if (!data->cache_rate_limiter) {
+                OB_LOG_WARN(pamh, "Failed to initialize cache rate limiter, continuing without");
+            } else {
+                OB_LOG_DEBUG(pamh, "Cache rate limiter enabled: max_attempts=%d, lockout=%ds",
+                        data->config.cache_rate_limit_max_attempts,
+                        data->config.cache_rate_limit_lockout_sec);
+            }
         }
     }
 
@@ -1863,38 +1895,81 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
          * This is the core of the offline mode feature (#36).
          */
         if (use_cache) {
-            auth_cache_entry_t cache_entry = {0};
-            if (auth_cache_lookup(data->auth_cache, user,
-                                  data->config.server_group, hostname, &cache_entry)) {
-                OB_LOG_INFO(pamh, "Server unavailable, using cached authorization for %s", user);
+            /*
+             * Brute-force protection for cache lookups (#92)
+             * Check rate limit before attempting cache lookup to prevent
+             * attackers from probing the cache when the server is unavailable.
+             */
+            bool cache_rate_limited = false;
+            if (data->cache_rate_limiter) {
+                int lockout_remaining = rate_limiter_check(data->cache_rate_limiter, user);
+                if (lockout_remaining > 0) {
+                    OB_LOG_WARN(pamh, "Cache lookup rate-limited for user %s (%d sec remaining)",
+                            user, lockout_remaining);
+                    cache_rate_limited = true;
 
-                /* Populate response from cache */
-                response.authorized = cache_entry.authorized;
-                response.user = cache_entry.user ? strdup(cache_entry.user) : NULL;
-                cache_entry.user = NULL;  /* Ownership transferred */
+                    if (audit_initialized) {
+                        audit_event.event_type = AUDIT_RATE_LIMITED;
+                        audit_event.result_code = PAM_MAXTRIES;
+                        audit_event.reason = "cache lookup rate limited";
+                        audit_event_set_end_time(&audit_event);
+                        audit_log_event(data->audit, &audit_event);
+                    }
 
-                response.has_permissions = true;
-                response.permissions.sudo_allowed = cache_entry.sudo_allowed;
-                response.permissions.sudo_nopasswd = cache_entry.sudo_nopasswd;
+                    /* Return immediately to keep PAM status consistent with audit */
+                    return PAM_MAXTRIES;
+                }
+            }
 
-                /* Copy groups */
-                if (cache_entry.groups && cache_entry.groups_count > 0) {
-                    response.groups = cache_entry.groups;
-                    response.groups_count = cache_entry.groups_count;
-                    cache_entry.groups = NULL;  /* Ownership transferred */
-                    cache_entry.groups_count = 0;
+            if (!cache_rate_limited) {
+                /* Record cache lookup attempt BEFORE the lookup to prevent enumeration.
+                 * This ensures all attempts (hits + misses) are counted, preventing
+                 * attackers from discovering cached usernames without penalty. (#92) */
+                if (data->cache_rate_limiter) {
+                    (void)rate_limiter_record_failure(data->cache_rate_limiter, user);
                 }
 
-                /* Copy user attributes */
-                response.gecos = cache_entry.gecos ? strdup(cache_entry.gecos) : NULL;
-                response.shell = cache_entry.shell ? strdup(cache_entry.shell) : NULL;
-                response.home = cache_entry.home ? strdup(cache_entry.home) : NULL;
+                auth_cache_entry_t cache_entry = {0};
+                if (auth_cache_lookup(data->auth_cache, user,
+                                      data->config.server_group, hostname, &cache_entry)) {
+                    OB_LOG_INFO(pamh, "Server unavailable, using cached authorization for %s", user);
 
-                auth_cache_entry_free(&cache_entry);
-                from_cache = true;
-                auth_result = 0;  /* Cache hit is success */
-            } else {
-                OB_LOG_WARN(pamh, "Server unavailable and no valid cache for %s", user);
+                    /* Only reset rate limiter on authorized cache hit.
+                     * This allows legitimate users to continue but prevents
+                     * attackers from resetting by finding any cached user. */
+                    if (data->cache_rate_limiter && cache_entry.authorized) {
+                        rate_limiter_reset(data->cache_rate_limiter, user);
+                    }
+
+                    /* Populate response from cache */
+                    response.authorized = cache_entry.authorized;
+                    response.user = cache_entry.user ? strdup(cache_entry.user) : NULL;
+                    cache_entry.user = NULL;  /* Ownership transferred */
+
+                    response.has_permissions = true;
+                    response.permissions.sudo_allowed = cache_entry.sudo_allowed;
+                    response.permissions.sudo_nopasswd = cache_entry.sudo_nopasswd;
+
+                    /* Copy groups */
+                    if (cache_entry.groups && cache_entry.groups_count > 0) {
+                        response.groups = cache_entry.groups;
+                        response.groups_count = cache_entry.groups_count;
+                        cache_entry.groups = NULL;  /* Ownership transferred */
+                        cache_entry.groups_count = 0;
+                    }
+
+                    /* Copy user attributes */
+                    response.gecos = cache_entry.gecos ? strdup(cache_entry.gecos) : NULL;
+                    response.shell = cache_entry.shell ? strdup(cache_entry.shell) : NULL;
+                    response.home = cache_entry.home ? strdup(cache_entry.home) : NULL;
+
+                    auth_cache_entry_free(&cache_entry);
+                    from_cache = true;
+                    auth_result = 0;  /* Cache hit is success */
+                } else {
+                    OB_LOG_WARN(pamh, "Server unavailable and no valid cache for %s", user);
+                    /* Attempt already recorded above, no need to record again on miss */
+                }
             }
         }
 

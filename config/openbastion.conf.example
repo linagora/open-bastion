@@ -235,3 +235,36 @@ log_level = warn
 # Note: P-256 provides ~128-bit security, P-384 ~192-bit, P-521 ~256-bit
 # Default: 256
 # ssh_key_min_ecdsa_bits = 256
+
+# ==============================================================================
+# Cache Brute-Force Protection (offline mode security)
+# ==============================================================================
+# When the LLNG server is unavailable, the module uses cached authorization
+# data. This can be exploited by attackers to brute-force access by trying
+# many usernames against the cache. These settings add rate limiting to
+# cache lookups to prevent such attacks.
+
+# Enable cache lookup rate limiting
+# When enabled, ALL cache lookups are counted per user (hits and misses)
+# to prevent enumeration. Users are locked out after max_attempts.
+# Only authorized cache hits reset the counter.
+# Default: false
+# cache_rate_limit_enabled = false
+
+# Maximum cache lookup attempts before lockout
+# After this many lookups, the user is locked out from cache access.
+# This is intentionally stricter than network rate limiting since cache
+# lookups are much faster and easier to brute-force.
+# Default: 3
+# cache_rate_limit_max_attempts = 3
+
+# Initial lockout duration in seconds
+# How long to lock out a user after exceeding max_attempts.
+# Uses exponential backoff (doubles on each subsequent lockout).
+# Default: 60 (1 minute)
+# cache_rate_limit_lockout_sec = 60
+
+# Maximum lockout duration in seconds
+# Upper limit for exponential backoff.
+# Default: 3600 (1 hour)
+# cache_rate_limit_max_lockout_sec = 3600

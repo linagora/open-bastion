@@ -134,6 +134,12 @@ typedef struct {
     char *ssh_key_allowed_types;           /* Comma-separated allowed types: ed25519,ecdsa,rsa (default: all) */
     int ssh_key_min_rsa_bits;              /* Minimum RSA key size in bits (default: 2048) */
     int ssh_key_min_ecdsa_bits;            /* Minimum ECDSA key size in bits (default: 256) */
+
+    /* Cache brute-force protection (#92) */
+    bool cache_rate_limit_enabled;         /* Enable rate limiting for cache lookups (default: false) */
+    int cache_rate_limit_max_attempts;     /* Max failed lookups before lockout (default: 3) */
+    int cache_rate_limit_lockout_sec;      /* Initial lockout in seconds (default: 60) */
+    int cache_rate_limit_max_lockout_sec;  /* Maximum lockout in seconds (default: 3600) */
 } pam_openbastion_config_t;
 
 /*

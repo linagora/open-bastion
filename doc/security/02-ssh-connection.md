@@ -1188,7 +1188,61 @@ ExposeAuthInfo yes   # Requis pour accéder au type de clé
 
 ---
 
-## 11. Comptes de Service
+## 11. Protection du Cache Offline
+
+### R-S12 - Brute-force du cache d'autorisation offline
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   2   |
+
+**Architectures concernées :** A, B, C, D (avec cache offline activé)
+
+**Description :** Lorsque le serveur LLNG est indisponible, le module PAM utilise un cache local des autorisations. Un attaquant avec accès local pourrait tenter de nombreux noms d'utilisateurs contre ce cache pour :
+- Découvrir quels utilisateurs ont des entrées en cache (énumération)
+- Tenter de se connecter en boucle jusqu'à trouver un utilisateur valide
+
+**Vecteurs d'attaque :**
+
+- Énumération d'utilisateurs via timing des réponses cache
+- Brute-force offline sur le cache local
+- Découverte de comptes autorisés sans contact avec LLNG
+
+**Conséquence :** Un attaquant local pourrait identifier des comptes valides et potentiellement accéder au système pendant une panne LLNG.
+
+**Remédiation embarquée (IMPLÉMENTÉE) :**
+
+Le module PAM applique un rate limiting aux lookups de cache :
+
+```ini
+# /etc/open-bastion/openbastion.conf
+cache_rate_limit_enabled = true
+cache_rate_limit_max_attempts = 3       # Lockout après 3 tentatives
+cache_rate_limit_lockout_sec = 60       # 1 minute initial
+cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
+```
+
+**Caractéristiques de protection :**
+
+| Aspect                      | Mesure                                                     |
+| --------------------------- | ---------------------------------------------------------- |
+| **Comptage des tentatives** | TOUTES les tentatives (hits + misses) pour éviter l'énumération |
+| **Rate limiting**           | Par utilisateur (attaque locale, pas par IP)               |
+| **Backoff exponentiel**     | 60s → 120s → 240s → ... → 3600s max                        |
+| **Réinitialisation**        | Uniquement sur cache hit autorisé                          |
+| **Persistance**             | État sur disque (survit aux redémarrages)                  |
+
+**Différence avec R-S7 :** R-S7 traite de l'indisponibilité LLNG et de la continuité de service. R-S12 traite de la sécurité du cache lui-même contre les attaques locales.
+
+|                 |           Score résiduel            |
+| --------------- | :---------------------------------: |
+| **Probabilité** | 1 (avec rate limiting toutes tentatives) |
+| **Impact**      | 2 (attaque locale limitée par lockout)  |
+
+---
+
+## 12. Comptes de Service
 
 ### Description
 
