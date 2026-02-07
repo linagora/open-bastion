@@ -843,4 +843,5 @@ cscli decisions list --ip 1.2.3.4
 - [bastion-architecture.md](bastion-architecture.md) - Architecture overview
 - [session-recording.md](session-recording.md) - Session recording details
 - [../README.md](../README.md) - Installation and quick start
-- [../SECURITY.md](../SECURITY.md) - Security considerations
+- [Security Architecture](security/00-architecture.md) - Security implementation details
+- [../SECURITY.md](../SECURITY.md) - Security policy and reporting

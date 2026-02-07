@@ -543,5 +543,6 @@ This enables:
 ## See Also
 
 - [README.md](../README.md) - Installation and configuration
-- [SECURITY.md](../SECURITY.md) - Security considerations
+- [Security Architecture](security/00-architecture.md) - Security implementation details
+- [SECURITY.md](../SECURITY.md) - Security policy and reporting
 - [session-recording.md](session-recording.md) - Session recording details

@@ -296,5 +296,6 @@ See issues #17-20 in the project backlog.
 ## See Also
 
 - [README.md](../README.md) - Main documentation
-- [SECURITY.md](../SECURITY.md) - Security considerations
+- [Security Architecture](security/00-architecture.md) - Security implementation details
+- [SECURITY.md](../SECURITY.md) - Security policy and reporting
 - [Bastion Architecture](bastion-architecture.md) - Overall bastion design
