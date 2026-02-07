@@ -15,11 +15,11 @@ The module supports two authentication methods:
 
 - Token introspection via OIDC introspection endpoint
 - Server authorization via `/pam/authorize` endpoint
-- Server groups support for granular access control
+- [Server groups](doc/llng-configuration.md#server-groups) support for granular access control
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
-- **Offline mode**:
+- **[Offline mode](doc/security.md#cache-brute-force-protection)**:
   - Encrypted authorization cache (AES-256-GCM)
   - Continue SSH key authentication when LLNG server is unavailable
   - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
@@ -32,28 +32,28 @@ The module supports two authentication methods:
   - Auto-create Unix accounts on first login
   - Configurable shell, home directory, UID/GID ranges
   - Skeleton directory support
-- **Service accounts** (ansible, backup, etc.):
+- **[Service accounts](doc/service-accounts.md)** (ansible, backup, etc.):
   - SSH key authentication without OIDC
   - Per-server configuration file
   - Fine-grained sudo permissions
   - Automatic account creation
-- **Bastion-to-backend authentication**:
+- **[Bastion-to-backend authentication](doc/bastion-architecture.md)**:
   - JWT-based proof of connection origin
   - Backends only accept SSH from authorized bastions
   - Offline verification via cached JWKS public keys
   - `ob-ssh-proxy` script for seamless bastion connections
-- **Session recording** (optional):
+- **[Session recording](doc/session-recording.md)** (optional):
   - Record all terminal I/O for audit compliance
   - Multiple formats: script, asciinema, ttyrec
   - Session metadata with unique IDs
-- **Security hardening**:
+- **[Security hardening](doc/security.md)**:
   - Structured JSON audit logging with correlation IDs
   - Rate limiting with exponential backoff
   - AES-256-GCM encrypted secret storage
   - Webhook notifications for security events
   - Token binding (IP, fingerprint)
-  - SSH key policy enforcement (allowed types, minimum sizes)
-- **CrowdSec integration** (optional):
+  - [SSH key policy](doc/security.md#ssh-key-policy) enforcement (allowed types, minimum sizes)
+- **[CrowdSec integration](doc/crowdsec.md)** (optional):
   - Pre-authentication IP blocking via CrowdSec bouncer
   - Post-authentication failure reporting via CrowdSec watcher
   - Auto-ban after configurable failure threshold
