@@ -245,6 +245,7 @@ void config_free(pam_openbastion_config_t *config)
     secure_free_str(config->crowdsec_password);
     free(config->crowdsec_scenario);
     free(config->crowdsec_ban_duration);
+    free(config->crowdsec_whitelist);
 
     /* SSH key policy */
     free(config->ssh_key_allowed_types);
@@ -629,6 +630,9 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     }
     else if (strcmp(key, "crowdsec_ban_duration") == 0) {
         SET_STRING_FIELD(config->crowdsec_ban_duration, value, key);
+    }
+    else if (strcmp(key, "crowdsec_whitelist") == 0) {
+        SET_STRING_FIELD(config->crowdsec_whitelist, value, key);
     }
     /* SSH key policy options */
     else if (strcmp(key, "ssh_key_policy_enabled") == 0 ||

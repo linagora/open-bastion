@@ -1314,6 +1314,74 @@ La liste blanche locale offre une défense en profondeur :
 
 ---
 
+### R-S14 - DoS auto-infligé sur IPs partagées (CrowdSec)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Architectures concernées :** A, B, C, D (avec CrowdSec activé)
+
+**Description :** Lorsque plusieurs utilisateurs légitimes partagent une même IP publique (terminaison VPN d'entreprise, NAT carrier-grade, proxy), des échecs d'authentification normaux (fautes de frappe, sessions expirées) peuvent déclencher l'auto-ban CrowdSec, bloquant tous les utilisateurs derrière cette IP.
+
+**Vecteurs de déclenchement :**
+
+- Terminaison VPN d'entreprise (tous les employés partagent la même IP de sortie)
+- NAT carrier-grade (opérateurs mobiles, certains FAI)
+- Proxy d'entreprise centralisant le trafic
+- Bastions partagés transmettant la même IP source
+
+**Conséquence :** Déni de service auto-infligé pour un groupe entier d'utilisateurs légitimes pendant la durée du ban (4h par défaut).
+
+**Remédiation embarquée (IMPLÉMENTÉE) :**
+
+Le module PAM permet de configurer une whitelist d'IPs/CIDRs qui bypass complètement CrowdSec :
+
+```ini
+# /etc/open-bastion/openbastion.conf
+crowdsec_whitelist = 10.0.0.0/8, 192.168.0.0/16, 203.0.113.10
+```
+
+Caractéristiques de la whitelist :
+
+| Aspect                   | Comportement                                   |
+| ------------------------ | ---------------------------------------------- |
+| **Formats supportés**    | IPv4, IPv6, CIDR (ex: `10.0.0.0/8`, `::1`)     |
+| **Vérification bouncer** | IPs whitelistées ne sont pas vérifiées         |
+| **Report watcher**       | Échecs d'IPs whitelistées ne sont pas reportés |
+| **Limite**               | Maximum 1000 entrées (protection DoS)          |
+
+**Remédiation configuration :**
+
+```ini
+# /etc/open-bastion/openbastion.conf
+
+# Option 1 : Whitelist des IPs de confiance (recommandé pour VPN)
+crowdsec_whitelist = 203.0.113.0/24, 2001:db8::/32
+
+# Option 2 : Mode warn au lieu de reject (log sans bloquer)
+crowdsec_action = warn
+
+# Option 3 : Augmenter le seuil avant ban
+crowdsec_max_failures = 10
+crowdsec_block_delay = 600  # 10 minutes au lieu de 3
+```
+
+**Bonnes pratiques pour les IPs whitelistées :**
+
+1. Documenter toutes les IPs whitelistées et leur justification
+2. Mettre en place un monitoring séparé pour ces IPs (SIEM, logs)
+3. Réviser périodiquement la liste (IPs obsolètes, changements VPN)
+4. Privilégier les IPs spécifiques aux larges CIDR quand possible
+
+|                 |         Score résiduel          |
+| --------------- | :-----------------------------: |
+| **Probabilité** |    1 (avec whitelist active)    |
+| **Impact**      | 2 (monitoring des IPs ignorées) |
+
+---
+
 ## 12. Comptes de Service
 
 ### Description

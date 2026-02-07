@@ -168,6 +168,12 @@ log_level = warn
 # Default: reject
 # crowdsec_action = reject
 
+# IP/CIDR whitelist: bypass CrowdSec checks for these addresses
+# Useful for VPN exit nodes or trusted networks to prevent DoS from false positives
+# Format: comma-separated list of IPs and CIDR ranges (IPv4 and IPv6 supported)
+# Examples: single IP, CIDR range, or mixed list
+# crowdsec_whitelist = 10.0.0.0/8, 192.168.1.0/24, 2001:db8::/32, ::1
+
 # ------------------------------------------------------------------------------
 # Watcher settings (post-authentication alert reporting)
 # ------------------------------------------------------------------------------

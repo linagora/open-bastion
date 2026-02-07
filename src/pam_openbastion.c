@@ -1321,6 +1321,16 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
             data->crowdsec_action = CS_ACTION_WARN;
         }
 
+        /* Parse whitelist if configured */
+        crowdsec_whitelist_entry_t *whitelist_entries = NULL;
+        int whitelist_count = 0;
+        if (data->config.crowdsec_whitelist) {
+            if (crowdsec_parse_whitelist(data->config.crowdsec_whitelist,
+                                         &whitelist_entries, &whitelist_count) != 0) {
+                OB_LOG_WARN(pamh, "Failed to parse CrowdSec whitelist");
+            }
+        }
+
         crowdsec_config_t cs_cfg = {
             .enabled = true,
             .url = data->config.crowdsec_url,
@@ -1336,9 +1346,13 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
             .send_all_alerts = data->config.crowdsec_send_all_alerts,
             .max_failures = data->config.crowdsec_max_failures,
             .block_delay = data->config.crowdsec_block_delay,
-            .ban_duration = data->config.crowdsec_ban_duration
+            .ban_duration = data->config.crowdsec_ban_duration,
+            .whitelist = whitelist_entries,
+            .whitelist_count = whitelist_count
         };
         data->crowdsec = crowdsec_init(&cs_cfg);
+        /* Free parsed whitelist - crowdsec_init made a deep copy */
+        crowdsec_free_whitelist(whitelist_entries);
         if (!data->crowdsec) {
             OB_LOG_WARN(pamh, "Failed to initialize CrowdSec, continuing without");
         }

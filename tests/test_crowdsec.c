@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include "crowdsec.h"
 
@@ -296,6 +297,239 @@ static int test_error_null_context(void)
     return error != NULL && strcmp(error, "NULL context") == 0;
 }
 
+/* Whitelist tests */
+
+/* Test parsing empty whitelist */
+static int test_whitelist_parse_empty(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("", &entries, &count);
+    if (result != 0 || count != 0 || entries != NULL) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    result = crowdsec_parse_whitelist(NULL, &entries, &count);
+    if (result != 0 || count != 0) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    return 1;
+}
+
+/* Test parsing single IPv4 */
+static int test_whitelist_parse_ipv4_single(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("192.168.1.1", &entries, &count);
+    if (result != 0 || count != 1) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    if (entries[0].family != AF_INET || entries[0].prefix_len != 32) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
+/* Test parsing IPv4 CIDR */
+static int test_whitelist_parse_ipv4_cidr(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("10.0.0.0/8", &entries, &count);
+    if (result != 0 || count != 1) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    if (entries[0].family != AF_INET || entries[0].prefix_len != 8) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
+/* Test parsing single IPv6 */
+static int test_whitelist_parse_ipv6_single(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("::1", &entries, &count);
+    if (result != 0 || count != 1) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    if (entries[0].family != AF_INET6 || entries[0].prefix_len != 128) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
+/* Test parsing IPv6 CIDR */
+static int test_whitelist_parse_ipv6_cidr(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("2001:db8::/32", &entries, &count);
+    if (result != 0 || count != 1) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    if (entries[0].family != AF_INET6 || entries[0].prefix_len != 32) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
+/* Test parsing mixed list */
+static int test_whitelist_parse_mixed(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("192.168.1.0/24, 10.0.0.1, 2001:db8::/32, ::1", &entries, &count);
+    if (result != 0 || count != 4) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    /* Check IPv4 CIDR */
+    if (entries[0].family != AF_INET || entries[0].prefix_len != 24) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    /* Check single IPv4 */
+    if (entries[1].family != AF_INET || entries[1].prefix_len != 32) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    /* Check IPv6 CIDR */
+    if (entries[2].family != AF_INET6 || entries[2].prefix_len != 32) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    /* Check single IPv6 */
+    if (entries[3].family != AF_INET6 || entries[3].prefix_len != 128) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
+/* Test whitelist matching */
+static int test_whitelist_match(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("192.168.1.0/24, 10.0.0.1, 2001:db8::/32", &entries, &count);
+    if (result != 0 || count != 3) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_config_t config = {
+        .enabled = true,
+        .url = "http://localhost:8080",
+        .timeout = 5,
+        .fail_open = true,
+        .verify_ssl = false,
+        .bouncer_key = "test-key",
+        .action = CS_ACTION_REJECT,
+        .whitelist = entries,
+        .whitelist_count = count
+    };
+
+    crowdsec_context_t *ctx = crowdsec_init(&config);
+    /* Free original entries - crowdsec_init made a deep copy */
+    crowdsec_free_whitelist(entries);
+    if (!ctx) {
+        return 0;
+    }
+
+    /* Test matching IPs */
+    if (!crowdsec_is_whitelisted(ctx, "192.168.1.100")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+    if (!crowdsec_is_whitelisted(ctx, "10.0.0.1")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+    if (!crowdsec_is_whitelisted(ctx, "2001:db8::1")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+
+    /* Test non-matching IPs */
+    if (crowdsec_is_whitelisted(ctx, "192.168.2.1")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+    if (crowdsec_is_whitelisted(ctx, "10.0.0.2")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+    if (crowdsec_is_whitelisted(ctx, "2001:db9::1")) {
+        crowdsec_destroy(ctx);
+        return 0;
+    }
+
+    crowdsec_destroy(ctx);
+    return 1;
+}
+
+/* Test invalid entries are skipped */
+static int test_whitelist_invalid_entries(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    /* Mix of valid and invalid entries */
+    int result = crowdsec_parse_whitelist("192.168.1.1, invalid, 10.0.0.1, not.an.ip, ::1", &entries, &count);
+    if (result != 0) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    /* Should have parsed 3 valid entries */
+    if (count != 3) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
 int main(void)
 {
     printf("CrowdSec Integration Tests\n");
@@ -320,6 +554,16 @@ int main(void)
     TEST(destroy_null);
     TEST(error_function);
     TEST(error_null_context);
+
+    printf("\nWhitelist tests:\n");
+    TEST(whitelist_parse_empty);
+    TEST(whitelist_parse_ipv4_single);
+    TEST(whitelist_parse_ipv4_cidr);
+    TEST(whitelist_parse_ipv6_single);
+    TEST(whitelist_parse_ipv6_cidr);
+    TEST(whitelist_parse_mixed);
+    TEST(whitelist_match);
+    TEST(whitelist_invalid_entries);
 
     printf("\n==========================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);
