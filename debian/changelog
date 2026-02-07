@@ -1,3 +1,12 @@
+open-bastion (0.1.1) unstable; urgency=medium
+
+  * Supplementary groups synchronization via managed_groups configuration
+  * Local whitelist for managed groups (allowed_managed_groups)
+  * CrowdSec IP/CIDR whitelist to bypass checks for trusted IPs/networks
+  * Fixed TOCTOU race condition in cache_key.c
+
+ -- Xavier Guimard <xguimard@linagora.com>  Sat, 07 Feb 2026 22:51:15 +0100
+
 open-bastion (0.1.0) unstable; urgency=medium
 
   * Initial release

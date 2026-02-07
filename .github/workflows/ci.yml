@@ -175,9 +175,10 @@ jobs:
 
     - name: Build RPM
       run: |
+        VERSION=$(grep -oP 'project\(open-bastion VERSION \K[0-9.]+' CMakeLists.txt)
         mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-        tar czf ~/rpmbuild/SOURCES/open-bastion-0.1.0.tar.gz \
-          --transform 's,^,open-bastion-0.1.0/,' \
+        tar czf ~/rpmbuild/SOURCES/open-bastion-${VERSION}.tar.gz \
+          --transform "s,^,open-bastion-${VERSION}/," \
           --exclude='.git' .
         rpmbuild -ba rpm/open-bastion.spec
 
