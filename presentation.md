@@ -257,7 +257,7 @@ sudo systemctl enable --now pam-llng-heartbeat.timer
 {
   "hostname": "server.example.com",
   "server_group": "production",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stats": { "auth_success": 42 }
 }
 ```

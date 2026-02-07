@@ -153,7 +153,7 @@ Each recording has an accompanying JSON metadata file (`.json`):
   "format": "asciinema",
   "recording_file": "20251216-103000_550e8400-e29b-41d4-a716-446655440000.cast",
   "hostname": "bastion.example.com",
-  "version": "1.0.0"
+  "version": "0.1.0"
 }
 ```
 

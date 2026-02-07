@@ -1,4 +1,4 @@
-open-bastion (1.0.0) unstable; urgency=medium
+open-bastion (0.1.0) unstable; urgency=medium
 
   * Initial release
   * Renamed project from pam-llng to open-bastion

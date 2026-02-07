@@ -17,12 +17,12 @@ Please include:
 
 ### Response Timeline
 
-| Stage | Timeline |
-|-------|----------|
-| Initial response | Within 48 hours |
-| Vulnerability assessment | Within 7 days |
-| Fix development | Depends on severity |
-| Public disclosure | After fix is released |
+| Stage                    | Timeline              |
+| ------------------------ | --------------------- |
+| Initial response         | Within 48 hours       |
+| Vulnerability assessment | Within 7 days         |
+| Fix development          | Depends on severity   |
+| Public disclosure        | After fix is released |
 
 ### What to Expect
 
@@ -34,9 +34,9 @@ Please include:
 ## Supported Versions
 
 | Version | Supported |
-|---------|-----------|
-| 1.x     | Yes |
-| < 1.0   | No |
+| ------- | --------- |
+| 1.x     | Yes       |
+| < 1.0   | No        |
 
 Only the latest minor version receives security updates. We recommend always running the latest release.
 

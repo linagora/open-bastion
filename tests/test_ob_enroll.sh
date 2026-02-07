@@ -78,7 +78,7 @@ test_syntax_check() {
 test_version_flag() {
     local output
     output=$("$SCRIPT_PATH" --version 2>&1) || return 1
-    echo "$output" | grep -q "version 1.0.0"
+    echo "$output" | grep -q "version 0.1.0"
 }
 
 # Test 3: --help exits 0

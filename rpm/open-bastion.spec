@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        1.0.0
+Version:        0.1.0
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -84,6 +84,6 @@ token-based and key-based authorization with server groups.
 %systemd_postun_with_restart ob-heartbeat.timer
 
 %changelog
-* Sat Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 1.0.0-1
+* Sat Dec 14 2025 Xavier Guimard <xguimard@linagora.com> - 0.1.0-1
 - Initial RPM package
 - Renamed project from pam-llng to open-bastion

@@ -22,7 +22,7 @@
 #include "crowdsec.h"
 
 /* Module version for scenario_version field */
-#define CROWDSEC_MODULE_VERSION "1.0.0"
+#define CROWDSEC_MODULE_VERSION "0.1.0"
 
 /* Maximum response size to prevent DoS */
 #define MAX_RESPONSE_SIZE (256 * 1024)

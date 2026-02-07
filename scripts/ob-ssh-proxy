@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="0.1.0"
 PROG_NAME=$(basename "$0")
 
 # Configuration (can be overridden via /etc/llng/ssh-proxy.conf)

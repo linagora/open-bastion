@@ -1305,7 +1305,7 @@ Request body:
   "refresh_token": "session_id_of_refresh_token",
   "hostname": "server.example.com",
   "server_group": "production",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "stats": { "auth_success": 42, "auth_failure": 3 }
 }
 
