@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-deb:
+    name: Build .deb (${{ matrix.codename }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container: ${{ matrix.container }}
+
+    strategy:
+      matrix:
+        include:
+          - distro: debian
+            codename: bookworm
+            container: debian:bookworm
+          - distro: debian
+            codename: trixie
+            container: debian:trixie
+          - distro: ubuntu
+            codename: noble
+            container: ubuntu:24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential \
+            debhelper \
+            cmake \
+            libcurl4-openssl-dev \
+            libjson-c-dev \
+            libpam0g-dev \
+            libssl-dev \
+            pkgconf \
+            devscripts \
+            fakeroot
+
+      - name: Build Debian package
+        run: |
+          dpkg-buildpackage -us -uc -b
+
+      - name: Move packages
+        run: |
+          mkdir -p packages
+          mv ../*.deb packages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.codename }}
+          path: packages/*.deb
+          retention-days: 7
+
+  create-repo:
+    name: Create APT Repository
+    runs-on: ubuntu-latest
+    needs: build-deb
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download all .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # Get the key ID
+          KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$KEY_ID" >> $GITHUB_ENV
+
+      - name: Install APT tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Create APT repository structure
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p repo
+
+          # Export public key
+          gpg --armor --export "$GPG_KEY_ID" > repo/KEY.gpg
+
+          # Create repository for each distribution
+          for codename in bookworm trixie noble; do
+            echo "Processing $codename..."
+
+            # Create directory structure
+            mkdir -p "repo/dists/${codename}/main/binary-amd64"
+
+            # Copy .deb files
+            if [ -d "artifacts/deb-${codename}" ]; then
+              cp artifacts/deb-${codename}/*.deb "repo/dists/${codename}/main/binary-amd64/"
+            fi
+
+            # Generate Packages file
+            cd repo
+            dpkg-scanpackages --arch amd64 "dists/${codename}/main/binary-amd64" > "dists/${codename}/main/binary-amd64/Packages"
+            gzip -k "dists/${codename}/main/binary-amd64/Packages"
+            cd ..
+
+            # Create Release file
+            cd "repo/dists/${codename}"
+
+            # Calculate checksums
+            PACKAGES_FILE="main/binary-amd64/Packages"
+            PACKAGES_GZ_FILE="main/binary-amd64/Packages.gz"
+
+            MD5_PACKAGES=$(md5sum "$PACKAGES_FILE" | cut -d' ' -f1)
+            MD5_PACKAGES_GZ=$(md5sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+            SHA256_PACKAGES=$(sha256sum "$PACKAGES_FILE" | cut -d' ' -f1)
+            SHA256_PACKAGES_GZ=$(sha256sum "$PACKAGES_GZ_FILE" | cut -d' ' -f1)
+            SIZE_PACKAGES=$(stat -c%s "$PACKAGES_FILE")
+            SIZE_PACKAGES_GZ=$(stat -c%s "$PACKAGES_GZ_FILE")
+
+            cat > Release << EOF
+          Origin: Open Bastion
+          Label: Open Bastion
+          Suite: stable
+          Codename: ${codename}
+          Architectures: amd64
+          Components: main
+          Description: Open Bastion APT Repository
+          Date: $(date -Ru)
+          MD5Sum:
+           ${MD5_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
+           ${MD5_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
+          SHA256:
+           ${SHA256_PACKAGES} ${SIZE_PACKAGES} ${PACKAGES_FILE}
+           ${SHA256_PACKAGES_GZ} ${SIZE_PACKAGES_GZ} ${PACKAGES_GZ_FILE}
+          EOF
+
+            # Sign Release file to create InRelease
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --clearsign -o InRelease Release
+
+            # Also create Release.gpg (detached signature)
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              -abs -o Release.gpg Release
+
+            cd ../../..
+          done
+
+          # Create index.html for convenience
+          cat > repo/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Open Bastion APT Repository</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+              pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+              h1 { color: #333; }
+              h2 { color: #666; margin-top: 30px; }
+            </style>
+          </head>
+          <body>
+            <h1>Open Bastion APT Repository</h1>
+            <p>This repository provides Debian packages for Open Bastion.</p>
+
+            <h2>Supported Distributions</h2>
+            <ul>
+              <li><strong>Debian 12</strong> (bookworm)</li>
+              <li><strong>Debian 13</strong> (trixie)</li>
+              <li><strong>Ubuntu 24.04</strong> (noble)</li>
+            </ul>
+
+            <h2>Installation</h2>
+
+            <h3>1. Add the GPG key</h3>
+            <pre>curl -fsSL https://linagora.github.io/open-bastion/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/open-bastion.gpg</pre>
+
+            <h3>2. Add the repository</h3>
+            <p>For <strong>Debian 12 (bookworm)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion bookworm main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
+
+            <p>For <strong>Debian 13 (trixie)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion trixie main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
+
+            <p>For <strong>Ubuntu 24.04 (noble)</strong>:</p>
+            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion noble main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
+
+            <h3>3. Install</h3>
+            <pre>sudo apt update
+          sudo apt install open-bastion</pre>
+
+            <h2>Links</h2>
+            <ul>
+              <li><a href="https://github.com/linagora/open-bastion">GitHub Repository</a></li>
+              <li><a href="KEY.gpg">GPG Public Key</a></li>
+            </ul>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload APT repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: apt-repo
+          path: repo/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: create-repo
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download APT repository
+        uses: actions/download-artifact@v4
+        with:
+          name: apt-repo
+          path: repo
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
