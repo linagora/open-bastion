@@ -1099,17 +1099,17 @@ cache_rate_limit_max_lockout_sec = 3600
 ### How It Works
 
 1. When the LLNG server is unreachable, cache lookups are attempted
-2. Each failed cache lookup (user not in cache) is counted
-3. After `max_attempts` failures, the user is locked out from cache lookups
+2. Every cache lookup attempt is counted (hits and misses) to prevent enumeration
+3. After `max_attempts` attempts, the user is locked out from cache lookups
 4. Lockout duration doubles on each subsequent violation (exponential backoff)
-5. Successful cache lookups reset the failure counter
+5. Only authorized cache hits reset the failure counter (prevents attackers from resetting by finding cached users)
 
 ### Configuration Options
 
 | Option                           | Default | Description                         |
 | -------------------------------- | ------- | ----------------------------------- |
 | `cache_rate_limit_enabled`       | `false` | Enable cache lookup rate limiting   |
-| `cache_rate_limit_max_attempts`  | `3`     | Failed lookups before lockout       |
+| `cache_rate_limit_max_attempts`  | `3`     | Cache lookup attempts before lockout |
 | `cache_rate_limit_lockout_sec`   | `60`    | Initial lockout duration in seconds |
 | `cache_rate_limit_max_lockout_sec` | `3600` | Maximum lockout duration in seconds |
 

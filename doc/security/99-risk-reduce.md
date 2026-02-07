@@ -367,12 +367,13 @@ cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
 
 - Rate limiting par utilisateur (pas par IP, car attaque locale)
 - Backoff exponentiel (60s → 120s → 240s → ... → 3600s max)
-- Réinitialisation sur succès de lookup
+- Comptage de TOUTES les tentatives (hits + misses) pour éviter l'énumération
+- Réinitialisation uniquement sur cache hit autorisé (pas sur simple hit)
 - État persistant sur disque (survit aux redémarrages)
 
 **Bénéfices sécurité :**
 
-- Empêche l'énumération d'utilisateurs via le cache
+- Empêche l'énumération d'utilisateurs via le cache (toutes tentatives comptées)
 - Ralentit drastiquement les tentatives de brute-force
 - Seuils plus stricts que le rate limiting réseau (3 vs 5 tentatives)
 - Audit des lockouts pour détection d'intrusion

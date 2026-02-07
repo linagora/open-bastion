@@ -245,13 +245,14 @@ log_level = warn
 # cache lookups to prevent such attacks.
 
 # Enable cache lookup rate limiting
-# When enabled, failed cache lookups are counted per user, and users are
-# locked out after exceeding max_attempts within a time window.
+# When enabled, ALL cache lookups are counted per user (hits and misses)
+# to prevent enumeration. Users are locked out after max_attempts.
+# Only authorized cache hits reset the counter.
 # Default: false
 # cache_rate_limit_enabled = false
 
-# Maximum failed cache lookups before lockout
-# After this many failed lookups, the user is locked out from cache access.
+# Maximum cache lookup attempts before lockout
+# After this many lookups, the user is locked out from cache access.
 # This is intentionally stricter than network rate limiting since cache
 # lookups are much faster and easier to brute-force.
 # Default: 3
