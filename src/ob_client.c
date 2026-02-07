@@ -696,12 +696,18 @@ int ob_verify_token(ob_client_t *client,
             response->managed_groups = calloc(count + 1, sizeof(char *));
             if (response->managed_groups) {
                 response->managed_groups_count = count;
+                size_t valid_count = 0;
                 for (size_t i = 0; i < count; i++) {
                     struct json_object *g = json_object_array_get_idx(val, i);
-                    if (g) {
-                        response->managed_groups[i] = safe_json_strdup(g);
+                    /* Only accept string elements, skip non-strings */
+                    if (g && json_object_is_type(g, json_type_string)) {
+                        response->managed_groups[valid_count] = safe_json_strdup(g);
+                        if (response->managed_groups[valid_count]) {
+                            valid_count++;
+                        }
                     }
                 }
+                response->managed_groups_count = valid_count;
             }
         }
     }
@@ -1067,13 +1073,18 @@ static int ob_authorize_user_internal(ob_client_t *client,
             }
             response->managed_groups = calloc(count + 1, sizeof(char *));
             if (response->managed_groups) {
-                response->managed_groups_count = count;
+                size_t valid_count = 0;
                 for (size_t i = 0; i < count; i++) {
                     struct json_object *g = json_object_array_get_idx(val, i);
-                    if (g) {
-                        response->managed_groups[i] = safe_json_strdup(g);
+                    /* Only accept string elements, skip non-strings */
+                    if (g && json_object_is_type(g, json_type_string)) {
+                        response->managed_groups[valid_count] = safe_json_strdup(g);
+                        if (response->managed_groups[valid_count]) {
+                            valid_count++;
+                        }
                     }
                 }
+                response->managed_groups_count = valid_count;
             }
         }
     }

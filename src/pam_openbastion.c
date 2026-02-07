@@ -179,13 +179,40 @@ static int verify_token_file_security(pam_handle_t *pamh, pam_openbastion_data_t
 }
 
 /*
+ * Securely open /etc/group for reading.
+ * Uses O_NOFOLLOW to prevent symlink attacks and verifies root ownership.
+ * Returns FILE* on success, NULL on failure.
+ * Caller must fclose() the returned FILE*.
+ */
+static FILE *open_etc_group_secure(void)
+{
+    int fd = open("/etc/group", O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) return NULL;
+
+    /* Verify it's a regular file owned by root */
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0) {
+        close(fd);
+        return NULL;
+    }
+
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return NULL;
+    }
+
+    return f;
+}
+
+/*
  * Check if a group exists by reading /etc/group directly.
  * This avoids NSS calls which could cause issues.
  * Returns 1 if group exists, 0 otherwise.
  */
 static int group_exists_locally(gid_t gid)
 {
-    FILE *f = fopen("/etc/group", "r");
+    FILE *f = open_etc_group_secure();
     if (!f) return 0;
 
     char line[1024];
@@ -232,7 +259,7 @@ static int group_exists_by_name(const char *groupname)
 {
     if (!groupname || !*groupname) return 0;
 
-    FILE *f = fopen("/etc/group", "r");
+    FILE *f = open_etc_group_secure();
     if (!f) return 0;
 
     char line[1024];
@@ -346,7 +373,7 @@ static int user_in_group_locally(const char *username, const char *groupname)
 {
     if (!username || !groupname) return 0;
 
-    FILE *f = fopen("/etc/group", "r");
+    FILE *f = open_etc_group_secure();
     if (!f) return 0;
 
     char line[4096];  /* Groups can have long member lists */
@@ -576,36 +603,53 @@ static char **filter_managed_groups(pam_handle_t *pamh,
 {
     *filtered_count = 0;
 
-    /* If no whitelist, return a copy of the original */
+    /* If no whitelist, return a copy of the original (with validation) */
     if (!whitelist || !*whitelist) {
         if (!managed_groups || managed_count == 0) {
             return NULL;
         }
 
-        char **result = calloc(managed_count, sizeof(char *));
+        /* First pass: count valid groups */
+        size_t valid_count = 0;
+        for (size_t i = 0; i < managed_count; i++) {
+            if (managed_groups[i] && validate_groupname(managed_groups[i])) {
+                valid_count++;
+            }
+        }
+
+        if (valid_count == 0) {
+            return NULL;
+        }
+
+        char **result = calloc(valid_count, sizeof(char *));
         if (!result) return NULL;
 
-        for (size_t i = 0; i < managed_count; i++) {
-            if (managed_groups[i]) {
-                result[i] = strdup(managed_groups[i]);
-                if (!result[i]) {
+        /* Second pass: copy valid groups only */
+        size_t idx = 0;
+        for (size_t i = 0; i < managed_count && idx < valid_count; i++) {
+            if (managed_groups[i] && validate_groupname(managed_groups[i])) {
+                result[idx] = strdup(managed_groups[i]);
+                if (!result[idx]) {
                     /* Cleanup on failure */
-                    for (size_t j = 0; j < i; j++) {
+                    for (size_t j = 0; j < idx; j++) {
                         free(result[j]);
                     }
                     free(result);
                     return NULL;
                 }
+                idx++;
             }
         }
-        *filtered_count = managed_count;
+        *filtered_count = valid_count;
         return result;
     }
 
-    /* Count matching groups first */
+    /* Count matching groups first (only valid names) */
     size_t match_count = 0;
     for (size_t i = 0; i < managed_count; i++) {
-        if (managed_groups[i] && is_group_in_whitelist(managed_groups[i], whitelist)) {
+        if (managed_groups[i] &&
+            validate_groupname(managed_groups[i]) &&
+            is_group_in_whitelist(managed_groups[i], whitelist)) {
             match_count++;
         }
     }
@@ -620,7 +664,12 @@ static char **filter_managed_groups(pam_handle_t *pamh,
 
     size_t idx = 0;
     for (size_t i = 0; i < managed_count && idx < match_count; i++) {
-        if (managed_groups[i] && is_group_in_whitelist(managed_groups[i], whitelist)) {
+        /* Skip invalid group names - don't log them to prevent injection */
+        if (!managed_groups[i] || !validate_groupname(managed_groups[i])) {
+            continue;
+        }
+
+        if (is_group_in_whitelist(managed_groups[i], whitelist)) {
             result[idx] = strdup(managed_groups[i]);
             if (!result[idx]) {
                 /* Cleanup on failure */
@@ -633,7 +682,7 @@ static char **filter_managed_groups(pam_handle_t *pamh,
 
             OB_LOG_DEBUG(pamh, "Managed group %s is in local whitelist", managed_groups[i]);
             idx++;
-        } else if (managed_groups[i]) {
+        } else {
             OB_LOG_DEBUG(pamh, "Managed group %s filtered out by local whitelist", managed_groups[i]);
         }
     }
@@ -689,6 +738,13 @@ static int sync_user_groups(pam_handle_t *pamh,
         const char *group = llng_groups[i];
         if (!group) continue;
 
+        /* Validate group name early to prevent log injection and unnecessary processing */
+        if (!validate_groupname(group)) {
+            /* Don't log the invalid name - it may contain control characters */
+            OB_LOG_DEBUG(pamh, "Skipping invalid LLNG group at index %zu", i);
+            continue;
+        }
+
         /* Only sync groups that are in the managed pool */
         if (!is_in_managed_pool(group, managed_groups, managed_groups_count)) {
             OB_LOG_DEBUG(pamh, "Group %s not in managed pool, skipping", group);
@@ -723,6 +779,12 @@ static int sync_user_groups(pam_handle_t *pamh,
     for (size_t i = 0; i < managed_groups_count; i++) {
         const char *managed = managed_groups[i];
         if (!managed) continue;
+
+        /* Validate managed group name early to prevent log injection */
+        if (!validate_groupname(managed)) {
+            OB_LOG_DEBUG(pamh, "Skipping invalid managed group at index %zu", i);
+            continue;
+        }
 
         /* Skip if user should be in this group */
         if (is_in_llng_groups(managed, llng_groups, llng_groups_count)) {

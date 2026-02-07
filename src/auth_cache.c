@@ -534,13 +534,18 @@ bool auth_cache_lookup(auth_cache_t *cache,
             }
             entry->managed_groups = calloc(count + 1, sizeof(char *));
             if (entry->managed_groups) {
-                entry->managed_groups_count = count;
+                size_t valid_count = 0;
                 for (size_t i = 0; i < count; i++) {
                     struct json_object *g = json_object_array_get_idx(val, i);
-                    if (g) {
-                        entry->managed_groups[i] = safe_json_strdup(g);
+                    /* Only accept string elements, skip non-strings */
+                    if (g && json_object_is_type(g, json_type_string)) {
+                        entry->managed_groups[valid_count] = safe_json_strdup(g);
+                        if (entry->managed_groups[valid_count]) {
+                            valid_count++;
+                        }
                     }
                 }
+                entry->managed_groups_count = valid_count;
             }
         }
     }
