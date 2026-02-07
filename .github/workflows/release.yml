@@ -64,15 +64,81 @@ jobs:
           path: packages/*.deb
           retention-days: 7
 
-  create-repo:
-    name: Create APT Repository
+  build-rpm:
+    name: Build .rpm (${{ matrix.codename }})
     runs-on: ubuntu-latest
-    needs: build-deb
+    permissions:
+      contents: read
+    container: ${{ matrix.container }}
+
+    strategy:
+      matrix:
+        include:
+          - distro: rocky
+            codename: el9
+            container: rockylinux:9
+          - distro: rocky
+            codename: el10
+            container: rockylinux:10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            rpm-build \
+            cmake \
+            gcc \
+            make \
+            pam-devel \
+            libcurl-devel \
+            json-c-devel \
+            openssl-devel \
+            pkgconfig \
+            systemd-rpm-macros
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep "^Version:" rpm/open-bastion.spec | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create source tarball
+        run: |
+          mkdir -p ~/rpmbuild/{SOURCES,SPECS}
+          tar czf ~/rpmbuild/SOURCES/open-bastion-${{ steps.version.outputs.version }}.tar.gz \
+            --transform "s,^,open-bastion-${{ steps.version.outputs.version }}/," \
+            --exclude='.git' \
+            .
+          cp rpm/open-bastion.spec ~/rpmbuild/SPECS/
+
+      - name: Build RPM package
+        run: |
+          rpmbuild -bb ~/rpmbuild/SPECS/open-bastion.spec
+
+      - name: Move packages
+        run: |
+          mkdir -p packages
+          mv ~/rpmbuild/RPMS/x86_64/*.rpm packages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.codename }}
+          path: packages/*.rpm
+          retention-days: 7
+
+  create-repo:
+    name: Create Repositories
+    runs-on: ubuntu-latest
+    needs: [build-deb, build-rpm]
     permissions:
       contents: read
 
     steps:
-      - name: Download all .deb artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -87,10 +153,10 @@ jobs:
           KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
           echo "GPG_KEY_ID=$KEY_ID" >> $GITHUB_ENV
 
-      - name: Install APT tools
+      - name: Install repository tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm
 
       - name: Create APT repository structure
         env:
@@ -161,63 +227,134 @@ jobs:
             cd ../../..
           done
 
-          # Create index.html for convenience
+      - name: Create YUM repository structure
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          # Create repository for each EL version
+          for elver in el9 el10; do
+            echo "Processing $elver..."
+
+            # Create directory structure
+            mkdir -p "repo/rpm/${elver}/x86_64"
+
+            # Copy .rpm files
+            if [ -d "artifacts/rpm-${elver}" ]; then
+              cp artifacts/rpm-${elver}/*.rpm "repo/rpm/${elver}/x86_64/"
+            fi
+
+            # Sign RPM packages
+            for rpm in repo/rpm/${elver}/x86_64/*.rpm; do
+              if [ -f "$rpm" ]; then
+                echo "$GPG_PASSPHRASE" | rpm --addsign "$rpm" \
+                  --define "_gpg_name $GPG_KEY_ID" \
+                  --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-fd 0"
+              fi
+            done
+
+            # Create repository metadata
+            createrepo_c "repo/rpm/${elver}/x86_64"
+
+            # Sign repository metadata
+            echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --detach-sign --armor "repo/rpm/${elver}/x86_64/repodata/repomd.xml"
+          done
+
+      - name: Create index.html
+        run: |
           cat > repo/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
           <head>
-            <title>Open Bastion APT Repository</title>
+            <title>Open Bastion Repository</title>
             <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
               pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
               code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
               h1 { color: #333; }
-              h2 { color: #666; margin-top: 30px; }
+              h2 { color: #555; margin-top: 40px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+              h3 { color: #666; margin-top: 25px; }
+              .distro-section { margin-bottom: 40px; }
+              .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+              .tab { padding: 10px 20px; background: #eee; border-radius: 5px; cursor: pointer; }
+              .tab.active { background: #007bff; color: white; }
             </style>
           </head>
           <body>
-            <h1>Open Bastion APT Repository</h1>
-            <p>This repository provides Debian packages for Open Bastion.</p>
+            <h1>Open Bastion Repository</h1>
+            <p>This repository provides packages for <a href="https://github.com/linagora/open-bastion">Open Bastion</a>,
+               a PAM/NSS module for SSH bastion authentication with LemonLDAP::NG.</p>
 
-            <h2>Supported Distributions</h2>
-            <ul>
-              <li><strong>Debian 12</strong> (bookworm)</li>
-              <li><strong>Debian 13</strong> (trixie)</li>
-              <li><strong>Ubuntu 24.04</strong> (noble)</li>
-            </ul>
+            <h2>Debian / Ubuntu (APT)</h2>
+            <div class="distro-section">
+              <p>Supported distributions:</p>
+              <ul>
+                <li><strong>Debian 12</strong> (bookworm)</li>
+                <li><strong>Debian 13</strong> (trixie)</li>
+                <li><strong>Ubuntu 24.04</strong> (noble)</li>
+              </ul>
 
-            <h2>Installation</h2>
+              <h3>1. Add the GPG key</h3>
+              <pre>curl -fsSL https://linagora.github.io/open-bastion/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/open-bastion.gpg</pre>
 
-            <h3>1. Add the GPG key</h3>
-            <pre>curl -fsSL https://linagora.github.io/open-bastion/KEY.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/open-bastion.gpg</pre>
+              <h3>2. Add the repository</h3>
+              <p>For <strong>Debian 12 (bookworm)</strong>:</p>
+              <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion bookworm main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
 
-            <h3>2. Add the repository</h3>
-            <p>For <strong>Debian 12 (bookworm)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion bookworm main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
+              <p>For <strong>Debian 13 (trixie)</strong>:</p>
+              <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion trixie main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
 
-            <p>For <strong>Debian 13 (trixie)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion trixie main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
+              <p>For <strong>Ubuntu 24.04 (noble)</strong>:</p>
+              <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion noble main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
 
-            <p>For <strong>Ubuntu 24.04 (noble)</strong>:</p>
-            <pre>echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion noble main" | sudo tee /etc/apt/sources.list.d/open-bastion.list</pre>
-
-            <h3>3. Install</h3>
-            <pre>sudo apt update
+              <h3>3. Install</h3>
+              <pre>sudo apt update
           sudo apt install open-bastion</pre>
+            </div>
+
+            <h2>Rocky Linux / RHEL (DNF)</h2>
+            <div class="distro-section">
+              <p>Supported distributions:</p>
+              <ul>
+                <li><strong>Rocky Linux 9</strong> / RHEL 9 / AlmaLinux 9</li>
+                <li><strong>Rocky Linux 10</strong> / RHEL 10 / AlmaLinux 10</li>
+              </ul>
+
+              <h3>1. Import the GPG key</h3>
+              <pre>sudo rpm --import https://linagora.github.io/open-bastion/KEY.gpg</pre>
+
+              <h3>2. Add the repository</h3>
+              <pre>sudo tee /etc/yum.repos.d/open-bastion.repo &lt;&lt; 'EOF'
+          [open-bastion]
+          name=Open Bastion
+          baseurl=https://linagora.github.io/open-bastion/rpm/el$releasever/x86_64/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://linagora.github.io/open-bastion/KEY.gpg
+          EOF</pre>
+
+              <h3>3. Install</h3>
+              <pre>sudo dnf install open-bastion</pre>
+            </div>
 
             <h2>Links</h2>
             <ul>
               <li><a href="https://github.com/linagora/open-bastion">GitHub Repository</a></li>
               <li><a href="KEY.gpg">GPG Public Key</a></li>
             </ul>
+
+            <hr style="margin-top: 40px;">
+            <p style="color: #888; font-size: 0.9em;">
+              &copy; 2025 <a href="https://linagora.com">Linagora</a> - Licensed under AGPL-3.0
+            </p>
           </body>
           </html>
           EOF
 
-      - name: Upload APT repository
+      - name: Upload repository
         uses: actions/upload-artifact@v4
         with:
-          name: apt-repo
+          name: repo
           path: repo/
           retention-days: 7
 
@@ -234,10 +371,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Download APT repository
+      - name: Download repository
         uses: actions/download-artifact@v4
         with:
-          name: apt-repo
+          name: repo
           path: repo
 
       - name: Setup Pages
