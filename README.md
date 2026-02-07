@@ -68,6 +68,18 @@ sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev 
 sudo dnf install libcurl-devel json-c-devel pam-devel openssl-devel keyutils-libs-devel cmake curl jq
 ```
 
+## Installation
+
+### From APT Repository (Debian/Ubuntu)
+
+Pre-built packages are available for Debian 12, Debian 13, and Ubuntu 24.04.
+
+See installation instructions at: **https://linagora.github.io/open-bastion/**
+
+### From Source
+
+See [Building and Installation](#building-and-installation) below.
+
 ## LemonLDAP::NG Configuration
 
 Before deploying the PAM module on your servers, you need to configure LemonLDAP::NG.
@@ -209,6 +221,8 @@ sudo systemctl restart apache2  # if using mod_perl
 ```
 
 ## Building and Installation
+
+If you prefer to build from source instead of using the APT repository:
 
 ```bash
 mkdir build && cd build
