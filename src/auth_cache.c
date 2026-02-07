@@ -507,47 +507,13 @@ bool auth_cache_lookup(auth_cache_t *cache,
     }
 
     if (json_object_object_get_ex(json, "groups", &val)) {
-        if (json_object_is_type(val, json_type_array)) {
-            size_t count = json_object_array_length(val);
-            /* Security: Limit groups to prevent DoS via memory exhaustion */
-            if (count > MAX_USER_GROUPS) {
-                count = MAX_USER_GROUPS;
-            }
-            entry->groups = calloc(count + 1, sizeof(char *));
-            if (entry->groups) {
-                entry->groups_count = count;
-                for (size_t i = 0; i < count; i++) {
-                    struct json_object *g = json_object_array_get_idx(val, i);
-                    if (g) {
-                        entry->groups[i] = safe_json_strdup(g);
-                    }
-                }
-            }
-        }
+        entry->groups = str_json_parse_string_array(val, MAX_USER_GROUPS,
+                                                     &entry->groups_count);
     }
 
     if (json_object_object_get_ex(json, "managed_groups", &val)) {
-        if (json_object_is_type(val, json_type_array)) {
-            size_t count = json_object_array_length(val);
-            if (count > MAX_USER_GROUPS) {
-                count = MAX_USER_GROUPS;
-            }
-            entry->managed_groups = calloc(count + 1, sizeof(char *));
-            if (entry->managed_groups) {
-                size_t valid_count = 0;
-                for (size_t i = 0; i < count; i++) {
-                    struct json_object *g = json_object_array_get_idx(val, i);
-                    /* Only accept string elements, skip non-strings */
-                    if (g && json_object_is_type(g, json_type_string)) {
-                        entry->managed_groups[valid_count] = safe_json_strdup(g);
-                        if (entry->managed_groups[valid_count]) {
-                            valid_count++;
-                        }
-                    }
-                }
-                entry->managed_groups_count = valid_count;
-            }
-        }
+        entry->managed_groups = str_json_parse_string_array(val, MAX_USER_GROUPS,
+                                                             &entry->managed_groups_count);
     }
 
     if (json_object_object_get_ex(json, "sudo_allowed", &val)) {
