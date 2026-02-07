@@ -33,11 +33,8 @@ target_compile_options(nss_openbastion PRIVATE
     -fvisibility=hidden           # Hide internal symbols, reduce attack surface
 )
 
-# _FORTIFY_SOURCE requires optimization (-O1 or higher) to be effective
-# Only enable for Release/RelWithDebInfo builds to avoid warnings in Debug
-target_compile_definitions(nss_openbastion PRIVATE
-    $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:_FORTIFY_SOURCE=2>
-)
+# Note: _FORTIFY_SOURCE is set by distribution build systems (Debian hardening)
+# Do not set it here to avoid redefinition warnings with -Werror
 
 # Linker security flags (Full RELRO = relro + now)
 target_link_options(nss_openbastion PRIVATE
