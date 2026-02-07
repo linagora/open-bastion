@@ -354,6 +354,73 @@ jobs:
           </html>
           EOF
 
+      - name: Generate directory indexes
+        run: |
+          # Generate index.html for each directory (autoindex)
+          cd repo
+          find . -type d | while read dir; do
+            # Skip root (already has custom index.html)
+            if [ "$dir" = "." ]; then
+              continue
+            fi
+
+            # Get relative path for display
+            relpath="${dir#./}"
+
+            # Generate index.html for this directory
+            cat > "$dir/index.html" << DIREOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Index of /${relpath}/</title>
+            <style>
+              body { font-family: monospace; margin: 20px; }
+              h1 { border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+              table { border-collapse: collapse; }
+              td, th { padding: 5px 15px; text-align: left; }
+              a { text-decoration: none; }
+              a:hover { text-decoration: underline; }
+              .size { color: #666; }
+            </style>
+          </head>
+          <body>
+            <h1>Index of /${relpath}/</h1>
+            <table>
+              <tr><th>Name</th><th>Size</th></tr>
+              <tr><td><a href="../">../</a></td><td>-</td></tr>
+          DIREOF
+
+            # List directories first, then files
+            for item in "$dir"/*; do
+              [ -e "$item" ] || continue
+              name=$(basename "$item")
+              # Skip index.html itself
+              [ "$name" = "index.html" ] && continue
+
+              if [ -d "$item" ]; then
+                echo "      <tr><td><a href=\"${name}/\">${name}/</a></td><td>-</td></tr>" >> "$dir/index.html"
+              else
+                size=$(stat -c%s "$item" 2>/dev/null || echo "0")
+                # Human readable size
+                if [ "$size" -gt 1048576 ]; then
+                  hsize="$(echo "scale=1; $size/1048576" | bc)M"
+                elif [ "$size" -gt 1024 ]; then
+                  hsize="$(echo "scale=1; $size/1024" | bc)K"
+                else
+                  hsize="${size}B"
+                fi
+                echo "      <tr><td><a href=\"${name}\">${name}</a></td><td class=\"size\">${hsize}</td></tr>" >> "$dir/index.html"
+              fi
+            done
+
+            cat >> "$dir/index.html" << DIREOF
+            </table>
+          </body>
+          </html>
+          DIREOF
+          done
+          cd ..
+
       - name: Upload repository
         uses: actions/upload-artifact@v4
         with:
