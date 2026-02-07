@@ -67,6 +67,7 @@ Additional and optional parameters that can be inserted into `lemonldap-ng.ini`,
 | `pamAccessSudoRules`                            | `{}`         | Sudo rules                              |
 | `pamAccessOfflineEnabled`                       | `0`          | Enable offline mode                     |
 | `pamAccessHeartbeatInterval`                    | `300` (5mn)  | Heartbeat interval                      |
+| `pamAccessManagedGroups`                        | `{}`         | Unix groups managed by LLNG per server group (see [Group Synchronization](#group-synchronization)) |
 
 When offline mode is enabled, the server-side cache is protected by
 [Cache Brute-Force Protection](security.md#cache-brute-force-protection).
@@ -178,6 +179,63 @@ Or during enrollment:
 ```bash
 sudo ob-enroll -g production
 ```
+
+## Group Synchronization
+
+The group synchronization feature (#38) allows LemonLDAP::NG to manage Unix supplementary groups on target servers. When a user connects via SSH, their Unix groups are synchronized with the groups defined in LLNG.
+
+### Configuration
+
+In `lemonldap-ng.ini`, configure which groups LLNG should manage for each server group:
+
+```perl
+pamAccessManagedGroups = {
+    production => 'docker,developers,readonly',
+    staging => 'developers,testers',
+    bastion => 'operators,auditors',
+    default => ''
+}
+```
+
+- Groups listed in `pamAccessManagedGroups` will be created automatically on the server if they don't exist
+- Users are added to groups they're assigned to in LLNG
+- Users are removed from managed groups they're no longer assigned to in LLNG
+- Groups NOT in `pamAccessManagedGroups` are never modified (local groups are preserved)
+
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant Client as SSH Client
+    participant Server as Server (PAM)
+    participant LLNG as LemonLDAP::NG
+
+    Client->>Server: ssh user@server
+    Server->>LLNG: /pam/authorize
+    LLNG-->>Server: {groups: ["dev","docker"],<br/>managed_groups: ["dev","docker","qa"]}
+    Note over Server: Sync groups:<br/>• Add user to "dev", "docker"<br/>• Remove from "qa" (managed but not assigned)
+    Server-->>Client: Session established
+```
+
+### Security Considerations
+
+- **Principle of least privilege**: Don't include privileged groups (sudo, wheel, admin) in `managed_groups`
+- **Audit trail**: All group modifications are logged with event type `GROUP_SYNC`
+- **Offline behavior**: Group sync uses cached group information when LLNG is unreachable
+- **File protection**: `/etc/group` modifications use file locking and symlink protection
+
+### Example: Per-Environment Groups
+
+```perl
+# Developer groups differ by environment
+pamAccessManagedGroups = {
+    production => 'app-users,readonly',           # Read-only in prod
+    staging => 'app-users,developers,docker',     # Full dev access in staging
+    bastion => 'operators'                        # Bastion operators only
+}
+```
+
+When a user moves from staging to production access, their docker and developers group memberships are automatically removed on production servers.
 
 ## See Also
 

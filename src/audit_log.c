@@ -45,7 +45,8 @@ static const char *event_type_strings[] = {
     "ENROLLMENT_START",
     "ENROLLMENT_SUCCESS",
     "ENROLLMENT_FAILURE",
-    "USER_CREATED"
+    "USER_CREATED",
+    "GROUP_SYNC"
 };
 
 const char *audit_event_type_str(audit_event_type_t type)

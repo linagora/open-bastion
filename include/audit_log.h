@@ -30,7 +30,8 @@ typedef enum {
     AUDIT_ENROLLMENT_START,
     AUDIT_ENROLLMENT_SUCCESS,
     AUDIT_ENROLLMENT_FAILURE,
-    AUDIT_USER_CREATED
+    AUDIT_USER_CREATED,
+    AUDIT_GROUP_SYNC
 } audit_event_type_t;
 
 /* Audit event structure */

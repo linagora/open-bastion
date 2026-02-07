@@ -2,7 +2,7 @@
  * auth_cache.c - Authorization cache for offline mode
  *
  * Caches authorization responses from LLNG server for offline use.
- * Uses JSON format (LLNGCACHE03) with AES-256-GCM encryption.
+ * Uses JSON format (LLNGCACHE04) with AES-256-GCM encryption.
  *
  * Copyright (C) 2025 Linagora
  * License: AGPL-3.0

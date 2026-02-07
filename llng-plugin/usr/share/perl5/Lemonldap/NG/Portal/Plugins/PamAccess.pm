@@ -321,9 +321,9 @@ sub authorize {
     my $authorized   = $result->{authorized};
     my $sudo_allowed = $result->{sudo_allowed};
 
-    # Get groups for response
+    # Get groups for response (filter empty strings)
     my $groups    = $req->sessionInfo->{groups} || '';
-    my @groupList = split /[,;\s]+/, $groups;
+    my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
 
     $self->logger->info( "PAM authorize: user '$user' "
           . ( $authorized ? 'granted' : 'denied' )
@@ -573,9 +573,9 @@ sub _getManagedGroups {
         return [];
     }
 
-    # Parse comma/space/semicolon separated list
+    # Parse comma/space/semicolon separated list (filter empty strings)
     return [] unless defined $groups_str && $groups_str ne '';
-    my @groups = split /[,;\s]+/, $groups_str;
+    my @groups = grep { length $_ } split /[,;\s]+/, $groups_str;
     return \@groups;
 }
 
@@ -732,7 +732,7 @@ sub verifyToken {
     # 6. Extract user info
     my $user      = $tokenSession->data->{_pamUser}   || '';
     my $groups    = $tokenSession->data->{_pamGroups} || '';
-    my @groupList = $groups ? split( /[,;\s]+/, $groups ) : ();
+    my @groupList = $groups ? grep { length $_ } split( /[,;\s]+/, $groups ) : ();
 
     # Extract exported attributes (prefixed with _pamAttr_)
     my %attrs;
@@ -927,9 +927,9 @@ sub userinfo {
         $attrs{$key} = $value if defined $value && $value ne '';
     }
 
-    # Always include basic info
+    # Always include basic info (filter empty strings)
     my $groups    = $req->sessionInfo->{groups} || '';
-    my @groupList = split /[,;\s]+/, $groups;
+    my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
 
     $self->logger->debug("PAM userinfo: Found user '$user'");
 
@@ -1004,7 +1004,7 @@ sub bastionToken {
     # 4. Verify server is in a bastion group
     my $server_group   = $tokenSession->data->{server_group}   || 'default';
     my $bastion_groups = $self->conf->{pamAccessBastionGroups} || 'bastion';
-    my @allowed_groups = split /[,;\s]+/, $bastion_groups;
+    my @allowed_groups = grep { length $_ } split /[,;\s]+/, $bastion_groups;
 
     my $is_bastion = 0;
     for my $allowed (@allowed_groups) {
@@ -1087,7 +1087,7 @@ sub bastionToken {
     my $error = $self->p->process($req);
     if ( $error == PE_OK ) {
         my $groups    = $req->sessionInfo->{groups} || '';
-        my @groupList = split /[,;\s]+/, $groups;
+        my @groupList = grep { length $_ } split /[,;\s]+/, $groups;
         $claims->{user_groups} = \@groupList if @groupList;
     }
     else {

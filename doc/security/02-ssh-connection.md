@@ -1243,6 +1243,63 @@ cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
 
 ---
 
+### R-S13 - Manipulation des groupes Unix via synchronisation LLNG
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Architectures concernées :** A, B, C, D (avec synchronisation de groupes activée)
+
+**Description :** La fonctionnalité de synchronisation des groupes Unix (#38) permet à LLNG de gérer les groupes supplémentaires des utilisateurs sur les serveurs. Un attaquant pourrait exploiter cette fonctionnalité pour obtenir des privilèges supplémentaires.
+
+**Vecteurs d'attaque :**
+
+- Modification des groupes côté LLNG pour obtenir des accès (ex: groupe docker, wheel, admin)
+- Attaque MITM sur la communication PAM-LLNG pour injecter des groupes
+- Modification du cache offline pour ajouter des groupes non autorisés
+- Symlink attack sur /etc/group pendant la modification
+
+**Conséquence :** Un attaquant pourrait obtenir des privilèges supplémentaires sur le serveur (sudo, docker, accès à des ressources sensibles).
+
+**Remédiation embarquée (IMPLÉMENTÉE) :**
+
+Le module PAM implémente plusieurs contrôles de sécurité :
+
+| Mesure de sécurité | Description |
+| --- | --- |
+| **Groupes gérés explicites** | Seuls les groupes listés dans `managed_groups` peuvent être modifiés |
+| **Validation des noms** | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement) |
+| **Protection symlink** | `/etc/group` ouvert avec `O_NOFOLLOW` et vérifié via `fstat()` |
+| **Vérification propriétaire** | `/etc/group` doit appartenir à root (uid=0) |
+| **Verrouillage fichier** | `flock(LOCK_EX)` pendant les modifications |
+| **Cache chiffré** | Les groupes sont stockés en cache avec AES-256-GCM |
+| **Audit GROUP_SYNC** | Toutes les modifications de groupes sont journalisées |
+
+**Configuration recommandée :**
+
+```yaml
+# Configuration LLNG Manager
+pamAccessManagedGroups:
+  production: "docker,developers,readonly"
+  bastion: "operators,auditors"
+  default: ""  # Pas de sync par défaut
+```
+
+**Principe de moindre privilège :**
+
+- Ne pas inclure les groupes critiques (wheel, sudo, root, admin) dans `managed_groups`
+- Créer des groupes dédiés pour les accès applicatifs (ex: app-users, db-readers)
+- Utiliser des `server_group` différents pour segmenter les accès
+
+|                 |                     Score résiduel                      |
+| --------------- | :-----------------------------------------------------: |
+| **Probabilité** | 1 (avec managed_groups restrictifs et validation noms) |
+| **Impact**      |              2 (groupes critiques non gérés)            |
+
+---
+
 ## 12. Comptes de Service
 
 ### Description
