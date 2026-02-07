@@ -19,6 +19,19 @@ The module supports two authentication methods:
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
+- **Offline mode**:
+  - Encrypted authorization cache (AES-256-GCM)
+  - Continue SSH key authentication when LLNG server is unavailable
+  - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
+  - Cache brute-force protection with rate limiting
+- **NSS module**:
+  - Resolve users from LLNG via `/pam/userinfo` endpoint
+  - Automatic UID generation from username hash
+  - Cross-process file cache for performance
+- **Automatic user provisioning**:
+  - Auto-create Unix accounts on first login
+  - Configurable shell, home directory, UID/GID ranges
+  - Skeleton directory support
 - **Service accounts** (ansible, backup, etc.):
   - SSH key authentication without OIDC
   - Per-server configuration file
@@ -29,17 +42,25 @@ The module supports two authentication methods:
   - Backends only accept SSH from authorized bastions
   - Offline verification via cached JWKS public keys
   - `ob-ssh-proxy` script for seamless bastion connections
+- **Session recording** (optional):
+  - Record all terminal I/O for audit compliance
+  - Multiple formats: script, asciinema, ttyrec
+  - Session metadata with unique IDs
 - **Security hardening**:
   - Structured JSON audit logging with correlation IDs
   - Rate limiting with exponential backoff
   - AES-256-GCM encrypted secret storage
   - Webhook notifications for security events
   - Token binding (IP, fingerprint)
+  - SSH key policy enforcement (allowed types, minimum sizes)
 - **CrowdSec integration** (optional):
   - Pre-authentication IP blocking via CrowdSec bouncer
   - Post-authentication failure reporting via CrowdSec watcher
   - Auto-ban after configurable failure threshold
   - Compatible with [Crowdsieve](https://github.com/linagora/crowdsieve) for centralized alert management
+- **Monitoring**:
+  - Server heartbeat via `ob-heartbeat`
+  - Statistics reporting to portal
 
 ## Installation
 
