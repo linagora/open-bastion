@@ -77,6 +77,9 @@ jobs:
           - distro: rocky
             codename: el9
             container: rockylinux:9
+          - distro: rocky
+            codename: el10
+            container: quay.io/rockylinux/rockylinux:10
 
     steps:
       - name: Checkout code
@@ -232,7 +235,7 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           # Create repository for each EL version
-          for elver in el9; do
+          for elver in el9 el10; do
             echo "Processing $elver..."
 
             # Create directory structure
@@ -317,6 +320,7 @@ jobs:
               <p>Supported distributions:</p>
               <ul>
                 <li><strong>Rocky Linux 9</strong> / RHEL 9 / AlmaLinux 9</li>
+                <li><strong>Rocky Linux 10</strong> / RHEL 10 / AlmaLinux 10</li>
               </ul>
 
               <h3>1. Import the GPG key</h3>
