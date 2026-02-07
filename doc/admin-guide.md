@@ -44,10 +44,10 @@ flowchart LR
 
 ```bash
 # Debian/Ubuntu
-apt-get install libpam-openbastion libnss-openbastion
+apt-get install open-bastion libnss-openbastion
 
 # RHEL/Rocky
-dnf install libpam-openbastion nss-openbastion
+dnf install open-bastion nss-openbastion
 ```
 
 ### Step 2: Create Configuration
@@ -154,10 +154,10 @@ flowchart LR
 
 ```bash
 # Debian/Ubuntu
-apt-get install libpam-openbastion libnss-openbastion uuid-runtime jq
+apt-get install open-bastion libnss-openbastion uuid-runtime jq
 
 # RHEL/Rocky
-dnf install libpam-openbastion nss-openbastion util-linux jq
+dnf install open-bastion nss-openbastion util-linux jq
 ```
 
 ### Step 2: Create Configuration
@@ -342,10 +342,10 @@ flowchart LR
 
 ```bash
 # Debian/Ubuntu
-apt-get install libpam-openbastion libnss-openbastion
+apt-get install open-bastion libnss-openbastion
 
 # RHEL/Rocky
-dnf install libpam-openbastion nss-openbastion
+dnf install open-bastion nss-openbastion
 ```
 
 ### Step 2: Create PAM Configuration
@@ -548,7 +548,7 @@ This setting protects against:
 **Important**: Ensure the PAM heartbeat timer is enabled to keep tokens active:
 
 ```bash
-systemctl enable --now libpam-openbastion-heartbeat.timer
+systemctl enable --now open-bastion-heartbeat.timer
 ```
 
 ### Other Recommended Security Settings

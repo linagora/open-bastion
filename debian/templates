@@ -1,4 +1,4 @@
-Template: libpam-openbastion/pam-mode
+Template: open-bastion/pam-mode
 Type: select
 Choices: none, mode-a, mode-b, mode-c, mode-d
 Default: none
@@ -13,39 +13,39 @@ _Description: PAM authentication mode for Open Bastion:
  .
  All modes require Open Bastion authorization to access this server.
 
-Template: libpam-openbastion/portal-url
+Template: open-bastion/portal-url
 Type: string
 Default:
 _Description: LemonLDAP::NG portal URL:
  Enter the URL of your LemonLDAP::NG portal with Open Bastion plugins
  (e.g., https://auth.example.com).
 
-Template: libpam-openbastion/client-id
+Template: open-bastion/client-id
 Type: string
 Default: pam-access
 _Description: OIDC client ID:
  Enter the OIDC client ID configured in LemonLDAP::NG for PAM access.
 
-Template: libpam-openbastion/client-secret
+Template: open-bastion/client-secret
 Type: password
 _Description: OIDC client secret:
  Enter the client secret for the OIDC client.
 
-Template: libpam-openbastion/server-group
+Template: open-bastion/server-group
 Type: string
 Default: default
 _Description: Server group name:
  Enter the server group name for authorization rules.
  This must match a group defined in LemonLDAP::NG's pamAccessServerGroups.
 
-Template: libpam-openbastion/configure-sudo
+Template: open-bastion/configure-sudo
 Type: boolean
 Default: false
 _Description: Configure PAM for sudo?
  Set this to true if you want to configure /etc/pam.d/sudo with Open Bastion
  authentication. This allows using Open Bastion tokens for sudo commands.
 
-Template: libpam-openbastion/sudo-server-group
+Template: open-bastion/sudo-server-group
 Type: string
 Default:
 _Description: Server group name for sudo:
@@ -54,7 +54,7 @@ _Description: Server group name for sudo:
  This allows different authorization rules for SSH access and sudo usage.
  Leave empty to use the same group as SSH.
 
-Template: libpam-openbastion/create-user
+Template: open-bastion/create-user
 Type: boolean
 Default: false
 _Description: Auto-create Unix accounts on first login?

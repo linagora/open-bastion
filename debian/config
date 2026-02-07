@@ -4,30 +4,30 @@ set -e
 . /usr/share/debconf/confmodule
 
 # Ask for PAM mode (medium priority)
-db_input medium libpam-openbastion/pam-mode || true
+db_input medium open-bastion/pam-mode || true
 db_go || true
 
-db_get libpam-openbastion/pam-mode
+db_get open-bastion/pam-mode
 MODE="$RET"
 
 # If a mode is selected, ask for LLNG parameters
 if [ "$MODE" != "none" ]; then
-    db_input high libpam-openbastion/portal-url || true
-    db_input medium libpam-openbastion/client-id || true
-    db_input high libpam-openbastion/client-secret || true
-    db_input low libpam-openbastion/server-group || true
-    db_input medium libpam-openbastion/configure-sudo || true
+    db_input high open-bastion/portal-url || true
+    db_input medium open-bastion/client-id || true
+    db_input high open-bastion/client-secret || true
+    db_input low open-bastion/server-group || true
+    db_input medium open-bastion/configure-sudo || true
     db_go || true
 
     # If sudo is enabled, ask for sudo server group
-    db_get libpam-openbastion/configure-sudo
+    db_get open-bastion/configure-sudo
     if [ "$RET" = "true" ]; then
-        db_input low libpam-openbastion/sudo-server-group || true
+        db_input low open-bastion/sudo-server-group || true
         db_go || true
     fi
 
     # Ask about auto-creating Unix accounts
-    db_input medium libpam-openbastion/create-user || true
+    db_input medium open-bastion/create-user || true
     db_go || true
 fi
 

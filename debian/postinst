@@ -23,7 +23,7 @@ generate_pam_sshd() {
     mode="$1"
     server_group="$2"
     cat << EOF
-# /etc/pam.d/sshd - Configured by libpam-openbastion
+# /etc/pam.d/sshd - Configured by open-bastion
 # Mode: $mode
 # Server group: $server_group
 #
@@ -68,7 +68,7 @@ generate_pam_sudo() {
     mode="$1"
     server_group="$2"
     cat << EOF
-# /etc/pam.d/sudo - Configured by libpam-openbastion
+# /etc/pam.d/sudo - Configured by open-bastion
 # Mode: $mode
 # Server group: $server_group
 #
@@ -118,8 +118,8 @@ generate_openbastion_conf() {
 
     cat << EOF
 # /etc/open-bastion/openbastion.conf
-# Configured by libpam-openbastion debconf
-# Run 'dpkg-reconfigure libpam-openbastion' to modify
+# Configured by open-bastion debconf
+# Run 'dpkg-reconfigure open-bastion' to modify
 
 # Open Bastion portal URL
 portal_url = $portal_url
@@ -155,24 +155,24 @@ case "$1" in
         mkdir -p /etc/open-bastion
         chmod 755 /etc/open-bastion
 
-        db_get libpam-openbastion/pam-mode
+        db_get open-bastion/pam-mode
         MODE="$RET"
 
         if [ "$MODE" != "none" ] && [ -n "$MODE" ]; then
             # Get debconf values
-            db_get libpam-openbastion/portal-url
+            db_get open-bastion/portal-url
             PORTAL_URL="$RET"
-            db_get libpam-openbastion/client-id
+            db_get open-bastion/client-id
             CLIENT_ID="$RET"
-            db_get libpam-openbastion/client-secret
+            db_get open-bastion/client-secret
             CLIENT_SECRET="$RET"
-            db_get libpam-openbastion/server-group
+            db_get open-bastion/server-group
             SERVER_GROUP="$RET"
-            db_get libpam-openbastion/configure-sudo
+            db_get open-bastion/configure-sudo
             CONFIGURE_SUDO="$RET"
-            db_get libpam-openbastion/sudo-server-group
+            db_get open-bastion/sudo-server-group
             SUDO_SERVER_GROUP="$RET"
-            db_get libpam-openbastion/create-user
+            db_get open-bastion/create-user
             CREATE_USER="$RET"
 
             # Use main server group for sudo if not specified
@@ -206,7 +206,7 @@ case "$1" in
             chmod 700 /var/lib/open-bastion
 
             # Clear secret from debconf database for security
-            db_set libpam-openbastion/client-secret ""
+            db_set open-bastion/client-secret ""
         fi
         ;;
 

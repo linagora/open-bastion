@@ -11,7 +11,7 @@ Build-Depends: debhelper-compat (= 13),
  pkgconf,
 Homepage: https://github.com/linagora/open-bastion
 
-Package: libpam-openbastion
+Package: open-bastion
 Architecture: any
 Multi-Arch: same
 Depends: ${misc:Depends},
