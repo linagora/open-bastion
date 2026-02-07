@@ -4,12 +4,12 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 ### Matrice des Risques Après Remédiation (avec clients OIDC distincts + JWT bastion)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                           | 2 - Peu probable |
-| ------------------------ | --------------------------------------------- | ---------------- |
-| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                         | R-SA1            |
-| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                  | R-S6             |
-| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10 | R6, R-S8         |
-| **1 - Négligeable**      | R0, R13                                       |                  |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                    | 2 - Peu probable |
+| ------------------------ | ------------------------------------------------------ | ---------------- |
+| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                                  | R-SA1            |
+| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                           | R-S6             |
+| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12   | R6, R-S8         |
+| **1 - Négligeable**      | R0, R13                                                |                  |
 
 **Zones de risque :**
 
@@ -21,14 +21,6 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 
 - **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 - détection replay réduit P)
 - **R-S10** : Rotation des clés JWKS non propagée (P=1, I=1 - atténué par publication anticipée LLNG)
-
-**Nouveau risque identifié (PR #91 - Politique de clés SSH) :**
-
-- **R-S11** : Utilisation de clés SSH faibles (P=1, I=3 - atténué par politique de clés)
-
-**Nouveau risque identifié (PR #92 - Protection brute-force du cache) :**
-
-- **R-S12** : Brute-force du cache offline (P=1, I=2 - atténué par rate limiting)
 
 **Risques spécifiques aux comptes de service :**
 
@@ -130,35 +122,7 @@ Pistes pour réduire P à 1 :
 
 ## Pistes d'Amélioration - JWT Bastion
 
-### R-S9 _(P=1, I=2)_ - Replay JWT bastion - **IMPLÉMENTÉ**
-
-**Détection de replay implémentée via cache JTI :**
-
-Le module PAM maintient un cache thread-safe des `jti` (JWT ID) utilisés :
-
-```c
-// src/jti_cache.c - Vérifie et ajoute atomiquement
-jti_cache_result_t result = jti_cache_check_and_add(cache, claims->jti, claims->exp);
-if (result == JTI_CACHE_REPLAY_DETECTED) {
-    return BASTION_JWT_REPLAY_DETECTED;
-}
-```
-
-**Configuration :**
-
-```ini
-# /etc/open-bastion/openbastion.conf
-bastion_jwt_replay_detection = true   # Activé par défaut
-bastion_jwt_replay_cache_size = 10000 # Max entrées
-bastion_jwt_replay_cleanup_interval = 60  # Nettoyage automatique
-```
-
-**Caractéristiques :**
-
-- Cache hash table O(1) pour lookup/insertion
-- Thread-safe avec mutex
-- Nettoyage automatique des entrées expirées
-- Gestion de la saturation (cleanup puis rejet si plein)
+### R-S9 _(P=1, I=2)_ - Replay JWT bastion
 
 Pistes supplémentaires (non implémentées) :
 
@@ -167,217 +131,6 @@ Pistes supplémentaires (non implémentées) :
 
 ### R-S10 _(P=1, I=1)_ - Rotation JWKS non propagée
 
-**Risque largement atténué par l'implémentation LLNG :**
-
-LemonLDAP::NG gère nativement la rotation de clés de manière sécurisée :
-
-- La future clé est publiée dans le JWKS **avant** d'être utilisée
-- L'ancienne clé reste disponible **après** la rotation
-
-→ Avec un TTL de cache ≤ 24h, la rotation est transparente et sans interruption.
-
 Piste supplémentaire (optionnelle) :
 
 1. **Push de notification** : LLNG notifie les backends via webhook pour refresh immédiat (utile uniquement en cas de compromission)
-
----
-
-## Sécurités Implémentées (valorisation)
-
-### Intégration CrowdSec - **IMPLÉMENTÉ**
-
-Le module PAM intègre CrowdSec pour la détection et le blocage des menaces :
-
-**Bouncer (pré-authentification) :**
-
-```c
-// src/crowdsec.c - Vérifie si l'IP est bannie avant auth
-crowdsec_result_t result = crowdsec_check_ip(ctx, client_ip);
-if (result == CS_DENY) {
-    // Bloquer ou avertir selon crowdsec_action
-}
-```
-
-**Watcher (post-authentification) :**
-
-```c
-// src/crowdsec.c - Reporte les échecs d'authentification
-crowdsec_report_failure(ctx, client_ip, username, service);
-// Auto-ban après max_failures dans block_delay secondes
-```
-
-**Configuration :**
-
-```ini
-# /etc/open-bastion/openbastion.conf
-crowdsec_enabled = true
-crowdsec_url = http://127.0.0.1:8080
-
-# Bouncer
-crowdsec_bouncer_key = <bouncer_key>
-crowdsec_action = reject  # ou warn
-crowdsec_fail_open = true
-
-# Watcher
-crowdsec_machine_id = <machine_id>
-crowdsec_password = <password>
-crowdsec_scenario = open-bastion/ssh-auth-failure
-crowdsec_send_all_alerts = true
-crowdsec_max_failures = 5
-crowdsec_block_delay = 180
-crowdsec_ban_duration = 4h
-```
-
-**Bénéfices sécurité :**
-
-- Protection collaborative : bénéficie de la base de données communautaire CrowdSec
-- Détection précoce : blocage des IPs malveillantes avant authentification
-- Auto-ban local : bannissement automatique après N échecs
-- Centralisation possible via [Crowdsieve](https://github.com/linagora/crowdsieve)
-
-**Risques impactés :**
-
-- **R-S1** : Réduction de P grâce au blocage des IPs de brute-force connues
-- **R-S6** : Détection des comportements anormaux sur le bastion
-
-### Génération UUID cryptographiquement sécurisée
-
-Le `jti` (JWT ID) des tokens bastion est généré avec :
-
-1. `Crypt::URandom` (si disponible)
-2. `/dev/urandom` (fallback)
-
-→ Protection contre les collisions et la prédictibilité.
-
-### Vérification permissions fichier config (ob-ssh-proxy)
-
-Le script vérifie avant de sourcer le fichier de configuration :
-
-- Propriétaire = root (uid 0)
-- Pas de permission group-writable ou world-writable
-
-→ Protection contre l'injection de configuration malveillante.
-
-### Construction JSON sécurisée
-
-Le script utilise `jq` pour construire les payloads JSON au lieu d'interpolation directe :
-
-```bash
-json_payload=$(jq -n --arg user "$user" '{user: $user}')
-```
-
-→ Protection contre l'injection JSON.
-
-### Vérification sécurisée du fichier de configuration des comptes de service
-
-Le module PAM vérifie avant de charger `/etc/open-bastion/service-accounts.conf` :
-
-- Ouverture avec `O_NOFOLLOW` (pas de symlinks)
-- Vérification `fstat()` sur le fd ouvert (évite TOCTOU)
-- Propriétaire = root (uid 0)
-- Permissions strictes (pas de lecture group/other)
-
-→ Protection contre l'injection de comptes de service malveillants.
-
-### Validation stricte des comptes de service
-
-- Nom : lowercase + chiffres + underscore/tiret, max 32 caractères
-- Fingerprint : format SHA256: ou MD5: avec caractères base64 uniquement
-- Shell : doit être dans la liste `approved_shells`
-- Home : doit commencer par un préfixe de `approved_home_prefixes`
-
-→ Protection contre les comptes mal configurés ou malveillants.
-
-### Codes d'audit différenciés
-
-- `AUDIT_SECURITY_ERROR` : Échecs cryptographiques (signature invalide, JWT malformé)
-- `AUDIT_AUTHZ_DENIED` : Échecs d'autorisation (subject mismatch, bastion non autorisé)
-
-→ Meilleure classification des incidents pour le SIEM.
-
-### Politique de clés SSH - **IMPLÉMENTÉ**
-
-Le module PAM peut appliquer une politique de restriction des types de clés SSH autorisés :
-
-```c
-// src/ssh_key_policy.c - Valide le type et la taille de la clé
-ssh_key_validation_result_t result;
-if (!ssh_key_policy_check(&policy, algorithm, &result)) {
-    // Clé rejetée : type non autorisé ou taille insuffisante
-}
-```
-
-**Configuration :**
-
-```ini
-# /etc/open-bastion/openbastion.conf
-ssh_key_policy_enabled = true
-ssh_key_allowed_types = ed25519, ecdsa, rsa, sk-ed25519, sk-ecdsa
-ssh_key_min_rsa_bits = 2048
-ssh_key_min_ecdsa_bits = 256
-```
-
-**Types de clés supportés :**
-
-| Type         | Sécurité   | Recommandation           |
-| ------------ | ---------- | ------------------------ |
-| `ed25519`    | Forte      | **Recommandé**           |
-| `sk-ed25519` | Très forte | **Recommandé** (FIDO2)   |
-| `sk-ecdsa`   | Très forte | **Recommandé** (FIDO2)   |
-| `ecdsa`      | Bonne      | Acceptable               |
-| `rsa`        | Moyenne    | Acceptable si ≥2048 bits |
-| `dsa`        | Faible     | **À désactiver**         |
-
-**Bénéfices sécurité :**
-
-- Empêche l'utilisation de clés DSA obsolètes
-- Impose une taille minimale pour RSA et ECDSA
-- Encourage l'adoption de clés modernes (Ed25519, FIDO2)
-- Audit des rejets de clés non conformes
-
-**Risque impacté :**
-
-- **R-S11** : Réduction de P grâce à l'interdiction des algorithmes faibles
-
-### Protection brute-force du cache offline - **IMPLÉMENTÉ**
-
-Le mode offline utilise un cache local des autorisations. Sans protection, un attaquant
-avec accès local pourrait tenter de nombreux utilisateurs contre le cache pour découvrir
-des comptes valides. Le module PAM applique maintenant un rate limiting aux lookups de cache :
-
-```c
-// src/pam_openbastion.c - Vérifie le rate limit avant lookup
-int lockout = rate_limiter_check(data->cache_rate_limiter, user);
-if (lockout > 0) {
-    // Utilisateur bloqué, pas de lookup cache
-}
-```
-
-**Configuration :**
-
-```ini
-# /etc/open-bastion/openbastion.conf
-cache_rate_limit_enabled = true
-cache_rate_limit_max_attempts = 3       # Lockout après 3 échecs
-cache_rate_limit_lockout_sec = 60       # 1 minute initial
-cache_rate_limit_max_lockout_sec = 3600 # 1 heure max
-```
-
-**Caractéristiques :**
-
-- Rate limiting par utilisateur (pas par IP, car attaque locale)
-- Backoff exponentiel (60s → 120s → 240s → ... → 3600s max)
-- Comptage de TOUTES les tentatives (hits + misses) pour éviter l'énumération
-- Réinitialisation uniquement sur cache hit autorisé (pas sur simple hit)
-- État persistant sur disque (survit aux redémarrages)
-
-**Bénéfices sécurité :**
-
-- Empêche l'énumération d'utilisateurs via le cache (toutes tentatives comptées)
-- Ralentit drastiquement les tentatives de brute-force
-- Seuils plus stricts que le rate limiting réseau (3 vs 5 tentatives)
-- Audit des lockouts pour détection d'intrusion
-
-**Risque impacté :**
-
-- **R-S12** : Réduction de P grâce au rate limiting des lookups cache
