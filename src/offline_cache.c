@@ -656,6 +656,219 @@ int offline_cache_store(offline_cache_t *cache,
     return OFFLINE_CACHE_OK;
 }
 
+/*
+ * Parse Argon2id verifier in standard format:
+ * $argon2id$v=19$m=65536,t=3,p=4$<salt_b64>$<hash_b64>
+ *
+ * Returns 0 on success, -1 on failure.
+ * On success, salt and hash are filled with decoded binary data.
+ */
+static int parse_argon2id_verifier(const char *verifier,
+                                    unsigned char *salt, size_t salt_size,
+                                    unsigned char *hash, size_t hash_size)
+{
+    if (!verifier || !salt || !hash) return -1;
+    if (salt_size < ARGON2_SALT_LEN || hash_size < ARGON2_HASH_LEN) return -1;
+
+    /* Check prefix */
+    if (strncmp(verifier, "$argon2id$", 10) != 0) {
+        return -1;
+    }
+
+    /* Find the salt and hash fields (last two $-separated fields) */
+    const char *p = verifier + 10;  /* Skip "$argon2id$" */
+
+    /* Skip v=19 */
+    const char *dollar = strchr(p, '$');
+    if (!dollar) return -1;
+    p = dollar + 1;
+
+    /* Skip m=...,t=...,p=... */
+    dollar = strchr(p, '$');
+    if (!dollar) return -1;
+    p = dollar + 1;
+
+    /* p now points to salt_b64 */
+    const char *salt_start = p;
+    dollar = strchr(p, '$');
+    if (!dollar) return -1;
+
+    size_t salt_b64_len = dollar - salt_start;
+    char *salt_b64 = strndup(salt_start, salt_b64_len);
+    if (!salt_b64) return -1;
+
+    /* dollar+1 points to hash_b64 */
+    const char *hash_b64 = dollar + 1;
+
+    /* Decode salt */
+    size_t decoded_salt_len = 0;
+    unsigned char *decoded_salt = base64_decode(salt_b64, &decoded_salt_len);
+    free(salt_b64);
+
+    if (!decoded_salt || decoded_salt_len != ARGON2_SALT_LEN) {
+        free(decoded_salt);
+        return -1;
+    }
+    memcpy(salt, decoded_salt, ARGON2_SALT_LEN);
+    free(decoded_salt);
+
+    /* Decode hash */
+    size_t decoded_hash_len = 0;
+    unsigned char *decoded_hash = base64_decode(hash_b64, &decoded_hash_len);
+
+    if (!decoded_hash || decoded_hash_len != ARGON2_HASH_LEN) {
+        free(decoded_hash);
+        secure_clear(salt, salt_size);
+        return -1;
+    }
+    memcpy(hash, decoded_hash, ARGON2_HASH_LEN);
+    secure_clear(decoded_hash, decoded_hash_len);
+    free(decoded_hash);
+
+    return 0;
+}
+
+/*
+ * Store a pre-computed password verifier from SSO server.
+ */
+int offline_cache_store_verifier(offline_cache_t *cache,
+                                  const char *user,
+                                  const char *verifier,
+                                  int ttl,
+                                  const char *gecos,
+                                  const char *shell,
+                                  const char *home)
+{
+    if (!cache || !user || !verifier) {
+        return OFFLINE_CACHE_ERR_INVALID;
+    }
+
+    if (!cache->key_derived) {
+        return OFFLINE_CACHE_ERR_CRYPTO;
+    }
+
+    /* Parse the Argon2id verifier */
+    unsigned char salt[ARGON2_SALT_LEN];
+    unsigned char hash[ARGON2_HASH_LEN];
+
+    if (parse_argon2id_verifier(verifier, salt, sizeof(salt), hash, sizeof(hash)) != 0) {
+        return OFFLINE_CACHE_ERR_INVALID;
+    }
+
+    /* Use default TTL if not specified */
+    if (ttl <= 0) ttl = OFFLINE_CACHE_DEFAULT_TTL;
+
+    /* Build JSON (same structure as offline_cache_store) */
+    struct json_object *json = json_object_new_object();
+    if (!json) {
+        secure_clear(hash, sizeof(hash));
+        secure_clear(salt, sizeof(salt));
+        return OFFLINE_CACHE_ERR_NOMEM;
+    }
+
+    time_t now = time(NULL);
+
+    json_object_object_add(json, "v", json_object_new_int(OFFLINE_CACHE_VERSION));
+    json_object_object_add(json, "user", json_object_new_string(user));
+    json_object_object_add(json, "created_at", json_object_new_int64(now));
+    json_object_object_add(json, "expires_at", json_object_new_int64(now + ttl));
+    json_object_object_add(json, "last_success", json_object_new_int64(now));
+    json_object_object_add(json, "failed_attempts", json_object_new_int(0));
+    json_object_object_add(json, "locked_until", json_object_new_int64(0));
+
+    /* Base64 encode hash and salt */
+    char *hash_b64 = base64_encode(hash, sizeof(hash));
+    char *salt_b64 = base64_encode(salt, sizeof(salt));
+
+    secure_clear(hash, sizeof(hash));
+    secure_clear(salt, sizeof(salt));
+
+    if (!hash_b64 || !salt_b64) {
+        free(hash_b64);
+        free(salt_b64);
+        json_object_put(json);
+        return OFFLINE_CACHE_ERR_NOMEM;
+    }
+
+    json_object_object_add(json, "password_hash", json_object_new_string(hash_b64));
+    json_object_object_add(json, "salt", json_object_new_string(salt_b64));
+
+    secure_clear(hash_b64, strlen(hash_b64));
+    secure_clear(salt_b64, strlen(salt_b64));
+    free(hash_b64);
+    free(salt_b64);
+
+    /* Add optional fields */
+    if (gecos) {
+        json_object_object_add(json, "gecos", json_object_new_string(gecos));
+    }
+    if (shell) {
+        json_object_object_add(json, "shell", json_object_new_string(shell));
+    }
+    if (home) {
+        json_object_object_add(json, "home", json_object_new_string(home));
+    }
+
+    const char *json_str = json_object_to_json_string(json);
+    size_t json_len = strlen(json_str);
+
+    /* Encrypt */
+    unsigned char *encrypted = NULL;
+    size_t encrypted_len = 0;
+
+    if (encrypt_data(cache, (unsigned char *)json_str, json_len,
+                     &encrypted, &encrypted_len) != 0) {
+        json_object_put(json);
+        return OFFLINE_CACHE_ERR_CRYPTO;
+    }
+
+    json_object_put(json);
+
+    /* Write to file */
+    char path[PATH_MAX];
+    build_cache_path(cache, user, path, sizeof(path));
+
+    char temp_path[PATH_MAX + 16];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", path, (int)getpid());
+
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        secure_clear(encrypted, encrypted_len);
+        free(encrypted);
+        return OFFLINE_CACHE_ERR_IO;
+    }
+
+    /* Write magic + encrypted data */
+    ssize_t written = write(fd, OFFLINE_CACHE_MAGIC, MAGIC_LEN);
+    if (written != MAGIC_LEN) {
+        close(fd);
+        unlink(temp_path);
+        secure_clear(encrypted, encrypted_len);
+        free(encrypted);
+        return OFFLINE_CACHE_ERR_IO;
+    }
+
+    written = write(fd, encrypted, encrypted_len);
+    secure_clear(encrypted, encrypted_len);
+    free(encrypted);
+
+    if (written != (ssize_t)encrypted_len) {
+        close(fd);
+        unlink(temp_path);
+        return OFFLINE_CACHE_ERR_IO;
+    }
+
+    fsync(fd);
+    close(fd);
+
+    if (rename(temp_path, path) != 0) {
+        unlink(temp_path);
+        return OFFLINE_CACHE_ERR_IO;
+    }
+
+    return OFFLINE_CACHE_OK;
+}
+
 /* Internal function to read and parse cache entry */
 static int read_cache_entry(offline_cache_t *cache, const char *user,
                             struct json_object **json_out)

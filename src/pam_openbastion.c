@@ -3186,6 +3186,25 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     }
 
     /*
+     * Store offline credential verifier if provided by server.
+     * This enables offline Desktop SSO login when the server is unreachable.
+     * The verifier is an Argon2id hash pre-computed by LLNG from user's password.
+     */
+    if (!from_cache && data->offline_cache &&
+        response.has_offline && response.offline.verifier) {
+        int ttl = response.offline.ttl > 0 ? response.offline.ttl : data->config.offline_cache_ttl;
+        int store_result = offline_cache_store_verifier(
+            data->offline_cache, user, response.offline.verifier, ttl,
+            response.gecos, response.shell, response.home);
+        if (store_result == OFFLINE_CACHE_OK) {
+            OB_LOG_DEBUG(pamh, "Stored offline verifier for %s (TTL: %d seconds)", user, ttl);
+        } else {
+            OB_LOG_WARN(pamh, "Failed to store offline verifier for %s: %s",
+                       user, offline_cache_strerror(store_result));
+        }
+    }
+
+    /*
      * Handle sudo authorization.
      * For sudo service, check if the user has sudo_allowed permission.
      * Store the result in PAM environment for sudo to use.

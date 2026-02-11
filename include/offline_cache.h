@@ -117,6 +117,28 @@ int offline_cache_store(offline_cache_t *cache,
                         const char *home);
 
 /*
+ * Store a pre-computed password verifier (from SSO server)
+ * Used when the SSO server provides an offline verifier (Argon2id hash)
+ * instead of receiving the raw password.
+ *
+ * user: Username
+ * verifier: Argon2id hash in standard format:
+ *           $argon2id$v=19$m=65536,t=3,p=4$<salt_b64>$<hash_b64>
+ * ttl: Time-to-live in seconds (0 for default)
+ * gecos: Optional GECOS field
+ * shell: Optional shell path
+ * home: Optional home directory
+ * Returns OFFLINE_CACHE_OK on success, error code on failure
+ */
+int offline_cache_store_verifier(offline_cache_t *cache,
+                                  const char *user,
+                                  const char *verifier,
+                                  int ttl,
+                                  const char *gecos,
+                                  const char *shell,
+                                  const char *home);
+
+/*
  * Verify user password against cached credentials (offline authentication)
  * user: Username
  * password: Password to verify

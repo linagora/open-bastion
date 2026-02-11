@@ -1045,6 +1045,10 @@ static int ob_authorize_user_internal(ob_client_t *client,
             if (json_object_object_get_ex(offline_obj, "ttl", &val)) {
                 response->offline.ttl = json_object_get_int(val);
             }
+            if (json_object_object_get_ex(offline_obj, "verifier", &val)) {
+                const char *v = json_object_get_string(val);
+                if (v) response->offline.verifier = strdup(v);
+            }
         }
     }
 
@@ -1101,6 +1105,12 @@ void ob_response_free(ob_response_t *response)
             free(response->managed_groups[i]);
         }
         free(response->managed_groups);
+    }
+
+    /* Free offline verifier (contains sensitive data) */
+    if (response->offline.verifier) {
+        explicit_bzero(response->offline.verifier, strlen(response->offline.verifier));
+        free(response->offline.verifier);
     }
 
     memset(response, 0, sizeof(*response));
