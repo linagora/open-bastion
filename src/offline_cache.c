@@ -123,6 +123,89 @@ static int read_machine_id(char *buf, size_t buf_size)
     if (len > 0 && buf[len - 1] == '\n') {
         buf[len - 1] = '\0';
     }
+    /* Check that we got something meaningful */
+    if (strlen(buf) < 16) {
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * Load or generate persistent instance ID for environments without machine-id.
+ * Creates a random hex ID in cache_dir/.instance_id
+ */
+static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t buf_size)
+{
+    if (buf_size < 33) {  /* Need at least 32 hex chars + null */
+        return -1;
+    }
+
+    char id_path[512];
+    int ret = snprintf(id_path, sizeof(id_path), "%s/.instance_id", cache_dir);
+    if (ret < 0 || ret >= (int)sizeof(id_path)) {
+        return -1;
+    }
+
+    /* Try to load existing instance ID */
+    FILE *f = fopen(id_path, "r");
+    if (f) {
+        if (fgets(buf, buf_size, f)) {
+            fclose(f);
+            size_t len = strlen(buf);
+            if (len > 0 && buf[len - 1] == '\n') {
+                buf[len - 1] = '\0';
+            }
+            if (strlen(buf) >= 32) {
+                return 0;  /* Successfully loaded existing ID */
+            }
+        } else {
+            fclose(f);
+        }
+    }
+
+    /* Generate new random instance ID (32 hex chars) */
+    unsigned char random_bytes[16];
+    if (RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
+        return -1;
+    }
+
+    for (int i = 0; i < 16; i++) {
+        snprintf(buf + (i * 2), 3, "%02x", random_bytes[i]);
+    }
+    buf[32] = '\0';
+    secure_clear(random_bytes, sizeof(random_bytes));
+
+    /* Save atomically */
+    char temp_path[520];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", id_path, (int)getpid());
+
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        if (errno == EEXIST) {
+            unlink(temp_path);
+            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        }
+        if (fd < 0) return -1;
+    }
+
+    size_t len = strlen(buf);
+    ssize_t written = write(fd, buf, len);
+    if (written > 0) {
+        char newline = '\n';
+        (void)write(fd, &newline, 1);
+    }
+    close(fd);
+
+    if (written != (ssize_t)len) {
+        unlink(temp_path);
+        return -1;
+    }
+
+    if (rename(temp_path, id_path) != 0) {
+        unlink(temp_path);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -237,11 +320,16 @@ static int derive_cache_key(offline_cache_t *cache)
         secure_clear(file_key, sizeof(file_key));
     }
 
-    /* Always include machine-id to bind cache to this machine */
+    /* Include machine-id (or instance_id fallback) to bind cache to this machine */
     char machine_id[64] = {0};
-    if (read_machine_id(machine_id, sizeof(machine_id)) != 0) {
-        secure_clear(key_material, sizeof(key_material));
-        return -1;
+    bool have_machine_id = (read_machine_id(machine_id, sizeof(machine_id)) == 0);
+
+    if (!have_machine_id) {
+        /* Fallback: generate persistent instance ID in cache directory */
+        if (load_or_generate_instance_id(cache->cache_dir, machine_id, sizeof(machine_id)) != 0) {
+            secure_clear(key_material, sizeof(key_material));
+            return -1;
+        }
     }
 
     size_t mid_len = strlen(machine_id);
@@ -250,12 +338,20 @@ static int derive_cache_key(offline_cache_t *cache)
     secure_clear(machine_id, sizeof(machine_id));
 
     if (!have_key_file) {
-        /* Emit syslog warning: key derived from world-readable machine-id only */
-        syslog(LOG_WARNING,
-               "open-bastion: offline cache key derived from machine-id only "
-               "(no key file at %s). Generate one with: "
-               "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
-               kf, kf, kf);
+        /* Emit syslog warning: key derived from world-readable source */
+        if (have_machine_id) {
+            syslog(LOG_WARNING,
+                   "open-bastion: offline cache key derived from machine-id only "
+                   "(no key file at %s). Generate one with: "
+                   "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
+                   kf, kf, kf);
+        } else {
+            syslog(LOG_WARNING,
+                   "open-bastion: offline cache using generated instance-id "
+                   "(no machine-id, no key file). For production, generate: "
+                   "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
+                   kf, kf);
+        }
     }
 
     unsigned char pbkdf_salt[SALT_SIZE];
