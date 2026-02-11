@@ -8,6 +8,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(ENABLE_CACHE "Enable token caching" ON)
 option(BUILD_TESTING "Build tests" ON)
 option(INSTALL_SYSTEMD "Install systemd unit files" ON)
+option(INSTALL_DESKTOP "Install Desktop SSO components (LightDM greeter)" OFF)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -204,6 +205,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-backend-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install cache admin tool (useful for both SSH and Desktop offline modes)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Install man pages (section 8 - admin commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-enroll.8
@@ -226,31 +232,40 @@ if(INSTALL_SYSTEMD)
     install(FILES
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
-        ${CMAKE_SOURCE_DIR}/systemd/ob-session-monitor.service
         DESTINATION lib/systemd/system
     )
+    # Desktop-specific systemd service
+    if(INSTALL_DESKTOP)
+        install(FILES
+            ${CMAKE_SOURCE_DIR}/systemd/ob-session-monitor.service
+            DESTINATION lib/systemd/system
+        )
+    endif()
 endif()
 
-# Install session monitor script
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-monitor
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
-)
+# Desktop SSO components (LightDM greeter, session monitor)
+if(INSTALL_DESKTOP)
+    # Install session monitor script
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-monitor
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
 
-# Install desktop setup script
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
-)
+    # Install desktop setup script
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
 
-# Install LightDM greeter theme
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/lightdm/greeter/
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/open-bastion/lightdm/greeter
-)
+    # Install LightDM greeter theme to standard lightdm-webkit theme location
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/lightdm/greeter/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/lightdm-webkit/themes/open-bastion
+    )
 
-# Install LightDM configuration example
-install(FILES ${CMAKE_SOURCE_DIR}/lightdm/config/lightdm-openbastion.conf
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
-    RENAME lightdm-openbastion.conf.example
-)
+    # Install LightDM configuration example
+    install(FILES ${CMAKE_SOURCE_DIR}/lightdm/config/lightdm-openbastion.conf
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
+        RENAME lightdm-openbastion.conf.example
+    )
+endif()
 
 # Build NSS module
 add_subdirectory(nss)
