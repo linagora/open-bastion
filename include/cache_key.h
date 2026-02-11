@@ -36,11 +36,29 @@ typedef struct {
  * Returns 0 on success, -1 on failure
  *
  * This function:
- * 1. Reads /etc/machine-id
+ * 1. Reads /etc/machine-id (or generates instance-id fallback)
  * 2. Loads or generates salt from cache_dir/salt_filename
  * 3. Derives AES-256 key using PBKDF2-HMAC-SHA256 with 100K iterations
  */
 int cache_derive_key(const char *cache_dir, const char *salt_filename,
                      cache_derived_key_t *out);
+
+/*
+ * Derive encryption key with optional key file (for offline cache)
+ * cache_dir: Directory containing the salt file
+ * salt_filename: Name of the salt file
+ * key_file: Optional path to secret key file (NULL to skip)
+ * out: Output parameter for derived key
+ * Returns 0 on success, -1 on failure
+ *
+ * When key_file is provided and readable:
+ *   key = PBKDF2(key_file_content || machine-id, salt)
+ * When key_file is NULL or unreadable:
+ *   key = PBKDF2(machine-id, salt)  (with syslog warning)
+ */
+int cache_derive_key_with_keyfile(const char *cache_dir,
+                                   const char *salt_filename,
+                                   const char *key_file,
+                                   cache_derived_key_t *out);
 
 #endif /* CACHE_KEY_H */

@@ -31,6 +31,7 @@
 
 #include "offline_cache.h"
 #include "str_utils.h"
+#include "cache_key.h"
 
 /* Try to use libsodium for Argon2id if available, otherwise use OpenSSL */
 #ifdef HAVE_LIBSODIUM
@@ -53,14 +54,10 @@
 #define safe_json_strdup str_json_strdup
 
 /* Encryption constants */
-#define MACHINE_ID_FILE "/etc/machine-id"
 #define DEFAULT_CACHE_KEY_FILE "/etc/open-bastion/cache.key"
-#define KEY_FILE_SIZE 32  /* Expected key file size in bytes */
 #define KEY_SIZE 32
 #define IV_SIZE 12
 #define TAG_SIZE 16
-#define SALT_SIZE 16
-#define PBKDF2_ITERATIONS 100000
 
 /* Cache structure */
 struct offline_cache {
@@ -107,273 +104,24 @@ static void secure_clear(void *ptr, size_t len)
     }
 }
 
-/* Read machine-id */
-static int read_machine_id(char *buf, size_t buf_size)
-{
-    FILE *f = fopen(MACHINE_ID_FILE, "r");
-    if (!f) return -1;
-
-    if (!fgets(buf, buf_size, f)) {
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') {
-        buf[len - 1] = '\0';
-    }
-    /* Check that we got something meaningful */
-    if (strlen(buf) < 16) {
-        return -1;
-    }
-    return 0;
-}
-
 /*
- * Load or generate persistent instance ID for environments without machine-id.
- * Creates a random hex ID in cache_dir/.instance_id
- */
-static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t buf_size)
-{
-    if (buf_size < 33) {  /* Need at least 32 hex chars + null */
-        return -1;
-    }
-
-    char id_path[512];
-    int ret = snprintf(id_path, sizeof(id_path), "%s/.instance_id", cache_dir);
-    if (ret < 0 || ret >= (int)sizeof(id_path)) {
-        return -1;
-    }
-
-    /* Try to load existing instance ID */
-    FILE *f = fopen(id_path, "r");
-    if (f) {
-        if (fgets(buf, buf_size, f)) {
-            fclose(f);
-            size_t len = strlen(buf);
-            if (len > 0 && buf[len - 1] == '\n') {
-                buf[len - 1] = '\0';
-            }
-            if (strlen(buf) >= 32) {
-                return 0;  /* Successfully loaded existing ID */
-            }
-        } else {
-            fclose(f);
-        }
-    }
-
-    /* Generate new random instance ID (32 hex chars) */
-    unsigned char random_bytes[16];
-    if (RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
-        return -1;
-    }
-
-    for (int i = 0; i < 16; i++) {
-        snprintf(buf + (i * 2), 3, "%02x", random_bytes[i]);
-    }
-    buf[32] = '\0';
-    secure_clear(random_bytes, sizeof(random_bytes));
-
-    /* Save atomically */
-    char temp_path[520];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", id_path, (int)getpid());
-
-    int fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0) {
-        if (errno == EEXIST) {
-            unlink(temp_path);
-            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        }
-        if (fd < 0) return -1;
-    }
-
-    size_t len = strlen(buf);
-    ssize_t written = write(fd, buf, len);
-    if (written > 0) {
-        char newline = '\n';
-        (void)write(fd, &newline, 1);
-    }
-    close(fd);
-
-    if (written != (ssize_t)len) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    if (rename(temp_path, id_path) != 0) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Load or generate salt for PBKDF2 */
-static int load_or_generate_salt(const char *cache_dir, unsigned char *salt, size_t salt_size)
-{
-    char salt_path[512];
-    snprintf(salt_path, sizeof(salt_path), "%s/.cred_salt", cache_dir);
-
-    int fd = open(salt_path, O_RDONLY | O_NOFOLLOW);
-    if (fd >= 0) {
-        ssize_t bytes_read = read(fd, salt, salt_size);
-        close(fd);
-        if (bytes_read == (ssize_t)salt_size) {
-            return 0;
-        }
-    }
-
-    /* Generate new random salt */
-    if (RAND_bytes(salt, salt_size) != 1) {
-        return -1;
-    }
-
-    /* Save salt atomically */
-    char temp_path[520];
-    snprintf(temp_path, sizeof(temp_path), "%s.tmp.%d", salt_path, (int)getpid());
-
-    fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0) {
-        if (errno == EEXIST) {
-            unlink(temp_path);
-            fd = open(temp_path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-        }
-        if (fd < 0) return -1;
-    }
-
-    ssize_t written = write(fd, salt, salt_size);
-    close(fd);
-
-    if (written != (ssize_t)salt_size) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    if (rename(temp_path, salt_path) != 0) {
-        unlink(temp_path);
-        return -1;
-    }
-
-    return 0;
-}
-
-/*
- * Read a root-only secret key file (e.g., /etc/open-bastion/cache.key).
- * The file must be exactly KEY_FILE_SIZE bytes, owned by root, mode 0600.
- * Returns 0 on success, -1 if not available or invalid.
- */
-static int read_key_file(const char *path, unsigned char *buf, size_t buf_size)
-{
-    if (!path) return -1;
-
-    int fd = open(path, O_RDONLY | O_NOFOLLOW);
-    if (fd < 0) return -1;
-
-    struct stat st;
-    if (fstat(fd, &st) != 0) {
-        close(fd);
-        return -1;
-    }
-
-    /* Verify ownership and permissions */
-    if (st.st_uid != 0 || (st.st_mode & 077) != 0) {
-        close(fd);
-        return -1;
-    }
-
-    if ((size_t)st.st_size != buf_size) {
-        close(fd);
-        return -1;
-    }
-
-    ssize_t bytes_read = read(fd, buf, buf_size);
-    close(fd);
-
-    return (bytes_read == (ssize_t)buf_size) ? 0 : -1;
-}
-
-/*
- * Derive encryption key.
- * Priority: secret key file → machine-id fallback (with warning).
- *
- * When a key file is available, it is combined with machine-id via
- * PBKDF2 so that the cache is bound to both the secret and the machine.
- * When no key file exists, machine-id alone is used (world-readable,
- * weaker protection — a syslog warning is emitted).
+ * Derive encryption key using shared cache_key module.
+ * Supports optional key file for stronger security.
  */
 static int derive_cache_key(offline_cache_t *cache)
 {
-    unsigned char key_material[KEY_FILE_SIZE + 64];
-    size_t key_material_len = 0;
-    bool have_key_file = false;
-
-    /* Try key file first */
     const char *kf = cache->key_file ? cache->key_file : DEFAULT_CACHE_KEY_FILE;
-    unsigned char file_key[KEY_FILE_SIZE];
-    if (read_key_file(kf, file_key, KEY_FILE_SIZE) == 0) {
-        memcpy(key_material, file_key, KEY_FILE_SIZE);
-        key_material_len = KEY_FILE_SIZE;
-        secure_clear(file_key, sizeof(file_key));
-        have_key_file = true;
-    } else {
-        secure_clear(file_key, sizeof(file_key));
-    }
+    cache_derived_key_t derived;
 
-    /* Include machine-id (or instance_id fallback) to bind cache to this machine */
-    char machine_id[64] = {0};
-    bool have_machine_id = (read_machine_id(machine_id, sizeof(machine_id)) == 0);
-
-    if (!have_machine_id) {
-        /* Fallback: generate persistent instance ID in cache directory */
-        if (load_or_generate_instance_id(cache->cache_dir, machine_id, sizeof(machine_id)) != 0) {
-            secure_clear(key_material, sizeof(key_material));
-            return -1;
-        }
-    }
-
-    size_t mid_len = strlen(machine_id);
-    memcpy(key_material + key_material_len, machine_id, mid_len);
-    key_material_len += mid_len;
-    secure_clear(machine_id, sizeof(machine_id));
-
-    if (!have_key_file) {
-        /* Emit syslog warning: key derived from world-readable source */
-        if (have_machine_id) {
-            syslog(LOG_WARNING,
-                   "open-bastion: offline cache key derived from machine-id only "
-                   "(no key file at %s). Generate one with: "
-                   "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
-                   kf, kf, kf);
-        } else {
-            syslog(LOG_WARNING,
-                   "open-bastion: offline cache using generated instance-id "
-                   "(no machine-id, no key file). For production, generate: "
-                   "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
-                   kf, kf);
-        }
-    }
-
-    unsigned char pbkdf_salt[SALT_SIZE];
-    if (load_or_generate_salt(cache->cache_dir, pbkdf_salt, SALT_SIZE) != 0) {
-        secure_clear(key_material, sizeof(key_material));
+    if (cache_derive_key_with_keyfile(cache->cache_dir, ".cred_salt", kf, &derived) != 0) {
         return -1;
     }
 
-    if (PKCS5_PBKDF2_HMAC((char *)key_material, key_material_len,
-                          pbkdf_salt, SALT_SIZE,
-                          PBKDF2_ITERATIONS,
-                          EVP_sha256(),
-                          KEY_SIZE, cache->derived_key) != 1) {
-        secure_clear(key_material, sizeof(key_material));
-        secure_clear(pbkdf_salt, sizeof(pbkdf_salt));
-        return -1;
-    }
+    memcpy(cache->derived_key, derived.key, KEY_SIZE);
+    cache->key_derived = derived.derived;
 
-    secure_clear(key_material, sizeof(key_material));
-    secure_clear(pbkdf_salt, sizeof(pbkdf_salt));
-
-    cache->key_derived = true;
+    /* Clear temporary key */
+    secure_clear(&derived, sizeof(derived));
     return 0;
 }
 
