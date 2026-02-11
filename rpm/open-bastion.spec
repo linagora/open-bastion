@@ -65,7 +65,8 @@ Features:
 %cmake_build
 
 %check
-%ctest
+cd %{_vpath_builddir}
+ctest --output-on-failure --verbose
 
 %install
 %cmake_install
