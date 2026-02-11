@@ -657,11 +657,20 @@ int offline_cache_store(offline_cache_t *cache,
 }
 
 /*
+ * Minimum acceptable Argon2id parameters for security.
+ * These match our internal defaults to ensure verifiers are strong enough.
+ */
+#define MIN_ARGON2_MEMORY_KB  16384   /* 16 MiB minimum (OWASP recommendation) */
+#define MIN_ARGON2_ITERATIONS 2       /* At least 2 iterations */
+#define MIN_ARGON2_PARALLELISM 1      /* At least 1 lane */
+
+/*
  * Parse Argon2id verifier in standard format:
  * $argon2id$v=19$m=65536,t=3,p=4$<salt_b64>$<hash_b64>
  *
  * Returns 0 on success, -1 on failure.
  * On success, salt and hash are filled with decoded binary data.
+ * Rejects verifiers with weak parameters (below minimum thresholds).
  */
 static int parse_argon2id_verifier(const char *verifier,
                                     unsigned char *salt, size_t salt_size,
@@ -683,9 +692,53 @@ static int parse_argon2id_verifier(const char *verifier,
     if (!dollar) return -1;
     p = dollar + 1;
 
-    /* Skip m=...,t=...,p=... */
+    /* Parse and validate m=...,t=...,p=... parameters */
     dollar = strchr(p, '$');
     if (!dollar) return -1;
+
+    /* Extract parameters string for validation */
+    size_t params_len = dollar - p;
+    char params[128];
+    if (params_len >= sizeof(params)) return -1;
+    memcpy(params, p, params_len);
+    params[params_len] = '\0';
+
+    /* Parse m=, t=, p= values */
+    int mem_kb = 0, iterations = 0, parallelism = 0;
+    char *tok = params;
+    char *comma;
+    while (tok && *tok) {
+        comma = strchr(tok, ',');
+        if (comma) *comma = '\0';
+
+        if (strncmp(tok, "m=", 2) == 0) {
+            mem_kb = atoi(tok + 2);
+        } else if (strncmp(tok, "t=", 2) == 0) {
+            iterations = atoi(tok + 2);
+        } else if (strncmp(tok, "p=", 2) == 0) {
+            parallelism = atoi(tok + 2);
+        }
+
+        tok = comma ? comma + 1 : NULL;
+    }
+
+    /* Reject weak parameters */
+    if (mem_kb < MIN_ARGON2_MEMORY_KB) {
+        syslog(LOG_WARNING, "offline_cache: rejecting verifier with weak memory cost (%d KB < %d KB)",
+               mem_kb, MIN_ARGON2_MEMORY_KB);
+        return -1;
+    }
+    if (iterations < MIN_ARGON2_ITERATIONS) {
+        syslog(LOG_WARNING, "offline_cache: rejecting verifier with weak iteration count (%d < %d)",
+               iterations, MIN_ARGON2_ITERATIONS);
+        return -1;
+    }
+    if (parallelism < MIN_ARGON2_PARALLELISM) {
+        syslog(LOG_WARNING, "offline_cache: rejecting verifier with invalid parallelism (%d < %d)",
+               parallelism, MIN_ARGON2_PARALLELISM);
+        return -1;
+    }
+
     p = dollar + 1;
 
     /* p now points to salt_b64 */
@@ -745,6 +798,28 @@ int offline_cache_store_verifier(offline_cache_t *cache,
 
     if (!cache->key_derived) {
         return OFFLINE_CACHE_ERR_CRYPTO;
+    }
+
+    /* Enforce maximum entries limit (skip check if user already has an entry) */
+    char existing_path[PATH_MAX];
+    build_cache_path(cache, user, existing_path, sizeof(existing_path));
+    if (access(existing_path, F_OK) != 0) {
+        /* New user — count existing .cred files */
+        DIR *dir = opendir(cache->cache_dir);
+        if (dir) {
+            int count = 0;
+            struct dirent *de;
+            while ((de = readdir(dir)) != NULL) {
+                if (strstr(de->d_name, ".cred") != NULL)
+                    count++;
+            }
+            closedir(dir);
+            if (count >= OFFLINE_CACHE_MAX_ENTRIES) {
+                syslog(LOG_WARNING, "offline_cache: max entries (%d) reached, refusing store for new user",
+                       OFFLINE_CACHE_MAX_ENTRIES);
+                return OFFLINE_CACHE_ERR_INVALID;
+            }
+        }
     }
 
     /* Parse the Argon2id verifier */
