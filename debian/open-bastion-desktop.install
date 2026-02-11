@@ -1,0 +1,14 @@
+# Open Bastion Desktop SSO components (from cmake install in debian/tmp)
+
+# Greeter theme files (cmake installs to /usr/share/lightdm-webkit/themes/open-bastion/)
+debian/tmp/usr/share/lightdm-webkit/themes/open-bastion/
+
+# LightDM configuration example (cmake installs to /etc/open-bastion/)
+debian/tmp/etc/open-bastion/lightdm-openbastion.conf.example usr/share/doc/open-bastion-desktop/examples/
+
+# Desktop setup script
+debian/tmp/usr/sbin/ob-desktop-setup
+
+# Session monitor
+debian/tmp/usr/sbin/ob-session-monitor
+systemd/ob-session-monitor.service lib/systemd/system/

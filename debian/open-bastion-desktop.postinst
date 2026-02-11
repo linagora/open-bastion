@@ -19,7 +19,7 @@ EOF
         chmod 0700 /var/cache/open-bastion/credentials
 
         echo ""
-        echo "Open Bastion LightDM greeter installed."
+        echo "Open Bastion Desktop SSO installed."
         echo ""
         echo "To complete setup, run:"
         echo "  sudo ob-desktop-setup -p https://your-llng-portal.example.com"

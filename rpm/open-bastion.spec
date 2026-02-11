@@ -33,6 +33,24 @@ Requires:       util-linux
 Open Bastion PAM/NSS module for SSH bastion authentication supporting
 token-based and key-based authorization with server groups.
 
+%package desktop
+Summary:        Open Bastion LightDM greeter for Desktop SSO
+BuildArch:      noarch
+Requires:       %{name} = %{version}-%{release}
+Requires:       lightdm
+Requires:       lightdm-webkit2-greeter
+
+%description desktop
+A LightDM webkit2 greeter theme that enables desktop workstations to
+authenticate users via LemonLDAP::NG Single Sign-On.
+
+Features:
+ - SSO authentication via embedded LLNG portal iframe
+ - Offline mode with cached credentials when server is unreachable
+ - Multi-factor authentication support (TOTP, WebAuthn, etc.)
+ - Session selection for multiple desktop environments
+ - Modern, responsive design
+
 %prep
 %autosetup
 
@@ -42,6 +60,7 @@ token-based and key-based authorization with server groups.
     -DENABLE_CACHE=ON \
     -DUSE_LIBSODIUM=ON \
     -DBUILD_TESTING=ON \
+    -DINSTALL_DESKTOP=ON \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
 
@@ -65,22 +84,13 @@ token-based and key-based authorization with server groups.
 %{_sbindir}/ob-session-recorder
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-backend-setup
-%{_sbindir}/ob-desktop-setup
+%{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh-proxy
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
-%config(noreplace) %{_sysconfdir}/open-bastion/lightdm-openbastion.conf.example
-%dir %{_datadir}/open-bastion/lightdm
-%dir %{_datadir}/open-bastion/lightdm/greeter
-%{_datadir}/open-bastion/lightdm/greeter/greeter.js
-%{_datadir}/open-bastion/lightdm/greeter/index.html
-%{_datadir}/open-bastion/lightdm/greeter/index.theme
-%{_datadir}/open-bastion/lightdm/greeter/style.css
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
-%{_sbindir}/ob-session-monitor
-%{_unitdir}/ob-session-monitor.service
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
@@ -90,17 +100,44 @@ token-based and key-based authorization with server groups.
 %{_mandir}/man1/ob-ssh-proxy.1*
 %exclude %{_docdir}/open-bastion/README.md
 
+%files desktop
+%{_sbindir}/ob-desktop-setup
+%{_sbindir}/ob-session-monitor
+%config(noreplace) %{_sysconfdir}/open-bastion/lightdm-openbastion.conf.example
+%dir %{_datadir}/lightdm-webkit
+%dir %{_datadir}/lightdm-webkit/themes
+%dir %{_datadir}/lightdm-webkit/themes/open-bastion
+%{_datadir}/lightdm-webkit/themes/open-bastion/greeter.js
+%{_datadir}/lightdm-webkit/themes/open-bastion/index.html
+%{_datadir}/lightdm-webkit/themes/open-bastion/index.theme
+%{_datadir}/lightdm-webkit/themes/open-bastion/style.css
+%{_unitdir}/ob-session-monitor.service
+
 %post
 %systemd_post ob-heartbeat.timer
-%systemd_post ob-session-monitor.service
 
 %preun
 %systemd_preun ob-heartbeat.timer
-%systemd_preun ob-session-monitor.service
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
+
+%post desktop
+%systemd_post ob-session-monitor.service
+# Create cache directory for offline credentials
+mkdir -p /var/cache/open-bastion/credentials
+chmod 0700 /var/cache/open-bastion/credentials
+
+%preun desktop
+%systemd_preun ob-session-monitor.service
+
+%postun desktop
 %systemd_postun_with_restart ob-session-monitor.service
+# Clean up cache and runtime directories on purge
+if [ "$1" = "0" ]; then
+    rm -rf /var/cache/open-bastion/credentials
+    rm -rf /run/open-bastion/offline_sessions
+fi
 
 %changelog
 * Sat Feb 07 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.1-1

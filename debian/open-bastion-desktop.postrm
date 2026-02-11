@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # Clean up cache directory for offline credentials
+        rm -rf /var/cache/open-bastion/credentials
+
+        # Clean up runtime directory for offline sessions
+        rm -rf /run/open-bastion/offline_sessions
+
+        # Remove theme directory if empty
+        if [ -d /usr/share/lightdm-webkit/themes/open-bastion ]; then
+            rmdir --ignore-fail-on-non-empty /usr/share/lightdm-webkit/themes/open-bastion 2>/dev/null || true
+        fi
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

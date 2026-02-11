@@ -9,7 +9,8 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DENABLE_CACHE=ON \
-		-DINSTALL_SYSTEMD=OFF
+		-DINSTALL_SYSTEMD=OFF \
+		-DINSTALL_DESKTOP=ON
 
 override_dh_auto_install:
 	dh_auto_install
@@ -17,3 +18,8 @@ override_dh_auto_install:
 # NSS and PAM modules need ldconfig but no development symlinks
 override_dh_makeshlibs:
 	dh_makeshlibs -X/security/
+
+# Install systemd units for each package
+override_dh_installsystemd:
+	dh_installsystemd -popen-bastion --name=ob-heartbeat ob-heartbeat.timer
+	dh_installsystemd -popen-bastion-desktop --name=ob-session-monitor ob-session-monitor.service
