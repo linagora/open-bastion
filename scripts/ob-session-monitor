@@ -13,6 +13,7 @@ set -euo pipefail
 CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
 MARKER_DIR="/run/open-bastion/offline_sessions"
 FORCE_ONLINE_FILE="/etc/open-bastion/force_online"
+FORCE_ONLINE_LOCK="/run/open-bastion/force_online.lock"
 POLL_INTERVAL=60
 REVALIDATION_GRACE=14400    # 4 hours
 MAX_SSO_UNREACHABLE=3600    # 1 hour
@@ -222,7 +223,7 @@ revalidate_sessions() {
                     if ! grep -qxF "$user" "$FORCE_ONLINE_FILE" 2>/dev/null; then
                         printf '%s\n' "$user" >> "$FORCE_ONLINE_FILE"
                     fi
-                } 200>"$FORCE_ONLINE_FILE.lock"
+                } 200>"$FORCE_ONLINE_LOCK"
             fi
         else
             # User no longer valid - terminate session
