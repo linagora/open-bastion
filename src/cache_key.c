@@ -344,12 +344,17 @@ static int read_key_file(const char *path, unsigned char *buf, size_t buf_size)
         /* Root-owned with loose permissions: warn but allow for backwards compatibility */
     }
 
-    ssize_t bytes_read = read(fd, buf, buf_size);
-    close(fd);
-
-    if (bytes_read < (ssize_t)KEY_FILE_SIZE) {
-        return -1;
+    /* Read exactly KEY_FILE_SIZE bytes, handling short reads */
+    size_t total_read = 0;
+    while (total_read < KEY_FILE_SIZE) {
+        ssize_t n = read(fd, buf + total_read, KEY_FILE_SIZE - total_read);
+        if (n <= 0) {
+            close(fd);
+            return -1;  /* EOF or error before reading enough bytes */
+        }
+        total_read += (size_t)n;
     }
+    close(fd);
 
     return 0;
 }

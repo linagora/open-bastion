@@ -125,8 +125,14 @@ static void pam_send_info(pam_handle_t *pamh, const char *msg)
     const struct pam_message *msgp = &pmsg;
     struct pam_response *resp = NULL;
 
-    conv->conv(1, &msgp, &resp, conv->appdata_ptr);
-    free(resp);
+    int ret = conv->conv(1, &msgp, &resp, conv->appdata_ptr);
+    if (ret == PAM_SUCCESS && resp) {
+        /* Free response content per PAM conventions */
+        if (resp->resp) {
+            free(resp->resp);
+        }
+        free(resp);
+    }
 }
 
 /*
@@ -2286,7 +2292,8 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          * via /pam/authorize. On success, refresh the offline cache and
          * remove the marker. On explicit denial, reject authentication.
          */
-        if (is_offline_password && data->offline_cache && has_offline_session_marker(user)) {
+        if (is_offline_password && data->offline_cache &&
+            data->config.offline_revalidation_enabled && has_offline_session_marker(user)) {
             OB_LOG_DEBUG(pamh, "Offline marker exists for %s, attempting online revalidation", user);
 
             ob_response_t reval_response = {0};
