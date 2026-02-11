@@ -331,9 +331,17 @@ static int read_key_file(const char *path, unsigned char *buf, size_t buf_size)
         return -1;
     }
 
-    /* Allow slightly relaxed permissions in test environments */
-    if ((st.st_mode & 0077) != 0 && st.st_uid == 0) {
-        /* Non-root readable but root-owned - warn but allow */
+    /* Enforce strict permissions on key file */
+    if ((st.st_mode & 0077) != 0) {
+        syslog(LOG_WARNING,
+               "open-bastion: key file has insecure permissions %04o (should be 0600)",
+               st.st_mode & 0777);
+        /* Reject non-root owned files with loose permissions */
+        if (st.st_uid != 0) {
+            close(fd);
+            return -1;
+        }
+        /* Root-owned with loose permissions: warn but allow for backwards compatibility */
     }
 
     ssize_t bytes_read = read(fd, buf, buf_size);
@@ -397,10 +405,8 @@ int cache_derive_key_with_keyfile(const char *cache_dir,
     /* Emit warning if no key file (weaker security) */
     if (!have_key_file && key_file) {
         syslog(LOG_WARNING,
-               "open-bastion: cache key derived without key file "
-               "(no key file at %s). Generate one with: "
-               "dd if=/dev/urandom bs=32 count=1 of=%s && chmod 600 %s",
-               key_file, key_file, key_file);
+               "open-bastion: cache key derived without key file (weaker security). "
+               "See documentation for key file setup.");
     }
 
     /* Load or generate salt */
