@@ -95,6 +95,7 @@ sudo ob-cache-admin list
 ```
 
 Output:
+
 ```
 Cached credential entries:
 --------------------------
@@ -114,6 +115,7 @@ sudo ob-cache-admin stats
 ```
 
 Output:
+
 ```
 Open Bastion Offline Cache Statistics
 ======================================
@@ -164,6 +166,7 @@ sudo ob-cache-admin unlock johndoe
 ```
 
 Options presented:
+
 1. Wait for lockout to expire (default: 5 minutes)
 2. Invalidate and re-cache (user must authenticate online next time)
 3. Force online auth
@@ -180,18 +183,18 @@ This removes files with invalid magic headers, empty files, and orphaned `.tmp` 
 
 ### Options
 
-| Option | Description |
-|--------|-------------|
-| `-c, --config <file>` | Override configuration file |
-| `-d, --cache-dir <dir>` | Override cache directory |
-| `-q, --quiet` | Quiet mode (less output) |
-| `-h, --help` | Show help message |
+| Option                  | Description                 |
+| ----------------------- | --------------------------- |
+| `-c, --config <file>`   | Override configuration file |
+| `-d, --cache-dir <dir>` | Override cache directory    |
+| `-q, --quiet`           | Quiet mode (less output)    |
+| `-h, --help`            | Show help message           |
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `OB_CACHE_DIR` | Override default cache directory |
+| Variable         | Description                         |
+| ---------------- | ----------------------------------- |
+| `OB_CACHE_DIR`   | Override default cache directory    |
 | `OB_CONFIG_FILE` | Override default configuration file |
 
 ## Cache File Format
@@ -262,16 +265,19 @@ For monitoring systems, consider tracking:
 ### User Cannot Login Offline
 
 1. Check if offline cache is enabled:
+
    ```bash
    grep offline_cache_enabled /etc/open-bastion/openbastion.conf
    ```
 
 2. Verify user has cached credentials:
+
    ```bash
    sudo ob-cache-admin show username
    ```
 
 3. Check cache statistics:
+
    ```bash
    sudo ob-cache-admin stats
    ```
@@ -284,11 +290,13 @@ For monitoring systems, consider tracking:
 ### Cache Not Working
 
 1. Verify directory exists with correct permissions:
+
    ```bash
    ls -la /var/cache/open-bastion/credentials/
    ```
 
 2. Check PAM configuration:
+
    ```bash
    grep pam_openbastion /etc/pam.d/lightdm
    ```
@@ -311,12 +319,12 @@ Credentials are only cached after a successful online authentication. Ensure:
 
 ### Risk Assessment
 
-| Risk | Mitigation |
-|------|------------|
-| Stolen device | Short TTL, lockout protection, full disk encryption |
-| Brute force | Argon2id slow hashing (64 MB memory), lockout after 5 failed attempts |
-| Cache tampering | File permissions (0600), root ownership, AES-256-GCM integrity |
-| Key extraction | Dedicated key file (0600), requires root access |
+| Risk            | Mitigation                                                            |
+| --------------- | --------------------------------------------------------------------- |
+| Stolen device   | Short TTL, lockout protection, full disk encryption                   |
+| Brute force     | Argon2id slow hashing (64 MB memory), lockout after 5 failed attempts |
+| Cache tampering | File permissions (0600), root ownership, AES-256-GCM integrity        |
+| Key extraction  | Dedicated key file (0600), requires root access                       |
 
 ### Recommendations
 

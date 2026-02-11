@@ -30,12 +30,12 @@ flowchart TB
 
 ## Use Cases
 
-| Scenario | Description |
-|----------|-------------|
-| **Laptop users** | Employees traveling or working remotely without VPN |
-| **Disaster recovery** | Network outage doesn't lock out all users |
-| **Air-gapped systems** | Systems that only occasionally connect to network |
-| **LightDM desktop** | Workstation login when SSO portal is unavailable |
+| Scenario               | Description                                         |
+| ---------------------- | --------------------------------------------------- |
+| **Laptop users**       | Employees traveling or working remotely without VPN |
+| **Disaster recovery**  | Network outage doesn't lock out all users           |
+| **Air-gapped systems** | Systems that only occasionally connect to network   |
+| **LightDM desktop**    | Workstation login when SSO portal is unavailable    |
 
 ## How It Works
 
@@ -115,11 +115,11 @@ and switches to offline mode.
 
 ### Visual Indicators
 
-| Element | Description |
-|---------|-------------|
-| **Offline banner** | Shows "Server unavailable" with retry button |
-| **Mode indicator** | Orange dot instead of green when offline |
-| **Lockout countdown** | Shows remaining time when account is locked |
+| Element               | Description                                  |
+| --------------------- | -------------------------------------------- |
+| **Offline banner**    | Shows "Server unavailable" with retry button |
+| **Mode indicator**    | Orange dot instead of green when offline     |
+| **Lockout countdown** | Shows remaining time when account is locked  |
 
 ### User Experience
 
@@ -218,32 +218,32 @@ See [Cache Administration](offline-cache-admin.md) for full documentation.
 
 ### Cryptographic Protections
 
-| Component | Algorithm | Purpose |
-|-----------|-----------|---------|
-| Password hash | Argon2id | Prevent offline cracking |
-| Encryption | AES-256-GCM | Protect cached data at rest |
+| Component      | Algorithm     | Purpose                                                 |
+| -------------- | ------------- | ------------------------------------------------------- |
+| Password hash  | Argon2id      | Prevent offline cracking                                |
+| Encryption     | AES-256-GCM   | Protect cached data at rest                             |
 | Key derivation | PBKDF2-SHA256 | Derive cache encryption key from key file or machine-id |
-| Filename | SHA-256 | Prevent user enumeration |
+| Filename       | SHA-256       | Prevent user enumeration                                |
 
 ### Argon2id Parameters
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| Memory | 64 MB | Prevents GPU/ASIC attacks |
-| Iterations | 3 | Balanced time cost |
-| Parallelism | 4 | Multi-core utilization |
-| Hash length | 32 bytes | 256-bit output |
-| Salt length | 16 bytes | Unique per user, random |
+| Parameter   | Value    | Rationale                 |
+| ----------- | -------- | ------------------------- |
+| Memory      | 64 MB    | Prevents GPU/ASIC attacks |
+| Iterations  | 3        | Balanced time cost        |
+| Parallelism | 4        | Multi-core utilization    |
+| Hash length | 32 bytes | 256-bit output            |
+| Salt length | 16 bytes | Unique per user, random   |
 
 These parameters follow OWASP recommendations for password storage.
 
 ### File System Security
 
-| Path | Permissions | Purpose |
-|------|-------------|---------|
-| Cache directory | 0700 | Owner only |
-| Cache files | 0600 | Owner read/write |
-| Key file | 0600 | Root read/write only |
+| Path            | Permissions | Purpose              |
+| --------------- | ----------- | -------------------- |
+| Cache directory | 0700        | Owner only           |
+| Cache files     | 0600        | Owner read/write     |
+| Key file        | 0600        | Root read/write only |
 
 ### Machine-ID / Key File Dependency
 
@@ -255,11 +255,11 @@ or falls back to `/etc/machine-id`. This means:
 
 **Important scenarios:**
 
-| Scenario | Impact | Mitigation |
-|----------|--------|------------|
-| VM cloning | All caches invalid | Regenerate machine-id after clone |
-| System reinstall | All caches invalid | Users re-authenticate online |
-| Key file rotation | All caches invalid | Users re-authenticate online |
+| Scenario          | Impact             | Mitigation                        |
+| ----------------- | ------------------ | --------------------------------- |
+| VM cloning        | All caches invalid | Regenerate machine-id after clone |
+| System reinstall  | All caches invalid | Users re-authenticate online      |
+| Key file rotation | All caches invalid | Users re-authenticate online      |
 
 ### Brute-Force Protection
 
@@ -279,11 +279,13 @@ by file manipulation.
 **Symptom:** User sees "User not found in cache"
 
 **Causes:**
+
 1. User never logged in online (no cached credentials)
 2. Cache expired (TTL exceeded)
 3. Cache was manually cleared
 
 **Solution:**
+
 1. User must login online at least once before offline mode works
 2. Check cache TTL: `grep offline_cache_ttl /etc/open-bastion/openbastion.conf`
 3. Verify user exists: `sudo ob-cache-admin show username`
@@ -293,9 +295,11 @@ by file manipulation.
 **Symptom:** User sees "Account temporarily locked"
 
 **Causes:**
+
 - Too many failed password attempts (5 by default)
 
 **Solution:**
+
 ```bash
 # Check lock status and options
 sudo ob-cache-admin unlock username
@@ -311,6 +315,7 @@ authenticate online next time. Alternatively, wait for the lockout to expire
 **Symptom:** Offline mode always fails
 
 **Debugging:**
+
 ```bash
 # Check if cache directory exists and has correct permissions
 ls -la /var/cache/open-bastion/credentials/
@@ -332,6 +337,7 @@ journalctl | grep pam_openbastion
 **Cause:** `/etc/machine-id` or `/etc/open-bastion/cache.key` was modified
 
 **Solution:**
+
 1. All users must re-authenticate online
 2. Clear the invalid cache: `sudo ob-cache-admin invalidate-all`
 
@@ -381,12 +387,12 @@ pam_openbastion[1237]: LLNG unreachable, switching to offline mode
 
 ### Metrics to Monitor
 
-| Metric | Alert Condition | Possible Cause |
-|--------|-----------------|----------------|
-| Offline auth count | Sudden spike | Network outage |
-| Lockout count | > 5/hour | Brute-force attempt |
-| Cache size | Unusually large | Cleanup not running |
-| Expired entries | Accumulating | Users not refreshing |
+| Metric             | Alert Condition | Possible Cause       |
+| ------------------ | --------------- | -------------------- |
+| Offline auth count | Sudden spike    | Network outage       |
+| Lockout count      | > 5/hour        | Brute-force attempt  |
+| Cache size         | Unusually large | Cleanup not running  |
+| Expired entries    | Accumulating    | Users not refreshing |
 
 ## Limitations
 
@@ -428,12 +434,12 @@ maintaining general network access, `ob-session-monitor` detects this condition.
 After a configurable timeout (`offline_max_sso_unreachable`, default 1 hour),
 all offline sessions are terminated.
 
-| Network | SSO Portal | Duration | Action |
-|---------|-----------|----------|--------|
-| Down | Down | Any | Normal offline mode |
-| Up | Up | — | Revalidate sessions |
-| Up | Down | < timeout | Warning logged |
-| Up | Down | ≥ timeout | Terminate all offline sessions |
+| Network | SSO Portal | Duration  | Action                         |
+| ------- | ---------- | --------- | ------------------------------ |
+| Down    | Down       | Any       | Normal offline mode            |
+| Up      | Up         | —         | Revalidate sessions            |
+| Up      | Down       | < timeout | Warning logged                 |
+| Up      | Down       | ≥ timeout | Terminate all offline sessions |
 
 ### Configuration
 

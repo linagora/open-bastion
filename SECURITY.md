@@ -30,12 +30,12 @@ sequenceDiagram
 
 ### TLS Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `min_tls_version` | 13 (TLS 1.3) | Minimum TLS version (12=1.2, 13=1.3) |
-| `verify_ssl` | true | Verify server certificate |
-| `ca_cert` | system | Custom CA certificate path |
-| `cert_pin` | none | Certificate pin (sha256//base64 format) |
+| Setting           | Default      | Description                             |
+| ----------------- | ------------ | --------------------------------------- |
+| `min_tls_version` | 13 (TLS 1.3) | Minimum TLS version (12=1.2, 13=1.3)    |
+| `verify_ssl`      | true         | Verify server certificate               |
+| `ca_cert`         | system       | Custom CA certificate path              |
+| `cert_pin`        | none         | Certificate pin (sha256//base64 format) |
 
 **Certificate Pinning**: When configured, the module validates the server's public key against
 the pinned value, preventing MITM attacks even with compromised CAs.
@@ -60,10 +60,10 @@ This provides defense-in-depth against request tampering, even if TLS is somehow
 
 The PAM module authenticates to the LLNG server using:
 
-| Setting | Description |
-|---------|-------------|
-| `server_token_file` | Path to file containing server bearer token |
-| `server_group` | Server group name (default: "default") |
+| Setting                | Description                                         |
+| ---------------------- | --------------------------------------------------- |
+| `server_token_file`    | Path to file containing server bearer token         |
+| `server_group`         | Server group name (default: "default")              |
 | `token_rotate_refresh` | Automatically rotate refresh tokens (default: true) |
 
 The server token should be stored in a file with restricted permissions (0600) owned by root.
@@ -115,12 +115,12 @@ flowchart LR
 
 ### Security Benefits
 
-| Threat | Without Bastion JWT | With Bastion JWT |
-|--------|---------------------|------------------|
-| Direct backend access | Possible if network accessible | Blocked (no valid JWT) |
-| VPN bypass to backend | Possible | Blocked |
-| Firewall misconfiguration | Exposes backends | Backends still protected |
-| Compromised bastion keys | Access to backends | Each hop still verified |
+| Threat                    | Without Bastion JWT            | With Bastion JWT         |
+| ------------------------- | ------------------------------ | ------------------------ |
+| Direct backend access     | Possible if network accessible | Blocked (no valid JWT)   |
+| VPN bypass to backend     | Possible                       | Blocked                  |
+| Firewall misconfiguration | Exposes backends               | Backends still protected |
+| Compromised bastion keys  | Access to backends             | Each hop still verified  |
 
 ### Configuration (Backend)
 
@@ -143,16 +143,16 @@ AcceptEnv LLNG_BASTION_JWT
 
 ### JWT Claims
 
-| Claim | Description |
-|-------|-------------|
-| `iss` | LLNG portal URL (must match `bastion_jwt_issuer`) |
-| `sub` | Username being proxied |
-| `aud` | `pam:bastion-backend` |
-| `exp` | Expiration timestamp (short-lived) |
-| `bastion_id` | Identifier of the bastion server |
-| `bastion_group` | Server group of the bastion |
-| `target_host` | Target backend hostname |
-| `user_groups` | User's LLNG groups |
+| Claim           | Description                                       |
+| --------------- | ------------------------------------------------- |
+| `iss`           | LLNG portal URL (must match `bastion_jwt_issuer`) |
+| `sub`           | Username being proxied                            |
+| `aud`           | `pam:bastion-backend`                             |
+| `exp`           | Expiration timestamp (short-lived)                |
+| `bastion_id`    | Identifier of the bastion server                  |
+| `bastion_group` | Server group of the bastion                       |
+| `target_host`   | Target backend hostname                           |
+| `user_groups`   | User's LLNG groups                                |
 
 ### Offline Verification
 
@@ -195,15 +195,16 @@ the mismatch with the encrypted timestamp causes immediate rejection and cache f
 ### Cache Invalidation
 
 When `cache_invalidate_on_logout = true` _(default)_:
+
 - User's cache is cleared when their PAM session closes
 - Prevents stale tokens from being reused
 
 ### Risk-Based TTL
 
-| Service Type | Default TTL |
-|--------------|-------------|
-| Normal services | 300 seconds |
-| High-risk services | 60 seconds |
+| Service Type       | Default TTL |
+| ------------------ | ----------- |
+| Normal services    | 300 seconds |
+| High-risk services | 60 seconds  |
 
 Configure high-risk services via `high_risk_services` _(comma-separated)_.
 
@@ -211,13 +212,13 @@ Configure high-risk services via `high_risk_services` _(comma-separated)_.
 
 Protection against brute-force attacks:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `rate_limit_enabled` | true | Enable rate limiting |
-| `rate_limit_max_attempts` | 5 | Failures before lockout |
-| `rate_limit_initial_lockout` | 30s | Initial lockout duration |
-| `rate_limit_max_lockout` | 3600s | Maximum lockout duration |
-| `rate_limit_backoff_mult` | 2.0 | Exponential backoff multiplier |
+| Setting                      | Default | Description                    |
+| ---------------------------- | ------- | ------------------------------ |
+| `rate_limit_enabled`         | true    | Enable rate limiting           |
+| `rate_limit_max_attempts`    | 5       | Failures before lockout        |
+| `rate_limit_initial_lockout` | 30s     | Initial lockout duration       |
+| `rate_limit_max_lockout`     | 3600s   | Maximum lockout duration       |
+| `rate_limit_backoff_mult`    | 2.0     | Exponential backoff multiplier |
 
 Lockout state is stored per-user in `rate_limit_state_dir`.
 
@@ -230,16 +231,19 @@ When `create_user_enabled = true`, users can be automatically created on first l
 All paths are validated before use:
 
 **Shell Validation** (`approved_shells`):
+
 - Must be in approved list _(default: common shells like /bin/bash, /bin/zsh)_
 - Must be absolute path
 - No path traversal sequences _(.., //)_
 - No shell metacharacters
 
 **Home Directory Validation** (`approved_home_prefixes`):
+
 - Must start with approved prefix _(default: /home, /var/home)_
 - Same safety checks as shell
 
 **Skeleton Directory Validation**:
+
 - Must be absolute path
 - Must be owned by root
 - No symlinks in path components
@@ -267,16 +271,19 @@ User accounts are created by directly writing to `/etc/passwd` and `/etc/shadow`
 external tools like `useradd`. This design choice was made for:
 
 **Advantages**:
+
 - **Portability**: No dependency on `useradd` which may not exist or have different options across distributions
 - **Atomicity**: Single-process control over file locking ensures consistent state
 - **Predictability**: No external tool behavior variations or unexpected prompts
 
 **Trade-offs**:
+
 - PAM account creation hooks are not triggered _(this module IS the PAM hook)_
 - SELinux contexts must be handled separately if required
 - System audit logs only see file modifications, not semantic "user created" events
 
 **Mitigations**:
+
 - The module emits its own structured audit events when `audit_enabled = true`
 - File operations use exclusive locks (`flock`) to prevent race conditions
 - If `/etc/shadow` write fails after `/etc/passwd` succeeds, rollback is attempted via `userdel`
@@ -286,13 +293,14 @@ external tools like `useradd`. This design choice was made for:
 
 When `audit_enabled = true`:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `audit_log_file` | none | JSON audit log file path |
-| `audit_to_syslog` | true | Also emit to syslog |
-| `audit_level` | 1 | 0=critical, 1=auth events, 2=all |
+| Setting           | Default | Description                      |
+| ----------------- | ------- | -------------------------------- |
+| `audit_log_file`  | none    | JSON audit log file path         |
+| `audit_to_syslog` | true    | Also emit to syslog              |
+| `audit_level`     | 1       | 0=critical, 1=auth events, 2=all |
 
 Audit events include:
+
 - Authentication attempts _(success/failure)_
 - Authorization decisions
 - Rate limit triggers
@@ -302,32 +310,32 @@ Audit events include:
 
 For real-time security monitoring:
 
-| Setting | Description |
-|---------|-------------|
-| `notify_enabled` | Enable webhooks |
-| `notify_url` | Webhook endpoint URL |
-| `notify_secret` | HMAC secret for webhook signatures |
+| Setting          | Description                        |
+| ---------------- | ---------------------------------- |
+| `notify_enabled` | Enable webhooks                    |
+| `notify_url`     | Webhook endpoint URL               |
+| `notify_secret`  | HMAC secret for webhook signatures |
 
 ## Configuration Security
 
 ### Secrets Management
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `secrets_encrypted` | true | Encrypt secrets at rest |
-| `secrets_use_keyring` | true | Use kernel keyring |
-| `secrets_keyring_name` | "pam_llng" | Keyring identifier |
+| Setting                | Default    | Description             |
+| ---------------------- | ---------- | ----------------------- |
+| `secrets_encrypted`    | true       | Encrypt secrets at rest |
+| `secrets_use_keyring`  | true       | Use kernel keyring      |
+| `secrets_keyring_name` | "pam_llng" | Keyring identifier      |
 
 ### File Permissions
 
 Recommended permissions:
 
-| File | Permissions | Owner |
-|------|-------------|-------|
-| `/etc/pam_llng.conf` | 0600 | root |
-| Server token file | 0600 | root |
-| Cache directory | 0700 | root |
-| Rate limit state dir | 0700 | root |
+| File                 | Permissions | Owner |
+| -------------------- | ----------- | ----- |
+| `/etc/pam_llng.conf` | 0600        | root  |
+| Server token file    | 0600        | root  |
+| Cache directory      | 0700        | root  |
+| Rate limit state dir | 0700        | root  |
 
 ## Operational Security Considerations
 
@@ -343,11 +351,13 @@ When `log_level = debug`, the module may log sensitive information to syslog:
 
 **Risk**: If debug logs are captured by a log aggregator or accessed by unauthorized users,
 this information could be used to:
+
 - Identify infrastructure topology
 - Track user movements across systems
 - Correlate sessions for targeting
 
 **Recommendation**:
+
 - Use `log_level = warn` or `log_level = error` in production
 - If debug logging is temporarily needed, ensure syslog access is restricted
 - Rotate and purge logs containing debug output promptly
@@ -357,23 +367,27 @@ this information could be used to:
 The encryption key for cached tokens and secrets is derived from `/etc/machine-id`.
 
 **Impact of machine-id change**:
+
 - All cached tokens become unreadable (automatic re-authentication required)
 - Encrypted secrets in the secret store become permanently unrecoverable
 - Server enrollment tokens must be re-issued
 
 **Scenarios causing machine-id change**:
+
 - VM cloning without regenerating machine-id
 - System reinstallation
 - Container image reuse across hosts
 - Some cloud provider instance recreation
 
 **Recommendations**:
+
 1. **Document machine-id stability** as a deployment requirement
 2. **Before system migration**: Backup enrollment tokens or plan for re-enrollment
 3. **VM cloning**: Always regenerate machine-id (`systemd-machine-id-setup`) and re-enroll
 4. **Monitoring**: Alert on machine-id changes via configuration management
 
 **Re-enrollment procedure after machine-id change**:
+
 ```bash
 # 1. The old token file is now unusable - remove it
 rm /etc/security/pam_llng.token
@@ -389,24 +403,24 @@ only, bypassing OIDC authentication. They are defined in a local configuration f
 
 ### Configuration File Security
 
-| Requirement | Description |
-|-------------|-------------|
-| Ownership | Must be owned by root (uid 0) |
-| Permissions | Must be 0600 (owner read/write only) |
-| Symlinks | File must not be a symlink (O_NOFOLLOW) |
-| Location | `/etc/open-bastion/service-accounts.conf` (configurable) |
+| Requirement | Description                                              |
+| ----------- | -------------------------------------------------------- |
+| Ownership   | Must be owned by root (uid 0)                            |
+| Permissions | Must be 0600 (owner read/write only)                     |
+| Symlinks    | File must not be a symlink (O_NOFOLLOW)                  |
+| Location    | `/etc/open-bastion/service-accounts.conf` (configurable) |
 
 ### Account Validation
 
 Service accounts are validated against the same security rules as regular users:
 
-| Field | Validation |
-|-------|------------|
-| `name` | Lowercase letters, digits, underscore, hyphen; max 32 chars |
+| Field             | Validation                                                   |
+| ----------------- | ------------------------------------------------------------ |
+| `name`            | Lowercase letters, digits, underscore, hyphen; max 32 chars  |
 | `key_fingerprint` | Must start with `SHA256:` or `MD5:`, valid base64 chars only |
-| `shell` | Must be in `approved_shells` list |
-| `home` | Must match `approved_home_prefixes` |
-| `uid`/`gid` | Must be in valid range (0-65534) |
+| `shell`           | Must be in `approved_shells` list                            |
+| `home`            | Must match `approved_home_prefixes`                          |
+| `uid`/`gid`       | Must be in valid range (0-65534)                             |
 
 ### SSH Server Requirement
 
@@ -448,21 +462,21 @@ sequenceDiagram
 
 ### Security Benefits
 
-| Feature | Benefit |
-|---------|---------|
-| Local configuration | No network dependency for service accounts |
-| Per-server control | Each server explicitly lists allowed service accounts |
-| SSH key binding | Fingerprint validation prevents key substitution |
-| Audit logging | All service account access is logged |
-| sudo control | Fine-grained sudo permissions per account |
+| Feature             | Benefit                                               |
+| ------------------- | ----------------------------------------------------- |
+| Local configuration | No network dependency for service accounts            |
+| Per-server control  | Each server explicitly lists allowed service accounts |
+| SSH key binding     | Fingerprint validation prevents key substitution      |
+| Audit logging       | All service account access is logged                  |
+| sudo control        | Fine-grained sudo permissions per account             |
 
 ### Limitations
 
-| Limitation | Mitigation |
-|------------|------------|
+| Limitation                | Mitigation                                     |
+| ------------------------- | ---------------------------------------------- |
 | No centralized management | Use configuration management (Ansible, Puppet) |
-| Manual key rotation | Implement key rotation procedures |
-| Local file dependency | Monitor file integrity with AIDE/Tripwire |
+| Manual key rotation       | Implement key rotation procedures              |
+| Local file dependency     | Monitor file integrity with AIDE/Tripwire      |
 
 ### Example Configuration
 
@@ -485,13 +499,13 @@ This section describes the security architecture and considerations.
 
 **Password Hashing (Argon2id):**
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| Memory cost | 64 MiB | Prevents GPU/ASIC attacks |
-| Iterations | 3 | Balance of security and latency |
-| Parallelism | 4 | Utilizes multi-core CPUs |
-| Hash length | 32 bytes | 256-bit output |
-| Salt length | 16 bytes | Unique per user, random |
+| Parameter   | Value    | Rationale                       |
+| ----------- | -------- | ------------------------------- |
+| Memory cost | 64 MiB   | Prevents GPU/ASIC attacks       |
+| Iterations  | 3        | Balance of security and latency |
+| Parallelism | 4        | Utilizes multi-core CPUs        |
+| Hash length | 32 bytes | 256-bit output                  |
+| Salt length | 16 bytes | Unique per user, random         |
 
 These parameters follow OWASP guidelines for high-security password storage.
 
@@ -502,13 +516,13 @@ File format:
 [Magic: OBCRED01 (8 bytes)][AES-256-GCM encrypted JSON]
 ```
 
-| Component | Description |
-|-----------|-------------|
-| Algorithm | AES-256-GCM authenticated encryption |
-| Key source | Root-only key file (`/etc/open-bastion/cache.key`), fallback to machine-id derivation |
-| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-cache-directory salt |
-| IV | 12 bytes, random per encryption |
-| Auth tag | 16 bytes, prevents tampering |
+| Component      | Description                                                                           |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Algorithm      | AES-256-GCM authenticated encryption                                                  |
+| Key source     | Root-only key file (`/etc/open-bastion/cache.key`), fallback to machine-id derivation |
+| Key derivation | PBKDF2-SHA256 (100,000 iterations) with per-cache-directory salt                      |
+| IV             | 12 bytes, random per encryption                                                       |
+| Auth tag       | 16 bytes, prevents tampering                                                          |
 
 **GCM authentication** ensures any tampering (bit flips, truncation) is detected
 and the entry is rejected.
@@ -522,6 +536,7 @@ The encryption key is derived from a root-only key file or `/etc/machine-id`, en
 - **Hardware binding**: Physical theft of disk provides no access without key file
 
 **Impact of machine-id/key change:**
+
 - All cached credentials become permanently unreadable
 - Users must authenticate online to re-cache credentials
 - No security risk (encrypted data remains encrypted)
@@ -543,12 +558,12 @@ stateDiagram-v2
 
 ### Brute Force Mitigation
 
-| Protection | Description |
-|------------|-------------|
-| Per-user lockout | 5 failed attempts triggers lockout |
-| Lockout duration | 5 minutes |
-| Failure persistence | Stored encrypted in cache file (`failed_attempts`, `locked_until`) |
-| Timing attack prevention | Constant-time hash comparison |
+| Protection               | Description                                                        |
+| ------------------------ | ------------------------------------------------------------------ |
+| Per-user lockout         | 5 failed attempts triggers lockout                                 |
+| Lockout duration         | 5 minutes                                                          |
+| Failure persistence      | Stored encrypted in cache file (`failed_attempts`, `locked_until`) |
+| Timing attack prevention | Constant-time hash comparison                                      |
 
 > **Note:** The lockout thresholds (5 attempts, 5 minutes) are compile-time constants
 > defined in `offline_cache.h` (`OFFLINE_CACHE_MAX_FAILED_ATTEMPTS` and
@@ -563,53 +578,55 @@ reset by file manipulation.
 The greeter and PAM module communicate via structured error codes
 (must match `include/offline_cache.h`):
 
-| Code | Constant | Meaning |
-|------|----------|---------|
-| 0 | OFFLINE_CACHE_OK | Success |
-| -1 | OFFLINE_CACHE_ERR_NOMEM | Out of memory |
-| -2 | OFFLINE_CACHE_ERR_IO | File system error |
-| -3 | OFFLINE_CACHE_ERR_CRYPTO | Decryption failed |
-| -4 | OFFLINE_CACHE_ERR_NOTFOUND | User not in cache |
-| -5 | OFFLINE_CACHE_ERR_EXPIRED | Cache entry expired |
-| -6 | OFFLINE_CACHE_ERR_LOCKED | Account locked out |
-| -7 | OFFLINE_CACHE_ERR_INVALID | Invalid cache data |
-| -8 | OFFLINE_CACHE_ERR_PASSWORD | Password mismatch |
+| Code | Constant                   | Meaning             |
+| ---- | -------------------------- | ------------------- |
+| 0    | OFFLINE_CACHE_OK           | Success             |
+| -1   | OFFLINE_CACHE_ERR_NOMEM    | Out of memory       |
+| -2   | OFFLINE_CACHE_ERR_IO       | File system error   |
+| -3   | OFFLINE_CACHE_ERR_CRYPTO   | Decryption failed   |
+| -4   | OFFLINE_CACHE_ERR_NOTFOUND | User not in cache   |
+| -5   | OFFLINE_CACHE_ERR_EXPIRED  | Cache entry expired |
+| -6   | OFFLINE_CACHE_ERR_LOCKED   | Account locked out  |
+| -7   | OFFLINE_CACHE_ERR_INVALID  | Invalid cache data  |
+| -8   | OFFLINE_CACHE_ERR_PASSWORD | Password mismatch   |
 
 The PAM module sends structured messages (`OFFLINE_ERROR:code[:locktime]`) via
 PAM conversation so the greeter can display appropriate feedback.
 
 ### File System Security
 
-| Requirement | Implementation |
-|-------------|----------------|
-| Directory permissions | 0700 (owner only) |
-| File permissions | 0600 (owner read/write) |
-| Symlink protection | O_NOFOLLOW on all opens |
-| Race condition | Atomic file operations (rename) |
-| Filename | SHA-256("cred:username") to prevent enumeration |
-| Secure deletion | `shred` used by admin tool |
+| Requirement           | Implementation                                  |
+| --------------------- | ----------------------------------------------- |
+| Directory permissions | 0700 (owner only)                               |
+| File permissions      | 0600 (owner read/write)                         |
+| Symlink protection    | O_NOFOLLOW on all opens                         |
+| Race condition        | Atomic file operations (rename)                 |
+| Filename              | SHA-256("cred:username") to prevent enumeration |
+| Secure deletion       | `shred` used by admin tool                      |
 
 ### Security Boundaries
 
-| Threat Vector | Protection |
-|---------------|------------|
-| Cache file theft | AES-256-GCM + machine/key binding |
-| Memory analysis | Secure memory clearing (explicit_bzero/sodium_memzero) |
-| Timing attacks | Constant-time comparison for hashes |
-| Symlink attacks | O_NOFOLLOW on all file operations |
-| Race conditions | Atomic file operations (rename) |
-| Privilege escalation | Cache directory is 0700 root-owned |
-| Lockout bypass | Lockout state encrypted in cache |
-| User enumeration | SHA-256 hashed filenames |
+| Threat Vector        | Protection                                             |
+| -------------------- | ------------------------------------------------------ |
+| Cache file theft     | AES-256-GCM + machine/key binding                      |
+| Memory analysis      | Secure memory clearing (explicit_bzero/sodium_memzero) |
+| Timing attacks       | Constant-time comparison for hashes                    |
+| Symlink attacks      | O_NOFOLLOW on all file operations                      |
+| Race conditions      | Atomic file operations (rename)                        |
+| Privilege escalation | Cache directory is 0700 root-owned                     |
+| Lockout bypass       | Lockout state encrypted in cache                       |
+| User enumeration     | SHA-256 hashed filenames                               |
 
 ### Operational Considerations
 
 **When to enable offline mode:**
+
 - Corporate workstations with network reliability concerns
 - Laptops used in areas with poor connectivity
 - Business continuity during LLNG maintenance
 
 **When NOT to enable offline mode:**
+
 - High-security environments requiring real-time authorization
 - Shared/public workstations
 - Systems requiring immediate access revocation
@@ -652,6 +669,7 @@ ob-cache-admin cleanup
 ```
 
 **Security notes:**
+
 - Requires root privileges (cache files owned by root)
 - Never displays passwords or hashes
 - Uses `shred` for secure file deletion
@@ -660,10 +678,12 @@ ob-cache-admin cleanup
 ### Audit and Monitoring
 
 Offline authentication events are logged to:
+
 - Syslog (via PAM)
 - Structured audit log (`/var/log/open-bastion/audit.json`)
 
 Look for:
+
 - `offline_auth_success`: User authenticated via cache
 - `offline_auth_failure`: Failed offline authentication attempt
 - `offline_cache_locked`: User locked out due to failed attempts
@@ -689,11 +709,11 @@ Look for:
 When a user authenticates offline and the network returns, the system
 revalidates the session via three mechanisms:
 
-| Mechanism | Trigger | Action |
-|-----------|---------|--------|
-| Screen unlock (PAM) | User enters password | Online LLNG auth attempted |
-| Token refresh (Greeter) | Screen unlock | Refresh token exchanged for new access token |
-| ob-session-monitor | Periodic (60s) | Check user validity via `/pam/userinfo` |
+| Mechanism               | Trigger              | Action                                       |
+| ----------------------- | -------------------- | -------------------------------------------- |
+| Screen unlock (PAM)     | User enters password | Online LLNG auth attempted                   |
+| Token refresh (Greeter) | Screen unlock        | Refresh token exchanged for new access token |
+| ob-session-monitor      | Periodic (60s)       | Check user validity via `/pam/userinfo`      |
 
 **Anti-firewall-bypass protection**: If the SSO portal is unreachable despite
 network being available (possible local firewall manipulation), all offline
@@ -701,25 +721,25 @@ sessions are terminated after `offline_max_sso_unreachable` seconds (default: 1h
 
 ## Threat Mitigations
 
-| Threat | Mitigation |
-|--------|------------|
-| Token replay | Single-use tokens, cache invalidation |
-| MITM attacks | TLS 1.3, certificate pinning |
-| Brute force | Rate limiting with exponential backoff |
-| Cache tampering | AES-256-GCM authenticated encryption |
-| Path injection | Strict path validation, approved lists |
-| Buffer overflow | Bounds-checked string operations, snprintf with null-termination |
-| UID collision | Fail-safe collision detection |
-| Request tampering | Optional HMAC request signing with nonces |
-| Memory exhaustion DoS | Response size limits (256KB), group limits (256 max) |
-| Integer overflow | Input validation in base64 encoding, backoff calculations |
-| Malformed JSON | Type validation for critical response fields |
-| Client secret exposure | JWT Client Assertion (RFC 7523) - secret never transmitted |
-| Bastion bypass | Bastion JWT verification on backends (RS256 signed) |
-| Direct backend access | JWT required + JWKS-based offline verification |
-| Offline cache theft | AES-256-GCM encryption + machine-id binding |
-| Offline brute force | Argon2id + per-user lockout after 5 attempts |
-| Stale offline credentials | Configurable TTL (default 7 days) |
+| Threat                    | Mitigation                                                       |
+| ------------------------- | ---------------------------------------------------------------- |
+| Token replay              | Single-use tokens, cache invalidation                            |
+| MITM attacks              | TLS 1.3, certificate pinning                                     |
+| Brute force               | Rate limiting with exponential backoff                           |
+| Cache tampering           | AES-256-GCM authenticated encryption                             |
+| Path injection            | Strict path validation, approved lists                           |
+| Buffer overflow           | Bounds-checked string operations, snprintf with null-termination |
+| UID collision             | Fail-safe collision detection                                    |
+| Request tampering         | Optional HMAC request signing with nonces                        |
+| Memory exhaustion DoS     | Response size limits (256KB), group limits (256 max)             |
+| Integer overflow          | Input validation in base64 encoding, backoff calculations        |
+| Malformed JSON            | Type validation for critical response fields                     |
+| Client secret exposure    | JWT Client Assertion (RFC 7523) - secret never transmitted       |
+| Bastion bypass            | Bastion JWT verification on backends (RS256 signed)              |
+| Direct backend access     | JWT required + JWKS-based offline verification                   |
+| Offline cache theft       | AES-256-GCM encryption + machine-id binding                      |
+| Offline brute force       | Argon2id + per-user lockout after 5 attempts                     |
+| Stale offline credentials | Configurable TTL (default 7 days)                                |
 
 ## Security Reporting
 

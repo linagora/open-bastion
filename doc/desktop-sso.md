@@ -80,16 +80,19 @@ sudo ob-desktop-setup -p https://auth.example.com --offline
 #### 1. Install LightDM and webkit2-greeter
 
 **Debian/Ubuntu:**
+
 ```bash
 apt install lightdm lightdm-webkit2-greeter
 ```
 
 **Fedora:**
+
 ```bash
 dnf install lightdm lightdm-webkit2-greeter
 ```
 
 **Arch Linux:**
+
 ```bash
 pacman -S lightdm lightdm-webkit2-greeter
 ```
@@ -211,11 +214,11 @@ In the LLNG Manager, create a new OIDC Relying Party:
 
 Set these parameters in the Manager:
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `desktopLoginRp` | RP name for desktop tokens | `desktop-sso` |
-| `desktopLoginTokenDuration` | Token TTL in seconds | `28800` (8 hours) |
-| `desktopLoginAllowedCallbacks` | Allowed callback URLs | `["http://localhost/*"]` |
+| Parameter                      | Description                | Default                  |
+| ------------------------------ | -------------------------- | ------------------------ |
+| `desktopLoginRp`               | RP name for desktop tokens | `desktop-sso`            |
+| `desktopLoginTokenDuration`    | Token TTL in seconds       | `28800` (8 hours)        |
+| `desktopLoginAllowedCallbacks` | Allowed callback URLs      | `["http://localhost/*"]` |
 
 ## How It Works
 
@@ -270,13 +273,13 @@ configured in LLNG work seamlessly.
 
 ### Supported 2FA Methods
 
-| Method | Status | Notes |
-|--------|--------|-------|
-| TOTP (Google Authenticator) | Fully supported | No configuration needed |
-| SMS/Email OTP | Fully supported | No configuration needed |
-| Push notifications | Fully supported | No configuration needed |
-| WebAuthn/FIDO2/U2F | Supported | Requires `allow` attribute on iframe |
-| SSL client certificates | Supported | Requires PKCS#11 configuration |
+| Method                      | Status          | Notes                                |
+| --------------------------- | --------------- | ------------------------------------ |
+| TOTP (Google Authenticator) | Fully supported | No configuration needed              |
+| SMS/Email OTP               | Fully supported | No configuration needed              |
+| Push notifications          | Fully supported | No configuration needed              |
+| WebAuthn/FIDO2/U2F          | Supported       | Requires `allow` attribute on iframe |
+| SSL client certificates     | Supported       | Requires PKCS#11 configuration       |
 
 ### WebAuthn/FIDO2 Configuration
 
@@ -285,9 +288,12 @@ the `publickey-credentials-get` permission. This is already configured in the
 Open Bastion greeter:
 
 ```html
-<iframe id="sso-iframe"
-        allow="publickey-credentials-get *; publickey-credentials-create *"
-        src="..." frameborder="0">
+<iframe
+  id="sso-iframe"
+  allow="publickey-credentials-get *; publickey-credentials-create *"
+  src="..."
+  frameborder="0"
+>
 </iframe>
 ```
 
@@ -298,11 +304,13 @@ If you're customizing the greeter, ensure this `allow` attribute is present.
 For smart card authentication:
 
 1. **Install PKCS#11 module** (e.g., OpenSC):
+
    ```bash
    apt install opensc-pkcs11
    ```
 
 2. **Configure p11-kit** for WebKitGTK:
+
    ```bash
    # /etc/pkcs11/modules/opensc.module
    module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
@@ -372,6 +380,7 @@ return (default TTL: 8 hours). The greeter handles this gracefully:
 ### How It Works
 
 The greeter stores three pieces of state from the initial SSO login:
+
 - `authToken`: The OAuth2 access token
 - `refreshToken`: The OAuth2 refresh token (new)
 - `tokenExpiresAt`: Token expiration timestamp (new)
@@ -387,6 +396,7 @@ provides a new one.
 At the PAM level, when a user enters their password to unlock and an offline
 session marker exists, the PAM module transparently attempts online LLNG
 authentication with the entered password. This:
+
 - Refreshes the offline credential cache
 - Removes the offline session marker
 - Validates the account is still active on LLNG
@@ -397,11 +407,13 @@ authentication with the entered password. This:
 ### Greeter Doesn't Load
 
 1. Check LightDM configuration:
+
    ```bash
    lightdm --test-mode --debug
    ```
 
 2. Verify webkit2-greeter is installed:
+
    ```bash
    dpkg -l | grep webkit2-greeter
    ```
@@ -414,6 +426,7 @@ authentication with the entered password. This:
 ### SSO Iframe Doesn't Load
 
 1. Verify network connectivity:
+
    ```bash
    curl -v https://auth.example.com/desktop/login
    ```
@@ -425,16 +438,19 @@ authentication with the entered password. This:
 ### Authentication Fails
 
 1. Check PAM configuration:
+
    ```bash
    cat /etc/pam.d/lightdm
    ```
 
 2. Review PAM logs:
+
    ```bash
    journalctl | grep pam_openbastion
    ```
 
 3. Verify Open Bastion configuration:
+
    ```bash
    cat /etc/open-bastion/openbastion.conf
    ```
