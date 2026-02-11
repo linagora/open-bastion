@@ -1,0 +1,42 @@
+# Open Bastion base package
+
+# PAM module
+debian/tmp/usr/lib/*/security/pam_openbastion.so*
+
+# NSS module
+debian/tmp/usr/lib/*/libnss_openbastion.so*
+
+# Configuration files
+debian/tmp/etc/open-bastion/openbastion.conf.example
+debian/tmp/etc/open-bastion/nss_openbastion.conf.example
+debian/tmp/etc/open-bastion/service-accounts.conf.example
+debian/tmp/etc/open-bastion/session-recorder.conf.example
+debian/tmp/etc/open-bastion/ssh-proxy.conf.example
+
+# Admin scripts
+debian/tmp/usr/sbin/ob-enroll
+debian/tmp/usr/sbin/ob-heartbeat
+debian/tmp/usr/sbin/ob-session-recorder
+debian/tmp/usr/sbin/ob-bastion-setup
+debian/tmp/usr/sbin/ob-backend-setup
+debian/tmp/usr/sbin/ob-cache-admin
+
+# User scripts
+debian/tmp/usr/bin/ob-ssh-cert
+debian/tmp/usr/bin/ob-ssh-proxy
+
+# Man pages
+debian/tmp/usr/share/man/man1/ob-ssh-cert.1
+debian/tmp/usr/share/man/man1/ob-ssh-proxy.1
+debian/tmp/usr/share/man/man8/ob-enroll.8
+debian/tmp/usr/share/man/man8/ob-heartbeat.8
+debian/tmp/usr/share/man/man8/ob-bastion-setup.8
+debian/tmp/usr/share/man/man8/ob-backend-setup.8
+debian/tmp/usr/share/man/man8/ob-session-recorder.8
+
+# Documentation
+debian/tmp/usr/share/doc/open-bastion/README.md
+
+# Heartbeat systemd timer and service (not installed by cmake when INSTALL_SYSTEMD=OFF)
+systemd/ob-heartbeat.timer lib/systemd/system/
+systemd/ob-heartbeat.service lib/systemd/system/

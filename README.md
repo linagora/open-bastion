@@ -66,6 +66,12 @@ The module supports two authentication methods:
 - **Monitoring**:
   - Server heartbeat via `ob-heartbeat`
   - Statistics reporting to portal
+- **Desktop SSO** (LightDM integration):
+  - Authenticate workstations via LLNG Single Sign-On
+  - LightDM webkit2-greeter theme with embedded LLNG portal
+  - Offline mode with cached credentials (Argon2id + AES-256-GCM)
+  - Multi-factor authentication support (TOTP, WebAuthn, etc.)
+  - Automatic session and desktop environment selection
 
 ## Installation
 
@@ -223,6 +229,50 @@ sudo ob-enroll
 - A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](./llng-plugin) installed and enabled
 - libcurl, json-c, OpenSSL, libkeyutils, PAM development headers
 - curl and jq (for enrollment script)
+
+## Desktop SSO (LightDM Integration)
+
+Open Bastion can authenticate desktop workstations via LemonLDAP::NG Single Sign-On
+using LightDM.
+
+### Quick Setup
+
+```bash
+# Install the greeter package
+sudo apt install lightdm-openbastion-greeter
+
+# Run the setup script
+sudo ob-desktop-setup -p https://auth.example.com
+
+# For offline mode support
+sudo ob-desktop-setup -p https://auth.example.com --offline
+```
+
+### Features
+
+- **SSO Authentication**: Users login with their LLNG credentials via embedded portal
+- **Multi-Factor Authentication**: Supports TOTP, WebAuthn/FIDO2, SMS, and more
+- **Offline Mode**: Cached credentials allow login when LLNG is unreachable
+- **Session Selection**: Choose between multiple desktop environments
+
+### Documentation
+
+- [Desktop SSO Guide](doc/desktop-sso.md) - Complete setup and configuration
+- [Offline Mode](doc/offline-mode.md) - Cached credential authentication
+- [Security Architecture](SECURITY.md#offline-credential-cache-security) - Security details
+
+### Cache Management
+
+```bash
+# Show cache statistics
+sudo ob-cache-admin stats
+
+# List cached users
+sudo ob-cache-admin list
+
+# Invalidate a user's cache (after termination)
+sudo ob-cache-admin invalidate username
+```
 
 ## License
 

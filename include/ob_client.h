@@ -21,6 +21,7 @@ typedef struct {
 typedef struct {
     bool enabled;           /* Offline mode allowed for this user */
     int ttl;                /* Cache TTL in seconds (0 = no caching) */
+    char *verifier;         /* Pre-computed Argon2id verifier for offline auth */
 } ob_offline_settings_t;
 
 /* SSH certificate info extracted from environment */

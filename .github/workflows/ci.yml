@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, desktop-sso ]
 
 # Restrict GITHUB_TOKEN permissions to read-only by default
 permissions:
@@ -34,11 +34,12 @@ jobs:
           libcurl4-openssl-dev \
           libjson-c-dev \
           libpam0g-dev \
+          libsodium-dev \
           curl \
           jq
 
     - name: Configure CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON
 
     - name: Build
       run: cmake --build build --parallel
@@ -86,12 +87,14 @@ jobs:
           cmake \
           libcurl4-openssl-dev \
           libjson-c-dev \
-          libpam0g-dev
+          libpam0g-dev \
+          libsodium-dev
 
     - name: Configure CMake with Debug and Sanitizers
       run: |
         cmake -B build \
           -DCMAKE_BUILD_TYPE=Debug \
+          -DUSE_LIBSODIUM=ON \
           -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 
     - name: Build
@@ -123,11 +126,12 @@ jobs:
           cmake \
           libcurl4-openssl-dev \
           libjson-c-dev \
-          libpam0g-dev
+          libpam0g-dev \
+          libsodium-dev
 
     - name: Configure and build
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=Release
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON
         cmake --build build --parallel
 
     - name: Create Debian package
@@ -170,6 +174,7 @@ jobs:
           libcurl-devel \
           json-c-devel \
           openssl-devel \
+          libsodium-devel \
           rpm-build \
           systemd-rpm-macros
 

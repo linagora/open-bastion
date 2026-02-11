@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <syslog.h>
 #include <sys/stat.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -299,6 +300,139 @@ int cache_derive_key(const char *cache_dir, const char *salt_filename,
 
     /* Clean up sensitive data */
     explicit_bzero(instance_id, sizeof(instance_id));
+    explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
+
+    out->derived = true;
+    return 0;
+}
+
+/* Key file size for offline cache (256-bit secret) */
+#define KEY_FILE_SIZE 32
+
+/*
+ * Read a secret key file (root-only, for offline cache).
+ * Returns 0 on success, -1 on failure.
+ */
+static int read_key_file(const char *path, unsigned char *buf, size_t buf_size)
+{
+    if (!path || buf_size < KEY_FILE_SIZE) {
+        return -1;
+    }
+
+    int fd = open(path, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        return -1;
+    }
+
+    /* Verify file permissions (should be 0600 and owned by root) */
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return -1;
+    }
+
+    /* Enforce strict permissions on key file */
+    if ((st.st_mode & 0077) != 0) {
+        syslog(LOG_WARNING,
+               "open-bastion: key file has insecure permissions %04o (should be 0600)",
+               st.st_mode & 0777);
+        /* Reject non-root owned files with loose permissions */
+        if (st.st_uid != 0) {
+            close(fd);
+            return -1;
+        }
+        /* Root-owned with loose permissions: warn but allow for backwards compatibility */
+    }
+
+    /* Read exactly KEY_FILE_SIZE bytes, handling short reads */
+    size_t total_read = 0;
+    while (total_read < KEY_FILE_SIZE) {
+        ssize_t n = read(fd, buf + total_read, KEY_FILE_SIZE - total_read);
+        if (n <= 0) {
+            close(fd);
+            return -1;  /* EOF or error before reading enough bytes */
+        }
+        total_read += (size_t)n;
+    }
+    close(fd);
+
+    return 0;
+}
+
+/*
+ * Derive encryption key with optional key file support.
+ * Used by offline_cache for stronger security when key file is available.
+ */
+int cache_derive_key_with_keyfile(const char *cache_dir,
+                                   const char *salt_filename,
+                                   const char *key_file,
+                                   cache_derived_key_t *out)
+{
+    if (!cache_dir || !salt_filename || !out) {
+        return -1;
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    /* Key material buffer: key_file (32 bytes) + instance_id (up to 64 bytes) */
+    unsigned char key_material[KEY_FILE_SIZE + 64];
+    size_t key_material_len = 0;
+    bool have_key_file = false;
+
+    /* Try to read key file if provided */
+    if (key_file) {
+        unsigned char file_key[KEY_FILE_SIZE];
+        if (read_key_file(key_file, file_key, KEY_FILE_SIZE) == 0) {
+            memcpy(key_material, file_key, KEY_FILE_SIZE);
+            key_material_len = KEY_FILE_SIZE;
+            explicit_bzero(file_key, sizeof(file_key));
+            have_key_file = true;
+        } else {
+            explicit_bzero(file_key, sizeof(file_key));
+        }
+    }
+
+    /* Get machine-id or instance-id fallback */
+    char instance_id[64] = {0};
+    if (read_machine_id(instance_id, sizeof(instance_id)) != 0) {
+        if (load_or_generate_instance_id(cache_dir, instance_id, sizeof(instance_id)) != 0) {
+            explicit_bzero(key_material, sizeof(key_material));
+            return -1;
+        }
+    }
+
+    /* Append instance_id to key material */
+    size_t id_len = strlen(instance_id);
+    memcpy(key_material + key_material_len, instance_id, id_len);
+    key_material_len += id_len;
+    explicit_bzero(instance_id, sizeof(instance_id));
+
+    /* Emit warning if no key file (weaker security) */
+    if (!have_key_file && key_file) {
+        syslog(LOG_WARNING,
+               "open-bastion: cache key derived without key file (weaker security). "
+               "See documentation for key file setup.");
+    }
+
+    /* Load or generate salt */
+    unsigned char pbkdf_salt[CACHE_SALT_SIZE];
+    if (load_or_generate_salt(cache_dir, salt_filename, pbkdf_salt, CACHE_SALT_SIZE) != 0) {
+        explicit_bzero(key_material, sizeof(key_material));
+        return -1;
+    }
+
+    /* Derive key using PBKDF2-HMAC-SHA256 */
+    if (PKCS5_PBKDF2_HMAC((char *)key_material, key_material_len,
+                          pbkdf_salt, CACHE_SALT_SIZE,
+                          CACHE_PBKDF2_ITERATIONS,
+                          EVP_sha256(),
+                          CACHE_KEY_SIZE, out->key) != 1) {
+        explicit_bzero(key_material, sizeof(key_material));
+        explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
+        return -1;
+    }
+
+    explicit_bzero(key_material, sizeof(key_material));
     explicit_bzero(pbkdf_salt, sizeof(pbkdf_salt));
 
     out->derived = true;

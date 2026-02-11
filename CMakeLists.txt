@@ -8,6 +8,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(ENABLE_CACHE "Enable token caching" ON)
 option(BUILD_TESTING "Build tests" ON)
 option(INSTALL_SYSTEMD "Install systemd unit files" ON)
+option(INSTALL_DESKTOP "Install Desktop SSO components (LightDM greeter)" OFF)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
@@ -48,11 +49,39 @@ set(PAM_MODULE_SOURCES
     src/service_account.c
     src/ssh_key_policy.c
     src/str_utils.c
+    src/offline_cache.c
 )
 
 if(ENABLE_CACHE)
     list(APPEND PAM_MODULE_SOURCES src/token_cache.c)
     add_definitions(-DENABLE_CACHE)
+endif()
+
+# Optional libsodium for Argon2id (preferred) - fallback to OpenSSL 3.0+
+option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
+
+if(USE_LIBSODIUM)
+    pkg_check_modules(SODIUM REQUIRED libsodium)
+    add_definitions(-DHAVE_LIBSODIUM)
+else()
+    # Check OpenSSL version >= 3.0 for Argon2id support
+    include(CheckCSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIRS})
+    check_c_source_compiles("
+        #include <openssl/opensslv.h>
+        #if OPENSSL_VERSION_NUMBER < 0x30000000L
+        #error OpenSSL 3.0+ required
+        #endif
+        int main() { return 0; }
+    " HAVE_OPENSSL_3)
+
+    if(NOT HAVE_OPENSSL_3)
+        message(FATAL_ERROR
+            "Offline credential cache requires either:\n"
+            "  - libsodium (recommended): cmake -DUSE_LIBSODIUM=ON ..\n"
+            "  - OpenSSL 3.0+ (detected version is too old)\n"
+            "Please install libsodium-dev or upgrade OpenSSL.")
+    endif()
 endif()
 
 # Build the PAM module as a shared library
@@ -73,6 +102,7 @@ target_include_directories(pam_openbastion PRIVATE
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIRS}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
 )
 
 # Link libraries
@@ -81,6 +111,7 @@ target_link_libraries(pam_openbastion
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
     ${OPENSSL_LIBRARIES}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
 )
 
 # Compiler flags
@@ -174,6 +205,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-backend-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install cache admin tool (useful for both SSH and Desktop offline modes)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Install man pages (section 8 - admin commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-enroll.8
@@ -197,6 +233,37 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
         DESTINATION lib/systemd/system
+    )
+    # Desktop-specific systemd service
+    if(INSTALL_DESKTOP)
+        install(FILES
+            ${CMAKE_SOURCE_DIR}/systemd/ob-session-monitor.service
+            DESTINATION lib/systemd/system
+        )
+    endif()
+endif()
+
+# Desktop SSO components (LightDM greeter, session monitor)
+if(INSTALL_DESKTOP)
+    # Install session monitor script
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-monitor
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
+
+    # Install desktop setup script
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
+
+    # Install LightDM greeter theme to standard lightdm-webkit theme location
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/lightdm/greeter/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/lightdm-webkit/themes/open-bastion
+    )
+
+    # Install LightDM configuration example
+    install(FILES ${CMAKE_SOURCE_DIR}/lightdm/config/lightdm-openbastion.conf
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
+        RENAME lightdm-openbastion.conf.example
     )
 endif()
 

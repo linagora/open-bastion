@@ -1,0 +1,358 @@
+#!/bin/bash
+# ob-session-monitor - Network revalidation service for Open Bastion
+#
+# Monitors network state and revalidates offline sessions when
+# connectivity to the LLNG portal returns.
+#
+# Copyright (C) 2025 Linagora
+# License: AGPL-3.0
+
+set -euo pipefail
+
+# Configuration defaults
+CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
+MARKER_DIR="/run/open-bastion/offline_sessions"
+FORCE_ONLINE_FILE="/etc/open-bastion/force_online"
+FORCE_ONLINE_LOCK="/run/open-bastion/force_online.lock"
+POLL_INTERVAL=60
+REVALIDATION_GRACE=14400    # 4 hours
+MAX_SSO_UNREACHABLE=3600    # 1 hour
+
+# State
+sso_unreachable_since=0
+
+# Verify required dependencies
+for cmd in curl jq loginctl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: required command '$cmd' not found" >&2
+        exit 1
+    fi
+done
+
+# Logging
+log_info() {
+    logger -t ob-session-monitor -p auth.info "$@"
+}
+
+log_warn() {
+    logger -t ob-session-monitor -p auth.warning "$@"
+}
+
+log_crit() {
+    logger -t ob-session-monitor -p auth.crit "$@"
+}
+
+log_debug() {
+    logger -t ob-session-monitor -p auth.debug "$@"
+}
+
+# Read configuration from openbastion.conf
+read_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_warn "Configuration file not found: $CONFIG_FILE"
+        return
+    fi
+
+    local portal_url_val
+    portal_url_val=$(grep -E '^\s*portal_url\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$portal_url_val" ]; then
+        PORTAL_URL="$portal_url_val"
+    fi
+
+    local server_token_file_val
+    server_token_file_val=$(grep -E '^\s*server_token_file\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$server_token_file_val" ] && [ -f "$server_token_file_val" ]; then
+        SERVER_TOKEN=$(cat "$server_token_file_val" 2>/dev/null)
+    fi
+
+    local reval_enabled
+    reval_enabled=$(grep -E '^\s*offline_revalidation_enabled\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ "$reval_enabled" = "false" ] || [ "$reval_enabled" = "0" ] || [ "$reval_enabled" = "no" ]; then
+        log_info "Offline revalidation disabled in configuration"
+        exit 0
+    fi
+
+    local grace_val
+    grace_val=$(grep -E '^\s*offline_revalidation_grace\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$grace_val" ] && [ "$grace_val" -gt 0 ] 2>/dev/null; then
+        REVALIDATION_GRACE=$grace_val
+    fi
+
+    local max_unreachable_val
+    max_unreachable_val=$(grep -E '^\s*offline_max_sso_unreachable\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$max_unreachable_val" ] && [ "$max_unreachable_val" -gt 0 ] 2>/dev/null; then
+        MAX_SSO_UNREACHABLE=$max_unreachable_val
+    fi
+
+    local force_online_val
+    force_online_val=$(grep -E '^\s*auth_cache_force_online\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$force_online_val" ]; then
+        FORCE_ONLINE_FILE="$force_online_val"
+    fi
+}
+
+# Check if LLNG portal is reachable
+check_portal() {
+    local url="${PORTAL_URL}/desktop/login?check=1"
+    if curl -sf -o /dev/null -m 5 "$url" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Check if general network is available (DNS resolution of portal hostname)
+check_network() {
+    local hostname
+    hostname=$(echo "$PORTAL_URL" | sed -E 's|https?://([^/:]+).*|\1|')
+    if [ -z "$hostname" ]; then
+        return 1
+    fi
+    if command -v host >/dev/null 2>&1 && host "$hostname" >/dev/null 2>&1; then
+        return 0
+    fi
+    # Fallback: try a simple network check
+    if ping -c1 -W2 8.8.8.8 >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# Check if a user is still valid on LLNG
+check_user_valid() {
+    local user="$1"
+    local auth_header=""
+    if [ -n "${SERVER_TOKEN:-}" ]; then
+        auth_header="Authorization: Bearer $SERVER_TOKEN"
+    fi
+
+    local payload
+    payload=$(jq -n --arg u "$user" '{user: $u}')
+
+    local response
+    response=$(curl -sf -m 10 \
+        -H "Content-Type: application/json" \
+        ${auth_header:+-H "$auth_header"} \
+        -d "$payload" \
+        "${PORTAL_URL}/pam/userinfo" 2>/dev/null) || return 1
+
+    # Check if user is found
+    local found
+    found=$(echo "$response" | jq -r '.found // empty' 2>/dev/null)
+    if [ "$found" = "true" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Get age of offline credential cache for a user
+get_cache_age() {
+    local user="$1"
+    local marker_file="$MARKER_DIR/$user"
+    if [ -f "$marker_file" ]; then
+        local marker_time
+        marker_time=$(cat "$marker_file" 2>/dev/null | head -1)
+        if [ -n "$marker_time" ]; then
+            local now
+            now=$(date +%s)
+            echo $(( now - marker_time ))
+            return
+        fi
+    fi
+    echo 0
+}
+
+# Revalidate all offline sessions
+revalidate_sessions() {
+    if [ ! -d "$MARKER_DIR" ]; then
+        return
+    fi
+
+    local found=false
+    for marker_path in "$MARKER_DIR"/*; do
+        [ -e "$marker_path" ] || continue
+        found=true
+        break
+    done
+    if [ "$found" = "false" ]; then
+        return
+    fi
+
+    for marker_path in "$MARKER_DIR"/*; do
+        [ -e "$marker_path" ] || continue
+        local user_file
+        user_file=$(basename "$marker_path")
+
+        # Sanitize: skip files with dots or slashes
+        case "$user_file" in
+            *.* ) continue ;;
+        esac
+
+        local user="$user_file"
+        log_debug "Checking offline session for user: $user"
+
+        # Check if user still has an active session
+        local has_session=false
+        while IFS= read -r line; do
+            local session_user
+            session_user=$(loginctl show-session "$line" -p Name --value 2>/dev/null) || continue
+            if [ "$session_user" = "$user" ]; then
+                has_session=true
+                break
+            fi
+        done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}')
+
+        if [ "$has_session" = "false" ]; then
+            # No active session - clean up marker
+            log_debug "No active session for $user, removing marker"
+            rm -f "$MARKER_DIR/$user"
+            continue
+        fi
+
+        # Check if user is still valid on LLNG
+        if check_user_valid "$user"; then
+            log_debug "User $user is valid on LLNG"
+
+            # Check cache age
+            local cache_age
+            cache_age=$(get_cache_age "$user")
+            if [ "$cache_age" -gt "$REVALIDATION_GRACE" ]; then
+                log_info "User $user: offline cache age ($cache_age seconds) exceeds grace period ($REVALIDATION_GRACE seconds), forcing online re-auth"
+                # Write user to force_online file with locking and deduplication
+                {
+                    flock -x 200
+                    if ! grep -qxF "$user" "$FORCE_ONLINE_FILE" 2>/dev/null; then
+                        printf '%s\n' "$user" >> "$FORCE_ONLINE_FILE"
+                    fi
+                } 200>"$FORCE_ONLINE_LOCK"
+            fi
+        else
+            # User no longer valid - terminate session
+            log_crit "User $user no longer valid on LLNG, terminating session"
+
+            while IFS= read -r line; do
+                local session_id
+                session_id=$(echo "$line" | awk '{print $1}')
+                local session_user
+                session_user=$(loginctl show-session "$session_id" -p Name --value 2>/dev/null) || continue
+                if [ "$session_user" = "$user" ]; then
+                    log_crit "Terminating session $session_id for revoked user $user"
+                    loginctl terminate-session "$session_id" 2>/dev/null || true
+                fi
+            done < <(loginctl list-sessions --no-legend 2>/dev/null)
+
+            # Clean up marker
+            rm -f "$MARKER_DIR/$user"
+        fi
+    done
+}
+
+# Part D: Handle network up but SSO unreachable (anti-firewall-bypass)
+handle_sso_unreachable() {
+    local now
+    now=$(date +%s)
+
+    if [ "$sso_unreachable_since" -eq 0 ]; then
+        sso_unreachable_since=$now
+        log_warn "SSO portal unreachable despite network being available"
+        return
+    fi
+
+    local unreachable_duration=$(( now - sso_unreachable_since ))
+    if [ "$unreachable_duration" -ge "$MAX_SSO_UNREACHABLE" ]; then
+        log_crit "SSO portal unreachable for ${unreachable_duration}s despite network, terminating all offline sessions"
+
+        if [ -d "$MARKER_DIR" ]; then
+            for marker_path in "$MARKER_DIR"/*; do
+                [ -e "$marker_path" ] || continue
+                local user_file
+                user_file=$(basename "$marker_path")
+                case "$user_file" in
+                    *.* ) continue ;;
+                esac
+
+                local user="$user_file"
+                log_crit "Terminating offline session for $user (SSO unreachable for ${unreachable_duration}s)"
+
+                while IFS= read -r line; do
+                    local session_id
+                    session_id=$(echo "$line" | awk '{print $1}')
+                    local session_user
+                    session_user=$(loginctl show-session "$session_id" -p Name --value 2>/dev/null) || continue
+                    if [ "$session_user" = "$user" ]; then
+                        loginctl terminate-session "$session_id" 2>/dev/null || true
+                    fi
+                done < <(loginctl list-sessions --no-legend 2>/dev/null)
+
+                rm -f "$MARKER_DIR/$user"
+            done
+        fi
+    else
+        log_warn "SSO portal unreachable for ${unreachable_duration}s (max: ${MAX_SSO_UNREACHABLE}s)"
+    fi
+}
+
+# Main loop
+main() {
+    log_info "Starting ob-session-monitor"
+
+    # Read configuration
+    read_config
+
+    if [ -z "${PORTAL_URL:-}" ]; then
+        log_crit "portal_url not configured, exiting"
+        exit 1
+    fi
+
+    # Validate portal URL format
+    case "$PORTAL_URL" in
+        https://*|http://*)
+            ;;
+        *)
+            log_crit "Invalid portal_url format (must start with http:// or https://): $PORTAL_URL"
+            exit 1
+            ;;
+    esac
+
+    log_info "Portal URL: $PORTAL_URL"
+    log_info "Revalidation grace period: ${REVALIDATION_GRACE}s"
+    log_info "Max SSO unreachable: ${MAX_SSO_UNREACHABLE}s"
+
+    # Create marker directory if it doesn't exist
+    mkdir -p "$MARKER_DIR"
+    chmod 700 "$MARKER_DIR"
+
+    while true; do
+        # Check network and SSO separately
+        network_up=false
+        sso_up=false
+
+        if check_network; then
+            network_up=true
+        fi
+
+        if check_portal; then
+            sso_up=true
+            # Reset SSO unreachable counter
+            if [ "$sso_unreachable_since" -gt 0 ]; then
+                log_info "SSO portal is reachable again"
+                sso_unreachable_since=0
+            fi
+        fi
+
+        if [ "$network_up" = "true" ] && [ "$sso_up" = "true" ]; then
+            # Network and SSO both up: revalidate offline sessions
+            revalidate_sessions
+        elif [ "$network_up" = "true" ] && [ "$sso_up" = "false" ]; then
+            # Network up but SSO down: potential firewall bypass (Part D)
+            handle_sso_unreachable
+        else
+            # Network down: normal offline mode, do nothing
+            log_debug "Network unavailable, skipping revalidation"
+            sso_unreachable_since=0
+        fi
+
+        sleep "$POLL_INTERVAL"
+    done
+}
+
+main "$@"
