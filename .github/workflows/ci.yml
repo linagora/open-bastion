@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop, desktop-sso ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main, desktop-sso ]
 
