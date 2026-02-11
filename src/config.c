@@ -145,6 +145,7 @@ void config_init(pam_openbastion_config_t *config)
     config->offline_cache_ttl = 604800;  /* 7 days */
     config->offline_cache_max_failures = 5;
     config->offline_cache_lockout = 300;  /* 5 minutes */
+    config->offline_cache_key_file = NULL;  /* Default: /etc/open-bastion/cache.key */
 
     /* Offline session revalidation - enabled by default */
     config->offline_revalidation_enabled = true;
@@ -221,6 +222,7 @@ void config_free(pam_openbastion_config_t *config)
 
     /* Offline credential cache */
     free(config->offline_cache_dir);
+    free(config->offline_cache_key_file);
 
     /* Audit settings */
     free(config->audit_log_file);
@@ -597,6 +599,9 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     }
     else if (strcmp(key, "offline_cache_lockout") == 0) {
         config->offline_cache_lockout = parse_int(value, 300, 60, 86400);  /* 1 min to 24 hours */
+    }
+    else if (strcmp(key, "offline_cache_key_file") == 0) {
+        SET_STRING_FIELD(config->offline_cache_key_file, value, key);
     }
     else if (strcmp(key, "offline_revalidation_enabled") == 0) {
         config->offline_revalidation_enabled = parse_bool(value);

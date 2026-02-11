@@ -34,7 +34,7 @@ Add the following options to `/etc/open-bastion/openbastion.conf`:
 
 ```ini
 # Enable offline credential caching
-auth_cache_enabled = true
+offline_cache_enabled = true
 
 # Directory for credential cache files (default: /var/cache/open-bastion/credentials)
 offline_cache_dir = /var/cache/open-bastion/credentials
@@ -55,7 +55,7 @@ auth sufficient pam_openbastion.so oauth2_token_auth offline_cache
 auth sufficient pam_openbastion.so oauth2_token_auth no_offline_cache
 ```
 
-Or via the configuration file with `auth_cache_enabled = true`.
+Or via the configuration file with `offline_cache_enabled = true`.
 
 ### Directory Permissions
 
@@ -263,7 +263,7 @@ For monitoring systems, consider tracking:
 
 1. Check if offline cache is enabled:
    ```bash
-   grep auth_cache_enabled /etc/open-bastion/openbastion.conf
+   grep offline_cache_enabled /etc/open-bastion/openbastion.conf
    ```
 
 2. Verify user has cached credentials:
@@ -303,7 +303,7 @@ For monitoring systems, consider tracking:
 Credentials are only cached after a successful online authentication. Ensure:
 
 1. User has logged in successfully while online
-2. The `auth_cache_enabled` option is set to `true` in the config
+2. The `offline_cache_enabled` option is set to `true` in the config
 3. The cache directory is writable by root
 4. The key file exists (`/etc/open-bastion/cache.key`)
 

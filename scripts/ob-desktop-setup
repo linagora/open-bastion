@@ -299,8 +299,9 @@ cache_enabled = true
 cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
-# Offline mode
-auth_cache_enabled = $OFFLINE_MODE
+# Offline credential cache
+offline_cache_enabled = $OFFLINE_MODE
+offline_cache_dir = /var/cache/open-bastion/credentials
 
 # Logging
 log_level = warn
@@ -392,8 +393,8 @@ create_directories() {
     chmod 750 /var/cache/open-bastion
 
     if $OFFLINE_MODE; then
-        mkdir -p /var/cache/open-bastion/auth
-        chmod 700 /var/cache/open-bastion/auth
+        mkdir -p /var/cache/open-bastion/credentials
+        chmod 700 /var/cache/open-bastion/credentials
 
         # Generate encryption key for offline credential cache
         local key_file="${OB_CONFIG_DIR}/cache.key"
