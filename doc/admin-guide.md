@@ -505,10 +505,18 @@ ls -la /home/$USER
 
 ## Server Groups Reference
 
-Configure server groups in LLNG Manager:
+Configure server groups in `/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
 
-```
-General Parameters > Plugins > PAM Access > Server Groups
+```ini
+[portal]
+pamAccessServerGroups = { \
+    bastion     => '$hGroup->{employees}', \
+    production  => '$hGroup->{sre} or $hGroup->{oncall}', \
+    staging     => '$hGroup->{sre} or $hGroup->{dev}', \
+    development => '$hGroup->{dev}', \
+    database    => '$hGroup->{dba}', \
+    default     => '0' \
+}
 ```
 
 Example configuration:

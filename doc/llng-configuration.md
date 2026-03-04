@@ -155,15 +155,18 @@ sudo systemctl restart apache2  # if using mod_perl
 
 Server groups allow different authorization rules for different server categories.
 
-### Configure in LLNG Manager
+### Configure in lemonldap-ng.ini
 
-```
-General Parameters > Plugins > PAM Access > Server Groups
+In `/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
 
-production => $hGroup->{ops}
-staging    => $hGroup->{ops} or $hGroup->{dev}
-dev        => $hGroup->{dev}
-default    => 1
+```ini
+[portal]
+pamAccessServerGroups = { \
+    production => '$hGroup->{ops}', \
+    staging    => '$hGroup->{ops} or $hGroup->{dev}', \
+    dev        => '$hGroup->{dev}', \
+    default    => '1' \
+}
 ```
 
 ### Configure on Each Server

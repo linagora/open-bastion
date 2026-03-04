@@ -162,17 +162,20 @@ The bastion JWT contains:
 
 ## Server Groups
 
-Server groups allow different authorization rules for different environments:
+Server groups allow different authorization rules for different environments.
 
-**LLNG Manager Configuration** → Server Groups:
+Configure in `/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
 
-| Group Name    | Authorization Rule                    |
-| ------------- | ------------------------------------- |
-| `production`  | `$hGroup->{sre} or $hGroup->{oncall}` |
-| `staging`     | `$hGroup->{sre} or $hGroup->{dev}`    |
-| `development` | `$hGroup->{dev}`                      |
-| `bastion`     | `$hGroup->{employees}`                |
-| `default`     | `0` (deny all)                        |
+```ini
+[portal]
+pamAccessServerGroups = { \
+    production  => '$hGroup->{sre} or $hGroup->{oncall}', \
+    staging     => '$hGroup->{sre} or $hGroup->{dev}', \
+    development => '$hGroup->{dev}', \
+    bastion     => '$hGroup->{employees}', \
+    default     => '0' \
+}
+```
 
 Each server enrolls with its server_group:
 
