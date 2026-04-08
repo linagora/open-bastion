@@ -85,8 +85,8 @@ Additional and optional parameters that can be inserted into `lemonldap-ng.ini`,
 | Parameter                                       | Default      | Description                                                                                        |
 | ----------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
 | `oidcServiceDeviceAuthorizationExpiration`      | `600` (10mn) | Device authorization expiration time                                                               |
-| `oidcServiceDeviceAuthorizationPollingInterval` | `5`          | Polling interval in seconds                                                                        |
-| `oidcServiceDeviceAuthorizationUserCodeLength`  | `8`          | Length of user code                                                                                |
+| `oidcServiceDeviceAuthorizationPollingInterval` | `5`          | Polling interval in seconds (clients polling faster get `slow_down` errors)                        |
+| `oidcServiceDeviceAuthorizationUserCodeLength`  | `8`          | Length of user code (base-20 charset, collision-safe)                                              |
 | `portalDisplayPamAccess`                        | `0`          | Set to 1 (or a rule) to display PAM tab                                                            |
 | `pamAccessRp`                                   | `pam-access` | OIDC Relying Party name                                                                            |
 | `pamAccessTokenDuration`                        | `600` (10mn) | Token duration                                                                                     |
@@ -99,6 +99,34 @@ Additional and optional parameters that can be inserted into `lemonldap-ng.ini`,
 | `pamAccessOfflineEnabled`                       | `0`          | Enable offline mode                                                                                |
 | `pamAccessHeartbeatInterval`                    | `300` (5mn)  | Heartbeat interval                                                                                 |
 | `pamAccessManagedGroups`                        | `{}`         | Unix groups managed by LLNG per server group (see [Group Synchronization](#group-synchronization)) |
+
+### Per-RP Device Authorization Parameters
+
+These are set in the LLNG Manager on each OIDC Relying Party:
+
+| Parameter                                       | Default | Description                                                               |
+| ----------------------------------------------- | ------- | ------------------------------------------------------------------------- |
+| `oidcRPMetaDataOptionsAllowDeviceAuthorization` | `0`     | Enable device grant. Can be a rule expression to restrict who can approve |
+| `oidcRPMetaDataOptionsDeviceOwnership`          | (empty) | Set to `organization` for organizational device mode (see below)          |
+
+### Organizational Device Enrollment
+
+When `oidcRPMetaDataOptionsDeviceOwnership` is set to `organization` on an RP, the **OIDCDeviceOrganization** plugin changes the device authorization behavior:
+
+- An administrator approves the device normally through the `/device` page
+- The resulting tokens identify the **client application** (client_id) instead of the approving admin
+- The device token survives the admin's session expiration or account removal
+- Refresh tokens remain valid independently of the admin's session
+
+This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
+
+### Device Authorization Security Features
+
+- **CSRF protection**: the `/device` verification form uses a one-time token
+- **Rate limiting**: clients polling faster than the configured interval receive `slow_down` errors with incremental backoff
+- **User code collision detection**: codes are regenerated on collision (up to 10 retries)
+- **Per-RP access rules**: `AllowDeviceAuthorization` accepts boolean expressions to restrict which users can approve devices
+- **CrowdSec integration**: invalid user_code attempts are reported to CrowdSec (scenario `llng/device-auth-bruteforce`)
 
 When offline mode is enabled, the server-side cache is protected by
 [Cache Brute-Force Protection](security.md#cache-brute-force-protection).
