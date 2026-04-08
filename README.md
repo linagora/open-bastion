@@ -226,7 +226,7 @@ sudo ob-enroll
 
 ## Requirements
 
-- A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](./llng-plugin) installed and enabled
+- A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](https://linagora.github.io/lemonldap-ng-plugins/) installed and enabled
 - libcurl, json-c, OpenSSL, libkeyutils, PAM development headers
 - curl and jq (for enrollment script)
 

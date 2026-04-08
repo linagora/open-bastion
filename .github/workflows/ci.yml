@@ -234,19 +234,6 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y jq curl openssh-client
 
-    - name: Clone LLNG plugins
-      run: |
-        # Clone llng-plugin for the demo
-        git clone --depth 1 https://github.com/linagora/llng-docker.git /tmp/llng-docker || true
-        if [ -d /tmp/llng-docker/llng-plugin ]; then
-          cp -r /tmp/llng-docker/llng-plugin ./llng-plugin
-        else
-          # Create minimal plugin structure if not available
-          mkdir -p llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins
-          mkdir -p llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap
-          mkdir -p llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js
-        fi
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 

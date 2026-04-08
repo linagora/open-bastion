@@ -99,7 +99,7 @@
       "oidcRPMetaDataOptionsClientAuthenticationMethod": "client_secret_jwt",
       "oidcRPMetaDataOptionsAccessTokenExpiration": 86400,
       "oidcRPMetaDataOptionsRefreshToken": 1,
-      "oidcRPMetaDataOptionsAllowDeviceAuthorizationGrant": 1
+      "oidcRPMetaDataOptionsAllowDeviceAuthorization": 1
     },
     "ssh-cert": {
       "oidcRPMetaDataOptionsDisplayName": "SSH Certificate",
@@ -107,7 +107,7 @@
       "oidcRPMetaDataOptionsClientSecret": "",
       "oidcRPMetaDataOptionsPublic": 1,
       "oidcRPMetaDataOptionsAccessTokenExpiration": 300,
-      "oidcRPMetaDataOptionsAllowDeviceAuthorizationGrant": 1
+      "oidcRPMetaDataOptionsAllowDeviceAuthorization": 1
     }
   },
 
@@ -126,7 +126,7 @@
   "oidcOPMetaDataJSON": {},
   "oidcOPMetaDataJWKS": {},
 
-  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization ::Plugins::SSHCA",
+  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization ::Plugins::OIDCDeviceOrganization ::Plugins::SSHCA",
 
   "portalDisplayPamAccess": 1,
   "portalDisplaySshCa": 1,

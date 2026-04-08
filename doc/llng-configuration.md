@@ -4,16 +4,38 @@ Before deploying the PAM module on your servers, you need to configure LemonLDAP
 
 ## Step 1: Install the Plugins
 
-Copy the plugins from the [`llng-plugin`](../llng-plugin) directory to your LemonLDAP::NG installation:
+The Open Bastion plugins are available from the [Linagora plugin store](https://linagora.github.io/lemonldap-ng-plugins/).
+
+### Option A: Debian/Ubuntu (recommended)
+
+Add the Linagora plugin repository and install:
 
 ```bash
-sudo cp -r llng-plugin/usr/share/* /usr/share/
+# Add repository key
+curl -fsSL https://linagora.github.io/lemonldap-ng-plugins/store-key.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/linagora-llng-plugins.gpg
+
+# Add repository
+echo "deb [signed-by=/usr/share/keyrings/linagora-llng-plugins.gpg] https://linagora.github.io/lemonldap-ng-plugins/debian stable main" \
+  | sudo tee /etc/apt/sources.list.d/llng-plugins.list
+
+# Install
+sudo apt-get update
+sudo apt-get install lemonldap-ng-plugin-pam-access \
+                     lemonldap-ng-plugin-oidc-device-authorization \
+                     lemonldap-ng-plugin-oidc-device-organization \
+                     lemonldap-ng-plugin-ssh-ca  # optional
 ```
 
-This installs the 3 Open Bastion plugins for LemonLDAP::NG:
+### Option B: Docker
+
+The `yadd/lemonldap-ng-portal` images already include all plugins. No extra installation needed — just enable them via `customPlugins` (see Step 3).
+
+### Plugins used by Open Bastion
 
 - **PamAccess** - Main plugin: token generation interface and authorization endpoints (`/pam/authorize`, `/pam/bastion-token`)
 - **OIDCDeviceAuthorization** - Server enrollment via OAuth 2.0 Device Authorization Grant (RFC 8628)
+- **OIDCDeviceOrganization** - Extension for organizational device enrollment (tokens identify the device, not the approving admin)
 - **SSHCA** _(optional)_ - SSH Certificate Authority for certificate-based authentication
 
 ## Step 2: Create the OIDC Relying Party
@@ -35,14 +57,14 @@ Use `customPlugins` inside `lemonldap-ng.ini`, section `[portal]`:
 
 ```ini
 [portal]
-customPlugins = ::Plugin::OIDCDeviceAuthorization, ::Plugins::PamAccess
+customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess
 ```
 
 - with SSHCA
 
 ```ini
 [portal]
-customPlugins = ::Plugin::OIDCDeviceAuthorization, ::Plugins::PamAccess, ::Plugins::SSHCA
+customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess, ::Plugins::SSHCA
 ```
 
 ## Step 4: Plugin Parameters

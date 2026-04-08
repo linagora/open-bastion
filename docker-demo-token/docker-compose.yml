@@ -22,17 +22,7 @@ services:
     ports:
       - "80:8080"
     volumes:
-      # Custom plugins (individual files to not override existing plugins)
-      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:ro
-      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:ro
-      # Templates for PAM Access and Device Authorization
-      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:ro
-      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:ro
-      # JavaScript for PAM Access
-      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:ro
-      # Configuration
       - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
-      # No persistent volumes - fresh start for each demo
     environment:
       - SSODOMAIN=example.com
       - PORTAL=http://localhost

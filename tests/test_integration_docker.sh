@@ -413,6 +413,7 @@ test_ssh_connection_bastion() {
     # Try SSH connection
     local output
     output=$(ssh -i "${TEST_KEY}" \
+                 -o IdentitiesOnly=yes \
                  -o StrictHostKeyChecking=no \
                  -o UserKnownHostsFile=/dev/null \
                  -o ConnectTimeout=10 \
