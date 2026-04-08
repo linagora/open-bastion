@@ -19,12 +19,12 @@ curl -fsSL https://linagora.github.io/lemonldap-ng-plugins/store-key.asc \
 echo "deb [signed-by=/usr/share/keyrings/linagora-llng-plugins.gpg] https://linagora.github.io/lemonldap-ng-plugins/debian stable main" \
   | sudo tee /etc/apt/sources.list.d/llng-plugins.list
 
-# Install
+# Install (pick pam-access and/or ssh-ca depending on your auth mode)
 sudo apt-get update
-sudo apt-get install lemonldap-ng-plugin-pam-access \
-                     lemonldap-ng-plugin-oidc-device-authorization \
+sudo apt-get install lemonldap-ng-plugin-oidc-device-authorization \
                      lemonldap-ng-plugin-oidc-device-organization \
-                     lemonldap-ng-plugin-ssh-ca  # optional
+                     lemonldap-ng-plugin-pam-access \  # token-based auth
+                     lemonldap-ng-plugin-ssh-ca         # certificate-based auth
 ```
 
 ### Option B: Docker
@@ -33,10 +33,12 @@ The `yadd/lemonldap-ng-portal` images already include all plugins. No extra inst
 
 ### Plugins used by Open Bastion
 
-- **PamAccess** - Main plugin: token generation interface and authorization endpoints (`/pam/authorize`, `/pam/bastion-token`)
 - **OIDCDeviceAuthorization** - Server enrollment via OAuth 2.0 Device Authorization Grant (RFC 8628)
 - **OIDCDeviceOrganization** - Extension for organizational device enrollment (tokens identify the device, not the approving admin)
-- **SSHCA** _(optional)_ - SSH Certificate Authority for certificate-based authentication
+- **PamAccess** _(optional)_ - Token-based authentication: authorization endpoints (`/pam/authorize`, `/pam/bastion-token`)
+- **SSHCA** _(optional)_ - Certificate-based authentication: SSH Certificate Authority
+
+> You need at least one of **PamAccess** or **SSHCA** depending on your authentication mode. See [PAM Authentication Modes](pam-modes.md).
 
 ## Step 2: Create the OIDC Relying Party
 
@@ -53,14 +55,21 @@ In the LLNG Manager, create a new OIDC Relying Party:
 
 Use `customPlugins` inside `lemonldap-ng.ini`, section `[portal]`:
 
-- without SSHCA:
+- Token-based authentication (PamAccess only):
 
 ```ini
 [portal]
 customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess
 ```
 
-- with SSHCA
+- Certificate-based authentication (SSHCA only):
+
+```ini
+[portal]
+customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::SSHCA
+```
+
+- Both:
 
 ```ini
 [portal]
