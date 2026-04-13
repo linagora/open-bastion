@@ -1,19 +1,18 @@
 # Offboarding d'un Administrateur SSH
 
-Ce document décrit la procédure de révocation des accès lorsqu'un administrateur SSH quitte l'entreprise ou change de service.
+Ce document décrit la procédure de révocation des accès lorsqu'un administrateur SSH quitte l'entreprise ou change de service. Il s'applique à l'architecture Mode E (sécurité maximale).
 
 ## Contexte
 
-Un administrateur SSH (appelé "A" dans ce document) dispose généralement de :
+Un administrateur SSH (appelé "A" dans ce document) dispose de :
 
-| Accès           | Description                                             |
-| --------------- | ------------------------------------------------------- |
-| Compte annuaire | Compte LDAP/AD avec appartenance aux groupes autorisés  |
-| `client_secret` | Secret du client OIDC utilisé pour les enrôlements      |
-| Clés SSH        | Clé privée SSH + clé publique déployée sur les serveurs |
-| Certificats SSH | Si SSH CA : certificats signés par la CA LLNG           |
-| Accès réseau    | VPN ou accès réseau interne vers les serveurs           |
-| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés   |
+| Accès           | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| Compte LLNG     | Compte LDAP/AD avec appartenance aux groupes autorisés |
+| `client_secret` | Secret du client OIDC utilisé pour les enrôlements     |
+| Certificat SSH  | Certificat signé par la CA LLNG (durée de vie : 1 an)  |
+| Accès réseau    | VPN ou accès réseau interne vers le bastion            |
+| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés  |
 
 ## Principe : Défense en Profondeur
 
@@ -25,12 +24,19 @@ La sécurité repose sur plusieurs couches indépendantes. La compromission d'un
 └─────────────────────────────────────────────────────────────┘
                             ▲
                             │ Toutes les couches doivent être OK
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-   ┌────┴────┐        ┌─────┴─────┐       ┌─────┴─────┐
-   │ Réseau  │        │   LLNG    │       │    SSH    │
-   │ (VPN)   │        │ (authent) │       │ (clé/cert)│
-   └─────────┘        └───────────┘       └───────────┘
+        ┌───────────────────┼──────────────────────┐
+        │                   │                      │
+   ┌────┴────┐        ┌─────┴─────┐         ┌──────┴──────┐
+   │ Réseau  │        │   LLNG    │         │   SSH CA    │
+   │  (VPN)  │        │  (authent │         │  (certificat│
+   └─────────┘        │ + autori) │         │  signé+KRL) │
+                      └─────┬─────┘         └─────────────┘
+                            │
+                       ┌────┴────┐
+                       │  sudo   │
+                       │ (token  │
+                       │  LLNG)  │
+                       └─────────┘
 ```
 
 **Avantage** : La révocation d'une seule couche bloque l'accès, évitant les actions d'urgence sur toutes les couches simultanément.
@@ -73,6 +79,8 @@ EOF
 - A ne peut plus s'authentifier sur le portail LLNG
 - A ne peut plus approuver de nouveaux enrôlements
 - `/pam/authorize` refusera A pour toute connexion SSH
+- A ne peut plus obtenir un nouveau certificat SSH
+- Les commandes `sudo` nécessitant un token LLNG seront bloquées
 
 #### 1.2 Invalidation des Sessions LLNG Actives
 
@@ -86,54 +94,15 @@ lemonldap-ng-sessions search --uid admin-a | \
 
 Retirer les droits VPN de A auprès de l'équipe réseau.
 
-**Effet** : Même avec des credentials valides, A ne peut plus atteindre les serveurs SSH.
+**Effet** : Même avec des credentials valides, A ne peut plus atteindre le bastion SSH.
 
 ---
 
-### Phase 2 : Révocation SSH (selon l'architecture)
+### Phase 2 : Révocation des Certificats SSH
 
-#### Architecture A/C : Clés SSH Classiques
+En Mode E, les certificats SSH ont une durée de vie d'un an. **L'attente de l'expiration naturelle n'est pas une option** : la révocation via KRL est obligatoire.
 
-**Action** : Supprimer la clé publique de A de tous les serveurs
-
-```bash
-# Script à exécuter sur chaque serveur de la zone
-# Ou via Ansible/Puppet/Chef
-
-# Identifier la clé de A (par commentaire ou fingerprint)
-grep -l "admin-a@" /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys 2>/dev/null
-
-# Supprimer la clé
-for f in $(grep -l "admin-a@" /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys 2>/dev/null); do
-    sed -i '/admin-a@/d' "$f"
-done
-```
-
-**Alternative avec Ansible** :
-
-```yaml
-# playbook-revoke-key.yml
-- hosts: zone_prod
-  tasks:
-    - name: Remove admin-a SSH key
-      ansible.posix.authorized_key:
-        user: "{{ item }}"
-        key: "ssh-rsa AAAA... admin-a@example.com"
-        state: absent
-      loop:
-        - root
-        - deploy
-```
-
-#### Architecture B/D : Certificats SSH (SSH CA)
-
-Avec SSH CA, la révocation est centralisée et plus simple.
-
-**Option 1 : Attendre l'expiration (recommandé si durée courte)**
-
-Si les certificats ont une durée de vie courte (30-60 minutes), il suffit d'attendre leur expiration naturelle. La révocation LLNG (Phase 1) empêche A d'obtenir de nouveaux certificats.
-
-**Option 2 : Révocation via l'interface d'administration LLNG**
+**Option 1 : Révocation via l'interface d'administration LLNG (recommandée)**
 
 Le plugin SSH CA de LLNG fournit une interface d'administration pour révoquer les certificats :
 
@@ -153,7 +122,7 @@ Le plugin SSH CA de LLNG fournit une interface d'administration pour révoquer l
 
 > **Note** : L'accès à l'interface d'administration est contrôlé par la règle `sshCaAdminRule` dans la configuration LLNG.
 
-**Option 3 : Révocation manuelle via KRL**
+**Option 2 : Révocation manuelle via KRL**
 
 Pour une révocation en ligne de commande :
 
@@ -231,46 +200,15 @@ Indépendamment des offboardings, planifier une rotation régulière :
 
 ---
 
-## Tableau Récapitulatif par Architecture
+## Tableau Récapitulatif
 
-### Architecture A : Serveur Isolé (Clés SSH)
-
-| Phase | Action                   | Délai      | Effet                       |
-| ----- | ------------------------ | ---------- | --------------------------- |
-| 1     | Désactiver compte LLNG   | Immédiat   | Bloque `/pam/authorize`     |
-| 1     | Révoquer VPN             | Immédiat   | Bloque accès réseau         |
-| 2     | Supprimer clé SSH        | < 24h      | Bloque authentification SSH |
-| 3     | Rotation `client_secret` | < 30 jours | Limite exposition           |
-
-### Architecture B : Serveur + SSH CA
-
-| Phase | Action                    | Délai      | Effet                                        |
-| ----- | ------------------------- | ---------- | -------------------------------------------- |
-| 1     | Désactiver compte LLNG    | Immédiat   | Bloque nouveaux certificats                  |
-| 1     | Révoquer VPN              | Immédiat   | Bloque accès réseau                          |
-| 2     | Révoquer via `/ssh/admin` | Immédiat   | Ajoute certificats à la KRL                  |
-| 2     | Expiration naturelle      | 30-60 min  | Certificats invalides (si pas de révocation) |
-| 3     | Rotation `client_secret`  | < 30 jours | Limite exposition                            |
-
-### Architecture C : Bastion + Backends (Clés SSH)
-
-| Phase | Action                       | Délai      | Effet                   |
-| ----- | ---------------------------- | ---------- | ----------------------- |
-| 1     | Désactiver compte LLNG       | Immédiat   | Bloque `/pam/authorize` |
-| 1     | Révoquer VPN                 | Immédiat   | Bloque accès bastion    |
-| 2     | Supprimer clé SSH (bastion)  | < 24h      | Bloque accès bastion    |
-| 2     | Supprimer clé SSH (backends) | < 24h      | Défense en profondeur   |
-| 3     | Rotation `client_secret`     | < 30 jours | Limite exposition       |
-
-### Architecture D : Bastion + SSH CA
-
-| Phase | Action                    | Délai      | Effet                                        |
-| ----- | ------------------------- | ---------- | -------------------------------------------- |
-| 1     | Désactiver compte LLNG    | Immédiat   | Bloque nouveaux certificats                  |
-| 1     | Révoquer VPN              | Immédiat   | Bloque accès bastion                         |
-| 2     | Révoquer via `/ssh/admin` | Immédiat   | Ajoute certificats à la KRL                  |
-| 2     | Expiration naturelle      | 30-60 min  | Certificats invalides (si pas de révocation) |
-| 3     | Rotation `client_secret`  | < 30 jours | Limite exposition                            |
+| Phase | Action                                | Délai      | Effet                                                 |
+| ----- | ------------------------------------- | ---------- | ----------------------------------------------------- |
+| 1     | Désactiver compte LLNG                | Immédiat   | Bloque `/pam/authorize` + nouveaux certificats + sudo |
+| 1     | Révoquer VPN                          | Immédiat   | Bloque accès bastion                                  |
+| 2     | Révoquer certificats via `/ssh/admin` | Immédiat   | Ajoute à la KRL                                       |
+| 2     | Propager KRL aux serveurs             | < 30 min   | Bloque certificats révoqués                           |
+| 3     | Rotation `client_secret`              | < 30 jours | Limite exposition                                     |
 
 ---
 
@@ -281,12 +219,13 @@ Indépendamment des offboardings, planifier une rotation régulière :
 - [ ] Compte A désactivé dans l'annuaire LDAP/AD
 - [ ] Sessions LLNG de A supprimées
 - [ ] Accès VPN de A révoqué
-- [ ] (Si SSH CA) Certificats révoqués via `/ssh/admin`
+- [ ] Certificats SSH de A révoqués via `/ssh/admin`
 - [ ] Équipe informée de ne pas réactiver le compte
 
 ### J+1 à J+7
 
-- [ ] (Si clés SSH) Clés publiques de A supprimées de tous les serveurs
+- [ ] KRL propagée manuellement sur tous les serveurs de la zone
+- [ ] Vérification que la KRL est à jour sur chaque serveur (`ssh-keygen -Q -f /etc/ssh/revoked_keys <cert>`)
 - [ ] Audit des accès récents de A (logs SSH, logs LLNG)
 - [ ] Vérification qu'aucune session persistante n'existe
 
@@ -309,8 +248,9 @@ Répéter la procédure pour chaque zone (chaque `client_secret` distinct).
 En cas de suspicion que A a exfiltré des tokens ou tente activement d'accéder :
 
 1. **Urgence réseau** : Bloquer l'IP de A au niveau firewall
-2. **Rotation immédiate** : `client_secret` de toutes les zones accessibles par A
-3. **Invalidation tokens** : Utiliser `/admintokenrevoke` pour révoquer les `refresh_token` des machines
+2. **Révocation KRL immédiate** : Propager manuellement la KRL sur tous les serveurs
+3. **Rotation immédiate** : `client_secret` de toutes les zones accessibles par A
+4. **Invalidation tokens** : Utiliser `/admintokenrevoke` pour révoquer les `refresh_token` des machines
 
 ```bash
 # Révocation d'un refresh_token via l'API admin LLNG
@@ -326,7 +266,7 @@ S'assurer qu'un autre administrateur a les accès nécessaires AVANT de révoque
 
 - Accès au Manager LLNG
 - Accès au `client_secret` (ou capacité à en générer un nouveau)
-- Clé SSH ou certificat valide pour les serveurs
+- Certificat SSH valide ou capacité à en obtenir un
 
 ---
 

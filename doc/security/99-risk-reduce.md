@@ -1,42 +1,28 @@
-Pistes exploratoires pour améliorer la sécurité mais non implémentées.
+# Pistes d'Amélioration - Mode E (Sécurité Maximale)
 
-## Vue Globale
+## Matrice des Risques Résiduels (Mode E)
 
-### Matrice des Risques Après Remédiation (avec clients OIDC distincts + JWT bastion)
-
-| Impact ↓ / Probabilité → | 1 - Très improbable                                         | 2 - Peu probable |
-| ------------------------ | ----------------------------------------------------------- | ---------------- |
-| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                                       | R-SA1            |
-| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                                | R-S6             |
-| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12, R-S14 | R6, R-S8         |
-| **1 - Négligeable**      | R0, R13                                                     |                  |
+| Impact ↓ / Probabilité → | 1 - Très improbable                          | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                                  | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11                              | R-S6             |              |                   |
+| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14                               |                  |              |                   |
 
 **Zones de risque :**
 
-- Score ≥ 6 : Zone rouge (aucun risque dans cette zone après remédiation)
-- Score 4-5 : Zone jaune → R5, R-S1, R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8 (P=2, I=2), R-S6 (P=2, I=3)
-- Score ≤ 3 : Zone verte → Tous les autres risques (incluant R-S14 avec whitelist)
+- Score ≥ 6 : Zone rouge (aucun risque dans cette zone en Mode E)
+- Score 4-5 : Zone jaune → R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8 (P=2, I=2), R-S6 (P=2, I=3)
+- Score ≤ 3 : Zone verte → Tous les autres risques
 
-**Nouveaux risques identifiés (PR #64 - JWT bastion) :**
+**Risques éliminés par le Mode E :**
 
-- **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 - détection replay réduit P)
-- **R-S10** : Rotation des clés JWKS non propagée (P=1, I=1 - atténué par publication anticipée LLNG)
-
-**Risques spécifiques aux comptes de service :**
-
-- **R-SA1** : Vol de clé de compte de service (P=2, I=4 → I=3 avec monitoring)
-- **R-SA2** : Compromission du fichier de configuration (P=1, I=4 - atténué par vérifications embarquées)
-
-**Amélioration par intégration CrowdSec :**
-
-- **R-S1** : Protection renforcée contre brute-force (blocage IPs communautaires + auto-ban local)
-- **R-S6** : Détection comportementale sur le bastion (alertes centralisables via Crowdsieve)
+- **R-S1** : Supprimé (aucun mot de passe SSH accepté)
+- **R-S2** : Descendu à I=1 (clé SSH inutile sans certificat CA)
 
 Voir [01-enrollment.md](01-enrollment.md) et [02-ssh-connection.md](02-ssh-connection.md) pour les détails des risques et remédiations.
 
 Voir [03-offboarding.md](03-offboarding.md) pour la procédure de révocation des accès administrateurs.
-
-Voir la section "Comptes de Service" de [02-ssh-connection.md](02-ssh-connection.md) pour les risques spécifiques aux comptes de service.
 
 ---
 
@@ -74,13 +60,6 @@ Pistes pour réduire P :
 
 ## Pistes d'Amélioration - SSH
 
-### R-S1 _(P=1, I=4)_ - Authentification par mot de passe
-
-Pistes supplémentaires :
-
-1. Audit automatisé de la configuration sshd (compliance check)
-2. Alerting si `PasswordAuthentication yes` détecté
-
 ### R-S4 _(P=1, I=4)_ - Compromission de la CA SSH
 
 Pistes supplémentaires :
@@ -94,7 +73,7 @@ Pistes supplémentaires :
 Pistes pour réduire P à 1 :
 
 1. **Bastion éphémère** : Recréer le bastion régulièrement (immutable infrastructure)
-2. **Zero-trust** : Pas de shell sur le bastion, uniquement ProxyJump
+2. **Shell restreint** : Forcer `ob-ssh-proxy` comme unique commande autorisée sur le bastion (`ForceCommand` ou shell restreint)
 3. **Durcissement CIS** : Benchmark automatisé + remediation
 4. **EDR/monitoring renforcé** : Détection d'intrusion sur le bastion
 
@@ -134,3 +113,23 @@ Pistes supplémentaires (non implémentées) :
 Piste supplémentaire (optionnelle) :
 
 1. **Push de notification** : LLNG notifie les backends via webhook pour refresh immédiat (utile uniquement en cas de compromission)
+
+---
+
+## Pistes d'Amélioration - Spécifiques au Mode E
+
+### R-S15 _(P=1, I=2)_ - KRL non à jour
+
+Pistes pour réduire P à quasi-zéro :
+
+1. **Monitoring actif** : Alerte si le fichier KRL a plus d'1h sans mise à jour
+2. **Push de notification** : LLNG notifie les serveurs via webhook lors d'une révocation
+3. **Réduction de l'intervalle cron** : Passer de 30 min à 5-10 min pour les environnements critiques
+
+### R-S16 _(P=1, I=2)_ - Escalade sudo
+
+Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire). Pistes supplémentaires :
+
+1. **2FA obligatoire** : Exiger un second facteur pour l'obtention du token sudo
+2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
+3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité
