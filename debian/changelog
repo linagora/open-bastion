@@ -1,3 +1,17 @@
+open-bastion (0.1.2) unstable; urgency=medium
+
+  * Mode E: Maximum Security (SSO certs only + sudo PAM-access + KRL)
+  * --max-security option in ob-backend-setup and ob-bastion-setup
+  * docker-demo-maxsec: Docker demo for Mode E architecture
+  * CI integration tests for Mode E
+  * EBIOS security study refactored for maximum security target
+  * Fix OB_BASTION_JWT → LLNG_BASTION_JWT everywhere
+  * Fix AllowAgentForwarding on bastion (no instead of yes)
+  * Fix ProxyJump references: use ob-ssh-proxy for JWT injection
+  * KRL format validation (SSHKRL magic bytes check)
+
+ -- Xavier Guimard <xguimard@linagora.com>  Sun, 13 Apr 2026 12:00:00 +0200
+
 open-bastion (0.1.1) unstable; urgency=medium
 
   * Supplementary groups synchronization via managed_groups configuration
