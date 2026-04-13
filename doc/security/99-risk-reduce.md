@@ -73,7 +73,7 @@ Pistes supplémentaires :
 Pistes pour réduire P à 1 :
 
 1. **Bastion éphémère** : Recréer le bastion régulièrement (immutable infrastructure)
-2. **Zero-trust** : Pas de shell sur le bastion, uniquement ProxyJump
+2. **Shell restreint** : Forcer `ob-ssh-proxy` comme unique commande autorisée sur le bastion (`ForceCommand` ou shell restreint)
 3. **Durcissement CIS** : Benchmark automatisé + remediation
 4. **EDR/monitoring renforcé** : Détection d'intrusion sur le bastion
 

@@ -40,8 +40,8 @@ flowchart TB
         CA -->|Certificat signé| Client
 
         subgraph ConnectionFlow["Flux de connexion"]
-            Client[Client SSH<br/>cert signé CA] -->|1. ssh -J bastion backend| Bastion[Bastion<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none]
-            Bastion -->|2. ProxyJump| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>bastion_jwt_required]
+            Client[Client SSH<br/>cert signé CA] -->|1. ssh bastion| Bastion[Bastion<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none]
+            Bastion -->|2. ob-ssh-proxy + JWT| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>bastion_jwt_required]
         end
 
         LLNG -->|KRL toutes 30 min| KRL
@@ -75,19 +75,21 @@ sequenceDiagram
 
     Note over Client: 1x/an : ob-ssh-cert<br/>→ certificat signé CA
 
-    Client->>Bastion: 1. ssh -J bastion backend<br/>(présente certificat)
+    Client->>Bastion: 1. ssh dwho@bastion<br/>(présente certificat)
     Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
     Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion
     LLNG-->>Bastion: 4. authorized: true
-    Note over Bastion: 5. Génère JWT bastion<br/>(TTL 300s, target=backend)<br/>⚠ ob-ssh-proxy (pas ProxyJump natif)
-    Bastion->>Backend: 6. ob-ssh-proxy + LLNG_BASTION_JWT
-    Note over Backend: 7. Vérifie signature CA<br/>Vérifie KRL<br/>Vérifie JWT bastion (JWKS)
-    Backend->>LLNG: 8. PAM: /pam/authorize<br/>user=X, host=backend
-    LLNG-->>Backend: 9. authorized: true
-    Backend-->>Client: 10. Session SSH établie
+    Note over Client: 5. Sur le bastion :<br/>ob-ssh-proxy backend
+    Bastion->>LLNG: 6. ob-ssh-proxy demande JWT<br/>POST /pam/bastion-token
+    LLNG-->>Bastion: 7. JWT signé (TTL 300s,<br/>target=backend)
+    Bastion->>Backend: 8. ssh + SendEnv LLNG_BASTION_JWT
+    Note over Backend: 9. Vérifie signature CA<br/>Vérifie KRL<br/>Vérifie JWT bastion (JWKS)
+    Backend->>LLNG: 10. PAM: /pam/authorize<br/>user=X, host=backend
+    LLNG-->>Backend: 11. authorized: true
+    Backend-->>Client: 12. Session SSH établie
 ```
 
-> **Note sur ob-ssh-proxy vs ProxyJump natif :** La commande client utilise `ssh -J bastion backend` pour la transparence utilisateur, mais le bastion n'utilise **pas** le ProxyJump SSH natif pour le saut vers le backend. Il utilise `ob-ssh-proxy`, un proxy SSH custom qui injecte la variable d'environnement `LLNG_BASTION_JWT` dans la connexion vers le backend. Le ProxyJump natif SSH ne permet pas d'injecter des variables d'environnement, ce qui rendrait impossible la transmission du JWT d'authentification bastion→backend.
+> **Pourquoi ob-ssh-proxy et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité d'injecter un JWT. `ob-ssh-proxy` résout ce problème : il s'exécute **sur le bastion**, demande un JWT signé à LLNG (`/pam/bastion-token`), puis ouvre la connexion SSH vers le backend avec `SendEnv LLNG_BASTION_JWT`. Le backend vérifie ce JWT pour s'assurer que la connexion provient bien d'un bastion autorisé.
 
 #### 3. Escalade de privilèges (sudo)
 
@@ -393,8 +395,8 @@ ssh backend.internal.example.com
 # sshd: No supported authentication methods available (server sent: publickey)
 # ou : PAM: Bastion JWT required but not provided
 
-# Depuis le bastion via ProxyJump, doit fonctionner :
-ssh -J bastion backend.internal.example.com
+# Depuis le bastion via ob-ssh-proxy, doit fonctionner :
+ob-ssh-proxy backend.internal.example.com
 ```
 
 |                 |                    Score résiduel                     |
@@ -428,7 +430,7 @@ ssh -J bastion backend.internal.example.com
 **Facteurs atténuants :**
 
 - PAM LLNG sur les backends = double vérification : chaque accès backend est vérifié indépendamment
-- `AllowAgentForwarding no` : pas de vol de clé via agent forwarding (ProxyJump ne transfère pas la clé)
+- `AllowAgentForwarding no` : pas de vol de clé via agent forwarding
 - Même depuis un bastion compromis, l'attaquant doit avoir des credentials utilisateur valides côté LLNG
 
 **Remédiation configuration :**
@@ -438,10 +440,10 @@ ssh -J bastion backend.internal.example.com
 # /etc/ssh/sshd_config
 AllowAgentForwarding no
 
-# Utiliser ProxyJump côté client (la clé ne touche jamais le bastion)
+# Utiliser ob-ssh-proxy (pas ProxyJump natif, qui contournerait le JWT bastion)
 # ~/.ssh/config
 Host backend
-    ProxyJump bastion
+    ProxyCommand ssh bastion ob-ssh-proxy %h %p
 ```
 
 **Remédiation procédurale :**
@@ -991,7 +993,7 @@ L'escalade sudo est bloquée par conception :
 ### Bastion et JWT
 
 - [ ] `AllowAgentForwarding no` sur le bastion
-- [ ] Clients configurés avec ProxyJump (pas d'agent forwarding)
+- [ ] Clients configurés avec `ob-ssh-proxy` (ProxyJump natif interdit car contourne le JWT)
 - [ ] `bastion_jwt_required = true` sur les backends
 - [ ] `bastion_jwt_replay_detection = true` activé
 - [ ] `AcceptEnv LLNG_BASTION_JWT` dans sshd_config des backends
@@ -1254,16 +1256,16 @@ sequenceDiagram
 
 ### Mesures recommandées
 
-| Mesure                                                  | Justification                                             |
-| ------------------------------------------------------- | --------------------------------------------------------- |
-| CA sur HSM ou machine air-gap                           | Réduit l'impact catastrophique de R-S4                    |
-| LLNG en haute disponibilité                             | Réduit R-S7 à P=1                                         |
-| Monitoring KRL + alertes                                | Détection rapide de R-S15                                 |
-| `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion   |
-| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                          |
-| ProxyJump côté client                                   | La clé privée ne touche jamais le bastion                 |
-| `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation |
-| 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                       |
+| Mesure                                                  | Justification                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------- |
+| CA sur HSM ou machine air-gap                           | Réduit l'impact catastrophique de R-S4                        |
+| LLNG en haute disponibilité                             | Réduit R-S7 à P=1                                             |
+| Monitoring KRL + alertes                                | Détection rapide de R-S15                                     |
+| `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion       |
+| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                              |
+| `ob-ssh-proxy` (pas ProxyJump natif)                    | JWT bastion obligatoire + clé privée ne touche pas le bastion |
+| `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation     |
+| 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                           |
 
 ### Points de surveillance (SIEM / monitoring)
 
