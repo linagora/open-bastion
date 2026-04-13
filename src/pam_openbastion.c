@@ -45,7 +45,9 @@
 #include "crowdsec.h"
 #include "service_account.h"
 #include "ssh_key_policy.h"
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 #include "offline_cache.h"
+#endif /* ENABLE_DESKTOP_SSO */
 #ifdef ENABLE_CACHE
 #include "token_cache.h"
 #endif
@@ -58,13 +60,17 @@
 
 /* Time constants */
 #define SECONDS_PER_DAY 86400
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 #define DEFAULT_OFFLINE_CACHE_TTL 86400  /* Default 24 hours for offline cache */
+#endif /* ENABLE_DESKTOP_SSO */
 
 /* Security: Maximum length for SSH_USER_AUTH environment variable */
 #define MAX_SSH_AUTH_LEN 8192
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /* Offline session marker directory (for ob-session-monitor) */
 #define OFFLINE_SESSION_MARKER_DIR "/run/open-bastion/offline_sessions"
+#endif /* ENABLE_DESKTOP_SSO */
 
 /* Internal data structure */
 typedef struct {
@@ -81,7 +87,9 @@ typedef struct {
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
     ssh_key_policy_t ssh_key_policy;  /* SSH key type/size policy (#91) */
     rate_limiter_t *cache_rate_limiter;  /* Brute-force protection for cache (#92) */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     offline_cache_t *offline_cache;  /* Offline credential cache for Desktop SSO */
+#endif /* ENABLE_DESKTOP_SSO */
 #ifdef ENABLE_CACHE
     token_cache_t *cache;
 #endif
@@ -109,6 +117,7 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
 static void invalidate_nscd_cache(void);
 static int validate_username(const char *user);
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /*
  * Send an info message to the PAM client via conversation.
  * Used to pass structured error codes to the LightDM greeter.
@@ -236,6 +245,7 @@ static int has_offline_session_marker(const char *user)
     struct stat st;
     return (stat(marker_path, &st) == 0);
 }
+#endif /* ENABLE_DESKTOP_SSO */
 
 /*
  * Security: Re-verify token file permissions periodically (fixes #46)
@@ -1153,9 +1163,11 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->auth_cache) {
             auth_cache_destroy(ob_data->auth_cache);
         }
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
         if (ob_data->offline_cache) {
             offline_cache_destroy(ob_data->offline_cache);
         }
+#endif /* ENABLE_DESKTOP_SSO */
         if (ob_data->bastion_jwt_verifier) {
             bastion_jwt_verifier_destroy(ob_data->bastion_jwt_verifier);
         }
@@ -1449,6 +1461,7 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
     explicit_bzero(&token_cache_key, sizeof(token_cache_key));
     explicit_bzero(&auth_cache_key, sizeof(auth_cache_key));
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Initialize offline credential cache (for Desktop SSO offline mode) */
     if (data->config.offline_cache_enabled) {
         const char *offline_dir = data->config.offline_cache_dir;
@@ -1465,6 +1478,7 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
                                       data->config.offline_cache_lockout);
         }
     }
+#endif /* ENABLE_DESKTOP_SSO */
 
     /* Initialize CrowdSec integration */
     if (data->config.crowdsec_enabled) {
@@ -2269,6 +2283,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
      */
     ob_response_t response = {0};
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     if (data->config.oauth2_token_auth) {
         /*
          * OAuth2 token authentication mode (Desktop SSO)
@@ -2567,7 +2582,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
         OB_LOG_DEBUG(pamh, "OAuth2 token verified for user %s (expires in %d seconds)",
                 user, response.expires_in);
-    } else {
+    } else
+#endif /* ENABLE_DESKTOP_SSO */
+    {
         /*
          * Default mode: Verify the one-time PAM token via /pam/verify
          * The token is destroyed after successful verification (single-use).
@@ -3161,6 +3178,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         return PAM_PERM_DENIED;
     }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /*
      * Store authorization in cache if:
      * - Not already from cache
@@ -3210,6 +3228,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
                        user, offline_cache_strerror(store_result));
         }
     }
+#endif /* ENABLE_DESKTOP_SSO */
 
     /*
      * Handle sudo authorization.
@@ -3761,8 +3780,10 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
         cache_invalidate_user(data->cache, user);
     }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Remove offline session marker on session close */
     remove_offline_session_marker(pamh, user);
+#endif /* ENABLE_DESKTOP_SSO */
 
     return PAM_SUCCESS;
 }

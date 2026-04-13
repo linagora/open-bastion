@@ -134,6 +134,7 @@ void config_init(pam_openbastion_config_t *config)
     /* Service accounts */
     config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Desktop SSO / OAuth2 token authentication - disabled by default */
     config->oauth2_token_auth = false;
     config->oauth2_token_cache = true;
@@ -151,6 +152,7 @@ void config_init(pam_openbastion_config_t *config)
     config->offline_revalidation_enabled = true;
     config->offline_revalidation_grace = 14400;  /* 4 hours */
     config->offline_max_sso_unreachable = 3600;  /* 1 hour */
+#endif /* ENABLE_DESKTOP_SSO */
 
     /* Bastion JWT verification - disabled by default */
     config->bastion_jwt_required = false;
@@ -220,9 +222,11 @@ void config_free(pam_openbastion_config_t *config)
     free(config->auth_cache_dir);
     free(config->auth_cache_force_online);
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Offline credential cache */
     free(config->offline_cache_dir);
     free(config->offline_cache_key_file);
+#endif /* ENABLE_DESKTOP_SSO */
 
     /* Audit settings */
     free(config->audit_log_file);
@@ -574,6 +578,7 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
              strcmp(key, "service_accounts") == 0) {
         SET_STRING_FIELD(config->service_accounts_file, value, key);
     }
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Desktop SSO / OAuth2 token authentication */
     else if (strcmp(key, "oauth2_token_auth") == 0) {
         config->oauth2_token_auth = parse_bool(value);
@@ -612,6 +617,7 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     else if (strcmp(key, "offline_max_sso_unreachable") == 0) {
         config->offline_max_sso_unreachable = parse_int(value, 3600, 600, 86400);  /* 10 min to 24 hours */
     }
+#endif /* ENABLE_DESKTOP_SSO */
     /* Bastion JWT verification settings */
     else if (strcmp(key, "bastion_jwt_required") == 0 || strcmp(key, "require_bastion") == 0) {
         config->bastion_jwt_required = parse_bool(value);
@@ -896,6 +902,7 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
         else if (strcmp(arg, "no_create_user") == 0 || strcmp(arg, "nocreateuser") == 0) {
             config->create_user_enabled = false;
         }
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
         /* OAuth2 token authentication flags */
         else if (strcmp(arg, "oauth2_token_auth") == 0) {
             config->oauth2_token_auth = true;
@@ -910,6 +917,7 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
         else if (strcmp(arg, "no_offline_cache") == 0) {
             config->offline_cache_enabled = false;
         }
+#endif /* ENABLE_DESKTOP_SSO */
     }
 
     return 0;

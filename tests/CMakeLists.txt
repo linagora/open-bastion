@@ -87,6 +87,11 @@ target_link_libraries(test_auth_cache
 )
 add_test(NAME test_auth_cache COMMAND test_auth_cache)
 
+# Desktop SSO components (offline credential cache, OAuth2 introspection)
+# When INSTALL_DESKTOP=OFF, none of this code is compiled into pam_openbastion.so.
+# This ensures the core SSH module has zero desktop code paths.
+if(INSTALL_DESKTOP)
+
 # Test offline credential cache (Argon2id + AES-256-GCM)
 add_executable(test_offline_cache test_offline_cache.c ../src/offline_cache.c ../src/str_utils.c ../src/cache_key.c)
 target_compile_definitions(test_offline_cache PRIVATE
@@ -124,6 +129,8 @@ target_link_libraries(test_offline_security
     $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
 )
 add_test(NAME test_offline_security COMMAND test_offline_security)
+
+endif() # INSTALL_DESKTOP
 
 # Test JWT utility functions
 add_executable(test_token_manager test_token_manager.c ../src/jwt_utils.c)
