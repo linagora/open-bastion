@@ -89,7 +89,7 @@ jobs:
       - name: Install build dependencies
         run: |
           # Enable CRB repository for json-c-devel
-          dnf install -y dnf-plugins-core
+          dnf install -y epel-release dnf-plugins-core
           dnf config-manager --set-enabled crb
           dnf install -y \
             rpm-build \
