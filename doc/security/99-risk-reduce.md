@@ -1,44 +1,28 @@
-Pistes exploratoires pour améliorer la sécurité mais non implémentées.
+# Pistes d'Amélioration - Mode E (Sécurité Maximale)
 
-## Vue Globale
+## Matrice des Risques Résiduels (Mode E)
 
-### Matrice des Risques Après Remédiation (avec clients OIDC distincts + JWT bastion)
-
-| Impact ↓ / Probabilité → | 1 - Très improbable                                         | 2 - Peu probable |
-| ------------------------ | ----------------------------------------------------------- | ---------------- |
-| **4 - Critique**         | R5, R-S1, R-S4, R-SA2                                       | R-SA1            |
-| **3 - Important**        | R1, R3, R8, R12, R-S5, R-S11                                | R-S6             |
-| **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12, R-S14 | R6, R-S8         |
-| **1 - Négligeable**      | R0, R13                                                     |                  |
-
-**Note Mode E :** En Mode E (certificats SSO + sudo PAM-access), R-S1 est **éliminé** et R-S2 descend à I=1 (négligeable). Voir [02-ssh-connection.md](02-ssh-connection.md) section 10 pour la matrice dédiée au Mode E.
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable |
+| ------------------------ | ------------------- | ---------------- |
+| **4 - Critique** | R-S4, R-SA2 | R-SA1 |
+| **3 - Important** | R5, R-S5, R-S11 | R-S6 |
+| **2 - Limité** | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16 | R6, R-S8 |
+| **1 - Négligeable** | R0, R13, R-S14 | |
 
 **Zones de risque :**
 
-- Score ≥ 6 : Zone rouge (aucun risque dans cette zone après remédiation)
-- Score 4-5 : Zone jaune → R5, R-S1, R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8 (P=2, I=2), R-S6 (P=2, I=3)
-- Score ≤ 3 : Zone verte → Tous les autres risques (incluant R-S14 avec whitelist)
+- Score ≥ 6 : Zone rouge (aucun risque dans cette zone en Mode E)
+- Score 4-5 : Zone jaune → R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8 (P=2, I=2), R-S6 (P=2, I=3)
+- Score ≤ 3 : Zone verte → Tous les autres risques
 
-**Nouveaux risques identifiés (PR #64 - JWT bastion) :**
+**Risques éliminés par le Mode E :**
 
-- **R-S9** : Replay d'un JWT bastion intercepté (P=1, I=2 - détection replay réduit P)
-- **R-S10** : Rotation des clés JWKS non propagée (P=1, I=1 - atténué par publication anticipée LLNG)
-
-**Risques spécifiques aux comptes de service :**
-
-- **R-SA1** : Vol de clé de compte de service (P=2, I=4 → I=3 avec monitoring)
-- **R-SA2** : Compromission du fichier de configuration (P=1, I=4 - atténué par vérifications embarquées)
-
-**Amélioration par intégration CrowdSec :**
-
-- **R-S1** : Protection renforcée contre brute-force (blocage IPs communautaires + auto-ban local)
-- **R-S6** : Détection comportementale sur le bastion (alertes centralisables via Crowdsieve)
+- **R-S1** : Supprimé (aucun mot de passe SSH accepté)
+- **R-S2** : Descendu à I=1 (clé SSH inutile sans certificat CA)
 
 Voir [01-enrollment.md](01-enrollment.md) et [02-ssh-connection.md](02-ssh-connection.md) pour les détails des risques et remédiations.
 
 Voir [03-offboarding.md](03-offboarding.md) pour la procédure de révocation des accès administrateurs.
-
-Voir la section "Comptes de Service" de [02-ssh-connection.md](02-ssh-connection.md) pour les risques spécifiques aux comptes de service.
 
 ---
 
@@ -75,15 +59,6 @@ Pistes pour réduire P :
 ---
 
 ## Pistes d'Amélioration - SSH
-
-### R-S1 _(P=1, I=4)_ - Authentification par mot de passe
-
-Pistes supplémentaires :
-
-1. Audit automatisé de la configuration sshd (compliance check)
-2. Alerting si `PasswordAuthentication yes` détecté
-
-**Impact Mode E :** En Mode E, R-S1 est entièrement éliminé car aucun mot de passe n'est accepté pour SSH (`PasswordAuthentication no` + `AuthorizedKeysFile none` + certificats CA uniquement).
 
 ### R-S4 _(P=1, I=4)_ - Compromission de la CA SSH
 
@@ -122,34 +97,6 @@ Pistes pour réduire P à 1 :
 // Si utilisateur révoqué → envoyer SIGHUP au processus sshd de l'utilisateur
 ```
 
-
-### Mode E - Impact global sur les risques
-
-Le Mode E (Architecture D + certificats SSO uniquement + sudo PAM-access + KRL obligatoire)
-représente la cible de sécurité la plus élevée. Impact sur les risques existants :
-
-| Risque | Score sans Mode E (Arch. D) | Score avec Mode E | Changement |
-|--------|:---------------------------:|:-----------------:|------------|
-| R-S1   | P=1, I=4                    | **ÉLIMINÉ**       | Pas de mot de passe SSH |
-| R-S2   | P=2, I=3                    | P=2, I=1          | Clé inutile sans certificat CA |
-| R-S3   | P=1, I=2                    | P=2, I=2          | KRL compense durée longue (1 an) |
-| R-S5   | P=1, I=3                    | P=1, I=3          | Inchangé (déjà optimal) |
-| R-S8   | P=2, I=2                    | P=2, I=2          | Inchangé |
-
-**Nouveaux risques Mode E :**
-
-| Risque | Description | Score |
-|--------|-------------|:-----:|
-| R-S15  | Certificat 1 an compromis sans KRL à jour | P=1, I=2 (avec cron + monitoring) |
-| R-S16  | Escalade sudo (bloquée par réauth SSO) | P=1, I=2 |
-
-**Contrôles compensatoires clés du Mode E :**
-
-1. **KRL obligatoire** : compense la durée longue des certificats (1 an)
-2. **Réauthentification SSO pour sudo** : empêche l'escalade même si session SSH compromise
-3. **`AuthorizedKeysFile none`** : empêche le contournement par clés non signées
-4. **Double vérification** : certificat CA (sshd) + `/pam/authorize` (PAM) pour SSH ; token LLNG + `/pam/authorize` (PAM) pour sudo
-
 ---
 
 ## Pistes d'Amélioration - JWT Bastion
@@ -166,3 +113,23 @@ Pistes supplémentaires (non implémentées) :
 Piste supplémentaire (optionnelle) :
 
 1. **Push de notification** : LLNG notifie les backends via webhook pour refresh immédiat (utile uniquement en cas de compromission)
+
+---
+
+## Pistes d'Amélioration - Spécifiques au Mode E
+
+### R-S15 _(P=1, I=2)_ - KRL non à jour
+
+Pistes pour réduire P à quasi-zéro :
+
+1. **Monitoring actif** : Alerte si le fichier KRL a plus d'1h sans mise à jour
+2. **Push de notification** : LLNG notifie les serveurs via webhook lors d'une révocation
+3. **Réduction de l'intervalle cron** : Passer de 30 min à 5-10 min pour les environnements critiques
+
+### R-S16 _(P=1, I=2)_ - Escalade sudo
+
+Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire). Pistes supplémentaires :
+
+1. **2FA obligatoire** : Exiger un second facteur pour l'obtention du token sudo
+2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
+3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité

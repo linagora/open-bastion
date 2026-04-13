@@ -1,5 +1,7 @@
 # Analyse de Sécurité - Phase 1 : Enrôlement du Serveur
 
+> **Contexte** : Cette analyse s'inscrit dans la cible de sécurité maximale d'Open Bastion (Mode E) : bastion + certificats SSH signés par la CA LLNG + sudo via token temporaire LLNG + KRL obligatoire. L'enrôlement des serveurs est identique quelle que soit l'architecture choisie.
+
 ## 1. Description du Flux
 
 L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). Ce flux est conçu pour les appareils sans navigateur (serveurs, IoT, CLI) qui ne peuvent pas effectuer de redirection HTTP.
