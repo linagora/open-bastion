@@ -1,5 +1,7 @@
 # Build directory
 build/
+build-core/
+build-desktop/
 
 # Editor files
 *~
