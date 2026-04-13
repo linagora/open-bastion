@@ -697,6 +697,7 @@ int ob_verify_token(ob_client_t *client,
     return 0;
 }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 int ob_introspect_token(ob_client_t *client,
                           const char *token,
                           ob_response_t *response)
@@ -824,6 +825,7 @@ int ob_introspect_token(ob_client_t *client,
     json_object_put(json);
     return 0;
 }
+#endif /* ENABLE_DESKTOP_SSO */
 
 int ob_authorize_user(ob_client_t *client,
                         const char *user,
@@ -1034,6 +1036,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
         }
     }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Parse offline settings object */
     struct json_object *offline_obj;
     if (json_object_object_get_ex(json, "offline", &offline_obj)) {
@@ -1051,6 +1054,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
             }
         }
     }
+#endif /* ENABLE_DESKTOP_SSO */
 
     json_object_put(json);
     return 0;
@@ -1107,11 +1111,13 @@ void ob_response_free(ob_response_t *response)
         free(response->managed_groups);
     }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Free offline verifier (contains sensitive data) */
     if (response->offline.verifier) {
         explicit_bzero(response->offline.verifier, strlen(response->offline.verifier));
         free(response->offline.verifier);
     }
+#endif /* ENABLE_DESKTOP_SSO */
 
     memset(response, 0, sizeof(*response));
 }

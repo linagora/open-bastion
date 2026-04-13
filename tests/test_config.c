@@ -349,6 +349,7 @@ static int test_parse_insecure_flag(void)
     return ok;
 }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /* Test OAuth2 token auth defaults */
 static int test_oauth2_token_auth_defaults(void)
 {
@@ -460,6 +461,7 @@ static int test_oauth2_token_min_ttl_bounds(void)
     config_free(&config);
     return ok;
 }
+#endif /* ENABLE_DESKTOP_SSO */
 
 /* Test config file loading
  * Note: This test verifies file permission checks when running as root,
@@ -535,11 +537,13 @@ int main(void)
     TEST(cache_rate_limit_defaults);
     TEST(parse_cache_rate_limit_args);
     TEST(cache_rate_limit_bounds);
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     TEST(oauth2_token_auth_defaults);
     TEST(parse_oauth2_token_auth_args);
     TEST(parse_oauth2_token_auth_config);
     TEST(parse_no_oauth2_token_cache);
     TEST(oauth2_token_min_ttl_bounds);
+#endif /* ENABLE_DESKTOP_SSO */
     TEST(load_config_file);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);

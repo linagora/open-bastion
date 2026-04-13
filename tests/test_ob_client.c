@@ -266,6 +266,7 @@ static void test_client_error_null(void)
     }
 }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /*
  * Test introspect_token with NULL parameters
  */
@@ -357,6 +358,7 @@ static void test_introspect_token_no_server(void)
 
     ob_client_destroy(client);
 }
+#endif /* ENABLE_DESKTOP_SSO */
 
 int main(void)
 {
@@ -379,9 +381,11 @@ int main(void)
     test_client_init_valid();
     test_client_error_null();
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Introspection tests (JWT client assertion) */
     test_introspect_token_null_params();
     test_introspect_token_no_server();
+#endif /* ENABLE_DESKTOP_SSO */
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
 

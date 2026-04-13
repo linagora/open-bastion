@@ -17,12 +17,14 @@ typedef struct {
     bool sudo_nopasswd;     /* Sudo without password (future use) */
 } ob_permissions_t;
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /* Offline settings from /pam/authorize response */
 typedef struct {
     bool enabled;           /* Offline mode allowed for this user */
     int ttl;                /* Cache TTL in seconds (0 = no caching) */
     char *verifier;         /* Pre-computed Argon2id verifier for offline auth */
 } ob_offline_settings_t;
+#endif /* ENABLE_DESKTOP_SSO */
 
 /* SSH certificate info extracted from environment */
 typedef struct {
@@ -55,9 +57,11 @@ typedef struct {
     ob_permissions_t permissions;
     bool has_permissions;   /* True if permissions object was present */
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Offline settings from /pam/authorize */
     ob_offline_settings_t offline;
     bool has_offline;       /* True if offline object was present */
+#endif /* ENABLE_DESKTOP_SSO */
 } ob_response_t;
 
 /* Client configuration */
@@ -99,6 +103,7 @@ int ob_verify_token(ob_client_t *client,
                     const char *user_token,
                     ob_response_t *response);
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /*
  * Introspect an access token via /oauth2/introspect
  * DEPRECATED for user tokens - use ob_verify_token instead.
@@ -108,6 +113,7 @@ int ob_verify_token(ob_client_t *client,
 int ob_introspect_token(ob_client_t *client,
                         const char *token,
                         ob_response_t *response);
+#endif /* ENABLE_DESKTOP_SSO */
 
 /*
  * Check user authorization via /pam/authorize

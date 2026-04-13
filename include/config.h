@@ -95,6 +95,7 @@ typedef struct {
     /* Service accounts (local accounts like ansible, backup, etc.) */
     char *service_accounts_file;    /* Path to service accounts config (default: /etc/open-bastion/service-accounts.conf) */
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Desktop SSO / OAuth2 token authentication (for LightDM greeter) */
     bool oauth2_token_auth;         /* Accept OAuth2 access tokens instead of one-time PAM tokens (default: false) */
     bool oauth2_token_cache;        /* Cache successful OAuth2 token auth for offline mode (default: true) */
@@ -112,6 +113,7 @@ typedef struct {
     bool offline_revalidation_enabled;  /* Enable network revalidation of offline sessions (default: true) */
     int offline_revalidation_grace;     /* Grace period before forcing re-auth in seconds (default: 14400 = 4h) */
     int offline_max_sso_unreachable;    /* Max time SSO can be unreachable while network is up (default: 3600 = 1h) */
+#endif /* ENABLE_DESKTOP_SSO */
 
     /* Bastion JWT verification (for backend servers) */
     bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */

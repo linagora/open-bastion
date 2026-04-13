@@ -49,7 +49,6 @@ set(PAM_MODULE_SOURCES
     src/service_account.c
     src/ssh_key_policy.c
     src/str_utils.c
-    src/offline_cache.c
 )
 
 if(ENABLE_CACHE)
@@ -57,30 +56,40 @@ if(ENABLE_CACHE)
     add_definitions(-DENABLE_CACHE)
 endif()
 
-# Optional libsodium for Argon2id (preferred) - fallback to OpenSSL 3.0+
-option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
+# Desktop SSO components (offline credential cache, OAuth2 introspection)
+# When INSTALL_DESKTOP=OFF, none of this code is compiled into pam_openbastion.so.
+# This ensures the core SSH module has zero desktop code paths.
+if(INSTALL_DESKTOP)
+    list(APPEND PAM_MODULE_SOURCES src/offline_cache.c)
+    add_definitions(-DENABLE_DESKTOP_SSO)
+endif()
 
-if(USE_LIBSODIUM)
-    pkg_check_modules(SODIUM REQUIRED libsodium)
-    add_definitions(-DHAVE_LIBSODIUM)
-else()
-    # Check OpenSSL version >= 3.0 for Argon2id support
-    include(CheckCSourceCompiles)
-    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIRS})
-    check_c_source_compiles("
-        #include <openssl/opensslv.h>
-        #if OPENSSL_VERSION_NUMBER < 0x30000000L
-        #error OpenSSL 3.0+ required
-        #endif
-        int main() { return 0; }
-    " HAVE_OPENSSL_3)
+if(INSTALL_DESKTOP)
+    # Optional libsodium for Argon2id (preferred) - fallback to OpenSSL 3.0+
+    option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
 
-    if(NOT HAVE_OPENSSL_3)
-        message(FATAL_ERROR
-            "Offline credential cache requires either:\n"
-            "  - libsodium (recommended): cmake -DUSE_LIBSODIUM=ON ..\n"
-            "  - OpenSSL 3.0+ (detected version is too old)\n"
-            "Please install libsodium-dev or upgrade OpenSSL.")
+    if(USE_LIBSODIUM)
+        pkg_check_modules(SODIUM REQUIRED libsodium)
+        add_definitions(-DHAVE_LIBSODIUM)
+    else()
+        # Check OpenSSL version >= 3.0 for Argon2id support
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIRS})
+        check_c_source_compiles("
+            #include <openssl/opensslv.h>
+            #if OPENSSL_VERSION_NUMBER < 0x30000000L
+            #error OpenSSL 3.0+ required
+            #endif
+            int main() { return 0; }
+        " HAVE_OPENSSL_3)
+
+        if(NOT HAVE_OPENSSL_3)
+            message(FATAL_ERROR
+                "Offline credential cache requires either:\n"
+                "  - libsodium (recommended): cmake -DUSE_LIBSODIUM=ON ..\n"
+                "  - OpenSSL 3.0+ (detected version is too old)\n"
+                "Please install libsodium-dev or upgrade OpenSSL.")
+        endif()
     endif()
 endif()
 
