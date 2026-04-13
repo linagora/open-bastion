@@ -112,6 +112,108 @@ account    required     pam_unix.so
 session    required     pam_unix.so
 ```
 
+## Mode E: SSO Certificates + sudo PAM-access (Maximum Security)
+
+**SSH: only via certificates signed by the LLNG CA. sudo: only via LLNG temporary token.**
+
+This mode provides the strictest separation between access (long-lived SSH certificate)
+and privilege escalation (fresh SSO re-authentication for each sudo).
+
+### Prerequisites
+
+- SSHCA plugin enabled in LemonLDAP::NG
+- PamAccess plugin enabled in LemonLDAP::NG
+- KRL (Key Revocation List) configured in LLNG (`/ssh/admin`)
+- `ob-ssh-cert` deployed on client workstations
+- Signed certificates for all users (recommended validity: 1 year)
+
+### Configuration sshd
+
+```
+# /etc/ssh/sshd_config
+PasswordAuthentication no         # No SSH passwords
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes          # SSH certificates only
+TrustedUserCAKeys /etc/ssh/llng_ca.pub
+AuthorizedKeysFile none           # No unsigned keys
+RevokedKeys /etc/ssh/revoked_keys # KRL mandatory
+ExposeAuthInfo yes                # For certificate audit
+```
+
+### PAM Configuration for sshd
+
+```
+# /etc/pam.d/sshd
+#
+# AUTHENTICATION: Handled by SSH certificates (not PAM)
+# - Unix passwords: DISABLED
+# - LLNG tokens: NOT USED for SSH
+# - SSH certificates: REQUIRED (signed by LLNG CA)
+#
+# AUTHORIZATION: LLNG checks if user can access this server
+
+auth       required     pam_permit.so
+
+account    required     pam_openbastion.so
+account    required     pam_unix.so
+
+session    required     pam_unix.so
+```
+
+### PAM Configuration for sudo
+
+```
+# /etc/pam.d/sudo
+#
+# AUTHENTICATION: LLNG temporary token ONLY
+# - Unix passwords: REJECTED
+# - LLNG tokens: REQUIRED (fresh re-authentication via SSO)
+#
+# AUTHORIZATION: LLNG checks sudo_allowed flag
+
+auth       sufficient   pam_openbastion.so
+auth       required     pam_deny.so
+
+account    required     pam_openbastion.so
+account    required     pam_unix.so
+
+session    required     pam_unix.so
+```
+
+### Security Model
+
+```
+┌──────────────────────────┐       ┌──────────────────────────┐
+│       SSH Access         │       │    sudo Escalation       │
+│                          │       │                          │
+│  SSO Certificate (1 yr)  │       │  LLNG Token (5-60 min)  │
+│  + /pam/authorize        │       │  + /pam/authorize        │
+│                          │       │  (sudo_allowed=true)     │
+│  "I have the right       │       │  "I want to perform a    │
+│   to be here"            │       │   privileged action      │
+│                          │       │   now"                   │
+└──────────────────────────┘       └──────────────────────────┘
+         │                                    │
+         ▼                                    ▼
+   Revocation:                         Revocation:
+   - KRL (immediate)                   - Disable LLNG account
+   - Disable LLNG account              - Remove sudo_allowed
+   - Remove from groups                  (immediate effect)
+```
+
+### Mandatory KRL
+
+With long-lived certificates (1 year), the KRL is **mandatory**:
+
+```bash
+# Initial KRL download
+curl -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
+
+# Automatic refresh (cron)
+# /etc/cron.d/llng-krl-refresh
+*/30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
+```
+
 ## Summary Table
 
 | Mode             | Unix Password | LLNG Token | SSH Key    | LLNG Authorization |
@@ -120,6 +222,7 @@ session    required     pam_unix.so
 | B - LLNG + Unix  | Fallback      | Preferred  | Optional\* | Required           |
 | C - SSH Key Only | Disabled      | Not used   | Required   | Required           |
 | D - All Methods  | Accepted      | Accepted   | Optional\* | Required           |
+| E - Max Security | Disabled      | sudo only  | Cert only  | Required           |
 
 \* SSH key authentication depends on `PubkeyAuthentication` in sshd_config
 
@@ -157,6 +260,20 @@ PubkeyAuthentication yes
 PermitEmptyPasswords no
 ```
 
+### For Mode E (Certificate + sudo token)
+
+```
+UsePAM yes
+PasswordAuthentication no         # No passwords for SSH
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes          # SSH certificates required
+TrustedUserCAKeys /etc/ssh/llng_ca.pub
+AuthorizedKeysFile none           # No unsigned keys
+RevokedKeys /etc/ssh/revoked_keys # KRL mandatory
+ExposeAuthInfo yes
+PermitEmptyPasswords no
+```
+
 Restart SSH after changes:
 
 ```bash
@@ -169,3 +286,4 @@ sudo systemctl restart sshd
 - [Configuration Reference](configuration.md) - All configuration options
 - [Service Accounts](service-accounts.md) - SSH key authentication for automation
 - [Security Features](security.md) - Key policies and rate limiting
+- [Security Analysis - SSH Connection](security/02-ssh-connection.md) - Risk analysis including Mode E

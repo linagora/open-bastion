@@ -11,6 +11,8 @@ Pistes exploratoires pour améliorer la sécurité mais non implémentées.
 | **2 - Limité**           | R4, R7, R9, R10, R11, R-S3, R-S7, R-S9, R-S10, R-S12, R-S14 | R6, R-S8         |
 | **1 - Négligeable**      | R0, R13                                                     |                  |
 
+**Note Mode E :** En Mode E (certificats SSO + sudo PAM-access), R-S1 est **éliminé** et R-S2 descend à I=1 (négligeable). Voir [02-ssh-connection.md](02-ssh-connection.md) section 10 pour la matrice dédiée au Mode E.
+
 **Zones de risque :**
 
 - Score ≥ 6 : Zone rouge (aucun risque dans cette zone après remédiation)
@@ -81,6 +83,8 @@ Pistes supplémentaires :
 1. Audit automatisé de la configuration sshd (compliance check)
 2. Alerting si `PasswordAuthentication yes` détecté
 
+**Impact Mode E :** En Mode E, R-S1 est entièrement éliminé car aucun mot de passe n'est accepté pour SSH (`PasswordAuthentication no` + `AuthorizedKeysFile none` + certificats CA uniquement).
+
 ### R-S4 _(P=1, I=4)_ - Compromission de la CA SSH
 
 Pistes supplémentaires :
@@ -117,6 +121,34 @@ Pistes pour réduire P à 1 :
 // Vérification périodique dans un thread ou via cron
 // Si utilisateur révoqué → envoyer SIGHUP au processus sshd de l'utilisateur
 ```
+
+
+### Mode E - Impact global sur les risques
+
+Le Mode E (Architecture D + certificats SSO uniquement + sudo PAM-access + KRL obligatoire)
+représente la cible de sécurité la plus élevée. Impact sur les risques existants :
+
+| Risque | Score sans Mode E (Arch. D) | Score avec Mode E | Changement |
+|--------|:---------------------------:|:-----------------:|------------|
+| R-S1   | P=1, I=4                    | **ÉLIMINÉ**       | Pas de mot de passe SSH |
+| R-S2   | P=2, I=3                    | P=2, I=1          | Clé inutile sans certificat CA |
+| R-S3   | P=1, I=2                    | P=2, I=2          | KRL compense durée longue (1 an) |
+| R-S5   | P=1, I=3                    | P=1, I=3          | Inchangé (déjà optimal) |
+| R-S8   | P=2, I=2                    | P=2, I=2          | Inchangé |
+
+**Nouveaux risques Mode E :**
+
+| Risque | Description | Score |
+|--------|-------------|:-----:|
+| R-S15  | Certificat 1 an compromis sans KRL à jour | P=1, I=2 (avec cron + monitoring) |
+| R-S16  | Escalade sudo (bloquée par réauth SSO) | P=1, I=2 |
+
+**Contrôles compensatoires clés du Mode E :**
+
+1. **KRL obligatoire** : compense la durée longue des certificats (1 an)
+2. **Réauthentification SSO pour sudo** : empêche l'escalade même si session SSH compromise
+3. **`AuthorizedKeysFile none`** : empêche le contournement par clés non signées
+4. **Double vérification** : certificat CA (sshd) + `/pam/authorize` (PAM) pour SSH ; token LLNG + `/pam/authorize` (PAM) pour sudo
 
 ---
 

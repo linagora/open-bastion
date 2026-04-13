@@ -1,0 +1,88 @@
+# Open Bastion Maximum Security Demo (Mode E)
+#
+# Architecture D + Mode E:
+#   - sso: LLNG Portal with SSH CA, PAM Access, Device Authorization
+#   - bastion: SSH bastion with certificate-only auth + KRL
+#   - backend: SSH backend with certificate-only auth + KRL + sudo via LLNG token
+#
+# Security model:
+#   - SSH: only SSO-signed certificates (AuthorizedKeysFile none)
+#   - sudo: only LLNG temporary tokens (PAM-access)
+#   - KRL: mandatory, refreshed every 30 minutes
+#
+# Usage:
+#   docker compose up -d
+#   # Get SSH cert: see README.md
+#   # SSH to bastion: ssh -p 2222 dwho@localhost
+#   # sudo on backend: requires fresh LLNG token
+
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    image: ob-maxsec-sso
+    container_name: ob-maxsec-sso
+    ports:
+      - "80:8080"
+    volumes:
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      ob-maxsec-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  bastion:
+    build:
+      context: ..
+      dockerfile: docker-demo-maxsec/bastion/Dockerfile
+    image: ob-maxsec-bastion
+    container_name: ob-maxsec-bastion
+    ports:
+      - "2222:22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_GROUP=bastion
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    networks:
+      - ob-maxsec-net
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker-demo-maxsec/backend/Dockerfile
+    image: ob-maxsec-backend
+    container_name: ob-maxsec-backend
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_GROUP=backend
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    networks:
+      - ob-maxsec-net
+
+networks:
+  ob-maxsec-net:
+    driver: bridge

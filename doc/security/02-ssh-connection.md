@@ -1102,6 +1102,7 @@ Tout de B et C, plus :
 | Conformité audit renforcé            | B (certificats pour traçabilité) |
 | Infrastructure importante            | C (bastion obligatoire)          |
 | Haute sécurité / production critique | D (bastion + certificats)        |
+| Sécurité maximale / administration   | E (D + certificats SSO + sudo PAM-access) |
 
 ### Évolution progressive
 
@@ -1111,8 +1112,9 @@ flowchart LR
     A -->|+ Bastion| C[C<br/>Bastion + Backends]
     B -->|+ Bastion| D[D<br/>Bastion + CA]
     C -->|+ SSH CA| D
+    D -->|+ cert SSO only<br/>+ sudo PAM-access<br/>+ KRL| E[E<br/>Sécurité maximale]
 
-    style D fill:#90EE90
+    style E fill:#90EE90
 ```
 
 | Transition | Gain                                    |
@@ -1120,10 +1122,204 @@ flowchart LR
 | A → B      | Traçabilité, révocation, durée limitée  |
 | A → C      | Point d'entrée unique, audit centralisé |
 | B/C → D    | Cumul des avantages                     |
+| D → E      | Certificats SSO only, sudo PAM-access, KRL obligatoire |
 
 ---
 
-## 10. Politique de Clés SSH
+## 10. Mode E : Sécurité Maximale (Certificats SSO + sudo PAM-access)
+
+### Description
+
+Le Mode E représente la cible de sécurité la plus élevée pour l'administration SSH. Il combine :
+
+- **SSH** : authentification uniquement par certificats signés par la CA LLNG (validité 1 an)
+- **sudo** : authentification uniquement par token temporaire LLNG (PAM-access, 5-60 min)
+- **KRL obligatoire** : pour révoquer un certificat compromis avant expiration
+- **Aucun mot de passe Unix** : ni pour SSH, ni pour sudo
+
+Ce mode crée une séparation nette entre **l'accès** (certificat longue durée) et **le pouvoir** (réauthentification dynamique SSO pour chaque sudo).
+
+### Flux de sécurité
+
+```mermaid
+sequenceDiagram
+    participant Client as Client SSH<br/>(cert 1 an)
+    participant Srv as Serveur SSH<br/>(TrustedCA + KRL)
+    participant LLNG as Portail LLNG
+    participant Admin as Admin SSO
+
+    Note over Client: 1x/an : ob-ssh-cert<br/>→ certificat signé
+
+    Client->>Srv: 1. ssh user@server<br/>(présente certificat)
+    Note over Srv: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
+    Srv->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=server
+    LLNG-->>Srv: 4. authorized: true
+    Srv-->>Client: 5. Session SSH établie
+
+    Note over Client: Pour chaque sudo :
+    Client->>Admin: 6. Demande token<br/>sur portail LLNG
+    Admin-->>Client: 7. Token temporaire<br/>(5-60 min, usage unique)
+    Client->>Srv: 8. sudo command<br/>(entre token LLNG)
+    Srv->>LLNG: 9. PAM: /pam/verify (token)<br/>+ /pam/authorize (sudo)
+    LLNG-->>Srv: 10. token valid +<br/>sudo_allowed: true
+    Srv-->>Client: 11. Commande exécutée
+```
+
+### Analyse de risque spécifique au Mode E
+
+Le Mode E modifie significativement le profil de risque de l'Architecture D :
+
+#### R-S1 en Mode E - Authentification par mot de passe SSH
+
+**Statut : ÉLIMINÉ**
+
+Aucun mot de passe n'est accepté pour SSH (`PasswordAuthentication no` + `AuthorizedKeysFile none`). Le seul moyen de se connecter est un certificat signé par la CA LLNG.
+
+#### R-S2 en Mode E - Vol de clé SSH privée
+
+|                 | Score Mode E |
+| --------------- | :----------: |
+| **Probabilité** |      2       |
+| **Impact**      |    **2**     |
+
+**Changement :** Impact réduit de 4 à 2. Une clé SSH privée volée est **inutile** sans certificat valide signé par la CA. L'attaquant devrait aussi obtenir le certificat, qui peut être révoqué via KRL.
+
+#### R-S3 en Mode E - Certificat SSH compromis (1 an)
+
+|                 | Score Mode E |
+| --------------- | :----------: |
+| **Probabilité** |      2       |
+| **Impact**      |      3       |
+
+**Spécificité certificats longs (1 an) :** Contrairement aux certificats courts (8-24h) qui expirent naturellement, un certificat compromis d'1 an reste valide longtemps. La **KRL devient le contrôle compensatoire principal** :
+
+- Révocation immédiate via `/ssh/admin` côté LLNG
+- Distribution de la KRL aux serveurs (cron toutes les 30 min recommandé)
+- Fenêtre d'exposition maximale : 30 min (délai de propagation KRL)
+
+**Facteur atténuant Mode E :** Même avec un certificat compromis, l'attaquant ne peut **pas faire de sudo** sans obtenir un token LLNG frais, ce qui nécessite une authentification SSO.
+
+|                 |                    Score résiduel                    |
+| --------------- | :--------------------------------------------------: |
+| **Probabilité** | 2 (compromission poste client toujours possible)     |
+| **Impact**      | 2 (avec KRL + sudo impossible sans token SSO frais)  |
+
+#### R-S5 en Mode E - Contournement du bastion
+
+|                 | Score Mode E |
+| --------------- | :----------: |
+| **Probabilité** |    **1**     |
+| **Impact**      |      3       |
+
+**Changement :** Probabilité réduite de 3 à 1. Même en contournant le réseau, l'attaquant doit présenter un certificat signé par la CA LLNG. Sans certificat valide, la connexion est rejetée par `sshd` avant même d'atteindre PAM.
+
+#### R-S15 (NOUVEAU) - Certificat 1 an compromis sans KRL à jour
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Architectures concernées :** Mode E (et Architecture B/D avec certificats longs)
+
+**Description :** Si la KRL n'est pas régulièrement mise à jour sur les serveurs, un certificat révoqué côté LLNG reste accepté par `sshd`.
+
+**Vecteurs de risque :**
+
+- Cron de rafraîchissement KRL en panne ou mal configuré
+- Serveur LLNG indisponible empêchant le téléchargement KRL
+- Délai entre la révocation et la propagation (jusqu'à 30 min)
+
+**Facteur atténuant :** `/pam/authorize` vérifie toujours l'autorisation LLNG à chaque connexion. Si le compte est désactivé dans LLNG, l'accès est refusé même avec un certificat non révoqué dans la KRL locale.
+
+**Remédiation :**
+
+```ini
+# Rafraîchissement KRL fréquent
+# /etc/cron.d/llng-krl-refresh
+*/30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
+
+# Monitoring : alerter si KRL > 1h
+*/15 * * * * root find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
+```
+
+|                 |                    Score résiduel                     |
+| --------------- | :---------------------------------------------------: |
+| **Probabilité** | 1 (avec cron + monitoring + /pam/authorize en backup) |
+| **Impact**      |            2 (sudo toujours bloqué sans token)        |
+
+#### R-S16 (NOUVEAU) - Escalade de privilèges sudo en Mode E
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   2   |
+
+**Architectures concernées :** Mode E uniquement
+
+**Description :** Un attaquant ayant compromis une session SSH tente d'exécuter des commandes privilégiées via sudo.
+
+**Remédiation Mode E (INTRINSÈQUE) :**
+
+Le Mode E bloque l'escalade par conception :
+
+1. Le sudo exige un token LLNG frais (5-60 min de validité, usage unique)
+2. L'obtention du token nécessite une authentification SSO (2FA si configuré)
+3. Même un poste client compromis ne peut pas obtenir de token sans les credentials SSO de l'utilisateur
+
+|                 |                    Score résiduel                    |
+| --------------- | :--------------------------------------------------: |
+| **Probabilité** |    1 (réauthentification SSO pour chaque sudo)       |
+| **Impact**      |    2 (scope limité à ce que sudo_allowed autorise)   |
+
+### Matrice des Risques - Mode E (Architecture D + Mode E)
+
+**Avant remédiation :**
+
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6             |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S15  |              |                   |
+| **2 - Limité**           | R-S16               | R-S2 R-S9 R-S10  | R-S8         |                   |
+| **1 - Négligeable**      |                     |                  |              |                   |
+
+**Après remédiation complète :**
+
+| Impact ↓ / Probabilité → | 1 - Très improbable            | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------------------ | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                           |                  |              |                   |
+| **3 - Important**        | R-S5                           | R-S6             |              |                   |
+| **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S15 R-S16 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S2                           |                  |              |                   |
+
+**Mode E = meilleur profil de risque possible :**
+
+- R-S1 (brute-force mot de passe) : **ÉLIMINÉ** (pas de mot de passe SSH)
+- R-S2 (vol clé SSH) : **réduit à négligeable** (clé inutile sans certificat)
+- R-S3 (certificat compromis) : **contrôlé par KRL** + sudo bloqué
+- R-S5 (contournement bastion) : **P=1** (certificat CA requis)
+- R-S16 (escalade sudo) : **contrôlé par réauthentification SSO**
+- Seuls risques résiduels significatifs : R-S4 (CA compromise) et R-S6 (bastion compromis)
+
+### Checklist Mode E
+
+Tout de l'Architecture D, plus :
+
+- [ ] `AuthorizedKeysFile none` dans sshd_config
+- [ ] `RevokedKeys /etc/ssh/revoked_keys` dans sshd_config
+- [ ] KRL téléchargée depuis LLNG (`/ssh/revoked`)
+- [ ] Cron de rafraîchissement KRL (toutes les 30 min)
+- [ ] Monitoring KRL (alerte si > 1h sans mise à jour)
+- [ ] `/etc/pam.d/sudo` configuré avec `pam_openbastion.so`
+- [ ] `ob-ssh-cert` déployé sur les postes clients
+- [ ] Certificats émis pour tous les utilisateurs (validité 1 an)
+- [ ] Test : connexion SSH sans certificat → rejetée
+- [ ] Test : sudo sans token LLNG → rejeté
+- [ ] Test : révocation certificat via KRL → accès SSH coupé
+
+---
+
+## 11. Politique de Clés SSH
 
 ### R-S11 - Utilisation de clés SSH faibles ou obsolètes
 
@@ -1188,7 +1384,7 @@ ExposeAuthInfo yes   # Requis pour accéder au type de clé
 
 ---
 
-## 11. Protection du Cache Offline
+## 12. Protection du Cache Offline
 
 ### R-S12 - Brute-force du cache d'autorisation offline
 
@@ -1382,7 +1578,7 @@ crowdsec_block_delay = 600  # 10 minutes au lieu de 3
 
 ---
 
-## 12. Comptes de Service
+## 13. Comptes de Service
 
 ### Description
 
