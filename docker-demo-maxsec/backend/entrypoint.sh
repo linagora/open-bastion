@@ -105,7 +105,7 @@ X11Forwarding no
 PermitRootLogin no
 
 # Accept bastion JWT environment variable from SSH connection
-AcceptEnv OB_BASTION_JWT
+AcceptEnv LLNG_BASTION_JWT
 EOF
 
 # Enroll server via Device Authorization Grant

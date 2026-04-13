@@ -42,13 +42,13 @@ flowchart LR
 
 ### What's different from docker-demo-cert?
 
-| Feature | docker-demo-cert | docker-demo-maxsec (Mode E) |
-| ------- | ---------------- | --------------------------- |
-| SSH auth | CA certificates | CA certificates ONLY |
-| `AuthorizedKeysFile` | Default | `none` (no unsigned keys) |
-| `RevokedKeys` (KRL) | Not configured | Mandatory + auto-refresh |
-| sudo | `NOPASSWD` | LLNG token required |
-| KRL refresh | Manual | Cron every 30 min |
+| Feature              | docker-demo-cert | docker-demo-maxsec (Mode E) |
+| -------------------- | ---------------- | --------------------------- |
+| SSH auth             | CA certificates  | CA certificates ONLY        |
+| `AuthorizedKeysFile` | Default          | `none` (no unsigned keys)   |
+| `RevokedKeys` (KRL)  | Not configured   | Mandatory + auto-refresh    |
+| sudo                 | `NOPASSWD`       | LLNG token required         |
+| KRL refresh          | Manual           | Cron every 30 min           |
 
 ## Quick Start
 
@@ -119,6 +119,7 @@ sudo whoami
 ```
 
 To get a temporary token:
+
 1. Go to http://localhost:80 and log in as `rtyler` / `rtyler`
 2. Navigate to the PAM-access section
 3. Generate a temporary token
@@ -128,11 +129,11 @@ To get a temporary token:
 
 ## Demo Users
 
-| User   | Password | SSH Access       | Sudo on Backend |
-| ------ | -------- | ---------------- | --------------- |
-| dwho   | dwho     | bastion, backend | No              |
-| rtyler | rtyler   | bastion, backend | Yes (with token)|
-| msmith | msmith   | bastion, backend | No              |
+| User   | Password | SSH Access       | Sudo on Backend  |
+| ------ | -------- | ---------------- | ---------------- |
+| dwho   | dwho     | bastion, backend | No               |
+| rtyler | rtyler   | bastion, backend | Yes (with token) |
+| msmith | msmith   | bastion, backend | No               |
 
 ## KRL (Key Revocation List)
 

@@ -136,8 +136,8 @@ AuthorizedPrincipalsCommandUser root
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 
-# Allow agent forwarding for ProxyJump to backend
-AllowAgentForwarding yes
+# ProxyJump requires TCP forwarding, but not SSH agent forwarding
+AllowAgentForwarding no
 AllowTcpForwarding yes
 
 # Expose certificate info for audit

@@ -79,13 +79,15 @@ sequenceDiagram
     Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
     Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion
     LLNG-->>Bastion: 4. authorized: true
-    Note over Bastion: 5. Génère JWT bastion<br/>(TTL 300s, target=backend)
-    Bastion->>Backend: 6. ProxyJump + OB_BASTION_JWT
+    Note over Bastion: 5. Génère JWT bastion<br/>(TTL 300s, target=backend)<br/>⚠ ob-ssh-proxy (pas ProxyJump natif)
+    Bastion->>Backend: 6. ob-ssh-proxy + LLNG_BASTION_JWT
     Note over Backend: 7. Vérifie signature CA<br/>Vérifie KRL<br/>Vérifie JWT bastion (JWKS)
     Backend->>LLNG: 8. PAM: /pam/authorize<br/>user=X, host=backend
     LLNG-->>Backend: 9. authorized: true
     Backend-->>Client: 10. Session SSH établie
 ```
+
+> **Note sur ob-ssh-proxy vs ProxyJump natif :** La commande client utilise `ssh -J bastion backend` pour la transparence utilisateur, mais le bastion n'utilise **pas** le ProxyJump SSH natif pour le saut vers le backend. Il utilise `ob-ssh-proxy`, un proxy SSH custom qui injecte la variable d'environnement `LLNG_BASTION_JWT` dans la connexion vers le backend. Le ProxyJump natif SSH ne permet pas d'injecter des variables d'environnement, ce qui rendrait impossible la transmission du JWT d'authentification bastion→backend.
 
 #### 3. Escalade de privilèges (sudo)
 
@@ -173,7 +175,7 @@ iptables -A INPUT -p tcp --dport 22 -j DROP
 
 ```bash
 # /etc/ssh/sshd_config sur les backends
-AcceptEnv OB_BASTION_JWT
+AcceptEnv LLNG_BASTION_JWT
 ```
 
 ### Durée de vie des certificats SSH
@@ -297,9 +299,9 @@ ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519
 ssh-add -t 8h ~/.ssh/id_ed25519
 ```
 
-|                 |                     Score résiduel                     |
-| --------------- | :----------------------------------------------------: |
-| **Probabilité** |        2 (compromission poste client possible)         |
+|                 |                   Score résiduel                    |
+| --------------- | :-------------------------------------------------: |
+| **Probabilité** |       2 (compromission poste client possible)       |
 | **Impact**      | 2 (avec KRL + sudo impossible sans token SSO frais) |
 
 ---
@@ -555,7 +557,7 @@ pkill -u $USERNAME -KILL
 **Vecteurs d'attaque :**
 
 - MITM entre bastion et backend (rare si réseau interne)
-- Lecture de la variable d'environnement `OB_BASTION_JWT` sur le bastion
+- Lecture de la variable d'environnement `LLNG_BASTION_JWT` sur le bastion
 - Logs applicatifs exposant le JWT
 
 **Facteurs atténuants :**
@@ -905,7 +907,7 @@ crowdsec_block_delay = 600  # 10 minutes au lieu de 3
 |                 |                    Score résiduel                     |
 | --------------- | :---------------------------------------------------: |
 | **Probabilité** | 1 (avec cron + monitoring + /pam/authorize en backup) |
-| **Impact**      |            2 (sudo toujours bloqué sans token)        |
+| **Impact**      |          2 (sudo toujours bloqué sans token)          |
 
 ---
 
@@ -926,10 +928,10 @@ L'escalade sudo est bloquée par conception :
 2. L'obtention du token nécessite une authentification SSO (2FA si configuré)
 3. Même un poste client compromis ne peut pas obtenir de token sans les credentials SSO de l'utilisateur
 
-|                 |                    Score résiduel                    |
-| --------------- | :--------------------------------------------------: |
-| **Probabilité** |    1 (réauthentification SSO pour chaque sudo)       |
-| **Impact**      |    2 (scope limité à ce que sudo_allowed autorise)   |
+|                 |                 Score résiduel                  |
+| --------------- | :---------------------------------------------: |
+| **Probabilité** |   1 (réauthentification SSO pour chaque sudo)   |
+| **Impact**      | 2 (scope limité à ce que sudo_allowed autorise) |
 
 ---
 
@@ -937,23 +939,23 @@ L'escalade sudo est bloquée par conception :
 
 ### Avant remédiation
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable     | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------- | -------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6                 |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                  | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | --------------------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6                              |              |                   |
 | **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 |              |                   |
-| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12     | R-S8         |                   |
-| **1 - Négligeable**      |                     |                      |              |                   |
+| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                  | R-S8         |                   |
+| **1 - Négligeable**      |                     |                                   |              |                   |
 
 > **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires.
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                              | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------------------------------------ | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                             |                  |              |                   |
-| **3 - Important**        | R-S5                                             | R-S6             |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                      | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                     |                  |              |                   |
+| **3 - Important**        | R-S5                                                     | R-S6             |              |                   |
 | **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S15 R-S16 | R-S8             |              |                   |
-| **1 - Négligeable**      |                                                  |                  |              |                   |
+| **1 - Négligeable**      |                                                          |                  |              |                   |
 
 **Profil de risque de la cible maximale :**
 
@@ -992,7 +994,7 @@ L'escalade sudo est bloquée par conception :
 - [ ] Clients configurés avec ProxyJump (pas d'agent forwarding)
 - [ ] `bastion_jwt_required = true` sur les backends
 - [ ] `bastion_jwt_replay_detection = true` activé
-- [ ] `AcceptEnv OB_BASTION_JWT` dans sshd_config des backends
+- [ ] `AcceptEnv LLNG_BASTION_JWT` dans sshd_config des backends
 - [ ] Restriction réseau : backends accessibles uniquement depuis le bastion
 - [ ] `bastion_jwt_allowed_bastions` configuré (whitelist des bastions)
 
@@ -1242,35 +1244,35 @@ sequenceDiagram
 
 ### Mesures critiques (non négociables)
 
-| Mesure | Justification |
-| ------ | ------------- |
-| `AuthorizedKeysFile none` | Élimine R-S1 et R-S2 ; certificat CA obligatoire |
-| KRL avec cron 30 min | Contrôle compensatoire pour les certificats 1 an |
+| Mesure                        | Justification                                               |
+| ----------------------------- | ----------------------------------------------------------- |
+| `AuthorizedKeysFile none`     | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
+| KRL avec cron 30 min          | Contrôle compensatoire pour les certificats 1 an            |
 | `bastion_jwt_required = true` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
-| PAM sudo avec token LLNG | Bloque toute escalade sans réauthentification SSO |
-| Restriction réseau backends | Défense en profondeur contre le contournement bastion |
+| PAM sudo avec token LLNG      | Bloque toute escalade sans réauthentification SSO           |
+| Restriction réseau backends   | Défense en profondeur contre le contournement bastion       |
 
 ### Mesures recommandées
 
-| Mesure | Justification |
-| ------ | ------------- |
-| CA sur HSM ou machine air-gap | Réduit l'impact catastrophique de R-S4 |
-| LLNG en haute disponibilité | Réduit R-S7 à P=1 |
-| Monitoring KRL + alertes | Détection rapide de R-S15 |
-| `AllowAgentForwarding no` | Réduit l'impact de R-S6 en cas de compromission bastion |
-| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11) |
-| ProxyJump côté client | La clé privée ne touche jamais le bastion |
-| `ClientAliveInterval 300` | Limite l'exposition des sessions actives après révocation |
-| 2FA sur LLNG pour les tokens sudo | Renforce la protection contre R-S16 |
+| Mesure                                                  | Justification                                             |
+| ------------------------------------------------------- | --------------------------------------------------------- |
+| CA sur HSM ou machine air-gap                           | Réduit l'impact catastrophique de R-S4                    |
+| LLNG en haute disponibilité                             | Réduit R-S7 à P=1                                         |
+| Monitoring KRL + alertes                                | Détection rapide de R-S15                                 |
+| `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion   |
+| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                          |
+| ProxyJump côté client                                   | La clé privée ne touche jamais le bastion                 |
+| `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation |
+| 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                       |
 
 ### Points de surveillance (SIEM / monitoring)
 
-| Événement | Criticité | Action recommandée |
-| --------- | --------- | ------------------ |
-| Connexion SSH sans certificat rejetée | Medium | Log + alerte récurrente |
-| Connexion avec certificat révoqué (KRL) | High | Alerte immédiate |
-| Connexion backend sans JWT bastion | High | Alerte immédiate |
-| KRL non mise à jour depuis > 1h | High | Alerte immédiate |
-| Sudo refusé (token absent/invalide) | Medium | Log |
-| Même certificat depuis 2+ IPs différentes | High | Alerte + investigation |
-| Modification `service-accounts.conf` | Critical | Alerte immédiate + audit |
+| Événement                                 | Criticité | Action recommandée       |
+| ----------------------------------------- | --------- | ------------------------ |
+| Connexion SSH sans certificat rejetée     | Medium    | Log + alerte récurrente  |
+| Connexion avec certificat révoqué (KRL)   | High      | Alerte immédiate         |
+| Connexion backend sans JWT bastion        | High      | Alerte immédiate         |
+| KRL non mise à jour depuis > 1h           | High      | Alerte immédiate         |
+| Sudo refusé (token absent/invalide)       | Medium    | Log                      |
+| Même certificat depuis 2+ IPs différentes | High      | Alerte + investigation   |
+| Modification `service-accounts.conf`      | Critical  | Alerte immédiate + audit |

@@ -2,12 +2,12 @@
 
 ## Matrice des Risques Résiduels (Mode E)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                   | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | ----------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4, R-SA2                                           | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11                                       | R-S6             |              |                   |
-| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16         | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14                                        |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                          | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                                  | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11                              | R-S6             |              |                   |
+| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14                               |                  |              |                   |
 
 **Zones de risque :**
 

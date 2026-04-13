@@ -74,9 +74,9 @@ Match User *
     ForceCommand /usr/bin/ob-ssh-proxy
 .fi
 .SS Backend Configuration (/etc/ssh/sshd_config)
-The backend must accept the OB_BASTION_JWT environment variable:
+The backend must accept the LLNG_BASTION_JWT environment variable:
 .nf
-AcceptEnv OB_BASTION_JWT
+AcceptEnv LLNG_BASTION_JWT
 .fi
 .SH PAM CONFIGURATION
 On backend servers, configure PAM to verify the bastion JWT by adding
@@ -107,7 +107,7 @@ Main configuration file
 Server authentication token (from ob-enroll)
 .SH ENVIRONMENT
 .TP
-.B OB_BASTION_JWT
+.B LLNG_BASTION_JWT
 The JWT is exported via this variable and passed to backends via SendEnv.
 .TP
 .B SSH_ORIGINAL_COMMAND

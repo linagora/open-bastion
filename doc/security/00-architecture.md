@@ -4,14 +4,14 @@
 
 Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open Bastion (Mode E) :
 
-| Composant | Configuration |
-| --------- | ------------- |
-| **Architecture réseau** | Bastion + backends isolés |
+| Composant                | Configuration                                                            |
+| ------------------------ | ------------------------------------------------------------------------ |
+| **Architecture réseau**  | Bastion + backends isolés                                                |
 | **Authentification SSH** | Certificats signés par la CA LLNG uniquement (`AuthorizedKeysFile none`) |
-| **Autorisation SSH** | Vérification LLNG `/pam/authorize` à chaque connexion |
-| **Escalade sudo** | Token temporaire LLNG uniquement (réauthentification SSO) |
-| **Révocation** | KRL obligatoire + désactivation compte LLNG |
-| **Bastion → Backend** | JWT signé vérifié cryptographiquement |
+| **Autorisation SSH**     | Vérification LLNG `/pam/authorize` à chaque connexion                    |
+| **Escalade sudo**        | Token temporaire LLNG uniquement (réauthentification SSO)                |
+| **Révocation**           | KRL obligatoire + désactivation compte LLNG                              |
+| **Bastion → Backend**    | JWT signé vérifié cryptographiquement                                    |
 
 ```mermaid
 flowchart TB
@@ -66,12 +66,12 @@ sequenceDiagram
 
 ### Configuration TLS
 
-| Paramètre         | Défaut       | Description                                           |
-| ----------------- | ------------ | ----------------------------------------------------- |
-| `min_tls_version` | 13 (TLS 1.3) | Version TLS minimale (12=1.2, 13=1.3)                 |
-| `verify_ssl`      | true         | Vérifier le certificat serveur                        |
-| `ca_cert`         | système      | Chemin vers un certificat CA personnalisé             |
-| `cert_pin`        | aucun        | Épinglage de certificat (format sha256//base64)       |
+| Paramètre         | Défaut       | Description                                     |
+| ----------------- | ------------ | ----------------------------------------------- |
+| `min_tls_version` | 13 (TLS 1.3) | Version TLS minimale (12=1.2, 13=1.3)           |
+| `verify_ssl`      | true         | Vérifier le certificat serveur                  |
+| `ca_cert`         | système      | Chemin vers un certificat CA personnalisé       |
+| `cert_pin`        | aucun        | Épinglage de certificat (format sha256//base64) |
 
 **Épinglage de Certificat** : Lorsqu'il est configuré, le module valide la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA.
 
@@ -95,10 +95,10 @@ Cela fournit une défense en profondeur contre la falsification de requêtes, m�
 
 Le module PAM s'authentifie auprès du serveur LLNG en utilisant :
 
-| Paramètre              | Description                                                     |
-| ---------------------- | --------------------------------------------------------------- |
-| `server_token_file`    | Chemin vers le fichier contenant le token bearer du serveur     |
-| `server_group`         | Nom du groupe serveur (défaut : "default")                      |
+| Paramètre              | Description                                                         |
+| ---------------------- | ------------------------------------------------------------------- |
+| `server_token_file`    | Chemin vers le fichier contenant le token bearer du serveur         |
+| `server_group`         | Nom du groupe serveur (défaut : "default")                          |
 | `token_rotate_refresh` | Rotation automatique des tokens de rafraîchissement (défaut : true) |
 
 Le token serveur doit être stocké dans un fichier avec des permissions restreintes (0600) appartenant à root.
@@ -149,12 +149,12 @@ flowchart LR
 
 ### Bénéfices de Sécurité
 
-| Menace                        | Sans JWT Bastion               | Avec JWT Bastion              |
-| ----------------------------- | ------------------------------ | ----------------------------- |
-| Accès direct au backend       | Possible si réseau accessible  | Bloqué (pas de JWT valide)    |
-| Contournement VPN vers backend | Possible                      | Bloqué                        |
-| Mauvaise configuration pare-feu | Expose les backends          | Backends toujours protégés    |
-| Clés bastion compromises      | Accès aux backends             | Chaque saut toujours vérifié  |
+| Menace                          | Sans JWT Bastion              | Avec JWT Bastion             |
+| ------------------------------- | ----------------------------- | ---------------------------- |
+| Accès direct au backend         | Possible si réseau accessible | Bloqué (pas de JWT valide)   |
+| Contournement VPN vers backend  | Possible                      | Bloqué                       |
+| Mauvaise configuration pare-feu | Expose les backends           | Backends toujours protégés   |
+| Clés bastion compromises        | Accès aux backends            | Chaque saut toujours vérifié |
 
 ### Configuration (Backend)
 
@@ -177,16 +177,16 @@ AcceptEnv LLNG_BASTION_JWT
 
 ### Claims JWT
 
-| Claim           | Description                                                   |
-| --------------- | ------------------------------------------------------------- |
+| Claim           | Description                                                    |
+| --------------- | -------------------------------------------------------------- |
 | `iss`           | URL du portail LLNG (doit correspondre à `bastion_jwt_issuer`) |
-| `sub`           | Nom d'utilisateur proxifié                                    |
-| `aud`           | `pam:bastion-backend`                                         |
-| `exp`           | Horodatage d'expiration (courte durée de vie)                 |
-| `bastion_id`    | Identifiant du serveur bastion                                |
-| `bastion_group` | Groupe serveur du bastion                                     |
-| `target_host`   | Nom d'hôte du backend cible                                   |
-| `user_groups`   | Groupes LLNG de l'utilisateur                                 |
+| `sub`           | Nom d'utilisateur proxifié                                     |
+| `aud`           | `pam:bastion-backend`                                          |
+| `exp`           | Horodatage d'expiration (courte durée de vie)                  |
+| `bastion_id`    | Identifiant du serveur bastion                                 |
+| `bastion_group` | Groupe serveur du bastion                                      |
+| `target_host`   | Nom d'hôte du backend cible                                    |
+| `user_groups`   | Groupes LLNG de l'utilisateur                                  |
 
 ### Vérification Hors-Ligne
 
@@ -235,10 +235,10 @@ Lorsque `cache_invalidate_on_logout = true` _(défaut)_ :
 
 ### TTL Basé sur le Risque
 
-| Type de service      | TTL par défaut |
-| -------------------- | -------------- |
-| Services normaux     | 300 secondes   |
-| Services à haut risque | 60 secondes  |
+| Type de service        | TTL par défaut |
+| ---------------------- | -------------- |
+| Services normaux       | 300 secondes   |
+| Services à haut risque | 60 secondes    |
 
 Configurer les services à haut risque via `high_risk_services` _(séparés par des virgules)_.
 
@@ -246,13 +246,13 @@ Configurer les services à haut risque via `high_risk_services` _(séparés par 
 
 Protection contre les attaques par force brute :
 
-| Paramètre                    | Défaut | Description                             |
-| ---------------------------- | ------ | --------------------------------------- |
-| `rate_limit_enabled`         | true   | Activer la limitation de débit          |
-| `rate_limit_max_attempts`    | 5      | Échecs avant verrouillage               |
-| `rate_limit_initial_lockout` | 30s    | Durée initiale de verrouillage          |
-| `rate_limit_max_lockout`     | 3600s  | Durée maximale de verrouillage          |
-| `rate_limit_backoff_mult`    | 2.0    | Multiplicateur d'attente exponentielle  |
+| Paramètre                    | Défaut | Description                            |
+| ---------------------------- | ------ | -------------------------------------- |
+| `rate_limit_enabled`         | true   | Activer la limitation de débit         |
+| `rate_limit_max_attempts`    | 5      | Échecs avant verrouillage              |
+| `rate_limit_initial_lockout` | 30s    | Durée initiale de verrouillage         |
+| `rate_limit_max_lockout`     | 3600s  | Durée maximale de verrouillage         |
+| `rate_limit_backoff_mult`    | 2.0    | Multiplicateur d'attente exponentielle |
 
 L'état de verrouillage est stocké par utilisateur dans `rate_limit_state_dir`.
 
@@ -344,15 +344,15 @@ Les événements d'audit incluent :
 
 Les événements d'audit utilisent des codes différenciés pour l'intégration SIEM :
 
-| Type d'événement       | Description                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `AUDIT_AUTH_SUCCESS`   | Authentification réussie                                                       |
-| `AUDIT_AUTH_FAILURE`   | Authentification échouée                                                       |
-| `AUDIT_AUTHZ_DENIED`   | Autorisation refusée (utilisateur valide, sans permission)                     |
-| `AUDIT_SECURITY_ERROR` | Échec cryptographique/sécurité (signature invalide, JWT malformé)              |
-| `AUDIT_RATE_LIMITED`   | Limitation de débit déclenchée                                                 |
-| `AUDIT_USER_CREATED`   | Compte utilisateur local créé                                                  |
-| `AUDIT_SERVER_ERROR`   | Erreur de communication avec le backend                                        |
+| Type d'événement       | Description                                                       |
+| ---------------------- | ----------------------------------------------------------------- |
+| `AUDIT_AUTH_SUCCESS`   | Authentification réussie                                          |
+| `AUDIT_AUTH_FAILURE`   | Authentification échouée                                          |
+| `AUDIT_AUTHZ_DENIED`   | Autorisation refusée (utilisateur valide, sans permission)        |
+| `AUDIT_SECURITY_ERROR` | Échec cryptographique/sécurité (signature invalide, JWT malformé) |
+| `AUDIT_RATE_LIMITED`   | Limitation de débit déclenchée                                    |
+| `AUDIT_USER_CREATED`   | Compte utilisateur local créé                                     |
+| `AUDIT_SERVER_ERROR`   | Erreur de communication avec le backend                           |
 
 Cette classification permet aux équipes de sécurité de distinguer :
 
@@ -363,32 +363,32 @@ Cette classification permet aux équipes de sécurité de distinguer :
 
 Pour la surveillance de sécurité en temps réel :
 
-| Paramètre        | Description                                       |
-| ---------------- | ------------------------------------------------- |
-| `notify_enabled` | Activer les webhooks                              |
-| `notify_url`     | URL de l'endpoint webhook                         |
-| `notify_secret`  | Secret HMAC pour les signatures des webhooks      |
+| Paramètre        | Description                                  |
+| ---------------- | -------------------------------------------- |
+| `notify_enabled` | Activer les webhooks                         |
+| `notify_url`     | URL de l'endpoint webhook                    |
+| `notify_secret`  | Secret HMAC pour les signatures des webhooks |
 
 ## Sécurité de la Configuration
 
 ### Gestion des Secrets
 
-| Paramètre              | Défaut     | Description                        |
-| ---------------------- | ---------- | ---------------------------------- |
-| `secrets_encrypted`    | true       | Chiffrer les secrets au repos      |
-| `secrets_use_keyring`  | true       | Utiliser le trousseau noyau        |
-| `secrets_keyring_name` | "pam_llng" | Identifiant du trousseau           |
+| Paramètre              | Défaut     | Description                   |
+| ---------------------- | ---------- | ----------------------------- |
+| `secrets_encrypted`    | true       | Chiffrer les secrets au repos |
+| `secrets_use_keyring`  | true       | Utiliser le trousseau noyau   |
+| `secrets_keyring_name` | "pam_llng" | Identifiant du trousseau      |
 
 ### Permissions des Fichiers
 
 Permissions recommandées :
 
-| Fichier              | Permissions | Propriétaire |
-| -------------------- | ----------- | ------------ |
-| `/etc/pam_llng.conf` | 0600        | root         |
-| Fichier token serveur | 0600       | root         |
-| Répertoire cache     | 0700        | root         |
-| Répertoire état limitation de débit | 0700 | root   |
+| Fichier                             | Permissions | Propriétaire |
+| ----------------------------------- | ----------- | ------------ |
+| `/etc/pam_llng.conf`                | 0600        | root         |
+| Fichier token serveur               | 0600        | root         |
+| Répertoire cache                    | 0700        | root         |
+| Répertoire état limitation de débit | 0700        | root         |
 
 ## Sécurité des Scripts
 
@@ -486,24 +486,24 @@ contournant l'authentification OIDC. Ils sont définis dans un fichier de config
 
 ### Sécurité du Fichier de Configuration
 
-| Exigence    | Description                                                         |
-| ----------- | ------------------------------------------------------------------- |
-| Propriété   | Doit appartenir à root (uid 0)                                      |
-| Permissions | Doit être 0600 (lecture/écriture propriétaire uniquement)           |
-| Liens sym.  | Le fichier ne doit pas être un lien symbolique (O_NOFOLLOW)         |
-| Emplacement | `/etc/open-bastion/service-accounts.conf` (configurable)            |
+| Exigence    | Description                                                 |
+| ----------- | ----------------------------------------------------------- |
+| Propriété   | Doit appartenir à root (uid 0)                              |
+| Permissions | Doit être 0600 (lecture/écriture propriétaire uniquement)   |
+| Liens sym.  | Le fichier ne doit pas être un lien symbolique (O_NOFOLLOW) |
+| Emplacement | `/etc/open-bastion/service-accounts.conf` (configurable)    |
 
 ### Validation des Comptes
 
 Les comptes de service sont validés selon les mêmes règles de sécurité que les utilisateurs réguliers :
 
-| Champ             | Validation                                                                  |
-| ----------------- | --------------------------------------------------------------------------- |
-| `name`            | Lettres minuscules, chiffres, underscore, tiret ; max 32 caractères         |
+| Champ             | Validation                                                                       |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `name`            | Lettres minuscules, chiffres, underscore, tiret ; max 32 caractères              |
 | `key_fingerprint` | Doit commencer par `SHA256:` ou `MD5:`, uniquement des caractères base64 valides |
-| `shell`           | Doit figurer dans la liste `approved_shells`                                |
-| `home`            | Doit correspondre à `approved_home_prefixes`                                |
-| `uid`/`gid`       | Doit être dans la plage valide (0-65534)                                    |
+| `shell`           | Doit figurer dans la liste `approved_shells`                                     |
+| `home`            | Doit correspondre à `approved_home_prefixes`                                     |
+| `uid`/`gid`       | Doit être dans la plage valide (0-65534)                                         |
 
 ### Exigence du Serveur SSH
 
@@ -545,21 +545,21 @@ sequenceDiagram
 
 ### Bénéfices de Sécurité
 
-| Fonctionnalité         | Bénéfice                                                      |
-| ---------------------- | ------------------------------------------------------------- |
-| Configuration locale   | Pas de dépendance réseau pour les comptes de service          |
+| Fonctionnalité         | Bénéfice                                                            |
+| ---------------------- | ------------------------------------------------------------------- |
+| Configuration locale   | Pas de dépendance réseau pour les comptes de service                |
 | Contrôle par serveur   | Chaque serveur liste explicitement les comptes de service autorisés |
-| Liaison par clé SSH    | La validation de l'empreinte empêche la substitution de clé   |
-| Journalisation d'audit | Tous les accès de comptes de service sont journalisés         |
-| Contrôle sudo          | Permissions sudo fines par compte                             |
+| Liaison par clé SSH    | La validation de l'empreinte empêche la substitution de clé         |
+| Journalisation d'audit | Tous les accès de comptes de service sont journalisés               |
+| Contrôle sudo          | Permissions sudo fines par compte                                   |
 
 ### Limitations
 
-| Limitation                      | Atténuation                                                |
-| ------------------------------- | ---------------------------------------------------------- |
-| Pas de gestion centralisée      | Utiliser la gestion de configuration (Ansible, Puppet)     |
-| Rotation manuelle des clés      | Mettre en œuvre des procédures de rotation des clés        |
-| Dépendance au fichier local     | Surveiller l'intégrité des fichiers avec AIDE/Tripwire     |
+| Limitation                  | Atténuation                                            |
+| --------------------------- | ------------------------------------------------------ |
+| Pas de gestion centralisée  | Utiliser la gestion de configuration (Ansible, Puppet) |
+| Rotation manuelle des clés  | Mettre en œuvre des procédures de rotation des clés    |
+| Dépendance au fichier local | Surveiller l'intégrité des fichiers avec AIDE/Tripwire |
 
 ### Exemple de Configuration
 
@@ -589,14 +589,14 @@ Cela empêche les connexions utilisant des algorithmes cryptographiques faibles 
 
 ### Types de Clés Supportés
 
-| Type         | Algorithme                | Recommandation                                  |
-| ------------ | ------------------------- | ----------------------------------------------- |
-| `ed25519`    | Ed25519                   | **Recommandé** - Moderne, rapide, sécurisé      |
-| `sk-ed25519` | Ed25519 avec FIDO2        | **Recommandé** - Lié au matériel                |
-| `sk-ecdsa`   | ECDSA avec FIDO2          | **Recommandé** - Lié au matériel                |
-| `ecdsa`      | ECDSA (P-256/P-384/P-521) | Acceptable                                      |
-| `rsa`        | RSA                       | Acceptable avec ≥3072 bits                      |
-| `dsa`        | DSA                       | **Obsolète** - Devrait être désactivé           |
+| Type         | Algorithme                | Recommandation                             |
+| ------------ | ------------------------- | ------------------------------------------ |
+| `ed25519`    | Ed25519                   | **Recommandé** - Moderne, rapide, sécurisé |
+| `sk-ed25519` | Ed25519 avec FIDO2        | **Recommandé** - Lié au matériel           |
+| `sk-ecdsa`   | ECDSA avec FIDO2          | **Recommandé** - Lié au matériel           |
+| `ecdsa`      | ECDSA (P-256/P-384/P-521) | Acceptable                                 |
+| `rsa`        | RSA                       | Acceptable avec ≥3072 bits                 |
+| `dsa`        | DSA                       | **Obsolète** - Devrait être désactivé      |
 
 ### Considérations de Sécurité
 
@@ -617,21 +617,21 @@ Cette configuration n'autorise que les clés Ed25519 et les clés de sécurité 
 
 ## Atténuation des Menaces
 
-| Menace                         | Atténuation                                                                  |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| Rejeu de token                 | Tokens à usage unique, invalidation du cache                                 |
-| Attaques MITM                  | TLS 1.3, épinglage de certificat                                             |
-| Force brute                    | Limitation de débit avec attente exponentielle                               |
-| Falsification du cache         | Chiffrement authentifié AES-256-GCM                                          |
-| Injection de chemin            | Validation stricte des chemins, listes approuvées                            |
-| Débordement de tampon          | Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null |
-| Collision d'UID                | Détection de collision à sécurité intégrée                                   |
-| Falsification de requête       | Signature HMAC optionnelle avec nonces                                       |
-| DoS par épuisement mémoire     | Limites de taille de réponse (256 Ko), limites de groupes (256 max)          |
-| Dépassement d'entier           | Validation des entrées dans l'encodage base64, calculs d'attente             |
-| JSON malformé                  | Validation de type pour les champs de réponse critiques                      |
-| Exposition du secret client    | JWT Client Assertion (RFC 7523) - secret jamais transmis                     |
-| Contournement du bastion       | Vérification JWT bastion sur les backends (signé RS256)                      |
-| Accès direct au backend        | JWT requis + vérification hors-ligne basée sur JWKS                          |
-| Clés SSH faibles               | Application de la politique de clés SSH avec restrictions de type/taille     |
-| Force brute sur le cache       | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle |
+| Menace                      | Atténuation                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------------- |
+| Rejeu de token              | Tokens à usage unique, invalidation du cache                                              |
+| Attaques MITM               | TLS 1.3, épinglage de certificat                                                          |
+| Force brute                 | Limitation de débit avec attente exponentielle                                            |
+| Falsification du cache      | Chiffrement authentifié AES-256-GCM                                                       |
+| Injection de chemin         | Validation stricte des chemins, listes approuvées                                         |
+| Débordement de tampon       | Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null      |
+| Collision d'UID             | Détection de collision à sécurité intégrée                                                |
+| Falsification de requête    | Signature HMAC optionnelle avec nonces                                                    |
+| DoS par épuisement mémoire  | Limites de taille de réponse (256 Ko), limites de groupes (256 max)                       |
+| Dépassement d'entier        | Validation des entrées dans l'encodage base64, calculs d'attente                          |
+| JSON malformé               | Validation de type pour les champs de réponse critiques                                   |
+| Exposition du secret client | JWT Client Assertion (RFC 7523) - secret jamais transmis                                  |
+| Contournement du bastion    | Vérification JWT bastion sur les backends (signé RS256)                                   |
+| Accès direct au backend     | JWT requis + vérification hors-ligne basée sur JWKS                                       |
+| Clés SSH faibles            | Application de la politique de clés SSH avec restrictions de type/taille                  |
+| Force brute sur le cache    | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle |

@@ -467,7 +467,7 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 
 # Accept bastion JWT environment variable
-AcceptEnv OB_BASTION_JWT
+AcceptEnv LLNG_BASTION_JWT
 
 # Accept connections from bastion only
 # (combine with firewall rules)

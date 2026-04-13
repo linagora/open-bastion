@@ -6,13 +6,13 @@ Ce document décrit la procédure de révocation des accès lorsqu'un administra
 
 Un administrateur SSH (appelé "A" dans ce document) dispose de :
 
-| Accès           | Description                                                        |
-| --------------- | ------------------------------------------------------------------ |
-| Compte LLNG     | Compte LDAP/AD avec appartenance aux groupes autorisés             |
-| `client_secret` | Secret du client OIDC utilisé pour les enrôlements                 |
-| Certificat SSH  | Certificat signé par la CA LLNG (durée de vie : 1 an)              |
-| Accès réseau    | VPN ou accès réseau interne vers le bastion                        |
-| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés              |
+| Accès           | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| Compte LLNG     | Compte LDAP/AD avec appartenance aux groupes autorisés |
+| `client_secret` | Secret du client OIDC utilisé pour les enrôlements     |
+| Certificat SSH  | Certificat signé par la CA LLNG (durée de vie : 1 an)  |
+| Accès réseau    | VPN ou accès réseau interne vers le bastion            |
+| Tokens machines | Connaissance des `refresh_token` des serveurs enrôlés  |
 
 ## Principe : Défense en Profondeur
 
@@ -202,13 +202,13 @@ Indépendamment des offboardings, planifier une rotation régulière :
 
 ## Tableau Récapitulatif
 
-| Phase | Action                              | Délai      | Effet                                              |
-| ----- | ----------------------------------- | ---------- | -------------------------------------------------- |
-| 1     | Désactiver compte LLNG              | Immédiat   | Bloque `/pam/authorize` + nouveaux certificats + sudo |
-| 1     | Révoquer VPN                        | Immédiat   | Bloque accès bastion                               |
-| 2     | Révoquer certificats via `/ssh/admin` | Immédiat | Ajoute à la KRL                                    |
-| 2     | Propager KRL aux serveurs           | < 30 min   | Bloque certificats révoqués                        |
-| 3     | Rotation `client_secret`            | < 30 jours | Limite exposition                                  |
+| Phase | Action                                | Délai      | Effet                                                 |
+| ----- | ------------------------------------- | ---------- | ----------------------------------------------------- |
+| 1     | Désactiver compte LLNG                | Immédiat   | Bloque `/pam/authorize` + nouveaux certificats + sudo |
+| 1     | Révoquer VPN                          | Immédiat   | Bloque accès bastion                                  |
+| 2     | Révoquer certificats via `/ssh/admin` | Immédiat   | Ajoute à la KRL                                       |
+| 2     | Propager KRL aux serveurs             | < 30 min   | Bloque certificats révoqués                           |
+| 3     | Rotation `client_secret`              | < 30 jours | Limite exposition                                     |
 
 ---
 

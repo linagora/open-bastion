@@ -134,7 +134,7 @@ sequenceDiagram
     Bastion->>LLNG: POST /pam/bastion-token
     LLNG-->>Bastion: {token: "JWT..."}
 
-    Bastion->>Backend: SSH + OB_BASTION_JWT env var
+    Bastion->>Backend: SSH + LLNG_BASTION_JWT env var
 
     Note over Backend: Verify JWT signature<br/>(using JWKS cache)
 
@@ -508,7 +508,7 @@ bastion_jwt_clock_skew = 60
 
 ```bash
 # /etc/ssh/sshd_config.d/llng.conf
-AcceptEnv OB_BASTION_JWT
+AcceptEnv LLNG_BASTION_JWT
 ```
 
 ### Offline Verification

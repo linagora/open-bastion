@@ -193,6 +193,20 @@ test_trailing_slash() {
     fi
 }
 
+# ── Test 13: --max-security sets MAX_SECURITY=true ──
+test_max_security() {
+    (
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --max-security
+        [ "$MAX_SECURITY" = "true" ] && exit 0 || exit 1
+    )
+    if [ $? -eq 0 ]; then
+        pass "--max-security sets MAX_SECURITY=true"
+    else
+        fail "--max-security sets MAX_SECURITY=true"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-backend-setup ==="
 run_test test_syntax
@@ -208,6 +222,7 @@ run_test test_dry_run
 run_test test_confirm_noninteractive
 run_test test_backup_file
 run_test test_trailing_slash
+run_test test_max_security
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

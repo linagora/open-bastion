@@ -396,12 +396,31 @@ download_krl() {
         warn "KRL not available or invalid format, created empty file"
     fi
 
-    # Create cron job for KRL refresh (validates format before replacing)
+    # Create refresh script that reuses curl options (SSL verification, timeout)
     local cron_file="/etc/cron.d/open-bastion-krl"
+    local refresh_script="/usr/local/bin/open-bastion-refresh-krl"
+
+    cat > "$refresh_script" << REFRESHEOF
+#!/bin/bash
+set -euo pipefail
+tmp_file=\$(mktemp /tmp/open-bastion-krl.XXXXXX)
+trap 'rm -f "\$tmp_file"' EXIT
+CURL_OPTS="-sf --connect-timeout ${TIMEOUT}"
+if [ "${VERIFY_SSL}" = "false" ]; then
+    CURL_OPTS="\$CURL_OPTS -k"
+fi
+if curl \$CURL_OPTS "${PORTAL_URL}/ssh/revoked" -o "\$tmp_file" \\
+   && head -c 6 "\$tmp_file" | grep -q "SSHKRL"; then
+    mv "\$tmp_file" "${SSH_REVOKED_KEYS}"
+    chmod 644 "${SSH_REVOKED_KEYS}"
+fi
+REFRESHEOF
+    chmod 755 "$refresh_script"
+
     cat > "$cron_file" << CRONEOF
 # Open Bastion KRL refresh (Mode E - Maximum Security)
 # Downloads Key Revocation List every ${KRL_REFRESH_INTERVAL} minutes
-*/${KRL_REFRESH_INTERVAL} * * * * root curl -sf -o /tmp/krl.tmp ${PORTAL_URL}/ssh/revoked && head -c 6 /tmp/krl.tmp | grep -q SSHKRL && mv /tmp/krl.tmp ${SSH_REVOKED_KEYS} || rm -f /tmp/krl.tmp
+*/${KRL_REFRESH_INTERVAL} * * * * root ${refresh_script} >/dev/null 2>&1
 CRONEOF
     chmod 644 "$cron_file"
     info "Created KRL refresh cron job ($cron_file) every ${KRL_REFRESH_INTERVAL} min"
@@ -700,7 +719,7 @@ main() {
     configure_pam_llng || exit 1
     configure_session_recorder || exit 1
     configure_max_security_sshd || exit 1
-    configure_max_security_sudo || true
+    configure_max_security_sudo || exit 1
     download_krl || warn "KRL download failed"
     enroll_server || warn "Server enrollment skipped or failed"
 
