@@ -44,6 +44,7 @@ jobs:
             libjson-c-dev \
             libpam0g-dev \
             libssl-dev \
+            libsodium-dev \
             pkgconf \
             devscripts \
             fakeroot
@@ -99,6 +100,7 @@ jobs:
             libcurl-devel \
             json-c-devel \
             openssl-devel \
+            libsodium-devel \
             pkgconfig \
             systemd-rpm-macros
 

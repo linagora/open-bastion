@@ -9,6 +9,7 @@ override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DENABLE_CACHE=ON \
+		-DUSE_LIBSODIUM=ON \
 		-DINSTALL_SYSTEMD=OFF \
 		-DINSTALL_DESKTOP=ON
 

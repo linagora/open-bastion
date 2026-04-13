@@ -8,6 +8,7 @@ Build-Depends: debhelper-compat (= 13),
  libjson-c-dev,
  libpam0g-dev,
  libssl-dev,
+ libsodium-dev,
  pkgconf,
 Homepage: https://github.com/linagora/open-bastion
 
