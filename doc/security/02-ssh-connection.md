@@ -937,13 +937,81 @@ L'escalade sudo est bloquée par conception :
 
 ---
 
+### R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   4   |
+
+**Description :** Si le serveur LLNG est indisponible de manière prolongée (au-delà du TTL du cache offline) et qu'aucun administrateur ne dispose d'un certificat SSH valide en cache, **plus personne ne peut se connecter** au serveur par SSH. En Mode E, le serveur n'accepte ni mot de passe (`AuthorizedKeysFile none`), ni clé SSH non signée par la CA — il n'existe donc aucun mécanisme SSH de secours natif.
+
+**Conditions du lockout :**
+
+1. LLNG indisponible (panne, réseau coupé, maintenance prolongée)
+2. Cache d'autorisation offline expiré (`auth_cache_offline_ttl` dépassé)
+3. Certificats SSH des administrateurs expirés ou révoqués (KRL)
+4. Aucun compte de service configuré (`service-accounts.conf` vide ou absent)
+
+**Vecteurs :**
+
+- Panne LLNG prolongée (> 24h avec configuration par défaut)
+- Panne réseau isolant le serveur du portail LLNG
+- Incident combiné : panne LLNG + rotation de certificats récente (certificats courts)
+- Erreur de configuration : cache offline désactivé ou TTL très court
+
+**Conséquence :** Perte totale d'accès administratif au serveur. Seul un accès console hors-bande (KVM, IPMI, console hyperviseur type OVH/vSphere/Proxmox) permet le recouvrement. Si aucun accès console n'est disponible, le serveur est irrécupérable sans intervention physique.
+
+**Remédiation opérationnelle :**
+
+| Mesure                           | Description                                                                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Compte de service de secours** | Configurer un compte de service dédié au recouvrement dans `service-accounts.conf` avec une clé SSH stockée de manière sécurisée (coffre-fort, HSM) |
+| **Accès console documenté**      | Documenter la procédure d'accès console (KVM/IPMI/hyperviseur) pour chaque serveur et la tester périodiquement                                      |
+| **Cache offline suffisant**      | Configurer `auth_cache_offline_ttl` à une valeur couvrant la durée maximale d'indisponibilité LLNG tolérée                                          |
+
+**Remédiation infrastructure :**
+
+- LLNG en haute disponibilité (réduit la probabilité de panne prolongée)
+- Plusieurs portails LLNG en failover
+- Monitoring avec alerte quand le cache offline approche de l'expiration
+
+**Procédure de recouvrement via console :**
+
+1. Accéder à la console hors-bande du serveur (KVM, IPMI, console hyperviseur)
+2. Se connecter en root (accès physique/console, pas SSH)
+3. Option A — Ajouter un compte de service temporaire :
+   ```bash
+   # Ajouter une clé de recouvrement dans service-accounts.conf
+   cat >> /etc/open-bastion/service-accounts.conf << 'EOF'
+   [recovery]
+   ssh_keys = ssh-ed25519 AAAA... recovery@emergency
+   EOF
+   ```
+4. Option B — Désactiver temporairement le module PAM :
+   ```bash
+   # Commenter la ligne pam_openbastion dans /etc/pam.d/sshd
+   sed -i 's/^auth.*pam_openbastion/#&/' /etc/pam.d/sshd
+   ```
+5. Rétablir la configuration normale dès que LLNG est de nouveau disponible
+6. Documenter l'incident et les actions prises (audit)
+
+> **Attention :** L'option B désactive toute la sécurité Open Bastion. Elle ne doit être utilisée qu'en dernier recours et pour la durée la plus courte possible.
+
+|                 |                         Score résiduel                          |
+| --------------- | :-------------------------------------------------------------: |
+| **Probabilité** |          1 (avec HA LLNG + compte de service secours)           |
+| **Impact**      | 2 (avec procédure de recouvrement console documentée et testée) |
+
+---
+
 ## 4. Matrice des Risques
 
 ### Avant remédiation
 
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                  | 3 - Probable | 4 - Très probable |
 | ------------------------ | ------------------- | --------------------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6                              |              |                   |
+| **4 - Critique**         | R-S4                | R-S6 R-S17                        |              |                   |
 | **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 |              |                   |
 | **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                  | R-S8         |                   |
 | **1 - Négligeable**      |                     |                                   |              |                   |
@@ -952,12 +1020,12 @@ L'escalade sudo est bloquée par conception :
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                      | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | -------------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                     |                  |              |                   |
-| **3 - Important**        | R-S5                                                     | R-S6             |              |                   |
-| **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S15 R-S16 | R-S8             |              |                   |
-| **1 - Négligeable**      |                                                          |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                            | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                           |                  |              |                   |
+| **3 - Important**        | R-S5                                                           | R-S6             |              |                   |
+| **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S15 R-S16 R-S17 | R-S8             |              |                   |
+| **1 - Négligeable**      |                                                                |                  |              |                   |
 
 **Profil de risque de la cible maximale :**
 
@@ -966,6 +1034,7 @@ L'escalade sudo est bloquée par conception :
 - R-S3 (certificat compromis) : **contrôlé par KRL** + sudo bloqué sans token SSO
 - R-S5 (contournement bastion) : **P=1** (certificat CA requis + JWT bastion)
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
+- R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
 - Seuls risques résiduels significatifs : R-S4 (CA compromise) et R-S6 (bastion compromis)
 
 ---

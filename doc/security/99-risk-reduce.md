@@ -2,12 +2,12 @@
 
 ## Matrice des Risques Résiduels (Mode E)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                          | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | -------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4, R-SA2                                  | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11                              | R-S6             |              |                   |
-| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16 | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14                               |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                                         | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11                                     | R-S6             |              |                   |
+| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16, R-S17 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14                                      |                  |              |                   |
 
 **Zones de risque :**
 
@@ -133,3 +133,18 @@ Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire)
 1. **2FA obligatoire** : Exiger un second facteur pour l'obtention du token sudo
 2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
 3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité
+
+### R-S17 _(P=1, I=2)_ - Verrouillage total (lockout)
+
+Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation le ramène à P=1/I=2 via :
+
+- Compte de service de secours (`service-accounts.conf`) avec clé stockée en coffre-fort
+- Procédure de recouvrement console documentée et testée
+- LLNG en haute disponibilité
+
+Pistes pour réduire davantage :
+
+1. **Test de recouvrement périodique** : Simuler un lockout (désactiver LLNG en environnement de test) et valider la procédure console + compte de service de secours au moins une fois par an
+2. **Alerte proactive** : Monitorer l'âge du cache offline et alerter quand il atteint 80% du TTL configuré, avant l'expiration
+3. **Cache offline étendu pour le compte de secours** : Configurer un TTL offline plus long spécifiquement pour le compte de service de recouvrement
+4. **Runbook automatisé** : Script de recouvrement pré-positionné sur le serveur (accessible uniquement via console) pour réactiver l'accès en une commande
