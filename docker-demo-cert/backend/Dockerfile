@@ -69,8 +69,8 @@ session    required     pam_unix.so\n\
 RUN sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf && \
     sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 
-# Allow all users to sudo (PAM handles authorization)
-RUN echo "ALL ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
+# Sudo requires PAM authentication (no NOPASSWD)
+RUN echo "ALL ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
 # Fix PAM loginuid for Docker
 RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd 2>/dev/null || true

@@ -66,7 +66,7 @@ chmod 644 "$SSH_REVOKED_KEYS"
 # Set up KRL refresh cron job (validates KRL format before replacing)
 echo "Setting up KRL refresh cron (every ${KRL_REFRESH_INTERVAL} min)..."
 cat > /etc/cron.d/open-bastion-krl << CRONEOF
-*/${KRL_REFRESH_INTERVAL} * * * * root curl -sf -o /tmp/krl.tmp ${PORTAL_URL}/ssh/revoked && head -c 6 /tmp/krl.tmp | grep -q SSHKRL && mv /tmp/krl.tmp ${SSH_REVOKED_KEYS} || rm -f /tmp/krl.tmp
+*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" "${PORTAL_URL}/ssh/revoked" && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" "${SSH_REVOKED_KEYS}" || rm -f "\$tmp"
 CRONEOF
 chmod 644 /etc/cron.d/open-bastion-krl
 cron
@@ -185,14 +185,13 @@ for i in {1..30}; do
         EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // 3600')
         NOW=$(date +%s)
         EXPIRES_AT=$((NOW + EXPIRES_IN))
-        cat > "$TOKEN_FILE" << TOKENEOF
-{
-  "access_token": "$ACCESS_TOKEN",
-  "refresh_token": "${REFRESH_TOKEN:-}",
-  "expires_at": $EXPIRES_AT,
-  "enrolled_at": $NOW
-}
-TOKENEOF
+        jq -n \
+            --arg at "$ACCESS_TOKEN" \
+            --arg rt "${REFRESH_TOKEN:-}" \
+            --argjson ea "$EXPIRES_AT" \
+            --argjson en "$NOW" \
+            '{"access_token":$at,"refresh_token":$rt,"expires_at":$ea,"enrolled_at":$en}' \
+            > "$TOKEN_FILE"
         chmod 600 "$TOKEN_FILE"
         echo "Token saved (expires at: $(date -d "@$EXPIRES_AT" 2>/dev/null || echo "$EXPIRES_AT"))"
         break
@@ -288,7 +287,7 @@ cat > /etc/pam.d/sshd << EOF
 auth       required     pam_permit.so
 account    required     pam_openbastion.so
 session    required     pam_unix.so
-session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
+session    optional     pam_mkhomedir.so skel=/etc/skel umask=0077
 EOF
 
 # Ensure sshd_config.d is included
