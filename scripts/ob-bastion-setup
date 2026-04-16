@@ -466,7 +466,6 @@ auth       sufficient   pam_openbastion.so
 auth       required     pam_deny.so
 
 account    required     pam_openbastion.so
-account    required     pam_unix.so
 
 session    required     pam_unix.so
 "
@@ -481,6 +480,15 @@ session    required     pam_unix.so
     echo "$pam_content" > "$PAM_SUDO"
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO for LLNG token authentication"
+
+    # Configure sudoers: allow all SSO users to sudo (PAM handles authorization)
+    local sudoers_file="/etc/sudoers.d/open-bastion"
+    if [ ! -f "$sudoers_file" ]; then
+        echo "# Open Bastion Mode E: sudo authorization is handled by PAM (LLNG token required)" > "$sudoers_file"
+        echo "ALL ALL=(ALL) ALL" >> "$sudoers_file"
+        chmod 440 "$sudoers_file"
+        info "Created $sudoers_file"
+    fi
 }
 
 # Configure NSS for user/group resolution via LLNG

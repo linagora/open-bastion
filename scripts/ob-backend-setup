@@ -417,7 +417,6 @@ auth       sufficient   pam_openbastion.so
 auth       required     pam_deny.so
 
 account    required     pam_openbastion.so
-account    required     pam_unix.so
 
 session    required     pam_unix.so
 "
