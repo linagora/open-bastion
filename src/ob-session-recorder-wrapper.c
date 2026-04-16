@@ -5,47 +5,71 @@
  *
  * Install as: root:ob-sessions, mode 2755 (setgid)
  *
- * Purpose: ensure the session recorder runs with effective gid ob-sessions
- * so that session files are created with group ob-sessions.  The sessions
- * directory is mode 1770 root:ob-sessions (sticky + rwxrwx---), which means
- * only root or a process with effective gid ob-sessions can create files
- * there.  The sticky bit prevents non-root/non-owner processes from deleting
- * files they do not own.
+ * Purpose: create the user's session recording directory with group
+ * ob-sessions and the setgid bit, then exec the session recorder script
+ * with the user's ORIGINAL privileges (no elevated gid).
+ *
+ * Architecture:
+ *  1. Kernel gives us effective gid = ob-sessions (via setgid bit on binary)
+ *  2. We create $SESSIONS_DIR/$USER/ owned by user:ob-sessions, mode 2770
+ *     - The directory's setgid bit ensures all files created inside inherit
+ *       the ob-sessions group, without the process needing elevated gid
+ *  3. We sanitize the environment (LD_PRELOAD, BASH_ENV, etc.)
+ *  4. We exec the recorder script WITHOUT calling setregid()
+ *     - The kernel naturally strips the setgid on exec of #! scripts
+ *     - The script and user's shell run with the user's original gid
+ *     - But files they create in the session dir get group ob-sessions
  *
  * Security properties:
  *  - The target path is hard-coded; no user-controlled input affects it.
- *  - Real uid/gid are unchanged; only effective gid comes from the setgid bit.
- *  - Dangerous environment variables (LD_PRELOAD etc.) are stripped before exec
- *    to prevent code injection via dynamic linker when running with elevated gid.
- *  - The user's original real gid is exported as OB_ORIG_GID so the session
- *    recorder can drop back to it before spawning user shells.
- *  - No temporary files, no dynamic allocation, no user-controlled paths.
+ *  - The elevated gid is used ONLY for directory creation, then dropped.
+ *  - Dangerous environment variables are stripped before exec.
+ *  - No setregid() call: the user's shell never has the ob-sessions gid.
+ *  - No temporary files, no user-controlled paths.
  */
 
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <grp.h>
+#include <pwd.h>
 #include <errno.h>
 #include <string.h>
 
-/* Hard-coded path – never derived from user input */
+/* Hard-coded paths – never derived from user input */
 #define SESSION_RECORDER "/usr/sbin/ob-session-recorder"
+#define SESSIONS_DIR     "/var/lib/open-bastion/sessions"
 
 /*
- * Sanitize environment: remove variables that the dynamic linker or C library
- * honour and that could be abused to inject code or alter behaviour when
- * running with elevated group privileges.
+ * Validate a username: must match ^[a-z_][a-z0-9_.-]*$
+ * Returns 0 if valid, -1 if invalid.
+ */
+static int validate_username(const char *name)
+{
+    if (!name || !*name) return -1;
+
+    /* First char: lowercase letter or underscore */
+    if (!((*name >= 'a' && *name <= 'z') || *name == '_'))
+        return -1;
+
+    for (const char *p = name + 1; *p; p++) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+              *p == '_' || *p == '.' || *p == '-'))
+            return -1;
+    }
+    return 0;
+}
+
+/*
+ * Sanitize environment: remove variables that the dynamic linker, C library,
+ * or shell honour and that could be abused to inject code or alter behaviour.
  *
- * After setregid(), the kernel considers the exec'd process as non-privilege-
- * gaining (real gid == effective gid), so LD_PRELOAD etc. would NOT be
- * stripped automatically by the dynamic linker.  We must do it ourselves
- * before calling execv().
- *
- * We use execv() (not execve()) so that the current process environment—
- * after these unsetenv() calls—is inherited by the child.  Using execve()
- * with the original envp[] snapshot would bypass the sanitisation.
+ * Since we do NOT call setregid(), the kernel will strip LD_PRELOAD etc.
+ * on exec of the setgid binary itself. However, we sanitize them anyway as
+ * defense-in-depth, and we MUST strip BASH_ENV/ENV which the kernel does
+ * not handle (they are processed by the shell interpreter, not the loader).
  */
 static void sanitize_environment(void)
 {
@@ -54,7 +78,7 @@ static void sanitize_environment(void)
         "LD_PRELOAD",
         "LD_LIBRARY_PATH",
         "LD_AUDIT",
-        "LD_BIND_NOT",
+        "LD_BIND_NOW",
         "LD_DEBUG",
         "LD_DEBUG_OUTPUT",
         "LD_DYNAMIC_WEAK",
@@ -64,6 +88,12 @@ static void sanitize_environment(void)
         "LD_PROFILE_OUTPUT",
         "LD_SHOW_AUXV",
         "LD_USE_LOAD_BIAS",
+        /* Shell init vectors – executed before set -euo pipefail */
+        "BASH_ENV",
+        "ENV",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "CDPATH",
         /* glibc / locale / resolver side-channels */
         "GCONV_PATH",
         "HOSTALIASES",
@@ -82,45 +112,94 @@ static void sanitize_environment(void)
     for (const char **var = dangerous_vars; *var; var++) {
         unsetenv(*var);
     }
+
+    /*
+     * Harden PATH: set a safe, minimal PATH to prevent execution of
+     * attacker-supplied binaries via $PATH in the recorder script.
+     */
+    setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin", 1);
+}
+
+/*
+ * Create the user's session recording directory with the proper ownership
+ * and permissions. The directory gets the setgid bit so that all files
+ * created inside inherit the ob-sessions group.
+ *
+ * Returns 0 on success or if directory already exists, -1 on error.
+ */
+static int ensure_user_session_dir(const char *username, uid_t uid, gid_t sessions_gid)
+{
+    char dirpath[512];
+    int len = snprintf(dirpath, sizeof(dirpath), "%s/%s", SESSIONS_DIR, username);
+    if (len < 0 || (size_t)len >= sizeof(dirpath)) {
+        fprintf(stderr, "ob-session-recorder-wrapper: session dir path too long\n");
+        return -1;
+    }
+
+    struct stat st;
+    if (stat(dirpath, &st) == 0) {
+        /* Directory exists - verify it's a directory */
+        if (!S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "ob-session-recorder-wrapper: %s exists but is not a directory\n",
+                    dirpath);
+            return -1;
+        }
+        /* Ensure setgid bit is set (repair if needed) */
+        if (!(st.st_mode & S_ISGID)) {
+            chmod(dirpath, 02770);
+        }
+        return 0;
+    }
+
+    /* Create directory - we have effective gid ob-sessions */
+    if (mkdir(dirpath, 02770) != 0) {
+        fprintf(stderr, "ob-session-recorder-wrapper: mkdir(%s) failed: %s\n",
+                dirpath, strerror(errno));
+        return -1;
+    }
+
+    /* Set ownership: user:ob-sessions */
+    if (chown(dirpath, uid, sessions_gid) != 0) {
+        fprintf(stderr, "ob-session-recorder-wrapper: chown(%s, %u, %u) failed: %s\n",
+                dirpath, (unsigned)uid, (unsigned)sessions_gid, strerror(errno));
+        /* Directory was created but ownership failed - remove it */
+        rmdir(dirpath);
+        return -1;
+    }
+
+    return 0;
 }
 
 int main(int argc __attribute__((unused)), char *argv[])
 {
-    /*
-     * Save the user's original real gid before we change it.
-     * Export it as OB_ORIG_GID so the session recorder script can drop back
-     * to the user's primary group before spawning user shells, limiting the
-     * window during which the ob-sessions gid is active.
-     */
-    gid_t orig_gid = getgid();
-    char orig_gid_str[32];
-    snprintf(orig_gid_str, sizeof(orig_gid_str), "%u", (unsigned int)orig_gid);
-    if (setenv("OB_ORIG_GID", orig_gid_str, 1) != 0) {
-        fprintf(stderr, "ob-session-recorder-wrapper: setenv(OB_ORIG_GID) failed: %s\n",
-                strerror(errno));
+    uid_t real_uid = getuid();
+    gid_t sessions_gid = getegid();  /* ob-sessions, from setgid bit */
+
+    /* Get username from real uid */
+    struct passwd *pw = getpwuid(real_uid);
+    if (!pw || !pw->pw_name) {
+        fprintf(stderr, "ob-session-recorder-wrapper: cannot resolve uid %u\n",
+                (unsigned)real_uid);
+        return 1;
+    }
+
+    /* Validate username to prevent path traversal */
+    if (validate_username(pw->pw_name) != 0) {
+        fprintf(stderr, "ob-session-recorder-wrapper: invalid username\n");
         return 1;
     }
 
     /*
-     * The kernel has already set our effective gid to ob-sessions via the
-     * setgid bit.  Persist it as the real gid so it survives exec of
-     * interpreted scripts (#!).
-     *
-     * Note: after this call, real gid == effective gid == ob-sessions.
-     * The kernel will therefore NOT strip LD_PRELOAD etc. on the next exec,
-     * which is why sanitize_environment() must be called below.
+     * Create the user's session directory with group ob-sessions and setgid bit.
+     * This is the ONLY operation that uses the elevated effective gid.
      */
-    gid_t target_gid = getegid();
-    if (setregid(target_gid, target_gid) != 0) {
-        fprintf(stderr, "ob-session-recorder-wrapper: setregid(%d) failed: %s\n",
-                target_gid, strerror(errno));
+    if (ensure_user_session_dir(pw->pw_name, real_uid, sessions_gid) != 0) {
         return 1;
     }
 
     /*
-     * Sanitize the environment: strip LD_PRELOAD and all other dynamic-linker
-     * variables that a malicious user could set to inject code running with
-     * the ob-sessions group.  Must be done AFTER setregid() and BEFORE execv().
+     * Sanitize the environment before exec.
+     * Strip LD_*, BASH_ENV, ENV, and harden PATH.
      */
     sanitize_environment();
 
@@ -132,10 +211,16 @@ int main(int argc __attribute__((unused)), char *argv[])
     }
 
     /*
-     * Exec the real session recorder, passing through all args.
-     * Use execv() (not execve()) so the sanitized current environment—
-     * after the unsetenv() calls above—is inherited by the child.
-     * execve() with the original envp snapshot would bypass sanitisation.
+     * Exec the real session recorder.
+     *
+     * We do NOT call setregid(). The kernel will naturally strip the setgid
+     * effective gid when exec'ing the #! script. The script and the user's
+     * shell will run with the user's original real gid only.
+     *
+     * Files created by the script in the session directory will inherit
+     * the ob-sessions group thanks to the directory's setgid bit (mode 2770).
+     *
+     * Use execv() so the sanitized in-process environment is inherited.
      */
     execv(SESSION_RECORDER, argv);
 

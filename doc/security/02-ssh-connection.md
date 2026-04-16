@@ -1055,12 +1055,13 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions` :
 
 1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
-2. Le wrapper appelle `setregid()` pour persister le gid effectif `ob-sessions` à travers l'`execve()` du script bash (le kernel supprime le setgid sur les scripts interprétés `#!`)
-3. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
+2. Le wrapper utilise son gid effectif `ob-sessions` **uniquement** pour créer le sous-répertoire utilisateur en mode `2770 user:ob-sessions` (bit setgid sur le répertoire)
+3. Le wrapper exec le script recorder **sans** appeler `setregid()` : le kernel supprime naturellement le setgid sur les scripts interprétés `#!`, donc le script et le shell de l'utilisateur tournent avec le gid original
+4. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
    - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
    - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire
-4. Les fichiers de session sont créés avec le groupe `ob-sessions` (hérité du processus setgid)
-5. L'utilisateur n'a pas le gid `ob-sessions` dans son shell interactif (le setgid ne s'applique qu'au wrapper)
+5. Les fichiers de session héritent du groupe `ob-sessions` grâce au bit setgid du sous-répertoire utilisateur (mode `2770`), sans que le processus ait besoin du gid élevé
+6. L'environnement est sanitisé (LD_PRELOAD, BASH_ENV, PATH durci) avant l'exec
 
 **Résultat :** L'utilisateur ne peut ni lire, ni modifier, ni supprimer les fichiers d'enregistrement de session depuis son shell.
 

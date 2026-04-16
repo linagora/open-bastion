@@ -343,7 +343,7 @@ test_invalid_session_user() {
     if [ $rc -ne 0 ]; then
         pass "Invalid SESSION_USER (path traversal) is rejected"
     else
-        fail "Invalid SESSION_USER (path traversal) is rejected"
+        fail "Invalid SESSION_USER (path traversal) was unexpectedly accepted" "exit=$rc"
     fi
 }
 
@@ -360,41 +360,6 @@ test_valid_session_user() {
     fi
 }
 
-# ── Test 15: build_drop_gid_prefix returns empty when OB_ORIG_GID unset ──
-test_build_drop_gid_prefix_empty() {
-    (
-        source_script "ob-session-recorder"
-        unset OB_ORIG_GID 2>/dev/null || true
-        local prefix
-        prefix=$(build_drop_gid_prefix)
-        [ -z "$prefix" ] && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "build_drop_gid_prefix: empty when OB_ORIG_GID unset"
-    else
-        fail "build_drop_gid_prefix: empty when OB_ORIG_GID unset"
-    fi
-}
-
-# ── Test 16: build_drop_gid_prefix includes setpriv when OB_ORIG_GID set ──
-test_build_drop_gid_prefix_setpriv() {
-    (
-        source_script "ob-session-recorder"
-        if ! command -v setpriv >/dev/null 2>&1; then
-            # setpriv not installed; skip by passing
-            exit 0
-        fi
-        OB_ORIG_GID=1000
-        local prefix
-        prefix=$(build_drop_gid_prefix)
-        echo "$prefix" | grep -q "setpriv" && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "build_drop_gid_prefix: setpriv prefix when OB_ORIG_GID set"
-    else
-        fail "build_drop_gid_prefix: setpriv prefix when OB_ORIG_GID set"
-    fi
-}
 
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
@@ -416,8 +381,6 @@ run_test test_env_defaults
 run_test test_parse_args
 run_test test_invalid_session_user
 run_test test_valid_session_user
-run_test test_build_drop_gid_prefix_empty
-run_test test_build_drop_gid_prefix_setpriv
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

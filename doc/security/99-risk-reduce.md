@@ -145,7 +145,9 @@ Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire)
 
 - Wrapper setgid `ob-session-recorder-wrapper` (groupe `ob-sessions`, mode `2755`)
 - Répertoire sessions `/var/lib/open-bastion/sessions` en mode `1770 root:ob-sessions` (sticky bit)
-- `setregid()` dans le wrapper pour persister le gid à travers l'exec du script bash
+- Sous-répertoires utilisateur en mode `2770 user:ob-sessions` (bit setgid pour héritage du groupe)
+- Le wrapper n'appelle plus `setregid()` : le gid élevé sert uniquement à créer le sous-répertoire, puis le kernel le supprime naturellement sur exec du script
+- Sanitisation de l'environnement (LD_PRELOAD, BASH_ENV, PATH durci) avant exec
 - Syslog (`auth.info`) comme journal d'audit indépendant et inaltérable
 
 **Score résiduel :** P=1, I=1 (zone verte). L'utilisateur ne peut ni accéder ni supprimer les fichiers de session. Syslog préserve les traces minimales même en cas de compromission root.

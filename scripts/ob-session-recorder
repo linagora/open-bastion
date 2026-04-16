@@ -38,7 +38,8 @@ TTY_NAME="${SSH_TTY:-notty}"
 # Security: validate SESSION_USER to prevent path traversal attacks.
 # Must contain only safe characters before it is used to construct file paths.
 if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
-    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SESSION_USER"
+    SAFE_USER=$(printf '%q' "$SESSION_USER")
+    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER"
     echo "Error: invalid session user" >&2
     exit 1
 fi
@@ -125,11 +126,14 @@ ensure_sessions_dir() {
         return 1
     fi
 
-    # Create user subdirectory (group ob-sessions via setgid wrapper)
+    # User subdirectory is created by ob-session-recorder-wrapper (setgid binary)
+    # with mode 2770 (setgid bit) and group ob-sessions. Files created inside
+    # inherit the ob-sessions group. If running without the wrapper (e.g. tests),
+    # create the directory as a fallback.
     local user_dir="$SESSIONS_DIR/$SESSION_USER"
     if [ ! -d "$user_dir" ]; then
-        mkdir "$user_dir"
-        chmod 0770 "$user_dir"
+        mkdir "$user_dir" 2>/dev/null || true
+        chmod 0770 "$user_dir" 2>/dev/null || true
     fi
 }
 
@@ -203,43 +207,20 @@ handle_timeout() {
     exit 124  # Standard timeout exit code
 }
 
-# Build a command prefix that drops the ob-sessions gid back to the user's
-# original primary group before spawning user shells.
-# The session file/directory is created before this is called, so the elevated
-# gid is no longer needed at that point.
-# Uses setpriv(1) (util-linux) when available; falls back to no-op if absent.
-# Trailing space in the non-empty return value is intentional: allows safe
-# concatenation with the command that follows (e.g. "${prefix}sh -c ...").
-build_drop_gid_prefix() {
-    if [ -n "${OB_ORIG_GID:-}" ] && command -v setpriv >/dev/null 2>&1; then
-        echo "setpriv --regid=${OB_ORIG_GID} --egid=${OB_ORIG_GID} --clear-groups -- "
-    else
-        echo ""
-    fi
-}
-
 # Record session using script command (always available)
 record_script() {
     local shell="${SHELL:-/bin/bash}"
-    local drop_prefix
-    drop_prefix=$(build_drop_gid_prefix)
 
     if [ -n "$ORIGINAL_COMMAND" ]; then
-        # Export the command so the inner sh -c can access it safely without
-        # additional quoting that would break complex commands.
-        OB_CMD="$ORIGINAL_COMMAND" \
-            script -q -c "${drop_prefix}sh -c \"\$OB_CMD\"" "$SESSION_FILE"
+        script -q -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
     else
-        # shellcheck disable=SC2086
-        script -q -c "${drop_prefix}${shell}" "$SESSION_FILE"
+        script -q -c "$shell" "$SESSION_FILE"
     fi
 }
 
 # Record session using asciinema (if available)
 record_asciinema() {
     local shell="${SHELL:-/bin/bash}"
-    local drop_prefix
-    drop_prefix=$(build_drop_gid_prefix)
 
     if ! command -v asciinema >/dev/null 2>&1; then
         log_warn "asciinema not installed, falling back to script"
@@ -250,19 +231,15 @@ record_asciinema() {
     fi
 
     if [ -n "$ORIGINAL_COMMAND" ]; then
-        OB_CMD="$ORIGINAL_COMMAND" \
-            asciinema rec -c "${drop_prefix}sh -c \"\$OB_CMD\"" "$SESSION_FILE"
+        asciinema rec -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
     else
-        # shellcheck disable=SC2086
-        asciinema rec -c "${drop_prefix}${shell}" "$SESSION_FILE"
+        asciinema rec -c "$shell" "$SESSION_FILE"
     fi
 }
 
 # Record session using ttyrec (if available)
 record_ttyrec() {
     local shell="${SHELL:-/bin/bash}"
-    local drop_prefix
-    drop_prefix=$(build_drop_gid_prefix)
 
     if ! command -v ttyrec >/dev/null 2>&1; then
         log_warn "ttyrec not installed, falling back to script"
@@ -273,11 +250,9 @@ record_ttyrec() {
     fi
 
     if [ -n "$ORIGINAL_COMMAND" ]; then
-        OB_CMD="$ORIGINAL_COMMAND" \
-            ttyrec -e "${drop_prefix}sh -c \"\$OB_CMD\"" "$SESSION_FILE"
+        ttyrec -e "$ORIGINAL_COMMAND" "$SESSION_FILE"
     else
-        # shellcheck disable=SC2086
-        ttyrec -e "${drop_prefix}${shell}" "$SESSION_FILE"
+        ttyrec -e "$shell" "$SESSION_FILE"
     fi
 }
 
