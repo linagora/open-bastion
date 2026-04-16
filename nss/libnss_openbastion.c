@@ -25,6 +25,7 @@
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include <stdint.h>
+#include <fcntl.h>
 
 /* Shared path validation functions */
 #include "path_validator.h"
@@ -303,8 +304,53 @@ static int load_server_token(nss_llng_config_t *config)
 {
     if (!config->server_token_file) return -1;
 
-    FILE *f = fopen(config->server_token_file, "r");
-    if (!f) return -1;
+    /*
+     * Security: open with O_NOFOLLOW to prevent symlink attacks,
+     * then verify ownership and permissions via fstat to avoid TOCTOU.
+     * The token file contains a Bearer token granting API access to
+     * the LLNG portal - it must be protected.
+     * Matches the pattern used in pam_openbastion.c for token loading.
+     */
+    int fd = open(config->server_token_file, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            syslog(LOG_WARNING, "libnss_llng: token file %s is a symlink (rejected)",
+                   config->server_token_file);
+        }
+        return -1;
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        syslog(LOG_WARNING, "libnss_llng: cannot stat token file %s: %s",
+               config->server_token_file, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    if (st.st_uid != 0) {
+        syslog(LOG_WARNING, "libnss_llng: token file %s not owned by root",
+               config->server_token_file);
+        close(fd);
+        return -1;
+    }
+    if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
+        syslog(LOG_WARNING, "libnss_llng: token file %s has insecure permissions",
+               config->server_token_file);
+        close(fd);
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        syslog(LOG_WARNING, "libnss_llng: token file %s is not a regular file",
+               config->server_token_file);
+        close(fd);
+        return -1;
+    }
+
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return -1;
+    }
 
     char buffer[8192];
     size_t len = fread(buffer, 1, sizeof(buffer) - 1, f);
@@ -347,8 +393,49 @@ static int load_server_token(nss_llng_config_t *config)
 /* Load configuration */
 static int load_config(nss_llng_config_t *config)
 {
-    FILE *f = fopen(NSS_LLNG_CONF, "r");
-    if (!f) return -1;
+    /*
+     * Security: open with O_NOFOLLOW to prevent symlink attacks,
+     * then check permissions on the opened fd to avoid TOCTOU.
+     * Matches the pattern used in config.c for pam_openbastion.
+     */
+    int fd = open(NSS_LLNG_CONF, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            syslog(LOG_ERR, "libnss_llng: config file %s is a symlink (rejected)",
+                   NSS_LLNG_CONF);
+        }
+        return -1;
+    }
+
+    /* Verify file ownership and permissions */
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        syslog(LOG_ERR, "libnss_llng: cannot stat config file %s: %s",
+               NSS_LLNG_CONF, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    if (st.st_uid != 0) {
+        syslog(LOG_ERR, "libnss_llng: config file %s not owned by root", NSS_LLNG_CONF);
+        close(fd);
+        return -1;
+    }
+    if (st.st_mode & (S_IWGRP | S_IWOTH)) {
+        syslog(LOG_ERR, "libnss_llng: config file %s is group/world-writable", NSS_LLNG_CONF);
+        close(fd);
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        syslog(LOG_ERR, "libnss_llng: config file %s is not a regular file", NSS_LLNG_CONF);
+        close(fd);
+        return -1;
+    }
+
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return -1;
+    }
 
     /* Set defaults */
     config->timeout = 5;
