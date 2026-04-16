@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
+#include <stdint.h>
 
 /* Shared path validation functions */
 #include "path_validator.h"
@@ -734,11 +735,26 @@ static void cache_add(const char *username, const struct passwd *pw, int valid)
     pthread_mutex_unlock(&g_cache.lock);
 }
 
+/* Maximum response size to prevent memory exhaustion.
+ * Matches the limit used in ob_client.c.
+ * NSS responses are typically under 10 KB. */
+#define NSS_MAX_RESPONSE_SIZE (256 * 1024)
+
 /* CURL write callback */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
+    /* Security: check for integer overflow in size calculation */
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) {
+        return 0;  /* Overflow - abort transfer */
+    }
+
     size_t realsize = size * nmemb;
     http_response_t *resp = (http_response_t *)userp;
+
+    /* Security: enforce maximum response size */
+    if (resp->size + realsize > NSS_MAX_RESPONSE_SIZE) {
+        return 0;  /* Response too large - abort transfer */
+    }
 
     char *ptr = realloc(resp->data, resp->size + realsize + 1);
     if (!ptr) return 0;
