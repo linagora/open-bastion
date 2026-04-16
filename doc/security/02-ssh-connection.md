@@ -114,12 +114,17 @@ sequenceDiagram
 
 ```bash
 # /etc/ssh/sshd_config
-TrustedUserCAKeys /etc/ssh/llng_ca.pub   # CA LLNG uniquement
-AuthorizedKeysFile none                   # Pas de clés non signées
-RevokedKeys /etc/ssh/revoked_keys         # KRL obligatoire
-ExposeAuthInfo yes                        # Requis pour SSH_CERT_* variables
-AllowAgentForwarding no                   # Pas de forwarding agent (sécurité)
+TrustedUserCAKeys /etc/ssh/llng_ca.pub           # CA LLNG uniquement
+AuthorizedKeysFile none                           # Pas de clés non signées
+RevokedKeys /etc/ssh/revoked_keys                 # KRL obligatoire
+ExposeAuthInfo yes                                # Requis pour SSH_CERT_* variables
+AllowAgentForwarding no                           # Pas de forwarding agent (sécurité)
+PermitRootLogin no                                # Root uniquement via console (ttyS0)
+AuthorizedPrincipalsCommand /bin/echo %u          # Accepte les certificats dont le principal = nom d'utilisateur
+AuthorizedPrincipalsCommandUser nobody
 ```
+
+> **Note `AuthorizedPrincipalsCommand` :** Cette directive permet d'accepter les certificats SSH dont le principal correspond exactement au nom d'utilisateur de la connexion. C'est nécessaire pour les utilisateurs résolus dynamiquement via NSS (`openbastion` dans `nsswitch.conf`), qui n'ont pas d'entrée `~/.ssh/authorized_principals` sur le système de fichiers. `ob-bastion-setup` configure cette directive automatiquement.
 
 ### Configuration PAM (sshd)
 
@@ -134,7 +139,10 @@ account    required     pam_openbastion.so
 ```
 # /etc/pam.d/sudo
 auth       required     pam_openbastion.so   service=sudo
+account    required     pam_openbastion.so   service=sudo
 ```
+
+> **Note Mode E :** La ligne `account required pam_unix.so` est **absente** du stack sudo. `pam_unix.so` est incompatible avec les utilisateurs NSS-only (résolution dynamique via `openbastion` dans `nsswitch.conf`) : il échouerait pour tout utilisateur n'ayant pas d'entrée dans `/etc/passwd`. L'autorisation est entièrement déléguée à `pam_openbastion.so`. Le fichier `/etc/sudoers.d/open-bastion` autorise tous les utilisateurs (`ALL ALL=(ALL) ALL`) — le filtrage est effectué par PAM.
 
 ### Configuration Open Bastion (backends)
 
@@ -930,6 +938,10 @@ L'escalade sudo est bloquée par conception :
 2. L'obtention du token nécessite une authentification SSO (2FA si configuré)
 3. Même un poste client compromis ne peut pas obtenir de token sans les credentials SSO de l'utilisateur
 
+**Séparation des privilèges pour l'enregistrement de session :**
+
+L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent ni lire ni supprimer leurs propres enregistrements de session, réduisant le risque de falsification de preuves en cas de compromission d'une session.
+
 |                 |                 Score résiduel                  |
 | --------------- | :---------------------------------------------: |
 | **Probabilité** |   1 (réauthentification SSO pour chaque sudo)   |
@@ -964,23 +976,32 @@ L'escalade sudo est bloquée par conception :
 
 **Remédiation opérationnelle :**
 
-| Mesure                           | Description                                                                                                                                         |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Compte de service de secours** | Configurer un compte de service dédié au recouvrement dans `service-accounts.conf` avec une clé SSH stockée de manière sécurisée (coffre-fort, HSM) |
-| **Accès console documenté**      | Documenter la procédure d'accès console (KVM/IPMI/hyperviseur) pour chaque serveur et la tester périodiquement                                      |
-| **Cache offline suffisant**      | Configurer `auth_cache_offline_ttl` à une valeur couvrant la durée maximale d'indisponibilité LLNG tolérée                                          |
+| Mesure                           | Description                                                                                                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Compte de service de secours** | Le paquet bootstrap `open-bastion-linagora` pré-configure un compte `linagora` dans `service-accounts.conf` avec clé RSA et `sudo_allowed = true`, stockée en coffre-fort                                  |
+| **Accès console via ttyS0**      | Le paquet bootstrap configure `/etc/securetty` avec `ttyS0` pour l'accès root via la console OVH/hors-bande. `PermitRootLogin no` dans sshd bloque l'accès root SSH, la console reste le filet de sécurité |
+| **Cache offline suffisant**      | Configurer `auth_cache_offline_ttl` à une valeur couvrant la durée maximale d'indisponibilité LLNG tolérée                                                                                                 |
+
+> **Automatisation bootstrap :** Le paquet `open-bastion-linagora` prend en charge la configuration initiale de `securetty`, du compte de service `linagora` et de `PermitRootLogin no`. Ces éléments n'ont pas besoin d'être configurés manuellement sur les déploiements utilisant ce paquet.
 
 **Remédiation infrastructure :**
 
 - LLNG en haute disponibilité (réduit la probabilité de panne prolongée)
 - Plusieurs portails LLNG en failover
 - Monitoring avec alerte quand le cache offline approche de l'expiration
+- Redémarrer `nscd` après toute modification de la configuration NSS (`/etc/nsswitch.conf`) pour éviter les entrées négatives en cache qui bloqueraient la résolution des utilisateurs du bastion
 
 **Procédure de recouvrement via console :**
 
-1. Accéder à la console hors-bande du serveur (KVM, IPMI, console hyperviseur)
-2. Se connecter en root (accès physique/console, pas SSH)
-3. Option A — Ajouter un compte de service temporaire :
+1. Accéder à la console hors-bande du serveur (KVM, IPMI, console OVH via ttyS0)
+2. Se connecter en root via la console (root login SSH est bloqué par `PermitRootLogin no`)
+3. Option A — Utiliser le compte de service `linagora` pré-configuré :
+   ```bash
+   # Le compte linagora est déjà dans service-accounts.conf (paquet bootstrap)
+   # Se connecter depuis un poste disposant de la clé de secours :
+   ssh linagora@server
+   ```
+4. Option B — Ajouter un compte de service temporaire depuis la console root :
    ```bash
    # Ajouter une clé de recouvrement dans service-accounts.conf
    cat >> /etc/open-bastion/service-accounts.conf << 'EOF'
@@ -988,20 +1009,69 @@ L'escalade sudo est bloquée par conception :
    ssh_keys = ssh-ed25519 AAAA... recovery@emergency
    EOF
    ```
-4. Option B — Désactiver temporairement le module PAM :
+5. Option C — Désactiver temporairement le module PAM (dernier recours) :
    ```bash
    # Commenter la ligne pam_openbastion dans /etc/pam.d/sshd
    sed -i 's/^auth.*pam_openbastion/#&/' /etc/pam.d/sshd
    ```
-5. Rétablir la configuration normale dès que LLNG est de nouveau disponible
-6. Documenter l'incident et les actions prises (audit)
+6. Rétablir la configuration normale dès que LLNG est de nouveau disponible
+7. Documenter l'incident et les actions prises (audit)
 
-> **Attention :** L'option B désactive toute la sécurité Open Bastion. Elle ne doit être utilisée qu'en dernier recours et pour la durée la plus courte possible.
+> **Attention :** L'option C désactive toute la sécurité Open Bastion. Elle ne doit être utilisée qu'en dernier recours et pour la durée la plus courte possible.
 
 |                 |                         Score résiduel                          |
 | --------------- | :-------------------------------------------------------------: |
 | **Probabilité** |          1 (avec HA LLNG + compte de service secours)           |
 | **Impact**      | 2 (avec procédure de recouvrement console documentée et testée) |
+
+---
+
+### R-S18 - Effacement des enregistrements de session par un utilisateur
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
+
+**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Si les fichiers de session sont créés avec les droits de l'utilisateur (propriétaire = utilisateur), celui-ci peut les supprimer librement.
+
+**Conditions de la menace :**
+
+1. L'utilisateur a une session SSH active (authentifié par certificat + autorisé par PAM)
+2. Le session recorder (`ForceCommand`) crée les fichiers sous l'identité de l'utilisateur
+3. L'utilisateur a accès en écriture au répertoire de sessions
+4. Aucune protection n'empêche la suppression ou modification des fichiers
+
+**Vecteurs :**
+
+- Suppression directe des fichiers de session (`rm`) depuis le shell
+- Modification du contenu (troncature, réécriture) pour masquer des commandes
+- Suppression des métadonnées JSON pour effacer les traces d'activité
+
+**Conséquence :** Perte de traçabilité des actions effectuées sur le serveur. En cas d'incident de sécurité, l'absence d'enregistrement empêche l'analyse forensique et l'imputation des actions.
+
+**Remédiation implémentée — Séparation des privilèges par wrapper setgid :**
+
+Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions` :
+
+1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
+2. Le wrapper appelle `setregid()` pour persister le gid effectif `ob-sessions` à travers l'`execve()` du script bash (le kernel supprime le setgid sur les scripts interprétés `#!`)
+3. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
+   - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
+   - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire
+4. Les fichiers de session sont créés avec le groupe `ob-sessions` (hérité du processus setgid)
+5. L'utilisateur n'a pas le gid `ob-sessions` dans son shell interactif (le setgid ne s'applique qu'au wrapper)
+
+**Résultat :** L'utilisateur ne peut ni lire, ni modifier, ni supprimer les fichiers d'enregistrement de session depuis son shell.
+
+**Protection complémentaire — Syslog :**
+
+Le session recorder enregistre les événements de début/fin de session dans syslog (`auth.info`), qui constitue un journal d'audit indépendant et résistant à la falsification par l'utilisateur (syslog est protégé par les droits root).
+
+|                 |                           Score résiduel                           |
+| --------------- | :----------------------------------------------------------------: |
+| **Probabilité** | 1 (setgid wrapper + sticky bit + syslog comme journal indépendant) |
+| **Impact**      |              1 (syslog préserve les traces minimales)              |
 
 ---
 
@@ -1012,7 +1082,7 @@ L'escalade sudo est bloquée par conception :
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                  | 3 - Probable | 4 - Très probable |
 | ------------------------ | ------------------- | --------------------------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4                | R-S6 R-S17                        |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 | R-S18        |                   |
 | **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                  | R-S8         |                   |
 | **1 - Négligeable**      |                     |                                   |              |                   |
 
@@ -1025,6 +1095,7 @@ L'escalade sudo est bloquée par conception :
 | **4 - Critique**         | R-S4                                                           |                  |              |                   |
 | **3 - Important**        | R-S5                                                           | R-S6             |              |                   |
 | **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S15 R-S16 R-S17 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S18                                                          |                  |              |                   |
 | **1 - Négligeable**      |                                                                |                  |              |                   |
 
 **Profil de risque de la cible maximale :**
@@ -1035,6 +1106,7 @@ L'escalade sudo est bloquée par conception :
 - R-S5 (contournement bastion) : **P=1** (certificat CA requis + JWT bastion)
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
 - R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
+- R-S18 (effacement sessions) : **contrôlé par wrapper setgid** + sticky bit + syslog indépendant
 - Seuls risques résiduels significatifs : R-S4 (CA compromise) et R-S6 (bastion compromis)
 
 ---

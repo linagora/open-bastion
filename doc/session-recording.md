@@ -43,7 +43,7 @@ dnf install util-linux jq
 
 ### Session Recorder Configuration
 
-Create `/etc/llng/session-recorder.conf`:
+Create `/etc/open-bastion/session-recorder.conf`:
 
 ```ini
 # Directory where recordings are stored
@@ -71,7 +71,7 @@ Edit `/etc/ssh/sshd_config` to force all sessions through the recorder:
 ```sshd_config
 # Record all sessions except for emergency admin access
 Match User *,!root,!admin
-    ForceCommand /usr/sbin/ob-session-recorder
+    ForceCommand /usr/sbin/ob-session-recorder-wrapper
 ```
 
 #### Option B: Record specific group only
@@ -79,14 +79,14 @@ Match User *,!root,!admin
 ```sshd_config
 # Only record sessions for users in the "recorded" group
 Match Group recorded
-    ForceCommand /usr/sbin/ob-session-recorder
+    ForceCommand /usr/sbin/ob-session-recorder-wrapper
 ```
 
 #### Option C: Record all sessions
 
 ```sshd_config
 # Record all sessions (use with caution)
-ForceCommand /usr/sbin/ob-session-recorder
+ForceCommand /usr/sbin/ob-session-recorder-wrapper
 ```
 
 Restart SSH after changes:
@@ -189,9 +189,10 @@ Each recording has an accompanying JSON metadata file (`.json`):
     └── ...
 ```
 
-- Permissions: `0700` on directories, `0600` on files
-- Owner: The user who initiated the session
-- Organization: One subdirectory per user
+- Sessions root: mode `1770`, owned `root:ob-sessions`
+- Per-user subdirectories: created by the wrapper
+- Recording files: mode `0640`, owned by `root:ob-sessions`
+- Organization: One subdirectory per user; users cannot delete recordings
 
 ## Replaying Sessions
 
@@ -222,11 +223,28 @@ scriptreplay timing.txt recording.typescript
 
 ## Security Considerations
 
+### Privilege Separation via Setgid Wrapper
+
+Session recordings are written by `ob-session-recorder-wrapper`, a setgid helper
+owned by `root:ob-sessions`. This design provides tamper-evident recordings:
+
+- The sessions directory `/var/lib/open-bastion/sessions` has mode `1770` and is
+  owned by `root:ob-sessions` (sticky bit set).
+- The wrapper runs with the `ob-sessions` group privilege, which allows it to
+  write into the shared directory.
+- Recorded users are **not** members of `ob-sessions`, so they cannot delete or
+  modify their own session recordings.
+- The actual recorder binary `/usr/sbin/ob-session-recorder` is invoked by the
+  wrapper after privilege setup.
+
+This means `ForceCommand` should point to `ob-session-recorder-wrapper`, not
+directly to `ob-session-recorder`.
+
 ### File Permissions
 
-- Session directory: `0700` (user-owned)
-- Recording files: `0600` (user-owned)
-- Config file: `0644` (root-owned)
+- Sessions directory: mode `1770`, owned `root:ob-sessions`
+- Recording files: `0640` (owned by root, group `ob-sessions`)
+- Config file: `/etc/open-bastion/session-recorder.conf`, mode `0644` (root-owned)
 
 ### Storage Security
 
@@ -256,12 +274,12 @@ journalctl -t ob-session-recorder
 
 ### Common Issues
 
-| Issue                | Cause                       | Solution                                   |
-| -------------------- | --------------------------- | ------------------------------------------ |
-| No recording created | ForceCommand not active     | Check sshd_config Match rules              |
-| Empty recording      | Session ended immediately   | Check for shell issues                     |
-| Permission denied    | Wrong directory permissions | `chmod 700 /var/lib/open-bastion/sessions` |
-| Format not available | ttyrec not installed        | Install ttyrec or use asciinema            |
+| Issue                | Cause                       | Solution                                            |
+| -------------------- | --------------------------- | --------------------------------------------------- |
+| No recording created | ForceCommand not active     | Check sshd_config Match rules                       |
+| Empty recording      | Session ended immediately   | Check for shell issues                              |
+| Permission denied    | Wrong directory permissions | Check `ob-sessions` group and directory mode `1770` |
+| Format not available | ttyrec not installed        | Install ttyrec or use asciinema                     |
 
 ### Debug mode
 
@@ -270,7 +288,7 @@ journalctl -t ob-session-recorder
 /usr/sbin/ob-session-recorder --help
 
 # Check configuration
-cat /etc/llng/session-recorder.conf
+cat /etc/open-bastion/session-recorder.conf
 ```
 
 ## Environment Variables

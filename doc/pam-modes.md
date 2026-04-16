@@ -131,14 +131,20 @@ and privilege escalation (fresh SSO re-authentication for each sudo).
 
 ```
 # /etc/ssh/sshd_config
-PasswordAuthentication no         # No SSH passwords
+PasswordAuthentication no                         # No SSH passwords
 KbdInteractiveAuthentication no
-PubkeyAuthentication yes          # SSH certificates only
+PubkeyAuthentication yes                          # SSH certificates only
 TrustedUserCAKeys /etc/ssh/llng_ca.pub
-AuthorizedKeysFile none           # No unsigned keys
-RevokedKeys /etc/ssh/revoked_keys # KRL mandatory
-ExposeAuthInfo yes                # For certificate audit
+AuthorizedKeysFile none                           # No unsigned keys
+RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
+ExposeAuthInfo yes                                # For certificate audit
+AuthorizedPrincipalsCommand /bin/echo %u          # Accept cert whose principal matches the Unix username
+AuthorizedPrincipalsCommandUser nobody
+PermitRootLogin no
 ```
+
+`ob-bastion-setup --max-security` writes these settings automatically via an
+`Include` directive in `sshd_config`.
 
 ### PAM Configuration for sshd
 
@@ -170,15 +176,21 @@ session    required     pam_unix.so
 # - LLNG tokens: REQUIRED (fresh re-authentication via SSO)
 #
 # AUTHORIZATION: LLNG checks sudo_allowed flag
+#
+# NOTE: pam_unix.so is intentionally absent from the account section.
+# In Mode E, users exist only in NSS (not /etc/passwd), so pam_unix.so
+# account check would fail for them.
 
 auth       sufficient   pam_openbastion.so
 auth       required     pam_deny.so
 
 account    required     pam_openbastion.so
-account    required     pam_unix.so
 
 session    required     pam_unix.so
 ```
+
+`ob-bastion-setup --max-security` creates `/etc/sudoers.d/open-bastion` to grant
+sudo rights to authorized users without relying on local Unix group membership.
 
 ### Security Model
 
@@ -264,13 +276,16 @@ PermitEmptyPasswords no
 
 ```
 UsePAM yes
-PasswordAuthentication no         # No passwords for SSH
+PasswordAuthentication no                         # No passwords for SSH
 KbdInteractiveAuthentication no
-PubkeyAuthentication yes          # SSH certificates required
+PubkeyAuthentication yes                          # SSH certificates required
 TrustedUserCAKeys /etc/ssh/llng_ca.pub
-AuthorizedKeysFile none           # No unsigned keys
-RevokedKeys /etc/ssh/revoked_keys # KRL mandatory
+AuthorizedKeysFile none                           # No unsigned keys
+RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
 ExposeAuthInfo yes
+AuthorizedPrincipalsCommand /bin/echo %u
+AuthorizedPrincipalsCommandUser nobody
+PermitRootLogin no
 PermitEmptyPasswords no
 ```
 

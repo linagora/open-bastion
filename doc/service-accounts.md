@@ -59,6 +59,13 @@ restricting allowed key types.
 ExposeAuthInfo yes
 ```
 
+**Mode E compatibility:**
+In Mode E deployments (`AuthorizedKeysFile none`), service accounts still work correctly.
+Although there is no `authorized_keys` file lookup, authentication succeeds via a different
+path: the SSH client presents its key, sshd exposes the key fingerprint through
+`SSH_USER_AUTH` (enabled by `ExposeAuthInfo yes`), and the PAM module validates that
+fingerprint against `service-accounts.conf`. No `authorized_keys` file is required.
+
 Get the SSH key fingerprint:
 
 ```bash

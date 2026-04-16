@@ -7,7 +7,7 @@
 | **4 - Critique**         | R-S4, R-SA2                                         | R-SA1            |              |                   |
 | **3 - Important**        | R5, R-S5, R-S11                                     | R-S6             |              |                   |
 | **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16, R-S17 | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14                                      |                  |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14, R-S18                               |                  |              |                   |
 
 **Zones de risque :**
 
@@ -19,6 +19,7 @@
 
 - **R-S1** : Supprimé (aucun mot de passe SSH accepté)
 - **R-S2** : Descendu à I=1 (clé SSH inutile sans certificat CA)
+- **R-S18** : Descendu à P=1/I=1 (wrapper setgid + sticky bit empêchent l'effacement des sessions)
 
 Voir [01-enrollment.md](01-enrollment.md) et [02-ssh-connection.md](02-ssh-connection.md) pour les détails des risques et remédiations.
 
@@ -134,13 +135,36 @@ Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire)
 2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
 3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité
 
+**Séparation des privilèges déjà implémentée (enregistrement de session) :** Le wrapper setgid `ob-session-recorder-wrapper` et les permissions `1770` sur `/var/lib/open-bastion/sessions` empêchent les utilisateurs de supprimer leurs enregistrements de session, réduisant le risque de falsification de preuves en cas de compromission.
+
+### R-S18 _(P=1, I=1)_ - Effacement des enregistrements de session
+
+**Score initial :** P=3, I=3 (zone jaune). Sans protection, tout utilisateur peut supprimer ses propres enregistrements de session.
+
+**Remédiation implémentée :**
+
+- Wrapper setgid `ob-session-recorder-wrapper` (groupe `ob-sessions`, mode `2755`)
+- Répertoire sessions `/var/lib/open-bastion/sessions` en mode `1770 root:ob-sessions` (sticky bit)
+- `setregid()` dans le wrapper pour persister le gid à travers l'exec du script bash
+- Syslog (`auth.info`) comme journal d'audit indépendant et inaltérable
+
+**Score résiduel :** P=1, I=1 (zone verte). L'utilisateur ne peut ni accéder ni supprimer les fichiers de session. Syslog préserve les traces minimales même en cas de compromission root.
+
+Pistes supplémentaires :
+
+1. **Centralisation syslog** : Envoyer les logs vers un serveur distant (SIEM) pour résister à une compromission root
+2. **Attribut append-only** : `chattr +a` sur les fichiers de session (nécessite CAP_LINUX_IMMUTABLE, donc un mécanisme setuid dédié)
+3. **Signature des sessions** : Signer cryptographiquement les fichiers de session à la clôture pour détecter toute altération
+
 ### R-S17 _(P=1, I=2)_ - Verrouillage total (lockout)
 
 Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation le ramène à P=1/I=2 via :
 
-- Compte de service de secours (`service-accounts.conf`) avec clé stockée en coffre-fort
-- Procédure de recouvrement console documentée et testée
+- Compte de service de secours (`service-accounts.conf`) avec clé stockée en coffre-fort — **pré-configuré par le paquet `open-bastion-linagora`** (compte `linagora`, clé RSA, `sudo_allowed = true`)
+- Procédure de recouvrement console documentée et testée — **accès root via ttyS0 pré-configuré** dans `/etc/securetty` par le paquet bootstrap (`PermitRootLogin no` bloque SSH, console OVH reste le filet de sécurité)
 - LLNG en haute disponibilité
+
+> **Note nscd :** Après toute modification de la configuration NSS (`/etc/nsswitch.conf`), redémarrer `nscd` (`systemctl restart nscd`) est obligatoire pour vider le cache négatif. Un cache négatif résiduel peut bloquer temporairement la résolution des utilisateurs du bastion même après configuration correcte.
 
 Pistes pour réduire davantage :
 

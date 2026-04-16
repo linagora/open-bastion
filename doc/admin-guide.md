@@ -213,9 +213,12 @@ format = script
 max_duration = 28800
 EOF
 
-# Create sessions directory
-mkdir -p /var/lib/open-bastion/sessions
-chmod 700 /var/lib/open-bastion/sessions
+# Sessions directory is created by the package with the correct permissions:
+# mode 1770, owned root:ob-sessions (users cannot delete their recordings)
+# If you need to recreate it manually:
+# mkdir -p /var/lib/open-bastion/sessions
+# chown root:ob-sessions /var/lib/open-bastion/sessions
+# chmod 1770 /var/lib/open-bastion/sessions
 ```
 
 ### Step 4: Enroll Server
@@ -253,7 +256,7 @@ PubkeyAuthentication yes
 
 # Session recording for all users except emergency admin
 Match User *,!root,!admin
-    ForceCommand /usr/sbin/ob-session-recorder
+    ForceCommand /usr/sbin/ob-session-recorder-wrapper
 
 # Emergency admin access (no recording, direct shell)
 Match User admin
@@ -429,6 +432,9 @@ chmod 644 /etc/open-bastion/nss_openbastion.conf
 #   passwd: files openbastion
 
 sed -i 's/^passwd:.*/passwd: files openbastion/' /etc/nsswitch.conf
+
+# Restart nscd so the new NSS module is picked up immediately
+systemctl restart nscd
 ```
 
 ### Step 5: Enroll Server
@@ -500,6 +506,82 @@ ls -la /home/$USER
 
 > **Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
 > even with valid SSH keys. This ensures all access goes through authorized bastions.
+
+---
+
+## Mode E: Maximum Security Deployment
+
+Mode E uses LLNG-signed SSH certificates for access and LLNG temporary tokens for
+sudo. All users exist only in NSS (not in `/etc/passwd`). This section describes
+the tested deployment flow.
+
+### Step 1: Install Bootstrap Package
+
+The `open-bastion-linagora` bootstrap package prepares the system before the main
+package is installed. It provides:
+
+- `/etc/securetty` with `ttyS0` for OVH serial console root access (pre-hardening)
+- A pre-hardening sshd snippet (`40-pre-hardening.conf`) that sets conservative
+  defaults so sshd is not locked out during setup
+- A dedicated service account used for initial enrollment
+
+```bash
+apt install open-bastion-linagora
+```
+
+### Step 2: Install Open Bastion
+
+```bash
+apt install open-bastion libnss-openbastion uuid-runtime jq
+```
+
+### Step 3: Run ob-bastion-setup
+
+`ob-bastion-setup --max-security` is the single command that configures everything:
+
+```bash
+ob-bastion-setup --max-security
+```
+
+It performs all of the following automatically:
+
+- Generates or imports the LLNG CA public key to `/etc/ssh/llng_ca.pub`
+- Writes the hardened sshd configuration via an `Include` directive:
+  - `AuthorizedKeysFile none`
+  - `TrustedUserCAKeys /etc/ssh/llng_ca.pub`
+  - `RevokedKeys /etc/ssh/revoked_keys`
+  - `AuthorizedPrincipalsCommand /bin/echo %u`
+  - `AuthorizedPrincipalsCommandUser nobody`
+  - `PermitRootLogin no`
+  - `ExposeAuthInfo yes`
+- Writes `/etc/pam.d/sshd` and `/etc/pam.d/sudo` for Mode E
+- Configures NSS: adds `openbastion` to `passwd` and `group` in `/etc/nsswitch.conf`
+- Runs `ob-enroll` to obtain `/etc/open-bastion/token`
+- Downloads the initial KRL to `/etc/ssh/revoked_keys`
+- Creates `/etc/sudoers.d/open-bastion` for sudo authorization
+
+### Step 4: Restart nscd
+
+After NSS configuration, restart the name service cache daemon so the new resolver
+is picked up immediately:
+
+```bash
+systemctl restart nscd
+```
+
+### Step 5: Verify
+
+```bash
+# Check NSS resolves LLNG users
+getent passwd <a-llng-user>
+
+# Test SSH certificate authentication
+ssh -i /path/to/cert user@bastion
+
+# Test sudo token flow
+sudo -k && sudo whoami
+# Enter LLNG temporary token when prompted
+```
 
 ---
 
@@ -589,7 +671,7 @@ ob-enroll -g <server_group>
 
 ```bash
 # Check PAM logs
-journalctl -u sshd | grep pam_llng
+journalctl -u sshd | grep pam_openbastion
 
 # Enable debug mode
 # In /etc/open-bastion/openbastion.conf:
