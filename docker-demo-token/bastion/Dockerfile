@@ -72,8 +72,8 @@ account    required     pam_openbastion.so service_type=sudo\n\
 session    required     pam_unix.so\n\
 ' > /etc/pam.d/sudo
 
-# Allow all users to sudo (PAM handles authorization)
-RUN echo "ALL ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
+# Sudo requires PAM authentication (no NOPASSWD)
+RUN echo "ALL ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
 # Session recorder configuration
 RUN echo '# Open Bastion Session Recorder Configuration\n\

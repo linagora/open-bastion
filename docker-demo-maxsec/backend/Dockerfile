@@ -69,7 +69,6 @@ auth       sufficient   pam_openbastion.so\n\
 auth       required     pam_deny.so\n\
 \n\
 account    required     pam_openbastion.so\n\
-account    required     pam_unix.so\n\
 \n\
 session    required     pam_unix.so\n\
 ' > /etc/pam.d/sudo

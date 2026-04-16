@@ -66,7 +66,7 @@ chmod 644 "$SSH_REVOKED_KEYS"
 # Set up KRL refresh cron job (validates KRL format before replacing)
 echo "Setting up KRL refresh cron (every ${KRL_REFRESH_INTERVAL} min)..."
 cat > /etc/cron.d/open-bastion-krl << CRONEOF
-*/${KRL_REFRESH_INTERVAL} * * * * root curl -sf -o /tmp/krl.tmp ${PORTAL_URL}/ssh/revoked && head -c 6 /tmp/krl.tmp | grep -q SSHKRL && mv /tmp/krl.tmp ${SSH_REVOKED_KEYS} || rm -f /tmp/krl.tmp
+*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" ${PORTAL_URL}/ssh/revoked && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" ${SSH_REVOKED_KEYS} || rm -f "\$tmp"
 CRONEOF
 chmod 644 /etc/cron.d/open-bastion-krl
 # Start cron daemon
@@ -82,31 +82,32 @@ USERNAME="$1"
 KEY_TYPE="$2"
 KEY_B64="$3"
 
-# Create user if not exists (using LLNG PAM module's userinfo)
-if ! getent passwd "$USERNAME" >/dev/null 2>&1; then
-    # Get user info from LLNG
+# Check if user exists locally or is known to LLNG.
+# User creation is handled by pam_openbastion (create_user=true in open_session),
+# not by this script (which runs as nobody, not root).
+KNOWN_USER=0
+if getent passwd "$USERNAME" >/dev/null 2>&1; then
+    KNOWN_USER=1
+else
     TOKEN=$(jq -r '.access_token // empty' /etc/open-bastion/server_token.json 2>/dev/null)
     PORTAL_URL=$(grep portal_url /etc/open-bastion/nss_openbastion.conf | cut -d= -f2 | tr -d ' ')
 
     if [ -n "$TOKEN" ] && [ -n "$PORTAL_URL" ]; then
+        # Build JSON safely with jq to prevent injection
+        JSON_BODY=$(jq -n --arg user "$USERNAME" '{"user": $user}')
         USERINFO=$(curl -s "$PORTAL_URL/pam/userinfo" \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"user\":\"$USERNAME\"}" 2>/dev/null)
+            -d "$JSON_BODY" 2>/dev/null)
 
-        if echo "$USERINFO" | grep -q '"found":true'; then
-            # Create user with UID from range
-            NEXT_UID=$(awk -F: '$3>=10000 && $3<60000 {print $3}' /etc/passwd | sort -n | tail -1)
-            NEXT_UID=$((${NEXT_UID:-9999} + 1))
-            GECOS=$(echo "$USERINFO" | jq -r '.gecos // .cn // ""')
-
-            useradd -m -u "$NEXT_UID" -s /bin/bash -c "$GECOS" "$USERNAME" 2>/dev/null
+        if echo "$USERINFO" | jq -e '.found == true' >/dev/null 2>&1; then
+            KNOWN_USER=1
         fi
     fi
 fi
 
 # Return the username as allowed principal (matching what's in the cert)
-if getent passwd "$USERNAME" >/dev/null 2>&1; then
+if [ "$KNOWN_USER" = "1" ]; then
     echo "$USERNAME"
 fi
 SCRIPT
@@ -130,7 +131,7 @@ RevokedKeys $SSH_REVOKED_KEYS
 
 # Create users on-the-fly via principals command
 AuthorizedPrincipalsCommand /usr/local/bin/llng-principals %u %t %k
-AuthorizedPrincipalsCommandUser root
+AuthorizedPrincipalsCommandUser nobody
 
 # Disable password authentication
 PasswordAuthentication no
@@ -231,14 +232,13 @@ for i in {1..30}; do
         EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // 3600')
         NOW=$(date +%s)
         EXPIRES_AT=$((NOW + EXPIRES_IN))
-        cat > "$TOKEN_FILE" << TOKENEOF
-{
-  "access_token": "$ACCESS_TOKEN",
-  "refresh_token": "${REFRESH_TOKEN:-}",
-  "expires_at": $EXPIRES_AT,
-  "enrolled_at": $NOW
-}
-TOKENEOF
+        jq -n \
+            --arg at "$ACCESS_TOKEN" \
+            --arg rt "${REFRESH_TOKEN:-}" \
+            --argjson ea "$EXPIRES_AT" \
+            --argjson en "$NOW" \
+            '{"access_token":$at,"refresh_token":$rt,"expires_at":$ea,"enrolled_at":$en}' \
+            > "$TOKEN_FILE"
         chmod 600 "$TOKEN_FILE"
         echo "Token saved (expires at: $(date -d "@$EXPIRES_AT" 2>/dev/null || echo "$EXPIRES_AT"))"
         break
@@ -341,12 +341,14 @@ cat > /etc/pam.d/sshd << EOF
 auth       required     pam_permit.so
 account    required     pam_openbastion.so
 session    required     pam_unix.so
-session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
+session    optional     pam_mkhomedir.so skel=/etc/skel umask=0077
 EOF
 
-# Fix session recording directory permissions
+# Session recording directory: match production permissions (1770 root:ob-sessions)
+groupadd --system ob-sessions 2>/dev/null || true
 mkdir -p /var/lib/open-bastion/sessions
-chmod 1777 /var/lib/open-bastion/sessions
+chgrp ob-sessions /var/lib/open-bastion/sessions
+chmod 1770 /var/lib/open-bastion/sessions
 
 # Ensure sshd_config.d is included
 if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
