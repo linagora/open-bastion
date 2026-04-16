@@ -214,27 +214,46 @@ test_default_format_unknown() {
     fi
 }
 
-# ── Test 9: ensure_sessions_dir creates directory with mode 0700 ──
+# ── Test 9: ensure_sessions_dir creates user subdir when parent exists ──
 test_ensure_sessions_dir() {
     local tmpdir
     tmpdir=$(mktemp -d)
-    local testdir="$tmpdir/newsessions"
     (
         source_script "ob-session-recorder"
-        SESSIONS_DIR="$testdir"
+        SESSIONS_DIR="$tmpdir"
         SESSION_USER="testuser"
         ensure_sessions_dir
-        [ -d "$testdir" ] || exit 1
+        [ -d "$tmpdir/testuser" ] || exit 1
         local perms
-        perms=$(stat -c '%a' "$testdir" 2>/dev/null || stat -f '%Lp' "$testdir" 2>/dev/null)
-        [ "$perms" = "700" ] && exit 0 || exit 1
+        perms=$(stat -c '%a' "$tmpdir/testuser" 2>/dev/null || stat -f '%Lp' "$tmpdir/testuser" 2>/dev/null)
+        [ "$perms" = "770" ] && exit 0 || exit 1
     )
     local rc=$?
     rm -rf "$tmpdir"
     if [ $rc -eq 0 ]; then
-        pass "ensure_sessions_dir creates directory with mode 0700"
+        pass "ensure_sessions_dir creates user subdir when parent exists"
     else
-        fail "ensure_sessions_dir creates directory with mode 0700"
+        fail "ensure_sessions_dir creates user subdir when parent exists"
+    fi
+}
+
+# ── Test 9b: ensure_sessions_dir fails when parent dir missing ──
+test_ensure_sessions_dir_missing() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    local testdir="$tmpdir/nonexistent"
+    (
+        source_script "ob-session-recorder"
+        SESSIONS_DIR="$testdir"
+        SESSION_USER="testuser"
+        ensure_sessions_dir 2>/dev/null && exit 1 || exit 0
+    )
+    local rc=$?
+    rm -rf "$tmpdir"
+    if [ $rc -eq 0 ]; then
+        pass "ensure_sessions_dir fails when parent dir missing"
+    else
+        fail "ensure_sessions_dir fails when parent dir missing"
     fi
 }
 
@@ -328,6 +347,7 @@ run_test test_session_file_asciinema
 run_test test_session_file_ttyrec
 run_test test_default_format_unknown
 run_test test_ensure_sessions_dir
+run_test test_ensure_sessions_dir_missing
 run_test test_write_metadata
 run_test test_env_defaults
 run_test test_parse_args
