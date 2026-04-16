@@ -233,9 +233,11 @@ owned by `root:ob-sessions`. This design provides tamper-evident recordings:
 - The wrapper uses its elevated effective gid (`ob-sessions`) **only** to create
   the per-user session subdirectory with mode `2770` (setgid bit on directory)
   and ownership `user:ob-sessions`.
-- The wrapper then exec's the recorder script **without** calling `setregid()`:
-  the kernel naturally strips the setgid on exec of interpreted scripts (`#!`),
-  so the script and the user's shell run with the user's original gid only.
+- After directory creation, the wrapper explicitly drops the elevated gid via
+  `setregid()`, restoring the user's original gid. `exec` does **not**
+  automatically strip an already-acquired effective/saved gid — only setgid
+  bits on the exec'd file are ignored. The explicit drop ensures the script
+  and the user's shell run with the user's original gid only.
 - Files created inside the per-user directory inherit the `ob-sessions` group
   thanks to the directory's setgid bit — no process-level privilege needed.
 - Recorded users are **not** members of `ob-sessions`, so they cannot access

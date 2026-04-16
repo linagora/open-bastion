@@ -1056,7 +1056,7 @@ Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) 
 
 1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
 2. Le wrapper utilise son gid effectif `ob-sessions` **uniquement** pour créer le sous-répertoire utilisateur en mode `2770 user:ob-sessions` (bit setgid sur le répertoire)
-3. Le wrapper exec le script recorder **sans** appeler `setregid()` : le kernel supprime naturellement le setgid sur les scripts interprétés `#!`, donc le script et le shell de l'utilisateur tournent avec le gid original
+3. Le wrapper drop explicitement le gid élevé via `setregid(orig_gid, orig_gid)` avant l'exec. `exec` ne supprime **pas** un gid effectif/sauvé déjà acquis (seuls les bits setgid du *fichier* exécuté sont ignorés). Le drop explicite garantit que le script et le shell tournent avec le gid original de l'utilisateur
 4. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
    - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
    - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire

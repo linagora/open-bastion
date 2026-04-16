@@ -135,6 +135,11 @@ ensure_sessions_dir() {
         mkdir "$user_dir" 2>/dev/null || true
         chmod 0770 "$user_dir" 2>/dev/null || true
     fi
+
+    if [ ! -d "$user_dir" ]; then
+        log_err "User sessions directory $user_dir does not exist and could not be created"
+        return 1
+    fi
 }
 
 # Write session metadata
