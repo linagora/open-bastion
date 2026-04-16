@@ -66,7 +66,7 @@ chmod 644 "$SSH_REVOKED_KEYS"
 # Set up KRL refresh cron job (validates KRL format before replacing)
 echo "Setting up KRL refresh cron (every ${KRL_REFRESH_INTERVAL} min)..."
 cat > /etc/cron.d/open-bastion-krl << CRONEOF
-*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" ${PORTAL_URL}/ssh/revoked && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" ${SSH_REVOKED_KEYS} || rm -f "\$tmp"
+*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" "${PORTAL_URL}/ssh/revoked" && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" "${SSH_REVOKED_KEYS}" || rm -f "\$tmp"
 CRONEOF
 chmod 644 /etc/cron.d/open-bastion-krl
 # Start cron daemon
@@ -75,39 +75,14 @@ cron
 # Create script to validate principals and create user if needed
 cat > /usr/local/bin/llng-principals << 'SCRIPT'
 #!/bin/bash
-# Called by sshd AuthorizedPrincipalsCommand
-# Creates user if needed, then returns allowed principals
-# Args: %u (username) %t (key type) %k (base64 key/cert)
+# Called by sshd AuthorizedPrincipalsCommand (runs as nobody)
+# Returns allowed principals for certificate authentication.
+# User creation is handled by pam_openbastion (create_user=true in open_session).
+# User lookup goes through NSS (libnss_openbastion), which has its own token.
 USERNAME="$1"
-KEY_TYPE="$2"
-KEY_B64="$3"
 
-# Check if user exists locally or is known to LLNG.
-# User creation is handled by pam_openbastion (create_user=true in open_session),
-# not by this script (which runs as nobody, not root).
-KNOWN_USER=0
+# Check if user is known (locally or via NSS/libnss_openbastion)
 if getent passwd "$USERNAME" >/dev/null 2>&1; then
-    KNOWN_USER=1
-else
-    TOKEN=$(jq -r '.access_token // empty' /etc/open-bastion/server_token.json 2>/dev/null)
-    PORTAL_URL=$(grep portal_url /etc/open-bastion/nss_openbastion.conf | cut -d= -f2 | tr -d ' ')
-
-    if [ -n "$TOKEN" ] && [ -n "$PORTAL_URL" ]; then
-        # Build JSON safely with jq to prevent injection
-        JSON_BODY=$(jq -n --arg user "$USERNAME" '{"user": $user}')
-        USERINFO=$(curl -s "$PORTAL_URL/pam/userinfo" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$JSON_BODY" 2>/dev/null)
-
-        if echo "$USERINFO" | jq -e '.found == true' >/dev/null 2>&1; then
-            KNOWN_USER=1
-        fi
-    fi
-fi
-
-# Return the username as allowed principal (matching what's in the cert)
-if [ "$KNOWN_USER" = "1" ]; then
     echo "$USERNAME"
 fi
 SCRIPT

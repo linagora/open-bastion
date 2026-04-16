@@ -66,7 +66,7 @@ chmod 644 "$SSH_REVOKED_KEYS"
 # Set up KRL refresh cron job (validates KRL format before replacing)
 echo "Setting up KRL refresh cron (every ${KRL_REFRESH_INTERVAL} min)..."
 cat > /etc/cron.d/open-bastion-krl << CRONEOF
-*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" ${PORTAL_URL}/ssh/revoked && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" ${SSH_REVOKED_KEYS} || rm -f "\$tmp"
+*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" "${PORTAL_URL}/ssh/revoked" && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" "${SSH_REVOKED_KEYS}" || rm -f "\$tmp"
 CRONEOF
 chmod 644 /etc/cron.d/open-bastion-krl
 cron
