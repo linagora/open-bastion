@@ -312,10 +312,18 @@ static int load_server_token(nss_llng_config_t *config)
      * Matches the pattern used in pam_openbastion.c for token loading.
      */
     int fd = open(config->server_token_file, O_RDONLY | O_NOFOLLOW);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            syslog(LOG_WARNING, "libnss_llng: token file %s is a symlink (rejected)",
+                   config->server_token_file);
+        }
+        return -1;
+    }
 
     struct stat st;
     if (fstat(fd, &st) != 0) {
+        syslog(LOG_WARNING, "libnss_llng: cannot stat token file %s: %s",
+               config->server_token_file, strerror(errno));
         close(fd);
         return -1;
     }
@@ -332,6 +340,8 @@ static int load_server_token(nss_llng_config_t *config)
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
+        syslog(LOG_WARNING, "libnss_llng: token file %s is not a regular file",
+               config->server_token_file);
         close(fd);
         return -1;
     }
@@ -389,11 +399,19 @@ static int load_config(nss_llng_config_t *config)
      * Matches the pattern used in config.c for pam_openbastion.
      */
     int fd = open(NSS_LLNG_CONF, O_RDONLY | O_NOFOLLOW);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            syslog(LOG_ERR, "libnss_llng: config file %s is a symlink (rejected)",
+                   NSS_LLNG_CONF);
+        }
+        return -1;
+    }
 
     /* Verify file ownership and permissions */
     struct stat st;
     if (fstat(fd, &st) != 0) {
+        syslog(LOG_ERR, "libnss_llng: cannot stat config file %s: %s",
+               NSS_LLNG_CONF, strerror(errno));
         close(fd);
         return -1;
     }
