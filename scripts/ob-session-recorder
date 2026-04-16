@@ -26,7 +26,8 @@ MAX_SESSION_DURATION="${LLNG_MAX_SESSION:-86400}"  # 24 hours default
 
 # Metadata
 SESSION_ID=""
-SESSION_USER="${USER:-unknown}"
+# Derive username from real uid, not $USER (which is user-controllable).
+SESSION_USER="$(id -un 2>/dev/null || echo unknown)"
 SESSION_START=""
 SESSION_FILE=""
 METADATA_FILE=""
@@ -34,6 +35,15 @@ ORIGINAL_COMMAND="${SSH_ORIGINAL_COMMAND:-}"
 CLIENT_IP="${SSH_CLIENT:+${SSH_CLIENT%% *}}"
 CLIENT_IP="${CLIENT_IP:-unknown}"
 TTY_NAME="${SSH_TTY:-notty}"
+
+# Security: validate SESSION_USER to prevent path traversal attacks.
+# Must contain only safe characters before it is used to construct file paths.
+if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
+    SAFE_USER=$(printf '%q' "$SESSION_USER")
+    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER"
+    echo "Error: invalid session user" >&2
+    exit 1
+fi
 
 # Process management
 TIMEOUT_PID=""
@@ -117,11 +127,19 @@ ensure_sessions_dir() {
         return 1
     fi
 
-    # Create user subdirectory (group ob-sessions via setgid wrapper)
+    # User subdirectory is created by ob-session-recorder-wrapper (setgid binary)
+    # with mode 2770 (setgid bit) and group ob-sessions. Files created inside
+    # inherit the ob-sessions group. If running without the wrapper (e.g. tests),
+    # create the directory as a fallback.
     local user_dir="$SESSIONS_DIR/$SESSION_USER"
     if [ ! -d "$user_dir" ]; then
-        mkdir "$user_dir"
-        chmod 0770 "$user_dir"
+        mkdir "$user_dir" 2>/dev/null || true
+        chmod 0770 "$user_dir" 2>/dev/null || true
+    fi
+
+    if [ ! -d "$user_dir" ]; then
+        log_err "User sessions directory $user_dir does not exist and could not be created"
+        return 1
     fi
 }
 

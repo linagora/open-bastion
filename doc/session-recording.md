@@ -190,9 +190,9 @@ Each recording has an accompanying JSON metadata file (`.json`):
 ```
 
 - Sessions root: mode `1770`, owned `root:ob-sessions`
-- Per-user subdirectories: created by the wrapper
-- Recording files: mode `0640`, owned by `root:ob-sessions`
-- Organization: One subdirectory per user; users cannot delete recordings
+- Per-user subdirectories: mode `2770` (setgid), owned `user:ob-sessions`, created by the wrapper
+- Recording files: inherit `ob-sessions` group from directory's setgid bit
+- Organization: One subdirectory per user; users cannot access other users' recordings
 
 ## Replaying Sessions
 
@@ -225,17 +225,23 @@ scriptreplay timing.txt recording.typescript
 
 ### Privilege Separation via Setgid Wrapper
 
-Session recordings are written by `ob-session-recorder-wrapper`, a setgid helper
+Session recordings are written via `ob-session-recorder-wrapper`, a setgid helper
 owned by `root:ob-sessions`. This design provides tamper-evident recordings:
 
 - The sessions directory `/var/lib/open-bastion/sessions` has mode `1770` and is
   owned by `root:ob-sessions` (sticky bit set).
-- The wrapper runs with the `ob-sessions` group privilege, which allows it to
-  write into the shared directory.
-- Recorded users are **not** members of `ob-sessions`, so they cannot delete or
-  modify their own session recordings.
-- The actual recorder binary `/usr/sbin/ob-session-recorder` is invoked by the
-  wrapper after privilege setup.
+- The wrapper uses its elevated effective gid (`ob-sessions`) **only** to create
+  the per-user session subdirectory with mode `2770` (setgid bit on directory)
+  and ownership `user:ob-sessions`.
+- After directory creation, the wrapper explicitly drops the elevated gid via
+  `setregid()`, restoring the user's original gid. `exec` does **not**
+  automatically strip an already-acquired effective/saved gid — only setgid
+  bits on the exec'd file are ignored. The explicit drop ensures the script
+  and the user's shell run with the user's original gid only.
+- Files created inside the per-user directory inherit the `ob-sessions` group
+  thanks to the directory's setgid bit — no process-level privilege needed.
+- Recorded users are **not** members of `ob-sessions`, so they cannot access
+  other users' session recordings.
 
 This means `ForceCommand` should point to `ob-session-recorder-wrapper`, not
 directly to `ob-session-recorder`.
@@ -243,7 +249,8 @@ directly to `ob-session-recorder`.
 ### File Permissions
 
 - Sessions directory: mode `1770`, owned `root:ob-sessions`
-- Recording files: `0640` (owned by root, group `ob-sessions`)
+- Per-user subdirectories: mode `2770` (setgid), owned `user:ob-sessions`
+- Recording files: inherit `ob-sessions` group from directory setgid bit
 - Config file: `/etc/open-bastion/session-recorder.conf`, mode `0644` (root-owned)
 
 ### Storage Security
