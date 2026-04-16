@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <grp.h>
 #include <pwd.h>
 #include <errno.h>
@@ -136,37 +137,54 @@ static int ensure_user_session_dir(const char *username, uid_t uid, gid_t sessio
         return -1;
     }
 
-    struct stat st;
-    if (stat(dirpath, &st) == 0) {
-        /* Directory exists - verify it's a directory */
-        if (!S_ISDIR(st.st_mode)) {
-            fprintf(stderr, "ob-session-recorder-wrapper: %s exists but is not a directory\n",
-                    dirpath);
-            return -1;
+    /*
+     * Try to open an existing directory first.
+     * Use O_NOFOLLOW to prevent symlink attacks.
+     * All subsequent checks use the fd to avoid TOCTOU races.
+     */
+    int fd = open(dirpath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd >= 0) {
+        /* Directory exists - ensure setgid bit is set (repair if needed) */
+        struct stat st;
+        if (fstat(fd, &st) == 0 && !(st.st_mode & S_ISGID)) {
+            fchmod(fd, 02770);
         }
-        /* Ensure setgid bit is set (repair if needed) */
-        if (!(st.st_mode & S_ISGID)) {
-            chmod(dirpath, 02770);
-        }
+        close(fd);
         return 0;
     }
 
-    /* Create directory - we have effective gid ob-sessions */
+    /* Directory does not exist - create it. We have effective gid ob-sessions. */
     if (mkdir(dirpath, 02770) != 0) {
+        if (errno == EEXIST) {
+            /* Race: another process created it between our open and mkdir */
+            return 0;
+        }
         fprintf(stderr, "ob-session-recorder-wrapper: mkdir(%s) failed: %s\n",
                 dirpath, strerror(errno));
         return -1;
     }
 
-    /* Set ownership: user:ob-sessions */
-    if (chown(dirpath, uid, sessions_gid) != 0) {
-        fprintf(stderr, "ob-session-recorder-wrapper: chown(%s, %u, %u) failed: %s\n",
-                dirpath, (unsigned)uid, (unsigned)sessions_gid, strerror(errno));
-        /* Directory was created but ownership failed - remove it */
+    /*
+     * Set ownership via fd to avoid TOCTOU between mkdir and chown.
+     * Open the directory we just created, then use fchown on the fd.
+     */
+    fd = open(dirpath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0) {
+        fprintf(stderr, "ob-session-recorder-wrapper: open(%s) after mkdir failed: %s\n",
+                dirpath, strerror(errno));
         rmdir(dirpath);
         return -1;
     }
 
+    if (fchown(fd, uid, sessions_gid) != 0) {
+        fprintf(stderr, "ob-session-recorder-wrapper: fchown(%s, %u, %u) failed: %s\n",
+                dirpath, (unsigned)uid, (unsigned)sessions_gid, strerror(errno));
+        close(fd);
+        rmdir(dirpath);
+        return -1;
+    }
+
+    close(fd);
     return 0;
 }
 
