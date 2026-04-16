@@ -83,6 +83,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder
+%attr(2755,root,ob-sessions) %{_sbindir}/ob-session-recorder-wrapper
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-backend-setup
 %{_sbindir}/ob-cache-admin
@@ -114,8 +115,22 @@ ctest --output-on-failure --verbose
 %{_datadir}/lightdm-webkit/themes/open-bastion/style.css
 %{_unitdir}/ob-session-monitor.service
 
+%pre
+# Create ob-sessions group for session recording privilege separation
+getent group ob-sessions >/dev/null 2>&1 || groupadd --system ob-sessions
+
 %post
 %systemd_post ob-heartbeat.timer
+# Create required directories
+mkdir -p /etc/open-bastion
+chmod 755 /etc/open-bastion
+mkdir -p /var/cache/open-bastion
+chmod 700 /var/cache/open-bastion
+mkdir -p /var/lib/open-bastion
+chmod 711 /var/lib/open-bastion
+mkdir -p /var/lib/open-bastion/sessions
+chgrp ob-sessions /var/lib/open-bastion/sessions
+chmod 1770 /var/lib/open-bastion/sessions
 
 %preun
 %systemd_preun ob-heartbeat.timer
@@ -141,6 +156,16 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Wed Apr 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.2-1
+- Mode E (max-security) hardening
+- Add setgid session recorder wrapper for privilege separation
+- Fix PAM module name (pam_llng.so -> pam_openbastion.so)
+- Fix NSS module symbols (_nss_llng_ -> _nss_openbastion_)
+- Fix ob-enroll client_secret handling
+- Fix setup scripts: token path, NSS config, sshd Include directive
+- Add AuthorizedPrincipalsCommand for SSH certificate support
+- Add PermitRootLogin no, pam_mkhomedir.so
+
 * Sat Feb 07 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.1-1
 - Supplementary groups synchronization via managed_groups
 - Local whitelist for managed groups (allowed_managed_groups)
