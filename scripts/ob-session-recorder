@@ -26,7 +26,8 @@ MAX_SESSION_DURATION="${LLNG_MAX_SESSION:-86400}"  # 24 hours default
 
 # Metadata
 SESSION_ID=""
-SESSION_USER="${USER:-unknown}"
+# Derive username from real uid, not $USER (which is user-controllable).
+SESSION_USER="$(id -un 2>/dev/null || echo unknown)"
 SESSION_START=""
 SESSION_FILE=""
 METADATA_FILE=""
