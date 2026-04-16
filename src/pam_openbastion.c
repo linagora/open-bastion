@@ -3630,6 +3630,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
      */
     const char *sudo_env = pam_getenv(pamh, "LLNG_SUDO_ALLOWED");
     int sudo_allowed = (sudo_env && strcmp(sudo_env, "1") == 0);
+    int sudo_group_changed = 0;
 
     if (sudo_allowed) {
         /* Sync membership only if the sudo group already exists locally. */
@@ -3637,7 +3638,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
             OB_LOG_DEBUG(pamh, "Group %s does not exist, skipping sudo group sync", OB_SUDO_GROUP);
         } else if (!user_in_group_locally(user, OB_SUDO_GROUP)) {
             OB_LOG_INFO(pamh, "Adding user %s to %s (sudo allowed)", user, OB_SUDO_GROUP);
-            if (add_user_to_group(pamh, user, OB_SUDO_GROUP) < 0) {
+            if (add_user_to_group(pamh, user, OB_SUDO_GROUP) == 0) {
+                sudo_group_changed = 1;
+            } else {
                 OB_LOG_WARN(pamh, "Failed to add user %s to %s", user, OB_SUDO_GROUP);
             }
         }
@@ -3647,10 +3650,17 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
             user_in_group_locally(user, OB_SUDO_GROUP)) {
             OB_LOG_INFO(pamh, "Removing user %s from %s (sudo no longer allowed)",
                         user, OB_SUDO_GROUP);
-            if (remove_user_from_group(pamh, user, OB_SUDO_GROUP) < 0) {
+            if (remove_user_from_group(pamh, user, OB_SUDO_GROUP) == 0) {
+                sudo_group_changed = 1;
+            } else {
                 OB_LOG_WARN(pamh, "Failed to remove user %s from %s", user, OB_SUDO_GROUP);
             }
         }
+    }
+
+    /* Invalidate nscd group cache so sudo sees the change immediately */
+    if (sudo_group_changed) {
+        invalidate_nscd_cache();
     }
 
     /* Check if user creation is enabled */
