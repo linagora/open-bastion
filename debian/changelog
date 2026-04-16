@@ -1,3 +1,23 @@
+open-bastion (0.1.3) unstable; urgency=medium
+
+  * Mode E hardening: tested end-to-end deployment
+  * Fix PAM module name: pam_llng.so -> pam_openbastion.so
+  * Fix NSS module symbols: _nss_llng_* -> _nss_openbastion_*
+  * Fix NSS config: nsswitch.conf uses 'openbastion', server_token_file key
+  * Fix ob-enroll: send client_secret to device endpoint (optional)
+  * Fix ob-bastion-setup: add Include directive, AuthorizedPrincipalsCommand,
+    PermitRootLogin no, NSS configuration, pam_mkhomedir.so
+  * Fix session recorder paths: ob-session-recorder, /etc/open-bastion/
+  * Fix sudo Mode E: remove pam_unix.so from account (NSS-only users),
+    create /etc/sudoers.d/open-bastion
+  * Session recording privilege separation via setgid wrapper
+    (ob-session-recorder-wrapper, group ob-sessions, mode 1770)
+  * New risk R-S18: session recording tampering (mitigated P=1/I=1)
+  * Pre-hardening bootstrap: securetty ttyS0, PermitRootLogin no,
+    service account for emergency access
+
+ -- Xavier Guimard <xguimard@linagora.com>  Wed, 16 Apr 2026 20:00:00 +0200
+
 open-bastion (0.1.2) unstable; urgency=medium
 
   * Mode E: Maximum Security (SSO certs only + sudo PAM-access + KRL)

@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.1.2
+Version:        0.1.3
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -156,15 +156,17 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
-* Wed Apr 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.2-1
-- Mode E (max-security) hardening
-- Add setgid session recorder wrapper for privilege separation
+* Wed Apr 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.3-1
+- Mode E hardening: tested end-to-end deployment
+- Session recording privilege separation (setgid wrapper, ob-sessions group)
 - Fix PAM module name (pam_llng.so -> pam_openbastion.so)
 - Fix NSS module symbols (_nss_llng_ -> _nss_openbastion_)
-- Fix ob-enroll client_secret handling
-- Fix setup scripts: token path, NSS config, sshd Include directive
-- Add AuthorizedPrincipalsCommand for SSH certificate support
-- Add PermitRootLogin no, pam_mkhomedir.so
+- Fix ob-enroll client_secret handling (optional)
+- Fix setup scripts: Include directive, AuthorizedPrincipalsCommand,
+  PermitRootLogin no, NSS config, token path, session recorder paths
+- Fix sudo Mode E: remove pam_unix.so, add sudoers.d/open-bastion
+- Add pam_mkhomedir.so for automatic home directory creation
+- New risk R-S18: session recording tampering (mitigated)
 
 * Sat Feb 07 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.1-1
 - Supplementary groups synchronization via managed_groups
