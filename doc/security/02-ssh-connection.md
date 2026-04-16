@@ -142,7 +142,7 @@ auth       required     pam_openbastion.so   service=sudo
 account    required     pam_openbastion.so   service=sudo
 ```
 
-> **Note Mode E :** La ligne `account required pam_unix.so` est **absente** du stack sudo. `pam_unix.so` est incompatible avec les utilisateurs NSS-only (résolution dynamique via `openbastion` dans `nsswitch.conf`) : il échouerait pour tout utilisateur n'ayant pas d'entrée dans `/etc/passwd`. L'autorisation est entièrement déléguée à `pam_openbastion.so`. Le fichier `/etc/sudoers.d/open-bastion` autorise tous les utilisateurs (`ALL ALL=(ALL) ALL`) — le filtrage est effectué par PAM.
+> **Note Mode E :** La ligne `account required pam_unix.so` est **absente** du stack sudo. `pam_unix.so` est incompatible avec les utilisateurs NSS-only (résolution dynamique via `openbastion` dans `nsswitch.conf`) : il échouerait pour tout utilisateur n'ayant pas d'entrée dans `/etc/passwd`. L'autorisation repose sur une approche **defense-in-depth** : le fichier `/etc/sudoers.d/open-bastion` n'autorise que les membres du groupe `open-bastion-sudo` (`%open-bastion-sudo ALL=(ALL) ALL`), et l'appartenance à ce groupe est gérée dynamiquement par le module PAM lors de l'ouverture de session SSH (basé sur `sudo_allowed`). Ainsi, même en cas de défaillance du module PAM lors de l'authentification sudo, les utilisateurs non autorisés sont bloqués par sudoers avant l'invocation de PAM.
 
 ### Configuration Open Bastion (backends)
 

@@ -79,8 +79,9 @@ account    required     pam_unix.so\n\
 session    required     pam_unix.so\n\
 ' > /etc/pam.d/sudo
 
-# sudo requires PAM authentication (NO NOPASSWD - this is Mode E)
-RUN echo "ALL ALL=(ALL:ALL) ALL" >> /etc/sudoers
+# Defense-in-depth: only open-bastion-sudo group members can sudo (PAM also required)
+RUN groupadd --system open-bastion-sudo 2>/dev/null || true \
+    && echo "%open-bastion-sudo ALL=(ALL:ALL) ALL" >> /etc/sudoers
 
 # Fix PAM loginuid for Docker
 RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd 2>/dev/null || true

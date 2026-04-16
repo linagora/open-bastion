@@ -160,6 +160,8 @@ case "$1" in
         chmod 711 /var/lib/open-bastion
         # Create ob-sessions group for session recording privilege separation
         groupadd --system ob-sessions 2>/dev/null || true
+        # Create open-bastion-sudo group for defense-in-depth sudo authorization (Mode E)
+        groupadd --system open-bastion-sudo 2>/dev/null || true
         mkdir -p /var/lib/open-bastion/sessions
         chgrp ob-sessions /var/lib/open-bastion/sessions
         chmod 1770 /var/lib/open-bastion/sessions

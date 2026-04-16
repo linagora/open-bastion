@@ -473,6 +473,8 @@ session    required     pam_unix.so
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would configure PAM sudo for LLNG token auth"
         echo "$pam_content"
+        info "[DRY-RUN] Would create group open-bastion-sudo"
+        info "[DRY-RUN] Would create /etc/sudoers.d/open-bastion with: %open-bastion-sudo ALL=(ALL) ALL"
         return 0
     fi
 
@@ -481,11 +483,15 @@ session    required     pam_unix.so
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO for LLNG token authentication"
 
-    # Configure sudoers: allow all SSO users to sudo (PAM handles authorization)
+    # Create open-bastion-sudo group for defense-in-depth sudo authorization
+    groupadd --system open-bastion-sudo 2>/dev/null || true
+
+    # Configure sudoers: only open-bastion-sudo group members can sudo (PAM also required)
     local sudoers_file="/etc/sudoers.d/open-bastion"
     if [ ! -f "$sudoers_file" ]; then
-        echo "# Open Bastion Mode E: sudo authorization is handled by PAM (LLNG token required)" > "$sudoers_file"
-        echo "ALL ALL=(ALL) ALL" >> "$sudoers_file"
+        echo "# Open Bastion Mode E: defense-in-depth sudo authorization" > "$sudoers_file"
+        echo "# Both group membership (managed by PAM session) AND LLNG token are required" >> "$sudoers_file"
+        echo "%open-bastion-sudo ALL=(ALL) ALL" >> "$sudoers_file"
         chmod 440 "$sudoers_file"
         info "Created $sudoers_file"
     fi
