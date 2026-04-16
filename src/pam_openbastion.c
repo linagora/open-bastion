@@ -102,6 +102,9 @@ typedef struct {
 /* How often to re-verify token file permissions (in seconds) */
 #define TOKEN_RECHECK_INTERVAL 300  /* 5 minutes */
 
+/* Defense-in-depth: group required by sudoers for sudo access */
+#define OB_SUDO_GROUP "open-bastion-sudo"
+
 /* Logging macros - prefixed to avoid conflict with syslog constants */
 #define OB_LOG_ERR(handle, fmt, ...) \
     pam_syslog(handle, LOG_ERR, fmt, ##__VA_ARGS__)
@@ -3723,6 +3726,41 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         }
 
         free_filtered_groups(filtered_managed, filtered_count);
+    }
+
+    /*
+     * Defense-in-depth: sync open-bastion-sudo group membership.
+     * The sudoers rule requires membership in this group, AND the PAM
+     * auth/account stack independently verifies sudo_allowed via LLNG.
+     * Both conditions must be met for sudo to succeed.
+     *
+     * On each SSH login:
+     *  - sudo_allowed=true  → add user to open-bastion-sudo
+     *  - sudo_allowed=false → remove user from open-bastion-sudo
+     */
+    const char *sudo_env = pam_getenv(pamh, "LLNG_SUDO_ALLOWED");
+    int sudo_allowed = (sudo_env && strcmp(sudo_env, "1") == 0);
+
+    if (sudo_allowed) {
+        /* Ensure group exists (idempotent) */
+        if (!group_exists_by_name(OB_SUDO_GROUP)) {
+            OB_LOG_DEBUG(pamh, "Group %s does not exist, skipping sudo group sync", OB_SUDO_GROUP);
+        } else if (!user_in_group_locally(user, OB_SUDO_GROUP)) {
+            OB_LOG_INFO(pamh, "Adding user %s to %s (sudo allowed)", user, OB_SUDO_GROUP);
+            if (add_user_to_group(pamh, user, OB_SUDO_GROUP) < 0) {
+                OB_LOG_WARN(pamh, "Failed to add user %s to %s", user, OB_SUDO_GROUP);
+            }
+        }
+    } else {
+        /* Remove from sudo group if present (permission revoked) */
+        if (group_exists_by_name(OB_SUDO_GROUP) &&
+            user_in_group_locally(user, OB_SUDO_GROUP)) {
+            OB_LOG_INFO(pamh, "Removing user %s from %s (sudo no longer allowed)",
+                        user, OB_SUDO_GROUP);
+            if (remove_user_from_group(pamh, user, OB_SUDO_GROUP) < 0) {
+                OB_LOG_WARN(pamh, "Failed to remove user %s from %s", user, OB_SUDO_GROUP);
+            }
+        }
     }
 
     return PAM_SUCCESS;

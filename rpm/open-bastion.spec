@@ -118,6 +118,8 @@ ctest --output-on-failure --verbose
 %pre
 # Create ob-sessions group for session recording privilege separation
 getent group ob-sessions >/dev/null 2>&1 || groupadd --system ob-sessions
+# Create open-bastion-sudo group for defense-in-depth sudo authorization (Mode E)
+getent group open-bastion-sudo >/dev/null 2>&1 || groupadd --system open-bastion-sudo
 
 %post
 %systemd_post ob-heartbeat.timer

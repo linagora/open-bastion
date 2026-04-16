@@ -189,8 +189,12 @@ account    required     pam_openbastion.so
 session    required     pam_unix.so
 ```
 
-`ob-bastion-setup --max-security` creates `/etc/sudoers.d/open-bastion` to grant
-sudo rights to authorized users without relying on local Unix group membership.
+`ob-bastion-setup --max-security` creates `/etc/sudoers.d/open-bastion` with
+`%open-bastion-sudo ALL=(ALL) ALL` and a system group `open-bastion-sudo`.
+The PAM module dynamically manages group membership during SSH session setup
+based on the `sudo_allowed` flag from the SSO portal. This provides
+**defense in depth**: even if the PAM module fails during sudo authentication,
+users without group membership are blocked by sudoers before PAM is invoked.
 
 ### Security Model
 
