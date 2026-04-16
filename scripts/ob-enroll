@@ -300,8 +300,7 @@ validate_config() {
     fi
 
     if [ -z "$CLIENT_SECRET" ]; then
-        log_error "Client secret is required (use -s or set client_secret in config)"
-        errors=$((errors + 1))
+        log_info "No client secret configured (public client mode)"
     fi
 
     if [ -z "$SERVER_GROUP" ]; then
@@ -340,6 +339,7 @@ initiate_device_auth() {
     response=$(curl "${CURL_OPTS[@]}" -w "\n%{http_code}" \
         -X POST "${PORTAL_URL}/oauth2/device" \
         -d "client_id=${CLIENT_ID}" \
+        ${CLIENT_SECRET:+-d "client_secret=${CLIENT_SECRET}"} \
         -d "scope=${SCOPE}" \
         -d "code_challenge=${CODE_CHALLENGE}" \
         -d "code_challenge_method=${CODE_CHALLENGE_METHOD}" 2>&1) || {
@@ -424,20 +424,31 @@ poll_for_token() {
 
         build_curl_opts
 
-        # Generate JWT for client_secret_jwt authentication (RFC 7523)
-        # This avoids sending client_secret in plaintext over the network
         local token_endpoint="${PORTAL_URL}/oauth2/token"
-        local client_jwt
-        client_jwt=$(generate_client_jwt "$CLIENT_ID" "$CLIENT_SECRET" "$token_endpoint")
 
-        response=$(curl "${CURL_OPTS[@]}" \
-            -X POST "$token_endpoint" \
-            -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
-            -d "device_code=${DEVICE_CODE}" \
-            -d "client_id=${CLIENT_ID}" \
-            -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
-            -d "client_assertion=${client_jwt}" \
-            -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
+        if [ -n "$CLIENT_SECRET" ]; then
+            # Generate JWT for client_secret_jwt authentication (RFC 7523)
+            # This avoids sending client_secret in plaintext over the network
+            local client_jwt
+            client_jwt=$(generate_client_jwt "$CLIENT_ID" "$CLIENT_SECRET" "$token_endpoint")
+
+            response=$(curl "${CURL_OPTS[@]}" \
+                -X POST "$token_endpoint" \
+                -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+                -d "device_code=${DEVICE_CODE}" \
+                -d "client_id=${CLIENT_ID}" \
+                -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+                -d "client_assertion=${client_jwt}" \
+                -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
+        else
+            # Public client: no client authentication
+            response=$(curl "${CURL_OPTS[@]}" \
+                -X POST "$token_endpoint" \
+                -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+                -d "device_code=${DEVICE_CODE}" \
+                -d "client_id=${CLIENT_ID}" \
+                -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
+        fi
 
         # Check for access token
         access_token=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)

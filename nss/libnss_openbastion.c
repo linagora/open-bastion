@@ -977,7 +977,7 @@ static void ensure_initialized(void)
 }
 
 /* NSS entry point: getpwnam_r */
-NSS_VISIBLE enum nss_status _nss_llng_getpwnam_r(const char *name,
+NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
                                       struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
@@ -1078,7 +1078,7 @@ NSS_VISIBLE enum nss_status _nss_llng_getpwnam_r(const char *name,
 }
 
 /* NSS entry point: getpwuid_r */
-NSS_VISIBLE enum nss_status _nss_llng_getpwuid_r(uid_t uid,
+NSS_VISIBLE enum nss_status _nss_openbastion_getpwuid_r(uid_t uid,
                                       struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
@@ -1168,20 +1168,20 @@ NSS_VISIBLE enum nss_status _nss_llng_getpwuid_r(uid_t uid,
 }
 
 /* NSS entry point: setpwent (start enumeration) */
-NSS_VISIBLE enum nss_status _nss_llng_setpwent(void)
+NSS_VISIBLE enum nss_status _nss_openbastion_setpwent(void)
 {
     /* We don't support enumeration */
     return NSS_STATUS_SUCCESS;
 }
 
 /* NSS entry point: endpwent (end enumeration) */
-NSS_VISIBLE enum nss_status _nss_llng_endpwent(void)
+NSS_VISIBLE enum nss_status _nss_openbastion_endpwent(void)
 {
     return NSS_STATUS_SUCCESS;
 }
 
 /* NSS entry point: getpwent_r (enumerate) */
-NSS_VISIBLE enum nss_status _nss_llng_getpwent_r(struct passwd *result,
+NSS_VISIBLE enum nss_status _nss_openbastion_getpwent_r(struct passwd *result,
                                       char *buffer,
                                       size_t buflen,
                                       int *errnop)

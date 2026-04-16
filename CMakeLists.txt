@@ -185,6 +185,27 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-recorder
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Build and install session recorder setgid wrapper
+add_executable(ob-session-recorder-wrapper
+    src/ob-session-recorder-wrapper.c
+)
+target_compile_options(ob-session-recorder-wrapper PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_options(ob-session-recorder-wrapper PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-session-recorder-wrapper
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Install session recorder config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion

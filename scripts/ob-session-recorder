@@ -19,8 +19,8 @@ VERSION="0.1.0"
 PROG_NAME=$(basename "$0")
 
 # Default configuration
-CONFIG_FILE="${LLNG_RECORDER_CONFIG:-/etc/llng/session-recorder.conf}"
-SESSIONS_DIR="${LLNG_SESSIONS_DIR:-/var/lib/llng-sessions}"
+CONFIG_FILE="${LLNG_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
+SESSIONS_DIR="${LLNG_SESSIONS_DIR:-/var/lib/open-bastion/sessions}"
 FORMAT="${LLNG_RECORDER_FORMAT:-script}"
 MAX_SESSION_DURATION="${LLNG_MAX_SESSION:-86400}"  # 24 hours default
 
@@ -31,7 +31,8 @@ SESSION_START=""
 SESSION_FILE=""
 METADATA_FILE=""
 ORIGINAL_COMMAND="${SSH_ORIGINAL_COMMAND:-}"
-CLIENT_IP="${SSH_CLIENT%% *}"
+CLIENT_IP="${SSH_CLIENT:+${SSH_CLIENT%% *}}"
+CLIENT_IP="${CLIENT_IP:-unknown}"
 TTY_NAME="${SSH_TTY:-notty}"
 
 # Process management
@@ -109,18 +110,18 @@ load_config() {
     fi
 }
 
-# Create sessions directory with proper permissions
+# Ensure session directories exist
 ensure_sessions_dir() {
     if [ ! -d "$SESSIONS_DIR" ]; then
-        mkdir -p "$SESSIONS_DIR"
-        chmod 0700 "$SESSIONS_DIR"
+        log_err "Sessions directory $SESSIONS_DIR does not exist"
+        return 1
     fi
 
-    # Create user subdirectory (owned by user, mode 0700)
+    # Create user subdirectory (group ob-sessions via setgid wrapper)
     local user_dir="$SESSIONS_DIR/$SESSION_USER"
     if [ ! -d "$user_dir" ]; then
-        mkdir -p "$user_dir"
-        chmod 0700 "$user_dir"
+        mkdir "$user_dir"
+        chmod 0770 "$user_dir"
     fi
 }
 

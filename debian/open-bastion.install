@@ -17,6 +17,7 @@ debian/tmp/etc/open-bastion/ssh-proxy.conf.example
 debian/tmp/usr/sbin/ob-enroll
 debian/tmp/usr/sbin/ob-heartbeat
 debian/tmp/usr/sbin/ob-session-recorder
+debian/tmp/usr/sbin/ob-session-recorder-wrapper
 debian/tmp/usr/sbin/ob-bastion-setup
 debian/tmp/usr/sbin/ob-backend-setup
 debian/tmp/usr/sbin/ob-cache-admin

@@ -40,7 +40,7 @@ PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 PAM_LLNG_CONF="/etc/security/pam_llng.conf"
-PAM_LLNG_TOKEN="/etc/security/pam_llng.token"
+PAM_LLNG_TOKEN="/etc/open-bastion/token"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 NSS_LLNG_CONF="/etc/nss_llng.conf"
 
@@ -145,6 +145,10 @@ configure_sshd() {
 # Trust LLNG SSH CA for certificate authentication
 TrustedUserCAKeys $SSH_CA_FILE
 
+# Accept certificate if principal matches the requested username
+AuthorizedPrincipalsCommand /bin/echo %u
+AuthorizedPrincipalsCommandUser nobody
+
 # Enable public key (certificate) authentication
 PubkeyAuthentication yes
 
@@ -160,6 +164,9 @@ UsePAM yes
 
 # Disable X11 forwarding for security
 X11Forwarding no
+
+# Root access via console only (not SSH)
+PermitRootLogin no
 "
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -170,6 +177,13 @@ X11Forwarding no
 
     # Use sshd_config.d if available (modern systems)
     if [ -d "$SSHD_CONFIG_DIR" ]; then
+        # Ensure Include directive exists in main sshd_config
+        if ! grep -q "^Include $SSHD_CONFIG_DIR/\*.conf" "$SSHD_CONFIG" 2>/dev/null; then
+            backup_file "$SSHD_CONFIG"
+            sed -i "1i Include $SSHD_CONFIG_DIR/*.conf" "$SSHD_CONFIG"
+            info "Added Include directive to $SSHD_CONFIG"
+        fi
+
         local llng_config="$SSHD_CONFIG_DIR/50-llng-backend.conf"
         backup_file "$llng_config"
         echo "$config_content" > "$llng_config"
@@ -220,10 +234,10 @@ configure_pam_sshd() {
 auth       required     pam_permit.so
 
 # Authorization - check with LLNG (certificate-aware mode)
-account    required     pam_llng.so ssh_cert_aware=true
+account    required     pam_openbastion.so ssh_cert_aware=true
 
 # Session - create user if needed, then standard Unix
-session    required     pam_llng.so $create_user_opt
+session    required     pam_openbastion.so $create_user_opt
 session    required     pam_unix.so
 "
 
@@ -255,10 +269,10 @@ configure_pam_sudo() {
 # Authorization for sudo is controlled by LLNG rules
 
 # Authentication - check with LLNG
-auth       required     pam_llng.so service_type=sudo
+auth       required     pam_openbastion.so service_type=sudo
 
 # Account - check with LLNG
-account    required     pam_llng.so service_type=sudo
+account    required     pam_openbastion.so service_type=sudo
 
 # Session - standard Unix
 session    required     pam_unix.so
@@ -431,32 +445,31 @@ configure_nss() {
 
     backup_file "$NSSWITCH_CONF"
 
-    # Add llng to passwd and group lines if not already present
-    # Insert llng after 'files' (or 'compat') for proper resolution order
-    if grep -q "^passwd:.*llng" "$NSSWITCH_CONF"; then
+    # Add openbastion to passwd and group lines if not already present
+    if grep -q "^passwd:.*openbastion" "$NSSWITCH_CONF"; then
         info "NSS already configured for passwd"
     else
         if grep -q "^passwd:.*files" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(passwd:.*files\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(passwd:.*files\)/\1 openbastion/' "$NSSWITCH_CONF"
         elif grep -q "^passwd:.*compat" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(passwd:.*compat\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(passwd:.*compat\)/\1 openbastion/' "$NSSWITCH_CONF"
         else
-            sed -i 's/^\(passwd:.*\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(passwd:.*\)/\1 openbastion/' "$NSSWITCH_CONF"
         fi
-        info "Added llng to passwd in $NSSWITCH_CONF"
+        info "Added openbastion to passwd in $NSSWITCH_CONF"
     fi
 
-    if grep -q "^group:.*llng" "$NSSWITCH_CONF"; then
+    if grep -q "^group:.*openbastion" "$NSSWITCH_CONF"; then
         info "NSS already configured for group"
     else
         if grep -q "^group:.*files" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(group:.*files\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(group:.*files\)/\1 openbastion/' "$NSSWITCH_CONF"
         elif grep -q "^group:.*compat" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(group:.*compat\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(group:.*compat\)/\1 openbastion/' "$NSSWITCH_CONF"
         else
-            sed -i 's/^\(group:.*\)/\1 llng/' "$NSSWITCH_CONF"
+            sed -i 's/^\(group:.*\)/\1 openbastion/' "$NSSWITCH_CONF"
         fi
-        info "Added llng to group in $NSSWITCH_CONF"
+        info "Added openbastion to group in $NSSWITCH_CONF"
     fi
 
     # Create NSS configuration
@@ -468,7 +481,7 @@ configure_nss() {
 portal_url = $PORTAL_URL
 
 # Server token file
-token_file = $PAM_LLNG_TOKEN
+server_token_file = $PAM_LLNG_TOKEN
 
 # Cache settings
 cache_enabled = true

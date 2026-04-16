@@ -23,6 +23,19 @@ Makefile
 # Debug
 *.dSYM/
 
+# Debian build artifacts
+debian/.debhelper/
+debian/tmp/
+debian/open-bastion/
+debian/open-bastion-desktop/
+debian/open-bastion-dbgsym/
+debian/*.debhelper.log
+debian/*.substvars
+debian/*.postrm.debhelper
+debian/debhelper-build-stamp
+debian/files
+obj-x86_64-linux-gnu/
+
 CLAUDE.md
 .PLAN.md
 .omc/

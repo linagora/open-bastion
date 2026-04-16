@@ -151,9 +151,23 @@ EOF
 
 case "$1" in
     configure)
-        # Create config directory
+        # Create required directories
         mkdir -p /etc/open-bastion
         chmod 755 /etc/open-bastion
+        mkdir -p /var/cache/open-bastion
+        chmod 700 /var/cache/open-bastion
+        mkdir -p /var/lib/open-bastion
+        chmod 711 /var/lib/open-bastion
+        # Create ob-sessions group for session recording privilege separation
+        groupadd --system ob-sessions 2>/dev/null || true
+        mkdir -p /var/lib/open-bastion/sessions
+        chgrp ob-sessions /var/lib/open-bastion/sessions
+        chmod 1770 /var/lib/open-bastion/sessions
+        # Set setgid on the session recorder wrapper so it runs with gid ob-sessions
+        if [ -f /usr/sbin/ob-session-recorder-wrapper ]; then
+            chgrp ob-sessions /usr/sbin/ob-session-recorder-wrapper
+            chmod 2755 /usr/sbin/ob-session-recorder-wrapper
+        fi
 
         db_get open-bastion/pam-mode
         MODE="$RET"
