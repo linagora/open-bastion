@@ -1,0 +1,59 @@
+# Open Bastion Quick Start
+#
+# Minimal setup: one LLNG portal + one SSH server.
+# The LLNG image ships with all plugins required by Open Bastion
+# (PamAccess, OIDCDeviceAuthorization, ...) via the plugin autoloader,
+# so no customPlugins configuration is needed.
+#
+# Usage:
+#   docker compose up -d
+#   # open http://localhost and login (dwho / dwho)
+#   # open http://localhost/pam to get a token
+#   ssh -p 2222 dwho@localhost
+#   # paste the token as password
+
+services:
+  sso:
+    image: yadd/lemonldap-ng-portal:latest-non-root
+    container_name: ob-quickstart-sso
+    ports:
+      - "80:8080"
+    volumes:
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      ob-quickstart-net:
+        aliases:
+          - sso
+
+  server:
+    build:
+      context: ..
+      dockerfile: quick-start/server/Dockerfile
+    image: ob-quickstart-server
+    container_name: ob-quickstart-server
+    ports:
+      - "2222:22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_GROUP=quick-start
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    networks:
+      - ob-quickstart-net
+
+networks:
+  ob-quickstart-net:
+    driver: bridge
