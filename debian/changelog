@@ -1,3 +1,46 @@
+open-bastion (0.1.4) unstable; urgency=medium
+
+  * NSS config path fix: libnss_openbastion now reads its config from
+    /etc/open-bastion/nss_openbastion.conf (the location where CMake
+    installs it and where ob-bastion-setup/ob-backend-setup have always
+    written). Previously hard-coded to /etc/nss_llng.conf (leftover from
+    llng-pam-module rename), so NSS silently refused to resolve users.
+    Re-run ob-bastion-setup or ob-backend-setup after upgrade.
+  * Session recorder wrapper (ob-session-recorder-wrapper): hardened
+    against privilege escalation. Explicitly drop elevated gid via
+    setregid() before exec; create session dir with mode 2770 (setgid)
+    so files inherit the ob-sessions group without the script needing
+    elevated gid; strip dangerous env vars (LD_*, BASH_ENV, ENV,
+    SHELLOPTS, BASHOPTS, CDPATH, GCONV_PATH, NLSPATH, TMPDIR, ...);
+    harden PATH; validate username against ^[a-z_][a-z0-9_.-]*$;
+    resolve username via getpwuid() instead of env.
+  * ob-session-recorder: derive SESSION_USER from "id -un" instead of
+    the user-controllable $USER env var; validate with same regex.
+  * Session directory creation: TOCTOU races fixed (use fstat/fchown/
+    fchmod on fd rather than path).
+  * Defense-in-depth sudo: new system group open-bastion-sudo created
+    by postinst/spec; pam_openbastion session hook syncs membership on
+    each login based on sudo_allowed from /pam/authorize
+    (true -> add to group, false -> remove). ob-bastion-setup writes
+    /etc/sudoers.d/open-bastion restricting sudo to %open-bastion-sudo
+    (existing files are not overwritten). nscd cache invalidated after
+    membership change so sudo sees the update immediately.
+  * NSS config and token files now opened with O_NOFOLLOW and verified
+    via fstat: must be owned by root, must be a regular file, must not
+    be group/world-writable; token file must not be group/world-readable.
+  * NSS write_callback: integer overflow check and 256 KB response size
+    cap to prevent memory exhaustion.
+  * NSS module: added syslog diagnostics for silent rejection paths.
+  * Docker demos: removed the "useradd -m" fallback that masked NSS
+    failures; demos now fail fast when NSS cannot resolve users.
+  * New quick-start/ directory: minimal 2-container demo using
+    yadd/lemonldap-ng-portal directly with the plugin autoloader (no
+    customPlugins edit), with README covering installation of
+    Open-Bastion plugins on an existing LLNG via lemonldap-ng-store or
+    Debian packages.
+
+ -- Xavier Guimard <xguimard@linagora.com>  Sat, 18 Apr 2026 23:00:00 +0200
+
 open-bastion (0.1.3) unstable; urgency=medium
 
   * Mode E hardening: tested end-to-end deployment

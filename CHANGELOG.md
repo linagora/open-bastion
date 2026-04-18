@@ -5,6 +5,124 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-04-18
+
+### Security
+
+- **Session recorder wrapper** (`ob-session-recorder-wrapper`): full rewrite
+  with defense-in-depth against privilege escalation
+  - Explicitly drop elevated gid via `setregid()` before `exec` (fixes a
+    vector where the `ob-sessions` gid would leak into the recorder
+    script's saved gid and child processes)
+  - Switch to directory-based privilege separation: the wrapper creates
+    `$SESSIONS_DIR/$USER` with mode `2770` (setgid) so files inside
+    inherit the `ob-sessions` group without the script needing elevated
+    gid
+  - Sanitize environment before `exec`: strip `LD_PRELOAD`,
+    `LD_LIBRARY_PATH`, `LD_AUDIT`, `BASH_ENV`, `ENV`, `SHELLOPTS`,
+    `BASHOPTS`, `CDPATH`, `GCONV_PATH`, `HOSTALIASES`, `LOCALDOMAIN`,
+    `LOCPATH`, `MALLOC_TRACE`, `NIS_PATH`, `NLSPATH`, `RESOLV_HOST_CONF`,
+    `RES_OPTIONS`, `TMPDIR`; force `PATH=/usr/sbin:/usr/bin:/sbin:/bin`
+  - Validate username against `^[a-z_][a-z0-9_.-]*$` before use in
+    path construction (prevents path traversal)
+  - Resolve username from the real uid via `getpwuid()` instead of a
+    user-controllable env variable
+  - Fix TOCTOU races in session directory creation by using
+    `fstat`/`fchown`/`fchmod` on an opened fd (CodeQL)
+- **`scripts/ob-session-recorder`**: derive `SESSION_USER` from `id -un`
+  instead of `$USER`; validate with the same regex
+- **NSS module** (`libnss_openbastion`):
+  - Config file and token file now opened with `O_NOFOLLOW` and verified
+    via `fstat`: must be owned by root, must be a regular file, must
+    not be group/world-writable; token file must not be
+    group/world-readable
+  - Add integer overflow check and 256 KB response cap in
+    `write_callback`
+  - Emit syslog diagnostics for every previously-silent rejection path
+- **Defense-in-depth sudo**:
+  - New system group `open-bastion-sudo` created automatically by
+    `debian/postinst` and the RPM pre-install scriptlet
+  - `pam_openbastion` session hook syncs membership on every login:
+    `sudo_allowed=true` → add user to the group, `false` → remove
+  - `nscd` group cache invalidated after a membership change so `sudo`
+    sees the update immediately
+  - `ob-bastion-setup` writes `/etc/sudoers.d/open-bastion` as
+    `%open-bastion-sudo ALL=(ALL) ALL` for new installs (does not
+    overwrite an existing file)
+
+### Fixed
+
+- **NSS configuration path**: `libnss_openbastion` now reads its config
+  from `/etc/open-bastion/nss_openbastion.conf` — where CMake installs
+  it and where `ob-bastion-setup`/`ob-backend-setup` have always
+  written. The module was hard-coded to `/etc/nss_llng.conf` (leftover
+  from the `llng-pam-module` → `open-bastion` rename), so NSS never
+  found its config and silently refused to resolve users. Docker demos
+  masked this with a `useradd -m` fallback that created local accounts
+  whenever NSS failed; the fallback is removed and demos now fail fast
+  on real NSS breakage
+- `ob-bastion-setup` / `ob-backend-setup`: update internal variable and
+  write config to the new NSS path
+
+### Added
+
+- **`quick-start/`** directory: minimal 2-container demo (LLNG portal +
+  single SSH server) using `yadd/lemonldap-ng-portal` directly,
+  relying on the plugin autoloader (no `customPlugins` edit needed).
+  README documents installing the four Open-Bastion plugins
+  (`pam-access`, `ssh-ca`, `oidc-device-authorization`,
+  `oidc-device-organization`) on an existing LemonLDAP::NG via
+  `lemonldap-ng-store` or Debian packages
+- `docker-demo-cert/README.md`: hands-on enrollment walkthrough fully
+  refreshed (container names, config paths, script names) after the
+  `llng-*` → `open-bastion`/`ob-*` rename
+
+### Upgrade notes
+
+- **NSS config path**: if you deployed v0.1.3 and ran
+  `ob-bastion-setup` or `ob-backend-setup`, you have an orphaned
+  `/etc/nss_llng.conf`. Re-running the setup script after upgrade
+  writes the config to the new path and fixes user resolution. You can
+  then `rm /etc/nss_llng.conf` to clean up. The Debian/RPM postinst
+  does not migrate it automatically.
+- **Session recorder usernames**: usernames with characters outside
+  `[a-z_][a-z0-9_.-]*` (e.g. AD-style `DOMAIN\user` or `user@realm`)
+  are now rejected by the wrapper. Open-Bastion's NSS module generates
+  POSIX-safe usernames, so this only affects custom integrations.
+- **NSS token file permissions**: the module now requires
+  `/etc/open-bastion/token` to be mode `0600 root:root`. `ob-enroll`
+  writes it with these permissions by default; custom deployments using
+  `0640` with a group read will need to tighten.
+
+## [0.1.3] - 2026-04-16
+
+### Security
+
+- **Session recording privilege separation** via setgid wrapper
+  (`ob-session-recorder-wrapper`, group `ob-sessions`, directory mode
+  `1770`)
+- New risk R-S18: session recording tampering (mitigated P=1/I=1)
+
+### Fixed
+
+- PAM module name: `pam_llng.so` → `pam_openbastion.so` across scripts
+  and setup tooling
+- NSS module symbols: `_nss_llng_*` → `_nss_openbastion_*`
+- NSS `nsswitch.conf` source name uses `openbastion`; `server_token_file`
+  config key aligned
+- `ob-enroll`: send `client_secret` to the device endpoint (optional but
+  accepted by RFC 8628)
+- `ob-bastion-setup`: add `Include` directive, `AuthorizedPrincipalsCommand`,
+  `PermitRootLogin no`, NSS configuration, `pam_mkhomedir.so`
+- Session recorder paths: `ob-session-recorder`, `/etc/open-bastion/`
+- Sudo Mode E: remove `pam_unix.so` from `account` stack (NSS-only
+  users), create `/etc/sudoers.d/open-bastion`
+
+### Added
+
+- Pre-hardening bootstrap: `securetty ttyS0`, `PermitRootLogin no`,
+  emergency-access service account
+
 ## [0.1.2] - 2026-04-13
 
 ### Added

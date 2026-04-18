@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.1.3
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -158,6 +158,25 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Sat Apr 18 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.4-1
+- NSS config path fix: libnss_openbastion reads from
+  /etc/open-bastion/nss_openbastion.conf (previously hard-coded to
+  /etc/nss_llng.conf, silently broke user resolution); re-run
+  ob-bastion-setup/ob-backend-setup after upgrade
+- Session recorder wrapper hardened: explicit gid drop before exec,
+  directory setgid (2770), dangerous env vars stripped, PATH hardened,
+  username regex-validated, username from getpwuid() instead of env
+- ob-session-recorder: SESSION_USER from "id -un", not user-controllable $USER
+- NSS config and token file: O_NOFOLLOW, fstat-based perm checks (root
+  owner, regular file, not group/world-writable; token not group/world-readable)
+- NSS write_callback: overflow check and 256 KB response size cap
+- Defense-in-depth sudo: open-bastion-sudo system group, dynamic
+  membership sync by pam_openbastion based on sudo_allowed, nscd cache
+  invalidated after change; ob-bastion-setup writes
+  %open-bastion-sudo ALL=(ALL) ALL in /etc/sudoers.d/open-bastion
+- TOCTOU races in session directory creation fixed (fchown/fchmod on fd)
+- quick-start/ demo added for fast evaluation
+
 * Wed Apr 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.3-1
 - Mode E hardening: tested end-to-end deployment
 - Session recording privilege separation (setgid wrapper, ob-sessions group)
