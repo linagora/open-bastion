@@ -34,7 +34,7 @@
 #define NSS_VISIBLE __attribute__((visibility("default")))
 
 /* Configuration file path */
-#define NSS_LLNG_CONF "/etc/nss_llng.conf"
+#define NSS_OB_CONF "/etc/open-bastion/nss_openbastion.conf"
 
 /* Cache settings */
 #define CACHE_TTL 300           /* 5 minutes */
@@ -398,11 +398,11 @@ static int load_config(nss_llng_config_t *config)
      * then check permissions on the opened fd to avoid TOCTOU.
      * Matches the pattern used in config.c for pam_openbastion.
      */
-    int fd = open(NSS_LLNG_CONF, O_RDONLY | O_NOFOLLOW);
+    int fd = open(NSS_OB_CONF, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         if (errno == ELOOP) {
             syslog(LOG_ERR, "libnss_llng: config file %s is a symlink (rejected)",
-                   NSS_LLNG_CONF);
+                   NSS_OB_CONF);
         }
         return -1;
     }
@@ -411,22 +411,22 @@ static int load_config(nss_llng_config_t *config)
     struct stat st;
     if (fstat(fd, &st) != 0) {
         syslog(LOG_ERR, "libnss_llng: cannot stat config file %s: %s",
-               NSS_LLNG_CONF, strerror(errno));
+               NSS_OB_CONF, strerror(errno));
         close(fd);
         return -1;
     }
     if (st.st_uid != 0) {
-        syslog(LOG_ERR, "libnss_llng: config file %s not owned by root", NSS_LLNG_CONF);
+        syslog(LOG_ERR, "libnss_llng: config file %s not owned by root", NSS_OB_CONF);
         close(fd);
         return -1;
     }
     if (st.st_mode & (S_IWGRP | S_IWOTH)) {
-        syslog(LOG_ERR, "libnss_llng: config file %s is group/world-writable", NSS_LLNG_CONF);
+        syslog(LOG_ERR, "libnss_llng: config file %s is group/world-writable", NSS_OB_CONF);
         close(fd);
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        syslog(LOG_ERR, "libnss_llng: config file %s is not a regular file", NSS_LLNG_CONF);
+        syslog(LOG_ERR, "libnss_llng: config file %s is not a regular file", NSS_OB_CONF);
         close(fd);
         return -1;
     }

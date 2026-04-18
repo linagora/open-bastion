@@ -144,9 +144,7 @@ log_level = info
 EOF
 chmod 600 /etc/open-bastion/openbastion.conf
 
-# libnss_openbastion currently reads /etc/nss_llng.conf (rename leftover,
-# see nss/libnss_openbastion.c). Write there directly so the module finds it.
-cat > /etc/nss_llng.conf << EOF
+cat > /etc/open-bastion/nss_openbastion.conf << EOF
 portal_url = $PORTAL_URL
 server_token_file = $TOKEN_FILE
 cache_ttl = 300
@@ -156,8 +154,7 @@ default_gid = 100
 default_shell = /bin/bash
 default_home_base = /home
 EOF
-chown root:root /etc/nss_llng.conf
-chmod 644 /etc/nss_llng.conf
+chmod 644 /etc/open-bastion/nss_openbastion.conf
 
 sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
 sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf

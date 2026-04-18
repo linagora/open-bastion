@@ -42,7 +42,7 @@ SESSION_RECORDER_CONF="/etc/open-bastion/session-recorder.conf"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
-NSS_LLNG_CONF="/etc/nss_llng.conf"
+NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
 # Colors (only if terminal)
 if [ -t 1 ]; then
@@ -561,10 +561,10 @@ default_shell = /bin/bash
 home_base = /home
 "
 
-    backup_file "$NSS_LLNG_CONF"
-    echo "$nss_content" > "$NSS_LLNG_CONF"
-    chmod 644 "$NSS_LLNG_CONF"
-    info "Created $NSS_LLNG_CONF"
+    backup_file "$NSS_OB_CONF"
+    echo "$nss_content" > "$NSS_OB_CONF"
+    chmod 644 "$NSS_OB_CONF"
+    info "Created $NSS_OB_CONF"
 }
 
 # Enroll server with LLNG

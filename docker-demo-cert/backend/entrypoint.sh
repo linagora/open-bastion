@@ -282,18 +282,13 @@ if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
     echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
 fi
 
-# NSS module now resolves users dynamically from LLNG
-# Test that NSS is working
+# NSS module resolves users dynamically from LLNG
 echo "Testing NSS module..."
 if getent passwd dwho >/dev/null 2>&1; then
     echo "  NSS module working: $(getent passwd dwho)"
 else
-    echo "  WARNING: NSS module not working, falling back to static users"
-    for user in dwho rtyler; do
-        if ! getent passwd "$user" >/dev/null 2>&1; then
-            useradd -m -s /bin/bash "$user" 2>/dev/null && echo "  Created user: $user"
-        fi
-    done
+    echo "  ERROR: NSS module not resolving users from LLNG"
+    exit 1
 fi
 
 echo "=== Backend Configuration Complete ==="

@@ -253,8 +253,8 @@ docker exec llng-backend-new chmod 600 /etc/security/pam_llng.conf
 #### Step 5: Configure NSS for dynamic user resolution
 
 ```bash
-docker exec llng-backend-new tee /etc/nss_llng.conf << 'EOF'
-# LemonLDAP::NG NSS configuration
+docker exec llng-backend-new tee /etc/open-bastion/nss_openbastion.conf << 'EOF'
+# Open Bastion NSS configuration
 portal_url = http://sso
 server_token_file = /etc/security/pam_llng.token
 cache_ttl = 300
