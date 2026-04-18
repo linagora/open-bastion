@@ -13,7 +13,7 @@ This Docker Compose demo demonstrates SSH certificate authentication with LemonL
 
 ```mermaid
 flowchart LR
-    subgraph Docker["Docker Network (llng-net)"]
+    subgraph Docker["Docker Network (ob-cert-net)"]
         SSO["SSO<br/>(LLNG)<br/>:80"]
         Bastion["Bastion<br/>(SSH)<br/>:2222"]
         Backend["Backend<br/>(SSH)<br/>:22"]
@@ -99,14 +99,14 @@ ssh -p 2222 dwho@localhost
 ### 5. From bastion, connect to backend
 
 The backend server requires a signed JWT from the bastion to prove the connection
-comes from an authorized bastion server. Use the `llng-ssh-proxy` command:
+comes from an authorized bastion server. Use the `ob-ssh-proxy` command:
 
 ```bash
 # On bastion - the proxy automatically gets a JWT and forwards it
-llng-ssh-proxy backend
+ob-ssh-proxy backend
 
 # Or using SSH with ProxyCommand
-ssh -o ProxyCommand='llng-ssh-proxy %h %p' dwho@backend
+ssh -o ProxyCommand='ob-ssh-proxy %h %p' dwho@backend
 ```
 
 **Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
@@ -153,7 +153,7 @@ sequenceDiagram
 3. **Server Trust Configuration**: SSH servers are configured to trust this CA:
 
    ```
-   # In /etc/ssh/sshd_config.d/llng-*.conf
+   # In /etc/ssh/sshd_config.d/open-bastion-*.conf
    TrustedUserCAKeys /etc/ssh/llng_ca.pub
    ```
 
@@ -211,15 +211,15 @@ docker compose up -d backend-new
 
 ```bash
 # Download CA key from the SSO portal
-docker exec llng-backend-new curl -sf http://sso/ssh/ca -o /etc/ssh/llng_ca.pub
-docker exec llng-backend-new cat /etc/ssh/llng_ca.pub
+docker exec ob-cert-backend-new curl -sf http://sso:8080/ssh/ca -o /etc/ssh/llng_ca.pub
+docker exec ob-cert-backend-new cat /etc/ssh/llng_ca.pub
 ```
 
 #### Step 3: Configure sshd for certificate authentication
 
 ```bash
-docker exec llng-backend-new tee /etc/ssh/sshd_config.d/llng.conf << 'EOF'
-# LemonLDAP::NG SSH Configuration
+docker exec ob-cert-backend-new tee /etc/ssh/sshd_config.d/open-bastion.conf << 'EOF'
+# Open Bastion SSH Configuration
 TrustedUserCAKeys /etc/ssh/llng_ca.pub
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -230,33 +230,33 @@ PermitRootLogin no
 EOF
 ```
 
-#### Step 4: Configure PAM for LLNG
+#### Step 4: Configure Open Bastion PAM module
 
 ```bash
-docker exec llng-backend-new tee /etc/security/pam_llng.conf << 'EOF'
-# LemonLDAP::NG PAM configuration
-portal_url = http://sso
+docker exec ob-cert-backend-new tee /etc/open-bastion/openbastion.conf << 'EOF'
+# Open Bastion PAM configuration
+portal_url = http://sso:8080
 server_group = backend-new
 client_id = pam-access
 client_secret = pamsecret
 timeout = 10
 verify_ssl = false
 cache_enabled = true
-cache_dir = /var/cache/pam_llng
+cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 log_level = info
 EOF
 
-docker exec llng-backend-new chmod 600 /etc/security/pam_llng.conf
+docker exec ob-cert-backend-new chmod 600 /etc/open-bastion/openbastion.conf
 ```
 
 #### Step 5: Configure NSS for dynamic user resolution
 
 ```bash
-docker exec llng-backend-new tee /etc/open-bastion/nss_openbastion.conf << 'EOF'
+docker exec ob-cert-backend-new tee /etc/open-bastion/nss_openbastion.conf << 'EOF'
 # Open Bastion NSS configuration
-portal_url = http://sso
-server_token_file = /etc/security/pam_llng.token
+portal_url = http://sso:8080
+server_token_file = /etc/open-bastion/token
 cache_ttl = 300
 min_uid = 10000
 max_uid = 60000
@@ -265,32 +265,33 @@ default_shell = /bin/bash
 default_home_base = /home
 EOF
 
-# Configure nsswitch.conf to use LLNG
-docker exec llng-backend-new sed -i 's/^passwd:.*/passwd:         files llng/' /etc/nsswitch.conf
-docker exec llng-backend-new sed -i 's/^group:.*/group:          files llng/' /etc/nsswitch.conf
+# Configure nsswitch.conf to use Open Bastion
+docker exec ob-cert-backend-new sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
+docker exec ob-cert-backend-new sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 ```
 
 #### Step 6: Configure PAM stack with home directory creation
 
 ```bash
-docker exec llng-backend-new tee /etc/pam.d/sshd << 'EOF'
-# PAM configuration for SSH with LemonLDAP::NG
+docker exec ob-cert-backend-new tee /etc/pam.d/sshd << 'EOF'
+# PAM configuration for SSH with Open Bastion
 auth       required     pam_permit.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
+session    required     pam_openbastion.so create_user=true
 session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
 EOF
 ```
 
-#### Step 7: Enroll the server with llng-pam-enroll
+#### Step 7: Enroll the server with ob-enroll
 
 ```bash
-docker exec -it llng-backend-new llng-pam-enroll
+docker exec -it ob-cert-backend-new ob-enroll
 ```
 
 The script will:
 
-1. Read configuration from `/etc/security/pam_llng.conf`
+1. Read configuration from `/etc/open-bastion/openbastion.conf`
 2. Request a device authorization code from the portal
 3. Display a **user code** (e.g., `WXYZ-1234`)
 4. Wait for administrator approval
@@ -306,14 +307,13 @@ While the script is waiting, open a browser:
 
 After approval, the script will:
 
-- Save the token to `/etc/security/pam_llng.token`
-- Update the PAM configuration with `server_token_file`
+- Save the token to `/etc/open-bastion/token`
 - Verify the enrollment
 
 #### Step 9: Restart sshd to apply configuration
 
 ```bash
-docker exec llng-backend-new pkill -HUP sshd
+docker exec ob-cert-backend-new pkill -HUP sshd
 ```
 
 #### Step 10: Test the connection
@@ -331,61 +331,65 @@ curl -s -X POST http://localhost:80/ssh/sign \
   | jq -r '.certificate' > /tmp/test_key-cert.pub
 
 # 3. Copy key and certificate to bastion
-docker exec llng-bastion mkdir -p /home/dwho/.ssh
-docker cp /tmp/test_key llng-bastion:/home/dwho/.ssh/id_ed25519
-docker cp /tmp/test_key-cert.pub llng-bastion:/home/dwho/.ssh/id_ed25519-cert.pub
-docker exec llng-bastion chown -R dwho:dwho /home/dwho/.ssh
-docker exec llng-bastion chmod 700 /home/dwho/.ssh
-docker exec llng-bastion chmod 600 /home/dwho/.ssh/id_ed25519
+docker exec ob-cert-bastion mkdir -p /home/dwho/.ssh
+docker cp /tmp/test_key ob-cert-bastion:/home/dwho/.ssh/id_ed25519
+docker cp /tmp/test_key-cert.pub ob-cert-bastion:/home/dwho/.ssh/id_ed25519-cert.pub
+docker exec ob-cert-bastion chown -R dwho:dwho /home/dwho/.ssh
+docker exec ob-cert-bastion chmod 700 /home/dwho/.ssh
+docker exec ob-cert-bastion chmod 600 /home/dwho/.ssh/id_ed25519
 
 # 4. Connect from bastion to backend-new
-docker exec -u dwho llng-bastion ssh -o StrictHostKeyChecking=no backend-new whoami
+docker exec -u dwho ob-cert-bastion ssh -o StrictHostKeyChecking=no backend-new whoami
 # Expected: dwho
 ```
 
 Note: The user `dwho` is resolved dynamically via the NSS module - no local account exists on the server. The home directory is created automatically on first login by `pam_mkhomedir`.
 
-### Summary: The llng-pam-enroll Script
+### Summary: The ob-enroll Script
 
-The `llng-pam-enroll` script automates the entire Device Authorization flow:
+The `ob-enroll` script automates the entire Device Authorization flow:
 
-1. **Reads configuration** from `/etc/security/pam_llng.conf` (portal URL, client credentials)
+1. **Reads configuration** from `/etc/open-bastion/openbastion.conf` (portal URL, client credentials)
 2. **Requests device code** from `/oauth2/device` endpoint
 3. **Displays instructions** with user code for administrator approval
 4. **Polls for token** at configurable intervals
-5. **Saves token** securely to `/etc/security/pam_llng.token`
-6. **Updates configuration** with `server_token_file` directive
-7. **Verifies enrollment** by calling `/pam/authorize`
+5. **Saves token** securely to `/etc/open-bastion/token`
+6. **Verifies enrollment** by calling `/pam/authorize`
 
 Options:
 
 ```bash
-llng-pam-enroll --help
+ob-enroll --help
 
 Options:
   -p, --portal URL       LemonLDAP::NG portal URL
   -c, --client-id ID     OIDC client ID (default: pam-access)
-  -s, --client-secret S  OIDC client secret
+  -s, --client-secret S  OIDC client secret (prefer OB_CLIENT_SECRET env var)
   -g, --server-group G   Server group name
-  -t, --token-file FILE  Where to save the token
+  -t, --token-file FILE  Where to save the token (default: /etc/open-bastion/token)
+  -C, --config FILE      Read settings from config file
   -k, --insecure         Skip SSL certificate verification
   -q, --quiet            Quiet mode
 ```
 
 ### How it works
 
-1. **Server Token**: Each SSH server needs an OAuth2 access token to authenticate its PAM module requests to the LLNG portal.
+1. **Server Token**: Each SSH server needs an OAuth2 access token to authenticate
+   its PAM module requests to the LLNG portal.
 
-2. **Token Configuration**: The token is passed via the `LLNG_SERVER_TOKEN` environment variable and stored in `/etc/security/llng_server_token`.
+2. **Token Configuration**: The token is stored in `/etc/open-bastion/token` and
+   referenced by `server_token_file` in `/etc/open-bastion/openbastion.conf`.
 
 3. **PAM Authorization Flow**:
    ```
-   User SSH → sshd → PAM (pam_llng.so) → LLNG /pam/authorize → Allow/Deny
+   User SSH → sshd → PAM (pam_openbastion.so) → LLNG /pam/authorize → Allow/Deny
    ```
 
 ### Registering a new SSH server (production)
 
-In production, use the Device Authorization Grant (RFC 8628) to register each server:
+In production, use the Device Authorization Grant (RFC 8628) to register each server.
+The recommended way is to run `ob-enroll` on the server, which takes care of the
+entire flow. The raw HTTP exchange below is shown for reference:
 
 ```bash
 # 1. Request device authorization
@@ -406,16 +410,16 @@ TOKEN_RESP=$(curl -s -X POST https://sso.example.com/oauth2/token \
   -d "client_secret=<secret>")
 
 # 4. Save the token
-echo $TOKEN_RESP | jq -r '.access_token' > /etc/security/llng_server_token
-chmod 600 /etc/security/llng_server_token
+echo $TOKEN_RESP | jq -r '.access_token' > /etc/open-bastion/token
+chmod 600 /etc/open-bastion/token
 ```
 
 ### PAM Configuration
 
-Each server needs `/etc/security/pam_llng.conf`:
+Each server needs `/etc/open-bastion/openbastion.conf`:
 
 ```ini
-# LemonLDAP::NG PAM configuration
+# Open Bastion PAM configuration
 portal_url = https://sso.example.com
 server_group = production-servers
 
@@ -424,7 +428,7 @@ client_id = pam-access
 client_secret = <secret>
 
 # Server token for authorization
-server_token_file = /etc/security/llng_server_token
+server_token_file = /etc/open-bastion/token
 
 # HTTP settings
 timeout = 10
@@ -432,7 +436,7 @@ verify_ssl = true
 
 # Cache settings (for offline mode)
 cache_enabled = true
-cache_dir = /var/cache/pam_llng
+cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 ```
 
@@ -440,7 +444,7 @@ And `/etc/pam.d/sshd`:
 
 ```
 auth       required     pam_permit.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
 session    required     pam_unix.so
 ```
 
@@ -469,7 +473,7 @@ sequenceDiagram
 ### How it works:
 
 1. User SSH to bastion with SSH certificate
-2. From bastion, user runs `llng-ssh-proxy backend`
+2. From bastion, user runs `ob-ssh-proxy backend`
 3. Proxy requests a signed JWT from LLNG `/pam/bastion-token`
 4. Proxy connects to backend with JWT in `LLNG_BASTION_JWT` env var
 5. Backend verifies JWT signature using cached JWKS (offline capable)
@@ -494,15 +498,15 @@ sequenceDiagram
 ### Check container logs
 
 ```bash
-docker logs llng-sso
-docker logs llng-bastion
-docker logs llng-backend
+docker logs ob-cert-sso
+docker logs ob-cert-bastion
+docker logs ob-cert-backend
 ```
 
 ### Test PAM authorization manually
 
 ```bash
-docker exec llng-bastion curl -s http://sso/pam/authorize \
+docker exec ob-cert-bastion curl -s http://sso/pam/authorize \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"user":"dwho","server_group":"bastion"}'
@@ -511,7 +515,7 @@ docker exec llng-bastion curl -s http://sso/pam/authorize \
 ### Verify SSH CA trust
 
 ```bash
-docker exec llng-bastion cat /etc/ssh/llng_ca.pub
+docker exec ob-cert-bastion cat /etc/ssh/llng_ca.pub
 curl http://localhost:80/ssh/ca
 ```
 
@@ -541,7 +545,7 @@ User authentication sessions are stored in the SSO container:
 
 ```bash
 # List active sessions
-docker exec llng-sso ls -la /var/lib/lemonldap-ng/sessions/
+docker exec ob-cert-sso ls -la /var/lib/lemonldap-ng/sessions/
 
 # Session files are named by session ID (the cookie value)
 ```
@@ -552,7 +556,7 @@ The SSH Certificate Authority keys are stored in the SSO:
 
 ```bash
 # View CA storage
-docker exec llng-sso ls -la /var/lib/lemonldap-ng/ssh/
+docker exec ob-cert-sso ls -la /var/lib/lemonldap-ng/ssh/
 
 # Files:
 # - ssh-ca (private key)
@@ -566,7 +570,7 @@ When session recording is enabled on the bastion (via `ForceCommand`), recording
 
 ```bash
 # List recordings
-docker exec llng-bastion ls -la /var/lib/llng-sessions/
+docker exec ob-cert-bastion ls -la /var/lib/open-bastion/sessions/
 
 # Recordings use 'script' format and can be replayed with:
 # scriptreplay timing_file typescript_file
@@ -575,7 +579,7 @@ docker exec llng-bastion ls -la /var/lib/llng-sessions/
 Note: In this demo, session recording is disabled to allow ProxyJump. To enable it, add to sshd config:
 
 ```
-ForceCommand /usr/sbin/llng-session-recorder
+ForceCommand /usr/sbin/ob-session-recorder
 ```
 
 ### PAM Authorization Cache
@@ -584,7 +588,7 @@ Each SSH server caches authorization responses for offline mode:
 
 ```bash
 # Cache location
-docker exec llng-bastion ls -la /var/cache/pam_llng/
+docker exec ob-cert-bastion ls -la /var/cache/open-bastion/
 
 # Cache entries are encrypted and expire based on cache_ttl (default: 300s)
 ```
