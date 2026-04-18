@@ -2,7 +2,10 @@
 
 This Docker Compose demo demonstrates SSH certificate authentication with LemonLDAP::NG, including:
 
-- **SSO Portal**: LemonLDAP::NG with PamAccess and Device Authorization plugins
+- **SSO Portal**: LemonLDAP::NG with SshCa, PamAccess and Device Authorization plugins
+  (PamAccess is still required even though authentication is certificate-based:
+  the PAM module on each server calls `/pam/authorize` for server-group access
+  checks)
 - **SSH Bastion**: Jump host with certificate authentication and PAM authorization
 - **SSH Backend**: Internal server accessible only through the bastion
 
