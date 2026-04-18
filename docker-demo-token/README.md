@@ -57,7 +57,7 @@ Or via browser at http://localhost:80 with credentials:
 - Username: `dwho`, `rtyler`, or `msmith`
 - Password: same as username
 
-Then go to the "PAM Access" tab to see your access token.
+Then open http://localhost:80/pam to see your access token.
 
 ### 3. Connect to the bastion
 

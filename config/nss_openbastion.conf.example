@@ -1,4 +1,4 @@
-# /etc/nss_llng.conf - Configuration for libnss_llng
+# /etc/open-bastion/nss_openbastion.conf - Configuration for libnss_openbastion
 #
 # This NSS module queries LemonLDAP::NG to resolve users.
 # It allows SSH and other services to authenticate users that don't

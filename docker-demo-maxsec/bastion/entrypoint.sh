@@ -335,12 +335,8 @@ echo "Testing NSS module..."
 if getent passwd dwho >/dev/null 2>&1; then
     echo "  NSS module working: $(getent passwd dwho)"
 else
-    echo "  WARNING: NSS module not working, falling back to static users"
-    for user in dwho rtyler; do
-        if ! getent passwd "$user" >/dev/null 2>&1; then
-            useradd -m -s /bin/bash "$user" 2>/dev/null && echo "  Created user: $user"
-        fi
-    done
+    echo "  ERROR: NSS module not resolving users from LLNG"
+    exit 1
 fi
 
 echo "=== Maximum Security Bastion Configuration Complete (Mode E) ==="

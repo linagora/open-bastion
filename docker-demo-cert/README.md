@@ -70,7 +70,7 @@ Then request a certificate for your public key.
 **Option A: Using the web interface**
 
 1. Go to http://localhost:80 and log in
-2. Click on the "SSH CA" tab in the portal
+2. Open http://localhost:80/ssh (the SSH CA page)
 3. Paste your public key (content of `~/.ssh/id_ed25519.pub`)
 4. Choose the validity duration
 5. Click "Sign" and download the certificate
@@ -253,8 +253,8 @@ docker exec llng-backend-new chmod 600 /etc/security/pam_llng.conf
 #### Step 5: Configure NSS for dynamic user resolution
 
 ```bash
-docker exec llng-backend-new tee /etc/nss_llng.conf << 'EOF'
-# LemonLDAP::NG NSS configuration
+docker exec llng-backend-new tee /etc/open-bastion/nss_openbastion.conf << 'EOF'
+# Open Bastion NSS configuration
 portal_url = http://sso
 server_token_file = /etc/security/pam_llng.token
 cache_ttl = 300
