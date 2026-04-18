@@ -36,8 +36,10 @@ WORKDIR /src/open-bastion
 RUN mkdir -p build && cd build && \
     cmake -DBUILD_TESTING=OFF .. && \
     make -j$(nproc) && \
-    cp pam_openbastion.so /usr/lib/x86_64-linux-gnu/security/ && \
-    cp nss/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/ && \
+    MULTIARCH="$(gcc -print-multiarch)" && \
+    mkdir -p "/usr/lib/${MULTIARCH}/security" "/lib/${MULTIARCH}" && \
+    cp pam_openbastion.so "/usr/lib/${MULTIARCH}/security/" && \
+    cp nss/libnss_openbastion.so.2 "/lib/${MULTIARCH}/" && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 

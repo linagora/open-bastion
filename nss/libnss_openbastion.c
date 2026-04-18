@@ -314,7 +314,7 @@ static int load_server_token(nss_llng_config_t *config)
     int fd = open(config->server_token_file, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         if (errno == ELOOP) {
-            syslog(LOG_WARNING, "libnss_llng: token file %s is a symlink (rejected)",
+            syslog(LOG_WARNING, "libnss_openbastion: token file %s is a symlink (rejected)",
                    config->server_token_file);
         }
         return -1;
@@ -322,25 +322,25 @@ static int load_server_token(nss_llng_config_t *config)
 
     struct stat st;
     if (fstat(fd, &st) != 0) {
-        syslog(LOG_WARNING, "libnss_llng: cannot stat token file %s: %s",
+        syslog(LOG_WARNING, "libnss_openbastion: cannot stat token file %s: %s",
                config->server_token_file, strerror(errno));
         close(fd);
         return -1;
     }
     if (st.st_uid != 0) {
-        syslog(LOG_WARNING, "libnss_llng: token file %s not owned by root",
+        syslog(LOG_WARNING, "libnss_openbastion: token file %s not owned by root",
                config->server_token_file);
         close(fd);
         return -1;
     }
     if (st.st_mode & (S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)) {
-        syslog(LOG_WARNING, "libnss_llng: token file %s has insecure permissions",
+        syslog(LOG_WARNING, "libnss_openbastion: token file %s has insecure permissions",
                config->server_token_file);
         close(fd);
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        syslog(LOG_WARNING, "libnss_llng: token file %s is not a regular file",
+        syslog(LOG_WARNING, "libnss_openbastion: token file %s is not a regular file",
                config->server_token_file);
         close(fd);
         return -1;
@@ -401,7 +401,7 @@ static int load_config(nss_llng_config_t *config)
     int fd = open(NSS_OB_CONF, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) {
         if (errno == ELOOP) {
-            syslog(LOG_ERR, "libnss_llng: config file %s is a symlink (rejected)",
+            syslog(LOG_ERR, "libnss_openbastion: config file %s is a symlink (rejected)",
                    NSS_OB_CONF);
         }
         return -1;
@@ -410,23 +410,23 @@ static int load_config(nss_llng_config_t *config)
     /* Verify file ownership and permissions */
     struct stat st;
     if (fstat(fd, &st) != 0) {
-        syslog(LOG_ERR, "libnss_llng: cannot stat config file %s: %s",
+        syslog(LOG_ERR, "libnss_openbastion: cannot stat config file %s: %s",
                NSS_OB_CONF, strerror(errno));
         close(fd);
         return -1;
     }
     if (st.st_uid != 0) {
-        syslog(LOG_ERR, "libnss_llng: config file %s not owned by root", NSS_OB_CONF);
+        syslog(LOG_ERR, "libnss_openbastion: config file %s not owned by root", NSS_OB_CONF);
         close(fd);
         return -1;
     }
     if (st.st_mode & (S_IWGRP | S_IWOTH)) {
-        syslog(LOG_ERR, "libnss_llng: config file %s is group/world-writable", NSS_OB_CONF);
+        syslog(LOG_ERR, "libnss_openbastion: config file %s is group/world-writable", NSS_OB_CONF);
         close(fd);
         return -1;
     }
     if (!S_ISREG(st.st_mode)) {
-        syslog(LOG_ERR, "libnss_llng: config file %s is not a regular file", NSS_OB_CONF);
+        syslog(LOG_ERR, "libnss_openbastion: config file %s is not a regular file", NSS_OB_CONF);
         close(fd);
         return -1;
     }
@@ -621,7 +621,7 @@ static void file_cache_save(const struct passwd *pw)
      * Use mkdir with correct mode; if it already exists (EEXIST), proceed.
      * The directory needs to be world-readable (0755) so all users can do UID lookups. */
     if (mkdir(CACHE_DIR, 0755) == -1 && errno != EEXIST) {
-        syslog(LOG_WARNING, "libnss_llng: cannot create cache directory %s: %s",
+        syslog(LOG_WARNING, "libnss_openbastion: cannot create cache directory %s: %s",
                CACHE_DIR, strerror(errno));
         return;
     }
@@ -629,14 +629,14 @@ static void file_cache_save(const struct passwd *pw)
     char filepath[256];
     int len = snprintf(filepath, sizeof(filepath), "%s/%u", CACHE_DIR, (unsigned)pw->pw_uid);
     if (len < 0 || (size_t)len >= sizeof(filepath)) {
-        syslog(LOG_ERR, "libnss_llng: cache filepath truncated for uid %u",
+        syslog(LOG_ERR, "libnss_openbastion: cache filepath truncated for uid %u",
                (unsigned)pw->pw_uid);
         return;
     }
 
     FILE *f = fopen(filepath, "w");
     if (!f) {
-        syslog(LOG_WARNING, "libnss_llng: cannot create cache file %s: %s",
+        syslog(LOG_WARNING, "libnss_openbastion: cannot create cache file %s: %s",
                filepath, strerror(errno));
         return;
     }
@@ -973,7 +973,7 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
             }
         } else {
             /* Server returned non-integer uid (likely string username) - log warning */
-            syslog(LOG_WARNING, "libnss_llng: server returned non-integer uid for user %s, generating UID from hash", username);
+            syslog(LOG_WARNING, "libnss_openbastion: server returned non-integer uid for user %s, generating UID from hash", username);
             pw->pw_uid = generate_unique_uid(username, g_config.min_uid, g_config.max_uid);
             if (pw->pw_uid == 0) {
                 json_object_put(json);

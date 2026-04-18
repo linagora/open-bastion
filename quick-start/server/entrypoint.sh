@@ -25,6 +25,7 @@ for i in {1..60}; do
     sleep 1
 done
 
+mkdir -p /etc/ssh/sshd_config.d
 cat > /etc/ssh/sshd_config.d/open-bastion.conf << EOF
 PubkeyAuthentication no
 PasswordAuthentication yes
@@ -35,8 +36,9 @@ PermitRootLogin no
 EOF
 
 echo "=== Server enrollment (Device Authorization Grant) ==="
-COOKIE_FILE="/tmp/admin_cookies"
-touch "$COOKIE_FILE"
+COOKIE_FILE=$(mktemp /tmp/admin_cookies.XXXXXX)
+chmod 600 "$COOKIE_FILE"
+trap 'rm -f "$COOKIE_FILE"' EXIT
 
 LOGIN_TOKEN=$(curl -s "$PORTAL_URL/" | grep -oP 'name="token" value="\K[^"]+' | head -1)
 
@@ -62,7 +64,6 @@ DEVICE_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
     -d "scope=pam pam:server" \
     -d "code_challenge=$CODE_CHALLENGE" \
     -d "code_challenge_method=S256")
-echo "  /oauth2/device raw response: $DEVICE_RESP"
 
 DEVICE_CODE=$(echo "$DEVICE_RESP" | jq -r '.device_code // empty' 2>/dev/null || true)
 USER_CODE=$(echo "$DEVICE_RESP" | jq -r '.user_code // empty' 2>/dev/null || true)
@@ -124,7 +125,6 @@ if [ ! -f "$TOKEN_FILE" ]; then
     echo "ERROR: no access token after polling"
     exit 1
 fi
-rm -f "$COOKIE_FILE"
 
 cat > /etc/open-bastion/openbastion.conf << EOF
 portal_url = $PORTAL_URL
@@ -182,7 +182,14 @@ account    required     pam_openbastion.so service_type=sudo
 session    required     pam_unix.so
 EOF
 
-echo "ALL ALL=(ALL:ALL) ALL" >> /etc/sudoers
+# Defense-in-depth sudo: only members of the open-bastion-sudo system
+# group can sudo, and pam_openbastion syncs group membership from the
+# /pam/authorize sudo_allowed flag on each login.
+groupadd --system open-bastion-sudo 2>/dev/null || true
+cat > /etc/sudoers.d/open-bastion << 'EOF'
+%open-bastion-sudo ALL=(ALL) ALL
+EOF
+chmod 0440 /etc/sudoers.d/open-bastion
 
 if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
     echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
