@@ -1883,8 +1883,26 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
      * LLNG cross-checks it against the user's persistent session
      * (_sshCerts) on /pam/authorize to reject a revoked cert even if the
      * local sshd KRL is stale or not enforced.
+     *
+     * LLNG only accepts the strict "SHA256:<base64>" form and returns
+     * HTTP 400 on anything else. If sshd is configured with
+     * "FingerprintHash md5" the extractor would yield "MD5:..." which
+     * would break every /pam/authorize call; filter those out and leave
+     * the field NULL so LLNG keeps the pre-binding behaviour.
      */
-    cert_info->key_fingerprint = extract_ssh_key_fingerprint(pamh);
+    char *extracted_fp = extract_ssh_key_fingerprint(pamh);
+    if (extracted_fp && strncmp(extracted_fp, "SHA256:", 7) == 0) {
+        cert_info->key_fingerprint = extracted_fp;
+    } else {
+        if (extracted_fp) {
+            OB_LOG_DEBUG(pamh,
+                         "Ignoring non-SHA256 SSH key fingerprint (%s): "
+                         "LLNG fingerprint binding requires SHA256",
+                         extracted_fp);
+            free(extracted_fp);
+        }
+        cert_info->key_fingerprint = NULL;
+    }
 
     /* If we didn't get any details, try to parse from SSH_USER_AUTH */
     if (!cert_info->key_id && !cert_info->serial) {
@@ -2611,7 +2629,23 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         {
             const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
             if (ssh_auth && strstr(ssh_auth, "-cert-")) {
-                ssh_fingerprint = extract_ssh_key_fingerprint(pamh);
+                char *fp = extract_ssh_key_fingerprint(pamh);
+                /*
+                 * LLNG only accepts SHA256 fingerprints and returns
+                 * HTTP 400 on anything else. Guard against an
+                 * MD5-configured sshd silently breaking all sudo /
+                 * re-auth flows by only forwarding SHA256 values.
+                 */
+                if (fp && strncmp(fp, "SHA256:", 7) == 0) {
+                    ssh_fingerprint = fp;
+                } else {
+                    if (fp) {
+                        OB_LOG_DEBUG(pamh,
+                                     "Ignoring non-SHA256 SSH fingerprint "
+                                     "(%s) for /pam/verify binding", fp);
+                        free(fp);
+                    }
+                }
             }
         }
 

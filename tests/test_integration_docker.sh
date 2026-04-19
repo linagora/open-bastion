@@ -376,42 +376,60 @@ test_pam_authorize_fingerprint_binding() {
         return 1
     fi
 
-    # 1. Matching fingerprint accepted
-    local response
-    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+    local body_tmp http_code response
+    body_tmp=$(mktemp)
+
+    # 1. Matching fingerprint accepted (HTTP 200 + authorized:true)
+    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
         -H "Authorization: Bearer $server_token" \
         -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" 2>&1) || true
-    log_verbose "authorize(match) response: $response"
-    if ! echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
-        fail "authorize with matching fingerprint should succeed" "$response"
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}")
+    response=$(cat "$body_tmp")
+    log_verbose "authorize(match) HTTP=$http_code body=$response"
+    if [[ "$http_code" != "200" ]]; then
+        rm -f "$body_tmp"
+        fail "authorize(match) expected HTTP 200, got $http_code" "$response"
+        return 1
+    fi
+    if ! echo "$response" | jq -e 'type == "object" and .authorized == true' >/dev/null 2>&1; then
+        rm -f "$body_tmp"
+        fail "authorize(match) expected authorized:true" "$response"
         return 1
     fi
 
-    # 2. Unknown fingerprint refused
+    # 2. Unknown fingerprint refused (HTTP 200 + authorized:false explicitly)
     local bogus="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
         -H "Authorization: Bearer $server_token" \
         -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$bogus\"}" 2>&1) || true
-    log_verbose "authorize(unknown) response: $response"
-    if echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
-        fail "authorize with unknown fingerprint should be refused" "$response"
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$bogus\"}")
+    response=$(cat "$body_tmp")
+    log_verbose "authorize(unknown) HTTP=$http_code body=$response"
+    if [[ "$http_code" != "200" ]]; then
+        rm -f "$body_tmp"
+        fail "authorize(unknown) expected HTTP 200, got $http_code" "$response"
+        return 1
+    fi
+    if ! echo "$response" | jq -e 'type == "object" and .authorized == false' >/dev/null 2>&1; then
+        rm -f "$body_tmp"
+        fail "authorize(unknown) expected authorized:false (not a jq parse failure)" "$response"
         return 1
     fi
 
     # 3. Malformed fingerprint → HTTP 400
-    local http_code
-    http_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
+    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
         -H "Authorization: Bearer $server_token" \
         -H "Content-Type: application/json" \
         -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"not-a-fingerprint\"}")
-    log_verbose "authorize(malformed) HTTP code: $http_code"
+    response=$(cat "$body_tmp")
+    log_verbose "authorize(malformed) HTTP=$http_code body=$response"
     if [[ "$http_code" != "400" ]]; then
-        fail "authorize with malformed fingerprint should return 400 (got $http_code)"
+        rm -f "$body_tmp"
+        fail "authorize(malformed) expected HTTP 400, got $http_code" "$response"
         return 1
     fi
 
+    rm -f "$body_tmp"
     pass "/pam/authorize fingerprint binding works (match / unknown / malformed)"
     return 0
 }
@@ -453,14 +471,30 @@ test_pam_authorize_rejects_revoked_cert() {
 
     local server_token
     server_token=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
-    local response
-    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+    if [[ -z "$server_token" ]]; then
+        fail "Could not get server token from bastion"
+        return 1
+    fi
+
+    local body_tmp http_code response
+    body_tmp=$(mktemp)
+    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
         -H "Authorization: Bearer $server_token" \
         -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" 2>&1) || true
-    log_verbose "authorize(revoked) response: $response"
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}")
+    response=$(cat "$body_tmp")
+    rm -f "$body_tmp"
+    log_verbose "authorize(revoked) HTTP=$http_code body=$response"
 
-    if echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
+    if [[ "$http_code" != "200" ]]; then
+        fail "authorize(revoked) expected HTTP 200, got $http_code" "$response"
+        return 1
+    fi
+    if ! echo "$response" | jq -e 'type == "object" and has("authorized")' >/dev/null 2>&1; then
+        fail "authorize(revoked) did not return a valid JSON object" "$response"
+        return 1
+    fi
+    if ! echo "$response" | jq -e '.authorized == false' >/dev/null 2>&1; then
         fail "authorize should reject a cert revoked on LLNG side" "$response"
         return 1
     fi
