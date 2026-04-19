@@ -351,6 +351,124 @@ test_pam_authorize_endpoint() {
     fi
 }
 
+test_pam_authorize_fingerprint_binding() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing /pam/authorize SSH fingerprint binding (PamAccess >= 0.1.16)..."
+
+    if [[ ! -f "${TEST_KEY}.pub" ]]; then
+        log_warn "No key available, skipping fingerprint binding test"
+        pass "Fingerprint binding test skipped (no key)"
+        return 0
+    fi
+
+    local fingerprint
+    fingerprint=$(ssh-keygen -l -E sha256 -f "${TEST_KEY}.pub" 2>/dev/null | awk '{print $2}')
+    if [[ -z "$fingerprint" || "$fingerprint" != SHA256:* ]]; then
+        fail "Could not compute SHA256 fingerprint of ${TEST_KEY}.pub"
+        return 1
+    fi
+    log_verbose "Computed fingerprint: $fingerprint"
+
+    local server_token
+    server_token=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
+    if [[ -z "$server_token" ]]; then
+        fail "Could not get server token from bastion"
+        return 1
+    fi
+
+    # 1. Matching fingerprint accepted
+    local response
+    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" 2>&1) || true
+    log_verbose "authorize(match) response: $response"
+    if ! echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
+        fail "authorize with matching fingerprint should succeed" "$response"
+        return 1
+    fi
+
+    # 2. Unknown fingerprint refused
+    local bogus="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$bogus\"}" 2>&1) || true
+    log_verbose "authorize(unknown) response: $response"
+    if echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
+        fail "authorize with unknown fingerprint should be refused" "$response"
+        return 1
+    fi
+
+    # 3. Malformed fingerprint → HTTP 400
+    local http_code
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"not-a-fingerprint\"}")
+    log_verbose "authorize(malformed) HTTP code: $http_code"
+    if [[ "$http_code" != "400" ]]; then
+        fail "authorize with malformed fingerprint should return 400 (got $http_code)"
+        return 1
+    fi
+
+    pass "/pam/authorize fingerprint binding works (match / unknown / malformed)"
+    return 0
+}
+
+test_pam_authorize_rejects_revoked_cert() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing /pam/authorize rejects a cert revoked via /ssh/myrevoke..."
+
+    if [[ ! -f "${TEST_KEY}.pub" ]]; then
+        pass "Revocation test skipped (no key)"
+        return 0
+    fi
+
+    local fingerprint
+    fingerprint=$(ssh-keygen -l -E sha256 -f "${TEST_KEY}.pub" 2>/dev/null | awk '{print $2}')
+    if [[ -z "$fingerprint" ]]; then
+        fail "Could not compute fingerprint for revocation test"
+        return 1
+    fi
+
+    local list
+    list=$(curl -sf "$PORTAL_URL/ssh/mycerts" -b "$COOKIE_FILE" 2>&1) || true
+    log_verbose "mycerts: $list"
+    local serial
+    serial=$(echo "$list" | jq -r --arg fp "$fingerprint" \
+        '(.certificates // []) | .[] | select(.fingerprint == $fp) | .serial' 2>/dev/null | head -n1)
+    if [[ -z "$serial" || "$serial" == "null" ]]; then
+        fail "Could not find serial for test cert in /ssh/mycerts" "$list"
+        return 1
+    fi
+    log_verbose "Revoking serial $serial"
+
+    local revoke_resp
+    revoke_resp=$(curl -s -X POST "$PORTAL_URL/ssh/myrevoke" \
+        -b "$COOKIE_FILE" \
+        -H "Content-Type: application/json" \
+        -d "{\"serial\":\"$serial\"}" 2>&1) || true
+    log_verbose "myrevoke: $revoke_resp"
+
+    local server_token
+    server_token=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
+    local response
+    response=$(curl -s -X POST "$PORTAL_URL/pam/authorize" \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" 2>&1) || true
+    log_verbose "authorize(revoked) response: $response"
+
+    if echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
+        fail "authorize should reject a cert revoked on LLNG side" "$response"
+        return 1
+    fi
+
+    pass "/pam/authorize rejects cert revoked via /ssh/myrevoke (no KRL refresh needed)"
+    return 0
+}
+
 test_token_introspection() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing token introspection (with JWT client assertion)..."
@@ -501,6 +619,7 @@ main() {
     echo ""
     echo "=== Phase 4: PAM Module Tests ==="
     test_pam_authorize_endpoint
+    test_pam_authorize_fingerprint_binding
     test_token_introspection
     test_nss_user_resolution
     test_pam_cache
@@ -508,6 +627,12 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+
+    echo ""
+    echo "=== Phase 6: Cert revocation via fingerprint binding ==="
+    # MUST run last: /ssh/myrevoke invalidates the test cert and would
+    # break any subsequent test that relies on a valid certificate.
+    test_pam_authorize_rejects_revoked_cert
 
     echo ""
     echo "=============================================="

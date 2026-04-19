@@ -322,6 +322,18 @@ flowchart TB
 - **Single-use**: Tokens invalidated after successful use
 - **IP binding**: Optional token-to-IP binding
 - **Rate limiting**: Exponential backoff on failures
+- **SSH key binding**: When the SSH session is authenticated with a
+  CA-signed certificate, the PAM module extracts the SHA256 fingerprint
+  of the user's SSH key from `SSH_USER_AUTH` and forwards it to LLNG in
+  **both** `/pam/authorize` (PAM `account` phase, at every SSH
+  connection) and `/pam/verify` (token verification, used for sudo and
+  re-authentication). LLNG checks that the fingerprint is present in
+  the user's persistent session (`_sshCerts`), is not revoked and is
+  not expired. If the check fails, LLNG refuses authorization (so the
+  SSH session cannot open) and rejects token verification (so sudo
+  cannot elevate). This binds both the SSH session and the PAM token
+  to the specific SSH certificate registered in LLNG, even when the
+  local `sshd` KRL is stale or not enforced.
 
 ### Server Token Security
 

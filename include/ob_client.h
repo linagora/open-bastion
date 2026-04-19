@@ -32,6 +32,10 @@ typedef struct {
     char *serial;           /* Certificate serial number */
     char *principals;       /* Comma-separated principals */
     char *ca_fingerprint;   /* CA key fingerprint */
+    char *key_fingerprint;  /* SHA256 fingerprint of the user SSH key used
+                               for auth. Sent as "fingerprint" to LLNG so it
+                               can cross-check it against the user's
+                               persistent session (_sshCerts). */
     bool valid;             /* Certificate was validated */
 } ob_ssh_cert_info_t;
 
@@ -97,10 +101,19 @@ void ob_client_destroy(ob_client_t *client);
  * Verify and consume a one-time PAM user token via /pam/verify
  * The token is destroyed after successful verification (single-use).
  * Requires server_token to be set in config.
+ *
+ * If fingerprint is non-NULL and non-empty (typically the SSH SHA256
+ * fingerprint of the client key used for signed-key authentication),
+ * it is sent to the portal so LLNG can verify the key is registered,
+ * not revoked and not expired in the user's persistent session. This
+ * binds the PAM token to a specific SSH key even if the local sshd
+ * KRL is stale or not checked.
+ *
  * Returns 0 on success, -1 on error
  */
 int ob_verify_token(ob_client_t *client,
                     const char *user_token,
+                    const char *fingerprint,
                     ob_response_t *response);
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */

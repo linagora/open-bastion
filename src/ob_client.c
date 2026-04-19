@@ -532,6 +532,7 @@ static void setup_curl(ob_client_t *client)
 
 int ob_verify_token(ob_client_t *client,
                       const char *user_token,
+                      const char *fingerprint,
                       ob_response_t *response)
 {
     if (!client || !user_token || !response) {
@@ -555,6 +556,17 @@ int ob_verify_token(ob_client_t *client,
     /* Build JSON request body */
     struct json_object *req_json = json_object_new_object();
     json_object_object_add(req_json, "token", json_object_new_string(user_token));
+
+    /*
+     * Bind the token to a specific SSH key when the user authenticated
+     * via a signed SSH certificate. LLNG will match this fingerprint
+     * against the entries stored in the user's persistent session and
+     * reject the verification if the key is unknown, revoked or expired.
+     */
+    if (fingerprint && *fingerprint) {
+        json_object_object_add(req_json, "fingerprint",
+                               json_object_new_string(fingerprint));
+    }
 
     const char *req_body = json_object_to_json_string(req_json);
 
@@ -901,6 +913,16 @@ static int ob_authorize_user_internal(ob_client_t *client,
         json_object_object_add(req_json, "ssh_cert", cert_json);
     }
 
+    /*
+     * Optional top-level SSH fingerprint binding: LLNG cross-checks the
+     * fingerprint against the user's persistent session and rejects
+     * /pam/authorize if the cert is unknown, revoked or expired.
+     */
+    if (ssh_cert && ssh_cert->key_fingerprint && *ssh_cert->key_fingerprint) {
+        json_object_object_add(req_json, "fingerprint",
+                               json_object_new_string(ssh_cert->key_fingerprint));
+    }
+
     const char *req_body = json_object_to_json_string(req_json);
 
     /* Build headers with Bearer token */
@@ -1077,6 +1099,7 @@ void ob_ssh_cert_info_free(ob_ssh_cert_info_t *cert_info)
     free(cert_info->serial);
     free(cert_info->principals);
     free(cert_info->ca_fingerprint);
+    free(cert_info->key_fingerprint);
     memset(cert_info, 0, sizeof(*cert_info));
 }
 

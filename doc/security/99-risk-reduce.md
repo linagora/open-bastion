@@ -2,12 +2,14 @@
 
 ## Matrice des Risques Résiduels (Mode E)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | --------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4, R-SA2                                         | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11                                     | R-S6             |              |                   |
-| **2 - Limité**           | R-S3, R-S7, R-S9, R-S10, R-S12, R-S15, R-S16, R-S17 | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14, R-S18                               |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                    | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | -------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                            | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11                        | R-S6             |              |                   |
+| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S18           | R-S3             |              |                   |
+
+> **Note :** R-S3 et R-S15 ont été descendus d'un cran sur l'axe Impact grâce au **binding fingerprint SSH** introduit dans le plugin PamAccess ≥ 0.1.16. La vérification est effectuée côté LLNG à la fois sur `/pam/authorize` (à chaque ouverture de session SSH, phase PAM `account`) et sur `/pam/verify` (à chaque utilisation d'un token PAM pour sudo ou ré-authentification) : tant que l'empreinte de la clef SSH n'est pas présente, active et non révoquée dans la session persistante LLNG, ni la session SSH ni l'escalade sudo ne sont autorisées, indépendamment de la fraîcheur de la KRL locale. Voir [02-ssh-connection.md](02-ssh-connection.md) pour les détails.
 
 **Zones de risque :**
 

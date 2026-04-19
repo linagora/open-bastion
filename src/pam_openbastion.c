@@ -1878,6 +1878,14 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
         cert_info->ca_fingerprint = strdup(ca_fp);
     }
 
+    /*
+     * SHA256 fingerprint of the user SSH key used for authentication.
+     * LLNG cross-checks it against the user's persistent session
+     * (_sshCerts) on /pam/authorize to reject a revoked cert even if the
+     * local sshd KRL is stale or not enforced.
+     */
+    cert_info->key_fingerprint = extract_ssh_key_fingerprint(pamh);
+
     /* If we didn't get any details, try to parse from SSH_USER_AUTH */
     if (!cert_info->key_id && !cert_info->serial) {
         /*
@@ -2592,8 +2600,27 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          * Default mode: Verify the one-time PAM token via /pam/verify
          * The token is destroyed after successful verification (single-use).
          * Note: Cache is not used for one-time tokens.
+         *
+         * When the SSH session was authenticated with a CA-signed
+         * certificate, forward the SSH key fingerprint so that LLNG can
+         * match it against the user's persistent session and refuse
+         * verification if the key has been revoked or expired in LLNG,
+         * even if the local sshd KRL is stale or missing.
          */
-        if (ob_verify_token(data->client, password, &response) != 0) {
+        char *ssh_fingerprint = NULL;
+        {
+            const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
+            if (ssh_auth && strstr(ssh_auth, "-cert-")) {
+                ssh_fingerprint = extract_ssh_key_fingerprint(pamh);
+            }
+        }
+
+        int verify_rc = ob_verify_token(data->client, password,
+                                        ssh_fingerprint, &response);
+        free(ssh_fingerprint);
+        ssh_fingerprint = NULL;
+
+        if (verify_rc != 0) {
             OB_LOG_ERR(pamh, "Token verification failed: %s",
                     ob_client_error(data->client));
 

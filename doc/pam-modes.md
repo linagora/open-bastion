@@ -230,6 +230,37 @@ curl -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
 ```
 
+### SSH fingerprint binding on `/pam/authorize` and `/pam/verify`
+
+From plugin PamAccess 0.1.16 onwards, `pam_openbastion` extracts the
+SHA256 fingerprint of the SSH key used to open the session (parsed
+from `SSH_USER_AUTH`, which requires `ExposeAuthInfo yes`) and sends
+it in **both** the `/pam/authorize` request issued at every SSH
+connection (PAM `account` phase) and the `/pam/verify` request issued
+on every LLNG-token operation (sudo, re-authentication).
+
+LLNG rejects the call unless it finds a matching, non-revoked and
+non-expired SSH CA record in the user's persistent session
+(`_sshCerts`). This provides a second line of defense on top of the
+local `sshd` KRL check:
+
+- **Session opening**: even if the bastion's `/etc/ssh/revoked_keys`
+  is stale or `RevokedKeys` is missing from `sshd_config`, a newly
+  revoked certificate is rejected at `/pam/authorize` (`account`
+  phase), and the SSH session is refused before the shell is spawned.
+- **Privilege escalation**: the same check runs on `/pam/verify`, so
+  a compromised or revoked certificate cannot be used to obtain
+  privileges via sudo from an already-established session either.
+- **Token binding**: a stolen LLNG token cannot be replayed from a
+  machine holding a different SSH key — the fingerprint presented in
+  the request would not match any `_sshCerts` entry of the token's
+  `sub` user.
+
+No configuration change is required on the bastion side — as long as
+`ExposeAuthInfo yes` is set (already required for session auditing),
+the fingerprint is picked up automatically. The `fingerprint` field is
+optional on the LLNG side, so older portals remain compatible.
+
 ## Summary Table
 
 | Mode             | Unix Password | LLNG Token | SSH Key    | LLNG Authorization |

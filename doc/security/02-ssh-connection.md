@@ -256,6 +256,52 @@ curl -sf -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 # → Fenêtre d'exposition maximale : 30 min
 ```
 
+### Binding fingerprint SSH sur `/pam/authorize` et `/pam/verify` (défense en profondeur)
+
+Depuis le plugin PamAccess ≥ 0.1.16, le module PAM `pam_openbastion` extrait l'empreinte SHA256 de la clef SSH utilisée pour la connexion (variable `SSH_USER_AUTH`, nécessite `ExposeAuthInfo yes`) et la transmet à LLNG dans le corps des requêtes `POST /pam/authorize` (phase `account`, à chaque connexion SSH) **et** `POST /pam/verify` (vérification d'un token PAM à usage unique pour sudo/ré-auth). Exemples :
+
+```json
+// POST /pam/authorize — ouverture de session SSH
+{
+  "user": "dwho",
+  "host": "backend-01",
+  "service": "sshd",
+  "server_group": "production",
+  "ssh_cert": { "key_id": "...", "serial": "...", ... },
+  "fingerprint": "SHA256:<base64>"
+}
+
+// POST /pam/verify — sudo / ré-authentification par token
+{
+  "token": "<token PAM à usage unique>",
+  "fingerprint": "SHA256:<base64>"
+}
+```
+
+LLNG effectue dans les **deux** handlers la même vérification croisée contre la **session persistante** de l'utilisateur (`_sshCerts`) :
+
+1. Le champ `fingerprint` doit respecter le format strict `SHA256:<base64>` (sinon `HTTP 400`, audit `PAM_AUTH[Z]_SSH_FP_MALFORMED`).
+2. L'empreinte doit être présente dans la liste des certificats émis par le plugin SSHCA pour cet utilisateur.
+3. Le certificat correspondant ne doit pas porter de marqueur `revoked_at`.
+4. Le certificat ne doit pas être expiré (`expires_at`).
+
+Si l'une des conditions 2-4 n'est pas remplie :
+
+- sur `/pam/authorize`, LLNG répond `{"authorized": false, "reason": "SSH fingerprint not recognized"}` (audit `PAM_AUTHZ_SSH_FP_REJECTED`) — **la connexion SSH est refusée au niveau PAM account**, même si `sshd` a accepté le certificat.
+- sur `/pam/verify`, LLNG répond `{"valid": false, "error": "SSH fingerprint not recognized"}` et le token PAM est consommé (audit `PAM_AUTH_SSH_FP_REJECTED`) — l'escalade sudo est bloquée.
+
+**Niveaux de défense apportés :**
+
+| Contrôle                                  | Où ?     | Couvre                                                                                                                                                |
+| ----------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RevokedKeys` (KRL locale)                | `sshd`   | Authentification SSH avec certificat révoqué (mécanisme principal, toujours requis)                                                                   |
+| **Binding fingerprint `/pam/authorize`**  | **LLNG** | **Ouverture de session SSH avec un certificat inconnu, révoqué ou expiré côté LLNG, même si `sshd` l'a accepté (KRL stale ou `RevokedKeys` oubliée)** |
+| `/pam/authorize` (autorisation classique) | LLNG     | Utilisateur désactivé ou sans droit sur le `server_group`                                                                                             |
+| **Binding fingerprint `/pam/verify`**     | **LLNG** | **sudo / ré-authentification par token : rejet si le cert de la session SSH est inconnu, révoqué ou expiré côté LLNG**                                |
+| **Présence dans la session persistante**  | **LLNG** | **Token volé à un utilisateur et rejoué depuis une autre clef SSH : l'empreinte ne correspond à aucun cert du `sub` du token**                        |
+
+Cette couche est activée automatiquement côté bastion dès que `ExposeAuthInfo yes` est configuré (déjà requis pour l'audit des sessions) ; côté LLNG, l'ancien comportement est préservé si le client n'envoie pas le champ `fingerprint` (rétrocompatibilité).
+
 ---
 
 ## 3. Analyse des Risques
@@ -290,13 +336,15 @@ curl -sf -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
 - Révocation immédiate via LLNG `/ssh/admin` → KRL propagée en 30 min
 - Le serial permet d'identifier précisément le certificat compromis
-- **Même avec un certificat compromis, l'attaquant ne peut pas faire de sudo** sans obtenir un token LLNG frais, ce qui nécessite une authentification SSO
+- **Binding fingerprint sur `/pam/authorize` (plugin PamAccess ≥ 0.1.16) :** à chaque connexion SSH, `pam_openbastion` envoie l'empreinte SHA256 de la clef utilisée, extraite de `SSH_USER_AUTH`. LLNG refuse l'autorisation (donc l'ouverture de la session SSH, via la phase `account` de PAM) si l'empreinte n'est pas présente dans la session persistante de l'utilisateur (`_sshCerts`), ou si le certificat correspondant est révoqué ou expiré côté LLNG. Ce filet de défense en profondeur bloque la session même si un certificat révoqué a franchi `sshd` à cause d'une KRL obsolète ou manquante.
+- **Binding fingerprint sur `/pam/verify` :** la même vérification est effectuée lors de toute utilisation d'un token PAM (sudo, ré-authentification), fermant l'escalade privilège dans la même logique.
 
 **Remédiation embarquée :**
 
-- PAM LLNG envoie le serial à LLNG pour vérification d'autorisation à chaque connexion
-- KRL vérifiée par sshd avant PAM (rejet immédiat si révoqué)
-- Audit complet avec key_id et serial
+- KRL vérifiée par `sshd` avant PAM (rejet immédiat si révoqué, mécanisme principal)
+- `/pam/authorize` refuse l'ouverture de session si la clef n'est pas active/non-révoquée/non-expirée côté LLNG (filet de secours vs KRL stale)
+- `/pam/verify` applique le même contrôle au moment du token (sudo, ré-auth)
+- Audit complet avec `key_id`, `serial`, et codes `PAM_AUTHZ_SSH_FP_REJECTED` / `PAM_AUTH_SSH_FP_REJECTED`
 
 **Remédiation configuration :**
 
@@ -309,10 +357,10 @@ ssh-keygen -t ed25519 -a 100 -f ~/.ssh/id_ed25519
 ssh-add -t 8h ~/.ssh/id_ed25519
 ```
 
-|                 |                   Score résiduel                    |
-| --------------- | :-------------------------------------------------: |
-| **Probabilité** |       2 (compromission poste client possible)       |
-| **Impact**      | 2 (avec KRL + sudo impossible sans token SSO frais) |
+|                 |                                        Score résiduel                                         |
+| --------------- | :-------------------------------------------------------------------------------------------: |
+| **Probabilité** |                            2 (compromission poste client possible)                            |
+| **Impact**      | 1 (KRL + binding fingerprint LLNG sur `/pam/authorize` et `/pam/verify` bloquent SSH et sudo) |
 
 ---
 
@@ -900,8 +948,23 @@ crowdsec_block_delay = 600  # 10 minutes au lieu de 3
 - Cron de rafraîchissement KRL en panne ou mal configuré
 - Serveur LLNG indisponible empêchant le téléchargement KRL
 - Délai entre la révocation et la propagation (jusqu'à 30 min)
+- Serveur SSH dont la directive `RevokedKeys` a été oubliée ou supprimée par inadvertance
 
-**Facteur atténuant :** `/pam/authorize` vérifie toujours l'autorisation LLNG à chaque connexion. Si le compte est désactivé dans LLNG, l'accès est refusé même avec un certificat non révoqué dans la KRL locale.
+> **Note d'architecture :** en fonctionnement nominal, un certificat révoqué ne doit **pas** permettre d'établir une connexion SSH — la KRL locale contrôlée par `sshd` reste le mécanisme principal de rejet, et son absence de mise à jour constitue déjà une alerte opérationnelle. Les facteurs atténuants ci-dessous ne remplacent pas la KRL ; ils constituent des couches de défense en profondeur pour le cas pathologique où un certificat révoqué franchirait malgré tout `sshd` (KRL absente, corrompue, ou significativement plus vieille que la fenêtre de révocation).
+
+**Facteurs atténuants :**
+
+1. **Binding fingerprint sur `/pam/authorize` (plugin PamAccess ≥ 0.1.16) :** à la phase `account` de PAM (donc à l'ouverture de chaque connexion SSH), `pam_openbastion` transmet l'empreinte SHA256 de la clef SSH utilisée. LLNG refuse l'autorisation (et donc l'ouverture de la session) si :
+   - l'empreinte n'apparaît pas dans la session persistante (`_sshCerts`) de l'utilisateur (clef inconnue de LLNG), **ou**
+   - le certificat correspondant est marqué `revoked_at` (révocation côté LLNG), **ou**
+   - le certificat est expiré.
+
+   Cette vérification est **indépendante** de la KRL locale : une révocation enregistrée dans LLNG est immédiatement effective sur toutes les connexions SSH, sans attendre la propagation de la KRL et indépendamment du fait que `sshd` la contrôle ou non.
+
+2. **Binding fingerprint sur `/pam/verify` :** la même vérification est effectuée sur les tokens PAM (sudo, ré-auth), de sorte qu'aucun privilège ne peut être acquis depuis une session ouverte avec un certificat devenu invalide entre temps.
+3. Contrôles d'autorisation classiques : `/pam/authorize` refuse aussi l'accès si le compte LLNG est désactivé ou ne vérifie pas la règle du `server_group`.
+
+**Conséquence pour la cible maximale :** dès la publication de la révocation côté LLNG, toute nouvelle connexion SSH utilisant le certificat révoqué est refusée au niveau PAM `account` (phase de vérification de l'autorisation). La KRL reste le contrôle principal, mais un oubli, un retard de propagation ou une absence de `RevokedKeys` dans `sshd_config` n'ouvrent plus de fenêtre d'exploitation : LLNG rejette de toute façon la session.
 
 **Remédiation :**
 
@@ -914,10 +977,10 @@ crowdsec_block_delay = 600  # 10 minutes au lieu de 3
 */15 * * * * root find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
 ```
 
-|                 |                    Score résiduel                     |
-| --------------- | :---------------------------------------------------: |
-| **Probabilité** | 1 (avec cron + monitoring + /pam/authorize en backup) |
-| **Impact**      |          2 (sudo toujours bloqué sans token)          |
+|                 |                                       Score résiduel                                        |
+| --------------- | :-----------------------------------------------------------------------------------------: |
+| **Probabilité** |  1 (cron KRL + binding fingerprint `/pam/authorize` + `/pam/verify` comme triple défense)   |
+| **Impact**      | 1 (ouverture SSH et sudo bloqués au niveau LLNG même avec KRL absente ou périmée côté sshd) |
 
 ---
 
@@ -1056,7 +1119,7 @@ Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) 
 
 1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
 2. Le wrapper utilise son gid effectif `ob-sessions` **uniquement** pour créer le sous-répertoire utilisateur en mode `2770 user:ob-sessions` (bit setgid sur le répertoire)
-3. Le wrapper drop explicitement le gid élevé via `setregid(orig_gid, orig_gid)` avant l'exec. `exec` ne supprime **pas** un gid effectif/sauvé déjà acquis (seuls les bits setgid du *fichier* exécuté sont ignorés). Le drop explicite garantit que le script et le shell tournent avec le gid original de l'utilisateur
+3. Le wrapper drop explicitement le gid élevé via `setregid(orig_gid, orig_gid)` avant l'exec. `exec` ne supprime **pas** un gid effectif/sauvé déjà acquis (seuls les bits setgid du _fichier_ exécuté sont ignorés). Le drop explicite garantit que le script et le shell tournent avec le gid original de l'utilisateur
 4. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
    - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
    - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire
@@ -1091,20 +1154,20 @@ Le session recorder enregistre les événements de début/fin de session dans sy
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                            | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | -------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                           |                  |              |                   |
-| **3 - Important**        | R-S5                                                           | R-S6             |              |                   |
-| **2 - Limité**           | R-S3 R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S15 R-S16 R-S17 | R-S8             |              |                   |
-| **1 - Négligeable**      | R-S18                                                          |                  |              |                   |
-| **1 - Négligeable**      |                                                                |                  |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                |                  |              |                   |
+| **3 - Important**        | R-S5                                                | R-S6             |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S15 R-S18                                         | R-S3             |              |                   |
 
 **Profil de risque de la cible maximale :**
 
 - R-S1 (brute-force mot de passe) : **ÉLIMINÉ** (pas de mot de passe SSH)
 - R-S2 (vol clé SSH sans certificat) : **ÉLIMINÉ** (AuthorizedKeysFile none)
-- R-S3 (certificat compromis) : **contrôlé par KRL** + sudo bloqué sans token SSO
+- R-S3 (certificat compromis) : **contrôlé par KRL** (mécanisme principal) + **binding fingerprint LLNG sur `/pam/authorize` et `/pam/verify`** qui bloque aussi bien l'ouverture SSH que l'escalade sudo dès que la révocation est publiée côté LLNG, même si la KRL locale n'est pas encore à jour
 - R-S5 (contournement bastion) : **P=1** (certificat CA requis + JWT bastion)
+- R-S15 (KRL stale) : **I=1** grâce au binding fingerprint sur `/pam/authorize` : une révocation LLNG interdit l'ouverture d'une session SSH à chaque nouvelle connexion, indépendamment de la fraîcheur de la KRL
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
 - R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
 - R-S18 (effacement sessions) : **contrôlé par wrapper setgid** + sticky bit + syslog indépendant
