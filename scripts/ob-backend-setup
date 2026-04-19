@@ -134,6 +134,80 @@ download_ca_key() {
     info "CA public key saved to $SSH_CA_FILE"
 }
 
+# Install /usr/local/sbin/ob-ssh-principals and its spool directory.
+# See ob-bastion-setup for rationale — mandatory for the /pam/authorize +
+# /pam/verify fingerprint binding introduced with PamAccess >= 0.1.16.
+install_principals_helper() {
+    step "Installing SSH principals helper..."
+
+    local script_path="/usr/local/sbin/ob-ssh-principals"
+    local spool_dir="/run/open-bastion/ssh-fp"
+    local tmpfiles_conf="/etc/tmpfiles.d/open-bastion-ssh-fp.conf"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $script_path and create $spool_dir"
+        return 0
+    fi
+
+    cat > "$script_path" << 'PRINCIPALS'
+#!/bin/sh
+# ob-ssh-principals — sshd AuthorizedPrincipalsCommand helper.
+# Args: <username> <fingerprint>
+# Outputs the username if known; drops the SSH key fingerprint to
+# /run/open-bastion/ssh-fp/<sshd-session-pid>.fp so pam_openbastion can
+# pick it up in pam_acct_mgmt and forward it to LLNG.
+USERNAME="$1"
+FINGERPRINT="$2"
+SPOOL_DIR="/run/open-bastion/ssh-fp"
+
+case "$FINGERPRINT" in
+    SHA256:[A-Za-z0-9+/]*) : ;;
+    *) FINGERPRINT="" ;;
+esac
+if [ -n "$FINGERPRINT" ] && [ -d "$SPOOL_DIR" ]; then
+    pid=$PPID
+    i=0
+    while [ "$pid" -gt 1 ] && [ $i -lt 16 ]; do
+        comm=$(cat /proc/"$pid"/comm 2>/dev/null || echo "")
+        case "$comm" in
+            sshd-session|sshd) break ;;
+        esac
+        pid=$(awk '/^PPid:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
+        [ -z "$pid" ] && pid=0
+        i=$((i + 1))
+    done
+    if [ "$pid" -gt 1 ]; then
+        umask 077
+        tmp=$(mktemp "$SPOOL_DIR/."$pid".XXXXXX" 2>/dev/null) || tmp=""
+        if [ -n "$tmp" ]; then
+            printf '%s\n' "$FINGERPRINT" > "$tmp"
+            mv -f "$tmp" "$SPOOL_DIR/$pid.fp"
+        fi
+    fi
+fi
+
+if getent passwd "$USERNAME" >/dev/null 2>&1; then
+    echo "$USERNAME"
+fi
+PRINCIPALS
+    chmod 755 "$script_path"
+
+    mkdir -p "$spool_dir"
+    chown root:root "$spool_dir"
+    chmod 1733 "$spool_dir"
+
+    cat > "$tmpfiles_conf" << TMPFILES
+# Open Bastion SSH fingerprint spool — recreated at boot so the directory
+# survives /run wipes. See /usr/local/sbin/ob-ssh-principals.
+d /run/open-bastion          0755 root root -
+d /run/open-bastion/ssh-fp   1733 root root -
+TMPFILES
+    chmod 644 "$tmpfiles_conf"
+
+    info "SSH principals helper installed at $script_path"
+    info "SSH fingerprint spool prepared at $spool_dir"
+}
+
 # Configure sshd
 configure_sshd() {
     step "Configuring SSH server..."
@@ -145,8 +219,9 @@ configure_sshd() {
 # Trust LLNG SSH CA for certificate authentication
 TrustedUserCAKeys $SSH_CA_FILE
 
-# Accept certificate if principal matches the requested username
-AuthorizedPrincipalsCommand /bin/echo %u
+# Accept certificate if principal matches the requested username and drop the
+# SSH key fingerprint for pam_openbastion to forward to LLNG.
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f
 AuthorizedPrincipalsCommandUser nobody
 
 # Enable public key (certificate) authentication
@@ -832,6 +907,7 @@ main() {
 
     # Run setup steps
     download_ca_key || exit 1
+    install_principals_helper || exit 1
     configure_sshd || exit 1
     configure_pam_sshd || exit 1
     configure_pam_sudo || true

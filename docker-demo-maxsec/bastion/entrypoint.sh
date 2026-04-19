@@ -72,14 +72,60 @@ chmod 644 /etc/cron.d/open-bastion-krl
 # Start cron daemon
 cron
 
-# Create script to validate principals and create user if needed
+# Shared directory where llng-principals drops the SSH key fingerprint so that
+# pam_openbastion can forward it to LLNG (/pam/authorize + /pam/verify
+# fingerprint binding). OpenSSH does NOT propagate SSH_USER_AUTH to the PAM
+# environment during pam_acct_mgmt, so we need this out-of-band channel.
+# Mode 1733 = sticky + -wx for group/other, 700 for owner:
+#   - root can rwx (and bypass permissions to read any file)
+#   - nobody (AuthorizedPrincipalsCommandUser) can create files it owns
+#   - others can neither list nor read other users' drops
+mkdir -p /run/open-bastion/ssh-fp
+chown root:root /run/open-bastion/ssh-fp
+chmod 1733 /run/open-bastion/ssh-fp
+
+# Create script to validate principals and record the SSH key fingerprint.
 cat > /usr/local/bin/llng-principals << 'SCRIPT'
 #!/bin/bash
-# Called by sshd AuthorizedPrincipalsCommand (runs as nobody)
-# Returns allowed principals for certificate authentication.
+# Called by sshd AuthorizedPrincipalsCommand (runs as nobody).
+# Args: <username> <key-type> <key-base64> <fingerprint>
+# Writes <fingerprint> to /run/open-bastion/ssh-fp/<sshd-session-pid>.fp so
+# that pam_openbastion can pick it up in pam_acct_mgmt and forward it to
+# LLNG for /pam/authorize fingerprint binding.
 # User creation is handled by pam_openbastion (create_user=true in open_session).
-# User lookup goes through NSS (libnss_openbastion), which has its own token.
 USERNAME="$1"
+FINGERPRINT="$4"
+
+# Record the fingerprint against our sshd-session ancestor PID.
+# Walk up /proc until we find the sshd-session process — pam_openbastion
+# will converge on the same ancestor from its own position.
+if [ -n "$FINGERPRINT" ] && [ -d /run/open-bastion/ssh-fp ]; then
+    case "$FINGERPRINT" in
+        SHA256:[A-Za-z0-9+/]*) : ;;
+        *) FINGERPRINT="" ;;
+    esac
+fi
+if [ -n "$FINGERPRINT" ]; then
+    pid=$PPID
+    i=0
+    while [ "$pid" -gt 1 ] && [ $i -lt 16 ]; do
+        comm=$(cat /proc/"$pid"/comm 2>/dev/null || echo "")
+        case "$comm" in
+            sshd-session|sshd) break ;;
+        esac
+        pid=$(awk '/^PPid:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
+        [ -z "$pid" ] && pid=0
+        i=$((i + 1))
+    done
+    if [ "$pid" -gt 1 ]; then
+        umask 077
+        tmp=$(mktemp /run/open-bastion/ssh-fp/."$pid".XXXXXX 2>/dev/null) || tmp=""
+        if [ -n "$tmp" ]; then
+            printf '%s\n' "$FINGERPRINT" > "$tmp"
+            mv -f "$tmp" /run/open-bastion/ssh-fp/"$pid".fp
+        fi
+    fi
+fi
 
 # Check if user is known (locally or via NSS/libnss_openbastion)
 if getent passwd "$USERNAME" >/dev/null 2>&1; then
@@ -105,7 +151,10 @@ AuthorizedKeysFile none
 RevokedKeys $SSH_REVOKED_KEYS
 
 # Create users on-the-fly via principals command
-AuthorizedPrincipalsCommand /usr/local/bin/llng-principals %u %t %k
+# %f = SHA256 fingerprint of the client key/cert (%F is the CA fingerprint);
+# recorded out-of-band so pam_openbastion can forward it to LLNG for
+# fingerprint binding on /pam/authorize and /pam/verify.
+AuthorizedPrincipalsCommand /usr/local/bin/llng-principals %u %t %k %f
 AuthorizedPrincipalsCommandUser nobody
 
 # Disable password authentication

@@ -1683,6 +1683,138 @@ static const char *get_client_ip(pam_handle_t *pamh)
 }
 
 /*
+ * Walk up the process tree looking for an ancestor whose /proc/<pid>/comm
+ * is "sshd-session" (or "sshd" as a fallback). Returns its PID, or 0 if
+ * none found. Used to correlate the PAM module's invocation with the
+ * AuthorizedPrincipalsCommand run, since both end up under the same
+ * sshd-session[priv] process even when run in separate child processes.
+ */
+static pid_t find_sshd_session_ancestor(void)
+{
+    pid_t pid = getpid();
+    for (int i = 0; i < 16; i++) {
+        char path[64];
+        char buf[256];
+
+        /* Read /proc/<pid>/comm */
+        snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
+        FILE *f = fopen(path, "r");
+        if (!f) return 0;
+        if (!fgets(buf, sizeof(buf), f)) {
+            fclose(f);
+            return 0;
+        }
+        fclose(f);
+        char *nl = strchr(buf, '\n');
+        if (nl) *nl = '\0';
+        if (strcmp(buf, "sshd-session") == 0 || strcmp(buf, "sshd") == 0) {
+            return pid;
+        }
+
+        /* Read PPid from /proc/<pid>/status */
+        snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+        f = fopen(path, "r");
+        if (!f) return 0;
+        pid_t ppid = 0;
+        while (fgets(buf, sizeof(buf), f)) {
+            if (strncmp(buf, "PPid:", 5) == 0) {
+                ppid = (pid_t)strtol(buf + 5, NULL, 10);
+                break;
+            }
+        }
+        fclose(f);
+        if (ppid <= 1 || ppid == pid) return 0;
+        pid = ppid;
+    }
+    return 0;
+}
+
+/*
+ * Read the SSH key fingerprint dropped by llng-principals in
+ * /run/open-bastion/ssh-fp/<sshd-session-pid>.fp. This is the out-of-band
+ * channel that compensates for the fact that OpenSSH does not propagate
+ * SSH_USER_AUTH to the PAM environment during pam_acct_mgmt.
+ *
+ * The file is intentionally left in place on successful read: the same
+ * sshd-session handles multiple PAM calls (SSH account phase + sudo
+ * /pam/verify), and they all need to match the same cert. llng-principals
+ * always atomically overwrites the file on the next sshd connection (via
+ * `mv -f`), so a stale PID reuse won't leak an old fingerprint.
+ *
+ * Returns allocated string (caller must free) on success, NULL otherwise.
+ */
+#ifndef OB_SSH_FP_SPOOL_DIR
+#define OB_SSH_FP_SPOOL_DIR "/run/open-bastion/ssh-fp"
+#endif
+
+static char *read_ssh_fp_from_spool(pam_handle_t *pamh)
+{
+    pid_t anchor = find_sshd_session_ancestor();
+    if (anchor <= 1) {
+        OB_LOG_DEBUG(pamh, "No sshd-session ancestor found, skipping SSH fp spool");
+        return NULL;
+    }
+
+    char path[128];
+    int n = snprintf(path, sizeof(path), "%s/%d.fp",
+                     OB_SSH_FP_SPOOL_DIR, (int)anchor);
+    if (n < 0 || (size_t)n >= sizeof(path)) return NULL;
+
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        OB_LOG_DEBUG(pamh, "SSH fp spool not found at %s (errno=%d)", path, errno);
+        return NULL;
+    }
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)
+        || st.st_size <= 0 || st.st_size > 512) {
+        close(fd);
+        unlink(path);
+        return NULL;
+    }
+
+    char buf[260];
+    ssize_t got = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (got <= 0) {
+        unlink(path);
+        return NULL;
+    }
+    buf[got] = '\0';
+    while (got > 0 && (buf[got - 1] == '\n' || buf[got - 1] == '\r' ||
+                       buf[got - 1] == ' ' || buf[got - 1] == '\t')) {
+        buf[--got] = '\0';
+    }
+    if (got <= 0) {
+        unlink(path);
+        return NULL;
+    }
+
+    /* Validate strict SHA256:<base64> form. LLNG rejects anything else
+     * with HTTP 400, so filter here too. */
+    if (strncmp(buf, "SHA256:", 7) != 0) {
+        OB_LOG_DEBUG(pamh, "SSH fp spool contents not SHA256: '%s'", buf);
+        unlink(path);
+        return NULL;
+    }
+    for (const char *p = buf + 7; *p; p++) {
+        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+              (*p >= '0' && *p <= '9') || *p == '+' || *p == '/' || *p == '=')) {
+            OB_LOG_DEBUG(pamh, "SSH fp spool has invalid char, rejecting");
+            unlink(path);
+            return NULL;
+        }
+    }
+
+    char *fp = strdup(buf);
+    if (fp) {
+        OB_LOG_DEBUG(pamh, "SSH fp recovered from spool: %s", fp);
+    }
+    return fp;
+}
+
+/*
  * Extract SSH key fingerprint from PAM environment.
  * SSH sets SSH_USER_AUTH environment variable when ExposeAuthInfo is enabled.
  * Format for publickey: "publickey <algorithm> SHA256:<fingerprint>"
@@ -1820,27 +1952,41 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
     if (!cert_info) return 0;
     memset(cert_info, 0, sizeof(*cert_info));
 
-    /* Get SSH_USER_AUTH from PAM environment */
+    /*
+     * Primary path for modern OpenSSH (10.x): the AuthorizedPrincipalsCommand
+     * (llng-principals) drops the SHA256 fingerprint in
+     * /run/open-bastion/ssh-fp/<sshd-session-pid>.fp because sshd does NOT
+     * expose SSH_USER_AUTH to the PAM environment during pam_acct_mgmt.
+     * Pick it up here so /pam/authorize gets the fingerprint.
+     */
+    char *spool_fp = read_ssh_fp_from_spool(pamh);
+
+    /* Get SSH_USER_AUTH from PAM environment (legacy / custom-patched sshd) */
     const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
-    if (!ssh_auth || !*ssh_auth) {
-        OB_LOG_DEBUG(pamh, "No SSH_USER_AUTH in environment");
+    if ((!ssh_auth || !*ssh_auth) && !spool_fp) {
+        OB_LOG_DEBUG(pamh, "No SSH_USER_AUTH in environment and no spool fingerprint");
         return 0;
     }
 
     /* Security: Check length before processing (fixes #45) */
-    if (strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
+    if (ssh_auth && strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
         OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
-        return 0;
+        ssh_auth = NULL;
     }
 
-    OB_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
+    if (ssh_auth) {
+        OB_LOG_DEBUG(pamh, "SSH_USER_AUTH: %s", ssh_auth);
+    }
 
     /*
      * Check if this is certificate authentication.
      * Certificate auth shows as: "publickey <algo>-cert-v01@openssh.com ..."
      * Regular key auth shows as: "publickey <algo> ..."
+     * If we only have the spool fingerprint (no SSH_USER_AUTH), accept it:
+     * sshd only runs AuthorizedPrincipalsCommand for cert-authenticated users,
+     * so a spool entry implies a signed cert was used.
      */
-    if (strstr(ssh_auth, "-cert-") == NULL) {
+    if (ssh_auth && strstr(ssh_auth, "-cert-") == NULL && !spool_fp) {
         OB_LOG_DEBUG(pamh, "SSH authentication is not certificate-based");
         return 0;
     }
@@ -1879,33 +2025,31 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
     }
 
     /*
-     * SHA256 fingerprint of the user SSH key used for authentication.
-     * LLNG cross-checks it against the user's persistent session
-     * (_sshCerts) on /pam/authorize to reject a revoked cert even if the
-     * local sshd KRL is stale or not enforced.
-     *
-     * LLNG only accepts the strict "SHA256:<base64>" form and returns
-     * HTTP 400 on anything else. If sshd is configured with
-     * "FingerprintHash md5" the extractor would yield "MD5:..." which
-     * would break every /pam/authorize call; filter those out and leave
-     * the field NULL so LLNG keeps the pre-binding behaviour.
+     * Wire the SHA256 fingerprint we captured from the spool (modern
+     * OpenSSH) or, as a fallback, extract it from SSH_USER_AUTH for any
+     * sshd that does propagate it. LLNG only accepts SHA256:<base64> and
+     * returns HTTP 400 on anything else, so filter strictly.
      */
-    char *extracted_fp = extract_ssh_key_fingerprint(pamh);
-    if (extracted_fp && strncmp(extracted_fp, "SHA256:", 7) == 0) {
-        cert_info->key_fingerprint = extracted_fp;
+    if (spool_fp) {
+        cert_info->key_fingerprint = spool_fp;
+        spool_fp = NULL;
     } else {
-        if (extracted_fp) {
+        char *extracted_fp = extract_ssh_key_fingerprint(pamh);
+        if (extracted_fp && strncmp(extracted_fp, "SHA256:", 7) == 0) {
+            cert_info->key_fingerprint = extracted_fp;
+        } else if (extracted_fp) {
             OB_LOG_DEBUG(pamh,
                          "Ignoring non-SHA256 SSH key fingerprint (%s): "
                          "LLNG fingerprint binding requires SHA256",
                          extracted_fp);
             free(extracted_fp);
         }
-        cert_info->key_fingerprint = NULL;
     }
 
-    /* If we didn't get any details, try to parse from SSH_USER_AUTH */
-    if (!cert_info->key_id && !cert_info->serial) {
+    /* If we didn't get any details, try to parse from SSH_USER_AUTH.
+     * Skipped when SSH_USER_AUTH is absent (modern OpenSSH) — we rely on
+     * the spool fingerprint and LLNG cross-check in that case. */
+    if (ssh_auth && !cert_info->key_id && !cert_info->serial) {
         /*
          * Try parsing format: "publickey algo fingerprint:keyid:serial:principals"
          * This is a simplified parser - real format may vary.
@@ -2625,26 +2769,26 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          * verification if the key has been revoked or expired in LLNG,
          * even if the local sshd KRL is stale or missing.
          */
-        char *ssh_fingerprint = NULL;
-        {
+        /*
+         * Bind the /pam/verify token to the SSH key that opened the
+         * current session. Primary source is the out-of-band spool
+         * populated by llng-principals (since SSH_USER_AUTH is not in
+         * the PAM env on modern OpenSSH); fallback to SSH_USER_AUTH for
+         * environments where a custom sshd does expose it. LLNG rejects
+         * anything other than SHA256:<base64>, so filter strictly.
+         */
+        char *ssh_fingerprint = read_ssh_fp_from_spool(pamh);
+        if (!ssh_fingerprint) {
             const char *ssh_auth = pam_getenv(pamh, "SSH_USER_AUTH");
             if (ssh_auth && strstr(ssh_auth, "-cert-")) {
                 char *fp = extract_ssh_key_fingerprint(pamh);
-                /*
-                 * LLNG only accepts SHA256 fingerprints and returns
-                 * HTTP 400 on anything else. Guard against an
-                 * MD5-configured sshd silently breaking all sudo /
-                 * re-auth flows by only forwarding SHA256 values.
-                 */
                 if (fp && strncmp(fp, "SHA256:", 7) == 0) {
                     ssh_fingerprint = fp;
-                } else {
-                    if (fp) {
-                        OB_LOG_DEBUG(pamh,
-                                     "Ignoring non-SHA256 SSH fingerprint "
-                                     "(%s) for /pam/verify binding", fp);
-                        free(fp);
-                    }
+                } else if (fp) {
+                    OB_LOG_DEBUG(pamh,
+                                 "Ignoring non-SHA256 SSH fingerprint "
+                                 "(%s) for /pam/verify binding", fp);
+                    free(fp);
                 }
             }
         }
