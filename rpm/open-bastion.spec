@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.1.4
+Version:        0.1.5
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 

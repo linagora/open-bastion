@@ -84,12 +84,12 @@ certificate authentication — the PAM module on each server still calls
 and server self-enrollment uses the `oidc-device-authorization` /
 `oidc-device-organization` plugins.
 
-| Plugin                      | Role                                               |
-| --------------------------- | -------------------------------------------------- |
+| Plugin                      | Role                                                    |
+| --------------------------- | ------------------------------------------------------- |
 | `pam-access`                | `/pam/authorize`, `/pam/userinfo`, `/pam/bastion-token` |
-| `ssh-ca`                    | SSH certificate signing (`/ssh/sign`, `/ssh/ca`)   |
-| `oidc-device-authorization` | RFC 8628 Device Authorization Grant (enrollment)   |
-| `oidc-device-organization`  | Admin approval flow for device codes               |
+| `ssh-ca`                    | SSH certificate signing (`/ssh/sign`, `/ssh/ca`)        |
+| `oidc-device-authorization` | RFC 8628 Device Authorization Grant (enrollment)        |
+| `oidc-device-organization`  | Admin approval flow for device codes                    |
 
 ### Option A — via `lemonldap-ng-store` (LLNG ≥ 2.23.0, recommended)
 
@@ -143,7 +143,7 @@ Once the plugins are installed, configure them through the LLNG Manager:
 2. **SSH CA** tab (only if you want certificate authentication) —
    enable it and generate or import a signing key.
 3. **OpenID Connect service** → enable the Device Authorization Grant on
-   the `pam-access` RP (checkbox *Allow Device Authorization*) and
+   the `pam-access` RP (checkbox _Allow Device Authorization_) and
    require PKCE.
 
 The `lmConf-1.json` shipped with this quick-start is a minimal working
