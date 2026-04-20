@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-04-20
+
+### Security
+
+- **SSH key fingerprint binding on `/pam/authorize` and `/pam/verify`**
+  (requires LemonLDAP::NG **PamAccess ≥ 0.1.16** and **SSHCA ≥ 0.1.16**).
+  `pam_openbastion` now forwards the SHA256 fingerprint of the SSH key
+  used to open the session in the JSON body of both endpoints. LLNG
+  cross-checks it against the user's persistent session (`_sshCerts`)
+  and rejects the call if the certificate is unknown, revoked, or
+  expired — independently of the local `sshd` KRL. This closes a gap
+  where a certificate revoked on the portal could still open a session
+  (or escalate via sudo) until the KRL propagated, or at all if
+  `RevokedKeys` was missing from `sshd_config`.
+- **Out-of-band fingerprint channel** for modern OpenSSH (≥ 9.x), which
+  does not propagate `SSH_USER_AUTH` to the PAM environment during
+  `pam_acct_mgmt`:
+  - New helper `/usr/local/sbin/ob-ssh-principals`, wired as
+    `AuthorizedPrincipalsCommand %u %f` by `ob-bastion-setup` and
+    `ob-backend-setup`. It drops the fingerprint to
+    `/run/open-bastion/ssh-fp/<sshd-session-pid>.fp` atomically
+    (`mktemp` + `mv`).
+  - `pam_openbastion` walks `/proc` up to the `sshd-session` ancestor
+    and reads the matching file, with strict validation: directory not
+    group/world-writable, file regular, owner == spool directory owner,
+    mode `0600`, `nlink == 1`, content matches `SHA256:<base64>`, size
+    ≤ 512 B. Fall back to parsing `SSH_USER_AUTH` if a custom-patched
+    sshd does expose it.
+  - Spool directory deployed as `0700 nobody:nogroup` (the
+    `AuthorizedPrincipalsCommandUser`); hardened `systemd-tmpfiles`
+    drop-in (`/etc/tmpfiles.d/open-bastion-ssh-fp.conf`) recreates it
+    at boot so `/run` wipes do not silently disable the binding.
+- **Strict SHA256 filter.** `pam_openbastion` refuses to forward a
+  fingerprint that is not in the `SHA256:<base64>` form expected by
+  LLNG (so an `sshd` configured with `FingerprintHash md5` cannot
+  trigger systematic HTTP 400 from the portal). Non-SHA256 values are
+  discarded and the call falls back to the pre-binding behaviour.
+
+### Added
+
+- `ob_client`: new top-level `fingerprint` field in `/pam/authorize`
+  and `/pam/verify` request bodies when available. `ob_verify_token()`
+  grows an optional `fingerprint` parameter.
+- `ob_ssh_cert_info_t`: new `key_fingerprint` field populated from the
+  spool or, as a fallback, from `SSH_USER_AUTH`.
+- Integration tests (`tests/test_integration_{docker,maxsec}.sh`):
+  three new cases — fingerprint accepted/unknown/malformed on
+  `/pam/authorize`, rejection of a certificate revoked via
+  `/ssh/myrevoke` without KRL refresh, and an end-to-end SSH attempt
+  with that revoked certificate that must be refused at the PAM
+  `account` phase.
+
+### Upgrade notes
+
+- Re-run `ob-bastion-setup` or `ob-backend-setup` on every bastion /
+  backend: they now install `/usr/local/sbin/ob-ssh-principals`, the
+  `/run/open-bastion/ssh-fp` spool, and the `systemd-tmpfiles`
+  drop-in. The `AuthorizedPrincipalsCommand` line in
+  `sshd_config.d/50-llng-bastion.conf` is updated to pass `%u %f`.
+- Bastions running against a LemonLDAP::NG portal without PamAccess
+  0.1.16 remain fully functional: the portal ignores the `fingerprint`
+  field (backward-compatible). The extra security layer activates as
+  soon as the portal is upgraded.
+- `ExposeAuthInfo yes` is **no longer required** for the fingerprint
+  binding (the helper + spool are self-sufficient); it remains useful
+  for session auditing.
+
 ## [0.1.4] - 2026-04-18
 
 ### Security

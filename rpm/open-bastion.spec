@@ -158,6 +158,30 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Mon Apr 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.5-1
+- SSH key fingerprint binding on /pam/authorize and /pam/verify
+  (requires LemonLDAP::NG PamAccess >= 0.1.16 and SSHCA >= 0.1.16);
+  LLNG cross-checks the fingerprint against the user's persistent
+  session (_sshCerts) and rejects on unknown/revoked/expired cert,
+  independently of the local sshd KRL
+- New helper /usr/local/sbin/ob-ssh-principals (deployed by
+  ob-bastion-setup / ob-backend-setup as AuthorizedPrincipalsCommand
+  "%u %f"); drops the fingerprint atomically to
+  /run/open-bastion/ssh-fp/<sshd-session-pid>.fp. pam_openbastion walks
+  /proc to the sshd-session ancestor and reads the file with strict
+  validation (owner/mode/nlink/size/format). systemd-tmpfiles drop-in
+  recreates the spool directory at boot.
+- Spool directory hardened: 0700, owned by AuthorizedPrincipalsCommand
+  user; pam_openbastion refuses group/world-writable directories and
+  any drop file whose owner/mode/nlink does not match (uid == dir uid,
+  mode 0600, nlink == 1)
+- Strict SHA256 filter: only SHA256:<base64> fingerprints are
+  forwarded, preventing HTTP 400 when sshd uses FingerprintHash md5
+- New integration tests covering fingerprint match/unknown/malformed
+  on /pam/authorize, /ssh/myrevoke revocation without KRL refresh, and
+  an end-to-end SSH refusal at PAM account phase
+- Re-run ob-bastion-setup / ob-backend-setup after upgrade
+
 * Sat Apr 18 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.4-1
 - NSS config path fix: libnss_openbastion reads from
   /etc/open-bastion/nss_openbastion.conf (previously hard-coded to

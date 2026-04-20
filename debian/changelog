@@ -1,3 +1,39 @@
+open-bastion (0.1.5) unstable; urgency=medium
+
+  * SSH key fingerprint binding on /pam/authorize and /pam/verify
+    (requires LemonLDAP::NG PamAccess >= 0.1.16 and SSHCA >= 0.1.16).
+    pam_openbastion now forwards the SHA256 fingerprint of the SSH
+    key used to open the session; LLNG cross-checks it against the
+    user's persistent session (_sshCerts) and rejects the call if the
+    certificate is unknown, revoked, or expired. Closes the gap where
+    a cert revoked on the portal could still open a session or
+    escalate via sudo until the KRL propagated (or at all if
+    RevokedKeys was missing from sshd_config).
+  * New helper /usr/local/sbin/ob-ssh-principals, installed by
+    ob-bastion-setup and ob-backend-setup as AuthorizedPrincipalsCommand
+    "%u %f". It atomically drops the fingerprint to
+    /run/open-bastion/ssh-fp/<sshd-session-pid>.fp (mktemp + mv).
+    pam_openbastion walks /proc up to the sshd-session ancestor and
+    reads the file, validating owner/mode/nlink/size/format. A
+    systemd-tmpfiles drop-in recreates the spool directory at boot.
+  * Spool directory hardened: owned by the
+    AuthorizedPrincipalsCommandUser (typically "nobody") with mode
+    0700, so no other local user can pre-create or substitute a drop
+    file. pam_openbastion refuses the spool if the directory is group/
+    world-writable, and rejects any drop file whose owner/mode/nlink
+    does not match (0600, nlink==1, uid == dir uid).
+  * Strict SHA256 filter: pam_openbastion only forwards fingerprints
+    matching SHA256:<base64>. Prevents systematic HTTP 400 when sshd
+    is configured with "FingerprintHash md5".
+  * Integration tests: fingerprint match/unknown/malformed on
+    /pam/authorize, revocation via /ssh/myrevoke without KRL refresh,
+    and end-to-end SSH attempt refused at PAM account phase.
+  * Re-run ob-bastion-setup / ob-backend-setup after upgrade to pick
+    up the new AuthorizedPrincipalsCommand line and install the spool
+    helper.
+
+ -- Xavier Guimard <xguimard@linagora.com>  Mon, 20 Apr 2026 07:00:00 +0200
+
 open-bastion (0.1.4) unstable; urgency=medium
 
   * NSS config path fix: libnss_openbastion now reads its config from
