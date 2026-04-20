@@ -44,19 +44,22 @@ if [ ! -f "$SSH_CA_FILE" ]; then
 fi
 
 # Shared directory for SSH key fingerprint pass-through to pam_openbastion.
-# See docker-demo-maxsec/bastion/entrypoint.sh for the rationale — OpenSSH
-# does not propagate SSH_USER_AUTH to the PAM account-phase environment, so
-# llng-principals drops the fingerprint in this directory keyed by
-# sshd-session PID, and pam_openbastion picks it up from there.
+# See docker-demo-maxsec/bastion/entrypoint.sh for the rationale. Directory
+# must NOT be world-writable: an unprivileged local user could otherwise
+# pre-create <pid>.fp with attacker-controlled content. Here the principals
+# command runs as root (AuthorizedPrincipalsCommandUser root) so the dir is
+# owned by root with mode 0700; pam_openbastion also verifies file
+# ownership and mode at read time.
 mkdir -p /run/open-bastion/ssh-fp
 chown root:root /run/open-bastion/ssh-fp
-chmod 1733 /run/open-bastion/ssh-fp
+chmod 0700 /run/open-bastion/ssh-fp
 
 # Create script to validate principals and create user if needed
 cat > /usr/local/bin/llng-principals << 'SCRIPT'
 #!/bin/bash
 # Called by sshd AuthorizedPrincipalsCommand.
-# Args: %u (username) %t (key type) %k (base64 key/cert) %F (SHA256 fingerprint)
+# Args: %u (username) %t (key type) %k (base64 key/cert) %f (SHA256 fingerprint
+#       of the client key or certificate — NOT %F which is the CA fingerprint)
 # - Creates the user if needed (uses LLNG /pam/userinfo).
 # - Drops the SHA256 fingerprint in /run/open-bastion/ssh-fp/<sshd-session-pid>.fp
 #   so pam_openbastion can read it and forward it to LLNG for fingerprint binding.

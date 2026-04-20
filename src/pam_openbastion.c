@@ -1755,6 +1755,29 @@ static char *read_ssh_fp_from_spool(pam_handle_t *pamh)
         return NULL;
     }
 
+    /*
+     * Reject the spool directory itself if it is world/group-writable or
+     * not owned by the expected principals helper user. We derive the
+     * trusted uid from the directory's st_uid: the deployment scripts
+     * create the directory chown'd to the AuthorizedPrincipalsCommandUser
+     * (root or nobody depending on the setup), so the directory owner
+     * becomes the ground truth for who is allowed to drop files.
+     */
+    struct stat dir_st;
+    if (stat(OB_SSH_FP_SPOOL_DIR, &dir_st) != 0) {
+        OB_LOG_DEBUG(pamh, "SSH fp spool dir missing: %s", OB_SSH_FP_SPOOL_DIR);
+        return NULL;
+    }
+    if (!S_ISDIR(dir_st.st_mode)) {
+        OB_LOG_ERR(pamh, "SSH fp spool %s is not a directory", OB_SSH_FP_SPOOL_DIR);
+        return NULL;
+    }
+    if (dir_st.st_mode & (S_IWGRP | S_IWOTH)) {
+        OB_LOG_ERR(pamh, "SSH fp spool %s is group/world-writable (mode %o) — refusing",
+                   OB_SSH_FP_SPOOL_DIR, dir_st.st_mode & 07777);
+        return NULL;
+    }
+
     char path[128];
     int n = snprintf(path, sizeof(path), "%s/%d.fp",
                      OB_SSH_FP_SPOOL_DIR, (int)anchor);
@@ -1769,6 +1792,23 @@ static char *read_ssh_fp_from_spool(pam_handle_t *pamh)
     struct stat st;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)
         || st.st_size <= 0 || st.st_size > 512) {
+        close(fd);
+        unlink(path);
+        return NULL;
+    }
+    /*
+     * File-level integrity checks: owned by the same uid as the spool
+     * directory (i.e. the principals helper user), exactly one link
+     * (so an attacker cannot substitute a hard link to another file),
+     * and not readable/writable by group/other.
+     */
+    if (st.st_uid != dir_st.st_uid || st.st_nlink != 1
+        || (st.st_mode & 0077) != 0) {
+        OB_LOG_ERR(pamh,
+                   "SSH fp spool file %s has bad ownership/mode "
+                   "(uid=%u expected=%u, mode=%o, nlink=%lu) — refusing",
+                   path, (unsigned)st.st_uid, (unsigned)dir_st.st_uid,
+                   st.st_mode & 07777, (unsigned long)st.st_nlink);
         close(fd);
         unlink(path);
         return NULL;
@@ -1968,10 +2008,15 @@ static int extract_ssh_cert_info(pam_handle_t *pamh, ob_ssh_cert_info_t *cert_in
         return 0;
     }
 
-    /* Security: Check length before processing (fixes #45) */
+    /* Security: Check length before processing (fixes #45).
+     * If the variable is unusable AND no spool fingerprint was found,
+     * bail out rather than authorise without a verifiable source. */
     if (ssh_auth && strlen(ssh_auth) >= MAX_SSH_AUTH_LEN) {
         OB_LOG_WARN(pamh, "SSH_USER_AUTH too long, ignoring");
         ssh_auth = NULL;
+    }
+    if (!ssh_auth && !spool_fp) {
+        return 0;
     }
 
     if (ssh_auth) {

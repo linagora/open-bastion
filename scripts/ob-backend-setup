@@ -192,15 +192,20 @@ fi
 PRINCIPALS
     chmod 755 "$script_path"
 
+    # Spool directory: owned by AuthorizedPrincipalsCommandUser (nobody),
+    # mode 0700 — see ob-bastion-setup for rationale (a world-writable
+    # directory would expose PAM to a spoofed-fingerprint attack via
+    # sticky-bit pre-creation). pam_openbastion also enforces owner/mode
+    # checks on each drop file.
     mkdir -p "$spool_dir"
-    chown root:root "$spool_dir"
-    chmod 1733 "$spool_dir"
+    chown nobody:nogroup "$spool_dir" 2>/dev/null || chown nobody:nobody "$spool_dir"
+    chmod 0700 "$spool_dir"
 
     cat > "$tmpfiles_conf" << TMPFILES
 # Open Bastion SSH fingerprint spool — recreated at boot so the directory
 # survives /run wipes. See /usr/local/sbin/ob-ssh-principals.
-d /run/open-bastion          0755 root root -
-d /run/open-bastion/ssh-fp   1733 root root -
+d /run/open-bastion          0755 root   root   -
+d /run/open-bastion/ssh-fp   0700 nobody nogroup -
 TMPFILES
     chmod 644 "$tmpfiles_conf"
 

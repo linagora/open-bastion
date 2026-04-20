@@ -76,13 +76,15 @@ cron
 # pam_openbastion can forward it to LLNG (/pam/authorize + /pam/verify
 # fingerprint binding). OpenSSH does NOT propagate SSH_USER_AUTH to the PAM
 # environment during pam_acct_mgmt, so we need this out-of-band channel.
-# Mode 1733 = sticky + -wx for group/other, 700 for owner:
-#   - root can rwx (and bypass permissions to read any file)
-#   - nobody (AuthorizedPrincipalsCommandUser) can create files it owns
-#   - others can neither list nor read other users' drops
+# Directory must be owned by the AuthorizedPrincipalsCommandUser and NOT be
+# world-writable — otherwise an unprivileged local user could pre-create
+# <pid>.fp with attacker-controlled content. Mode 0700 means only the
+# principals helper can enumerate/create drops; root still reads via
+# permission bypass. pam_openbastion additionally validates file ownership
+# and mode at read time.
 mkdir -p /run/open-bastion/ssh-fp
-chown root:root /run/open-bastion/ssh-fp
-chmod 1733 /run/open-bastion/ssh-fp
+chown nobody:nogroup /run/open-bastion/ssh-fp
+chmod 0700 /run/open-bastion/ssh-fp
 
 # Create script to validate principals and record the SSH key fingerprint.
 cat > /usr/local/bin/llng-principals << 'SCRIPT'

@@ -232,12 +232,40 @@ curl -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
 ### SSH fingerprint binding on `/pam/authorize` and `/pam/verify`
 
-From plugin PamAccess 0.1.16 onwards, `pam_openbastion` extracts the
-SHA256 fingerprint of the SSH key used to open the session (parsed
-from `SSH_USER_AUTH`, which requires `ExposeAuthInfo yes`) and sends
-it in **both** the `/pam/authorize` request issued at every SSH
-connection (PAM `account` phase) and the `/pam/verify` request issued
-on every LLNG-token operation (sudo, re-authentication).
+From plugin PamAccess 0.1.16 onwards, `pam_openbastion` forwards the
+SHA256 fingerprint of the SSH key used to open the session in **both**
+the `/pam/authorize` request issued at every SSH connection (PAM
+`account` phase) and the `/pam/verify` request issued on every
+LLNG-token operation (sudo, re-authentication).
+
+#### How the fingerprint is captured
+
+Modern OpenSSH (≥ 9.x) does **not** propagate the authentication info
+to the PAM environment during `pam_acct_mgmt` — `ExposeAuthInfo yes`
+is not sufficient on its own. The bastion therefore uses an explicit
+out-of-band channel:
+
+1. sshd invokes `AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f`
+   (deployed by `ob-bastion-setup` / `ob-backend-setup`). The `%f`
+   token is the SHA256 fingerprint of the client key or certificate
+   (not `%F`, which is the CA key's fingerprint).
+2. The helper writes the fingerprint to
+   `/run/open-bastion/ssh-fp/<sshd-session-pid>.fp` (atomic `mktemp` +
+   `mv`). The spool directory is owned by the
+   `AuthorizedPrincipalsCommandUser` (typically `nobody`) with mode
+   `0700`, so no other unprivileged user can pre-create or substitute
+   a drop file.
+3. `pam_openbastion` walks `/proc/<pid>/status` from its own PID up to
+   the `sshd-session` ancestor, reads the corresponding spool file,
+   validates it (regular file owned by the spool-dir owner, mode
+   `0600`, `nlink == 1`, strict `SHA256:<base64>` format, ≤ 512 B),
+   and forwards the fingerprint to LLNG.
+
+As a fallback, if a custom sshd variant does populate
+`SSH_USER_AUTH` with the content (`publickey <algo> SHA256:<fp>`), the
+module will parse it from there instead.
+
+#### Security properties
 
 LLNG rejects the call unless it finds a matching, non-revoked and
 non-expired SSH CA record in the user's persistent session
@@ -256,10 +284,19 @@ local `sshd` KRL check:
   the request would not match any `_sshCerts` entry of the token's
   `sub` user.
 
-No configuration change is required on the bastion side — as long as
-`ExposeAuthInfo yes` is set (already required for session auditing),
-the fingerprint is picked up automatically. The `fingerprint` field is
-optional on the LLNG side, so older portals remain compatible.
+#### Operational requirements
+
+- `ob-bastion-setup` / `ob-backend-setup` install
+  `/usr/local/sbin/ob-ssh-principals`, wire it as
+  `AuthorizedPrincipalsCommand`, and prepare the spool directory +
+  `/etc/tmpfiles.d/open-bastion-ssh-fp.conf` drop-in so that `/run`
+  gets the directory recreated at boot.
+- `ExposeAuthInfo yes` is **not** required for the fingerprint
+  binding itself (the helper + spool are self-sufficient); it remains
+  useful for session auditing.
+- The `fingerprint` field is optional on the LLNG side, so bastions
+  running on older portals that lack PamAccess 0.1.16 remain fully
+  compatible — the portal simply ignores it.
 
 ## Summary Table
 

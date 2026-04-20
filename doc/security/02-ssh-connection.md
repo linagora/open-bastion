@@ -258,7 +258,15 @@ curl -sf -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
 ### Binding fingerprint SSH sur `/pam/authorize` et `/pam/verify` (défense en profondeur)
 
-Depuis le plugin PamAccess ≥ 0.1.16, le module PAM `pam_openbastion` extrait l'empreinte SHA256 de la clef SSH utilisée pour la connexion (variable `SSH_USER_AUTH`, nécessite `ExposeAuthInfo yes`) et la transmet à LLNG dans le corps des requêtes `POST /pam/authorize` (phase `account`, à chaque connexion SSH) **et** `POST /pam/verify` (vérification d'un token PAM à usage unique pour sudo/ré-auth). Exemples :
+Depuis le plugin PamAccess ≥ 0.1.16, le module PAM `pam_openbastion` transmet à LLNG l'empreinte SHA256 de la clef SSH utilisée pour la connexion, dans le corps des requêtes `POST /pam/authorize` (phase `account`, à chaque connexion SSH) **et** `POST /pam/verify` (vérification d'un token PAM à usage unique pour sudo/ré-auth).
+
+**Récupération de l'empreinte côté bastion.** OpenSSH moderne (≥ 9.x) ne propage pas `SSH_USER_AUTH` à l'environnement PAM pendant `pam_acct_mgmt` — `ExposeAuthInfo yes` ne suffit donc pas. Le bastion utilise un canal explicite :
+
+1. `sshd` appelle `AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f` (déployé par `ob-bastion-setup` / `ob-backend-setup`). Le token `%f` est l'empreinte de la clef/du certificat client (pas `%F` qui désigne l'empreinte de la CA).
+2. Le helper écrit l'empreinte dans `/run/open-bastion/ssh-fp/<sshd-session-pid>.fp` de façon atomique (`mktemp` + `mv`). Le répertoire est la propriété de l'utilisateur `AuthorizedPrincipalsCommandUser` (typiquement `nobody`), en mode `0700` : aucun autre utilisateur local ne peut créer ou pré-positionner un fichier factice.
+3. `pam_openbastion` remonte `/proc/<pid>/status` depuis son propre PID jusqu'à l'ancêtre `sshd-session` et lit le fichier spool. Il valide strictement : fichier régulier appartenant à l'owner du répertoire, mode `0600`, `nlink == 1`, format `SHA256:<base64>`, taille ≤ 512 octets.
+
+En repli, si un `sshd` patché peuple réellement `SSH_USER_AUTH` avec le contenu, le module extrait l'empreinte depuis cette variable. Exemples de corps de requête envoyés :
 
 ```json
 // POST /pam/authorize — ouverture de session SSH
@@ -300,7 +308,7 @@ Si l'une des conditions 2-4 n'est pas remplie :
 | **Binding fingerprint `/pam/verify`**     | **LLNG** | **sudo / ré-authentification par token : rejet si le cert de la session SSH est inconnu, révoqué ou expiré côté LLNG**                                |
 | **Présence dans la session persistante**  | **LLNG** | **Token volé à un utilisateur et rejoué depuis une autre clef SSH : l'empreinte ne correspond à aucun cert du `sub` du token**                        |
 
-Cette couche est activée automatiquement côté bastion dès que `ExposeAuthInfo yes` est configuré (déjà requis pour l'audit des sessions) ; côté LLNG, l'ancien comportement est préservé si le client n'envoie pas le champ `fingerprint` (rétrocompatibilité).
+`ob-bastion-setup` et `ob-backend-setup` déploient automatiquement `ob-ssh-principals` + le répertoire spool (mode `0700`, propriétaire `nobody`) + un drop-in `/etc/tmpfiles.d/` pour recréation au boot. Côté LLNG, le champ `fingerprint` reste optionnel : un bastion à jour contre un portail antérieur à PamAccess 0.1.16 reste compatible (le portail ignore simplement le champ).
 
 ---
 
