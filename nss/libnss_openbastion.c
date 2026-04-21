@@ -46,6 +46,14 @@
 #define DEFAULT_SHELL "/bin/bash"
 #define DEFAULT_HOME_BASE "/home"
 #define DEFAULT_MIN_UID 10000
+
+/*
+ * Default path to the Open Bastion service-accounts configuration. Can be
+ * overridden in nss_openbastion.conf with `service_accounts_file = …`
+ * (same key name pam_openbastion uses) so both modules keep a consistent
+ * view of which file is authoritative.
+ */
+#define DEFAULT_SERVICE_ACCOUNTS_CONF_FILE "/etc/open-bastion/service-accounts.conf"
 #define DEFAULT_MAX_UID 60000
 
 /* Reserved UID for 'nobody' user - must never be assigned */
@@ -67,6 +75,7 @@ typedef struct {
     uid_t min_uid;
     uid_t max_uid;
     gid_t default_gid;
+    char *service_accounts_file;  /* Local service accounts config */
 } nss_llng_config_t;
 
 /* Cache entry */
@@ -514,6 +523,10 @@ static int load_config(nss_llng_config_t *config)
                 config->default_gid = default_gid;
             }
         }
+        else if (strcmp(key, "service_accounts_file") == 0) {
+            free(config->service_accounts_file);
+            config->service_accounts_file = strdup(value);
+        }
     }
 
     fclose(f);
@@ -529,6 +542,9 @@ static int load_config(nss_llng_config_t *config)
     }
     if (!config->default_home_base) {
         config->default_home_base = strdup(DEFAULT_HOME_BASE);
+    }
+    if (!config->service_accounts_file) {
+        config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_CONF_FILE);
     }
 
     return (config->portal_url && config->server_token) ? 0 : -1;
@@ -854,16 +870,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     return realsize;
 }
 
-/*
- * Path to the Open Bastion service-accounts configuration. The file is
- * 0600 root:root, so this lookup only succeeds when libnss_openbastion
- * runs inside a root-owned process (e.g. sshd during pre-auth user
- * validation). Unprivileged callers silently fall through to the LLNG
- * query, which is the behaviour we want: service accounts are a host-
- * local concept, there is no reason for normal users to resolve them.
- */
-#define SERVICE_ACCOUNTS_CONF_FILE "/etc/open-bastion/service-accounts.conf"
-
 /* Minimal in-place trim used by the .conf parser below. */
 static char *sa_trim(char *s)
 {
@@ -909,12 +915,26 @@ static int query_service_account(const char *username, struct passwd *pw,
         if (!islower(c) && !isdigit(c) && c != '_' && c != '-') return -1;
     }
 
-    int fd = open(SERVICE_ACCOUNTS_CONF_FILE, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    const char *conf_path = g_config.service_accounts_file
+                            ? g_config.service_accounts_file
+                            : DEFAULT_SERVICE_ACCOUNTS_CONF_FILE;
+
+    int fd = open(conf_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) return -1;
 
-    /* Ownership guard: must be root-owned regular file. */
+    /*
+     * Strict guard: must be a regular root:root file with exact 0600
+     * permissions. Anything more permissive is refused — unprivileged
+     * callers must NOT be able to pull service-account data out of this
+     * file via a misconfigured mode, and pam_openbastion applies the
+     * same contract on its side.
+     */
     struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0) {
+    if (fstat(fd, &st) != 0 ||
+        !S_ISREG(st.st_mode) ||
+        st.st_uid != 0 ||
+        st.st_gid != 0 ||
+        (st.st_mode & 0777) != (S_IRUSR | S_IWUSR)) {
         close(fd);
         return -1;
     }
@@ -1340,10 +1360,16 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
      * deliberately unknown to LLNG and exist only on this host. We only
      * get an answer when the calling process can read the 0600 config
      * file (typically sshd during pre-auth getpwnam()).
+     *
+     * Deliberately skip file_cache_save() here: the shared file cache
+     * lives under /var/cache/nss_llng with 0755 dir and 0644 entries,
+     * so persisting service-account metadata there would expose it to
+     * unprivileged users on the host (including the uid → name reverse
+     * lookup). Keeping it in the per-process in-memory cache only is
+     * sufficient for the one-shot sshd pre-auth getpwnam() path.
      */
     if (query_service_account(name, result, buffer, buflen) == 0) {
         cache_add(name, result, 1);
-        file_cache_save(result);
         g_in_nss_lookup = 0;
         return NSS_STATUS_SUCCESS;
     }

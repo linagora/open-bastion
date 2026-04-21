@@ -1126,7 +1126,7 @@ test_service_account_bad_key_rejected() {
     rm -f "$bad_key" "${bad_key}.pub"
     ssh-keygen -t ed25519 -f "$bad_key" -N "" -q
 
-    local output rc
+    local output rc=0
     output=$(ssh -i "$bad_key" \
                  -o IdentitiesOnly=yes \
                  -o StrictHostKeyChecking=no \
@@ -1135,8 +1135,7 @@ test_service_account_bad_key_rejected() {
                  -o ConnectTimeout=10 \
                  -p 2222 \
                  "${SVC_ACCOUNT}@localhost" \
-                 "echo SHOULD_NEVER_PRINT" 2>&1) || true
-    rc=$?
+                 "echo SHOULD_NEVER_PRINT" 2>&1) || rc=$?
     rm -f "$bad_key" "${bad_key}.pub"
     log_verbose "SSH(bad key) rc=$rc output: $output"
 

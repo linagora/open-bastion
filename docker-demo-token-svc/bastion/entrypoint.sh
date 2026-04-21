@@ -326,9 +326,16 @@ session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
 EOF
 
-# Fix session recording directory permissions
+# Session recording directory: match production permissions
+# (1770 root:ob-sessions). Only root and the recorder group may write
+# there — regular users cannot fill the volume or interfere with
+# recorder output.
+if ! getent group ob-sessions >/dev/null 2>&1; then
+    groupadd --system ob-sessions
+fi
 mkdir -p /var/lib/open-bastion/sessions
-chmod 1777 /var/lib/open-bastion/sessions
+chown root:ob-sessions /var/lib/open-bastion/sessions
+chmod 1770 /var/lib/open-bastion/sessions
 
 # Ensure sshd_config.d is included
 if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
