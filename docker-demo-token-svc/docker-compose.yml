@@ -1,0 +1,91 @@
+# Open Bastion Token-based Authentication Demo + Service Accounts
+#
+# Same as docker-demo-token (LLNG tokens used as SSH passwords for human
+# users) plus local service accounts (ansible, backup, ...) declared in
+# /etc/open-bastion/service-accounts.conf and authenticated via a plain
+# SSH key that is NOT signed by any SSH CA.
+#
+# Architecture:
+#   - sso:     LLNG Portal (PAM Access + Device Authorization, no SSH CA)
+#   - bastion: token-auth SSH bastion, also serves service-account keys
+#   - backend: token-auth SSH backend, also serves service-account keys
+#
+# Usage:
+#   docker compose up -d
+#   # Regular user (token as password):
+#   #   llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
+#   #   ssh -p 2222 dwho@localhost
+#   # Service account (SSH key):
+#   #   docker exec ob-token-svc-bastion sh -c '...populate service-accounts.conf...'
+#   #   ssh -p 2222 -i ~/.ssh/ansible-ci ansible-ci@localhost
+
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    image: ob-token-svc-sso
+    container_name: ob-token-svc-sso
+    ports:
+      - "80:8080"
+    volumes:
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      ob-token-svc-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  bastion:
+    build:
+      context: ..
+      dockerfile: docker-demo-token-svc/bastion/Dockerfile
+    image: ob-token-svc-bastion
+    container_name: ob-token-svc-bastion
+    ports:
+      - "2222:22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_GROUP=bastion
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    networks:
+      - ob-token-svc-net
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker-demo-token-svc/backend/Dockerfile
+    image: ob-token-svc-backend
+    container_name: ob-token-svc-backend
+    expose:
+      - "22"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_GROUP=backend
+      - LLNG_CLIENT_ID=pam-access
+      - LLNG_CLIENT_SECRET=pamsecret
+      - LLNG_ADMIN_USER=dwho
+      - LLNG_ADMIN_PASSWORD=dwho
+    networks:
+      - ob-token-svc-net
+
+networks:
+  ob-token-svc-net:
+    driver: bridge

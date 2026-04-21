@@ -1,0 +1,304 @@
+#!/bin/bash
+# LLNG Backend Entrypoint - Token-based authentication
+# Uses LLNG tokens as SSH passwords (no SSH certificates)
+
+set -e
+
+PORTAL_URL="${LLNG_PORTAL_URL:-http://sso}"
+SERVER_GROUP="${LLNG_SERVER_GROUP:-backend}"
+CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
+CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
+ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
+ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
+TOKEN_FILE="/etc/open-bastion/server_token.json"
+
+echo "=== LLNG Backend Starting (Token Auth Mode) ==="
+echo "Portal URL: $PORTAL_URL"
+echo "Server Group: $SERVER_GROUP"
+
+# Wait for SSO to be available
+echo "Waiting for SSO..."
+for i in {1..60}; do
+    if curl -sf "$PORTAL_URL/" >/dev/null 2>&1; then
+        echo "SSO is available"
+        break
+    fi
+    sleep 1
+done
+
+# Configure sshd for password authentication via PAM
+cat > /etc/ssh/sshd_config.d/llng-backend.conf << EOF
+# LemonLDAP::NG Backend Configuration (Token Auth Mode)
+
+# Disable public key authentication
+PubkeyAuthentication no
+
+# Enable password authentication via PAM
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+
+# No agent forwarding on backend
+AllowAgentForwarding no
+
+# Use PAM for authentication AND authorization
+UsePAM yes
+
+# Security settings
+X11Forwarding no
+PermitRootLogin no
+
+# Accept bastion JWT environment variable from SSH connection
+AcceptEnv LLNG_BASTION_JWT
+EOF
+
+# Enroll server via Device Authorization Grant
+echo "=== Server Enrollment via Device Authorization ==="
+COOKIE_FILE="/tmp/admin_cookies"
+touch "$COOKIE_FILE"
+
+# Step 1: Get login token
+echo "Getting login token..."
+LOGIN_TOKEN=$(curl -s "$PORTAL_URL/" | grep -oP 'name="token" value="\K[^"]+' | head -1)
+echo "  Token: $LOGIN_TOKEN"
+
+# Step 2: Login as admin (don't follow redirect, cookie is set on 302 response)
+echo "Logging in as $ADMIN_USER..."
+LOGIN_RESP=$(curl -s -c "$COOKIE_FILE" \
+    -d "user=$ADMIN_USER" \
+    -d "password=$ADMIN_PASSWORD" \
+    -d "token=$LOGIN_TOKEN" \
+    "$PORTAL_URL/")
+
+# Verify login succeeded by checking cookie file
+if grep -q "lemonldap" "$COOKIE_FILE"; then
+    echo "Admin login successful"
+else
+    echo "ERROR: Failed to login as admin"
+    echo "Cookie file contents:"
+    cat "$COOKIE_FILE" || true
+    exit 1
+fi
+
+# Step 3: Initiate Device Authorization Grant with PKCE
+echo "Initiating Device Authorization Grant..."
+
+# Generate PKCE code_verifier (43-128 chars, URL-safe)
+CODE_VERIFIER=$(head -c 32 /dev/urandom | base64 | tr -d '=' | tr '+/' '-_')
+echo "  Generated code_verifier"
+
+# Calculate code_challenge = BASE64URL(SHA256(code_verifier))
+CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl sha256 -binary | base64 | tr -d '=' | tr '+/' '-_')
+echo "  Generated code_challenge"
+
+DEVICE_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
+    -d "client_id=$CLIENT_ID" \
+    -d "client_secret=$CLIENT_SECRET" \
+    -d "scope=pam pam:server" \
+    -d "code_challenge=$CODE_CHALLENGE" \
+    -d "code_challenge_method=S256")
+echo "  Device response: $DEVICE_RESP"
+
+DEVICE_CODE=$(echo "$DEVICE_RESP" | jq -r '.device_code // empty')
+USER_CODE=$(echo "$DEVICE_RESP" | jq -r '.user_code // empty')
+
+if [ -z "$DEVICE_CODE" ] || [ -z "$USER_CODE" ]; then
+    echo "ERROR: Failed to get device code"
+    echo "Response: $DEVICE_RESP"
+    exit 1
+fi
+
+echo "Device code obtained, user code: $USER_CODE"
+
+# Step 4: Approve the device code as admin
+# Remove dashes from user_code for URL
+USER_CODE_CLEAN=$(echo "$USER_CODE" | tr -d '-')
+
+echo "Approving device code..."
+# First GET the device page to get the form token
+DEVICE_PAGE=$(curl -s -b "$COOKIE_FILE" "$PORTAL_URL/device?user_code=$USER_CODE_CLEAN")
+FORM_TOKEN=$(echo "$DEVICE_PAGE" | grep -oP 'name="token" value="\K[^"]+' | head -1)
+
+# POST approval
+APPROVE_RESP=$(curl -s -b "$COOKIE_FILE" -X POST "$PORTAL_URL/device" \
+    -d "user_code=$USER_CODE_CLEAN" \
+    -d "action=approve" \
+    -d "token=$FORM_TOKEN")
+
+if echo "$APPROVE_RESP" | grep -q "approved\|success\|authorized"; then
+    echo "Device code approved"
+else
+    # Check if approval worked by trying to get token
+    echo "Checking approval status..."
+fi
+
+# Step 5: Poll for access token
+echo "Polling for access token..."
+for i in {1..30}; do
+    TOKEN_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/token" \
+        -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+        -d "device_code=$DEVICE_CODE" \
+        -d "client_id=$CLIENT_ID" \
+        -d "client_secret=$CLIENT_SECRET" \
+        -d "code_verifier=$CODE_VERIFIER")
+
+    ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
+
+    if [ -n "$ACCESS_TOKEN" ]; then
+        echo "Access token obtained!"
+        # Extract additional token info
+        REFRESH_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.refresh_token // empty')
+        EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // 3600')
+        NOW=$(date +%s)
+        EXPIRES_AT=$((NOW + EXPIRES_IN))
+        # Save in JSON format with metadata
+        cat > "$TOKEN_FILE" << TOKENEOF
+{
+  "access_token": "$ACCESS_TOKEN",
+  "refresh_token": "${REFRESH_TOKEN:-}",
+  "expires_at": $EXPIRES_AT,
+  "enrolled_at": $NOW
+}
+TOKENEOF
+        chmod 600 "$TOKEN_FILE"
+        echo "Token saved in JSON format (expires at: $(date -d "@$EXPIRES_AT" 2>/dev/null || echo "$EXPIRES_AT"))"
+        break
+    fi
+
+    ERROR=$(echo "$TOKEN_RESP" | jq -r '.error // empty')
+    if [ "$ERROR" = "authorization_pending" ] || [ "$ERROR" = "slow_down" ]; then
+        sleep 2
+    elif [ -n "$ERROR" ]; then
+        echo "ERROR: Token request failed: $ERROR"
+        echo "Response: $TOKEN_RESP"
+        exit 1
+    fi
+done
+
+if [ ! -f "$TOKEN_FILE" ]; then
+    echo "ERROR: Failed to obtain access token after polling"
+    exit 1
+fi
+
+echo "Server enrollment complete"
+rm -f "$COOKIE_FILE"
+
+# Create PAM Open Bastion configuration
+mkdir -p /etc/open-bastion
+cat > /etc/open-bastion/openbastion.conf << EOF
+# Open Bastion PAM configuration for Backend (Token Auth Mode)
+
+portal_url = $PORTAL_URL
+server_group = $SERVER_GROUP
+
+# Client credentials
+client_id = $CLIENT_ID
+client_secret = $CLIENT_SECRET
+
+# Server token for authorization
+server_token_file = $TOKEN_FILE
+
+# HTTP settings
+timeout = 10
+verify_ssl = false
+
+# Cache settings
+cache_enabled = true
+cache_dir = /var/cache/open-bastion
+cache_ttl = 300
+
+# User creation
+create_user = true
+create_home = true
+default_shell = /bin/bash
+
+# Bastion JWT verification (require connection from authorized bastion)
+bastion_jwt_required = true
+bastion_jwt_issuer = $PORTAL_URL
+bastion_jwt_jwks_url = $PORTAL_URL/.well-known/jwks.json
+bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
+bastion_jwt_cache_ttl = 3600
+bastion_jwt_clock_skew = 60
+
+# Logging
+log_level = info
+EOF
+
+chmod 600 /etc/open-bastion/openbastion.conf
+
+# Create NSS Open Bastion configuration
+cat > /etc/open-bastion/nss_openbastion.conf << EOF
+# Open Bastion NSS configuration
+
+portal_url = $PORTAL_URL
+server_token_file = $TOKEN_FILE
+
+# Cache settings
+cache_ttl = 300
+
+# UID/GID range for dynamic users
+min_uid = 10000
+max_uid = 60000
+default_gid = 100
+
+# Defaults
+default_shell = /bin/bash
+default_home_base = /home
+EOF
+
+chmod 644 /etc/open-bastion/nss_openbastion.conf
+
+# Configure NSS to use Open Bastion for user/group resolution
+sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
+sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
+echo "NSS configured to use Open Bastion"
+
+# Start nscd for caching NSS lookups (runs as root, can read server token)
+if command -v nscd >/dev/null 2>&1; then
+    mkdir -p /var/run/nscd
+    nscd -i passwd 2>/dev/null || true
+    nscd 2>/dev/null &
+    echo "nscd started for NSS caching"
+fi
+
+# Configure PAM for token-based authentication
+# pam_openbastion.so in auth validates the LLNG token as password
+cat > /etc/pam.d/sshd << EOF
+# PAM configuration for SSH with Open Bastion (Token Auth Mode)
+# User enters their LLNG token as password
+
+# Authentication: LLNG token validation
+auth       sufficient   pam_openbastion.so
+auth       required     pam_deny.so
+
+# Authorization: LLNG checks user access to server group
+account    required     pam_openbastion.so
+
+# Session management
+session    required     pam_unix.so
+session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
+EOF
+
+# Ensure sshd_config.d is included
+if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
+    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+fi
+
+# NSS module resolves users dynamically from LLNG
+echo "Testing NSS module..."
+if getent passwd dwho >/dev/null 2>&1; then
+    echo "  NSS module working: $(getent passwd dwho)"
+else
+    echo "  ERROR: NSS module not resolving users from LLNG"
+    exit 1
+fi
+
+echo "=== Backend Configuration Complete (Token Auth Mode) ==="
+echo "SSH listening on port 22"
+echo "Users connect with their LLNG token as password"
+echo "Sudo available for authorized users (rtyler)"
+echo ""
+echo "Bastion JWT verification ENABLED"
+echo "Direct SSH connections without valid bastion JWT will be DENIED"
+
+# Execute the command (sshd)
+exec "$@"

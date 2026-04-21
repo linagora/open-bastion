@@ -1,0 +1,357 @@
+#!/bin/bash
+# LLNG Bastion Entrypoint - Token-based authentication
+# Uses LLNG tokens as SSH passwords (no SSH certificates)
+
+set -e
+
+PORTAL_URL="${LLNG_PORTAL_URL:-http://sso}"
+SERVER_GROUP="${LLNG_SERVER_GROUP:-bastion}"
+CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
+CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
+ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
+ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
+TOKEN_FILE="/etc/open-bastion/server_token.json"
+
+echo "=== LLNG Bastion Starting (Token Auth Mode) ==="
+echo "Portal URL: $PORTAL_URL"
+echo "Server Group: $SERVER_GROUP"
+
+# Wait for SSO to be available
+echo "Waiting for SSO..."
+for i in {1..60}; do
+    if curl -sf "$PORTAL_URL/" >/dev/null 2>&1; then
+        echo "SSO is available"
+        break
+    fi
+    sleep 1
+done
+
+# Configure sshd for both password (human users) and pubkey (service
+# accounts) auth. AuthorizedKeysCommand yields a key only for usernames
+# declared in /etc/open-bastion/service-accounts.conf, so plain pubkey
+# auth is effectively restricted to those service accounts.
+cat > /etc/ssh/sshd_config.d/llng-bastion.conf << EOF
+# LemonLDAP::NG Bastion Configuration (Token Auth Mode + Service Accounts)
+
+# Enable public key authentication for service accounts. AuthorizedKeysFile
+# is "none" - sshd only resolves authorized keys via AuthorizedKeysCommand,
+# which is scoped to registered service accounts.
+PubkeyAuthentication yes
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/ob-service-account-keys %u
+AuthorizedKeysCommandUser nobody
+
+# Expose SSH auth details to PAM so pam_openbastion can re-verify the
+# public-key fingerprint from SSH_USER_AUTH against service-accounts.conf
+# in pam_sm_acct_mgmt (defense-in-depth).
+ExposeAuthInfo yes
+
+# Enable password authentication via PAM (LLNG token as password)
+PasswordAuthentication yes
+KbdInteractiveAuthentication yes
+
+# Allow agent forwarding for ProxyJump to backend
+AllowAgentForwarding yes
+AllowTcpForwarding yes
+
+# Use PAM for authentication AND authorization
+UsePAM yes
+
+# Security settings
+X11Forwarding no
+PermitRootLogin no
+EOF
+
+# Enroll server via Device Authorization Grant
+echo "=== Server Enrollment via Device Authorization ==="
+COOKIE_FILE="/tmp/admin_cookies"
+touch "$COOKIE_FILE"
+
+# Step 1: Get login token
+echo "Getting login token..."
+LOGIN_TOKEN=$(curl -s "$PORTAL_URL/" | grep -oP 'name="token" value="\K[^"]+' | head -1)
+echo "  Token: $LOGIN_TOKEN"
+
+# Step 2: Login as admin (don't follow redirect, cookie is set on 302 response)
+echo "Logging in as $ADMIN_USER..."
+LOGIN_RESP=$(curl -s -c "$COOKIE_FILE" \
+    -d "user=$ADMIN_USER" \
+    -d "password=$ADMIN_PASSWORD" \
+    -d "token=$LOGIN_TOKEN" \
+    "$PORTAL_URL/")
+
+# Verify login succeeded by checking cookie file
+if grep -q "lemonldap" "$COOKIE_FILE"; then
+    echo "Admin login successful"
+else
+    echo "ERROR: Failed to login as admin"
+    echo "Cookie file contents:"
+    cat "$COOKIE_FILE" || true
+    exit 1
+fi
+
+# Step 3: Initiate Device Authorization Grant with PKCE (RFC 7636)
+echo "Initiating Device Authorization Grant with PKCE..."
+
+# Generate PKCE code_verifier (32 bytes of random data, base64url encoded)
+CODE_VERIFIER=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+# Generate code_challenge = BASE64URL(SHA256(code_verifier))
+CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+echo "  PKCE enabled (code_challenge_method=S256)"
+
+DEVICE_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
+    -d "client_id=$CLIENT_ID" \
+    -d "client_secret=$CLIENT_SECRET" \
+    -d "scope=pam pam:server" \
+    -d "code_challenge=$CODE_CHALLENGE" \
+    -d "code_challenge_method=S256")
+echo "  Device response: $DEVICE_RESP"
+
+DEVICE_CODE=$(echo "$DEVICE_RESP" | jq -r '.device_code // empty')
+USER_CODE=$(echo "$DEVICE_RESP" | jq -r '.user_code // empty')
+
+if [ -z "$DEVICE_CODE" ] || [ -z "$USER_CODE" ]; then
+    echo "ERROR: Failed to get device code"
+    echo "Response: $DEVICE_RESP"
+    exit 1
+fi
+
+echo "Device code obtained, user code: $USER_CODE"
+
+# Step 4: Approve the device code as admin
+# Remove dashes from user_code for URL
+USER_CODE_CLEAN=$(echo "$USER_CODE" | tr -d '-')
+
+echo "Approving device code..."
+# First GET the device page to get the form token
+DEVICE_PAGE=$(curl -s -b "$COOKIE_FILE" "$PORTAL_URL/device?user_code=$USER_CODE_CLEAN")
+FORM_TOKEN=$(echo "$DEVICE_PAGE" | grep -oP 'name="token" value="\K[^"]+' | head -1)
+
+# POST approval
+APPROVE_RESP=$(curl -s -b "$COOKIE_FILE" -X POST "$PORTAL_URL/device" \
+    -d "user_code=$USER_CODE_CLEAN" \
+    -d "action=approve" \
+    -d "token=$FORM_TOKEN")
+
+if echo "$APPROVE_RESP" | grep -q "approved\|success\|authorized"; then
+    echo "Device code approved"
+else
+    # Check if approval worked by trying to get token
+    echo "Checking approval status..."
+fi
+
+# Step 5: Poll for access token (with PKCE code_verifier)
+echo "Polling for access token..."
+for i in {1..30}; do
+    TOKEN_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/token" \
+        -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+        -d "device_code=$DEVICE_CODE" \
+        -d "client_id=$CLIENT_ID" \
+        -d "client_secret=$CLIENT_SECRET" \
+        -d "code_verifier=$CODE_VERIFIER")
+
+    ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
+
+    if [ -n "$ACCESS_TOKEN" ]; then
+        echo "Access token obtained!"
+        # Extract additional token info
+        REFRESH_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.refresh_token // empty')
+        EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // 3600')
+        NOW=$(date +%s)
+        EXPIRES_AT=$((NOW + EXPIRES_IN))
+        # Save in JSON format with metadata
+        cat > "$TOKEN_FILE" << TOKENEOF
+{
+  "access_token": "$ACCESS_TOKEN",
+  "refresh_token": "${REFRESH_TOKEN:-}",
+  "expires_at": $EXPIRES_AT,
+  "enrolled_at": $NOW
+}
+TOKENEOF
+        chmod 600 "$TOKEN_FILE"
+        echo "Token saved in JSON format (expires at: $(date -d "@$EXPIRES_AT" 2>/dev/null || echo "$EXPIRES_AT"))"
+        break
+    fi
+
+    ERROR=$(echo "$TOKEN_RESP" | jq -r '.error // empty')
+    if [ "$ERROR" = "authorization_pending" ] || [ "$ERROR" = "slow_down" ]; then
+        sleep 2
+    elif [ -n "$ERROR" ]; then
+        echo "ERROR: Token request failed: $ERROR"
+        echo "Response: $TOKEN_RESP"
+        exit 1
+    fi
+done
+
+if [ ! -f "$TOKEN_FILE" ]; then
+    echo "ERROR: Failed to obtain access token after polling"
+    exit 1
+fi
+
+echo "Server enrollment complete"
+rm -f "$COOKIE_FILE"
+
+# Create PAM Open Bastion configuration
+mkdir -p /etc/open-bastion
+cat > /etc/open-bastion/openbastion.conf << EOF
+# Open Bastion PAM configuration for Bastion (Token Auth Mode)
+
+portal_url = $PORTAL_URL
+server_group = $SERVER_GROUP
+
+# Client credentials
+client_id = $CLIENT_ID
+client_secret = $CLIENT_SECRET
+
+# Server token for authorization
+server_token_file = $TOKEN_FILE
+
+# HTTP settings
+timeout = 10
+verify_ssl = false
+
+# Cache settings
+cache_enabled = true
+cache_dir = /var/cache/open-bastion
+cache_ttl = 300
+
+# Service accounts (ansible, backup, ...). Initially empty; the integration
+# test populates this file at runtime with a real fingerprint + matching
+# public key in /etc/open-bastion/service-accounts.d/.
+service_accounts_file = /etc/open-bastion/service-accounts.conf
+
+# Auto-create the local Unix account on first login. Required for service
+# accounts unknown to LLNG (pam_openbastion uses the uid/gid declared in
+# service-accounts.conf instead of NSS).
+create_user = true
+create_home = true
+default_shell = /bin/bash
+
+# Logging
+log_level = info
+EOF
+
+chmod 600 /etc/open-bastion/openbastion.conf
+
+# Root-owned, empty service-accounts.conf so pam_openbastion's permission
+# check (root:root, 0600) succeeds at module init even when no service
+# account is registered yet.
+if [ ! -f /etc/open-bastion/service-accounts.conf ]; then
+    : > /etc/open-bastion/service-accounts.conf
+    chown root:root /etc/open-bastion/service-accounts.conf
+    chmod 600 /etc/open-bastion/service-accounts.conf
+fi
+
+# Directory consumed by ob-service-account-keys (AuthorizedKeysCommand).
+# Traversable by the AuthorizedKeysCommandUser (nobody); .pub files are
+# root:root 0644.
+mkdir -p /etc/open-bastion/service-accounts.d
+chown root:root /etc/open-bastion/service-accounts.d
+chmod 755 /etc/open-bastion/service-accounts.d
+
+# Create NSS Open Bastion configuration
+cat > /etc/open-bastion/nss_openbastion.conf << EOF
+# Open Bastion NSS configuration
+
+portal_url = $PORTAL_URL
+server_token_file = $TOKEN_FILE
+
+# Cache settings
+cache_ttl = 300
+
+# UID/GID range for dynamic users
+min_uid = 10000
+max_uid = 60000
+default_gid = 100
+
+# Defaults
+default_shell = /bin/bash
+default_home_base = /home
+EOF
+
+chmod 644 /etc/open-bastion/nss_openbastion.conf
+
+# Create SSH proxy configuration for bastion-to-backend connections
+cat > /etc/open-bastion/ssh-proxy.conf << EOF
+# Open Bastion SSH Proxy configuration
+# Used by ob-ssh-proxy to request JWT for bastion-to-backend auth
+
+PORTAL_URL=$PORTAL_URL
+SERVER_TOKEN_FILE=$TOKEN_FILE
+SERVER_GROUP=$SERVER_GROUP
+TARGET_GROUP=backend
+TIMEOUT=10
+VERIFY_SSL=false
+SSH_OPTIONS="-o StrictHostKeyChecking=no"
+DEBUG=false
+EOF
+chmod 644 /etc/open-bastion/ssh-proxy.conf
+echo "SSH proxy configured for bastion-to-backend authentication"
+
+# Configure NSS to use Open Bastion for user/group resolution
+sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
+sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
+echo "NSS configured to use Open Bastion"
+
+# Start nscd for caching NSS lookups (runs as root, can read server token)
+if command -v nscd >/dev/null 2>&1; then
+    mkdir -p /var/run/nscd
+    nscd -i passwd 2>/dev/null || true
+    nscd 2>/dev/null &
+    echo "nscd started for NSS caching"
+fi
+
+# Configure PAM for token-based authentication + service accounts.
+# Human users: pam_openbastion validates the LLNG token (password auth).
+# Service accounts: sshd accepted the key via AuthorizedKeysCommand; for
+# pubkey auth sshd does NOT call pam_authenticate, so the marker and
+# gecos/shell/home data are populated in pam_sm_acct_mgmt. The session
+# phase materialises the local Unix account using the uid/gid declared
+# in service-accounts.conf (pam_openbastion.so create_user=true).
+cat > /etc/pam.d/sshd << EOF
+# PAM configuration for SSH with Open Bastion
+# (Token Auth Mode + Service Accounts)
+
+# Authentication: LLNG token validation (human users only — pubkey auth
+# skips this phase, see pam_sm_acct_mgmt for service-account handling).
+auth       sufficient   pam_openbastion.so
+auth       required     pam_deny.so
+
+# Authorization: LLNG / service-account check
+account    required     pam_openbastion.so
+
+# Session: auto-create the Unix account on first login
+session    required     pam_openbastion.so create_user=true
+session    required     pam_unix.so
+session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022
+EOF
+
+# Fix session recording directory permissions
+mkdir -p /var/lib/open-bastion/sessions
+chmod 1777 /var/lib/open-bastion/sessions
+
+# Ensure sshd_config.d is included
+if ! grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config; then
+    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+fi
+
+# NSS module resolves users dynamically from LLNG
+echo "Testing NSS module..."
+if getent passwd dwho >/dev/null 2>&1; then
+    echo "  NSS module working: $(getent passwd dwho)"
+else
+    echo "  ERROR: NSS module not resolving users from LLNG"
+    exit 1
+fi
+
+echo "=== Bastion Configuration Complete (Token Auth Mode) ==="
+echo "SSH listening on port 22"
+echo "Users connect with: ssh -p 2222 <username>@localhost"
+echo "Password: Use your LLNG access token"
+echo ""
+echo "To connect to backend via bastion:"
+echo "  From bastion: ob-ssh-proxy backend"
+echo "  Or: ssh -o ProxyCommand='ob-ssh-proxy %h %p' backend"
+
+# Execute the command (sshd)
+exec "$@"
