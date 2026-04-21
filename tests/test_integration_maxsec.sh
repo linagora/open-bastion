@@ -64,6 +64,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="$PROJECT_DIR/docker-demo-maxsec"
 COOKIE_FILE="/tmp/llng-test-cookies"
 TEST_KEY="/tmp/test_integration_key"
+SVC_KEY="/tmp/test_integration_svc_key"
 
 # Test configuration
 PORTAL_URL="http://localhost:80"
@@ -71,6 +72,13 @@ TEST_USER="dwho"
 TEST_PASSWORD="dwho"
 CLIENT_ID="pam-access"
 CLIENT_SECRET="pamsecret"
+
+# Service account used for the SSH-key-only scenario. Intentionally a user
+# unknown to LLNG: only service-accounts.conf + the matching .pub key on
+# the bastion grant access.
+SVC_ACCOUNT="ansible-ci"
+SVC_UID=5000
+SVC_GID=5000
 
 log() {
     echo -e "${GREEN}[TEST]${NC} $*"
@@ -105,7 +113,8 @@ fail() {
 
 cleanup() {
     log "Cleaning up..."
-    rm -f "$COOKIE_FILE" "${TEST_KEY}" "${TEST_KEY}.pub" "${TEST_KEY}-cert.pub" 2>/dev/null || true
+    rm -f "$COOKIE_FILE" "${TEST_KEY}" "${TEST_KEY}.pub" "${TEST_KEY}-cert.pub" \
+          "${SVC_KEY}" "${SVC_KEY}.pub" 2>/dev/null || true
 
     if [[ $KEEP_CONTAINERS -eq 0 ]]; then
         log "Stopping containers..."
@@ -866,6 +875,285 @@ test_password_auth_disabled() {
 }
 
 # =============================================================================
+# Service-account test cases
+# =============================================================================
+#
+# Scenario: an ansible-style service account is registered ONLY locally on
+# the bastion (service-accounts.conf + .pub). LLNG does NOT know this user.
+# We then verify:
+#   1. SSH with the plain (non-SSO-signed) key is accepted thanks to
+#      AuthorizedKeysCommand + service-accounts.conf fingerprint matching.
+#   2. pam_openbastion materialises the local Unix account in /etc/passwd
+#      on first login using the uid/gid from service-accounts.conf
+#      (service-account NSS resolution is impossible).
+#   3. `sudo -n` from that session works without a password (sudo_nopasswd
+#      path in pam_openbastion auth) and yields uid 0.
+
+svc_provision_on_bastion() {
+    local pubkey
+    pubkey=$(cat "${SVC_KEY}.pub")
+
+    # service-accounts.conf: must be root:root 0600 (pam_openbastion enforces this).
+    # NOTE: use `docker exec -i sh -c` and a heredoc so special chars in the key
+    # don't break the shell; pubkey comes from our own file so it's trusted.
+    docker exec -i ob-maxsec-bastion sh -c "cat > /etc/open-bastion/service-accounts.conf" <<EOF
+[${SVC_ACCOUNT}]
+key_fingerprint = $(ssh-keygen -l -E sha256 -f "${SVC_KEY}.pub" | awk '{print $2}')
+sudo_allowed = true
+sudo_nopasswd = true
+gecos = CI service account
+shell = /bin/bash
+home = /home/${SVC_ACCOUNT}
+uid = ${SVC_UID}
+gid = ${SVC_GID}
+EOF
+    docker exec ob-maxsec-bastion chown root:root /etc/open-bastion/service-accounts.conf
+    docker exec ob-maxsec-bastion chmod 600 /etc/open-bastion/service-accounts.conf
+
+    # Public key file consumed by ob-service-account-keys (AuthorizedKeysCommand).
+    docker exec -i ob-maxsec-bastion sh -c \
+        "cat > /etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub" <<< "$pubkey"
+    docker exec ob-maxsec-bastion chown root:root \
+        "/etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub"
+    docker exec ob-maxsec-bastion chmod 644 \
+        "/etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub"
+
+    # sudoers NOPASSWD rule. sudo(8) decides whether to prompt for a
+    # password from sudoers BEFORE it invokes the PAM stack, so
+    # pam_openbastion's service-account sudo_nopasswd logic is necessary
+    # but not sufficient: we also need an explicit NOPASSWD entry here.
+    #
+    # The maxsec image appends `%open-bastion-sudo ALL=(ALL:ALL) ALL` to
+    # /etc/sudoers AFTER the `@includedir /etc/sudoers.d` directive.
+    # sudoers is "last-match-wins", so any rule dropped into
+    # /etc/sudoers.d is overwritten by the group rule. We therefore
+    # append our NOPASSWD rule directly at the very end of
+    # /etc/sudoers so it has the final say for this specific user.
+    #
+    # visudo -c validates the result; if it fails we abort to avoid
+    # leaving a broken sudoers on a production-lookalike host.
+    docker exec ob-maxsec-bastion sh -c "
+        set -e
+        grep -qE '^${SVC_ACCOUNT}[[:space:]]+ALL=.*NOPASSWD' /etc/sudoers || \
+            printf '%s\n' '${SVC_ACCOUNT} ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+        visudo -c >/dev/null
+    "
+}
+
+test_service_account_provision() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Provisioning service account ${SVC_ACCOUNT} on the bastion..."
+
+    # Fresh key: plain ed25519, NOT signed by the LLNG SSH CA.
+    rm -f "${SVC_KEY}" "${SVC_KEY}.pub"
+    if ! ssh-keygen -t ed25519 -f "${SVC_KEY}" -N "" -q; then
+        fail "Failed to generate service account SSH key"
+        return 1
+    fi
+
+    if ! svc_provision_on_bastion; then
+        fail "Failed to provision service account on bastion"
+        return 1
+    fi
+
+    # Sanity-check: the local Unix account MUST NOT exist yet (whole point
+    # of this test is the on-login auto-creation).
+    if docker exec ob-maxsec-bastion getent -s files passwd "${SVC_ACCOUNT}" >/dev/null 2>&1; then
+        fail "Service account ${SVC_ACCOUNT} already exists locally before first login"
+        return 1
+    fi
+
+    # The AuthorizedKeysCommand must now return our public key for this user.
+    local cmd_output
+    cmd_output=$(docker exec ob-maxsec-bastion \
+        /usr/local/bin/ob-service-account-keys "${SVC_ACCOUNT}" 2>/dev/null || true)
+    if [[ -z "$cmd_output" ]]; then
+        fail "ob-service-account-keys returned no key for ${SVC_ACCOUNT}"
+        return 1
+    fi
+    if ! grep -q "ssh-ed25519" <<< "$cmd_output"; then
+        fail "ob-service-account-keys output is not an ed25519 key" "$cmd_output"
+        return 1
+    fi
+
+    pass "Service account ${SVC_ACCOUNT} provisioned (key + conf installed)"
+    return 0
+}
+
+test_service_account_ssh_login() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing SSH login as service account ${SVC_ACCOUNT} (plain key)..."
+
+    if [[ ! -f "${SVC_KEY}" ]]; then
+        fail "Service account key missing; provisioning step must run first"
+        return 1
+    fi
+
+    local output rc=0
+    output=$(ssh -i "${SVC_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${SVC_ACCOUNT}@localhost" \
+                 "whoami && id -u && id -g" 2>&1) || rc=$?
+    log_verbose "SSH(svc) rc=$rc output: $output"
+
+    if [[ $rc -ne 0 ]]; then
+        fail "SSH login as ${SVC_ACCOUNT} failed" "$output"
+        return 1
+    fi
+
+    if ! grep -qx "${SVC_ACCOUNT}" <<< "$output"; then
+        fail "SSH session did not report ${SVC_ACCOUNT} as whoami" "$output"
+        return 1
+    fi
+    if ! grep -qx "${SVC_UID}" <<< "$output"; then
+        fail "SSH session reported wrong uid (expected ${SVC_UID})" "$output"
+        return 1
+    fi
+    if ! grep -qx "${SVC_GID}" <<< "$output"; then
+        fail "SSH session reported wrong gid (expected ${SVC_GID})" "$output"
+        return 1
+    fi
+
+    pass "Service account ${SVC_ACCOUNT} logged in with uid=${SVC_UID}, gid=${SVC_GID}"
+    return 0
+}
+
+test_service_account_local_user_created() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Checking that the local Unix account was materialised by pam_openbastion..."
+
+    # Look in /etc/passwd directly: libnss_openbastion could otherwise mask
+    # the question "does a local account exist?".
+    local passwd_entry
+    passwd_entry=$(docker exec ob-maxsec-bastion \
+        grep -E "^${SVC_ACCOUNT}:" /etc/passwd 2>&1) || true
+    log_verbose "passwd entry: $passwd_entry"
+
+    if [[ -z "$passwd_entry" ]]; then
+        fail "No /etc/passwd entry for ${SVC_ACCOUNT} after first SSH login"
+        return 1
+    fi
+
+    # Format: name:x:uid:gid:gecos:home:shell
+    local entry_uid entry_gid entry_home entry_shell
+    entry_uid=$(cut -d: -f3 <<< "$passwd_entry")
+    entry_gid=$(cut -d: -f4 <<< "$passwd_entry")
+    entry_home=$(cut -d: -f6 <<< "$passwd_entry")
+    entry_shell=$(cut -d: -f7 <<< "$passwd_entry")
+
+    if [[ "$entry_uid" != "${SVC_UID}" ]]; then
+        fail "/etc/passwd uid for ${SVC_ACCOUNT} is $entry_uid, expected ${SVC_UID}" "$passwd_entry"
+        return 1
+    fi
+    if [[ "$entry_gid" != "${SVC_GID}" ]]; then
+        fail "/etc/passwd gid for ${SVC_ACCOUNT} is $entry_gid, expected ${SVC_GID}" "$passwd_entry"
+        return 1
+    fi
+    if [[ "$entry_home" != "/home/${SVC_ACCOUNT}" ]]; then
+        fail "Home directory for ${SVC_ACCOUNT} is $entry_home, expected /home/${SVC_ACCOUNT}" "$passwd_entry"
+        return 1
+    fi
+    if [[ "$entry_shell" != "/bin/bash" ]]; then
+        fail "Login shell for ${SVC_ACCOUNT} is $entry_shell, expected /bin/bash" "$passwd_entry"
+        return 1
+    fi
+
+    # Primary group must also have been materialised.
+    local group_entry
+    group_entry=$(docker exec ob-maxsec-bastion \
+        awk -F: -v gid="${SVC_GID}" '$3 == gid {print; exit}' /etc/group 2>&1) || true
+    if [[ -z "$group_entry" ]]; then
+        fail "No /etc/group entry for gid ${SVC_GID} after first login"
+        return 1
+    fi
+
+    pass "Local account ${SVC_ACCOUNT} created in /etc/passwd + matching /etc/group entry"
+    return 0
+}
+
+test_service_account_sudo() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing sudo from service account session (sudo_nopasswd path)..."
+
+    if [[ ! -f "${SVC_KEY}" ]]; then
+        fail "Service account key missing; earlier step must have run"
+        return 1
+    fi
+
+    # -n: non-interactive. If anything prompts for a password this fails,
+    # which is exactly what we want to assert about sudo_nopasswd.
+    local output rc=0
+    output=$(ssh -i "${SVC_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${SVC_ACCOUNT}@localhost" \
+                 "sudo -n id -u && sudo -n id -un" 2>&1) || rc=$?
+    log_verbose "SSH(svc+sudo) rc=$rc output: $output"
+
+    if [[ $rc -ne 0 ]]; then
+        fail "sudo -n as ${SVC_ACCOUNT} failed" "$output"
+        return 1
+    fi
+
+    # Expect "0" and "root" on separate lines.
+    if ! grep -qx "0" <<< "$output"; then
+        fail "sudo did not yield uid 0" "$output"
+        return 1
+    fi
+    if ! grep -qx "root" <<< "$output"; then
+        fail "sudo did not yield root username" "$output"
+        return 1
+    fi
+
+    pass "sudo -n from ${SVC_ACCOUNT} runs as root (nopasswd path)"
+    return 0
+}
+
+test_service_account_bad_key_rejected() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing that a different ed25519 key is rejected for ${SVC_ACCOUNT}..."
+
+    local bad_key="/tmp/test_integration_svc_bad"
+    rm -f "$bad_key" "${bad_key}.pub"
+    ssh-keygen -t ed25519 -f "$bad_key" -N "" -q
+
+    local output rc
+    output=$(ssh -i "$bad_key" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${SVC_ACCOUNT}@localhost" \
+                 "echo SHOULD_NEVER_PRINT" 2>&1) || true
+    rc=$?
+    rm -f "$bad_key" "${bad_key}.pub"
+    log_verbose "SSH(bad key) rc=$rc output: $output"
+
+    if grep -q "SHOULD_NEVER_PRINT" <<< "$output"; then
+        fail "An unrelated key was accepted for ${SVC_ACCOUNT}" "$output"
+        return 1
+    fi
+    if ! grep -qE "Permission denied|Connection closed|Authentication failed" <<< "$output"; then
+        fail "SSH with wrong key did not fail with a permission denial" "$output"
+        return 1
+    fi
+
+    pass "A non-registered SSH key is rejected for ${SVC_ACCOUNT}"
+    return 0
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -916,7 +1204,18 @@ main() {
     test_password_auth_disabled
 
     echo ""
-    echo "=== Phase 7: Cert revocation via fingerprint binding ==="
+    echo "=== Phase 7: Service-account SSH key + sudo ==="
+    # Must run before the revocation phase (which invalidates the cert used
+    # earlier) but has no ordering dependency with Phase 6: the service
+    # account uses a distinct username unknown to LLNG.
+    test_service_account_provision
+    test_service_account_ssh_login
+    test_service_account_local_user_created
+    test_service_account_sudo
+    test_service_account_bad_key_rejected
+
+    echo ""
+    echo "=== Phase 8: Cert revocation via fingerprint binding ==="
     # MUST run last: /ssh/myrevoke invalidates the test cert and would
     # break any subsequent test that relies on a valid certificate.
     test_pam_authorize_rejects_revoked_cert
