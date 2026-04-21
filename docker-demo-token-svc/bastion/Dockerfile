@@ -1,19 +1,19 @@
-# Open Bastion SSH Bastion - Maximum Security Mode E
+# Open Bastion SSH Bastion - Token + Service Accounts
 #
 # This container provides:
-# - SSH certificate authentication ONLY (no authorized_keys)
-# - Key Revocation List (KRL) enforcement
+# - SSH password authentication using Open Bastion tokens (human users)
+# - SSH key authentication for service accounts declared in
+#   /etc/open-bastion/service-accounts.conf (ansible, backup, ...)
+# - Session recording for audit
 # - PAM authorization via Open Bastion
-# - sudo via LLNG temporary token only
 
 FROM debian:13-slim
 
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
-    sudo \
     nscd \
-    cron \
+    sudo \
     libcurl4-gnutls-dev \
     libjson-c-dev \
     libssl-dev \
@@ -57,10 +57,10 @@ RUN mkdir -p build && cd build && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 
-# Configure PAM for SSH (Mode E: certificate only, no password)
-RUN echo '# PAM configuration for SSH with Open Bastion (Mode E)\n\
-# Authentication via SSH certificates only (not PAM)\n\
-auth       required     pam_permit.so\n\
+# Configure PAM for SSH (bastion mode with token authentication)
+RUN echo '# PAM configuration for SSH Bastion with Open Bastion\n\
+# Authentication via Open Bastion tokens (user pastes token as password)\n\
+auth       required     pam_openbastion.so\n\
 \n\
 # Authorization - check with Open Bastion\n\
 account    required     pam_openbastion.so\n\
@@ -70,20 +70,22 @@ session    required     pam_unix.so\n\
 session    optional     pam_openbastion.so\n\
 ' > /etc/pam.d/sshd
 
-# Configure PAM for sudo (Mode E: LLNG temporary token required)
-RUN echo '# PAM configuration for sudo with Open Bastion (Mode E)\n\
-# LLNG temporary token ONLY - Unix passwords REJECTED\n\
-auth       sufficient   pam_openbastion.so\n\
-auth       required     pam_deny.so\n\
-\n\
-account    required     pam_openbastion.so\n\
-\n\
+# Configure PAM for sudo (Open Bastion authorization)
+RUN echo '# PAM configuration for sudo with Open Bastion\n\
+auth       required     pam_openbastion.so service_type=sudo\n\
+account    required     pam_openbastion.so service_type=sudo\n\
 session    required     pam_unix.so\n\
 ' > /etc/pam.d/sudo
 
-# Defense-in-depth: only open-bastion-sudo group members can sudo (PAM also required)
-RUN groupadd --system open-bastion-sudo 2>/dev/null || true \
-    && echo "%open-bastion-sudo ALL=(ALL:ALL) ALL" >> /etc/sudoers
+# Sudo requires PAM authentication (no NOPASSWD)
+RUN echo "ALL ALL=(ALL:ALL) ALL" >> /etc/sudoers
+
+# Session recorder configuration
+RUN echo '# Open Bastion Session Recorder Configuration\n\
+sessions_dir = /var/lib/open-bastion/sessions\n\
+format = script\n\
+max_duration = 28800\n\
+' > /etc/open-bastion/session-recorder.conf
 
 # Fix PAM loginuid for Docker
 RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd 2>/dev/null || true
@@ -92,7 +94,7 @@ RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid
 RUN ssh-keygen -A
 
 # Startup script
-COPY docker-demo-maxsec/bastion/entrypoint.sh /entrypoint.sh
+COPY docker-demo-token-svc/bastion/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 22
