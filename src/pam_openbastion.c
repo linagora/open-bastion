@@ -2361,51 +2361,67 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
             return PAM_AUTH_ERR;
         }
-        OB_LOG_DEBUG(pamh, "User %s is a service account, validating SSH key fingerprint", user);
-
         /*
-         * Security: Validate SSH key fingerprint.
-         * Extract the fingerprint from SSH_USER_AUTH and compare with configured value.
-         * This requires ExposeAuthInfo=yes in sshd_config.
+         * Sudo context: there is no SSH_USER_AUTH because sudo is not an
+         * SSH service. When sudo_nopasswd is configured the admin has
+         * declared that a valid existing Unix session is sufficient, so
+         * skip the fingerprint check here. pam_sm_acct_mgmt will still
+         * enforce sudo_allowed below.
          */
-        char *ssh_fingerprint = extract_ssh_key_fingerprint(pamh);
-        if (!ssh_fingerprint) {
-            OB_LOG_ERR(pamh, "Service account %s: cannot extract SSH key fingerprint "
-                    "(is ExposeAuthInfo enabled in sshd_config?)", user);
+        bool skip_fp_check =
+            (strcmp(service, "sudo") == 0) && sa->sudo_nopasswd;
 
-            if (audit_initialized) {
-                audit_event.event_type = AUDIT_AUTH_FAILURE;
-                audit_event.result_code = PAM_AUTH_ERR;
-                audit_event.reason = "Service account: no SSH fingerprint available";
-                audit_event_set_end_time(&audit_event);
-                audit_log_event(data->audit, &audit_event);
+        if (skip_fp_check) {
+            OB_LOG_INFO(pamh,
+                        "Service account %s: sudo with sudo_nopasswd, "
+                        "skipping SSH fingerprint check", user);
+        } else {
+            OB_LOG_DEBUG(pamh, "User %s is a service account, validating SSH key fingerprint", user);
+
+            /*
+             * Security: Validate SSH key fingerprint.
+             * Extract the fingerprint from SSH_USER_AUTH and compare with configured value.
+             * This requires ExposeAuthInfo=yes in sshd_config.
+             */
+            char *ssh_fingerprint = extract_ssh_key_fingerprint(pamh);
+            if (!ssh_fingerprint) {
+                OB_LOG_ERR(pamh, "Service account %s: cannot extract SSH key fingerprint "
+                        "(is ExposeAuthInfo enabled in sshd_config?)", user);
+
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_AUTH_FAILURE;
+                    audit_event.result_code = PAM_AUTH_ERR;
+                    audit_event.reason = "Service account: no SSH fingerprint available";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+
+                return PAM_AUTH_ERR;
             }
 
-            return PAM_AUTH_ERR;
-        }
+            /* Validate fingerprint against configured value */
+            int fp_result = service_accounts_validate_key(&data->service_accounts, user, ssh_fingerprint);
+            if (fp_result != 0) {
+                OB_LOG_ERR(pamh, "Service account %s: SSH key fingerprint mismatch "
+                        "(got %s, expected %s)", user, ssh_fingerprint,
+                        sa->key_fingerprint ? sa->key_fingerprint : "(none)");
+                free(ssh_fingerprint);
 
-        /* Validate fingerprint against configured value */
-        int fp_result = service_accounts_validate_key(&data->service_accounts, user, ssh_fingerprint);
-        if (fp_result != 0) {
-            OB_LOG_ERR(pamh, "Service account %s: SSH key fingerprint mismatch "
-                    "(got %s, expected %s)", user, ssh_fingerprint,
-                    sa->key_fingerprint ? sa->key_fingerprint : "(none)");
+                if (audit_initialized) {
+                    audit_event.event_type = AUDIT_AUTH_FAILURE;
+                    audit_event.result_code = PAM_AUTH_ERR;
+                    audit_event.reason = "Service account: SSH key fingerprint mismatch";
+                    audit_event_set_end_time(&audit_event);
+                    audit_log_event(data->audit, &audit_event);
+                }
+
+                return PAM_AUTH_ERR;
+            }
+
+            OB_LOG_INFO(pamh, "Service account %s authenticated with fingerprint %s",
+                    user, ssh_fingerprint);
             free(ssh_fingerprint);
-
-            if (audit_initialized) {
-                audit_event.event_type = AUDIT_AUTH_FAILURE;
-                audit_event.result_code = PAM_AUTH_ERR;
-                audit_event.reason = "Service account: SSH key fingerprint mismatch";
-                audit_event_set_end_time(&audit_event);
-                audit_log_event(data->audit, &audit_event);
-            }
-
-            return PAM_AUTH_ERR;
         }
-
-        OB_LOG_INFO(pamh, "Service account %s authenticated with fingerprint %s",
-                user, ssh_fingerprint);
-        free(ssh_fingerprint);
 
         /* Store service account attributes for pam_sm_open_session (user creation) */
         if (sa->gecos) {
@@ -2434,7 +2450,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         if (audit_initialized) {
             audit_event.event_type = AUDIT_AUTH_SUCCESS;
             audit_event.result_code = PAM_SUCCESS;
-            audit_event.reason = "Service account (SSH key validated)";
+            audit_event.reason = skip_fp_check
+                ? "Service account (sudo_nopasswd, fingerprint check skipped)"
+                : "Service account (SSH key validated)";
             audit_event_set_end_time(&audit_event);
             audit_log_event(data->audit, &audit_event);
         }
@@ -3099,6 +3117,64 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
 
         /*
+         * Mark as service account for pam_sm_open_session and propagate the
+         * user attributes from service-accounts.conf. For SSH pubkey auth
+         * sshd does NOT invoke pam_authenticate, so this is the only place
+         * where we can stash this information for the session phase.
+         */
+        pam_set_data(pamh, "ob_service_account", (void *)1, NULL);
+        if (sa->gecos) {
+            char *gecos_copy = strdup(sa->gecos);
+            if (gecos_copy) {
+                pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
+            }
+        }
+        if (sa->shell) {
+            char *shell_copy = strdup(sa->shell);
+            if (shell_copy) {
+                pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
+            }
+        }
+        if (sa->home) {
+            char *home_copy = strdup(sa->home);
+            if (home_copy) {
+                pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
+            }
+        }
+
+        /*
+         * Defense-in-depth fingerprint check for SSH sessions. sshd's
+         * AuthorizedKeysCommand already ensured the presented key matches
+         * what we published for this service account, but we re-verify
+         * the SHA256 fingerprint from SSH_USER_AUTH (ExposeAuthInfo yes)
+         * against the canonical value in service-accounts.conf. We do NOT
+         * fail closed when SSH_USER_AUTH is absent: the PAM `sudo` service
+         * never has it, and some OpenSSH builds omit it for non-cert keys.
+         */
+        if (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0) {
+            char *ssh_fp = extract_ssh_key_fingerprint(pamh);
+            if (ssh_fp) {
+                int fp_result = service_accounts_validate_key(
+                    &data->service_accounts, user, ssh_fp);
+                if (fp_result != 0) {
+                    OB_LOG_ERR(pamh,
+                               "Service account %s: fingerprint mismatch in account phase "
+                               "(got %s)", user, ssh_fp);
+                    free(ssh_fp);
+                    if (audit_initialized) {
+                        audit_event.event_type = AUDIT_AUTHZ_DENIED;
+                        audit_event.result_code = PAM_PERM_DENIED;
+                        audit_event.reason = "Service account fingerprint mismatch";
+                        audit_event_set_end_time(&audit_event);
+                        audit_log_event(data->audit, &audit_event);
+                    }
+                    return PAM_PERM_DENIED;
+                }
+                free(ssh_fp);
+            }
+        }
+
+        /*
          * Handle sudo authorization for service accounts.
          * Check if the service account has sudo_allowed permission.
          */
@@ -3564,7 +3640,9 @@ static int create_unix_user(pam_handle_t *pamh,
                             const pam_openbastion_config_t *config,
                             const char *gecos,
                             const char *shell,
-                            const char *home)
+                            const char *home,
+                            uid_t forced_uid,
+                            gid_t forced_gid)
 {
     uid_t uid = 0;
     gid_t gid = 0;
@@ -3583,20 +3661,64 @@ static int create_unix_user(pam_handle_t *pamh,
         return -1;
     }
 
-    /* Get UID/GID from NSS (libnss_openbastion) */
-    struct passwd *nss_pw = getpwnam(user);
-    if (nss_pw) {
-        uid = nss_pw->pw_uid;
-        gid = nss_pw->pw_gid;
-    } else {
-        OB_LOG_ERR(pamh, "Cannot get user info from NSS for %s", user);
-        return -1;
-    }
+    if (forced_uid != 0) {
+        /*
+         * Service-account path: the account only exists in
+         * service-accounts.conf, not in LLNG, so NSS cannot resolve it.
+         * Use the uid/gid explicitly configured by the admin and auto-create
+         * the matching primary group on the fly.
+         */
+        uid = forced_uid;
+        gid = (forced_gid != 0) ? forced_gid : forced_uid;
 
-    /* Verify that the primary group exists */
-    if (!group_exists_locally(gid)) {
-        OB_LOG_ERR(pamh, "Primary group %lu does not exist for user %s", (unsigned long)gid, user);
-        return -1;
+        if (!group_exists_locally(gid)) {
+            OB_LOG_INFO(pamh, "Creating primary group %s (gid=%lu) for service account",
+                        user, (unsigned long)gid);
+            pid_t pid = fork();
+            if (pid < 0) {
+                OB_LOG_ERR(pamh, "Cannot fork for groupadd: %s", strerror(errno));
+                return -1;
+            }
+            if (pid == 0) {
+                char gid_str[16];
+                snprintf(gid_str, sizeof(gid_str), "%lu", (unsigned long)gid);
+                int null_fd = open("/dev/null", O_WRONLY);
+                if (null_fd >= 0) {
+                    dup2(null_fd, STDOUT_FILENO);
+                    dup2(null_fd, STDERR_FILENO);
+                    close(null_fd);
+                }
+                execl("/usr/sbin/groupadd", "groupadd", "-g", gid_str, user, NULL);
+                _exit(127);
+            }
+            int status;
+            if (waitpid(pid, &status, 0) < 0) {
+                OB_LOG_ERR(pamh, "Cannot wait for groupadd: %s", strerror(errno));
+                return -1;
+            }
+            if (!group_exists_locally(gid)) {
+                OB_LOG_ERR(pamh, "Failed to create primary group %s (gid=%lu)",
+                           user, (unsigned long)gid);
+                return -1;
+            }
+        }
+    } else {
+        /* Get UID/GID from NSS (libnss_openbastion) */
+        struct passwd *nss_pw = getpwnam(user);
+        if (nss_pw) {
+            uid = nss_pw->pw_uid;
+            gid = nss_pw->pw_gid;
+        } else {
+            OB_LOG_ERR(pamh, "Cannot get user info from NSS for %s", user);
+            return -1;
+        }
+
+        /* Verify that the primary group exists */
+        if (!group_exists_locally(gid)) {
+            OB_LOG_ERR(pamh, "Primary group %lu does not exist for user %s",
+                       (unsigned long)gid, user);
+            return -1;
+        }
     }
 
     /* Determine and validate home directory */
@@ -3941,10 +4063,29 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         shell = (const char *)ob_shell;
         home = (const char *)ob_home;
 
+        /*
+         * If the user is a service account (only in service-accounts.conf,
+         * unknown to LLNG), NSS cannot resolve it. Use the explicit uid/gid
+         * from the service-account configuration.
+         */
+        uid_t forced_uid = 0;
+        gid_t forced_gid = 0;
+        const void *ob_sa_marker = NULL;
+        if (pam_get_data(pamh, "ob_service_account", &ob_sa_marker) == PAM_SUCCESS &&
+            ob_sa_marker != NULL) {
+            const service_account_t *sa =
+                service_accounts_find(&data->service_accounts, user);
+            if (sa) {
+                forced_uid = (uid_t)sa->uid;
+                forced_gid = (gid_t)sa->gid;
+            }
+        }
+
         /* Create the user */
         OB_LOG_INFO(pamh, "User %s does not exist, creating account", user);
 
-        if (create_unix_user(pamh, user, &data->config, gecos, shell, home) != 0) {
+        if (create_unix_user(pamh, user, &data->config, gecos, shell, home,
+                             forced_uid, forced_gid) != 0) {
             OB_LOG_ERR(pamh, "Failed to create Unix user: %s", user);
             return PAM_SESSION_ERR;
         }
