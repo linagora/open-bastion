@@ -146,8 +146,17 @@ TrustedUserCAKeys $SSH_CA_FILE
 # Enable certificate authentication
 PubkeyAuthentication yes
 
-# MAXIMUM SECURITY: No unsigned keys allowed
+# MAXIMUM SECURITY: No unsigned keys allowed via authorized_keys file
 AuthorizedKeysFile none
+
+# Service accounts (ansible, backup, ...) authenticate with a plain SSH key
+# that is NOT signed by the LLNG SSH CA. Mode E still accepts those keys
+# because AuthorizedKeysCommand yields the authorized public key only for
+# usernames registered in /etc/open-bastion/service-accounts.conf. Regular
+# human users continue to authenticate with an LLNG-signed certificate via
+# TrustedUserCAKeys above.
+AuthorizedKeysCommand /usr/local/bin/ob-service-account-keys %u
+AuthorizedKeysCommandUser nobody
 
 # MAXIMUM SECURITY: Key Revocation List (mandatory)
 RevokedKeys $SSH_REVOKED_KEYS
@@ -311,11 +320,39 @@ cache_enabled = true
 cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
+# Service accounts (ansible, backup, ...). Empty by default; the integration
+# test populates this file at runtime with a real fingerprint + matching
+# public key in /etc/open-bastion/service-accounts.d/.
+service_accounts_file = /etc/open-bastion/service-accounts.conf
+
+# Auto-create the local Unix account on first login. Required for service
+# accounts unknown to LLNG: pam_openbastion uses the uid/gid declared in
+# service-accounts.conf instead of NSS.
+create_user = true
+create_home = true
+default_shell = /bin/bash
+
 # Logging
 log_level = info
 EOF
 
 chmod 600 /etc/open-bastion/openbastion.conf
+
+# Provide a root-owned, empty service-accounts.conf so pam_openbastion's
+# permission check (root:root, 0600) succeeds at module init even when no
+# service account is registered yet. Integration tests append real entries.
+if [ ! -f /etc/open-bastion/service-accounts.conf ]; then
+    : > /etc/open-bastion/service-accounts.conf
+    chown root:root /etc/open-bastion/service-accounts.conf
+    chmod 600 /etc/open-bastion/service-accounts.conf
+fi
+
+# Directory for per-account authorized public keys used by
+# ob-service-account-keys (AuthorizedKeysCommand). Must be traversable by
+# the AuthorizedKeysCommandUser (nobody), files themselves are root:root 0644.
+mkdir -p /etc/open-bastion/service-accounts.d
+chown root:root /etc/open-bastion/service-accounts.d
+chmod 755 /etc/open-bastion/service-accounts.d
 
 # Create NSS configuration
 cat > /etc/open-bastion/nss_openbastion.conf << EOF
@@ -362,10 +399,21 @@ if command -v nscd >/dev/null 2>&1; then
 fi
 
 # Configure PAM for SSH (Mode E)
+# The "auth" phase runs pam_openbastion with authorize_only=yes so that:
+#   - for service accounts: the SSH key fingerprint is re-validated against
+#     service-accounts.conf (defense-in-depth on top of sshd's
+#     AuthorizedKeysCommand) and the ob_service_account marker is stored
+#     for pam_sm_open_session;
+#   - for regular users: the cert has already been validated by sshd, the
+#     module just returns success without asking for a password.
+# The "session" phase runs pam_openbastion with create_user=true so that
+# service accounts unknown to LLNG are materialised in /etc/passwd using
+# the uid/gid declared in service-accounts.conf.
 cat > /etc/pam.d/sshd << EOF
 # PAM configuration for SSH with Open Bastion (Mode E - Maximum Security)
-auth       required     pam_permit.so
+auth       required     pam_openbastion.so authorize_only
 account    required     pam_openbastion.so
+session    required     pam_openbastion.so create_user=true
 session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0077
 EOF

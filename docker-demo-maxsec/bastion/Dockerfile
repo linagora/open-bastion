@@ -49,8 +49,11 @@ RUN mkdir -p build && cd build && \
     cp nss/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/ && \
     cp ../scripts/ob-session-recorder /usr/sbin/ && \
     cp ../scripts/ob-ssh-proxy /usr/bin/ && \
+    cp ../scripts/ob-service-account-keys /usr/local/bin/ && \
     chmod 755 /usr/sbin/ob-session-recorder && \
     chmod 755 /usr/bin/ob-ssh-proxy && \
+    chown root:root /usr/local/bin/ob-service-account-keys && \
+    chmod 755 /usr/local/bin/ob-service-account-keys && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 
