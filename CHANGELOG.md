@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-04-22
+
+### Added
+
+- **Service accounts (machine accounts)**: local Unix accounts declared
+  in `/etc/open-bastion/service-accounts.conf` (`0600 root:root`) that
+  LemonLDAP::NG never sees, for CI agents and headless tooling.
+  - `pam_openbastion` materialises the Unix user on first login
+    (`create_user = true`), with forced uid/gid and auto-created
+    primary group.
+  - `libnss_openbastion` resolves service accounts so `sshd`'s
+    pre-auth `getpwnam()` succeeds; path configurable via
+    `service_accounts_file =` in `nss_openbastion.conf`.
+  - Mode E support via `scripts/ob-service-account-keys`
+    (`AuthorizedKeysCommand` helper) so plain (non-SSO-signed) keys
+    can authenticate registered service accounts without breaking
+    the `AuthorizedKeysFile none` guarantee.
+- **`docker-demo-token-svc/`**: token-auth + local service accounts
+  demo variant, coexists with `docker-demo-token`.
+- **Integration tests**: `tests/test_integration_token_svc.sh` and a
+  new Phase 7 in `tests/test_integration_maxsec.sh`.
+
+### Security
+
+- `libnss_openbastion`: enforce strict `0600 root:root` on
+  `service-accounts.conf` (mirrors `pam_openbastion`).
+- Service-account entries are not persisted to the on-disk NSS cache
+  to avoid exposing local-only metadata.
+
+### Upgrade notes
+
+- Service accounts are **opt-in**: deployments without
+  `service_accounts_file` in `openbastion.conf` /
+  `nss_openbastion.conf` behave exactly like v0.1.5.
+
 ## [0.1.5] - 2026-04-20
 
 ### Security

@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.1.5
+Version:        0.1.6
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -158,6 +158,26 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Wed Apr 22 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.6-1
+- Service accounts (machine accounts): local Unix accounts declared in
+  /etc/open-bastion/service-accounts.conf (0600 root:root) that
+  LemonLDAP::NG never sees, for CI agents and headless tooling.
+  pam_openbastion materialises the Unix user on first login
+  (create_user = true) with forced uid/gid; libnss_openbastion
+  resolves them so sshd's pre-auth getpwnam() succeeds
+- Mode E support via /usr/local/sbin/ob-service-account-keys
+  (AuthorizedKeysCommand helper): plain (non-SSO-signed) keys can
+  authenticate registered service accounts without breaking the
+  "AuthorizedKeysFile none" guarantee
+- New docker-demo-token-svc/ variant (coexists with docker-demo-token)
+  and integration tests (test_integration_token_svc.sh + Phase 7 in
+  test_integration_maxsec.sh)
+- Security: strict 0600 root:root enforced on service-accounts.conf in
+  libnss_openbastion; service-account entries not persisted to the
+  on-disk NSS cache
+- Opt-in: deployments without service_accounts_file in
+  openbastion.conf / nss_openbastion.conf behave like v0.1.5
+
 * Mon Apr 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.5-1
 - SSH key fingerprint binding on /pam/authorize and /pam/verify
   (requires LemonLDAP::NG PamAccess >= 0.1.16 and SSHCA >= 0.1.16);
