@@ -1282,23 +1282,23 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 ### Avant remédiation
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                  | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------- | --------------------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6 R-S17                        |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 | R-S18        |                   |
-| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                  | R-S8         |                   |
-| **1 - Négligeable**      |                     |                                   |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | ----------------------------------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6 R-S17                                      |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 | R-S19    |                   |
+| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                                | R-S8         |                   |
+| **1 - Négligeable**      |                     |                                                 |              |                   |
 
-> **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires.
+> **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18).
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | --------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                |                  |              |                   |
-| **3 - Important**        | R-S5                                                | R-S6             |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 | R-S8             |              |                   |
-| **1 - Négligeable**      | R-S15 R-S18                                         | R-S3             |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable    | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------- | ------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                |                     |              |                   |
+| **3 - Important**        | R-S5                                                | R-S6                |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8 R-S18 |              |                   |
+| **1 - Négligeable**      | R-S15 R-S19                                         | R-S3                |              |                   |
 
 **Profil de risque de la cible maximale :**
 
@@ -1309,8 +1309,10 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - R-S15 (KRL stale) : **I=1** grâce au binding fingerprint sur `/pam/authorize` : une révocation LLNG interdit l'ouverture d'une session SSH à chaque nouvelle connexion, indépendamment de la fraîcheur de la KRL
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
 - R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
-- R-S18 (effacement sessions) : **contrôlé par wrapper setgid** + sticky bit + syslog indépendant
-- Seuls risques résiduels significatifs : R-S4 (CA compromise) et R-S6 (bastion compromis)
+- R-S18 (effacement sessions) : **traçable mais reste effaçable techniquement** ; l'imputation tient grâce à syslog `auth.info` (start/end de session) et, si PR2 (#113) est activée, grâce au watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement lui-même
+- R-S19 (évasion containment via `setsid`/`nohup`), R-S20 (action différée via `at`/`cron`/`systemd-run`), R-S21 (action non capturée par le pty) : **nouvellement identifiés** et mitigés par PR1 (#112) et PR2 (#113) sous condition d'activation opt-in
+- **Conditions d'activation :** ces nouveaux risques (R-S19, R-S20, R-S21) ne sont mitigés à leur niveau résiduel **que si** le hardening (PR1) ET la trace auditd (PR2) sont activés via `ob-bastion-setup --enable-hardening --enable-audit-trace`. En l'absence d'activation, ces risques restent en zone jaune (P=3, I=3 pour R-S19 ; P=2, I=3 pour R-S20 et R-S21). Voir [doc/hardening.md](../hardening.md) et [doc/audit.md](../audit.md) (documentations techniques en anglais) pour les détails opérationnels.
+- Seuls risques résiduels significatifs en zone jaune (PR1 et PR2 activées) : R-S4 (CA compromise) et R-S6 (bastion compromis)
 
 ---
 
