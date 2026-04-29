@@ -1,0 +1,14 @@
+#!/bin/sh
+# Open Bastion: rotate auditd logs daily so that with num_logs=7
+# (configured in /etc/audit/auditd.conf) we keep ~1 week of history.
+# Installed by `ob-bastion-setup --enable-audit-trace`.
+
+# Trigger auditd rotation (same as `service auditd rotate`).
+# Old auditd: SIGUSR1 to the daemon. Modern: systemctl kill -s USR1.
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active auditd >/dev/null 2>&1; then
+    systemctl kill -s USR1 auditd 2>/dev/null || true
+elif [ -r /var/run/auditd.pid ]; then
+    kill -USR1 "$(cat /var/run/auditd.pid)" 2>/dev/null || true
+fi
+
+exit 0
