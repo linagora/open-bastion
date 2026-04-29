@@ -2,6 +2,7 @@
 build/
 build-core/
 build-desktop/
+build-test/
 
 # Editor files
 *~

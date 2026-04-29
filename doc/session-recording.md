@@ -330,9 +330,43 @@ Future releases will support:
 
 See issues #17-20 in the project backlog.
 
+## Session containment
+
+Recording the pty is necessary but not sufficient. An authenticated user
+can detach work from the recorded session with `setsid nohup … &` (the
+child re-parents to PID 1 and survives logout), or schedule deferred
+commands with `at(1)` / `crontab(1)` that run outside the wrapper
+entirely.
+
+`ob-bastion-setup` deploys a set of host-level configuration drop-ins
+that close these channels — pure system config, no new setuid binary:
+
+- `KillUserProcesses=yes` in `systemd-logind` so any process owned by
+  the user is killed when their last session ends, including
+  `setsid`-detached children.
+- `at.allow` (empty) and `cron.allow` (root only) so non-sudo users
+  cannot schedule deferred jobs. `atd` is masked.
+- `nproc` cap (256, root unlimited) in `/etc/security/limits.d/` to
+  contain fork bombs.
+
+Verify post-deploy that no user has been opted out via `loginctl
+enable-linger`:
+
+```bash
+loginctl show-user <user> | grep Linger    # expected: Linger=no
+```
+
+The full rationale, deployment details, and re-enable instructions are
+in [`hardening.md`](hardening.md).
+
+> **Note:** PR2 will introduce an `auditd` ruleset as the primary
+> trace, so any process that escapes the recorder still produces a
+> syscall log. Tracked separately.
+
 ## See Also
 
 - [README.md](../README.md) - Main documentation
+- [Hardening](hardening.md) - Session containment configuration
 - [Security Architecture](security/00-architecture.md) - Security implementation details
 - [SECURITY.md](../SECURITY.md) - Security policy and reporting
 - [Bastion Architecture](bastion-architecture.md) - Overall bastion design

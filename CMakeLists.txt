@@ -226,6 +226,22 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Install hardening templates (session containment - PR1)
+# These are deployed by ob-bastion-setup into /etc/{systemd/logind.conf.d,security/limits.d,at.allow,cron.allow}
+# See doc/hardening.md for rationale.
+install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/logind.conf.d/open-bastion.conf
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening/logind.conf.d
+)
+install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/security/limits.d/open-bastion.conf
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening/security/limits.d
+)
+install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/at.allow
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening
+)
+install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/cron.allow
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening
+)
+
 # Install setup scripts (admin-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}

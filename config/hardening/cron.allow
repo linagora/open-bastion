@@ -1,0 +1,4 @@
+# Open Bastion: only users listed here can use crontab(1).
+# Add admin/sudoer accounts as needed. The package needs root to
+# manage system crontabs in /etc/cron.d/.
+root

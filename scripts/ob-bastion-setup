@@ -45,6 +45,22 @@ PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
+# Hardening (session containment) — see doc/hardening.md
+HARDENING_TEMPLATE_DIR="/usr/share/open-bastion/hardening"
+HARDENING_LOGIND_DST="/etc/systemd/logind.conf.d/open-bastion.conf"
+HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
+HARDENING_AT_ALLOW="/etc/at.allow"
+HARDENING_CRON_ALLOW="/etc/cron.allow"
+ENABLE_HARDENING=false
+# Result of setup_hardening, consumed by print_summary. One of:
+#   not-applied (default — step never ran or was opt-out)
+#   applied     (all sub-steps succeeded)
+#   partial     (one or more sub-steps emitted warn/error but step continued)
+#   declined    (user said no at the confirm prompt)
+#   failed      (hard refusal: templates missing, linger gate, etc.)
+#   dry-run     (--dry-run, nothing was actually applied)
+HARDENING_RESULT="not-applied"
+
 # Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
 AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
@@ -667,6 +683,261 @@ home_base = /home
     info "Created $NSS_OB_CONF"
 }
 
+# Install one hardening template by absolute source/destination path,
+# creating the destination directory if missing and backing up any
+# existing file. Mode 0644 root:root.
+install_hardening_file() {
+    local src="$1"
+    local dst="$2"
+    local dst_dir
+    dst_dir=$(dirname "$dst")
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src (package not fully installed?)"
+        return 1
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $src -> $dst (0644 root:root)"
+        return 0
+    fi
+
+    [ -d "$dst_dir" ] || mkdir -p "$dst_dir"
+    backup_file "$dst"
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Installed $dst"
+}
+
+# Conditionally drop a *.allow whitelist if absent, keeping any
+# pre-existing admin file untouched. We only warn — overwriting an
+# admin-managed file silently would be hostile.
+install_hardening_allowlist() {
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src"
+        return 1
+    fi
+
+    if [ -f "$dst" ]; then
+        if cmp -s "$src" "$dst"; then
+            info "$dst already matches template, leaving as-is"
+        else
+            warn "$dst already exists with custom content — leaving untouched"
+            warn "Review it manually against $src to ensure containment is preserved"
+        fi
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would create $dst from $src (0644 root:root)"
+        return 0
+    fi
+
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Created $dst"
+}
+
+# Detect non-root users that have `loginctl enable-linger` set.
+# A lingering user keeps a per-user systemd manager running after
+# logout, which lets them schedule deferred work via
+#   systemd-run --user --on-active=…
+# That bypasses both KillUserProcesses=yes and the at/cron allowlists.
+# This function prints offending "<user>:<uid>" lines to stdout (one
+# per line, empty if none) and returns 0. It returns 1 only when
+# loginctl is missing — callers should treat that as "skip with a
+# warning" since a host without systemd cannot enable linger anyway.
+detect_lingering_users() {
+    if ! command -v loginctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local users_raw
+    # `loginctl list-users --no-legend` prints "<uid> <user> [..]" per row.
+    # Some versions trail a header/legend even with --no-legend on older
+    # systemd; we filter defensively by requiring a leading numeric uid.
+    users_raw=$(loginctl list-users --no-legend 2>/dev/null || true)
+    [ -n "$users_raw" ] || return 0
+
+    local uid user linger
+    while read -r uid user _rest; do
+        case "$uid" in
+            ''|*[!0-9]*) continue ;;     # skip non-numeric rows / headers
+        esac
+        [ "$uid" = "0" ] && continue     # root is allowed to linger
+        [ -n "$user" ] || continue
+        linger=$(loginctl show-user "$user" --property=Linger --value 2>/dev/null || echo "")
+        if [ "$linger" = "yes" ]; then
+            printf '%s:%s\n' "$user" "$uid"
+        fi
+    done <<< "$users_raw"
+
+    return 0
+}
+
+# Configure host-level session containment. All steps are pure system
+# config — no setuid binary is added. See doc/hardening.md for rationale.
+setup_hardening() {
+    step "Applying session containment hardening..."
+
+    if [ ! -d "$HARDENING_TEMPLATE_DIR" ]; then
+        warn "Hardening templates not found in $HARDENING_TEMPLATE_DIR"
+        warn "Skipping hardening step — install the open-bastion package."
+        HARDENING_RESULT="failed"
+        return 1
+    fi
+
+    # Pre-flight: refuse to harden if any non-root user has linger
+    # enabled. Such a user could schedule jobs via `systemd-run --user`
+    # that survive logout, defeating both KillUserProcesses=yes and the
+    # at/cron allow-lists. This is a security gate, not a UX one — we
+    # fail even in --yes mode. In --dry-run, only log so operators can
+    # discover the problem before committing.
+    local linger_offenders
+    if linger_offenders=$(detect_lingering_users); then
+        if [ -n "$linger_offenders" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+                warn "[DRY-RUN] Linger enabled for the following non-root users (would abort in real run):"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    warn "[DRY-RUN]   $u (uid $uid)"
+                done <<< "$linger_offenders"
+            else
+                error "Hardening refused: the following users have systemd linger enabled,"
+                error "        which would let them schedule deferred jobs via 'systemd-run --user',"
+                error "        bypassing this hardening:"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    error "          $u (uid $uid)"
+                done <<< "$linger_offenders"
+                error ""
+                error "        To proceed, disable linger for these users:"
+                error "          loginctl disable-linger <user>"
+                error ""
+                error "        Then re-run: ob-bastion-setup --portal $PORTAL_URL --enable-hardening [...]"
+                HARDENING_RESULT="failed"
+                return 1
+            fi
+        fi
+    else
+        warn "loginctl not available, skipping linger pre-check"
+    fi
+
+    if ! confirm "Apply session containment hardening (KillUserProcesses, nproc cap, at/cron allowlists, mask atd)?"; then
+        info "Hardening skipped by user"
+        HARDENING_RESULT="declined"
+        return 0
+    fi
+
+    # Optimistic: assume each sub-step will succeed; downgrade to
+    # "partial" on any failure that we choose to recover from rather
+    # than abort. Final state is reported by print_summary and by the
+    # closing log line below.
+    HARDENING_RESULT="applied"
+
+    # 1. logind: KillUserProcesses=yes
+    if ! install_hardening_file \
+            "$HARDENING_TEMPLATE_DIR/logind.conf.d/open-bastion.conf" \
+            "$HARDENING_LOGIND_DST"; then
+        warn "Failed to install $HARDENING_LOGIND_DST — containment is incomplete"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 2. limits.d: nproc cap
+    if ! install_hardening_file \
+            "$HARDENING_TEMPLATE_DIR/security/limits.d/open-bastion.conf" \
+            "$HARDENING_LIMITS_DST"; then
+        warn "Failed to install $HARDENING_LIMITS_DST — fork-bomb cap not in place"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 3. at.allow / cron.allow — never overwrite an admin-managed file
+    if ! install_hardening_allowlist \
+            "$HARDENING_TEMPLATE_DIR/at.allow" \
+            "$HARDENING_AT_ALLOW"; then
+        warn "Failed to deploy $HARDENING_AT_ALLOW — at(1) lockdown skipped"
+        HARDENING_RESULT="partial"
+    fi
+
+    if ! install_hardening_allowlist \
+            "$HARDENING_TEMPLATE_DIR/cron.allow" \
+            "$HARDENING_CRON_ALLOW"; then
+        warn "Failed to deploy $HARDENING_CRON_ALLOW — crontab(1) lockdown skipped"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 3b. Warn if cron.allow doesn't list 'root'. The Mode E KRL refresh
+    #     job (/etc/cron.d/open-bastion-krl) runs as root, and cron
+    #     refuses to dispatch jobs for users absent from cron.allow when
+    #     the file exists. An admin-managed cron.allow without 'root'
+    #     would silently break KRL refresh.
+    if [ -f "$HARDENING_CRON_ALLOW" ] \
+       && ! grep -qE '^[[:space:]]*root[[:space:]]*$' "$HARDENING_CRON_ALLOW"; then
+        warn "$HARDENING_CRON_ALLOW exists but does not list 'root' — this will break"
+        warn "the KRL refresh job (/etc/cron.d/open-bastion-krl). Add 'root' on its"
+        warn "own line to $HARDENING_CRON_ALLOW."
+    fi
+
+    # 4. Mask atd if it exists. We do NOT mask cron because
+    #    --max-security writes /etc/cron.d/open-bastion-krl which needs
+    #    a running cron daemon.
+    if systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
+        if [ "$DRY_RUN" = "true" ]; then
+            info "[DRY-RUN] Would systemctl mask atd && systemctl stop atd"
+        else
+            systemctl stop atd 2>/dev/null || true
+            if systemctl mask atd 2>/dev/null; then
+                info "Masked atd.service (deferred at(1) jobs disabled)"
+            else
+                warn "Failed to mask atd.service — at(1) jobs may still run"
+                HARDENING_RESULT="partial"
+            fi
+        fi
+    else
+        info "atd.service not present, nothing to mask"
+    fi
+
+    # 5. Reload logind so KillUserProcesses=yes takes effect.
+    #    `systemctl reload` (SIGHUP) is non-disruptive: logind re-reads
+    #    its drop-ins without restarting and without killing active
+    #    sessions. KillUserProcesses=yes is consulted at session-end
+    #    cleanup, so the new behaviour applies to existing sessions
+    #    when they eventually log out, while currently-connected admins
+    #    keep their shells. Avoid `reload-or-restart` here: a fallback
+    #    to restart would terminate every user session, including the
+    #    admin running this setup.
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would systemctl reload systemd-logind (SIGHUP, non-disruptive)"
+        # In dry-run, nothing was actually written; report as such so
+        # the operator doesn't read "applied" and assume the host is
+        # configured.
+        HARDENING_RESULT="dry-run"
+    else
+        info "Reloading systemd-logind (SIGHUP, no session disruption)"
+        if systemctl reload systemd-logind 2>/dev/null; then
+            info "Reloaded systemd-logind"
+        else
+            warn "Failed to reload systemd-logind — run 'systemctl reload systemd-logind' manually"
+            HARDENING_RESULT="partial"
+        fi
+    fi
+
+    case "$HARDENING_RESULT" in
+        applied)
+            info "Hardening applied. Verify with: loginctl show-user <user> | grep Linger"
+            ;;
+        partial)
+            warn "Hardening applied with warnings — review the output above before relying on containment"
+            ;;
+        dry-run)
+            info "[DRY-RUN] Hardening would be applied. Re-run without --dry-run to commit."
+            ;;
+        *)
+            ;;
+    esac
+}
+
 # Configure primary audit trace via auditd (opt-in).
 # Goal: tamper-evident syscall-level evidence of non-sudo user activity,
 # independent of the pty session recording (which a malicious user could
@@ -852,6 +1123,26 @@ print_summary() {
     echo "  ✓ Session recording (ForceCommand)"
     echo "  ✓ LLNG authorization"
     echo "  ✓ Password authentication disabled"
+    case "$HARDENING_RESULT" in
+        applied)
+            echo "  ✓ Session containment (logind KillUserProcesses, nproc cap, at/cron allowlists)"
+            ;;
+        partial)
+            echo "  ⚠ Session containment partially applied — see [WARN] lines above"
+            ;;
+        dry-run)
+            echo "  ✓ Session containment (dry-run — nothing actually written)"
+            ;;
+        declined)
+            echo "  ✗ Session containment hardening (declined at confirm prompt)"
+            ;;
+        failed)
+            echo "  ✗ Session containment hardening (failed — see [ERROR] lines above)"
+            ;;
+        *)
+            echo "  ✗ Session containment hardening (not applied — use --enable-hardening to opt in)"
+            ;;
+    esac
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "  ✓ Maximum Security Mode E"
         echo "    - SSH: SSO-signed certificates only"
@@ -889,6 +1180,9 @@ Options:
   -y, --yes               Non-interactive mode (requires --token-file)
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
+  --enable-hardening      Apply system-wide containment hardening (logind KillUserProcesses,
+                          mask atd, at/cron allow-lists, nproc limit). OFF by default —
+                          modifies system-wide behaviour, opt in only on dedicated bastion hosts.
   --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
                           Installs audit rules (rules.d/open-bastion.rules)
                           and a daily rotation cron, then restarts auditd.
@@ -910,6 +1204,9 @@ What this script does:
   4. Configures PAM for LLNG authorization
   5. Enrolls the server with LLNG (Device Authorization)
   6. Restarts SSH service
+  7. Applies session containment hardening (logind KillUserProcesses,
+     nproc cap, at/cron allowlists, mask atd) ONLY if --enable-hardening
+     is passed. Hardening is OFF by default.
 
 EOF
     exit 0
@@ -960,6 +1257,10 @@ parse_args() {
                 ;;
             --max-security)
                 MAX_SECURITY=true
+                shift
+                ;;
+            --enable-hardening)
+                ENABLE_HARDENING=true
                 shift
                 ;;
             --enable-audit-trace)
@@ -1051,6 +1352,11 @@ main() {
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
     configure_nss || exit 1
+    if [ "$ENABLE_HARDENING" = "true" ]; then
+        setup_hardening || warn "Hardening step reported errors"
+    else
+        info "Session containment hardening not applied (opt-in: pass --enable-hardening to activate)"
+    fi
     download_krl || warn "KRL download failed"
     enroll_server || warn "Server enrollment skipped or failed"
 
