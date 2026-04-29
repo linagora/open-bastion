@@ -111,6 +111,16 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
 %{_mandir}/man1/ob-ssh-proxy.1*
+# Hardening templates (session containment - deployed by ob-bastion-setup)
+%dir %{_datadir}/open-bastion
+%dir %{_datadir}/open-bastion/hardening
+%dir %{_datadir}/open-bastion/hardening/logind.conf.d
+%dir %{_datadir}/open-bastion/hardening/security
+%dir %{_datadir}/open-bastion/hardening/security/limits.d
+%{_datadir}/open-bastion/hardening/logind.conf.d/open-bastion.conf
+%{_datadir}/open-bastion/hardening/security/limits.d/open-bastion.conf
+%{_datadir}/open-bastion/hardening/at.allow
+%{_datadir}/open-bastion/hardening/cron.allow
 %exclude %{_docdir}/open-bastion/README.md
 
 %files desktop

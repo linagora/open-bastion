@@ -1,0 +1,3 @@
+# Open Bastion: only users listed here can use at(1).
+# Empty (root only) by design — non-sudo users must not schedule
+# deferred commands that would run outside the recorded session.

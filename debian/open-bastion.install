@@ -39,6 +39,12 @@ debian/tmp/usr/share/man/man8/ob-session-recorder.8
 debian/tmp/usr/share/open-bastion/audit/rules.d/open-bastion.rules
 debian/tmp/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 
+# Hardening templates (deployed by `ob-bastion-setup --enable-hardening`)
+debian/tmp/usr/share/open-bastion/hardening/logind.conf.d/open-bastion.conf
+debian/tmp/usr/share/open-bastion/hardening/security/limits.d/open-bastion.conf
+debian/tmp/usr/share/open-bastion/hardening/at.allow
+debian/tmp/usr/share/open-bastion/hardening/cron.allow
+
 # Documentation
 debian/tmp/usr/share/doc/open-bastion/README.md
 
