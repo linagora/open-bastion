@@ -45,6 +45,14 @@ PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
+# Hardening (session containment) — see doc/hardening.md
+HARDENING_TEMPLATE_DIR="/usr/share/open-bastion/hardening"
+HARDENING_LOGIND_DST="/etc/systemd/logind.conf.d/open-bastion.conf"
+HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
+HARDENING_AT_ALLOW="/etc/at.allow"
+HARDENING_CRON_ALLOW="/etc/cron.allow"
+SKIP_HARDENING=false
+
 # Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
 AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
@@ -667,6 +675,137 @@ home_base = /home
     info "Created $NSS_OB_CONF"
 }
 
+# Install one hardening template by absolute source/destination path,
+# creating the destination directory if missing and backing up any
+# existing file. Mode 0644 root:root.
+install_hardening_file() {
+    local src="$1"
+    local dst="$2"
+    local dst_dir
+    dst_dir=$(dirname "$dst")
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src (package not fully installed?)"
+        return 1
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $src -> $dst (0644 root:root)"
+        return 0
+    fi
+
+    [ -d "$dst_dir" ] || mkdir -p "$dst_dir"
+    backup_file "$dst"
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Installed $dst"
+}
+
+# Conditionally drop a *.allow whitelist if absent, keeping any
+# pre-existing admin file untouched. We only warn — overwriting an
+# admin-managed file silently would be hostile.
+install_hardening_allowlist() {
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src"
+        return 1
+    fi
+
+    if [ -f "$dst" ]; then
+        if cmp -s "$src" "$dst"; then
+            info "$dst already matches template, leaving as-is"
+        else
+            warn "$dst already exists with custom content — leaving untouched"
+            warn "Review it manually against $src to ensure containment is preserved"
+        fi
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would create $dst from $src (0644 root:root)"
+        return 0
+    fi
+
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Created $dst"
+}
+
+# Configure host-level session containment. All steps are pure system
+# config — no setuid binary is added. See doc/hardening.md for rationale.
+setup_hardening() {
+    if [ "$SKIP_HARDENING" = "true" ]; then
+        info "Skipping session containment hardening (--skip-hardening)"
+        return 0
+    fi
+
+    step "Applying session containment hardening..."
+
+    if [ ! -d "$HARDENING_TEMPLATE_DIR" ]; then
+        warn "Hardening templates not found in $HARDENING_TEMPLATE_DIR"
+        warn "Skipping hardening step — install the open-bastion package or pass --skip-hardening to silence this."
+        return 0
+    fi
+
+    if ! confirm "Apply session containment hardening (KillUserProcesses, nproc cap, at/cron allowlists, mask atd)?"; then
+        info "Hardening skipped by user"
+        return 0
+    fi
+
+    # 1. logind: KillUserProcesses=yes
+    install_hardening_file \
+        "$HARDENING_TEMPLATE_DIR/logind.conf.d/open-bastion.conf" \
+        "$HARDENING_LOGIND_DST" || true
+
+    # 2. limits.d: nproc cap
+    install_hardening_file \
+        "$HARDENING_TEMPLATE_DIR/security/limits.d/open-bastion.conf" \
+        "$HARDENING_LIMITS_DST" || true
+
+    # 3. at.allow / cron.allow — never overwrite an admin-managed file
+    install_hardening_allowlist \
+        "$HARDENING_TEMPLATE_DIR/at.allow" \
+        "$HARDENING_AT_ALLOW" || true
+
+    install_hardening_allowlist \
+        "$HARDENING_TEMPLATE_DIR/cron.allow" \
+        "$HARDENING_CRON_ALLOW" || true
+
+    # 4. Mask atd if it exists. We do NOT mask cron because
+    #    --max-security writes /etc/cron.d/open-bastion-krl which needs
+    #    a running cron daemon.
+    if systemctl list-unit-files atd.service >/dev/null 2>&1 \
+       && systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
+        if [ "$DRY_RUN" = "true" ]; then
+            info "[DRY-RUN] Would systemctl mask atd && systemctl stop atd"
+        else
+            systemctl stop atd 2>/dev/null || true
+            if systemctl mask atd 2>/dev/null; then
+                info "Masked atd.service (deferred at(1) jobs disabled)"
+            else
+                warn "Failed to mask atd.service"
+            fi
+        fi
+    else
+        info "atd.service not present, nothing to mask"
+    fi
+
+    # 5. Reload logind so KillUserProcesses=yes takes effect.
+    #    Note: this disconnects active user sessions on this host.
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would systemctl reload-or-restart systemd-logind"
+    else
+        warn "Reloading systemd-logind — any active user session on this host will be killed"
+        if systemctl reload-or-restart systemd-logind 2>/dev/null; then
+            info "Reloaded systemd-logind"
+        else
+            warn "Failed to reload systemd-logind — reboot or run manually"
+        fi
+    fi
+
+    info "Hardening applied. Verify with: loginctl show-user <user> | grep Linger"
+}
+
 # Configure primary audit trace via auditd (opt-in).
 # Goal: tamper-evident syscall-level evidence of non-sudo user activity,
 # independent of the pty session recording (which a malicious user could
@@ -852,6 +991,11 @@ print_summary() {
     echo "  ✓ Session recording (ForceCommand)"
     echo "  ✓ LLNG authorization"
     echo "  ✓ Password authentication disabled"
+    if [ "$SKIP_HARDENING" = "true" ]; then
+        echo "  ✗ Session containment hardening (skipped)"
+    else
+        echo "  ✓ Session containment (logind KillUserProcesses, nproc cap, at/cron allowlists)"
+    fi
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "  ✓ Maximum Security Mode E"
         echo "    - SSH: SSO-signed certificates only"
@@ -889,6 +1033,8 @@ Options:
   -y, --yes               Non-interactive mode (requires --token-file)
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
+  --skip-hardening        Do not deploy session containment templates
+                          (logind KillUserProcesses, nproc cap, at/cron allowlists, mask atd)
   --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
                           Installs audit rules (rules.d/open-bastion.rules)
                           and a daily rotation cron, then restarts auditd.
@@ -908,8 +1054,10 @@ What this script does:
   2. Configures sshd for certificate authentication
   3. Enables session recording via ForceCommand
   4. Configures PAM for LLNG authorization
-  5. Enrolls the server with LLNG (Device Authorization)
-  6. Restarts SSH service
+  5. Applies session containment hardening (logind KillUserProcesses,
+     nproc cap, at/cron allowlists, mask atd) unless --skip-hardening
+  6. Enrolls the server with LLNG (Device Authorization)
+  7. Restarts SSH service
 
 EOF
     exit 0
@@ -960,6 +1108,10 @@ parse_args() {
                 ;;
             --max-security)
                 MAX_SECURITY=true
+                shift
+                ;;
+            --skip-hardening)
+                SKIP_HARDENING=true
                 shift
                 ;;
             --enable-audit-trace)
@@ -1051,6 +1203,7 @@ main() {
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
     configure_nss || exit 1
+    setup_hardening || warn "Hardening step reported errors"
     download_krl || warn "KRL download failed"
     enroll_server || warn "Server enrollment skipped or failed"
 
