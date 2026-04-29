@@ -1227,6 +1227,57 @@ Au moment de l'exécution effective de la commande planifiée (si la planificati
 
 ---
 
+### R-S21 - Action non capturée par l'enregistreur sans tuer le recorder
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Description :** Même avec le recorder actif et la session ouverte, certaines actions ne passent pas par le pty et ne sont donc pas capturées par `script(1)`. Cas typiques :
+
+- I/O sur des descripteurs de fichiers redirigés (socket réseau, fichier, mémoire) qui contournent le pty
+- Commandes lancées via `execveat` (syscall #322 sur x86_64) au lieu d'`execve` — non tracées par défaut par auditd si seul `execve` est dans les règles
+- Exfiltration UDP via `sendto` sur socket non-connectée — non tracée par `connect()`
+- Opérations `io_uring` qui contournent les syscalls classiques
+
+Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le recorder est vivant et la session est ouverte : c'est la **nature du syscall** qui rend l'action invisible au pty.
+
+**Conditions de la menace :**
+
+1. Recorder actif et fonctionnel (cf. R-S19 pour le cas où il est tué)
+2. Utilisateur connaît la technique (informaticien expérimenté ou attaquant motivé)
+
+**Vecteurs :**
+
+- Petit programme C/Python qui appelle `syscall(SYS_execveat, ...)` pour spawner un shell hors trace `execve`
+- Reverse shell où le pty enregistre seulement la commande de lancement, puis l'attaquant pilote depuis l'extérieur (la session continue mais le canal de pilotage est invisible)
+- Exfiltration DNS via UDP `sendto` non-connecté
+
+**Conséquence :** Le recording pty ne reflète pas la totalité des actions de la session. Limite la valeur forensique du replay et l'imputation.
+
+**Remédiation implémentée — Trace primaire auditd (PR2 #113, opt-in via `--enable-audit-trace`) :**
+
+- Règles `-S execve -S execveat` : les **deux** syscalls sont couverts → `execveat` ne contourne plus la trace (correctif issu de la review sécurité de PR2 ; n'inclure qu'`execve` était insuffisant).
+- Watch `-w /var/lib/open-bastion/sessions/ -p wa` : toute tentative de modifier ou supprimer un recording est tracée même si l'effacement réussit (cf. R-S18).
+- `connect()` tracé pour les sockets connectées (TCP, sockets Unix connectées, UDP « connectées » — c'est-à-dire après un `connect(AF_INET, SOCK_DGRAM)`).
+- Watches sur les fichiers sensibles (`/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/sudoers`, `/etc/ssh/sshd_config`, `/etc/open-bastion/`) : toute modification est imputable au PID/UID/PPID qui l'a provoquée.
+
+**Limites résiduelles documentées dans [doc/audit.md](../audit.md) (documentation technique en anglais) :**
+
+- `sendto`/`sendmsg` UDP non-connectées non tracées par défaut (la volumétrie serait excessive). Extension opt-in documentée : ajouter `-S sendto -S sendmsg` à `/etc/audit/rules.d/open-bastion.rules`.
+- `io_uring_enter` non tracé (rare en pratique). Mêmes considérations de volumétrie.
+- Contenu des fichiers et des buffers réseau non capturé : auditd trace les **syscalls et leurs métadonnées** (uid, ppid, cwd, args), pas les données échangées.
+
+|                 |                                       Score résiduel (PR2 activée)                                       |
+| --------------- | :------------------------------------------------------------------------------------------------------: |
+| **Probabilité** | 1 (`execve`/`execveat` couverts, watches sur `/etc` et `sessions/`, `connect()` TCP/UDP-connect tracés) |
+| **Impact**      |  2 (`sendto` UDP non-connecté reste un canal d'exfil non tracé par défaut → DNS-tunnel possible mais documenté) |
+
+> **Score résiduel si PR2 NON activée :** P=2, I=3 (zone jaune). L'enregistrement pty seul ne suffit pas comme preuve d'audit primaire : la trace auditd est **fortement recommandée** en complément. Voir [doc/audit.md](../audit.md) pour les détails techniques (documentation technique en anglais).
+
+---
+
 ## 4. Matrice des Risques
 
 ### Avant remédiation
