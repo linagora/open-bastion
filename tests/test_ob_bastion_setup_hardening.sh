@@ -2,6 +2,10 @@
 # Integration tests for the session-containment hardening step
 # added to ob-bastion-setup (PR1). All tests run in dry-run mode and
 # inside a sandboxed temporary directory so they never touch the host.
+#
+# shellcheck disable=SC2034  # variables are read by sourced functions
+# shellcheck disable=SC2181  # $? idiom matches existing test style
+# shellcheck disable=SC2329  # mocked functions invoked indirectly via sourced helpers
 set -uo pipefail
 
 TESTS_RUN=0
@@ -68,7 +72,7 @@ test_at_allow_template_content() {
     local f="$REPO_DIR/config/hardening/at.allow"
     # grep -v comments, blank lines; expect zero non-comment lines.
     local non_comments
-    non_comments=$(grep -vE '^[[:space:]]*(#|$)' "$f" | wc -l)
+    non_comments=$(grep -cvE '^[[:space:]]*(#|$)' "$f")
     if [ "$non_comments" -eq 0 ]; then
         pass "at.allow template is empty (root-only by design)"
     else

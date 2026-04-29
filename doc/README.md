@@ -15,6 +15,7 @@
 | [Service Accounts](service-accounts.md)         | Ansible, backup, CI/CD accounts               |
 | [Bastion Architecture](bastion-architecture.md) | Bastion-to-backend JWT authentication         |
 | [Session Recording](session-recording.md)       | SSH session recording for audit               |
+| [Session Containment Hardening](hardening.md)   | logind, limits, at/cron containment           |
 | [Primary Audit Trace](audit.md)                 | Optional auditd-based syscall audit trail     |
 | [CrowdSec Integration](crowdsec.md)             | IP blocking and alert reporting               |
 | [Security Features](security.md)                | Key policies, rate limiting, cache protection |
