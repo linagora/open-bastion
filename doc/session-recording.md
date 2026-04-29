@@ -259,6 +259,18 @@ directly to `ob-session-recorder`.
 - Consider log rotation and retention policies
 - Sensitive data may be captured (passwords typed in terminals)
 
+### Complementary primary audit trace
+
+Session recording is a faithful pty replay, not an independent audit
+trail: a determined user can attempt to bypass the pty (via `setsid`,
+`at`, `cron`, `nohup`, `systemd --user`) or tamper with their own
+recording on disk. For a kernel-level, tamper-evident syscall log
+covering `execve`, outbound `connect`, and writes to sensitive paths
+(including the recordings directory itself), enable the optional
+auditd-based trace — see [Primary Audit Trace](audit.md). It is
+opt-in (`ob-bastion-setup --enable-audit-trace`) and complementary to
+session recording, not a replacement.
+
 ### Network Security
 
 When uploading to LLNG (future feature):
