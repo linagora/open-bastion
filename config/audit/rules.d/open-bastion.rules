@@ -1,0 +1,43 @@
+## Open Bastion: traceability rules for non-system users.
+## Filter on auid (audit-uid) so the rule survives setuid/setgid transitions.
+## auid<unset> covers system processes started before login.
+
+# Buffer: 8192 events (default 64 too small for execve-heavy workloads)
+-b 8192
+
+# On full buffer: printk to console (1), do not panic kernel
+-f 1
+
+# === EXECVE: every command run by a logged-in non-system user ===
+# Cover both execve and execveat (syscall #322): execveat alone bypasses
+# a rule that only matches execve.
+-a always,exit -F arch=b64 -S execve -S execveat -F auid>=1000 -F auid!=unset -k ob-exec
+-a always,exit -F arch=b32 -S execve -S execveat -F auid>=1000 -F auid!=unset -k ob-exec
+
+# === NETWORK: outbound connect() only — see doc/audit.md for sendto/io_uring caveats ===
+# UDP exfiltration via sendto on an unconnected socket and io_uring-based
+# clients are NOT covered here on purpose (sendto/sendmsg would be too
+# chatty by default). Operators who need broader coverage can add
+# `-S sendto -S sendmsg` and accept the volume.
+-a always,exit -F arch=b64 -S connect -F auid>=1000 -F auid!=unset -k ob-connect
+-a always,exit -F arch=b32 -S connect -F auid>=1000 -F auid!=unset -k ob-connect
+
+# === SENSITIVE FILES: writes/attribute changes ===
+-w /etc/passwd       -p wa -k ob-passwd
+-w /etc/shadow       -p wa -k ob-shadow
+-w /etc/group        -p wa -k ob-group
+-w /etc/gshadow      -p wa -k ob-gshadow
+-w /etc/sudoers      -p wa -k ob-sudoers
+-w /etc/sudoers.d/   -p wa -k ob-sudoers
+-w /etc/ssh/sshd_config    -p wa -k ob-sshd
+-w /etc/ssh/sshd_config.d/ -p wa -k ob-sshd
+
+# === SESSION RECORDINGS: tampering detection ===
+-w /var/lib/open-bastion/sessions/ -p wa -k ob-sessions-tampering
+
+# === BASTION OWN CONFIG ===
+-w /etc/open-bastion/ -p wa -k ob-config
+
+# Last rule: lock the audit configuration until reboot.
+# Comment out for development; uncomment in production.
+# -e 2

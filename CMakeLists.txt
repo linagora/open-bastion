@@ -231,6 +231,17 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
+# Read-only templates under /usr/share/open-bastion/audit/. The setup function
+# copies them into /etc/audit/rules.d/ and /etc/cron.daily/ at deployment time.
+# These are NOT dpkg conffiles / rpm config(noreplace) — see doc/audit.md.
+install(FILES ${CMAKE_SOURCE_DIR}/config/audit/rules.d/open-bastion.rules
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/rules.d
+)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/config/audit/cron.daily/open-bastion-audit-rotate
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/cron.daily
+)
+
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-backend-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )

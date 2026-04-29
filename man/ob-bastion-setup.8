@@ -37,6 +37,24 @@ Non-interactive mode (requires \-\-token\-file).
 .BR \-k ", " \-\-insecure
 Skip SSL certificate verification.
 .TP
+.BR \-\-enable\-audit\-trace
+Enable the optional primary audit trace based on
+.BR auditd (8).
+OFF by default. When enabled, installs
+.I /etc/audit/rules.d/open-bastion.rules
+(targeting non-system users via auid >= 1000) and
+.I /etc/cron.daily/open-bastion-audit-rotate
+for daily log rotation, then loads the rules and restarts auditd.
+.I /etc/audit/auditd.conf
+is intentionally NOT modified; tune retention manually
+(see
+.BR doc/audit.md ,
+section "Tuning retention").
+Requires the auditd package to be installed on the host
+(Recommends, not Depends). See
+.B doc/audit.md
+for rationale, threat model, verification, and tuning.
+.TP
 .BR \-n ", " \-\-dry\-run
 Show what would be done without making changes.
 .TP

@@ -29,6 +29,11 @@ Requires:       nscd
 Requires:       systemd
 Requires:       util-linux
 
+# Soft dependency: needed only when admin opts in via
+# `ob-bastion-setup --enable-audit-trace`. The audit templates ship in this
+# package; the auditd daemon itself is pulled in only by Recommends.
+Recommends:     audit
+
 %description
 Open Bastion PAM/NSS module for SSH bastion authentication supporting
 token-based and key-based authorization with server groups.
@@ -91,6 +96,12 @@ ctest --output-on-failure --verbose
 %{_bindir}/ob-ssh-proxy
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
+%dir %{_datadir}/open-bastion
+%dir %{_datadir}/open-bastion/audit
+%dir %{_datadir}/open-bastion/audit/rules.d
+%dir %{_datadir}/open-bastion/audit/cron.daily
+%{_datadir}/open-bastion/audit/rules.d/open-bastion.rules
+%{_datadir}/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
 %{_mandir}/man1/ob-ssh-cert.1*

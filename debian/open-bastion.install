@@ -35,6 +35,10 @@ debian/tmp/usr/share/man/man8/ob-bastion-setup.8
 debian/tmp/usr/share/man/man8/ob-backend-setup.8
 debian/tmp/usr/share/man/man8/ob-session-recorder.8
 
+# Audit trace templates (deployed by `ob-bastion-setup --enable-audit-trace`)
+debian/tmp/usr/share/open-bastion/audit/rules.d/open-bastion.rules
+debian/tmp/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate
+
 # Documentation
 debian/tmp/usr/share/doc/open-bastion/README.md
 
