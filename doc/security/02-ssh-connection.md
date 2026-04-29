@@ -1101,17 +1101,16 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 
 |                 | Score |
 | --------------- | :---: |
-| **Probabilité** |   3   |
+| **Probabilité** |   2   |
 | **Impact**      |   3   |
 
-**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Si les fichiers de session sont créés avec les droits de l'utilisateur (propriétaire = utilisateur), celui-ci peut les supprimer librement.
+**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Le wrapper setgid crée le sous-répertoire utilisateur en mode `2770 user:ob-sessions` : **l'utilisateur en est propriétaire** et dispose donc des permissions `wx` sur ce sous-répertoire, ce qui lui permet de faire `unlink` de ses propres fichiers de session via `rm`. Le sticky bit du parent `/var/lib/open-bastion/sessions` (mode `1770 root:ob-sessions`) protège uniquement le sous-répertoire utilisateur lui-même contre la suppression, **pas les fichiers à l'intérieur**.
 
 **Conditions de la menace :**
 
 1. L'utilisateur a une session SSH active (authentifié par certificat + autorisé par PAM)
-2. Le session recorder (`ForceCommand`) crée les fichiers sous l'identité de l'utilisateur
-3. L'utilisateur a accès en écriture au répertoire de sessions
-4. Aucune protection n'empêche la suppression ou modification des fichiers
+2. Le session recorder (`ForceCommand`) crée les fichiers dans un sous-répertoire dont l'utilisateur est propriétaire (`2770 user:ob-sessions`)
+3. L'utilisateur a accès en écriture au sous-répertoire et est propriétaire des fichiers de session
 
 **Vecteurs :**
 
@@ -1119,31 +1118,26 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 - Modification du contenu (troncature, réécriture) pour masquer des commandes
 - Suppression des métadonnées JSON pour effacer les traces d'activité
 
-**Conséquence :** Perte de traçabilité des actions effectuées sur le serveur. En cas d'incident de sécurité, l'absence d'enregistrement empêche l'analyse forensique et l'imputation des actions.
+**Conséquence :** Perte du replay visuel de la session. La timeline (start/end, identifiant utilisateur) reste cependant traçable via syslog `auth.info`, et l'événement d'effacement lui-même peut être tracé si la trace auditd primaire est activée.
 
-**Remédiation implémentée — Séparation des privilèges par wrapper setgid :**
+**Remédiations en place :**
 
-Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions` :
+1. **Wrapper setgid `ob-session-recorder-wrapper`** : empêche l'utilisateur d'**accéder aux recordings d'autres utilisateurs**. C'est la propriété principale réellement obtenue par le mécanisme setgid : isolation latérale entre utilisateurs, et non immutabilité des fichiers de l'utilisateur courant. Cette propriété reste valable et utile.
+2. **Sanitisation de l'environnement** (LD_PRELOAD, BASH_ENV, PATH durci) avant exec du script de session : empêche les vecteurs d'évasion via préchargement de bibliothèque.
+3. **Syslog `auth.info`** : le session recorder émet des événements `session_start` / `session_end` dans syslog, qui constitue un journal indépendant des fichiers de recording (syslog est root-owned et n'est pas accessible en écriture à l'utilisateur). Même si l'utilisateur supprime ses fichiers de session, syslog conserve la trace de l'ouverture et de la fermeture de la session, suffisante pour l'imputation temporelle.
+4. **Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa`** (PR2 #113, opt-in via `--enable-audit-trace`) : trace tout `unlink`, `truncate` ou `rename` sur les fichiers de session, **même si l'effacement réussit**. L'événement d'effacement devient lui-même une preuve d'audit.
 
-1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
-2. Le wrapper utilise son gid effectif `ob-sessions` **uniquement** pour créer le sous-répertoire utilisateur en mode `2770 user:ob-sessions` (bit setgid sur le répertoire)
-3. Le wrapper drop explicitement le gid élevé via `setregid(orig_gid, orig_gid)` avant l'exec. `exec` ne supprime **pas** un gid effectif/sauvé déjà acquis (seuls les bits setgid du _fichier_ exécuté sont ignorés). Le drop explicite garantit que le script et le shell tournent avec le gid original de l'utilisateur
-4. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
-   - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
-   - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire
-5. Les fichiers de session héritent du groupe `ob-sessions` grâce au bit setgid du sous-répertoire utilisateur (mode `2770`), sans que le processus ait besoin du gid élevé
-6. L'environnement est sanitisé (LD_PRELOAD, BASH_ENV, PATH durci) avant l'exec
+**Pistes non retenues :**
 
-**Résultat :** L'utilisateur ne peut ni lire, ni modifier, ni supprimer les fichiers d'enregistrement de session depuis son shell.
+- **Démon collecteur privilégié** (fichiers root-owned via fd-passing sur socket Unix) : architecture la plus robuste mais introduit un nouveau service permanent et un canal IPC privilégié. Discutée en brainstorm initial mais écartée à ce stade.
+- **Binaire setuid root** dédié à la création de fichiers root-owned : écarté en raison de la préférence projet pour ne pas multiplier les binaires setuid root sur le bastion.
 
-**Protection complémentaire — Syslog :**
+Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélioration permettant de redescendre P à 1 sans setuid.
 
-Le session recorder enregistre les événements de début/fin de session dans syslog (`auth.info`), qui constitue un journal d'audit indépendant et résistant à la falsification par l'utilisateur (syslog est protégé par les droits root).
-
-|                 |                           Score résiduel                           |
-| --------------- | :----------------------------------------------------------------: |
-| **Probabilité** | 1 (setgid wrapper + sticky bit + syslog comme journal indépendant) |
-| **Impact**      |              1 (syslog préserve les traces minimales)              |
+|                 |                                Score résiduel                                |
+| --------------- | :--------------------------------------------------------------------------: |
+| **Probabilité** |                  2 (suppression triviale via `rm` reste possible)            |
+| **Impact**      | 1 (syslog `auth.info` + watches auditd préservent la timeline et l'événement d'effacement) |
 
 ---
 
