@@ -1253,6 +1253,9 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - Petit programme C/Python qui appelle `syscall(SYS_execveat, ...)` pour spawner un shell hors trace `execve`
 - Reverse shell où le pty enregistre seulement la commande de lancement, puis l'attaquant pilote depuis l'extérieur (la session continue mais le canal de pilotage est invisible)
 - Exfiltration DNS via UDP `sendto` non-connecté
+- `TIOCSTI` ioctl pour injecter de l'input dans le tty parent ou un autre tty appartenant au même utilisateur (mitigé par défaut sur Linux ≥ 6.2 via `dev.tty.legacy_tiocsti_restrict=1`, mais à vérifier sur les hosts plus anciens)
+- `ptrace`/`PTRACE_ATTACH` sur un autre processus de l'utilisateur pour injecter du code dans un process non recordé (mitigé par défaut sur Debian/Ubuntu via `kernel.yama.ptrace_scope=1`, qui restreint `ptrace` au lien parent-enfant direct)
+- `LD_PRELOAD` *à l'intérieur* de la session (la sanitisation du wrapper ne couvre que le **lancement** du recorder, pas les commandes que l'utilisateur exécute ensuite). Exemple : `LD_PRELOAD=./evil.so /usr/bin/somecmd` pour intercepter ce que `somecmd` fait. Le pty enregistre le préfixe `LD_PRELOAD=…` mais pas les effets de la lib injectée.
 
 **Conséquence :** Le recording pty ne reflète pas la totalité des actions de la session. Limite la valeur forensique du replay et l'imputation.
 
@@ -1297,8 +1300,8 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 | ------------------------ | --------------------------------------------------- | ------------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4                                                |                     |              |                   |
 | **3 - Important**        | R-S5                                                | R-S6                |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8 R-S18 |              |                   |
-| **1 - Négligeable**      | R-S15 R-S19                                         | R-S3                |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8                |              |                   |
+| **1 - Négligeable**      | R-S15 R-S19                                         | R-S3 R-S18          |              |                   |
 
 **Profil de risque de la cible maximale :**
 
