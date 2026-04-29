@@ -22,6 +22,7 @@ Depends: ${misc:Depends},
  jq,
  nscd,
  debconf | debconf-2.0,
+Recommends: auditd,
 Pre-Depends: ${misc:Pre-Depends},
 Description: Open Bastion PAM/NSS module for SSH bastion authentication
  This PAM module enables Linux servers to authenticate users via
