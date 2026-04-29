@@ -728,12 +728,21 @@ setup_audit_trace() {
     # 4. Install rules template into /etc/audit/rules.d/.
     #    auditd's default rules.d entries (e.g. audit.rules) ship as 0640
     #    root:root on Debian; we match that.
-    install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"
+    #    Guard against `set -e` aborting the whole ob-bastion-setup run if
+    #    /etc/audit/rules.d/ is missing, RO, or perms-denied — return 1
+    #    instead so main() catches it via `setup_audit_trace || warn …`.
+    if ! install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"; then
+        error "Failed to install $AUDIT_RULES_FILE"
+        return 1
+    fi
     info "Installed $AUDIT_RULES_FILE"
 
     # 5. Install daily rotation cron. cron.daily entries must be executable
     #    and unsuffixed (run-parts ignores files with dots/tildes).
-    install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"
+    if ! install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"; then
+        error "Failed to install $AUDIT_CRON_FILE"
+        return 1
+    fi
     info "Installed $AUDIT_CRON_FILE"
 
     # /etc/audit/auditd.conf is intentionally NOT modified. It is a single

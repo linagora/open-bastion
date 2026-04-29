@@ -255,7 +255,7 @@ test_auditd_conf_not_modified() {
     fi
 }
 
-# ── Test 9: rules template content has the expected keys ──
+# ── Test 8: rules template content has the expected keys ──
 test_rules_template_content() {
     local rules="$PROJECT_ROOT/config/audit/rules.d/open-bastion.rules"
     if [ ! -f "$rules" ]; then
@@ -282,7 +282,7 @@ test_rules_template_content() {
     fi
 }
 
-# ── Test 10: cron.daily template is a valid /bin/sh script that calls SIGUSR1 ──
+# ── Test 9: cron.daily template is a valid /bin/sh script that calls SIGUSR1 ──
 test_cron_template_content() {
     local cron="$PROJECT_ROOT/config/audit/cron.daily/open-bastion-audit-rotate"
     if [ ! -f "$cron" ]; then
@@ -302,7 +302,7 @@ test_cron_template_content() {
     fi
 }
 
-# ── Test 11: setup_audit_trace is gated behind ENABLE_AUDIT_TRACE in main() ──
+# ── Test 10: setup_audit_trace is gated behind ENABLE_AUDIT_TRACE in main() ──
 # Smoke check: the script must mention the gating in main(). We
 # deliberately don't exec main() — that would try to talk to a real LLNG
 # portal — but we can grep the wiring.
@@ -316,7 +316,7 @@ test_main_gates_audit_trace() {
     fi
 }
 
-# ── Test 12: print_summary distinguishes applied vs not applied ──
+# ── Test 11: print_summary distinguishes applied vs not applied ──
 test_summary_distinguishes_state() {
     (
         source_script "ob-bastion-setup"
