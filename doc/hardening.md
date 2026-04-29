@@ -130,13 +130,40 @@ ps -u user | grep sleep        # → no output
 If `sleep` is still running, either `KillUserProcesses=yes` was not
 applied (logind not reloaded?) or the user has `Linger=yes`.
 
+## Lifecycle of the deployed files
+
+The four files written under `/etc/` (`at.allow`, `cron.allow`,
+`systemd/logind.conf.d/open-bastion.conf`,
+`security/limits.d/open-bastion.conf`) are **deployment artefacts of
+`ob-bastion-setup`**, not package-managed conffiles. The hardening step
+is opt-in (the operator runs `ob-bastion-setup` and confirms the
+prompt), so the package itself does not place these files.
+
+Practical consequences:
+
+- `apt purge open-bastion` (or `rpm -e open-bastion`) **does not
+  remove** `/etc/at.allow`, `/etc/cron.allow`,
+  `/etc/systemd/logind.conf.d/open-bastion.conf`, or
+  `/etc/security/limits.d/open-bastion.conf`. Remove them with `rm`
+  if you no longer want the hardening.
+- A package upgrade **does not overwrite** them either. Re-run
+  `ob-bastion-setup` after an upgrade if a template changes and you
+  want the new content; the script backs up the existing file before
+  replacing it.
+- The templates themselves live under `/usr/share/open-bastion/hardening/`
+  and *are* reinstalled on upgrade. They are read-only references; do
+  not edit them.
+
+To reapply or update the deployed files, edit them under `/etc/` and
+either re-run the relevant step (e.g. `systemctl reload systemd-logind`
+after touching the logind drop-in) or re-run `ob-bastion-setup` (which
+will back up and overwrite the logind/limits drop-ins, and warn if it
+finds an admin-managed `at.allow` or `cron.allow`).
+
 ## Disabling parts of the hardening
 
 If a deployment needs a specific subsystem back, edit the deployed
-files in `/etc/`, **not** the templates under `/usr/share/`. The
-templates are reinstalled on every package upgrade, but `/etc/` files
-are preserved (`%config(noreplace)` on RPM, dpkg conffile semantics on
-Debian).
+files in `/etc/` directly.
 
 | Re-enable           | What to do                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
