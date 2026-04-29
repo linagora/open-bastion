@@ -6,8 +6,8 @@
 | ------------------------ | -------------------------------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4, R-SA2                                  | R-SA1            |              |                   |
 | **3 - Important**        | R5, R-S5, R-S11                              | R-S6             |              |                   |
-| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21 | R6, R-S8, R-S18 |       |                   |
-| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                 | R-S3             |              |                   |
+| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                 | R-S3, R-S18      |              |                   |
 
 > **Note :** R-S3 et R-S15 ont été descendus d'un cran sur l'axe Impact grâce au **binding fingerprint SSH** introduit dans le plugin PamAccess ≥ 0.1.16. La vérification est effectuée côté LLNG à la fois sur `/pam/authorize` (à chaque ouverture de session SSH, phase PAM `account`) et sur `/pam/verify` (à chaque utilisation d'un token PAM pour sudo ou ré-authentification) : tant que l'empreinte de la clef SSH n'est pas présente, active et non révoquée dans la session persistante LLNG, ni la session SSH ni l'escalade sudo ne sont autorisées, indépendamment de la fraîcheur de la KRL locale. Voir [02-ssh-connection.md](02-ssh-connection.md) pour les détails.
 
@@ -16,8 +16,8 @@
 **Zones de risque :**
 
 - Score ≥ 6 : Zone rouge (aucun risque dans cette zone en Mode E avec PR1 + PR2 activées)
-- Score 4-5 : Zone jaune → R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8, R-S18 (P=2, I=2), R-S6 (P=2, I=3)
-- Score ≤ 3 : Zone verte → Tous les autres risques
+- Score 4-5 : Zone jaune → R-S4, R-SA2 (P=1, I=4), R-SA1 (P=2, I=4/3), R6, R-S8 (P=2, I=2), R-S6 (P=2, I=3)
+- Score ≤ 3 : Zone verte → Tous les autres risques (incluant R-S18 à P=2, I=1 = score 2)
 
 **Risques éliminés ou ramenés en zone verte par le Mode E (avec PR1 et PR2 activées) :**
 
