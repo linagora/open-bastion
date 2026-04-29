@@ -237,6 +237,47 @@ test_setup_hardening_preserves_admin_file() {
     fi
 }
 
+# ── Test 11b: when an admin file is byte-identical to the template,
+#             leave it as-is and log a noop, not a warning ──
+test_setup_hardening_admin_file_identical() {
+    local sandbox
+    sandbox=$(mktemp -d)
+    mkdir -p "$sandbox/share/hardening" "$sandbox/etc"
+    cp "$REPO_DIR/config/hardening/cron.allow" "$sandbox/share/hardening/cron.allow"
+    # Pre-existing admin file IS the template byte-for-byte
+    cp "$sandbox/share/hardening/cron.allow" "$sandbox/etc/cron.allow"
+    local before
+    before=$(stat -c '%Y:%s' "$sandbox/etc/cron.allow")
+
+    (
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        NON_INTERACTIVE=true
+        SKIP_HARDENING=false
+        install() { :; }
+        systemctl() { :; }
+        export -f install systemctl 2>/dev/null || true
+
+        out=$(install_hardening_allowlist \
+            "$sandbox/share/hardening/cron.allow" \
+            "$sandbox/etc/cron.allow" 2>&1)
+        rc=$?
+        echo "$out" | grep -q "already matches template" || exit 2
+        echo "$out" | grep -qi "leaving untouched" && exit 3   # must NOT warn
+        exit $rc
+    )
+    local rc=$?
+    local after
+    after=$(stat -c '%Y:%s' "$sandbox/etc/cron.allow")
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ] && [ "$before" = "$after" ]; then
+        pass "install_hardening_allowlist is a noop when admin file matches template"
+    else
+        fail "install_hardening_allowlist is a noop when admin file matches template" \
+             "rc=$rc before=$before after=$after"
+    fi
+}
+
 # ── Test 12: linger detection helper returns offending users ──
 test_detect_lingering_users_with_offender() {
     (
@@ -476,7 +517,72 @@ test_setup_hardening_linger_real_aborts() {
     fi
 }
 
-# ── Test 17: setup script uses 'reload' (non-disruptive), not 'reload-or-restart' ──
+# ── Test 17: cron.allow without 'root' triggers a WARN ──
+test_cron_allow_missing_root_warns() {
+    local sandbox
+    sandbox=$(mktemp -d)
+    mkdir -p "$sandbox/share/hardening/logind.conf.d" \
+             "$sandbox/share/hardening/security/limits.d" \
+             "$sandbox/etc"
+    cp "$REPO_DIR/config/hardening/logind.conf.d/open-bastion.conf" \
+       "$sandbox/share/hardening/logind.conf.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/security/limits.d/open-bastion.conf" \
+       "$sandbox/share/hardening/security/limits.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/at.allow" "$sandbox/share/hardening/at.allow"
+    cp "$REPO_DIR/config/hardening/cron.allow" "$sandbox/share/hardening/cron.allow"
+    # Pre-existing admin cron.allow that lists alice but NOT root
+    echo "alice" > "$sandbox/etc/cron.allow"
+
+    (
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        NON_INTERACTIVE=true
+        SKIP_HARDENING=false
+        HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
+        HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
+        HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
+        HARDENING_AT_ALLOW="$sandbox/etc/at.allow"
+        HARDENING_CRON_ALLOW="$sandbox/etc/cron.allow"
+        BACKUP_DIR="$sandbox/backup"
+        # No linger users
+        loginctl() { :; }
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                echo "loginctl"; return 0
+            fi
+            builtin command "$@"
+        }
+        install() { :; }
+        systemctl() { :; }
+        export -f loginctl command install systemctl 2>/dev/null || true
+
+        out=$(setup_hardening 2>&1)
+        # The admin cron.allow must be left untouched
+        grep -q "^alice$" "$sandbox/etc/cron.allow" || exit 2
+        # Must surface the WARN about root missing
+        echo "$out" | grep -q "does not list 'root'" || exit 3
+        exit 0
+    )
+    local rc=$?
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ]; then
+        pass "setup_hardening warns when cron.allow is missing 'root'"
+    else
+        fail "setup_hardening warns when cron.allow is missing 'root'" "rc=$rc"
+    fi
+}
+
+# ── Test 18: limits template exempts @ob-service from the nproc cap ──
+test_limits_template_exempts_ob_service() {
+    local f="$REPO_DIR/config/hardening/security/limits.d/open-bastion.conf"
+    if grep -qE '^@ob-service[[:space:]]+hard[[:space:]]+nproc[[:space:]]+unlimited' "$f"; then
+        pass "limits template exempts @ob-service from nproc cap"
+    else
+        fail "limits template exempts @ob-service from nproc cap"
+    fi
+}
+
+# ── Test 19: setup script uses 'reload' (non-disruptive), not 'reload-or-restart' ──
 test_setup_script_reload_only() {
     local f="$SCRIPT_DIR/ob-bastion-setup"
     if grep -q "reload-or-restart systemd-logind" "$f"; then
@@ -501,11 +607,14 @@ run_test test_help_mentions_hardening
 run_test test_setup_hardening_skipped
 run_test test_setup_hardening_dryrun
 run_test test_setup_hardening_preserves_admin_file
+run_test test_setup_hardening_admin_file_identical
 run_test test_detect_lingering_users_with_offender
 run_test test_detect_lingering_users_clean
 run_test test_detect_lingering_users_no_loginctl
 run_test test_setup_hardening_linger_dryrun_warns
 run_test test_setup_hardening_linger_real_aborts
+run_test test_cron_allow_missing_root_warns
+run_test test_limits_template_exempts_ob_service
 run_test test_setup_script_reload_only
 
 echo ""

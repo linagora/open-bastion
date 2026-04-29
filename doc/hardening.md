@@ -95,6 +95,12 @@ We mask `atd` rather than only relying on `at.allow` because some
 distros ship `atd` enabled by default, and a mis-edited `at.allow`
 would silently re-open the channel.
 
+> **Note on `cron.allow`:** if the file already exists and does **not**
+> list `root` on a line by itself, `cron` will refuse to dispatch
+> root-owned jobs — including the Mode E KRL refresh job at
+> `/etc/cron.d/open-bastion-krl`. `ob-bastion-setup` warns when it
+> detects this and asks you to add `root` to `/etc/cron.allow`.
+
 ## Why a `nproc` cap
 
 Without it, a fork bomb (`:(){ :|:& };:`) inside the recorded session
@@ -103,6 +109,33 @@ trying to clean it up. 256 is comfortable for interactive use and
 common build/test workloads; raise it in `/etc/security/limits.d/`
 with a more specific drop-in (e.g. `99-build-agents.conf`) if a
 service account legitimately needs more.
+
+### Service-account exemption
+
+Service accounts (Ansible, GitLab Runner, deploy bots — see
+[`service-accounts.md`](service-accounts.md)) often run parallel
+build/CI workloads (`make -j`, `pytest -n auto`, container builds)
+that legitimately exceed 256 processes. The deployed
+`/etc/security/limits.d/open-bastion.conf` therefore exempts members
+of the `ob-service` group:
+
+```
+@ob-service hard nproc unlimited
+```
+
+The package does **not** create `ob-service` — it would be a footgun
+if it did, since an operator might unknowingly drop accounts in it
+later. To opt in:
+
+```bash
+groupadd --system ob-service
+gpasswd -a ansible ob-service       # repeat for each service account
+```
+
+If the group does not exist, `pam_limits` silently ignores the line
+and the cap stays at 256 for everyone except root. To exempt a
+different group instead, add a more specific drop-in (sorted *after*
+`open-bastion.conf` alphabetically, e.g. `99-ci.conf`).
 
 ## Verifying after deployment
 

@@ -843,6 +843,18 @@ setup_hardening() {
         "$HARDENING_TEMPLATE_DIR/cron.allow" \
         "$HARDENING_CRON_ALLOW" || true
 
+    # 3b. Warn if cron.allow doesn't list 'root'. The Mode E KRL refresh
+    #     job (/etc/cron.d/open-bastion-krl) runs as root, and cron
+    #     refuses to dispatch jobs for users absent from cron.allow when
+    #     the file exists. An admin-managed cron.allow without 'root'
+    #     would silently break KRL refresh.
+    if [ -f "$HARDENING_CRON_ALLOW" ] \
+       && ! grep -qE '^[[:space:]]*root[[:space:]]*$' "$HARDENING_CRON_ALLOW"; then
+        warn "$HARDENING_CRON_ALLOW exists but does not list 'root' — this will break"
+        warn "the KRL refresh job (/etc/cron.d/open-bastion-krl). Add 'root' on its"
+        warn "own line to $HARDENING_CRON_ALLOW."
+    fi
+
     # 4. Mask atd if it exists. We do NOT mask cron because
     #    --max-security writes /etc/cron.d/open-bastion-krl which needs
     #    a running cron daemon.
