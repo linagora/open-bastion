@@ -237,6 +237,18 @@ test_setup_hardening_preserves_admin_file() {
     fi
 }
 
+# ── Test 12: setup script uses 'reload' (non-disruptive), not 'reload-or-restart' ──
+test_setup_script_reload_only() {
+    local f="$SCRIPT_DIR/ob-bastion-setup"
+    if grep -q "reload-or-restart systemd-logind" "$f"; then
+        fail "setup_hardening must use 'systemctl reload', not 'reload-or-restart'"
+    elif grep -q "systemctl reload systemd-logind" "$f"; then
+        pass "setup_hardening uses 'systemctl reload systemd-logind' (non-disruptive)"
+    else
+        fail "setup_hardening must call 'systemctl reload systemd-logind'"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-bastion-setup hardening step ==="
 run_test test_templates_present
@@ -250,6 +262,7 @@ run_test test_help_mentions_hardening
 run_test test_setup_hardening_skipped
 run_test test_setup_hardening_dryrun
 run_test test_setup_hardening_preserves_admin_file
+run_test test_setup_script_reload_only
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

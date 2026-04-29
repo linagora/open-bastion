@@ -34,9 +34,12 @@ the recorder leaves a primary trace independent of the wrapper.
 | `/etc/cron.allow`                               | `share/open-bastion/hardening/cron.allow`                | Whitelist: `root` only. Add admins as needed.                                                 |
 | `systemctl mask atd`                            | —                                                        | Disables the at daemon entirely if it is installed.                                           |
 
-`systemd-logind` is reloaded at the end of the step. **This kills any
-active user session on the host** — run the setup outside business
-hours or warn users first.
+`systemd-logind` is reloaded at the end of the step via `systemctl
+reload systemd-logind` (SIGHUP). This is **non-disruptive**: logind
+re-reads `/etc/systemd/logind.conf.d/*.conf` without restarting and
+without killing active sessions. `KillUserProcesses=yes` is consulted
+when each session ends, so existing sessions stay open and the new
+behaviour applies to their cleanup.
 
 `cron.service` is **not** masked. `ob-bastion-setup --max-security`
 writes `/etc/cron.d/open-bastion-krl` to refresh the SSH key
@@ -169,7 +172,7 @@ files in `/etc/` directly.
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `at(1)` for a user  | Add the username to `/etc/at.allow`, then `systemctl unmask atd && systemctl enable --now atd`.                        |
 | `crontab` for a user | Add the username to `/etc/cron.allow`. (`cron.service` is already running.)                                            |
-| Background processes | Remove `/etc/systemd/logind.conf.d/open-bastion.conf`, then `systemctl restart systemd-logind`. Discouraged on a bastion. |
+| Background processes | Remove `/etc/systemd/logind.conf.d/open-bastion.conf`, then `systemctl reload systemd-logind`. Discouraged on a bastion. |
 | Higher `nproc`       | Add a more specific drop-in **after** `open-bastion.conf` (alphabetical order, e.g. `99-build.conf`).                  |
 
 To skip the entire step at install time:

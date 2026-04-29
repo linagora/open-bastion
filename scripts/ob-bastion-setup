@@ -791,15 +791,22 @@ setup_hardening() {
     fi
 
     # 5. Reload logind so KillUserProcesses=yes takes effect.
-    #    Note: this disconnects active user sessions on this host.
+    #    `systemctl reload` (SIGHUP) is non-disruptive: logind re-reads
+    #    its drop-ins without restarting and without killing active
+    #    sessions. KillUserProcesses=yes is consulted at session-end
+    #    cleanup, so the new behaviour applies to existing sessions
+    #    when they eventually log out, while currently-connected admins
+    #    keep their shells. Avoid `reload-or-restart` here: a fallback
+    #    to restart would terminate every user session, including the
+    #    admin running this setup.
     if [ "$DRY_RUN" = "true" ]; then
-        info "[DRY-RUN] Would systemctl reload-or-restart systemd-logind"
+        info "[DRY-RUN] Would systemctl reload systemd-logind (SIGHUP, non-disruptive)"
     else
-        warn "Reloading systemd-logind — any active user session on this host will be killed"
-        if systemctl reload-or-restart systemd-logind 2>/dev/null; then
+        info "Reloading systemd-logind (SIGHUP, no session disruption)"
+        if systemctl reload systemd-logind 2>/dev/null; then
             info "Reloaded systemd-logind"
         else
-            warn "Failed to reload systemd-logind — reboot or run manually"
+            warn "Failed to reload systemd-logind — run 'systemctl reload systemd-logind' manually"
         fi
     fi
 
