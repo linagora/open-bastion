@@ -731,6 +731,43 @@ install_hardening_allowlist() {
     info "Created $dst"
 }
 
+# Detect non-root users that have `loginctl enable-linger` set.
+# A lingering user keeps a per-user systemd manager running after
+# logout, which lets them schedule deferred work via
+#   systemd-run --user --on-active=…
+# That bypasses both KillUserProcesses=yes and the at/cron allowlists.
+# This function prints offending "<user>:<uid>" lines to stdout (one
+# per line, empty if none) and returns 0. It returns 1 only when
+# loginctl is missing — callers should treat that as "skip with a
+# warning" since a host without systemd cannot enable linger anyway.
+detect_lingering_users() {
+    if ! command -v loginctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local users_raw
+    # `loginctl list-users --no-legend` prints "<uid> <user> [..]" per row.
+    # Some versions trail a header/legend even with --no-legend on older
+    # systemd; we filter defensively by requiring a leading numeric uid.
+    users_raw=$(loginctl list-users --no-legend 2>/dev/null || true)
+    [ -n "$users_raw" ] || return 0
+
+    local uid user linger
+    while read -r uid user _rest; do
+        case "$uid" in
+            ''|*[!0-9]*) continue ;;     # skip non-numeric rows / headers
+        esac
+        [ "$uid" = "0" ] && continue     # root is allowed to linger
+        [ -n "$user" ] || continue
+        linger=$(loginctl show-user "$user" --property=Linger --value 2>/dev/null || echo "")
+        if [ "$linger" = "yes" ]; then
+            printf '%s:%s\n' "$user" "$uid"
+        fi
+    done <<< "$users_raw"
+
+    return 0
+}
+
 # Configure host-level session containment. All steps are pure system
 # config — no setuid binary is added. See doc/hardening.md for rationale.
 setup_hardening() {
@@ -745,6 +782,41 @@ setup_hardening() {
         warn "Hardening templates not found in $HARDENING_TEMPLATE_DIR"
         warn "Skipping hardening step — install the open-bastion package or pass --skip-hardening to silence this."
         return 0
+    fi
+
+    # Pre-flight: refuse to harden if any non-root user has linger
+    # enabled. Such a user could schedule jobs via `systemd-run --user`
+    # that survive logout, defeating both KillUserProcesses=yes and the
+    # at/cron allow-lists. This is a security gate, not a UX one — we
+    # fail even in --yes mode. In --dry-run, only log so operators can
+    # discover the problem before committing.
+    local linger_offenders
+    if linger_offenders=$(detect_lingering_users); then
+        if [ -n "$linger_offenders" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+                warn "[DRY-RUN] Linger enabled for the following non-root users (would abort in real run):"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    warn "[DRY-RUN]   $u (uid $uid)"
+                done <<< "$linger_offenders"
+            else
+                error "Hardening refused: the following users have systemd linger enabled,"
+                error "        which would let them schedule deferred jobs via 'systemd-run --user',"
+                error "        bypassing this hardening:"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    error "          $u (uid $uid)"
+                done <<< "$linger_offenders"
+                error ""
+                error "        To proceed, disable linger for these users:"
+                error "          loginctl disable-linger <user>"
+                error ""
+                error "        Then re-run: ob-bastion-setup --portal $PORTAL_URL [...]"
+                return 1
+            fi
+        fi
+    else
+        warn "loginctl not available, skipping linger pre-check"
     fi
 
     if ! confirm "Apply session containment hardening (KillUserProcesses, nproc cap, at/cron allowlists, mask atd)?"; then

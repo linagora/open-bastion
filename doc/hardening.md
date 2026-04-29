@@ -61,18 +61,26 @@ If a legitimate user really needs to keep a long-running job, that
 should go through a service account (see `doc/service-accounts.md`)
 and a systemd unit, not a backgrounded shell on the bastion.
 
-`Linger=no` is the implicit default per user; you can confirm it
-post-deploy with:
+`Linger=no` is the implicit default per user. A user with
+`Linger=yes` (set via `loginctl enable-linger`) can keep processes
+running after logout *and* schedule deferred work via
+`systemd-run --user --on-active=…`, which would defeat both
+`KillUserProcesses=yes` and the `at`/`cron` allow-lists.
 
-```bash
-loginctl show-user <user> | grep -E 'Linger|State'
-```
-
-If `Linger=yes` for any user, that user has been allowed to keep
-processes after logout (`loginctl enable-linger`). Disable it:
+`ob-bastion-setup` therefore **refuses to apply the hardening** if any
+non-root user has linger enabled, and lists those users. Disable
+linger for each of them and re-run the setup:
 
 ```bash
 loginctl disable-linger <user>
+ob-bastion-setup --portal https://…   # re-run
+```
+
+You can confirm the state at any time with:
+
+```bash
+loginctl list-users
+loginctl show-user <user> | grep -E 'Linger|State'
 ```
 
 ## Why allow-listing `at` and `cron`

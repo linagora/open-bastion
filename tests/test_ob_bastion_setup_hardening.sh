@@ -237,7 +237,246 @@ test_setup_hardening_preserves_admin_file() {
     fi
 }
 
-# ── Test 12: setup script uses 'reload' (non-disruptive), not 'reload-or-restart' ──
+# ── Test 12: linger detection helper returns offending users ──
+test_detect_lingering_users_with_offender() {
+    (
+        source_script "ob-bastion-setup"
+        # Mock loginctl: list-users returns one non-root user with linger=yes
+        loginctl() {
+            case "${1:-}" in
+                list-users)
+                    printf '%s\n' "1000 alice  user"
+                    ;;
+                show-user)
+                    # show-user <name> --property=Linger --value
+                    case "${3:-}" in
+                        --property=Linger) echo "yes" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+            esac
+        }
+        # Force command -v to find our mock
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                echo "loginctl"
+                return 0
+            fi
+            builtin command "$@"
+        }
+        export -f loginctl command 2>/dev/null || true
+
+        out=$(detect_lingering_users)
+        rc=$?
+        [ "$rc" -eq 0 ] || exit 2
+        echo "$out" | grep -q "^alice:1000$" || exit 3
+        exit 0
+    )
+    if [ $? -eq 0 ]; then
+        pass "detect_lingering_users reports non-root users with Linger=yes"
+    else
+        fail "detect_lingering_users reports non-root users with Linger=yes"
+    fi
+}
+
+# ── Test 13: linger detection ignores root and non-lingering users ──
+test_detect_lingering_users_clean() {
+    (
+        source_script "ob-bastion-setup"
+        loginctl() {
+            case "${1:-}" in
+                list-users)
+                    printf '%s\n' \
+                        "0 root  user" \
+                        "1001 bob  user"
+                    ;;
+                show-user)
+                    case "${2:-}" in
+                        root)
+                            # root is already filtered before this is called,
+                            # but be safe
+                            echo "no" ;;
+                        bob)  echo "no" ;;
+                        *)    echo "" ;;
+                    esac
+                    ;;
+            esac
+        }
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                echo "loginctl"
+                return 0
+            fi
+            builtin command "$@"
+        }
+        export -f loginctl command 2>/dev/null || true
+
+        out=$(detect_lingering_users)
+        rc=$?
+        [ "$rc" -eq 0 ] || exit 2
+        [ -z "$out" ] || exit 3
+        exit 0
+    )
+    if [ $? -eq 0 ]; then
+        pass "detect_lingering_users returns empty when no non-root linger"
+    else
+        fail "detect_lingering_users returns empty when no non-root linger"
+    fi
+}
+
+# ── Test 14: linger detection returns 1 when loginctl is absent ──
+test_detect_lingering_users_no_loginctl() {
+    (
+        source_script "ob-bastion-setup"
+        # Mock command -v loginctl as missing
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        export -f command 2>/dev/null || true
+
+        detect_lingering_users
+        rc=$?
+        [ "$rc" -eq 1 ] && exit 0 || exit 2
+    )
+    if [ $? -eq 0 ]; then
+        pass "detect_lingering_users returns 1 when loginctl missing"
+    else
+        fail "detect_lingering_users returns 1 when loginctl missing"
+    fi
+}
+
+# ── Test 15: setup_hardening dry-run with linger user logs WARN, does not abort ──
+test_setup_hardening_linger_dryrun_warns() {
+    local sandbox
+    sandbox=$(mktemp -d)
+    mkdir -p "$sandbox/share/hardening/logind.conf.d" \
+             "$sandbox/share/hardening/security/limits.d"
+    cp "$REPO_DIR/config/hardening/logind.conf.d/open-bastion.conf" \
+       "$sandbox/share/hardening/logind.conf.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/security/limits.d/open-bastion.conf" \
+       "$sandbox/share/hardening/security/limits.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/at.allow" "$sandbox/share/hardening/at.allow"
+    cp "$REPO_DIR/config/hardening/cron.allow" "$sandbox/share/hardening/cron.allow"
+
+    (
+        source_script "ob-bastion-setup"
+        DRY_RUN=true
+        NON_INTERACTIVE=true
+        SKIP_HARDENING=false
+        HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
+        HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
+        HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
+        HARDENING_AT_ALLOW="$sandbox/etc/at.allow"
+        HARDENING_CRON_ALLOW="$sandbox/etc/cron.allow"
+        BACKUP_DIR="$sandbox/backup"
+        # Mock loginctl to expose one non-root linger user
+        loginctl() {
+            case "${1:-}" in
+                list-users) printf '%s\n' "1000 mallory  user" ;;
+                show-user)
+                    case "${3:-}" in
+                        --property=Linger) echo "yes" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+            esac
+        }
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                echo "loginctl"
+                return 0
+            fi
+            builtin command "$@"
+        }
+        export -f loginctl command 2>/dev/null || true
+
+        out=$(setup_hardening 2>&1)
+        rc=$?
+        # Dry-run: warn but do not abort the function
+        echo "$out" | grep -q "DRY-RUN.*Linger enabled" || exit 2
+        echo "$out" | grep -q "mallory (uid 1000)" || exit 3
+        # Should still produce DRY-RUN install lines
+        echo "$out" | grep -q "DRY-RUN.*Would install" || exit 4
+        exit $rc
+    )
+    local rc=$?
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ]; then
+        pass "setup_hardening dry-run warns on linger but continues"
+    else
+        fail "setup_hardening dry-run warns on linger but continues" "rc=$rc"
+    fi
+}
+
+# ── Test 16: setup_hardening (real run) refuses with linger user ──
+test_setup_hardening_linger_real_aborts() {
+    local sandbox
+    sandbox=$(mktemp -d)
+    mkdir -p "$sandbox/share/hardening/logind.conf.d" \
+             "$sandbox/share/hardening/security/limits.d"
+    cp "$REPO_DIR/config/hardening/logind.conf.d/open-bastion.conf" \
+       "$sandbox/share/hardening/logind.conf.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/security/limits.d/open-bastion.conf" \
+       "$sandbox/share/hardening/security/limits.d/open-bastion.conf"
+    cp "$REPO_DIR/config/hardening/at.allow" "$sandbox/share/hardening/at.allow"
+    cp "$REPO_DIR/config/hardening/cron.allow" "$sandbox/share/hardening/cron.allow"
+
+    (
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        NON_INTERACTIVE=true
+        SKIP_HARDENING=false
+        HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
+        HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
+        HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
+        HARDENING_AT_ALLOW="$sandbox/etc/at.allow"
+        HARDENING_CRON_ALLOW="$sandbox/etc/cron.allow"
+        BACKUP_DIR="$sandbox/backup"
+        loginctl() {
+            case "${1:-}" in
+                list-users) printf '%s\n' "1000 mallory  user" ;;
+                show-user)
+                    case "${3:-}" in
+                        --property=Linger) echo "yes" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+            esac
+        }
+        command() {
+            if [ "${1:-}" = "-v" ] && [ "${2:-}" = "loginctl" ]; then
+                echo "loginctl"
+                return 0
+            fi
+            builtin command "$@"
+        }
+        # Shadow install/systemctl to neutralize root ops if reached
+        install() { :; }
+        systemctl() { :; }
+        export -f loginctl command install systemctl 2>/dev/null || true
+
+        out=$(setup_hardening 2>&1)
+        rc=$?
+        echo "$out" | grep -q "Hardening refused" || exit 2
+        echo "$out" | grep -q "mallory (uid 1000)" || exit 3
+        # Must NOT have created any /etc file
+        [ ! -e "$sandbox/etc/systemd/logind.conf.d/open-bastion.conf" ] || exit 4
+        # Function must have returned non-zero
+        [ "$rc" -ne 0 ] && exit 0 || exit 5
+    )
+    local rc=$?
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ]; then
+        pass "setup_hardening aborts and writes nothing when non-root linger detected"
+    else
+        fail "setup_hardening aborts and writes nothing when non-root linger detected" "rc=$rc"
+    fi
+}
+
+# ── Test 17: setup script uses 'reload' (non-disruptive), not 'reload-or-restart' ──
 test_setup_script_reload_only() {
     local f="$SCRIPT_DIR/ob-bastion-setup"
     if grep -q "reload-or-restart systemd-logind" "$f"; then
@@ -262,6 +501,11 @@ run_test test_help_mentions_hardening
 run_test test_setup_hardening_skipped
 run_test test_setup_hardening_dryrun
 run_test test_setup_hardening_preserves_admin_file
+run_test test_detect_lingering_users_with_offender
+run_test test_detect_lingering_users_clean
+run_test test_detect_lingering_users_no_loginctl
+run_test test_setup_hardening_linger_dryrun_warns
+run_test test_setup_hardening_linger_real_aborts
 run_test test_setup_script_reload_only
 
 echo ""
