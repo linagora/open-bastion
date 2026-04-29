@@ -882,8 +882,7 @@ setup_hardening() {
     # 4. Mask atd if it exists. We do NOT mask cron because
     #    --max-security writes /etc/cron.d/open-bastion-krl which needs
     #    a running cron daemon.
-    if systemctl list-unit-files atd.service >/dev/null 2>&1 \
-       && systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
+    if systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
         if [ "$DRY_RUN" = "true" ]; then
             info "[DRY-RUN] Would systemctl mask atd && systemctl stop atd"
         else
@@ -933,6 +932,8 @@ setup_hardening() {
             ;;
         dry-run)
             info "[DRY-RUN] Hardening would be applied. Re-run without --dry-run to commit."
+            ;;
+        *)
             ;;
     esac
 }
