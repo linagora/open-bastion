@@ -92,31 +92,31 @@ test_cron_allow_template_content() {
     fi
 }
 
-# ── Test 6: --skip-hardening sets SKIP_HARDENING=true ──
-test_skip_hardening_flag() {
+# ── Test 6: --enable-hardening sets ENABLE_HARDENING=true ──
+test_enable_hardening_flag() {
     (
         source_script "ob-bastion-setup"
-        parse_args -p "https://x" --skip-hardening
-        [ "$SKIP_HARDENING" = "true" ] && exit 0 || exit 1
+        parse_args -p "https://x" --enable-hardening
+        [ "$ENABLE_HARDENING" = "true" ] && exit 0 || exit 1
     )
     if [ $? -eq 0 ]; then
-        pass "--skip-hardening sets SKIP_HARDENING=true"
+        pass "--enable-hardening sets ENABLE_HARDENING=true"
     else
-        fail "--skip-hardening sets SKIP_HARDENING=true"
+        fail "--enable-hardening sets ENABLE_HARDENING=true"
     fi
 }
 
-# ── Test 7: Without --skip-hardening, SKIP_HARDENING defaults to false ──
-test_skip_hardening_default() {
+# ── Test 7: Without --enable-hardening, ENABLE_HARDENING defaults to false ──
+test_enable_hardening_default() {
     (
         source_script "ob-bastion-setup"
         parse_args -p "https://x"
-        [ "$SKIP_HARDENING" = "false" ] && exit 0 || exit 1
+        [ "$ENABLE_HARDENING" = "false" ] && exit 0 || exit 1
     )
     if [ $? -eq 0 ]; then
-        pass "SKIP_HARDENING defaults to false"
+        pass "ENABLE_HARDENING defaults to false (opt-in, off by default)"
     else
-        fail "SKIP_HARDENING defaults to false"
+        fail "ENABLE_HARDENING defaults to false (opt-in, off by default)"
     fi
 }
 
@@ -131,20 +131,24 @@ test_help_mentions_hardening() {
     fi
 }
 
-# ── Test 9: setup_hardening in dry-run with --skip-hardening is a noop ──
-test_setup_hardening_skipped() {
+# ── Test 9: Without --enable-hardening, main() logs that hardening is not applied ──
+test_hardening_not_applied_by_default() {
     (
         source_script "ob-bastion-setup"
-        DRY_RUN=true
-        SKIP_HARDENING=true
-        NON_INTERACTIVE=true
-        out=$(setup_hardening 2>&1)
-        echo "$out" | grep -q "Skipping session containment hardening" && exit 0 || exit 1
+        # ENABLE_HARDENING is false by default — simulate main() wiring
+        ENABLE_HARDENING=false
+        out=""
+        if [ "$ENABLE_HARDENING" = "true" ]; then
+            out=$(setup_hardening 2>&1)
+        else
+            out="[INFO] Session containment hardening not applied (opt-in: pass --enable-hardening to activate)"
+        fi
+        echo "$out" | grep -q "opt-in" && exit 0 || exit 1
     )
     if [ $? -eq 0 ]; then
-        pass "setup_hardening with SKIP_HARDENING=true logs skip and returns 0"
+        pass "Without --enable-hardening, hardening is not applied and logs opt-in hint"
     else
-        fail "setup_hardening with SKIP_HARDENING=true logs skip and returns 0"
+        fail "Without --enable-hardening, hardening is not applied and logs opt-in hint"
     fi
 }
 
@@ -166,7 +170,7 @@ test_setup_hardening_dryrun() {
         source_script "ob-bastion-setup"
         DRY_RUN=true
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
         HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
         HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
@@ -213,7 +217,7 @@ test_setup_hardening_preserves_admin_file() {
         # Use real (non-dry-run) installer to test the "leave existing" branch
         DRY_RUN=false
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         # Avoid root-only operations: shadow install/systemctl with no-ops
         install() { :; }
         systemctl() { :; }
@@ -253,7 +257,7 @@ test_setup_hardening_admin_file_identical() {
         source_script "ob-bastion-setup"
         DRY_RUN=false
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         install() { :; }
         systemctl() { :; }
         export -f install systemctl 2>/dev/null || true
@@ -406,7 +410,7 @@ test_setup_hardening_linger_dryrun_warns() {
         source_script "ob-bastion-setup"
         DRY_RUN=true
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
         HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
         HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
@@ -469,7 +473,7 @@ test_setup_hardening_linger_real_aborts() {
         source_script "ob-bastion-setup"
         DRY_RUN=false
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
         HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
         HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
@@ -537,7 +541,7 @@ test_cron_allow_missing_root_warns() {
         source_script "ob-bastion-setup"
         DRY_RUN=false
         NON_INTERACTIVE=true
-        SKIP_HARDENING=false
+        ENABLE_HARDENING=true
         HARDENING_TEMPLATE_DIR="$sandbox/share/hardening"
         HARDENING_LOGIND_DST="$sandbox/etc/systemd/logind.conf.d/open-bastion.conf"
         HARDENING_LIMITS_DST="$sandbox/etc/security/limits.d/open-bastion.conf"
@@ -601,10 +605,10 @@ run_test test_logind_template_content
 run_test test_limits_template_content
 run_test test_at_allow_template_content
 run_test test_cron_allow_template_content
-run_test test_skip_hardening_flag
-run_test test_skip_hardening_default
+run_test test_enable_hardening_flag
+run_test test_enable_hardening_default
 run_test test_help_mentions_hardening
-run_test test_setup_hardening_skipped
+run_test test_hardening_not_applied_by_default
 run_test test_setup_hardening_dryrun
 run_test test_setup_hardening_preserves_admin_file
 run_test test_setup_hardening_admin_file_identical

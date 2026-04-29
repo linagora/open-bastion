@@ -4,9 +4,18 @@
 > primary trace) will be tracked separately.
 
 This document describes the host-level configuration deployed by
-`ob-bastion-setup` to keep an authenticated user from escaping the
-recorded SSH session. Everything here is **pure system configuration** —
-no setuid binary is added.
+`ob-bastion-setup --enable-hardening` to keep an authenticated user from
+escaping the recorded SSH session. Everything here is **pure system
+configuration** — no setuid binary is added.
+
+> **Opt-in only.** System-wide changes (logind `KillUserProcesses`,
+> masking `atd`, `at`/`cron` allow-lists, `nproc` limits) are too
+> invasive to apply silently on every `ob-bastion-setup` run. Following
+> Debian packaging convention, a setup script must not modify global
+> system behaviour without an explicit opt-in. On a dedicated bastion
+> host where this script will be the primary configuration, hardening is
+> recommended. On a multi-purpose host or for testing, leave it off and
+> apply manually if needed.
 
 ## Threat model
 
@@ -24,7 +33,7 @@ PR1 closes channels (1)–(3) by configuration. PR2 will additionally
 log every `execve()` system-wide via `auditd` so any attempt to bypass
 the recorder leaves a primary trace independent of the wrapper.
 
-## What `ob-bastion-setup` deploys
+## What `ob-bastion-setup --enable-hardening` deploys
 
 | Destination                                     | Source template                                          | Purpose                                                                                       |
 | ----------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -73,7 +82,7 @@ linger for each of them and re-run the setup:
 
 ```bash
 loginctl disable-linger <user>
-ob-bastion-setup --portal https://…   # re-run
+ob-bastion-setup --portal https://… --enable-hardening   # re-run
 ```
 
 You can confirm the state at any time with:
@@ -179,9 +188,10 @@ applied (logind not reloaded?) or the user has `Linger=yes`.
 The four files written under `/etc/` (`at.allow`, `cron.allow`,
 `systemd/logind.conf.d/open-bastion.conf`,
 `security/limits.d/open-bastion.conf`) are **deployment artefacts of
-`ob-bastion-setup`**, not package-managed conffiles. The hardening step
-is opt-in (the operator runs `ob-bastion-setup` and confirms the
-prompt), so the package itself does not place these files.
+`ob-bastion-setup --enable-hardening`**, not package-managed conffiles.
+The hardening step is opt-in (the operator passes `--enable-hardening`
+and confirms the prompt), so the package itself does not place these
+files and a plain `ob-bastion-setup` run never touches them.
 
 Practical consequences:
 
@@ -200,9 +210,10 @@ Practical consequences:
 
 To reapply or update the deployed files, edit them under `/etc/` and
 either re-run the relevant step (e.g. `systemctl reload systemd-logind`
-after touching the logind drop-in) or re-run `ob-bastion-setup` (which
-will back up and overwrite the logind/limits drop-ins, and warn if it
-finds an admin-managed `at.allow` or `cron.allow`).
+after touching the logind drop-in) or re-run
+`ob-bastion-setup --enable-hardening` (which will back up and overwrite
+the logind/limits drop-ins, and warn if it finds an admin-managed
+`at.allow` or `cron.allow`).
 
 ## Disabling parts of the hardening
 
@@ -216,10 +227,10 @@ files in `/etc/` directly.
 | Background processes | Remove `/etc/systemd/logind.conf.d/open-bastion.conf`, then `systemctl reload systemd-logind`. Discouraged on a bastion. |
 | Higher `nproc`       | Add a more specific drop-in **after** `open-bastion.conf` (alphabetical order, e.g. `99-build.conf`).                  |
 
-To skip the entire step at install time:
+To activate the hardening at install time (opt-in, off by default):
 
 ```bash
-ob-bastion-setup --portal https://auth.example.com --skip-hardening
+ob-bastion-setup --portal https://auth.example.com --enable-hardening
 ```
 
 ## What PR1 does **not** cover

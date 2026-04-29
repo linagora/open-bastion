@@ -51,7 +51,7 @@ HARDENING_LOGIND_DST="/etc/systemd/logind.conf.d/open-bastion.conf"
 HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
 HARDENING_AT_ALLOW="/etc/at.allow"
 HARDENING_CRON_ALLOW="/etc/cron.allow"
-SKIP_HARDENING=false
+ENABLE_HARDENING=false
 
 # Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
@@ -771,16 +771,11 @@ detect_lingering_users() {
 # Configure host-level session containment. All steps are pure system
 # config — no setuid binary is added. See doc/hardening.md for rationale.
 setup_hardening() {
-    if [ "$SKIP_HARDENING" = "true" ]; then
-        info "Skipping session containment hardening (--skip-hardening)"
-        return 0
-    fi
-
     step "Applying session containment hardening..."
 
     if [ ! -d "$HARDENING_TEMPLATE_DIR" ]; then
         warn "Hardening templates not found in $HARDENING_TEMPLATE_DIR"
-        warn "Skipping hardening step — install the open-bastion package or pass --skip-hardening to silence this."
+        warn "Skipping hardening step — install the open-bastion package."
         return 0
     fi
 
@@ -811,7 +806,7 @@ setup_hardening() {
                 error "        To proceed, disable linger for these users:"
                 error "          loginctl disable-linger <user>"
                 error ""
-                error "        Then re-run: ob-bastion-setup --portal $PORTAL_URL [...]"
+                error "        Then re-run: ob-bastion-setup --portal $PORTAL_URL --enable-hardening [...]"
                 return 1
             fi
         fi
@@ -1082,10 +1077,10 @@ print_summary() {
     echo "  ✓ Session recording (ForceCommand)"
     echo "  ✓ LLNG authorization"
     echo "  ✓ Password authentication disabled"
-    if [ "$SKIP_HARDENING" = "true" ]; then
-        echo "  ✗ Session containment hardening (skipped)"
-    else
+    if [ "$ENABLE_HARDENING" = "true" ]; then
         echo "  ✓ Session containment (logind KillUserProcesses, nproc cap, at/cron allowlists)"
+    else
+        echo "  ✗ Session containment hardening (not applied — use --enable-hardening to opt in)"
     fi
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "  ✓ Maximum Security Mode E"
@@ -1124,8 +1119,9 @@ Options:
   -y, --yes               Non-interactive mode (requires --token-file)
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
-  --skip-hardening        Do not deploy session containment templates
-                          (logind KillUserProcesses, nproc cap, at/cron allowlists, mask atd)
+  --enable-hardening      Apply system-wide containment hardening (logind KillUserProcesses,
+                          mask atd, at/cron allow-lists, nproc limit). OFF by default —
+                          modifies system-wide behaviour, opt in only on dedicated bastion hosts.
   --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
                           Installs audit rules (rules.d/open-bastion.rules)
                           and a daily rotation cron, then restarts auditd.
@@ -1145,10 +1141,11 @@ What this script does:
   2. Configures sshd for certificate authentication
   3. Enables session recording via ForceCommand
   4. Configures PAM for LLNG authorization
-  5. Applies session containment hardening (logind KillUserProcesses,
-     nproc cap, at/cron allowlists, mask atd) unless --skip-hardening
-  6. Enrolls the server with LLNG (Device Authorization)
-  7. Restarts SSH service
+  5. Enrolls the server with LLNG (Device Authorization)
+  6. Restarts SSH service
+  7. Applies session containment hardening (logind KillUserProcesses,
+     nproc cap, at/cron allowlists, mask atd) ONLY if --enable-hardening
+     is passed. Hardening is OFF by default.
 
 EOF
     exit 0
@@ -1201,8 +1198,8 @@ parse_args() {
                 MAX_SECURITY=true
                 shift
                 ;;
-            --skip-hardening)
-                SKIP_HARDENING=true
+            --enable-hardening)
+                ENABLE_HARDENING=true
                 shift
                 ;;
             --enable-audit-trace)
@@ -1294,7 +1291,11 @@ main() {
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
     configure_nss || exit 1
-    setup_hardening || warn "Hardening step reported errors"
+    if [ "$ENABLE_HARDENING" = "true" ]; then
+        setup_hardening || warn "Hardening step reported errors"
+    else
+        info "Session containment hardening not applied (opt-in: pass --enable-hardening to activate)"
+    fi
     download_krl || warn "KRL download failed"
     enroll_server || warn "Server enrollment skipped or failed"
 
