@@ -29,6 +29,7 @@ DRY_RUN=false
 BACKUP_DIR="/var/backup/llng-setup-$(date +%Y%m%d-%H%M%S)"
 MAX_SECURITY=false
 KRL_REFRESH_INTERVAL=30
+ENABLE_AUDIT_TRACE=false
 
 # Paths
 SSH_CA_FILE="/etc/ssh/llng_ca.pub"
@@ -43,6 +44,12 @@ SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
+
+# Audit trace paths (opt-in, see --enable-audit-trace)
+AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
+AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
+AUDIT_CRON_FILE="/etc/cron.daily/open-bastion-audit-rotate"
+AUDITD_CONF="/etc/audit/auditd.conf"
 
 # Colors (only if terminal)
 if [ -t 1 ]; then
@@ -661,6 +668,146 @@ home_base = /home
     info "Created $NSS_OB_CONF"
 }
 
+# Idempotent in-place edit of a single auditd.conf key.
+# - Matches `^\s*<key>\s*=` (so commented lines `# key = ...` are NOT touched).
+# - Replaces the matched line with `<key> = <value>`.
+# - If no match, appends `<key> = <value>` to the file.
+# Args: <conf_file> <key> <value>
+audit_set_conf_key() {
+    local file="$1" key="$2" value="$3"
+    local desired="$key = $value"
+    local pattern="^[[:space:]]*${key}[[:space:]]*="
+    local sed_pattern="^[[:space:]]*${key}[[:space:]]*=.*"
+
+    if grep -Eq "$pattern" "$file" 2>/dev/null; then
+        # Replace existing key (sed -E for extended regex compatibility).
+        # Using a delimiter unlikely to appear in either key or value.
+        sed -E -i "s|${sed_pattern}|${desired}|" "$file"
+    else
+        # Append with newline guard if file does not end with one.
+        if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+            printf '\n' >> "$file"
+        fi
+        printf '%s\n' "$desired" >> "$file"
+    fi
+}
+
+# Configure primary audit trace via auditd (opt-in).
+# Goal: tamper-evident syscall-level evidence of non-sudo user activity,
+# independent of the pty session recording (which a malicious user could
+# wipe or bypass via setsid/at/cron). Targets auid >= 1000.
+#
+# Caller decides whether this runs (see ENABLE_AUDIT_TRACE in main()).
+# This function never tries to install the auditd package itself: it only
+# *configures* an auditd that is already present (Recommends in packaging).
+setup_audit_trace() {
+    step "Configuring primary audit trace (auditd)..."
+
+    # 1. Sanity: auditd must be installed. We don't try to be clever — both
+    #    `auditctl` (the CLI) and `augenrules` (the rules.d compiler) are
+    #    needed at runtime. systemctl probe is an additional belt-and-braces.
+    local auditd_ok=true
+    if ! command -v auditctl >/dev/null 2>&1; then
+        auditd_ok=false
+    fi
+    if ! command -v augenrules >/dev/null 2>&1; then
+        auditd_ok=false
+    fi
+    if [ "$auditd_ok" != "true" ]; then
+        error "auditd is not installed: refusing to enable audit trace."
+        error "  Debian/Ubuntu: apt install auditd"
+        error "  RHEL/Rocky/Fedora: dnf install audit"
+        error "  Then re-run with --enable-audit-trace."
+        return 1
+    fi
+
+    # 2. Templates must be deployed (CMake installs them under datarootdir).
+    local rules_template="$AUDIT_TEMPLATE_DIR/rules.d/open-bastion.rules"
+    local cron_template="$AUDIT_TEMPLATE_DIR/cron.daily/open-bastion-audit-rotate"
+    if [ ! -f "$rules_template" ]; then
+        error "Audit rules template not found: $rules_template"
+        error "Reinstall the open-bastion package, or set AUDIT_TEMPLATE_DIR=<path>."
+        return 1
+    fi
+    if [ ! -f "$cron_template" ]; then
+        error "Audit cron template not found: $cron_template"
+        return 1
+    fi
+
+    # 3. Confirmation: this modifies global system config (auditd.conf, rules.d,
+    #    cron.daily) and restarts auditd. Default-OFF policy applies.
+    if ! confirm "Enable primary audit trace? Modifies $AUDITD_CONF and restarts auditd."; then
+        info "Audit trace setup skipped by user."
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $AUDIT_RULES_FILE (0640 root:root)"
+        info "[DRY-RUN] Would install $AUDIT_CRON_FILE (0755 root:root)"
+        info "[DRY-RUN] Would tune $AUDITD_CONF: max_log_file=50, num_logs=7, max_log_file_action=ROTATE"
+        info "[DRY-RUN] Would augenrules --load and restart auditd"
+        return 0
+    fi
+
+    # 4. Backup auditd.conf before in-place edit. This file is shipped by the
+    #    `audit` distro package; we don't replace it (would clash with dpkg
+    #    conffile prompts and rpm config(noreplace)).
+    if [ -f "$AUDITD_CONF" ]; then
+        backup_file "$AUDITD_CONF"
+    else
+        warn "$AUDITD_CONF not found — auditd may be installed but not initialized yet."
+        warn "Continuing: rules.d + cron.daily will still be deployed."
+    fi
+
+    # 5. Install rules template into /etc/audit/rules.d/.
+    #    auditd's default rules.d entries (e.g. audit.rules) ship as 0640
+    #    root:root on Debian; we match that.
+    backup_file "$AUDIT_RULES_FILE"
+    install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"
+    info "Installed $AUDIT_RULES_FILE"
+
+    # 6. Install daily rotation cron. cron.daily entries must be executable
+    #    and unsuffixed (run-parts ignores files with dots/tildes).
+    backup_file "$AUDIT_CRON_FILE"
+    install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"
+    info "Installed $AUDIT_CRON_FILE"
+
+    # 7. Tune auditd.conf retention (idempotent). Only touch the 3 keys we
+    #    care about; leave everything else (log file path, dispatcher, etc.)
+    #    as the distro shipped it.
+    if [ -f "$AUDITD_CONF" ]; then
+        audit_set_conf_key "$AUDITD_CONF" "max_log_file" "50"
+        audit_set_conf_key "$AUDITD_CONF" "num_logs" "7"
+        audit_set_conf_key "$AUDITD_CONF" "max_log_file_action" "ROTATE"
+        info "Tuned $AUDITD_CONF (max_log_file=50, num_logs=7, max_log_file_action=ROTATE)"
+    fi
+
+    # 8. Compile + load rules. augenrules merges everything under
+    #    /etc/audit/rules.d/*.rules into /etc/audit/audit.rules and tells
+    #    auditctl to load them. A non-zero exit usually means a bad rule
+    #    (e.g. arch mismatch on 32-bit kernel) — surface it but don't abort:
+    #    the cron rotation and the conf tuning are still in effect.
+    if augenrules --load >/dev/null 2>&1; then
+        info "auditd rules loaded via augenrules"
+    else
+        warn "augenrules --load failed; check 'augenrules --check' output."
+    fi
+
+    # 9. Restart auditd so any conf changes (max_log_file etc.) take effect.
+    #    auditd does not honour SIGHUP for rules.d changes — restart is the
+    #    documented way. Unlike logind, restarting auditd does NOT terminate
+    #    SSH sessions, so this is safe to run on a live bastion.
+    if systemctl is-active --quiet auditd 2>/dev/null; then
+        if systemctl restart auditd 2>/dev/null; then
+            info "Restarted auditd.service"
+        else
+            warn "Failed to restart auditd; run 'systemctl restart auditd' manually."
+        fi
+    else
+        warn "auditd.service is not active; start it with 'systemctl enable --now auditd'."
+    fi
+}
+
 # Enroll server with LLNG
 enroll_server() {
     step "Enrolling server with LLNG..."
@@ -741,6 +888,11 @@ print_summary() {
         echo "    - sudo: LLNG temporary token required"
         echo "    - KRL: mandatory, refreshed every ${KRL_REFRESH_INTERVAL} min"
     fi
+    if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
+        echo "  ✓ Audit trace: applied (auditd rules + daily rotation)"
+    else
+        echo "  ✗ Audit trace: not applied (opt-in: --enable-audit-trace)"
+    fi
     echo ""
     echo "Backup location: $BACKUP_DIR"
     echo ""
@@ -767,6 +919,11 @@ Options:
   -y, --yes               Non-interactive mode (requires --token-file)
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
+  --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
+                          Modifies /etc/audit/auditd.conf, installs audit rules
+                          and a daily rotation cron, restarts auditd.
+                          Requires auditd package (apt install auditd /
+                          dnf install audit).
   -n, --dry-run           Show what would be done without making changes
   -h, --help              Show this help
   -V, --version           Show version
@@ -831,6 +988,10 @@ parse_args() {
                 ;;
             --max-security)
                 MAX_SECURITY=true
+                shift
+                ;;
+            --enable-audit-trace)
+                ENABLE_AUDIT_TRACE=true
                 shift
                 ;;
             -n|--dry-run)
@@ -920,6 +1081,13 @@ main() {
     configure_nss || exit 1
     download_krl || warn "KRL download failed"
     enroll_server || warn "Server enrollment skipped or failed"
+
+    # Optional primary audit trace (default OFF — modifies global system).
+    if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
+        setup_audit_trace || warn "Audit trace setup failed (see errors above)"
+    else
+        info "Audit trace not applied (opt-in: pass --enable-audit-trace)"
+    fi
 
     if [ "$DRY_RUN" = "false" ]; then
         restart_sshd || warn "Failed to restart SSH"
