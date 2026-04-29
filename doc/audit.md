@@ -85,11 +85,13 @@ sudo ob-bastion-setup \
 
 What `--enable-audit-trace` does, in order:
 
-1. Refuses to proceed if the `auditd` package is not installed
-   (Debian/Ubuntu: `apt install auditd`; RHEL/Rocky/Fedora:
-   `dnf install audit`). We declare `auditd` as a `Recommends`
-   soft dependency so installing the bastion package alone
-   never silently flips a global system knob.
+1. Warns and skips the audit-trace step if the `auditd` package is
+   not installed (Debian/Ubuntu: `apt install auditd`; RHEL/Rocky/Fedora:
+   `dnf install audit`). The rest of `ob-bastion-setup` continues
+   normally — the operator can install `auditd` later and re-run
+   with `--enable-audit-trace`. We declare `auditd` as a `Recommends`
+   soft dependency so installing the bastion package alone never
+   silently flips a global system knob.
 2. Asks the admin to confirm (skipped under `--yes`).
 3. Installs `/etc/audit/rules.d/open-bastion.rules` (mode 0640
    `root:root`) from the template at

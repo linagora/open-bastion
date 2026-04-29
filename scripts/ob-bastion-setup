@@ -689,11 +689,11 @@ setup_audit_trace() {
         auditd_ok=false
     fi
     if [ "$auditd_ok" != "true" ]; then
-        error "auditd is not installed: refusing to enable audit trace."
-        error "  Debian/Ubuntu: apt install auditd"
-        error "  RHEL/Rocky/Fedora: dnf install audit"
-        error "  Then re-run with --enable-audit-trace."
-        return 1
+        warn "auditd is not installed; skipping audit trace setup."
+        warn "  To enable audit trace later, install auditd then re-run with --enable-audit-trace:"
+        warn "    Debian/Ubuntu: apt install auditd"
+        warn "    RHEL/Rocky/Fedora: dnf install audit"
+        return 0
     fi
 
     # 2. Templates must be deployed (CMake installs them under datarootdir).

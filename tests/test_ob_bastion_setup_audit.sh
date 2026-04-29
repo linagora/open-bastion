@@ -121,7 +121,9 @@ test_refuses_without_auditd() {
         local out
         out=$(setup_audit_trace 2>&1)
         local rc=$?
-        if [ "$rc" -ne 0 ] && echo "$out" | grep -q "auditd is not installed"; then
+        # auditd absent must NOT fail the step (warn + return 0, so the
+        # surrounding ob-bastion-setup run continues).
+        if [ "$rc" -eq 0 ] && echo "$out" | grep -q "auditd is not installed; skipping"; then
             exit 0
         else
             echo "rc=$rc out=$out" >&2
@@ -131,9 +133,9 @@ test_refuses_without_auditd() {
     local rc=$?
     rm -rf "$tmpdir"
     if [ $rc -eq 0 ]; then
-        pass "setup_audit_trace refuses cleanly when auditd is missing"
+        pass "setup_audit_trace warns and continues when auditd is missing"
     else
-        fail "setup_audit_trace refuses cleanly when auditd is missing"
+        fail "setup_audit_trace warns and continues when auditd is missing"
     fi
 }
 
