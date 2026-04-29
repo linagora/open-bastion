@@ -721,7 +721,7 @@ setup_audit_trace() {
         info "[DRY-RUN] Would install $AUDIT_RULES_FILE (0640 root:root)"
         info "[DRY-RUN] Would install $AUDIT_CRON_FILE (0755 root:root)"
         info "[DRY-RUN] Would augenrules --load and restart auditd"
-        info "[DRY-RUN] $AUDITD_CONF intentionally NOT modified"
+        info "[DRY-RUN] /etc/audit/auditd.conf intentionally NOT modified"
         return 0
     fi
 
