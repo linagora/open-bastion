@@ -1,7 +1,9 @@
 #!/bin/bash
 # Integration tests for the session-containment hardening step
-# added to ob-bastion-setup (PR1). All tests run in dry-run mode and
-# inside a sandboxed temporary directory so they never touch the host.
+# added to ob-bastion-setup (PR1). Tests run inside a sandboxed
+# temporary directory and may toggle DRY_RUN while stubbing
+# privileged operations (install, systemctl, …), so they never
+# touch the host.
 #
 # shellcheck disable=SC2034  # variables are read by sourced functions
 # shellcheck disable=SC2181  # $? idiom matches existing test style
