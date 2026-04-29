@@ -87,27 +87,23 @@ What `--enable-audit-trace` does, in order:
 
 1. Refuses to proceed if the `auditd` package is not installed
    (Debian/Ubuntu: `apt install auditd`; RHEL/Rocky/Fedora:
-   `dnf install audit`). We declare `auditd` as a `Recommends` /
-   `Recommends` soft dependency so installing the bastion package alone
+   `dnf install audit`). We declare `auditd` as a `Recommends`
+   soft dependency so installing the bastion package alone
    never silently flips a global system knob.
 2. Asks the admin to confirm (skipped under `--yes`).
-3. Backs up `/etc/audit/auditd.conf`.
-4. Installs `/etc/audit/rules.d/open-bastion.rules` (mode 0640
+3. Installs `/etc/audit/rules.d/open-bastion.rules` (mode 0640
    `root:root`) from the template at
    `/usr/share/open-bastion/audit/rules.d/open-bastion.rules`.
-5. Installs `/etc/cron.daily/open-bastion-audit-rotate` (mode 0755
+4. Installs `/etc/cron.daily/open-bastion-audit-rotate` (mode 0755
    `root:root`) from the corresponding template — this triggers a daily
    rotation so that `num_logs=7` gives a ~1-week retention window.
-6. Idempotently sets three keys in `/etc/audit/auditd.conf`:
-   - `max_log_file = 50` (50 MB per audit.log file)
-   - `num_logs = 7` (keep 7 rotated files ≈ 1 week with daily rotation)
-   - `max_log_file_action = ROTATE`
-   Other keys (log path, dispatcher, `space_left_action`, etc.) are
-   left as the distribution shipped them.
-7. Loads the new rules with `augenrules --load` and restarts the
+5. Loads the new rules with `augenrules --load` and restarts the
    `auditd` service. **Note:** restarting auditd does *not* terminate
    active SSH sessions (unlike `logind`), so this is safe to run on a
    live bastion.
+
+**`/etc/audit/auditd.conf` is deliberately NOT modified.** See
+[Tuning retention](#tuning-retention) below for the manual step.
 
 ## Verification
 
@@ -152,20 +148,42 @@ distinction matters when you upgrade or remove the bastion package.
 |------------------------------------------------------|-------------|----------------------------------------------|
 | `/usr/share/open-bastion/audit/rules.d/open-bastion.rules` | open-bastion pkg | Read-only template (shipped by package).     |
 | `/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate` | open-bastion pkg | Read-only template.                          |
-| `/etc/audit/rules.d/open-bastion.rules`              | deployment  | Live copy. Edit in place if needed.          |
-| `/etc/cron.daily/open-bastion-audit-rotate`          | deployment  | Live copy. Edit in place if needed.          |
-| `/etc/audit/auditd.conf`                             | audit pkg   | Distro-shipped; we patch 3 keys in place.    |
+| `/etc/audit/rules.d/open-bastion.rules`              | deployment  | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
+| `/etc/cron.daily/open-bastion-audit-rotate`          | deployment  | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
+| `/etc/audit/auditd.conf`                             | audit pkg   | Admin-tunable. **NOT modified by Open Bastion.** |
 
-Reasoning: the audit package ships `auditd.conf` as its own conffile.
-If we shipped a competing one, dpkg/rpm would prompt the admin on every
-upgrade. Instead, we keep ours under `/usr/share/...` (ours, read-only)
-and copy it into `/etc/...` only at the moment the admin opts in. The
-backup made before any in-place edit ends up in
-`/var/backup/llng-setup-<timestamp>/auditd.conf`.
+We deliberately do **not** modify `/etc/audit/auditd.conf` because it
+is a single admin-tunable file owned by the `audit` distro package.
+Drop-in mechanisms (`rules.d/`, `cron.daily/`) are used where they
+exist; the single admin-tunable file `auditd.conf` is left untouched.
+If we patched it in place, any `dpkg`/`rpm` conffile prompt on the next
+`audit` package upgrade would confront the admin with unexpected diffs.
 
-## Tuning retention
+## Tuning retention (manual post-deployment step)
 
-The defaults aim at ~1 week of history. To tune:
+**This is a required manual step** after running `--enable-audit-trace`.
+Open Bastion does not modify `/etc/audit/auditd.conf`. The distribution
+defaults (often `num_logs=5`, `max_log_file=8`) give only a few days of
+retention on a busy bastion.
+
+**Recommended: ~1 week local retention**
+
+```bash
+sudo sed -i \
+  -e 's/^max_log_file = .*/max_log_file = 50/' \
+  -e 's/^num_logs = .*/num_logs = 7/' \
+  -e 's/^max_log_file_action = .*/max_log_file_action = ROTATE/' \
+  /etc/audit/auditd.conf
+sudo systemctl restart auditd
+```
+
+Or edit the file directly:
+
+```bash
+sudo vim /etc/audit/auditd.conf
+```
+
+To further tune:
 
 | Want                | Edit `/etc/audit/auditd.conf` |
 |---------------------|-------------------------------|
@@ -177,7 +195,7 @@ The defaults aim at ~1 week of history. To tune:
 After editing, run:
 
 ```bash
-systemctl restart auditd
+sudo systemctl restart auditd
 ```
 
 You may also want to adjust the cron frequency. By default we rotate
@@ -218,10 +236,9 @@ augenrules --load
 systemctl restart auditd
 ```
 
-The auditd.conf changes (`max_log_file`, `num_logs`,
-`max_log_file_action`) remain in place; they are harmless even without
-our rules. To revert them, restore from
-`/var/backup/llng-setup-<timestamp>/auditd.conf`.
+If you previously tuned `/etc/audit/auditd.conf` manually (as recommended
+in the Tuning section), those changes are yours to revert; they are
+harmless even without our rules.
 
 ## Volume and saturation
 

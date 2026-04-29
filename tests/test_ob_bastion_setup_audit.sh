@@ -9,8 +9,9 @@
 # test host. We exercise:
 #   - flag parsing (default off, --enable-audit-trace flips it on)
 #   - the auditd-not-installed refusal path
-#   - the audit_set_conf_key idempotent in-place edit
 #   - shipped template contents
+#   - regression: auditd.conf must NOT be modified by setup_audit_trace
+#   - regression: audit_set_conf_key must NOT exist in the script
 # Anything that would actually call augenrules / systemctl is fenced
 # behind the "auditd missing" guard.
 #
@@ -174,104 +175,81 @@ test_refuses_without_templates() {
     fi
 }
 
-# ── Test 6: audit_set_conf_key replaces an existing key in place ──
-test_conf_key_replace_existing() {
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    local conf="$tmpdir/auditd.conf"
-    cat > "$conf" <<EOF
-# auditd.conf
-log_file = /var/log/audit/audit.log
-max_log_file = 8
-num_logs = 5
-log_format = ENRICHED
-EOF
-    (
-        source_script "ob-bastion-setup"
-        audit_set_conf_key "$conf" "max_log_file" "50"
-        audit_set_conf_key "$conf" "num_logs" "7"
-        # Replacing twice must be idempotent.
-        audit_set_conf_key "$conf" "max_log_file" "50"
-        grep -q "^max_log_file = 50$" "$conf" || exit 1
-        grep -q "^num_logs = 7$" "$conf" || exit 1
-        # Original unrelated keys preserved.
-        grep -q "^log_file = /var/log/audit/audit.log$" "$conf" || exit 1
-        grep -q "^log_format = ENRICHED$" "$conf" || exit 1
-        # Old values gone.
-        grep -q "^max_log_file = 8$" "$conf" && exit 1
-        grep -q "^num_logs = 5$" "$conf" && exit 1
-        # File should not have grown duplicate keys.
-        local cnt
-        cnt=$(grep -c "^max_log_file " "$conf")
-        [ "$cnt" -eq 1 ] || exit 1
-        cnt=$(grep -c "^num_logs " "$conf")
-        [ "$cnt" -eq 1 ] || exit 1
-        exit 0
-    )
-    local rc=$?
-    rm -rf "$tmpdir"
-    if [ $rc -eq 0 ]; then
-        pass "audit_set_conf_key replaces existing key idempotently"
+# ── Test 6: audit_set_conf_key must NOT exist in the script ──
+# Regression guard: prevent accidental re-introduction of the removed helper.
+test_no_audit_set_conf_key() {
+    local script="$SCRIPT_DIR/ob-bastion-setup"
+    if grep -q "audit_set_conf_key" "$script"; then
+        fail "audit_set_conf_key must not exist in ob-bastion-setup" \
+             "found: $(grep -n 'audit_set_conf_key' "$script")"
     else
-        fail "audit_set_conf_key replaces existing key idempotently"
+        pass "audit_set_conf_key is absent from ob-bastion-setup (removed)"
     fi
 }
 
-# ── Test 7: audit_set_conf_key appends when key is absent ──
-test_conf_key_append_absent() {
+# ── Test 7: setup_audit_trace does NOT modify a sandbox auditd.conf ──
+# We create a sandbox auditd.conf with a known content, run
+# setup_audit_trace in a fully sandboxed environment (fake auditctl /
+# augenrules, AUDIT_TEMPLATE_DIR, no systemctl), then assert the file is
+# byte-for-byte identical to what we created.
+test_auditd_conf_not_modified() {
     local tmpdir
     tmpdir=$(mktemp -d)
-    local conf="$tmpdir/auditd.conf"
-    cat > "$conf" <<EOF
-log_file = /var/log/audit/audit.log
-log_format = ENRICHED
-EOF
     (
         source_script "ob-bastion-setup"
-        audit_set_conf_key "$conf" "max_log_file_action" "ROTATE"
-        grep -q "^max_log_file_action = ROTATE$" "$conf" || exit 1
-        # Pre-existing keys untouched.
-        grep -q "^log_file = /var/log/audit/audit.log$" "$conf" || exit 1
-        # Single occurrence after multiple calls.
-        audit_set_conf_key "$conf" "max_log_file_action" "ROTATE"
-        local cnt
-        cnt=$(grep -c "^max_log_file_action " "$conf")
-        [ "$cnt" -eq 1 ] || exit 1
-        exit 0
-    )
-    local rc=$?
-    rm -rf "$tmpdir"
-    if [ $rc -eq 0 ]; then
-        pass "audit_set_conf_key appends absent key (and stays idempotent)"
-    else
-        fail "audit_set_conf_key appends absent key (and stays idempotent)"
-    fi
-}
 
-# ── Test 8: audit_set_conf_key does not touch commented lines ──
-test_conf_key_skips_comments() {
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    local conf="$tmpdir/auditd.conf"
-    cat > "$conf" <<EOF
-# max_log_file = 8
-# default-shipped commented example
-EOF
-    (
-        source_script "ob-bastion-setup"
-        audit_set_conf_key "$conf" "max_log_file" "50"
-        # The commented line must remain.
-        grep -q "^# max_log_file = 8$" "$conf" || exit 1
-        # The new live line was appended, not substituted into the comment.
-        grep -q "^max_log_file = 50$" "$conf" || exit 1
-        exit 0
+        # Stub auditctl, augenrules, systemctl — they must exist for the
+        # function not to bail at step 1, but we want them to be no-ops.
+        mkdir -p "$tmpdir/bin"
+        printf '#!/bin/sh\nexit 0\n' > "$tmpdir/bin/auditctl"
+        printf '#!/bin/sh\nexit 0\n' > "$tmpdir/bin/augenrules"
+        printf '#!/bin/sh\nexit 0\n' > "$tmpdir/bin/systemctl"
+        chmod +x "$tmpdir/bin/auditctl" "$tmpdir/bin/augenrules" "$tmpdir/bin/systemctl"
+        export PATH="$tmpdir/bin:$PATH"
+
+        # Provide minimal templates so the template-check passes.
+        local tdir="$tmpdir/templates"
+        mkdir -p "$tdir/rules.d" "$tdir/cron.daily"
+        printf '# rules\n' > "$tdir/rules.d/open-bastion.rules"
+        printf '#!/bin/sh\necho rotate\n' > "$tdir/cron.daily/open-bastion-audit-rotate"
+        chmod +x "$tdir/cron.daily/open-bastion-audit-rotate"
+        AUDIT_TEMPLATE_DIR="$tdir"
+
+        # Redirect install targets so we don't need /etc.
+        AUDIT_RULES_FILE="$tmpdir/open-bastion.rules"
+        AUDIT_CRON_FILE="$tmpdir/open-bastion-audit-rotate"
+
+        # The sandbox auditd.conf with a known sentinel value.
+        local sandbox_conf="$tmpdir/auditd.conf"
+        printf 'max_log_file = 8\nnum_logs = 5\n' > "$sandbox_conf"
+        local before_hash
+        before_hash=$(md5sum "$sandbox_conf")
+
+        # Non-interactive so confirm() returns true.
+        NON_INTERACTIVE=true
+
+        # Run the function. It should NOT touch sandbox_conf — but we do
+        # not pass $sandbox_conf as a parameter; we just verify by hash.
+        setup_audit_trace >/dev/null 2>&1 || true
+
+        local after_hash
+        after_hash=$(md5sum "$sandbox_conf")
+
+        if [ "$before_hash" = "$after_hash" ]; then
+            exit 0
+        else
+            echo "auditd.conf was modified!" >&2
+            echo "Before: $before_hash" >&2
+            echo "After:  $after_hash" >&2
+            exit 1
+        fi
     )
     local rc=$?
     rm -rf "$tmpdir"
     if [ $rc -eq 0 ]; then
-        pass "audit_set_conf_key leaves commented lines alone"
+        pass "setup_audit_trace does NOT modify a sandbox auditd.conf"
     else
-        fail "audit_set_conf_key leaves commented lines alone"
+        fail "setup_audit_trace does NOT modify a sandbox auditd.conf"
     fi
 }
 
@@ -370,9 +348,8 @@ run_test test_flag_enables
 run_test test_help_mentions_flag
 run_test test_refuses_without_auditd
 run_test test_refuses_without_templates
-run_test test_conf_key_replace_existing
-run_test test_conf_key_append_absent
-run_test test_conf_key_skips_comments
+run_test test_no_audit_set_conf_key
+run_test test_auditd_conf_not_modified
 run_test test_rules_template_content
 run_test test_cron_template_content
 run_test test_main_gates_audit_trace
