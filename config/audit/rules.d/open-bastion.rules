@@ -9,10 +9,16 @@
 -f 1
 
 # === EXECVE: every command run by a logged-in non-system user ===
--a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=unset -k ob-exec
--a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=unset -k ob-exec
+# Cover both execve and execveat (syscall #322): execveat alone bypasses
+# a rule that only matches execve.
+-a always,exit -F arch=b64 -S execve -S execveat -F auid>=1000 -F auid!=unset -k ob-exec
+-a always,exit -F arch=b32 -S execve -S execveat -F auid>=1000 -F auid!=unset -k ob-exec
 
-# === NETWORK: outbound connections (exfiltration detection) ===
+# === NETWORK: outbound connect() only — see doc/audit.md for sendto/io_uring caveats ===
+# UDP exfiltration via sendto on an unconnected socket and io_uring-based
+# clients are NOT covered here on purpose (sendto/sendmsg would be too
+# chatty by default). Operators who need broader coverage can add
+# `-S sendto -S sendmsg` and accept the volume.
 -a always,exit -F arch=b64 -S connect -F auid>=1000 -F auid!=unset -k ob-connect
 -a always,exit -F arch=b32 -S connect -F auid>=1000 -F auid!=unset -k ob-connect
 

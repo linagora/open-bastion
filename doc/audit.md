@@ -66,10 +66,16 @@ What this trace **does not** cover:
 - System processes (auid < 1000 — daemons, kernel threads). They are
   excluded on purpose, because they generate orders of magnitude more
   events and have no business showing up in a user audit trail.
-- IPv6 outbound traffic via `sendto` on already-connected UDP sockets.
-  We trace `connect` only.
-- Programs that statically link or use `vfork`+exec patterns the kernel
-  does not classify as `execve` (rare in practice).
+- Outbound UDP exfiltration via `sendto`/`sendmsg` on an unconnected
+  socket (the canonical DNS-tunnel pattern). We trace `connect` only,
+  by design — adding `sendto`/`sendmsg` would be very chatty by default.
+  Operators who need broader coverage can add `-S sendto -S sendmsg` to
+  `/etc/audit/rules.d/open-bastion.rules` and accept the volume.
+- Outbound traffic over `io_uring` (`io_uring_enter` with
+  `IORING_OP_CONNECT` / `IORING_OP_SEND*`). Same trade-off as above.
+- Programs that use `vfork`+exec patterns the kernel does not classify
+  as `execve`/`execveat` (rare in practice). Both `execve` and
+  `execveat` (syscall #322) are covered by our rules.
 
 ## Activation
 
