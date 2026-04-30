@@ -8,9 +8,9 @@ signature, no LLNG involvement on the auth path**.
 
 ## Two authentication flows in one bastion
 
-| User kind       | SSH auth         | How              |
-| --------------- | ---------------- | ---------------- |
-| Human           | Password (token) | Paste LLNG access token as the SSH password |
+| User kind       | SSH auth         | How                                                                                                                         |
+| --------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Human           | Password (token) | Paste LLNG access token as the SSH password                                                                                 |
 | Service account | Public key       | sshd accepts the key via `AuthorizedKeysCommand` → pam_openbastion verifies the fingerprint against `service-accounts.conf` |
 
 Regular users can still `sudo` by re-entering their token (stock
@@ -90,6 +90,6 @@ rejection of non-registered keys.
 
 ## See also
 
-- `docker-demo-token/`  — token auth for humans only (no service accounts)
+- `docker-demo-token/` — token auth for humans only (no service accounts)
 - `docker-demo-maxsec/` — Mode E (SSH certificates) + service accounts
 - `doc/service-accounts.md` — canonical documentation
