@@ -2,12 +2,12 @@
 
 ## Matrice des Risques Résiduels (Mode E)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                          | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | -------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4, R-SA2                                  | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11                              | R-S6             |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                  | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ---------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                                          | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11                                      | R-S6             |              |                   |
 | **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21 | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                 | R-S3, R-S18      |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                         | R-S3, R-S18      |              |                   |
 
 > **Note :** R-S3 et R-S15 ont été descendus d'un cran sur l'axe Impact grâce au **binding fingerprint SSH** introduit dans le plugin PamAccess ≥ 0.1.16. La vérification est effectuée côté LLNG à la fois sur `/pam/authorize` (à chaque ouverture de session SSH, phase PAM `account`) et sur `/pam/verify` (à chaque utilisation d'un token PAM pour sudo ou ré-authentification) : tant que l'empreinte de la clef SSH n'est pas présente, active et non révoquée dans la session persistante LLNG, ni la session SSH ni l'escalade sudo ne sont autorisées, indépendamment de la fraîcheur de la KRL locale. Voir [02-ssh-connection.md](02-ssh-connection.md) pour les détails.
 
@@ -23,7 +23,7 @@
 
 - **R-S1** : Supprimé (aucun mot de passe SSH accepté)
 - **R-S2** : Descendu à I=1 (clé SSH inutile sans certificat CA)
-- **R-S18** : Reste à (P=2, I=1). Le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, mais l'utilisateur est propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres recordings. La traçabilité est préservée par syslog `auth.info` (start/end de session, journal indépendant root-only) et, si PR2 (#113) est activée, par le watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement même s'il réussit. Pistes pour passer à I=1 (ou à P=1 sans setuid) : voir [section R-S18 ci-dessous](#r-s18-p2-i1---effacement-des-enregistrements-de-session).
+- **R-S18** : Reste à (P=2, I=1). Le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, mais l'utilisateur est propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres recordings. La traçabilité est préservée par syslog `auth.info` (start/end de session, journal indépendant root-only) et, si PR2 (#113) est activée, par le watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement même s'il réussit. Pistes pour passer à P=1 (rendre l'effacement techniquement impossible, sans introduire de binaire setuid) : voir [section R-S18 ci-dessous](#r-s18-p2-i1---effacement-des-enregistrements-de-session).
 - **R-S19** : Descendu à (P=1, I=1) grâce à `KillUserProcesses=yes` (le cgroup utilisateur est tué à la fin de la session, y compris les processus détachés via `setsid`) et au pre-flight refusant `Linger=yes`.
 - **R-S20** : Descendu à (P=1, I=2) grâce à `at.allow` vide + `atd` masqué + `cron.allow` root-only + pre-flight `Linger=yes`. Limite résiduelle (I=2) : crontab pré-existant non purgé.
 - **R-S21** : Descendu à (P=1, I=2) grâce aux règles auditd `-S execve -S execveat` + watches sur les fichiers sensibles + `connect()`. Limite résiduelle (I=2) : `sendto`/`sendmsg` UDP non-connectés non tracés par défaut.
@@ -142,7 +142,7 @@ Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire)
 2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
 3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité
 
-**Séparation des privilèges déjà implémentée (enregistrement de session) :** Le wrapper setgid `ob-session-recorder-wrapper` et les permissions `1770` sur `/var/lib/open-bastion/sessions` empêchent les utilisateurs de supprimer leurs enregistrements de session, réduisant le risque de falsification de preuves en cas de compromission.
+**Séparation des privilèges déjà implémentée (enregistrement de session) :** Le wrapper setgid `ob-session-recorder-wrapper` et les permissions `1770` sur `/var/lib/open-bastion/sessions` **empêchent l'accès et la suppression croisés entre utilisateurs** (isolation latérale). L'utilisateur reste cependant propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres enregistrements — voir R-S18 ci-dessous pour le détail et les protections complémentaires (syslog `auth.info`, watch auditd via PR2 #113).
 
 ### R-S18 _(P=2, I=1)_ - Effacement des enregistrements de session
 

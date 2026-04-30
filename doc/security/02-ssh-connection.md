@@ -1011,7 +1011,7 @@ L'escalade sudo est bloquée par conception :
 
 **Séparation des privilèges pour l'enregistrement de session :**
 
-L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent ni lire ni supprimer leurs propres enregistrements de session, réduisant le risque de falsification de preuves en cas de compromission d'une session.
+L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent **ni lire ni supprimer les enregistrements des autres utilisateurs** (isolation latérale). En revanche, l'utilisateur reste propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres enregistrements — voir R-S18 ci-dessous pour le détail et les protections complémentaires (syslog `auth.info`, watch auditd).
 
 |                 |                 Score résiduel                  |
 | --------------- | :---------------------------------------------: |
@@ -1124,7 +1124,7 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 
 1. **Wrapper setgid `ob-session-recorder-wrapper`** : empêche l'utilisateur d'**accéder aux recordings d'autres utilisateurs**. C'est la propriété principale réellement obtenue par le mécanisme setgid : isolation latérale entre utilisateurs, et non immutabilité des fichiers de l'utilisateur courant. Cette propriété reste valable et utile.
 2. **Sanitisation de l'environnement** (LD_PRELOAD, BASH_ENV, PATH durci) avant exec du script de session : empêche les vecteurs d'évasion via préchargement de bibliothèque.
-3. **Syslog `auth.info`** : le session recorder émet des événements `session_start` / `session_end` dans syslog, qui constitue un journal indépendant des fichiers de recording (syslog est root-owned et n'est pas accessible en écriture à l'utilisateur). Même si l'utilisateur supprime ses fichiers de session, syslog conserve la trace de l'ouverture et de la fermeture de la session, suffisante pour l'imputation temporelle.
+3. **Syslog `auth.info`** : le session recorder émet à l'ouverture une ligne `Session <UUID> started for user <user> from <ip>` et à la clôture `Session <UUID> ended for user <user> (status: <status>)` (cf. `scripts/ob-session-recorder:200,383`). Ce journal est root-owned et indépendant des fichiers de recording — il n'est pas accessible en écriture à l'utilisateur. Même si l'utilisateur supprime ses fichiers de session, ces deux lignes conservent la trace de l'ouverture et de la fermeture de la session, suffisante pour l'imputation temporelle.
 4. **Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa`** (PR2 #113, opt-in via `--enable-audit-trace`) : trace tout `unlink`, `truncate` ou `rename` sur les fichiers de session, **même si l'effacement réussit**. L'événement d'effacement devient lui-même une preuve d'audit.
 
 **Pistes non retenues :**
@@ -1134,9 +1134,9 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 
 Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélioration permettant de redescendre P à 1 sans setuid.
 
-|                 |                                Score résiduel                                |
-| --------------- | :--------------------------------------------------------------------------: |
-| **Probabilité** |                  2 (suppression triviale via `rm` reste possible)            |
+|                 |                                       Score résiduel                                       |
+| --------------- | :----------------------------------------------------------------------------------------: |
+| **Probabilité** |                      2 (suppression triviale via `rm` reste possible)                      |
 | **Impact**      | 1 (syslog `auth.info` + watches auditd préservent la timeline et l'événement d'effacement) |
 
 ---
@@ -1174,10 +1174,10 @@ Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélio
 
 - Règles `-S execve -S execveat` dans `/etc/audit/rules.d/open-bastion.rules` : chaque commande lancée par le processus détaché laisse une trace indépendante du recorder pty, attribuée à l'UID de l'utilisateur (champ `uid=` du record auditd).
 
-|                 |                                       Score résiduel (PR1 + PR2 activées)                                       |
-| --------------- | :-------------------------------------------------------------------------------------------------------------: |
-| **Probabilité** |  1 (`KillUserProcesses=yes` ferme le canal d'évasion principal ; auditd ferme la trace de seconde main)         |
-| **Impact**      |              1 (orphelins tués à la déconnexion ; commandes tracées syscall-level par auditd)                   |
+|                 |                                  Score résiduel (PR1 + PR2 activées)                                   |
+| --------------- | :----------------------------------------------------------------------------------------------------: |
+| **Probabilité** | 1 (`KillUserProcesses=yes` ferme le canal d'évasion principal ; auditd ferme la trace de seconde main) |
+| **Impact**      |            1 (orphelins tués à la déconnexion ; commandes tracées syscall-level par auditd)            |
 
 > **Score résiduel si PR1 NON activée :** P=3, I=3 (zone jaune). Le hardening doit être documenté comme **fortement recommandé** sur tout déploiement bastion réel. Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
 
@@ -1218,10 +1218,10 @@ Au moment de l'exécution effective de la commande planifiée (si la planificati
 
 **Limite résiduelle documentée :** Un crontab pré-existant déposé dans `/var/spool/cron/crontabs/<user>` **avant** l'activation du hardening n'est pas purgé par `setup_hardening`. `cron` lit le spool indépendamment de `cron.allow` (qui ne contrôle que `crontab(1)` au moment de l'édition). Voir [99-risk-reduce.md](99-risk-reduce.md) pour la piste d'amélioration (purge des crontabs pré-existants à l'activation du hardening).
 
-|                 |                                       Score résiduel (PR1 activée)                                       |
-| --------------- | :------------------------------------------------------------------------------------------------------: |
-| **Probabilité** |              1 (at masqué, cron en allow-list root, linger refusé par le pre-flight)                     |
-| **Impact**      |    2 (limite documentée : crontab pré-existant non purgé ; auditd trace tout de même l'exécution)        |
+|                 |                                  Score résiduel (PR1 activée)                                  |
+| --------------- | :--------------------------------------------------------------------------------------------: |
+| **Probabilité** |            1 (at masqué, cron en allow-list root, linger refusé par le pre-flight)             |
+| **Impact**      | 2 (limite documentée : crontab pré-existant non purgé ; auditd trace tout de même l'exécution) |
 
 > **Score résiduel si PR1 NON activée :** P=2, I=3 (zone jaune). Voir [doc/hardening.md](../hardening.md) pour les détails techniques (documentation technique en anglais).
 
@@ -1255,7 +1255,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - Exfiltration DNS via UDP `sendto` non-connecté
 - `TIOCSTI` ioctl pour injecter de l'input dans le tty parent ou un autre tty appartenant au même utilisateur (mitigé par défaut sur Linux ≥ 6.2 via `dev.tty.legacy_tiocsti_restrict=1`, mais à vérifier sur les hosts plus anciens)
 - `ptrace`/`PTRACE_ATTACH` sur un autre processus de l'utilisateur pour injecter du code dans un process non recordé (mitigé par défaut sur Debian/Ubuntu via `kernel.yama.ptrace_scope=1`, qui restreint `ptrace` au lien parent-enfant direct)
-- `LD_PRELOAD` *à l'intérieur* de la session (la sanitisation du wrapper ne couvre que le **lancement** du recorder, pas les commandes que l'utilisateur exécute ensuite). Exemple : `LD_PRELOAD=./evil.so /usr/bin/somecmd` pour intercepter ce que `somecmd` fait. Le pty enregistre le préfixe `LD_PRELOAD=…` mais pas les effets de la lib injectée.
+- `LD_PRELOAD` _à l'intérieur_ de la session (la sanitisation du wrapper ne couvre que le **lancement** du recorder, pas les commandes que l'utilisateur exécute ensuite). Exemple : `LD_PRELOAD=./evil.so /usr/bin/somecmd` pour intercepter ce que `somecmd` fait. Le pty enregistre le préfixe `LD_PRELOAD=…` mais pas les effets de la lib injectée.
 
 **Conséquence :** Le recording pty ne reflète pas la totalité des actions de la session. Limite la valeur forensique du replay et l'imputation.
 
@@ -1272,10 +1272,10 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - `io_uring_enter` non tracé (rare en pratique). Mêmes considérations de volumétrie.
 - Contenu des fichiers et des buffers réseau non capturé : auditd trace les **syscalls et leurs métadonnées** (uid, ppid, cwd, args), pas les données échangées.
 
-|                 |                                       Score résiduel (PR2 activée)                                       |
-| --------------- | :------------------------------------------------------------------------------------------------------: |
-| **Probabilité** | 1 (`execve`/`execveat` couverts, watches sur `/etc` et `sessions/`, `connect()` TCP/UDP-connect tracés) |
-| **Impact**      |  2 (`sendto` UDP non-connecté reste un canal d'exfil non tracé par défaut → DNS-tunnel possible mais documenté) |
+|                 |                                          Score résiduel (PR2 activée)                                          |
+| --------------- | :------------------------------------------------------------------------------------------------------------: |
+| **Probabilité** |    1 (`execve`/`execveat` couverts, watches sur `/etc` et `sessions/`, `connect()` TCP/UDP-connect tracés)     |
+| **Impact**      | 2 (`sendto` UDP non-connecté reste un canal d'exfil non tracé par défaut → DNS-tunnel possible mais documenté) |
 
 > **Score résiduel si PR2 NON activée :** P=2, I=3 (zone jaune). L'enregistrement pty seul ne suffit pas comme preuve d'audit primaire : la trace auditd est **fortement recommandée** en complément. Voir [doc/audit.md](../audit.md) pour les détails techniques (documentation technique en anglais).
 
@@ -1285,23 +1285,23 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 ### Avant remédiation
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------- | ----------------------------------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6 R-S17                                      |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 | R-S19    |                   |
-| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                                | R-S8         |                   |
-| **1 - Négligeable**      |                     |                                                 |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                    | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | --------------------------------------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6 R-S17                                          |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 | R-S19        |                   |
+| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                                    | R-S8         |                   |
+| **1 - Négligeable**      |                     |                                                     |              |                   |
 
 > **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18).
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                 | 2 - Peu probable    | 3 - Probable | 4 - Très probable |
-| ------------------------ | --------------------------------------------------- | ------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                |                     |              |                   |
-| **3 - Important**        | R-S5                                                | R-S6                |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8                |              |                   |
-| **1 - Négligeable**      | R-S15 R-S19                                         | R-S3 R-S18          |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                             | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                            |                  |              |                   |
+| **3 - Important**        | R-S5                                                            | R-S6             |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S15 R-S19                                                     | R-S3 R-S18       |              |                   |
 
 **Profil de risque de la cible maximale :**
 

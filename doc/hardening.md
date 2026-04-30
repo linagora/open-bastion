@@ -35,13 +35,13 @@ the recorder leaves a primary trace independent of the wrapper.
 
 ## What `ob-bastion-setup --enable-hardening` deploys
 
-| Destination                                     | Source template                                          | Purpose                                                                                       |
-| ----------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `/etc/systemd/logind.conf.d/open-bastion.conf`  | `share/open-bastion/hardening/logind.conf.d/…`           | `KillUserProcesses=yes` — logind reaps every process owned by a user when their last session ends. |
-| `/etc/security/limits.d/open-bastion.conf`      | `share/open-bastion/hardening/security/limits.d/…`       | Caps `nproc` per user at 256, root unlimited. Fork-bomb guardrail.                            |
-| `/etc/at.allow`                                 | `share/open-bastion/hardening/at.allow`                  | Whitelist: empty (root only by design). Non-root users cannot use `at(1)`.                    |
-| `/etc/cron.allow`                               | `share/open-bastion/hardening/cron.allow`                | Whitelist: `root` only. Add admins as needed.                                                 |
-| `systemctl mask atd`                            | —                                                        | Disables the at daemon entirely if it is installed.                                           |
+| Destination                                    | Source template                                    | Purpose                                                                                            |
+| ---------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `/etc/systemd/logind.conf.d/open-bastion.conf` | `share/open-bastion/hardening/logind.conf.d/…`     | `KillUserProcesses=yes` — logind reaps every process owned by a user when their last session ends. |
+| `/etc/security/limits.d/open-bastion.conf`     | `share/open-bastion/hardening/security/limits.d/…` | Caps `nproc` per user at 256, root unlimited. Fork-bomb guardrail.                                 |
+| `/etc/at.allow`                                | `share/open-bastion/hardening/at.allow`            | Whitelist: empty (root only by design). Non-root users cannot use `at(1)`.                         |
+| `/etc/cron.allow`                              | `share/open-bastion/hardening/cron.allow`          | Whitelist: `root` only. Add admins as needed.                                                      |
+| `systemctl mask atd`                           | —                                                  | Disables the at daemon entirely if it is installed.                                                |
 
 `systemd-logind` is reloaded at the end of the step via `systemctl
 reload systemd-logind` (SIGHUP). This is **non-disruptive**: logind
@@ -72,7 +72,7 @@ and a systemd unit, not a backgrounded shell on the bastion.
 
 `Linger=no` is the implicit default per user. A user with
 `Linger=yes` (set via `loginctl enable-linger`) can keep processes
-running after logout *and* schedule deferred work via
+running after logout _and_ schedule deferred work via
 `systemd-run --user --on-active=…`, which would defeat both
 `KillUserProcesses=yes` and the `at`/`cron` allow-lists.
 
@@ -143,7 +143,7 @@ gpasswd -a ansible ob-service       # repeat for each service account
 
 If the group does not exist, `pam_limits` silently ignores the line
 and the cap stays at 256 for everyone except root. To exempt a
-different group instead, add a more specific drop-in (sorted *after*
+different group instead, add a more specific drop-in (sorted _after_
 `open-bastion.conf` alphabetically, e.g. `99-ci.conf`).
 
 ## Verifying after deployment
@@ -205,7 +205,7 @@ Practical consequences:
   want the new content; the script backs up the existing file before
   replacing it.
 - The templates themselves live under `/usr/share/open-bastion/hardening/`
-  and *are* reinstalled on upgrade. They are read-only references; do
+  and _are_ reinstalled on upgrade. They are read-only references; do
   not edit them.
 
 To reapply or update the deployed files, edit them under `/etc/` and
@@ -220,12 +220,12 @@ the logind/limits drop-ins, and warn if it finds an admin-managed
 If a deployment needs a specific subsystem back, edit the deployed
 files in `/etc/` directly.
 
-| Re-enable           | What to do                                                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `at(1)` for a user  | Add the username to `/etc/at.allow`, then `systemctl unmask atd && systemctl enable --now atd`.                        |
-| `crontab` for a user | Add the username to `/etc/cron.allow`. (`cron.service` is already running.)                                            |
+| Re-enable            | What to do                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `at(1)` for a user   | Add the username to `/etc/at.allow`, then `systemctl unmask atd && systemctl enable --now atd`.                          |
+| `crontab` for a user | Add the username to `/etc/cron.allow`. (`cron.service` is already running.)                                              |
 | Background processes | Remove `/etc/systemd/logind.conf.d/open-bastion.conf`, then `systemctl reload systemd-logind`. Discouraged on a bastion. |
-| Higher `nproc`       | Add a more specific drop-in **after** `open-bastion.conf` (alphabetical order, e.g. `99-build.conf`).                  |
+| Higher `nproc`       | Add a more specific drop-in **after** `open-bastion.conf` (alphabetical order, e.g. `99-build.conf`).                    |
 
 To activate the hardening at install time (opt-in, off by default):
 
@@ -242,7 +242,7 @@ ob-bastion-setup --portal https://auth.example.com --enable-hardening
 - **Container escape / kernel exploits.** Out of scope; rely on
   upstream kernel hardening and timely patching.
 - **`systemd-run --user` with a service template.** Covered by
-  `KillUserProcesses=yes` *only* if the user does not have linger
+  `KillUserProcesses=yes` _only_ if the user does not have linger
   enabled. Confirm with `loginctl show-user`.
 
 ## See also
