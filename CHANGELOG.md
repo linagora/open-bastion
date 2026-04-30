@@ -5,13 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6] - 2026-04-22
+## [0.2.0] - 2026-04-30
+
+This release groups three independent opt-in features (service
+accounts, session-containment hardening, syscall-level audit trace)
+and a security-analysis update. None of them changes existing
+behaviour: a v0.1.5 deployment upgrades to v0.2.0 with no flag set
+and runs identically. (Note: v0.1.6 was prepared internally but
+never published; its contents are folded into v0.2.0.)
 
 ### Added
 
-- **Service accounts (machine accounts)**: local Unix accounts declared
-  in `/etc/open-bastion/service-accounts.conf` (`0600 root:root`) that
-  LemonLDAP::NG never sees, for CI agents and headless tooling.
+- **Service accounts (machine accounts)** — local Unix accounts
+  declared in `/etc/open-bastion/service-accounts.conf`
+  (`0600 root:root`) that LemonLDAP::NG never sees, for CI agents
+  and headless tooling.
   - `pam_openbastion` materialises the Unix user on first login
     (`create_user = true`), with forced uid/gid and auto-created
     primary group.
@@ -22,10 +30,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`AuthorizedKeysCommand` helper) so plain (non-SSO-signed) keys
     can authenticate registered service accounts without breaking
     the `AuthorizedKeysFile none` guarantee.
-- **`docker-demo-token-svc/`**: token-auth + local service accounts
-  demo variant, coexists with `docker-demo-token`.
-- **Integration tests**: `tests/test_integration_token_svc.sh` and a
-  new Phase 7 in `tests/test_integration_maxsec.sh`.
+  - New `docker-demo-token-svc/` variant (coexists with
+    `docker-demo-token`) and integration tests
+    (`tests/test_integration_token_svc.sh` + Phase 7 in
+    `tests/test_integration_maxsec.sh`).
+
+- **Session-containment hardening** (`ob-bastion-setup
+  --enable-hardening`, opt-in, off by default) — closes the known
+  SSH evasion channels (`setsid`+`nohup` orphans, deferred
+  `at`/`cron` jobs, `systemd-run --user` timers) without any new
+  setuid binary.
+  - `KillUserProcesses=yes` deployed via
+    `/etc/systemd/logind.conf.d/open-bastion.conf` (SIGHUP-applied,
+    non-disruptive — does not kill the admin's own session).
+  - `/etc/at.allow` empty + `systemctl mask atd` disable `at(1)` for
+    non-root users; `/etc/cron.allow` root-only disables `crontab(1)`
+    for non-root users (cron itself stays up because Mode E uses
+    `/etc/cron.d/open-bastion-krl`).
+  - Pre-flight refusal if any non-root user has `Linger=yes`, which
+    would let them schedule jobs via `systemd-run --user
+    --on-active=…` (operator must `loginctl disable-linger <user>`
+    before re-running).
+  - `nproc` cap (256, `@ob-service` group exempt) as defense in depth
+    against fork-bomb-style runaway processes.
+  - Templates ship under `/usr/share/open-bastion/hardening/` (read
+    only; deployment artefacts in `/etc/` are written by
+    `ob-bastion-setup`, not by dpkg/rpm).
+  - New `doc/hardening.md` and `tests/test_ob_bastion_setup_hardening.sh`
+    (20 tests).
+
+- **Primary audit trace via auditd** (`ob-bastion-setup
+  --enable-audit-trace`, opt-in, off by default) — syscall-level,
+  tamper-evident audit independent of the pty session recording.
+  - `/etc/audit/rules.d/open-bastion.rules`: `-S execve -S execveat`
+    (both — `execveat` alone bypasses an `execve`-only rule),
+    `-S connect`, watches on `/etc/passwd`, `/etc/shadow`,
+    `/etc/group`, `/etc/sudoers` (and `.d`), `/etc/ssh/sshd_config`
+    (and `.d`), `/var/lib/open-bastion/sessions/`, `/etc/open-bastion/`.
+  - `/etc/cron.daily/open-bastion-audit-rotate` — daily SIGUSR1 to
+    auditd; combined with `num_logs=7` gives ~1 week local
+    retention.
+  - `/etc/audit/auditd.conf` is **intentionally not modified** (it
+    is a single admin-tunable file owned by the `audit` package; we
+    use the drop-in mechanism `rules.d/` and document the
+    recommended retention values for the admin to apply manually).
+  - Warns and skips (does not refuse) if `auditd` is not installed
+    so the rest of `ob-bastion-setup` continues normally.
+  - `auditd` is declared as `Recommends:` (Debian) /
+    `Recommends:` (RPM) — never installed silently.
+  - New `doc/audit.md` and `tests/test_ob_bastion_setup_audit.sh`
+    (11 tests).
+
+### Changed
+
+- **Security analysis updated** (`doc/security/02-ssh-connection.md`,
+  `doc/security/99-risk-reduce.md`):
+  - **R-S18 corrected** — the previous claim that the setgid wrapper
+    + sticky bit prevented users from deleting their own recordings
+    was inaccurate: the per-user subdirectory is
+    `2770 user:ob-sessions`, so the user is owner and can `rm` their
+    own files. Score revised from `(P=1, I=1)` to `(P=2, I=1)` —
+    syslog `auth.info` (start/end) and the new auditd watch on
+    `/var/lib/open-bastion/sessions/` preserve the timeline and
+    record any unlink even if the file is deleted. The wrapper still
+    provides cross-user isolation (which is what it was always
+    really doing).
+  - **R-S19 (new)** — session-containment evasion via `setsid`/`nohup`.
+    Initial `(P=3, I=3)`; residual `(P=1, I=1)` with hardening +
+    audit trace activated.
+  - **R-S20 (new)** — deferred action via `at`/`cron`/`systemd-run
+    --user --on-active=…`. Initial `(P=2, I=3)`; residual `(P=1, I=2)`
+    with hardening (limit: pre-existing crontabs in
+    `/var/spool/cron/crontabs/` are not purged on activation).
+  - **R-S21 (new)** — action not captured by the pty (`execveat`,
+    UDP `sendto`, `io_uring`, TIOCSTI, ptrace, intra-session
+    `LD_PRELOAD`). Initial `(P=2, I=3)`; residual `(P=1, I=2)` with
+    audit trace (limit: UDP `sendto`/`sendmsg` not traced by
+    default — opt-in extension documented).
+  - New section "Pistes d'amélioration — Containment et Traçabilité"
+    in `99-risk-reduce.md` with concrete next-steps (privileged
+    session collector, `audisp-syslog` forwarding, MAC profiles,
+    cryptographic recording signatures, etc.).
 
 ### Security
 
@@ -33,12 +118,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `service-accounts.conf` (mirrors `pam_openbastion`).
 - Service-account entries are not persisted to the on-disk NSS cache
   to avoid exposing local-only metadata.
+- Hardening pre-flight is a **security gate**: the linger check
+  fails the step (`return 1`, no `/etc/` writes) even under `--yes`,
+  so an operator cannot accidentally bypass it in batch mode.
 
 ### Upgrade notes
 
-- Service accounts are **opt-in**: deployments without
-  `service_accounts_file` in `openbastion.conf` /
-  `nss_openbastion.conf` behave exactly like v0.1.5.
+- All three new features are **opt-in**:
+  - Service accounts: leave `service_accounts_file` unset in
+    `openbastion.conf` / `nss_openbastion.conf`.
+  - Hardening: do not pass `--enable-hardening` to `ob-bastion-setup`.
+  - Audit trace: do not pass `--enable-audit-trace`.
+
+  A v0.1.5 deployment upgraded to v0.2.0 with no flag set behaves
+  exactly like v0.1.5.
+
+- On a dedicated bastion host, the recommended invocation is now
+  `ob-bastion-setup --portal … --enable-hardening --enable-audit-trace`.
+  Both flags can be combined with `--max-security` (Mode E).
+
+- The hardening step refuses to run if any non-root user has
+  `Linger=yes`. If you have legitimate lingering services, disable
+  linger (`loginctl disable-linger <user>`) before re-running, or
+  leave `--enable-hardening` off.
+
+- `auditd` is a `Recommends:` not `Depends:` — it is **not**
+  pulled in automatically by `apt install --no-install-recommends`.
+  Operators who want the audit trace must `apt install auditd`
+  explicitly.
+
+- `v0.1.6` was prepared internally (CHANGELOG entry + commit
+  `c591109`) but **never tagged or published**. Its contents are
+  folded into v0.2.0; no v0.1.6 → v0.2.0 upgrade path exists.
 
 ## [0.1.5] - 2026-04-20
 

@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.1.6
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -179,25 +179,52 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
-* Wed Apr 22 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.6-1
+* Thu Apr 30 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.0-1
+- Three independent opt-in features (none changes existing behaviour;
+  v0.1.5 → v0.2.0 with no flag set runs identically). v0.1.6 was
+  prepared internally but never published; its content is folded here.
 - Service accounts (machine accounts): local Unix accounts declared in
   /etc/open-bastion/service-accounts.conf (0600 root:root) that
   LemonLDAP::NG never sees, for CI agents and headless tooling.
   pam_openbastion materialises the Unix user on first login
   (create_user = true) with forced uid/gid; libnss_openbastion
-  resolves them so sshd's pre-auth getpwnam() succeeds
-- Mode E support via /usr/local/sbin/ob-service-account-keys
-  (AuthorizedKeysCommand helper): plain (non-SSO-signed) keys can
-  authenticate registered service accounts without breaking the
-  "AuthorizedKeysFile none" guarantee
-- New docker-demo-token-svc/ variant (coexists with docker-demo-token)
-  and integration tests (test_integration_token_svc.sh + Phase 7 in
-  test_integration_maxsec.sh)
+  resolves them so sshd's pre-auth getpwnam() succeeds. Mode E
+  support via /usr/local/sbin/ob-service-account-keys
+  (AuthorizedKeysCommand helper). New docker-demo-token-svc/ variant
+  and integration tests
+- Session-containment hardening (ob-bastion-setup --enable-hardening,
+  off by default): closes setsid/nohup orphans (KillUserProcesses=yes
+  via /etc/systemd/logind.conf.d/), at(1) and crontab(1) for non-root
+  users (at.allow empty + atd masked, cron.allow root-only),
+  systemd-run --user --on-active timers (linger pre-flight refusal),
+  and fork bombs (nproc cap 256, @ob-service group exempt). No new
+  setuid binary. Templates ship under
+  /usr/share/open-bastion/hardening/, deployed into /etc/ at runtime.
+  New doc/hardening.md + 20 integration tests
+- Primary audit trace via auditd (ob-bastion-setup
+  --enable-audit-trace, off by default): execve+execveat, connect,
+  watches on /etc/passwd, /etc/shadow, /etc/sudoers(.d),
+  /etc/ssh/sshd_config(.d), /var/lib/open-bastion/sessions/,
+  /etc/open-bastion/. Daily SIGUSR1 rotation cron for ~1 week local
+  retention. /etc/audit/auditd.conf intentionally not modified
+  (admin-tunable). Warns and skips if auditd is absent. auditd
+  declared as Recommends:, never installed silently. New doc/audit.md
+  + 11 tests
+- Security analysis updated (doc/security/02-ssh-connection.md +
+  99-risk-reduce.md): R-S18 score corrected (P=2, I=1; the wrapper
+  setgid + sticky bit provide cross-user isolation, not own-file
+  immutability — syslog and the new auditd watch preserve traceability).
+  R-S19/20/21 added (containment evasion, deferred action,
+  syscalls-not-captured); residual scores assume both --enable-hardening
+  and --enable-audit-trace activated
 - Security: strict 0600 root:root enforced on service-accounts.conf in
   libnss_openbastion; service-account entries not persisted to the
-  on-disk NSS cache
-- Opt-in: deployments without service_accounts_file in
-  openbastion.conf / nss_openbastion.conf behave like v0.1.5
+  on-disk NSS cache. The hardening linger pre-flight is a security
+  gate (fails the step under --yes too)
+- Upgrade notes: all features opt-in; recommended on dedicated
+  bastions: --enable-hardening --enable-audit-trace. apt install
+  --no-install-recommends will not pull auditd; install it explicitly
+  if you want the audit trace
 
 * Mon Apr 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.1.5-1
 - SSH key fingerprint binding on /pam/authorize and /pam/verify
