@@ -5,6 +5,13 @@
 
 FROM yadd/lemonldap-ng-portal:latest-non-root
 
+# Upstream image ships both /etc/nginx/uwsgi_params and portal-nginx.conf with
+# `uwsgi_param HTTP_HOST $host;`. uwsgi concatenates duplicate params, so
+# LLNG sees vhost "localhost, localhost" and rejects all requests.
+USER root
+RUN sed -i '/uwsgi_param HTTP_HOST/d' /etc/lemonldap-ng/portal-nginx.conf
+USER www-data
+
 # Copy token initialization script to run during container init
 COPY --chmod=755 init-tokens.sh /etc/cont-init.d/10-init-tokens
 
