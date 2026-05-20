@@ -21,6 +21,16 @@ or NSS modules.
   llng-pam-enroll manually after installation.` after a successful
   enrollment.
 
+- **`ob-bastion-setup`**: give /var/lib/open-bastion/sessions mode 3771
+    ob-bastion-setup posed mode 1770 (drwxrwx--T) on the sessions
+    parent. The ob-session-recorder-wrapper setgid binary creates the
+    per-user subdir while it holds effective gid ob-sessions, then
+    drops back to the user's gid and execs the recorder script. With
+    the parent at 1770 the connecting user (not a member of ob-sessions)
+    has no traverse right on the parent, so the script cannot stat
+    its own subdir and logs "User sessions directory ... does not
+    exist and could not be created", leaving sessions unrecorded.
+
 - Sweep the remaining `llng-*` leftovers across scripts, docs,
   configs and Docker demos so paths, modules, units, packages and
   internal identifiers match the names actually installed by the
