@@ -298,9 +298,9 @@ test_write_metadata() {
 # ── Test 11: Environment variable defaults ──
 test_env_defaults() {
     (
-        export LLNG_SESSIONS_DIR="/tmp/env-sessions"
-        export LLNG_RECORDER_FORMAT="ttyrec"
-        export LLNG_MAX_SESSION="7200"
+        export OB_SESSIONS_DIR="/tmp/env-sessions"
+        export OB_RECORDER_FORMAT="ttyrec"
+        export OB_MAX_SESSION="7200"
         source_script "ob-session-recorder"
         local ok=true
         [ "$SESSIONS_DIR" = "/tmp/env-sessions" ] || ok=false
@@ -309,9 +309,9 @@ test_env_defaults() {
         if $ok; then exit 0; else exit 1; fi
     )
     if [ $? -eq 0 ]; then
-        pass "Environment variable defaults (LLNG_SESSIONS_DIR, LLNG_RECORDER_FORMAT, LLNG_MAX_SESSION)"
+        pass "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
     else
-        fail "Environment variable defaults (LLNG_SESSIONS_DIR, LLNG_RECORDER_FORMAT, LLNG_MAX_SESSION)"
+        fail "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
     fi
 }
 
