@@ -1,3 +1,33 @@
+open-bastion (0.2.1) unstable; urgency=medium
+
+  * Maintenance release. No behavioural change in the PAM or NSS
+    modules.
+  * Fix: ob-bastion-setup / ob-backend-setup stop looking for the
+    defunct /usr/sbin/llng-pam-enroll (renamed to ob-enroll); a
+    fresh setup no longer prints "[WARN] Server not enrolled. Run
+    llng-pam-enroll manually after installation" after a successful
+    enrollment.
+  * Fix (Docker demos): drop the duplicate uwsgi_param HTTP_HOST
+    $host that the upstream yadd/lemonldap-ng-portal:latest-non-root
+    image now ships in both /etc/nginx/uwsgi_params and
+    portal-nginx.conf. uwsgi concatenates duplicate values, so LLNG
+    saw the vhost as "localhost, localhost" and rejected every
+    request with ACCESS_REFUSED, breaking demo bastion enrollment.
+  * Sweep remaining llng-* leftovers across scripts, docs, configs
+    and Docker demos so paths, modules, units, packages and internal
+    identifiers match the names actually installed
+    (pam_openbastion.so, libnss_openbastion.so, /etc/open-bastion/*,
+    ob-* binaries, ob-heartbeat.timer, open-bastion apt package,
+    50-open-bastion-*.conf sshd dropins, etc.). LemonLDAP::NG portal
+    and external llng CLI references preserved.
+  * Bash/env vars: PAM_LLNG_*, LLNG_RECORDER_* renamed to PAM_OB_*,
+    OB_RECORDER_* / OB_SESSIONS_DIR / OB_MAX_SESSION /
+    OB_RECORDER_FORMAT.
+  * CI: bump GitHub Actions to versions running on Node.js 24
+    (#115).
+
+ -- Xavier Guimard <yadd@debian.org>  Wed, 20 May 2026 13:55:00 +0200
+
 open-bastion (0.2.0) unstable; urgency=medium
 
   * Three independent opt-in features (none changes existing

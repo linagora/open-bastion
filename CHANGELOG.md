@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-20
+
+Maintenance release that completes the `llng-pam-module` →
+`open-bastion` rebranding in the setup scripts, docs and Docker
+demos, and patches a regression in the upstream LemonLDAP::NG
+portal image used by the demos. No behavioural change in the PAM
+or NSS modules.
+
+### Fixed
+
+- **`ob-bastion-setup` / `ob-backend-setup`**: stop looking for the
+  defunct `/usr/sbin/llng-pam-enroll` (renamed to `ob-enroll`); a
+  fresh setup no longer prints `[WARN] Server not enrolled. Run
+  llng-pam-enroll manually after installation.` after a successful
+  enrollment.
+
+- Sweep the remaining `llng-*` leftovers across scripts, docs,
+  configs and Docker demos so paths, modules, units, packages and
+  internal identifiers match the names actually installed by the
+  Debian / RPM packages:
+  - binaries: `llng-pam-{enroll,heartbeat}`,
+    `llng-{ssh-cert,session-recorder,principals}` → `ob-*`
+  - modules: `pam_llng.so` → `pam_openbastion.so`,
+    `libnss_llng.so` → `libnss_openbastion.so`
+  - paths: `/etc/security/pam_llng.*` → `/etc/open-bastion/*`,
+    `/var/{cache,log,lib}/pam_llng` → `.../open-bastion`
+  - sshd: `/etc/ssh/llng_ca.pub` → `/etc/ssh/open-bastion_ca.pub`,
+    dropins → `50-open-bastion-{bastion,backend}.conf`
+  - systemd: `pam-llng-heartbeat.timer` → `ob-heartbeat.timer`
+  - apt package: `libpam-llng` → `open-bastion`
+  - bash/env vars: `PAM_LLNG_*`, `LLNG_RECORDER_*` renamed
+    consistently
+  - Tests updated to match (`test_ob_session_recorder.sh`,
+    `test_integration_maxsec.sh`).
+  - Legitimate references to the LemonLDAP::NG SSO portal and to
+    the external `llng` CLI client are preserved.
+
+- **CI**: bump GitHub Actions to versions running on Node.js 24
+  (#115).
+
+### Upgrade notes
+
+- If you were driving `ob-session-recorder` via the `LLNG_*`
+  environment variables (`LLNG_RECORDER_CONFIG`,
+  `LLNG_SESSIONS_DIR`, `LLNG_RECORDER_FORMAT`, `LLNG_MAX_SESSION`),
+  rename them to their `OB_*` counterparts.
+
 ## [0.2.0] - 2026-04-30
 
 This release groups three independent opt-in features (service

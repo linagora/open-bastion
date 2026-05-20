@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -179,6 +179,31 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Wed May 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.1-1
+- Maintenance release. No behavioural change in the PAM or NSS
+  modules.
+- Fix: ob-bastion-setup / ob-backend-setup stop looking for the
+  defunct /usr/sbin/llng-pam-enroll (renamed to ob-enroll); a fresh
+  setup no longer prints "[WARN] Server not enrolled. Run
+  llng-pam-enroll manually after installation" after a successful
+  enrollment.
+- Fix (Docker demos): drop the duplicate uwsgi_param HTTP_HOST $host
+  that the upstream yadd/lemonldap-ng-portal:latest-non-root image
+  now ships in both /etc/nginx/uwsgi_params and portal-nginx.conf.
+  uwsgi concatenates duplicate values, so LLNG saw the vhost as
+  "localhost, localhost" and rejected every request with
+  ACCESS_REFUSED, breaking demo bastion enrollment.
+- Sweep remaining llng-* leftovers across scripts, docs, configs and
+  Docker demos so paths, modules, units, packages and internal
+  identifiers match the names actually installed (pam_openbastion.so,
+  libnss_openbastion.so, /etc/open-bastion/*, ob-* binaries,
+  ob-heartbeat.timer, open-bastion apt package, 50-open-bastion-*.conf
+  sshd dropins, etc.). LemonLDAP::NG portal and the external llng CLI
+  references preserved.
+- Bash/env vars: PAM_LLNG_*, LLNG_RECORDER_* renamed to PAM_OB_*,
+  OB_RECORDER_* / OB_SESSIONS_DIR / OB_MAX_SESSION / OB_RECORDER_FORMAT.
+- CI: bump GitHub Actions to versions running on Node.js 24 (#115).
+
 * Thu Apr 30 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.0-1
 - Three independent opt-in features (none changes existing behaviour;
   v0.1.5 → v0.2.0 with no flag set runs identically). v0.1.6 was
