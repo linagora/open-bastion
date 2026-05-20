@@ -449,10 +449,18 @@ max_duration = 28800
     chmod 644 "$SESSION_RECORDER_CONF"
     info "Created $SESSION_RECORDER_CONF"
 
-    # Create sessions directory (setgid ob-sessions for privilege separation)
+    # Create sessions directory.
+    # Mode 3771 (drwxrws--t root:ob-sessions):
+    #   - setgid (g+s) so per-user subdirs inherit group ob-sessions;
+    #   - sticky  (o+t) so only owners can unlink their own entries;
+    #   - o+x (no o+r) so a connecting user (not in ob-sessions) can traverse
+    #     into its own subdir without being able to list other users' dirs.
+    # The o+x is required: after the setgid wrapper drops its elevated gid,
+    # the recorder script runs with the user's gid and would otherwise fail to
+    # reach its own subdir created by the wrapper.
     mkdir -p /var/lib/open-bastion/sessions
     chgrp ob-sessions /var/lib/open-bastion/sessions
-    chmod 1770 /var/lib/open-bastion/sessions
+    chmod 3771 /var/lib/open-bastion/sessions
 }
 
 # Configure sshd for max security (Mode E)
