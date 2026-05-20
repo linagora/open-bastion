@@ -633,12 +633,12 @@ show_summary() {
     echo "  Token File:    $TOKEN_FILE"
     echo ""
     echo "Next steps:"
-    echo "  1. Configure PAM to use pam_llng module"
+    echo "  1. Configure PAM to use pam_openbastion module"
     echo "  2. Test SSH authentication"
     echo ""
     echo "Example PAM configuration (/etc/pam.d/sshd):"
-    echo "  auth    sufficient    pam_llng.so"
-    echo "  account required      pam_llng.so"
+    echo "  auth    sufficient    pam_openbastion.so"
+    echo "  account required      pam_openbastion.so"
     echo ""
 }
 

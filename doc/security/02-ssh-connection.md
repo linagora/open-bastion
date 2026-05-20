@@ -59,7 +59,7 @@ flowchart TB
 
 ```bash
 # Sur le poste client : obtenir un certificat signé par la CA LLNG
-ob-ssh-cert --llng-url https://auth.example.com
+ob-ssh-cert --portal https://auth.example.com
 # → Certificat stocké dans ~/.ssh/id_ed25519-cert.pub (validité 1 an)
 # → La clé privée ~/.ssh/id_ed25519 ne change pas
 ```
@@ -114,7 +114,7 @@ sequenceDiagram
 
 ```bash
 # /etc/ssh/sshd_config
-TrustedUserCAKeys /etc/ssh/llng_ca.pub           # CA LLNG uniquement
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub   # CA LLNG uniquement
 AuthorizedKeysFile none                           # Pas de clés non signées
 RevokedKeys /etc/ssh/revoked_keys                 # KRL obligatoire
 ExposeAuthInfo yes                                # Requis pour SSH_CERT_* variables
@@ -226,7 +226,7 @@ Une durée **longue (1 an)** est acceptable car :
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
 
 # Une fois par an : renouveler le certificat via LLNG
-ob-ssh-cert --llng-url https://auth.example.com
+ob-ssh-cert --portal https://auth.example.com
 # → ~/.ssh/id_ed25519-cert.pub mis à jour
 # → ssh-agent n'a pas besoin d'être rechargé
 ```
@@ -240,7 +240,7 @@ La KRL est le mécanisme de révocation immédiate des certificats. Elle est mai
 curl -sf -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
 # Cron de rafraîchissement (toutes les 30 min)
-# /etc/cron.d/llng-krl-refresh
+# /etc/cron.d/open-bastion-krl
 */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
 
 # Monitoring : alerter si KRL > 1h sans mise à jour
@@ -978,7 +978,7 @@ crowdsec_block_delay = 600  # 10 minutes au lieu de 3
 
 ```ini
 # Rafraîchissement KRL fréquent
-# /etc/cron.d/llng-krl-refresh
+# /etc/cron.d/open-bastion-krl
 */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
 
 # Monitoring : alerter si KRL > 1h
@@ -1325,7 +1325,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 - [ ] CA SSH générée sur machine sécurisée (air-gap ou HSM)
 - [ ] Clé CA avec passphrase forte (100 rounds de dérivation)
-- [ ] `TrustedUserCAKeys /etc/ssh/llng_ca.pub` configuré sur bastion et backends
+- [ ] `TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub` configuré sur bastion et backends
 - [ ] `AuthorizedKeysFile none` sur bastion et backends
 - [ ] `ExposeAuthInfo yes` dans sshd_config
 - [ ] Certificats émis pour tous les utilisateurs (validité 1 an)

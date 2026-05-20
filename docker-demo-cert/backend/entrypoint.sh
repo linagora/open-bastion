@@ -10,7 +10,7 @@ CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
 CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
 ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
-SSH_CA_FILE="/etc/ssh/llng_ca.pub"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
 
 echo "=== LLNG Backend Starting ==="
@@ -44,7 +44,7 @@ if [ ! -f "$SSH_CA_FILE" ]; then
 fi
 
 # Configure sshd for certificate authentication
-cat > /etc/ssh/sshd_config.d/llng-backend.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << EOF
 # LemonLDAP::NG Backend Configuration
 
 # Trust LLNG SSH CA

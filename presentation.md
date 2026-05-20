@@ -24,7 +24,7 @@ Portal plugins and endpoints
 
 ## 2. Client-side (Linux)
 
-C PAM module (`pam_llng.so`)
+C PAM module (`pam_openbastion.so`)
 
 <!-- end_slide -->
 
@@ -76,9 +76,9 @@ Token generated → Used once → Destroyed
                            ▼
 ┌─────────────────────────────────────────────────────────┐
 │               Linux Server (PAM Client)                 │
-│  /lib/security/pam_llng.so  - PAM module                │
-│  /lib/*/libnss_llng.so.2    - NSS module                │
-│  /etc/security/pam_llng.*   - Configuration             │
+│  /lib/security/pam_openbastion.so  - PAM module                │
+│  /lib/*/libnss_openbastion.so.2    - NSS module                │
+│  /etc/open-bastion/             - Configuration         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -105,7 +105,7 @@ Token generated → Used once → Destroyed
 One-time setup per Linux server:
 
 ```bash
-sudo llng-pam-enroll
+sudo ob-enroll
 ```
 
 <!-- pause -->
@@ -116,7 +116,7 @@ sudo llng-pam-enroll
 2. Displays user code (e.g., `ABCD-EFGH`)
 3. Admin approves on LLNG portal
 4. Script receives `access_token` + `refresh_token`
-5. Tokens saved to `/etc/security/pam_llng.token`
+5. Tokens saved to `/etc/open-bastion/token`
 
 <!-- end_slide -->
 
@@ -171,7 +171,7 @@ User                    Linux Server                LLNG
 
 <!-- end_slide -->
 
-# NSS Module: libnss_llng
+# NSS Module: libnss_openbastion
 
 ## The Problem
 
@@ -181,11 +181,11 @@ SSH checks if user exists in `/etc/passwd` **BEFORE** calling PAM
 
 ## The Solution
 
-`libnss_llng` queries LLNG for unknown users
+`libnss_openbastion` queries LLNG for unknown users
 
 ```bash
 # /etc/nsswitch.conf
-passwd:         files llng
+passwd:         files openbastion
 ```
 
 <!-- pause -->
@@ -194,7 +194,7 @@ passwd:         files llng
 
 1. SSH calls `getpwnam("dwho")`
 2. NSS checks `/etc/passwd` → not found
-3. NSS calls `libnss_llng` → queries `/pam/userinfo`
+3. NSS calls `libnss_openbastion` → queries `/pam/userinfo`
 4. LLNG returns user attributes
 5. SSH continues with PAM authentication
 
@@ -211,7 +211,7 @@ PAM can automatically create Unix accounts on first connection
 ## Configuration
 
 ```ini
-# /etc/security/pam_llng.conf
+# /etc/open-bastion/openbastion.conf
 create_user = true
 create_user_shell = /bin/bash
 create_user_groups = users,docker
@@ -237,7 +237,7 @@ pamAccessExportedVars:
 ## Server Registration & Health Checks
 
 ```bash
-sudo systemctl enable --now pam-llng-heartbeat.timer
+sudo systemctl enable --now ob-heartbeat.timer
 ```
 
 <!-- pause -->
@@ -281,7 +281,7 @@ default    => 1
 ## Per-Server Configuration
 
 ```ini
-# /etc/security/pam_llng.conf
+# /etc/open-bastion/openbastion.conf
 server_group = production
 ```
 
@@ -347,9 +347,9 @@ If attacker uses stolen token:
 ## Mode A: LLNG Token Only
 
 ```
-auth       sufficient   pam_llng.so
+auth       sufficient   pam_openbastion.so
 auth       required     pam_deny.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
 ```
 
 <!-- pause -->
@@ -357,7 +357,7 @@ account    required     pam_llng.so
 ## Mode B: LLNG Token OR Unix Password
 
 ```
-auth       sufficient   pam_llng.so
+auth       sufficient   pam_openbastion.so
 auth       sufficient   pam_unix.so nullok try_first_pass
 auth       required     pam_deny.so
 ```
@@ -368,7 +368,7 @@ auth       required     pam_deny.so
 
 ```
 auth       required     pam_permit.so
-account    required     pam_llng.so
+account    required     pam_openbastion.so
 ```
 
 <!-- end_slide -->
@@ -378,13 +378,13 @@ account    required     pam_llng.so
 ## Debian/Ubuntu
 
 ```bash
-sudo apt install libpam-llng
+sudo apt install open-bastion
 ```
 
 ## From Source
 
 ```bash
-cd llng-pam-module
+cd open-bastion
 mkdir build && cd build
 cmake ..
 make
@@ -398,7 +398,7 @@ sudo make install
 ## 1. Configure
 
 ```bash
-vim /etc/security/pam_llng.conf
+vim /etc/open-bastion/openbastion.conf
 ```
 
 <!-- pause -->
@@ -406,7 +406,7 @@ vim /etc/security/pam_llng.conf
 ## 2. Enroll
 
 ```bash
-sudo llng-pam-enroll
+sudo ob-enroll
 ```
 
 <!-- pause -->
@@ -422,7 +422,7 @@ vim /etc/pam.d/sshd
 ## 4. Enable heartbeat
 
 ```bash
-sudo systemctl enable --now pam-llng-heartbeat.timer
+sudo systemctl enable --now ob-heartbeat.timer
 ```
 
 <!-- end_slide -->
@@ -436,7 +436,7 @@ sudo systemctl enable --now pam-llng-heartbeat.timer
 sudo tail -f /var/log/auth.log
 
 # PAM audit logs
-sudo tail -f /var/log/pam_llng/audit.json
+sudo tail -f /var/log/open-bastion/audit.json
 
 # Journalctl
 sudo journalctl -u sshd -f
@@ -447,7 +447,7 @@ sudo journalctl -u sshd -f
 ## Debug Mode
 
 ```ini
-# /etc/security/pam_llng.conf
+# /etc/open-bastion/openbastion.conf
 log_level = debug
 ```
 
@@ -456,8 +456,8 @@ log_level = debug
 ## Re-enrollment
 
 ```bash
-sudo rm /etc/security/pam_llng.token
-sudo llng-pam-enroll
+sudo rm /etc/open-bastion/token
+sudo ob-enroll
 ```
 
 <!-- end_slide -->
@@ -479,10 +479,10 @@ sudo llng-pam-enroll
 
 | Component            | Function                           |
 | -------------------- | ---------------------------------- |
-| `pam_llng.so`        | PAM authentication & authorization |
-| `libnss_llng.so`     | User resolution before PAM         |
-| `llng-pam-enroll`    | Server enrollment                  |
-| `llng-pam-heartbeat` | Server monitoring                  |
+| `pam_openbastion.so`        | PAM authentication & authorization |
+| `libnss_openbastion.so`     | User resolution before PAM         |
+| `ob-enroll`          | Server enrollment                  |
+| `ob-heartbeat`       | Server monitoring                  |
 
 <!-- end_slide -->
 

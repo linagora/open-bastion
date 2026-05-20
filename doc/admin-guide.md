@@ -247,7 +247,7 @@ EOF
 ### Step 6: Configure SSH with Recording
 
 ```bash
-cat > /etc/ssh/sshd_config.d/llng-bastion.conf << 'EOF'
+cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << 'EOF'
 # LLNG PAM Authentication
 UsePAM yes
 PasswordAuthentication yes
@@ -300,7 +300,7 @@ Host backend-*
 ### Step 8: Configure Log Rotation
 
 ```bash
-cat > /etc/logrotate.d/llng-sessions << 'EOF'
+cat > /etc/logrotate.d/open-bastion-sessions << 'EOF'
 /var/lib/open-bastion/sessions/*/*.cast
 /var/lib/open-bastion/sessions/*/*.json {
     monthly
@@ -463,7 +463,7 @@ EOF
 ### Step 7: Configure SSH
 
 ```bash
-cat > /etc/ssh/sshd_config.d/llng-backend.conf << 'EOF'
+cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << 'EOF'
 # PAM required for authorization and user creation
 UsePAM yes
 
@@ -545,10 +545,10 @@ ob-bastion-setup --max-security
 
 It performs all of the following automatically:
 
-- Generates or imports the LLNG CA public key to `/etc/ssh/llng_ca.pub`
+- Generates or imports the LLNG CA public key to `/etc/ssh/open-bastion_ca.pub`
 - Writes the hardened sshd configuration via an `Include` directive:
   - `AuthorizedKeysFile none`
-  - `TrustedUserCAKeys /etc/ssh/llng_ca.pub`
+  - `TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub`
   - `RevokedKeys /etc/ssh/revoked_keys`
   - `AuthorizedPrincipalsCommand /bin/echo %u`
   - `AuthorizedPrincipalsCommandUser nobody`
@@ -573,7 +573,7 @@ systemctl restart nscd
 
 ```bash
 # Check NSS resolves LLNG users
-getent passwd <a-llng-user>
+getent passwd <a-portal-user>
 
 # Test SSH certificate authentication
 ssh -i /path/to/cert user@bastion

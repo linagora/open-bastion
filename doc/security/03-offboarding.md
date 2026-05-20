@@ -154,7 +154,7 @@ curl -s https://auth.example.com/ssh/revoked > /etc/ssh/revoked_keys
 
 ```bash
 # /etc/ssh/sshd_config
-TrustedUserCAKeys /etc/ssh/llng_ca.pub
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
 RevokedKeys /etc/ssh/revoked_keys
 ```
 

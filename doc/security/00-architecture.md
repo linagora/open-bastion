@@ -126,7 +126,7 @@ Dans les architectures bastion/backend, le module PAM prend en charge la vérifi
 ```mermaid
 flowchart LR
     subgraph Bastion["Serveur Bastion"]
-        proxy["llng-ssh-proxy"]
+        proxy["ob-ssh-proxy"]
     end
 
     subgraph LLNG["Portail LLNG"]
@@ -135,7 +135,7 @@ flowchart LR
     end
 
     subgraph Backend["Serveur Backend"]
-        pam["pam_llng.so"]
+        pam["pam_openbastion.so"]
         cache["Cache JWKS"]
     end
 
@@ -159,11 +159,11 @@ flowchart LR
 ### Configuration (Backend)
 
 ```ini
-# /etc/security/pam_llng.conf
+# /etc/open-bastion/openbastion.conf
 bastion_jwt_required = true
 bastion_jwt_issuer = https://auth.example.com
 bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
 bastion_jwt_cache_ttl = 3600
 bastion_jwt_clock_skew = 60
 # Optionnel : restreindre à des bastions spécifiques
@@ -292,7 +292,7 @@ Tous les chemins sont validés avant utilisation :
 
 ### Sécurité du Module NSS
 
-Le module NSS (`libnss_llng.so`) fournit la résolution des utilisateurs :
+Le module NSS (`libnss_openbastion.so`) fournit la résolution des utilisateurs :
 
 - **Protection contre les débordements de tampon** : Toutes les copies de chaînes utilisent `safe_strcpy()` avec vérification des limites
 - **Validation des entrées serveur** : Les chemins de shell et de répertoire personnel provenant du serveur sont validés par rapport aux listes approuvées
@@ -377,7 +377,7 @@ Pour la surveillance de sécurité en temps réel :
 | ---------------------- | ---------- | ----------------------------- |
 | `secrets_encrypted`    | true       | Chiffrer les secrets au repos |
 | `secrets_use_keyring`  | true       | Utiliser le trousseau noyau   |
-| `secrets_keyring_name` | "pam_llng" | Identifiant du trousseau      |
+| `secrets_keyring_name` | "open-bastion" | Identifiant du trousseau      |
 
 ### Permissions des Fichiers
 
@@ -385,7 +385,7 @@ Permissions recommandées :
 
 | Fichier                             | Permissions | Propriétaire |
 | ----------------------------------- | ----------- | ------------ |
-| `/etc/pam_llng.conf`                | 0600        | root         |
+| `/etc/open-bastion/openbastion.conf` | 0600        | root         |
 | Fichier token serveur               | 0600        | root         |
 | Répertoire cache                    | 0700        | root         |
 | Répertoire état limitation de débit | 0700        | root         |
@@ -473,10 +473,10 @@ La clé de chiffrement pour les tokens et secrets en cache est dérivée de `/et
 
 ```bash
 # 1. L'ancien fichier token est maintenant inutilisable - le supprimer
-rm /etc/security/pam_llng.token
+rm /etc/open-bastion/token
 
 # 2. Relancer l'enrôlement
-llng-pam-enroll --portal https://auth.example.com --client-id pam-access
+ob-enroll --portal https://auth.example.com --client-id pam-access
 ```
 
 ## Sécurité des Comptes de Service

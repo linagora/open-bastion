@@ -14,7 +14,7 @@ CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
 CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
 ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
-SSH_CA_FILE="/etc/ssh/llng_ca.pub"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
 KRL_REFRESH_INTERVAL=30
@@ -72,7 +72,7 @@ chmod 644 /etc/cron.d/open-bastion-krl
 cron
 
 # Configure sshd for maximum security (Mode E)
-cat > /etc/ssh/sshd_config.d/llng-backend.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << EOF
 # Open Bastion Maximum Security Configuration (Mode E)
 
 # Trust LLNG SSH CA

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# llng-session-recorder - Record SSH sessions for audit purposes
+# ob-session-recorder - Record SSH sessions for audit purposes
 #
 # This script is designed to be used as ForceCommand in sshd_config
 # to record all SSH sessions passing through a bastion host.
@@ -19,10 +19,10 @@ VERSION="0.2.0"
 PROG_NAME=$(basename "$0")
 
 # Default configuration
-CONFIG_FILE="${LLNG_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
-SESSIONS_DIR="${LLNG_SESSIONS_DIR:-/var/lib/open-bastion/sessions}"
-FORMAT="${LLNG_RECORDER_FORMAT:-script}"
-MAX_SESSION_DURATION="${LLNG_MAX_SESSION:-86400}"  # 24 hours default
+CONFIG_FILE="${OB_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
+SESSIONS_DIR="${OB_SESSIONS_DIR:-/var/lib/open-bastion/sessions}"
+FORMAT="${OB_RECORDER_FORMAT:-script}"
+MAX_SESSION_DURATION="${OB_MAX_SESSION:-86400}"  # 24 hours default
 
 # Metadata
 SESSION_ID=""
@@ -279,19 +279,19 @@ Options:
                         (default: $FORMAT)
 
 Configuration file format:
-    sessions_dir = /var/lib/llng-sessions
+    sessions_dir = /var/lib/open-bastion/sessions
     format = script
     max_duration = 86400
 
 sshd_config example:
     Match Group recorded-users
-        ForceCommand /usr/sbin/llng-session-recorder
+        ForceCommand /usr/sbin/ob-session-recorder
 
 Environment variables:
-    LLNG_RECORDER_CONFIG    Config file path
-    LLNG_SESSIONS_DIR       Sessions directory
-    LLNG_RECORDER_FORMAT    Recording format
-    LLNG_MAX_SESSION        Max session duration in seconds
+    OB_RECORDER_CONFIG      Config file path
+    OB_SESSIONS_DIR         Sessions directory
+    OB_RECORDER_FORMAT      Recording format
+    OB_MAX_SESSION          Max session duration in seconds
 
 EOF
 }

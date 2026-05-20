@@ -13,7 +13,7 @@ CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
 CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
 ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
-SSH_CA_FILE="/etc/ssh/llng_ca.pub"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
 KRL_REFRESH_INTERVAL=30
@@ -72,7 +72,7 @@ chmod 644 /etc/cron.d/open-bastion-krl
 # Start cron daemon
 cron
 
-# Shared directory where llng-principals drops the SSH key fingerprint so that
+# Shared directory where ob-principals drops the SSH key fingerprint so that
 # pam_openbastion can forward it to LLNG (/pam/authorize + /pam/verify
 # fingerprint binding). OpenSSH does NOT propagate SSH_USER_AUTH to the PAM
 # environment during pam_acct_mgmt, so we need this out-of-band channel.
@@ -87,7 +87,7 @@ chown nobody:nogroup /run/open-bastion/ssh-fp
 chmod 0700 /run/open-bastion/ssh-fp
 
 # Create script to validate principals and record the SSH key fingerprint.
-cat > /usr/local/bin/llng-principals << 'SCRIPT'
+cat > /usr/local/bin/ob-principals << 'SCRIPT'
 #!/bin/bash
 # Called by sshd AuthorizedPrincipalsCommand (runs as nobody).
 # Args: <username> <key-type> <key-base64> <fingerprint>
@@ -134,10 +134,10 @@ if getent passwd "$USERNAME" >/dev/null 2>&1; then
     echo "$USERNAME"
 fi
 SCRIPT
-chmod 755 /usr/local/bin/llng-principals
+chmod 755 /usr/local/bin/ob-principals
 
 # Configure sshd for maximum security (Mode E)
-cat > /etc/ssh/sshd_config.d/llng-bastion.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << EOF
 # Open Bastion Maximum Security Configuration (Mode E)
 
 # Trust LLNG SSH CA
@@ -165,7 +165,7 @@ RevokedKeys $SSH_REVOKED_KEYS
 # %f = SHA256 fingerprint of the client key/cert (%F is the CA fingerprint);
 # recorded out-of-band so pam_openbastion can forward it to LLNG for
 # fingerprint binding on /pam/authorize and /pam/verify.
-AuthorizedPrincipalsCommand /usr/local/bin/llng-principals %u %t %k %f
+AuthorizedPrincipalsCommand /usr/local/bin/ob-principals %u %t %k %f
 AuthorizedPrincipalsCommandUser nobody
 
 # Disable password authentication

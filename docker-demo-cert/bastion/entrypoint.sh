@@ -10,7 +10,7 @@ CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
 CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
 ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
-SSH_CA_FILE="/etc/ssh/llng_ca.pub"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
 
 echo "=== LLNG Bastion Starting ==="
@@ -55,14 +55,14 @@ chown root:root /run/open-bastion/ssh-fp
 chmod 0700 /run/open-bastion/ssh-fp
 
 # Create script to validate principals and create user if needed
-cat > /usr/local/bin/llng-principals << 'SCRIPT'
+cat > /usr/local/bin/ob-principals << 'SCRIPT'
 #!/bin/bash
 # Called by sshd AuthorizedPrincipalsCommand.
 # Args: %u (username) %t (key type) %k (base64 key/cert) %f (SHA256 fingerprint
 #       of the client key or certificate — NOT %F which is the CA fingerprint)
 # - Creates the user if needed (uses LLNG /pam/userinfo).
 # - Drops the SHA256 fingerprint in /run/open-bastion/ssh-fp/<sshd-session-pid>.fp
-#   so pam_openbastion can read it and forward it to LLNG for fingerprint binding.
+#   so pam_openbastion can read it and forward it to open-bastion for fingerprint binding.
 # - Returns the allowed principals (= the username).
 USERNAME="$1"
 KEY_TYPE="$2"
@@ -128,10 +128,10 @@ if getent passwd "$USERNAME" >/dev/null 2>&1; then
     echo "$USERNAME"
 fi
 SCRIPT
-chmod 755 /usr/local/bin/llng-principals
+chmod 755 /usr/local/bin/ob-principals
 
 # Configure sshd for certificate authentication
-cat > /etc/ssh/sshd_config.d/llng-bastion.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << EOF
 # LemonLDAP::NG Bastion Configuration
 
 # Trust LLNG SSH CA
@@ -144,7 +144,7 @@ PubkeyAuthentication yes
 # %f = SHA256 fingerprint of the client key/cert (%F is the CA fingerprint);
 # recorded out-of-band so pam_openbastion can forward it to LLNG for
 # fingerprint binding on /pam/authorize and /pam/verify.
-AuthorizedPrincipalsCommand /usr/local/bin/llng-principals %u %t %k %f
+AuthorizedPrincipalsCommand /usr/local/bin/ob-principals %u %t %k %f
 AuthorizedPrincipalsCommandUser root
 
 # Disable password authentication

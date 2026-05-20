@@ -1,7 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2155
 #
-# llng-backend-setup - Configure a server as an SSH backend with LLNG
+# ob-backend-setup - Configure a server as an SSH backend with LLNG
 #
 # This script configures a Linux server as an SSH backend that:
 # - Accepts SSH certificate authentication via LLNG CA (from bastion)
@@ -26,21 +26,21 @@ NON_INTERACTIVE=false
 VERIFY_SSL=true
 TIMEOUT=30
 DRY_RUN=false
-BACKUP_DIR="/var/backup/llng-setup-$(date +%Y%m%d-%H%M%S)"
+BACKUP_DIR="/var/backup/open-bastion-setup-$(date +%Y%m%d-%H%M%S)"
 ENABLE_SUDO=true
 CREATE_USERS=true
 MAX_SECURITY=false
 KRL_REFRESH_INTERVAL=30
 
 # Paths
-SSH_CA_FILE="/etc/ssh/llng_ca.pub"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 SSHD_CONFIG="/etc/ssh/sshd_config"
 SSHD_CONFIG_DIR="/etc/ssh/sshd_config.d"
 PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
-PAM_LLNG_CONF="/etc/security/pam_llng.conf"
-PAM_LLNG_TOKEN="/etc/open-bastion/token"
+OB_CONFIG="/etc/open-bastion/openbastion.conf"
+OB_TOKEN="/etc/open-bastion/token"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
@@ -264,22 +264,22 @@ PermitRootLogin no
             info "Added Include directive to $SSHD_CONFIG"
         fi
 
-        local llng_config="$SSHD_CONFIG_DIR/50-llng-backend.conf"
-        backup_file "$llng_config"
-        echo "$config_content" > "$llng_config"
-        chmod 644 "$llng_config"
-        info "Created $llng_config"
+        local ob_config="$SSHD_CONFIG_DIR/50-open-bastion-backend.conf"
+        backup_file "$ob_config"
+        echo "$config_content" > "$ob_config"
+        chmod 644 "$ob_config"
+        info "Created $ob_config"
     else
         # Append to main sshd_config
         backup_file "$SSHD_CONFIG"
 
         # Check if already configured
-        if grep -q "TrustedUserCAKeys.*llng" "$SSHD_CONFIG" 2>/dev/null; then
-            warn "LLNG configuration already exists in $SSHD_CONFIG"
+        if grep -q "TrustedUserCAKeys.*open-bastion" "$SSHD_CONFIG" 2>/dev/null; then
+            warn "Open Bastion configuration already exists in $SSHD_CONFIG"
         else
             echo "" >> "$SSHD_CONFIG"
             echo "$config_content" >> "$SSHD_CONFIG"
-            info "Added LLNG configuration to $SSHD_CONFIG"
+            info "Added Open Bastion configuration to $SSHD_CONFIG"
         fi
     fi
 
@@ -560,7 +560,7 @@ configure_nss() {
 portal_url = $PORTAL_URL
 
 # Server token file
-server_token_file = $PAM_LLNG_TOKEN
+server_token_file = $OB_TOKEN
 
 # Cache settings
 cache_enabled = true
@@ -583,9 +583,9 @@ home_base = /home
     info "Created $NSS_OB_CONF"
 }
 
-# Configure PAM LLNG module
-configure_pam_llng() {
-    step "Configuring PAM LLNG module..."
+# Configure PAM open-bastion module
+configure_pam_openbastion() {
+    step "Configuring PAM open-bastion module..."
 
     # shellcheck disable=SC2155
     local config_content="# LemonLDAP::NG PAM module configuration
@@ -595,7 +595,7 @@ configure_pam_llng() {
 portal_url = $PORTAL_URL
 
 # Server authentication token file
-server_token_file = $PAM_LLNG_TOKEN
+server_token_file = $OB_TOKEN
 
 # Server group for authorization rules
 server_group = $SERVER_GROUP
@@ -606,7 +606,7 @@ verify_ssl = $VERIFY_SSL
 
 # Cache settings
 cache_enabled = true
-cache_dir = /var/cache/pam_llng
+cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
 # User creation settings
@@ -628,14 +628,14 @@ audit_to_syslog = true
         return 0
     fi
 
-    backup_file "$PAM_LLNG_CONF"
-    echo "$config_content" > "$PAM_LLNG_CONF"
-    chmod 600 "$PAM_LLNG_CONF"
-    info "Created $PAM_LLNG_CONF"
+    backup_file "$OB_CONFIG"
+    echo "$config_content" > "$OB_CONFIG"
+    chmod 600 "$OB_CONFIG"
+    info "Created $OB_CONFIG"
 
     # Create cache directory
-    mkdir -p /var/cache/pam_llng
-    chmod 750 /var/cache/pam_llng
+    mkdir -p /var/cache/open-bastion
+    chmod 750 /var/cache/open-bastion
 }
 
 # Enroll server with LLNG
@@ -649,13 +649,13 @@ enroll_server() {
             return 0
         fi
 
-        echo "$SERVER_TOKEN" > "$PAM_LLNG_TOKEN"
-        chmod 600 "$PAM_LLNG_TOKEN"
+        echo "$SERVER_TOKEN" > "$OB_TOKEN"
+        chmod 600 "$OB_TOKEN"
         info "Server token saved"
-    elif [ -x /usr/sbin/llng-pam-enroll ]; then
+    elif [ -x /usr/sbin/ob-enroll ]; then
         # Use enrollment script
         if [ "$DRY_RUN" = "true" ]; then
-            info "[DRY-RUN] Would run llng-pam-enroll"
+            info "[DRY-RUN] Would run ob-enroll"
             return 0
         fi
 
@@ -668,9 +668,9 @@ enroll_server() {
             return 1
         fi
 
-        /usr/sbin/llng-pam-enroll "${enroll_opts[@]}"
+        /usr/sbin/ob-enroll "${enroll_opts[@]}"
     else
-        warn "Server not enrolled. Run llng-pam-enroll manually after installation."
+        warn "Server not enrolled. Run ob-enroll manually after installation."
     fi
 }
 
@@ -920,7 +920,7 @@ main() {
     configure_max_security_sudo || exit 1
     download_krl || warn "KRL download failed"
     configure_nss || exit 1
-    configure_pam_llng || exit 1
+    configure_pam_openbastion || exit 1
     enroll_server || warn "Server enrollment skipped or failed"
 
     if [ "$DRY_RUN" = "false" ]; then

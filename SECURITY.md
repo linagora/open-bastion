@@ -92,7 +92,7 @@ to backends originate from authorized bastion servers.
 ```mermaid
 flowchart LR
     subgraph Bastion["Bastion Server"]
-        proxy["llng-ssh-proxy"]
+        proxy["ob-ssh-proxy"]
     end
 
     subgraph LLNG["LLNG Portal"]
@@ -101,7 +101,7 @@ flowchart LR
     end
 
     subgraph Backend["Backend Server"]
-        pam["pam_llng.so"]
+        pam["pam_openbastion.so"]
         cache["JWKS Cache"]
     end
 
@@ -125,11 +125,11 @@ flowchart LR
 ### Configuration (Backend)
 
 ```ini
-# /etc/security/pam_llng.conf
+# /etc/open-bastion/openbastion.conf
 bastion_jwt_required = true
 bastion_jwt_issuer = https://auth.example.com
 bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
 bastion_jwt_cache_ttl = 3600
 bastion_jwt_clock_skew = 60
 # Optional: restrict to specific bastions
@@ -258,7 +258,7 @@ All paths are validated before use:
 
 ### NSS Module Security
 
-The NSS module (`libnss_llng.so`) provides user resolution:
+The NSS module (`libnss_openbastion.so`) provides user resolution:
 
 - **Buffer overflow protection**: All string copies use bounds-checked `safe_strcpy()`
 - **Server input validation**: Shell and home paths from server are validated against approved lists
@@ -324,7 +324,7 @@ For real-time security monitoring:
 | ---------------------- | ---------- | ----------------------- |
 | `secrets_encrypted`    | true       | Encrypt secrets at rest |
 | `secrets_use_keyring`  | true       | Use kernel keyring      |
-| `secrets_keyring_name` | "pam_llng" | Keyring identifier      |
+| `secrets_keyring_name` | "open-bastion" | Keyring identifier      |
 
 ### File Permissions
 
@@ -332,7 +332,7 @@ Recommended permissions:
 
 | File                 | Permissions | Owner |
 | -------------------- | ----------- | ----- |
-| `/etc/pam_llng.conf` | 0600        | root  |
+| `/etc/open-bastion/openbastion.conf` | 0600        | root  |
 | Server token file    | 0600        | root  |
 | Cache directory      | 0700        | root  |
 | Rate limit state dir | 0700        | root  |
@@ -390,10 +390,10 @@ The encryption key for cached tokens and secrets is derived from `/etc/machine-i
 
 ```bash
 # 1. The old token file is now unusable - remove it
-rm /etc/security/pam_llng.token
+rm /etc/open-bastion/token
 
 # 2. Re-run enrollment
-llng-pam-enroll --portal https://auth.example.com --client-id pam-access
+ob-enroll --portal https://auth.example.com --client-id pam-access
 ```
 
 ## Service Accounts Security

@@ -8,7 +8,7 @@
 portal_url = https://auth.example.com
 
 # Server token file (from PAM module enrollment)
-server_token_file = /etc/security/pam_llng.token
+server_token_file = /etc/open-bastion/token
 
 # HTTP timeout in seconds
 timeout = 5

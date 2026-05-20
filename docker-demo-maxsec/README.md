@@ -161,10 +161,10 @@ docker logs ob-maxsec-backend
 
 ```bash
 # Check AuthorizedKeysFile is none
-docker exec ob-maxsec-bastion grep AuthorizedKeysFile /etc/ssh/sshd_config.d/llng-bastion.conf
+docker exec ob-maxsec-bastion grep AuthorizedKeysFile /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf
 
 # Check KRL is configured
-docker exec ob-maxsec-bastion grep RevokedKeys /etc/ssh/sshd_config.d/llng-bastion.conf
+docker exec ob-maxsec-bastion grep RevokedKeys /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf
 
 # Check sudo PAM uses pam_openbastion (not NOPASSWD)
 docker exec ob-maxsec-backend cat /etc/pam.d/sudo

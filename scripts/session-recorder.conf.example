@@ -1,13 +1,13 @@
 #
 # LemonLDAP::NG Session Recorder Configuration
 #
-# This file configures the llng-session-recorder script used to
+# This file configures the ob-session-recorder script used to
 # record SSH sessions on bastion hosts for audit purposes.
 #
 
 # Directory where session recordings are stored
-# Each user gets a subdirectory: /var/lib/llng-sessions/<username>/
-sessions_dir = /var/lib/llng-sessions
+# Each user gets a subdirectory: /var/lib/open-bastion/sessions/<username>/
+sessions_dir = /var/lib/open-bastion/sessions
 
 # Recording format:
 #   script    - Plain text typescript (default, always available)
@@ -26,15 +26,15 @@ max_duration = 86400
 # To record all sessions for users in the "recorded-users" group:
 #
 #   Match Group recorded-users
-#       ForceCommand /usr/sbin/llng-session-recorder
+#       ForceCommand /usr/sbin/ob-session-recorder
 #
 # To record all sessions except for specific users:
 #
 #   Match User *,!admin,!root
-#       ForceCommand /usr/sbin/llng-session-recorder
+#       ForceCommand /usr/sbin/ob-session-recorder
 #
 # To record sessions with a specific format:
 #
 #   Match Group audited
-#       ForceCommand /usr/sbin/llng-session-recorder -f ttyrec
+#       ForceCommand /usr/sbin/ob-session-recorder -f ttyrec
 #

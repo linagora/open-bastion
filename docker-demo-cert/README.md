@@ -154,7 +154,7 @@ sequenceDiagram
 
    ```
    # In /etc/ssh/sshd_config.d/open-bastion-*.conf
-   TrustedUserCAKeys /etc/ssh/llng_ca.pub
+   TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
    ```
 
 4. **Certificate Signing**: When a user requests a certificate via `/ssh/sign`:
@@ -211,8 +211,8 @@ docker compose up -d backend-new
 
 ```bash
 # Download CA key from the SSO portal
-docker exec ob-cert-backend-new curl -sf http://sso:8080/ssh/ca -o /etc/ssh/llng_ca.pub
-docker exec ob-cert-backend-new cat /etc/ssh/llng_ca.pub
+docker exec ob-cert-backend-new curl -sf http://sso:8080/ssh/ca -o /etc/ssh/open-bastion_ca.pub
+docker exec ob-cert-backend-new cat /etc/ssh/open-bastion_ca.pub
 ```
 
 #### Step 3: Configure sshd for certificate authentication
@@ -220,7 +220,7 @@ docker exec ob-cert-backend-new cat /etc/ssh/llng_ca.pub
 ```bash
 docker exec ob-cert-backend-new tee /etc/ssh/sshd_config.d/open-bastion.conf << 'EOF'
 # Open Bastion SSH Configuration
-TrustedUserCAKeys /etc/ssh/llng_ca.pub
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -515,7 +515,7 @@ docker exec ob-cert-bastion curl -s http://sso/pam/authorize \
 ### Verify SSH CA trust
 
 ```bash
-docker exec ob-cert-bastion cat /etc/ssh/llng_ca.pub
+docker exec ob-cert-bastion cat /etc/ssh/open-bastion_ca.pub
 curl http://localhost:80/ssh/ca
 ```
 

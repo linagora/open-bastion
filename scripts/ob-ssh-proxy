@@ -1,7 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2155
 #
-# llng-ssh-proxy - SSH proxy command for bastion-to-backend authentication
+# ob-ssh-proxy - SSH proxy command for bastion-to-backend authentication
 #
 # This script is used as a ProxyCommand (or ForceCommand) on bastion servers
 # to request a JWT from LLNG before connecting to backend servers. The JWT
@@ -10,11 +10,11 @@
 # Usage:
 #   As ProxyCommand (in ~/.ssh/config):
 #     Host backend-*
-#       ProxyCommand /usr/bin/llng-ssh-proxy %h %p
+#       ProxyCommand /usr/bin/ob-ssh-proxy %h %p
 #
 #   As ForceCommand (in sshd_config):
 #     Match User *
-#       ForceCommand /usr/bin/llng-ssh-proxy
+#       ForceCommand /usr/bin/ob-ssh-proxy
 #
 # The script:
 # 1. Requests a bastion JWT from LLNG /pam/bastion-token endpoint
@@ -30,9 +30,9 @@ set -euo pipefail
 VERSION="0.2.0"
 PROG_NAME=$(basename "$0")
 
-# Configuration (can be overridden via /etc/llng/ssh-proxy.conf)
+# Configuration (can be overridden via /etc/open-bastion/ssh-proxy.conf)
 PORTAL_URL=""
-SERVER_TOKEN_FILE="/etc/security/pam_llng.token"
+SERVER_TOKEN_FILE="/etc/open-bastion/token"
 SERVER_GROUP="bastion"
 TARGET_GROUP="default"
 TIMEOUT=10
@@ -41,7 +41,7 @@ SSH_OPTIONS_ARRAY=()
 DEBUG=false
 
 # Configuration file (must be owned by root and not group/world-writable)
-CONFIG_FILE="/etc/llng/ssh-proxy.conf"
+CONFIG_FILE="/etc/open-bastion/ssh-proxy.conf"
 
 # Load configuration securely
 load_config() {
@@ -130,7 +130,7 @@ get_server_token() {
         exit 1
     fi
 
-    # Support both JSON format (from llng-pam-enroll) and plain text
+    # Support both JSON format (from ob-enroll) and plain text
     if head -c1 "$SERVER_TOKEN_FILE" | grep -q '{'; then
         # JSON format: extract access_token
         jq -r '.access_token // empty' "$SERVER_TOKEN_FILE" 2>/dev/null || cat "$SERVER_TOKEN_FILE"
@@ -346,7 +346,7 @@ Configuration:
 
   Example configuration:
     PORTAL_URL="https://auth.example.com"
-    SERVER_TOKEN_FILE="/etc/security/pam_llng.token"
+    SERVER_TOKEN_FILE="/etc/open-bastion/token"
     SERVER_GROUP="bastion"
     TARGET_GROUP="default"
     TIMEOUT=10

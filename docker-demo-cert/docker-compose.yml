@@ -57,7 +57,7 @@ services:
       - LLNG_ADMIN_PASSWORD=dwho
     volumes:
       # PAM module sources for build
-      - ..:/src/llng-pam-module:ro
+      - ..:/src/open-bastion:ro
       # No persistent volumes - fresh start for each demo
     networks:
       - ob-cert-net
@@ -83,7 +83,7 @@ services:
       - LLNG_ADMIN_PASSWORD=dwho
     volumes:
       # PAM module sources for build
-      - ..:/src/llng-pam-module:ro
+      - ..:/src/open-bastion:ro
     networks:
       - ob-cert-net
 

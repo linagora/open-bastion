@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# llng-pam-heartbeat - Send heartbeat to LemonLDAP::NG PAM server
+# ob-heartbeat - Send heartbeat to LemonLDAP::NG PAM server
 #
 # This script is called periodically by systemd timer to send heartbeat
 # to the LLNG portal, allowing the SSO to track active PAM servers.
@@ -14,9 +14,9 @@ VERSION="0.2.0"
 PROG_NAME=$(basename "$0")
 
 # Default values
-CONFIG_FILE="/etc/security/pam_llng.conf"
-TOKEN_FILE="/etc/security/pam_llng.token"
-STATS_FILE="/var/lib/pam_llng/stats.json"
+CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+TOKEN_FILE="/etc/open-bastion/token"
+STATS_FILE="/var/lib/open-bastion/stats.json"
 TIMEOUT=10
 
 # Logging functions

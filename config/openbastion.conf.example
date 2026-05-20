@@ -1,5 +1,5 @@
-# PAM LemonLDAP::NG Configuration File
-# /etc/security/pam_llng.conf
+# Open Bastion PAM Configuration File
+# /etc/open-bastion/openbastion.conf
 
 # ==============================================================================
 # Required Settings
@@ -19,7 +19,7 @@ client_secret = your-client-secret-here
 # Path to file containing the server's access token
 # This token is obtained during server enrollment via Device Authorization Grant
 # The file should contain only the token and be readable only by root
-server_token_file = /etc/security/pam_llng.token
+server_token_file = /etc/open-bastion/token
 
 # Server group name for authorization rules
 # This must match a group defined in LLNG's pamAccessServerGroups
@@ -51,8 +51,8 @@ verify_ssl = true
 cache_enabled = true
 
 # Cache directory
-# Default: /var/cache/pam_llng
-cache_dir = /var/cache/pam_llng
+# Default: /var/cache/open-bastion
+cache_dir = /var/cache/open-bastion
 
 # Cache TTL in seconds (time to live)
 # Cached results expire after this time
@@ -176,8 +176,8 @@ log_level = warn
 # bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
 
 # Local cache file for JWKS (enables offline verification)
-# Default: /var/cache/pam_llng/jwks.json
-# bastion_jwt_jwks_cache = /var/cache/pam_llng/jwks.json
+# Default: /var/cache/open-bastion/jwks.json
+# bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
 
 # JWKS cache TTL in seconds
 # Default: 3600 (1 hour)

@@ -345,7 +345,7 @@ auth required pam_openbastion.so no_rotate_refresh  # Pour désactiver (non reco
 ```mermaid
 sequenceDiagram
     participant Srv as Serveur SSH
-    participant Token as /etc/security/<br/>pam_llng.token
+    participant Token as /etc/open-bastion/<br/>token
     participant LLNG as Portail LLNG
 
     Note over Srv,LLNG: Phase initiale : Enrôlement (Device Grant)
@@ -566,9 +566,9 @@ oidcServiceDeviceAuthorizationUserCodeLength: 8 # Longueur du code (défaut: 8)
   - Le JWT contient les claims `iss`, `sub`, `aud`, `exp`, `iat`, `jti`
   - Le `jti` (JWT ID) est un UUID unique pour chaque requête, empêchant le replay
   - Le secret sert uniquement à signer le JWT localement, il ne transite jamais sur le réseau
-- TLS 1.3 par défaut (`src/llng_client.c:410`)
+- TLS 1.3 par défaut (`src/ob_client.c:410`)
 - Vérification SSL activée par défaut
-- Support du certificate pinning (`src/llng_client.c:512-521`)
+- Support du certificate pinning (`src/ob_client.c:512-521`)
 - Le secret n'apparaît pas dans les logs du script
 
 **Flux d'authentification `client_secret_jwt` :**
@@ -699,7 +699,7 @@ auditctl -w /etc/open-bastion/token -p rwa -k pam_token_access
 - Vérification SSL obligatoire par défaut
 - Validation du format HTTPS dans la configuration (`src/config.c:659-663`)
 - Support du certificate pinning (`CURLOPT_PINNEDPUBLICKEY`)
-- Validation du format du pin à l'initialisation (`src/llng_client.c:298-359`)
+- Validation du format du pin à l'initialisation (`src/ob_client.c:298-359`)
 
 **Remédiation configuration :**
 
@@ -828,9 +828,9 @@ openssl s_client -connect auth.example.com:443 2>/dev/null | \
 
 **Remédiation embarquée :**
 
-- `explicit_bzero()` sur tous les secrets après usage (`src/llng_client.c:468-470`)
-- Effacement des buffers HMAC (`src/llng_client.c:203,220`)
-- Effacement des headers Authorization (`src/llng_client.c:576,884`)
+- `explicit_bzero()` sur tous les secrets après usage (`src/ob_client.c:468-470`)
+- Effacement des buffers HMAC (`src/ob_client.c:203,220`)
+- Effacement des headers Authorization (`src/ob_client.c:576,884`)
 - Fonction `secure_free()` pour libération sécurisée (`src/token_manager.c:449-456`)
 
 **Remédiation configuration :**

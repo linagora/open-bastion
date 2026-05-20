@@ -134,7 +134,7 @@ and privilege escalation (fresh SSO re-authentication for each sudo).
 PasswordAuthentication no                         # No SSH passwords
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes                          # SSH certificates only
-TrustedUserCAKeys /etc/ssh/llng_ca.pub
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
 AuthorizedKeysFile none                           # No unsigned keys
 RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
 ExposeAuthInfo yes                                # For certificate audit
@@ -226,7 +226,7 @@ With long-lived certificates (1 year), the KRL is **mandatory**:
 curl -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
 # Automatic refresh (cron)
-# /etc/cron.d/llng-krl-refresh
+# /etc/cron.d/open-bastion-krl
 */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
 ```
 
@@ -351,7 +351,7 @@ UsePAM yes
 PasswordAuthentication no                         # No passwords for SSH
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes                          # SSH certificates required
-TrustedUserCAKeys /etc/ssh/llng_ca.pub
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
 AuthorizedKeysFile none                           # No unsigned keys
 RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
 ExposeAuthInfo yes

@@ -27,7 +27,7 @@ for i in {1..60}; do
 done
 
 # Configure sshd for password authentication via PAM
-cat > /etc/ssh/sshd_config.d/llng-bastion.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << EOF
 # LemonLDAP::NG Bastion Configuration (Token Auth Mode)
 
 # Disable public key authentication

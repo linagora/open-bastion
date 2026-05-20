@@ -214,7 +214,7 @@ sequenceDiagram
 ### nsswitch.conf
 
 ```
-passwd: files llng
+passwd: files openbastion
 group:  files
 shadow: files
 ```
@@ -225,7 +225,7 @@ shadow: files
 
 ```ini
 portal_url = https://auth.example.com
-server_token_file = /etc/llng/server_token
+server_token_file = /etc/open-bastion/token
 timeout = 5
 cache_ttl = 300
 min_uid = 10000
@@ -266,7 +266,7 @@ session required pam_unix.so
 All sessions through bastions are recorded:
 
 ```
-/var/lib/llng-sessions/
+/var/lib/open-bastion/sessions/
 ├── dwho/
 │   ├── 20251216-103000_<uuid>.cast      # Recording
 │   └── 20251216-103000_<uuid>.json      # Metadata
@@ -498,7 +498,7 @@ flowchart LR
 #### On Bastion
 
 ```bash
-# /etc/llng/ssh-proxy.conf
+# /etc/open-bastion/ssh-proxy.conf
 PORTAL_URL=https://auth.example.com
 SERVER_TOKEN_FILE=/etc/open-bastion/token
 SERVER_GROUP=bastion
@@ -519,7 +519,7 @@ bastion_jwt_clock_skew = 60
 ```
 
 ```bash
-# /etc/ssh/sshd_config.d/llng.conf
+# /etc/ssh/sshd_config.d/50-open-bastion.conf
 AcceptEnv LLNG_BASTION_JWT
 ```
 

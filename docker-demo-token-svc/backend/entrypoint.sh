@@ -27,7 +27,7 @@ for i in {1..60}; do
 done
 
 # Configure sshd for password authentication via PAM
-cat > /etc/ssh/sshd_config.d/llng-backend.conf << EOF
+cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << EOF
 # LemonLDAP::NG Backend Configuration (Token Auth Mode)
 
 # Disable public key authentication

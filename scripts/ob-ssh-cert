@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# llng-ssh-cert - Obtain SSH certificates from LemonLDAP::NG
+# ob-ssh-cert - Obtain SSH certificates from LemonLDAP::NG
 #
 # This script allows users to obtain signed SSH certificates from LLNG,
 # enabling passwordless SSH authentication to servers that trust the LLNG CA.
