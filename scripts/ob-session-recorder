@@ -213,6 +213,56 @@ handle_timeout() {
     exit 124  # Standard timeout exit code
 }
 
+# Detect non-interactive file-transfer commands that cannot tolerate a PTY.
+# scp, sftp-server and rsync exchange a binary protocol over stdin/stdout;
+# wrapping them in script/asciinema/ttyrec corrupts the stream (NL→CR+NL
+# translation, terminal echo, etc.) and the client aborts with errors like
+# "Connection closed" or "unexpected <newline>". Returns 0 if the command
+# must be exec'd directly (no PTY), 1 otherwise.
+is_file_transfer() {
+    local cmd="${ORIGINAL_COMMAND:-}"
+    [ -z "$cmd" ] && return 1
+    local first="${cmd%%[[:space:]]*}"
+    # Strip an optional leading path: ssh subsystem invocations come as
+    # the full path defined by "Subsystem sftp ...".
+    local base="${first##*/}"
+    case "$base" in
+        scp)
+            # scp server-side is invoked as "scp -t <dir>" (to) or
+            # "scp -f <file>" (from). The interactive 'scp' command on
+            # the bastion itself would not have these flags.
+            case " $cmd " in
+                *" -t "*|*" -f "*) return 0 ;;
+            esac
+            ;;
+        sftp-server|internal-sftp)
+            return 0
+            ;;
+        rsync)
+            # Server-side rsync is always invoked with --server.
+            case " $cmd " in
+                *" --server "*) return 0 ;;
+            esac
+            ;;
+    esac
+    return 1
+}
+
+# Exec a file-transfer command directly, bypassing the PTY recorder.
+# Stdin/stdout/stderr stay raw so the SCP/SFTP/rsync protocol works.
+# We still write metadata (command, start/end, exit status) for audit.
+record_transfer() {
+    local shell="${SHELL:-/bin/bash}"
+    # Mark the session as a non-PTY transfer in metadata. The session file
+    # placeholder is kept (created empty during write_metadata) so audit
+    # tools that grep for *.typescript still find the metadata sibling.
+    FORMAT="transfer"
+    log_info "Session $SESSION_ID: file-transfer (no PTY recording): $ORIGINAL_COMMAND"
+    # Run under the user's login shell so $PATH and aliases behave as usual.
+    # We don't use 'exec' because we want the cleanup trap to run on return.
+    "$shell" -c "$ORIGINAL_COMMAND"
+}
+
 # Record session using script command (always available)
 record_script() {
     local shell="${SHELL:-/bin/bash}"
@@ -386,28 +436,48 @@ main() {
     trap cleanup EXIT
     trap handle_timeout ALRM
 
-    # Set session timeout (in background)
+    # Set session timeout (in background).
+    #
+    # CRITICAL: redirect stdin/stdout/stderr to /dev/null. Without this, the
+    # background subshell inherits the SSH channel's FDs from sshd; sshd then
+    # waits for ALL processes holding those FDs to release them before closing
+    # the channel. For interactive sessions this is masked because the user's
+    # shell holds the channel anyway, but for scp/sftp/rsync the transfer
+    # finishes cleanly yet "the command hangs" because sshd is waiting on the
+    # leaked sleep child. See: https://serverfault.com/q/342436
+    #
+    # We also trap TERM in the subshell to kill the sleep grandchild on
+    # cleanup, so we don't leak a sleep process for MAX_SESSION_DURATION.
     if [ "$MAX_SESSION_DURATION" -gt 0 ]; then
         local parent_pid=$$
         (
-            sleep "$MAX_SESSION_DURATION"
+            trap 'kill "${sleep_pid:-0}" 2>/dev/null; exit 0' TERM HUP
+            sleep "$MAX_SESSION_DURATION" &
+            sleep_pid=$!
+            wait "$sleep_pid" 2>/dev/null
             kill -ALRM "$parent_pid" 2>/dev/null || true
-        ) &
+        ) </dev/null >/dev/null 2>&1 &
         TIMEOUT_PID=$!
     fi
 
-    # Start recording based on format (runs in foreground, allows cleanup)
-    case "$FORMAT" in
-        asciinema)
-            record_asciinema
-            ;;
-        ttyrec)
-            record_ttyrec
-            ;;
-        *)
-            record_script
-            ;;
-    esac
+    # File-transfer commands (scp, sftp, rsync) need raw stdio: bypass the
+    # PTY recorder, log metadata only. Otherwise wrap the command in the
+    # configured recorder (script/asciinema/ttyrec) which gives a PTY.
+    if is_file_transfer; then
+        record_transfer
+    else
+        case "$FORMAT" in
+            asciinema)
+                record_asciinema
+                ;;
+            ttyrec)
+                record_ttyrec
+                ;;
+            *)
+                record_script
+                ;;
+        esac
+    fi
 }
 
 main "$@"
