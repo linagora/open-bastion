@@ -78,7 +78,10 @@ test_syntax_check() {
 test_version_flag() {
     local output
     output=$("$SCRIPT_PATH" --version 2>&1) || return 1
-    echo "$output" | grep -q "version 0.2.1"
+    # Accept any semver-looking value so the test does not break on each
+    # release bump. The other version files (CMakeLists.txt, debian/changelog,
+    # rpm spec) are kept in sync manually at release time.
+    echo "$output" | grep -qE "version [0-9]+\.[0-9]+\.[0-9]+"
 }
 
 # Test 3: --help exits 0
