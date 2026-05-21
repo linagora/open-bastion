@@ -21,6 +21,7 @@ Depends: ${misc:Depends},
  curl,
  jq,
  nscd,
+ locales,
  debconf | debconf-2.0,
 Recommends: auditd
 Pre-Depends: ${misc:Pre-Depends},

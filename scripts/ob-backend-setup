@@ -32,6 +32,22 @@ CREATE_USERS=true
 MAX_SECURITY=false
 KRL_REFRESH_INTERVAL=30
 
+# OIDC client credentials. CLIENT_ID defaults to "pam-access" inside ob-enroll
+# when empty here. CLIENT_SECRET is empty in public-client mode; if the LLNG
+# client requires authentication, set it via --client-secret-file or the
+# OB_CLIENT_SECRET env var (CLI arg avoided to keep the secret out of /proc).
+CLIENT_ID=""
+CLIENT_SECRET=""
+
+# Result of enroll_server, consumed by print_summary. One of:
+#   not-attempted (default), success, token-provided, dry-run, failed
+ENROLL_RESULT="not-attempted"
+
+# Files created (not just modified) during this run. Used by
+# rollback_on_failure() to remove inert config artefacts when the run
+# aborts before SSH/PAM lockdown.
+CREATED_FILES=()
+
 # Paths
 SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 SSHD_CONFIG="/etc/ssh/sshd_config"
@@ -70,6 +86,33 @@ check_root() {
         error "This script must be run as root"
         exit 1
     fi
+}
+
+# Record a path as something we wrote. Used by rollback_on_failure() to
+# decide what to restore from BACKUP_DIR (file existed before — restore)
+# vs. what to remove (file did not exist before — delete).
+track_created() {
+    CREATED_FILES+=("$1")
+}
+
+# Rollback inert files written before enrollment, called if enrollment fails
+# before SSH/PAM lockdown is applied. Safe because the affected files are
+# not referenced by sshd/PAM until later steps.
+rollback_on_failure() {
+    if [ ${#CREATED_FILES[@]} -eq 0 ]; then
+        return 0
+    fi
+    warn "Rolling back inert files written before enrollment..."
+    local f base
+    for f in "${CREATED_FILES[@]}"; do
+        base=$(basename "$f")
+        if [ -f "$BACKUP_DIR/$base" ]; then
+            cp -a "$BACKUP_DIR/$base" "$f" && info "Restored $f from backup"
+        else
+            rm -f "$f" && info "Removed $f (no backup, file did not exist before)"
+        fi
+    done
+    info "Backup directory preserved at: $BACKUP_DIR"
 }
 
 # Backup a file before modifying
@@ -131,6 +174,7 @@ download_ca_key() {
     backup_file "$SSH_CA_FILE"
     echo "$ca_key" > "$SSH_CA_FILE"
     chmod 644 "$SSH_CA_FILE"
+    track_created "$SSH_CA_FILE"
     info "CA public key saved to $SSH_CA_FILE"
 }
 
@@ -191,6 +235,7 @@ if getent passwd "$USERNAME" >/dev/null 2>&1; then
 fi
 PRINCIPALS
     chmod 755 "$script_path"
+    track_created "$script_path"
 
     # Spool directory: owned by AuthorizedPrincipalsCommandUser (nobody),
     # mode 0700 — see ob-bastion-setup for rationale (a world-writable
@@ -208,6 +253,7 @@ d /run/open-bastion          0755 root   root   -
 d /run/open-bastion/ssh-fp   0700 nobody nogroup -
 TMPFILES
     chmod 644 "$tmpfiles_conf"
+    track_created "$tmpfiles_conf"
 
     info "SSH principals helper installed at $script_path"
     info "SSH fingerprint spool prepared at $spool_dir"
@@ -513,6 +559,44 @@ session    required     pam_unix.so
     info "Configured $PAM_SUDO for LLNG token authentication"
 }
 
+# Ensure /etc/nsswitch.conf has a usable "<db>: files openbastion ..." line.
+# Handles three cases:
+#   1. Active line already includes "openbastion" → noop.
+#   2. Active line exists without openbastion → insert after the first source.
+#   3. No active line (missing or commented out) → APPEND a fresh
+#      "<db>: files openbastion systemd" line. Crucial fix: previously the
+#      script silently no-op'd here, leaving NSS unable to resolve any user.
+nss_configure_db() {
+    local db="$1"
+    local file="$2"
+    local default_line="$3"
+
+    if grep -qE "^${db}:.*[[:space:]]openbastion([[:space:]]|\$)" "$file"; then
+        info "NSS already configured for $db"
+        return 0
+    fi
+
+    if grep -qE "^${db}:" "$file"; then
+        if grep -qE "^${db}:[[:space:]]+files" "$file"; then
+            sed -i -E "s/^(${db}:[[:space:]]+files)/\\1 openbastion/" "$file"
+        elif grep -qE "^${db}:[[:space:]]+compat" "$file"; then
+            sed -i -E "s/^(${db}:[[:space:]]+compat)/\\1 openbastion/" "$file"
+        else
+            sed -i -E "s/^(${db}:[[:space:]]+[^[:space:]]+)/\\1 openbastion/" "$file"
+        fi
+        info "Added openbastion to $db in $file"
+    else
+        warn "$file has no active '$db:' line; appending: $default_line"
+        printf '%s\n' "$default_line" >> "$file"
+        info "Appended new $db line to $file"
+    fi
+
+    if ! grep -qE "^${db}:.*[[:space:]]openbastion([[:space:]]|\$)" "$file"; then
+        error "Failed to add openbastion to $db in $file — please edit manually."
+        return 1
+    fi
+}
+
 # Configure NSS
 configure_nss() {
     step "Configuring NSS for user/group resolution..."
@@ -524,32 +608,8 @@ configure_nss() {
 
     backup_file "$NSSWITCH_CONF"
 
-    # Add openbastion to passwd and group lines if not already present
-    if grep -q "^passwd:.*openbastion" "$NSSWITCH_CONF"; then
-        info "NSS already configured for passwd"
-    else
-        if grep -q "^passwd:.*files" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(passwd:.*files\)/\1 openbastion/' "$NSSWITCH_CONF"
-        elif grep -q "^passwd:.*compat" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(passwd:.*compat\)/\1 openbastion/' "$NSSWITCH_CONF"
-        else
-            sed -i 's/^\(passwd:.*\)/\1 openbastion/' "$NSSWITCH_CONF"
-        fi
-        info "Added openbastion to passwd in $NSSWITCH_CONF"
-    fi
-
-    if grep -q "^group:.*openbastion" "$NSSWITCH_CONF"; then
-        info "NSS already configured for group"
-    else
-        if grep -q "^group:.*files" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(group:.*files\)/\1 openbastion/' "$NSSWITCH_CONF"
-        elif grep -q "^group:.*compat" "$NSSWITCH_CONF"; then
-            sed -i 's/^\(group:.*compat\)/\1 openbastion/' "$NSSWITCH_CONF"
-        else
-            sed -i 's/^\(group:.*\)/\1 openbastion/' "$NSSWITCH_CONF"
-        fi
-        info "Added openbastion to group in $NSSWITCH_CONF"
-    fi
+    nss_configure_db passwd "$NSSWITCH_CONF" "passwd:         files openbastion systemd" || return 1
+    nss_configure_db group  "$NSSWITCH_CONF" "group:          files openbastion systemd" || return 1
 
     # Create NSS configuration
     # shellcheck disable=SC2155
@@ -580,57 +640,70 @@ home_base = /home
     backup_file "$NSS_OB_CONF"
     echo "$nss_content" > "$NSS_OB_CONF"
     chmod 644 "$NSS_OB_CONF"
+    track_created "$NSS_OB_CONF"
     info "Created $NSS_OB_CONF"
+}
+
+# Render openbastion.conf content using current globals. Used both by
+# the initial configure_pam_openbastion (Phase 1) and the post-enrollment
+# refresh that persists any client_id/client_secret entered during the
+# retry prompts.
+render_openbastion_conf() {
+    printf '# LemonLDAP::NG PAM module configuration\n'
+    printf '# Generated by %s on %s\n\n' "$PROG_NAME" "$(date)"
+    printf '# Portal URL (required)\n'
+    printf 'portal_url = %s\n\n' "$PORTAL_URL"
+    printf '# Server authentication token file\n'
+    printf 'server_token_file = %s\n\n' "$OB_TOKEN"
+    printf '# Server group for authorization rules\n'
+    printf 'server_group = %s\n\n' "$SERVER_GROUP"
+    # Authorization-only mode: pam_sm_authenticate always succeeds (SSH already
+    # validated the cert), only pam_sm_acct_mgmt calls /pam/authorize. Without
+    # this, pam_openbastion would require client_id/client_secret in this file
+    # for OIDC token introspection — which the backend never receives, since
+    # the user authenticates with an SSH certificate, not an OIDC token.
+    printf '# SSH backend mode: cert auth via sshd, authorization via /pam/authorize\n'
+    printf 'authorize_only = true\n\n'
+    if [ -n "$CLIENT_ID" ]; then
+        printf '# OIDC client used for enrollment (kept for re-enroll)\n'
+        printf 'client_id = %s\n\n' "$CLIENT_ID"
+    fi
+    if [ -n "$CLIENT_SECRET" ]; then
+        printf '# OIDC client secret (confidential client; kept for re-enroll)\n'
+        printf 'client_secret = %s\n\n' "$CLIENT_SECRET"
+    fi
+    printf '# HTTP settings\n'
+    printf 'timeout = 10\n'
+    printf 'verify_ssl = %s\n\n' "$VERIFY_SSL"
+    printf '# Cache settings\n'
+    printf 'cache_enabled = true\n'
+    printf 'cache_dir = /var/cache/open-bastion\n'
+    printf 'cache_ttl = 300\n\n'
+    printf '# User creation settings\n'
+    printf 'create_user_enabled = %s\n' "$CREATE_USERS"
+    printf 'create_home = true\n'
+    printf 'default_shell = /bin/bash\n\n'
+    printf '# Logging\n'
+    printf 'log_level = info\n\n'
+    printf '# Audit logging\n'
+    printf 'audit_enabled = true\n'
+    printf 'audit_to_syslog = true\n'
 }
 
 # Configure PAM open-bastion module
 configure_pam_openbastion() {
     step "Configuring PAM open-bastion module..."
 
-    # shellcheck disable=SC2155
-    local config_content="# LemonLDAP::NG PAM module configuration
-# Generated by $PROG_NAME on $(date)
-
-# Portal URL (required)
-portal_url = $PORTAL_URL
-
-# Server authentication token file
-server_token_file = $OB_TOKEN
-
-# Server group for authorization rules
-server_group = $SERVER_GROUP
-
-# HTTP settings
-timeout = 10
-verify_ssl = $VERIFY_SSL
-
-# Cache settings
-cache_enabled = true
-cache_dir = /var/cache/open-bastion
-cache_ttl = 300
-
-# User creation settings
-create_user_enabled = $CREATE_USERS
-create_home = true
-default_shell = /bin/bash
-
-# Logging
-log_level = info
-
-# Audit logging
-audit_enabled = true
-audit_to_syslog = true
-"
-
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would create PAM LLNG configuration"
-        echo "$config_content"
+        render_openbastion_conf
         return 0
     fi
 
     backup_file "$OB_CONFIG"
-    echo "$config_content" > "$OB_CONFIG"
+    render_openbastion_conf > "$OB_CONFIG"
     chmod 600 "$OB_CONFIG"
+    track_created "$OB_CONFIG"
     info "Created $OB_CONFIG"
 
     # Create cache directory
@@ -638,40 +711,188 @@ audit_to_syslog = true
     chmod 750 /var/cache/open-bastion
 }
 
+# Re-render openbastion.conf in place (no fresh backup, no track) after
+# enrollment succeeds — persists credentials updated during retry prompts.
+refresh_openbastion_conf() {
+    if [ "$DRY_RUN" = "true" ]; then
+        return 0
+    fi
+    render_openbastion_conf > "$OB_CONFIG"
+    chmod 600 "$OB_CONFIG"
+}
+
 # Enroll server with LLNG
+# Pre-flight: verify the portal's Device Authorization endpoint is reachable
+# BEFORE applying any SSH/PAM lockdown. Without this check, a failed
+# enrollment could leave the backend in a state where no user can log in.
+preflight_check_portal() {
+    if [ -n "$SERVER_TOKEN" ]; then
+        return 0
+    fi
+    if [ "$DRY_RUN" = "true" ]; then
+        return 0
+    fi
+
+    step "Pre-flight: checking Device Authorization endpoint reachability..."
+
+    build_curl_opts
+    # Strip -f so we get the HTTP code instead of curl returning non-zero on 4xx.
+    local opts=()
+    local opt
+    for opt in "${CURL_OPTS[@]}"; do
+        [ "$opt" = "-f" ] || opts+=("$opt")
+    done
+
+    local http_code
+    http_code=$(curl "${opts[@]}" -X POST -o /dev/null -w '%{http_code}' \
+                "${PORTAL_URL}/oauth2/device" 2>/dev/null) || http_code="000"
+
+    if [ "$http_code" = "000" ]; then
+        error "Cannot reach Device Authorization endpoint at ${PORTAL_URL}/oauth2/device"
+        error "Aborting BEFORE any SSH/PAM lockdown to avoid leaving the backend unreachable."
+        error ""
+        error "Possible causes:"
+        error "  - Portal URL incorrect (got: $PORTAL_URL)"
+        error "  - Device Authorization Grant not enabled on the LLNG portal"
+        error "  - Network/DNS/TLS failure (test: curl -v ${PORTAL_URL}/oauth2/device)"
+        error "  - Use -k/--insecure if portal uses a self-signed certificate"
+        return 1
+    fi
+
+    if [ "$http_code" = "404" ]; then
+        error "Portal responded with 404 on /oauth2/device — Device Authorization Grant is not enabled."
+        return 1
+    fi
+
+    info "Device Authorization endpoint reachable (HTTP $http_code)"
+    return 0
+}
+
+# Enroll server with LLNG. Sets ENROLL_RESULT and returns 0 on success,
+# 1 on failure.
 enroll_server() {
     step "Enrolling server with LLNG..."
 
     if [ -n "$SERVER_TOKEN" ]; then
-        # Token provided directly
         if [ "$DRY_RUN" = "true" ]; then
             info "[DRY-RUN] Would save provided server token"
+            ENROLL_RESULT="dry-run"
             return 0
         fi
 
         echo "$SERVER_TOKEN" > "$OB_TOKEN"
         chmod 600 "$OB_TOKEN"
         info "Server token saved"
-    elif [ -x /usr/sbin/ob-enroll ]; then
-        # Use enrollment script
-        if [ "$DRY_RUN" = "true" ]; then
-            info "[DRY-RUN] Would run ob-enroll"
+        ENROLL_RESULT="token-provided"
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would run ob-enroll"
+        ENROLL_RESULT="dry-run"
+        return 0
+    fi
+
+    if [ ! -x /usr/sbin/ob-enroll ]; then
+        error "Enrollment helper /usr/sbin/ob-enroll not found or not executable."
+        error "Install the open-bastion package or provide a token via --token-file."
+        ENROLL_RESULT="failed"
+        return 1
+    fi
+
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        error "Cannot enroll in non-interactive mode without --token-file"
+        ENROLL_RESULT="failed"
+        return 1
+    fi
+
+    local enroll_opts=("-p" "$PORTAL_URL" "-g" "$SERVER_GROUP")
+    if [ "$VERIFY_SSL" = "false" ]; then
+        enroll_opts+=("-k")
+    fi
+    if [ -n "$CLIENT_ID" ]; then
+        enroll_opts+=("-c" "$CLIENT_ID")
+    fi
+
+    # Pass the secret via env var (not CLI) to keep it out of /proc/<pid>/cmdline.
+    if [ -n "$CLIENT_SECRET" ]; then
+        if OB_CLIENT_SECRET="$CLIENT_SECRET" /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            ENROLL_RESULT="success"
             return 0
         fi
-
-        local enroll_opts=("-p" "$PORTAL_URL" "-g" "$SERVER_GROUP")
-        if [ "$VERIFY_SSL" = "false" ]; then
-            enroll_opts+=("-k")
-        fi
-        if [ "$NON_INTERACTIVE" = "true" ]; then
-            error "Cannot enroll in non-interactive mode without --token"
-            return 1
-        fi
-
-        /usr/sbin/ob-enroll "${enroll_opts[@]}"
     else
-        warn "Server not enrolled. Run ob-enroll manually after installation."
+        if /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            ENROLL_RESULT="success"
+            return 0
+        fi
     fi
+
+    ENROLL_RESULT="failed"
+    return 1
+}
+
+# Prompt for required settings (SERVER_GROUP and CLIENT_ID) before any
+# system change. No silent defaults: misconfiguring either makes the
+# backend unusable.
+prompt_required_settings() {
+    if [ -z "$SERVER_GROUP" ]; then
+        if [ "$NON_INTERACTIVE" = "true" ]; then
+            error "Missing --server-group (required in non-interactive mode)."
+            exit 1
+        fi
+        printf "Server group (must match a group defined in LLNG): " >&2
+        IFS= read -r SERVER_GROUP
+        if [ -z "$SERVER_GROUP" ]; then
+            error "Server group cannot be empty."
+            exit 1
+        fi
+    fi
+
+    if [ -z "$CLIENT_ID" ]; then
+        if [ "$NON_INTERACTIVE" = "true" ]; then
+            error "Missing --client-id (required in non-interactive mode)."
+            exit 1
+        fi
+        local input
+        printf "OIDC client_id [pam-access]: " >&2
+        IFS= read -r input
+        CLIENT_ID="${input:-pam-access}"
+    fi
+}
+
+# Interactive prompt after an enrollment failure (typically invalid_client).
+# Returns 0 if new values were supplied, 1 if the user declined.
+prompt_for_client_credentials() {
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        return 1
+    fi
+
+    echo ""
+    info "The LLNG portal seems to require a confidential client."
+    info "Current: client_id='${CLIENT_ID:-pam-access (default)}', client_secret=$([ -n "$CLIENT_SECRET" ] && echo 'set' || echo 'empty')"
+    echo ""
+    if ! confirm "Provide/update client credentials and retry?"; then
+        return 1
+    fi
+
+    local new_id new_secret
+    printf "Client ID [%s]: " "${CLIENT_ID:-pam-access}" >&2
+    IFS= read -r new_id
+    if [ -n "$new_id" ]; then
+        CLIENT_ID="$new_id"
+    fi
+
+    printf "Client secret (input hidden, empty = keep current): " >&2
+    IFS= read -rs new_secret
+    echo "" >&2
+    if [ -n "$new_secret" ]; then
+        CLIENT_SECRET="$new_secret"
+    fi
+
+    if [ -z "$CLIENT_SECRET" ]; then
+        warn "No client_secret provided — retry will likely fail again."
+    fi
+    return 0
 }
 
 # Restart SSH service
@@ -698,9 +919,15 @@ restart_sshd() {
 # Print summary
 print_summary() {
     echo ""
-    echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│           Backend Configuration Complete                 │"
-    echo "└─────────────────────────────────────────────────────────┘"
+    if [ "$ENROLL_RESULT" = "failed" ]; then
+        echo "┌─────────────────────────────────────────────────────────┐"
+        echo "│        Backend Configuration INCOMPLETE                  │"
+        echo "└─────────────────────────────────────────────────────────┘"
+    else
+        echo "┌─────────────────────────────────────────────────────────┐"
+        echo "│           Backend Configuration Complete                 │"
+        echo "└─────────────────────────────────────────────────────────┘"
+    fi
     echo ""
     echo "Configuration:"
     echo "  Portal URL:    $PORTAL_URL"
@@ -717,6 +944,25 @@ print_summary() {
     fi
     echo "  ✓ NSS user/group resolution"
     echo "  ✓ Password authentication disabled"
+    case "$ENROLL_RESULT" in
+        success)
+            echo "  ✓ Server enrolled with LLNG (token stored)"
+            ;;
+        token-provided)
+            echo "  ✓ Server token installed (provided via --token-file)"
+            ;;
+        dry-run)
+            echo "  ✓ Server enrollment (dry-run — nothing actually saved)"
+            ;;
+        failed)
+            echo "  ✗ Server enrollment FAILED — see [ERROR] above"
+            echo "    The backend will REJECT all logins until you run:"
+            echo "      ob-enroll -p $PORTAL_URL -g $SERVER_GROUP"
+            ;;
+        *)
+            echo "  ? Server enrollment status unknown ($ENROLL_RESULT)"
+            ;;
+    esac
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "  ✓ Maximum Security Mode E"
         echo "    - SSH: SSO-signed certificates only"
@@ -726,28 +972,46 @@ print_summary() {
     echo ""
     echo "Backup location: $BACKUP_DIR"
     echo ""
-    echo "Next steps:"
-    echo "  1. Verify SSH connectivity from bastion"
-    echo "  2. Check user creation works correctly"
-    if [ "$ENABLE_SUDO" = "true" ]; then
-        echo "  3. Test sudo access for authorized users"
+    if [ "$ENROLL_RESULT" = "failed" ]; then
+        echo "ACTION REQUIRED — the backend is NOT operational:"
+        echo "  1. KEEP your current shell open (you may be locked out otherwise)."
+        echo "  2. Fix portal connectivity and run:"
+        echo "       ob-enroll -p $PORTAL_URL -g $SERVER_GROUP"
+        echo "  3. Or roll back manually using files in $BACKUP_DIR."
+        echo ""
+    else
+        echo "Next steps:"
+        echo "  1. Verify SSH connectivity from bastion"
+        echo "  2. Check user creation works correctly"
+        if [ "$ENABLE_SUDO" = "true" ]; then
+            echo "  3. Test sudo access for authorized users"
+        fi
+        echo ""
     fi
-    echo ""
 }
 
 # Usage
 usage() {
     cat << EOF
-Usage: $PROG_NAME --portal URL --server-group NAME [OPTIONS]
+Usage: $PROG_NAME --portal URL [OPTIONS]
 
 Configure a server as an SSH backend with LemonLDAP::NG integration.
 
 Required:
   -p, --portal URL        LLNG portal URL
-  -g, --server-group NAME Server group name (for authorization rules)
 
 Options:
+  -g, --server-group NAME Server group name (must match a group defined in
+                          LLNG). Prompted interactively if omitted; required
+                          when --yes is used.
   -t, --token-file FILE   Read server token from file (use - for stdin)
+  -c, --client-id ID      OIDC client_id for enrollment. Prompted interactively
+                          if omitted (suggested: pam-access); required when
+                          --yes is used.
+  -S, --client-secret-file FILE
+                          Read OIDC client_secret from file (use - for stdin).
+                          Alternative: set OB_CLIENT_SECRET env var.
+                          Required when the LLNG client is a confidential client.
   -y, --yes               Non-interactive mode (requires --token-file)
   -k, --insecure          Skip SSL certificate verification
   --no-sudo               Don't configure sudo with LLNG
@@ -808,6 +1072,29 @@ parse_args() {
                 fi
                 shift 2
                 ;;
+            -c|--client-id)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                CLIENT_ID="$2"
+                shift 2
+                ;;
+            -S|--client-secret-file)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                if [ "$2" = "-" ]; then
+                    CLIENT_SECRET=$(cat)
+                elif [ -f "$2" ]; then
+                    CLIENT_SECRET=$(cat "$2")
+                else
+                    error "Client secret file not found: $2"
+                    exit 1
+                fi
+                shift 2
+                ;;
             -y|--yes)
                 NON_INTERACTIVE=true
                 shift
@@ -858,13 +1145,14 @@ main() {
         exit 1
     fi
 
-    if [ -z "$SERVER_GROUP" ]; then
-        error "Server group is required (-g/--server-group)"
-        exit 1
-    fi
-
     # Remove trailing slash
     PORTAL_URL="${PORTAL_URL%/}"
+
+    # Pick up client_secret from env if not provided via --client-secret-file.
+    # Storing it in OB_CLIENT_SECRET keeps it out of /proc/<pid>/cmdline.
+    if [ -z "$CLIENT_SECRET" ] && [ -n "${OB_CLIENT_SECRET:-}" ]; then
+        CLIENT_SECRET="$OB_CLIENT_SECRET"
+    fi
 
     # Security: warn if not using HTTPS (credentials sent in clear)
     if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
@@ -882,6 +1170,10 @@ main() {
         fi
     done
 
+    # Ask for server_group and client_id BEFORE the banner so the user sees
+    # exactly what will be sent to LLNG.
+    prompt_required_settings
+
     echo ""
     echo "┌─────────────────────────────────────────────────────────┐"
     echo "│        LemonLDAP::NG Backend Setup                       │"
@@ -891,6 +1183,7 @@ main() {
     echo ""
     echo "Portal URL:    $PORTAL_URL"
     echo "Server Group:  $SERVER_GROUP"
+    echo "Client ID:     $CLIENT_ID"
     echo "Create Users:  $CREATE_USERS"
     echo "Sudo via LLNG: $ENABLE_SUDO"
     if [ "$MAX_SECURITY" = "true" ]; then
@@ -910,18 +1203,75 @@ main() {
 
     echo ""
 
-    # Run setup steps
-    download_ca_key || exit 1
-    install_principals_helper || exit 1
+    # ── Phase 1: inert preparation (no SSH/PAM lockdown yet) ──
+    # These steps download/create files that are NOT referenced by sshd or PAM
+    # until phase 3 runs. If anything fails here, or if enrollment fails in
+    # phase 2, the system is still usable: rollback_on_failure() restores
+    # backups / removes new files and exits.
+    download_ca_key || { rollback_on_failure; exit 1; }
+    install_principals_helper || { rollback_on_failure; exit 1; }
+    configure_pam_openbastion || { rollback_on_failure; exit 1; }
+    configure_nss || { rollback_on_failure; exit 1; }
+
+    # ── Phase 2: portal connectivity + enrollment ──
+    # Must succeed before we lock down SSH/PAM, otherwise the backend would
+    # be unreachable (PasswordAuthentication=no + no certs because no token).
+    if ! preflight_check_portal; then
+        rollback_on_failure
+        exit 1
+    fi
+
+    # Retry loop: on enrollment failure (typically invalid_client), offer the
+    # user a chance to provide/update client_id and client_secret and retry.
+    local max_attempts=3
+    local attempt=1
+    while ! enroll_server; do
+        error ""
+        error "Server enrollment FAILED (attempt $attempt/$max_attempts)."
+
+        if [ $attempt -ge $max_attempts ]; then
+            error "Maximum enrollment attempts reached."
+            break
+        fi
+
+        if ! prompt_for_client_credentials; then
+            break
+        fi
+
+        attempt=$((attempt + 1))
+        info "Retrying enrollment..."
+    done
+
+    if [ "$ENROLL_RESULT" != "success" ] && [ "$ENROLL_RESULT" != "token-provided" ] && [ "$ENROLL_RESULT" != "dry-run" ]; then
+        if [ "$MAX_SECURITY" = "true" ]; then
+            error "Refusing to apply --max-security lockdown: without enrollment, no user"
+            error "can authenticate (SSO certs cannot be issued, sudo would require"
+            error "a token nobody can obtain). Aborting BEFORE any SSH/PAM changes."
+            rollback_on_failure
+            exit 1
+        fi
+        warn "PAM authorization will fail until you run:"
+        warn "  ob-enroll -p $PORTAL_URL -g $SERVER_GROUP${CLIENT_ID:+ -c $CLIENT_ID}"
+        warn "manually after this setup completes."
+        echo ""
+        if ! confirm "Continue applying SSH/PAM lockdown anyway? (DANGEROUS)"; then
+            info "Aborted by user."
+            rollback_on_failure
+            exit 1
+        fi
+    else
+        # Persist any client_id/client_secret entered during retry prompts so
+        # future re-enrollments via ob-enroll alone keep working.
+        refresh_openbastion_conf
+    fi
+
+    # ── Phase 3: SSH / PAM lockdown ──
     configure_sshd || exit 1
     configure_pam_sshd || exit 1
     configure_pam_sudo || true
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
     download_krl || warn "KRL download failed"
-    configure_nss || exit 1
-    configure_pam_openbastion || exit 1
-    enroll_server || warn "Server enrollment skipped or failed"
 
     if [ "$DRY_RUN" = "false" ]; then
         restart_sshd || warn "Failed to restart SSH"
