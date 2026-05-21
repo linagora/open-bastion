@@ -1,260 +1,53 @@
 open-bastion (0.2.2) unstable; urgency=medium
 
-  * Fix (ob-bastion-setup): prevent bastion lockout when enrollment
-    fails. Added a pre-flight check on POST /oauth2/device before any
-    system change, and reorganised main() so SSH/PAM lockdown only
-    runs AFTER successful enrollment. In --max-security, enrollment
-    failure is now FATAL and the script aborts before touching
-    /etc/ssh/sshd_config*, /etc/pam.d/sshd or /etc/pam.d/sudo. Inert
-    files written during preparation are rolled back from BACKUP_DIR
-    (or removed) so a failed run leaves the system unchanged.
-  * Fix (ob-bastion-setup): configure_nss now handles commented or
-    missing passwd:/group: lines in /etc/nsswitch.conf. The previous
-    sed-based logic silently no-op'd on minimal images where these
-    lines ship commented out, leaving NSS unable to resolve any
-    LLNG-managed user (getent passwd returned nothing, SSH cert auth
-    failed with "Invalid user xxx" even with a valid certificate).
-  * Fix (ob-bastion-setup): always write authorize_only=true to
-    /etc/open-bastion/openbastion.conf. Without it, pam_openbastion
-    config_validate() rejected the file with "Invalid configuration"
-    because it required client_id/client_secret for OIDC token
-    introspection — which a cert-authenticated bastion never receives.
-  * Fix (ob-enroll): dropped "curl -f" so HTTP 4xx responses surface
-    the portal's actual error body (invalid_client, unauthorized_client,
-    etc.) instead of the misleading "Failed to contact portal".
-    The script now logs the JSON response and a list of common causes.
-  * Fix (ob-session-recorder): scp / sftp / rsync transfers now work.
-    is_file_transfer() detects scp -t/-f, sftp-server, internal-sftp
-    and rsync --server, and execs those commands directly via the
-    user's shell instead of wrapping them in script/asciinema/ttyrec
-    (whose PTY corrupted the binary transfer protocol).
-  * Fix (ob-session-recorder): release SSH channel FDs in the
-    background timeout subshell. Without redirecting stdin/stdout/
-    stderr to /dev/null, sshd waited for the leaked sleep child
-    (up to MAX_SESSION_DURATION = 8 h) before closing the channel,
-    making scp appear to hang after a clean transfer. A TERM/HUP
-    trap in the subshell now kills the sleep grandchild on cleanup.
-  * Feat (ob-bastion-setup): added -c/--client-id, -S/--client-secret-file
-    and support for the OB_CLIENT_SECRET env var. On enrollment
-    failure the script prompts interactively for credentials and
-    retries up to 3 times; credentials that succeed are persisted
-    in openbastion.conf for future re-enrollments.
-  * Feat (ob-bastion-setup): prompt for --server-group and --client-id
-    when omitted. The silent SERVER_GROUP="bastion" default is gone;
-    in --yes mode both options must be passed explicitly.
+  * See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 
  -- Xavier Guimard <yadd@debian.org>  Thu, 21 May 2026 10:00:00 +0200
 
 open-bastion (0.2.1) unstable; urgency=medium
 
-  * Maintenance release. No behavioural change in the PAM or NSS
-    modules.
-  * Fix: ob-bastion-setup / ob-backend-setup stop looking for the
-    defunct /usr/sbin/llng-pam-enroll (renamed to ob-enroll); a
-    fresh setup no longer prints "[WARN] Server not enrolled. Run
-    llng-pam-enroll manually after installation" after a successful
-    enrollment.
-  * Fix (Docker demos): drop the duplicate uwsgi_param HTTP_HOST
-    $host that the upstream yadd/lemonldap-ng-portal:latest-non-root
-    image now ships in both /etc/nginx/uwsgi_params and
-    portal-nginx.conf. uwsgi concatenates duplicate values, so LLNG
-    saw the vhost as "localhost, localhost" and rejected every
-    request with ACCESS_REFUSED, breaking demo bastion enrollment.
-  * Sweep remaining llng-* leftovers across scripts, docs, configs
-    and Docker demos so paths, modules, units, packages and internal
-    identifiers match the names actually installed
-    (pam_openbastion.so, libnss_openbastion.so, /etc/open-bastion/*,
-    ob-* binaries, ob-heartbeat.timer, open-bastion apt package,
-    50-open-bastion-*.conf sshd dropins, etc.). LemonLDAP::NG portal
-    and external llng CLI references preserved.
-  * Bash/env vars: PAM_LLNG_*, LLNG_RECORDER_* renamed to PAM_OB_*,
-    OB_RECORDER_* / OB_SESSIONS_DIR / OB_MAX_SESSION /
-    OB_RECORDER_FORMAT.
-  * CI: bump GitHub Actions to versions running on Node.js 24
-    (#115).
+  * See CHANGELOG.md
 
  -- Xavier Guimard <yadd@debian.org>  Wed, 20 May 2026 13:55:00 +0200
 
 open-bastion (0.2.0) unstable; urgency=medium
 
-  * Three independent opt-in features (none changes existing
-    behaviour: a v0.1.5 deployment upgraded with no flag set runs
-    identically). v0.1.6 was prepared internally but never tagged or
-    published; its content is folded into this release.
-  * Service accounts (machine accounts): local Unix accounts declared
-    in /etc/open-bastion/service-accounts.conf (0600 root:root) that
-    LemonLDAP::NG never sees, for CI agents and headless tooling.
-    pam_openbastion materialises the Unix user on first login
-    (create_user = true) with forced uid/gid; libnss_openbastion
-    resolves them so sshd's pre-auth getpwnam() succeeds. Mode E
-    support via scripts/ob-service-account-keys
-    (AuthorizedKeysCommand helper) so plain (non-SSO-signed) keys can
-    authenticate registered service accounts without breaking the
-    "AuthorizedKeysFile none" guarantee. New docker-demo-token-svc/
-    variant and integration tests.
-  * Session-containment hardening (ob-bastion-setup
-    --enable-hardening, off by default): closes setsid/nohup orphans
-    (KillUserProcesses=yes via /etc/systemd/logind.conf.d/), at(1)
-    and crontab(1) for non-root users (at.allow empty + atd masked,
-    cron.allow root-only), systemd-run --user --on-active timers
-    (linger pre-flight refusal), and fork bombs (nproc cap 256,
-    @ob-service group exempt). No new setuid binary. Templates ship
-    under /usr/share/open-bastion/hardening/ and are deployed into
-    /etc/ at runtime by ob-bastion-setup. New doc/hardening.md and 20
-    integration tests.
-  * Primary audit trace via auditd (ob-bastion-setup
-    --enable-audit-trace, off by default): execve+execveat, connect,
-    watches on /etc/passwd, /etc/shadow, /etc/sudoers(.d),
-    /etc/ssh/sshd_config(.d), /var/lib/open-bastion/sessions/,
-    /etc/open-bastion/. Daily SIGUSR1 rotation cron for ~1 week local
-    retention. /etc/audit/auditd.conf is intentionally not modified
-    (admin-tunable). Warns and skips if auditd is absent. auditd
-    declared as Recommends:, never installed silently. New
-    doc/audit.md and 11 tests.
-  * Security analysis updated (doc/security/02-ssh-connection.md and
-    99-risk-reduce.md): R-S18 score corrected (P=2, I=1 — the wrapper
-    setgid + sticky bit provide cross-user isolation, not own-file
-    immutability; syslog and the new auditd watch preserve
-    traceability). R-S19/R-S20/R-S21 added (containment evasion,
-    deferred action, syscalls-not-captured); residual scores assume
-    both --enable-hardening and --enable-audit-trace activated.
-  * Security: strict 0600 root:root enforced on service-accounts.conf
-    in libnss_openbastion (mirrors pam_openbastion); service-account
-    entries are not persisted to the on-disk NSS cache. The hardening
-    linger pre-flight is a security gate (fails the step under --yes
-    too).
-  * Recommended invocation on dedicated bastion hosts:
-    ob-bastion-setup --portal … --enable-hardening
-    --enable-audit-trace. Both flags can be combined with
-    --max-security (Mode E).
+  * See CHANGELOG.md
 
  -- Xavier Guimard <yadd@debian.org>  Thu, 30 Apr 2026 12:00:00 +0200
 
 open-bastion (0.1.5) unstable; urgency=medium
 
-  * SSH key fingerprint binding on /pam/authorize and /pam/verify
-    (requires LemonLDAP::NG PamAccess >= 0.1.16 and SSHCA >= 0.1.16).
-    pam_openbastion now forwards the SHA256 fingerprint of the SSH
-    key used to open the session; LLNG cross-checks it against the
-    user's persistent session (_sshCerts) and rejects the call if the
-    certificate is unknown, revoked, or expired. Closes the gap where
-    a cert revoked on the portal could still open a session or
-    escalate via sudo until the KRL propagated (or at all if
-    RevokedKeys was missing from sshd_config).
-  * New helper /usr/local/sbin/ob-ssh-principals, installed by
-    ob-bastion-setup and ob-backend-setup as AuthorizedPrincipalsCommand
-    "%u %f". It atomically drops the fingerprint to
-    /run/open-bastion/ssh-fp/<sshd-session-pid>.fp (mktemp + mv).
-    pam_openbastion walks /proc up to the sshd-session ancestor and
-    reads the file, validating owner/mode/nlink/size/format. A
-    systemd-tmpfiles drop-in recreates the spool directory at boot.
-  * Spool directory hardened: owned by the
-    AuthorizedPrincipalsCommandUser (typically "nobody") with mode
-    0700, so no other local user can pre-create or substitute a drop
-    file. pam_openbastion refuses the spool if the directory is group/
-    world-writable, and rejects any drop file whose owner/mode/nlink
-    does not match (0600, nlink==1, uid == dir uid).
-  * Strict SHA256 filter: pam_openbastion only forwards fingerprints
-    matching SHA256:<base64>. Prevents systematic HTTP 400 when sshd
-    is configured with "FingerprintHash md5".
-  * Integration tests: fingerprint match/unknown/malformed on
-    /pam/authorize, revocation via /ssh/myrevoke without KRL refresh,
-    and end-to-end SSH attempt refused at PAM account phase.
-  * Re-run ob-bastion-setup / ob-backend-setup after upgrade to pick
-    up the new AuthorizedPrincipalsCommand line and install the spool
-    helper.
+  * See CHANGELOG.md
 
  -- Xavier Guimard <xguimard@linagora.com>  Mon, 20 Apr 2026 07:00:00 +0200
 
 open-bastion (0.1.4) unstable; urgency=medium
 
-  * NSS config path fix: libnss_openbastion now reads its config from
-    /etc/open-bastion/nss_openbastion.conf (the location where CMake
-    installs it and where ob-bastion-setup/ob-backend-setup have always
-    written). Previously hard-coded to /etc/nss_llng.conf (leftover from
-    llng-pam-module rename), so NSS silently refused to resolve users.
-    Re-run ob-bastion-setup or ob-backend-setup after upgrade.
-  * Session recorder wrapper (ob-session-recorder-wrapper): hardened
-    against privilege escalation. Explicitly drop elevated gid via
-    setregid() before exec; create session dir with mode 2770 (setgid)
-    so files inherit the ob-sessions group without the script needing
-    elevated gid; strip dangerous env vars (LD_*, BASH_ENV, ENV,
-    SHELLOPTS, BASHOPTS, CDPATH, GCONV_PATH, NLSPATH, TMPDIR, ...);
-    harden PATH; validate username against ^[a-z_][a-z0-9_.-]*$;
-    resolve username via getpwuid() instead of env.
-  * ob-session-recorder: derive SESSION_USER from "id -un" instead of
-    the user-controllable $USER env var; validate with same regex.
-  * Session directory creation: TOCTOU races fixed (use fstat/fchown/
-    fchmod on fd rather than path).
-  * Defense-in-depth sudo: new system group open-bastion-sudo created
-    by postinst/spec; pam_openbastion session hook syncs membership on
-    each login based on sudo_allowed from /pam/authorize
-    (true -> add to group, false -> remove). ob-bastion-setup writes
-    /etc/sudoers.d/open-bastion restricting sudo to %open-bastion-sudo
-    (existing files are not overwritten). nscd cache invalidated after
-    membership change so sudo sees the update immediately.
-  * NSS config and token files now opened with O_NOFOLLOW and verified
-    via fstat: must be owned by root, must be a regular file, must not
-    be group/world-writable; token file must not be group/world-readable.
-  * NSS write_callback: integer overflow check and 256 KB response size
-    cap to prevent memory exhaustion.
-  * NSS module: added syslog diagnostics for silent rejection paths.
-  * Docker demos: removed the "useradd -m" fallback that masked NSS
-    failures; demos now fail fast when NSS cannot resolve users.
-  * New quick-start/ directory: minimal 2-container demo using
-    yadd/lemonldap-ng-portal directly with the plugin autoloader (no
-    customPlugins edit), with README covering installation of
-    Open-Bastion plugins on an existing LLNG via lemonldap-ng-store or
-    Debian packages.
+  * See CHANGELOG.md
 
  -- Xavier Guimard <xguimard@linagora.com>  Sat, 18 Apr 2026 23:00:00 +0200
 
 open-bastion (0.1.3) unstable; urgency=medium
 
-  * Mode E hardening: tested end-to-end deployment
-  * Fix PAM module name: pam_llng.so -> pam_openbastion.so
-  * Fix NSS module symbols: _nss_llng_* -> _nss_openbastion_*
-  * Fix NSS config: nsswitch.conf uses 'openbastion', server_token_file key
-  * Fix ob-enroll: send client_secret to device endpoint (optional)
-  * Fix ob-bastion-setup: add Include directive, AuthorizedPrincipalsCommand,
-    PermitRootLogin no, NSS configuration, pam_mkhomedir.so
-  * Fix session recorder paths: ob-session-recorder, /etc/open-bastion/
-  * Fix sudo Mode E: remove pam_unix.so from account (NSS-only users),
-    create /etc/sudoers.d/open-bastion
-  * Session recording privilege separation via setgid wrapper
-    (ob-session-recorder-wrapper, group ob-sessions, mode 1770)
-  * New risk R-S18: session recording tampering (mitigated P=1/I=1)
-  * Pre-hardening bootstrap: securetty ttyS0, PermitRootLogin no,
-    service account for emergency access
+  * See CHANGELOG.md
 
  -- Xavier Guimard <xguimard@linagora.com>  Wed, 16 Apr 2026 20:00:00 +0200
 
 open-bastion (0.1.2) unstable; urgency=medium
 
-  * Mode E: Maximum Security (SSO certs only + sudo PAM-access + KRL)
-  * --max-security option in ob-backend-setup and ob-bastion-setup
-  * docker-demo-maxsec: Docker demo for Mode E architecture
-  * CI integration tests for Mode E
-  * EBIOS security study refactored for maximum security target
-  * Fix OB_BASTION_JWT → LLNG_BASTION_JWT everywhere
-  * Fix AllowAgentForwarding on bastion (no instead of yes)
-  * Fix ProxyJump references: use ob-ssh-proxy for JWT injection
-  * KRL format validation (SSHKRL magic bytes check)
+  * See CHANGELOG.md
 
  -- Xavier Guimard <xguimard@linagora.com>  Sun, 13 Apr 2026 12:00:00 +0200
 
 open-bastion (0.1.1) unstable; urgency=medium
 
-  * Supplementary groups synchronization via managed_groups configuration
-  * Local whitelist for managed groups (allowed_managed_groups)
-  * CrowdSec IP/CIDR whitelist to bypass checks for trusted IPs/networks
-  * Fixed TOCTOU race condition in cache_key.c
+  * See CHANGELOG.md
 
  -- Xavier Guimard <xguimard@linagora.com>  Sat, 07 Feb 2026 22:51:15 +0100
 
 open-bastion (0.1.0) unstable; urgency=medium
 
   * Initial release
-  * Renamed project from pam-llng to open-bastion
 
  -- Xavier Guimard <xguimard@linagora.com>  Sat, 07 Feb 2026 12:58:42 +0100
