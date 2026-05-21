@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-21
+
+Robustness release for the setup scripts and the session recorder. The
+previous setup could brick a fresh bastion in several non-obvious ways
+(failed enrollment + applied SSH/PAM lockdown, silently broken NSS,
+PAM module rejecting its own generated config) and the ForceCommand
+recorder broke scp / sftp / rsync. None of this changes the on-wire
+protocol with LemonLDAP::NG — only the install path and the recorder
+behaviour are affected.
+
+### Fixed
+
+- **`ob-bastion-setup`**: no longer locks down SSH/PAM before server
+  enrollment has succeeded. Added a pre-flight check on
+  `POST /oauth2/device` and reorganised `main()` into three phases:
+  inert preparation → portal pre-flight + enrollment → SSH/PAM
+  lockdown. In `--max-security`, enrollment failure is now FATAL and
+  the script aborts before touching `/etc/ssh/sshd_config*`,
+  `/etc/pam.d/sshd`, `/etc/pam.d/sudo`, etc. Inert files written
+  during phase 1 are rolled back from `BACKUP_DIR` (or removed if
+  no backup existed), so a failed run leaves the system unchanged.
+
+- **`ob-bastion-setup`** (NSS): `configure_nss` no longer silently
+  no-ops when `/etc/nsswitch.conf` ships with `passwd:` / `group:`
+  commented out or missing. The new `nss_configure_db` helper handles
+  three cases (already configured, active line present, missing/
+  commented) and refuses to proceed if the resulting line still
+  doesn't include `openbastion`. Without this fix, `getent passwd`
+  returned nothing for LLNG-managed users and SSH cert auth failed
+  with `Invalid user xxx` even though the certificate was valid.
+
+- **`ob-bastion-setup`** (PAM config): `/etc/open-bastion/openbastion.conf`
+  is now generated with `authorize_only = true` by default. Without
+  this flag, `pam_openbastion`'s `config_validate()` requires both
+  `client_id` and `client_secret` for OIDC token introspection —
+  which the bastion never receives, since the user authenticates
+  with an SSH certificate. Symptom of the old behaviour: PAM
+  account step failed with `pam_openbastion: Invalid configuration`
+  immediately after a successful certificate authentication.
+
+- **`ob-enroll`**: dropped `curl -f` from `build_curl_opts()` so that
+  HTTP 4xx responses surface the portal's actual error body. The
+  script already checks `http_code != 200` manually; with `-f` curl
+  exited non-zero before the body was read and the user was told
+  `Failed to contact portal` regardless of whether the portal was
+  unreachable or simply rejecting the request (unknown `client_id`,
+  missing scope, Device Authorization Grant disabled, etc.). The
+  error messages now include the JSON response and a list of common
+  causes.
+
+- **`ob-session-recorder`** (scp / sftp / rsync): the `ForceCommand`
+  recorder used to wrap every command in `script` / `asciinema` /
+  `ttyrec`, which spawns a PTY. File-transfer protocols exchange a
+  binary stream over raw stdio and the PTY's `NL` → `CR+NL`
+  translation corrupted it (clients hung or aborted with
+  `Connection closed`). The new `is_file_transfer()` detects
+  `scp -t/-f`, `sftp-server`, `internal-sftp` and `rsync --server`
+  and `exec`s those commands directly via the user's shell. Metadata
+  is still written (`format = "transfer"`); only the PTY recording
+  is skipped.
+
+- **`ob-session-recorder`** (channel hang): the background session
+  timeout (`(sleep N; kill -ALRM $$) &`) inherited stdin/stdout/stderr
+  from sshd. sshd waits for every process holding the channel FDs to
+  release them before closing the channel, so even after a clean
+  `scp` finished the client appeared to hang for up to
+  `MAX_SESSION_DURATION` (8 h by default). The subshell now redirects
+  its FDs to `/dev/null`, and a `TERM`/`HUP` trap kills the `sleep`
+  grandchild on cleanup so we no longer leak an 8-hour sleep per
+  session.
+
+### Added
+
+- **`ob-bastion-setup`**: `-c` / `--client-id`, `-S` /
+  `--client-secret-file FILE` (use `-` for stdin) and support for the
+  `OB_CLIENT_SECRET` environment variable. Secrets passed via file
+  or env stay out of `/proc/<pid>/cmdline`. The credentials are
+  forwarded to `ob-enroll` via env so they never appear on its
+  command line either.
+
+- **`ob-bastion-setup`**: interactive retry on enrollment failure.
+  On `invalid_client` or similar, the script asks the user whether
+  to provide / update credentials and tries again (up to 3 attempts)
+  without restarting the whole setup. Credentials that succeed are
+  persisted in `/etc/open-bastion/openbastion.conf` so future
+  re-enrollments via `ob-enroll` alone keep working.
+
+- **`ob-bastion-setup`**: interactive prompts for `--server-group`
+  and `--client-id` when they are omitted on the CLI. The silent
+  `SERVER_GROUP="bastion"` default has been removed. In `--yes`
+  (non-interactive) mode both options must now be passed
+  explicitly — the script errors out otherwise instead of using
+  a default that probably does not match the LLNG configuration.
+
+- **`ob-bastion-setup`** (summary): the post-run banner now reports
+  enrollment outcome (`✓ Server enrolled`, `✓ Token installed`,
+  `✗ Server enrollment FAILED`) and switches to
+  `Bastion Configuration INCOMPLETE` with an `ACTION REQUIRED` block
+  when enrollment did not succeed and the user chose to proceed
+  anyway.
+
 ## [0.2.1] - 2026-05-20
 
 Maintenance release that completes the `llng-pam-module` →

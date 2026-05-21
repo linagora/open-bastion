@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 PROG_NAME=$(basename "$0")
 
 # Default configuration

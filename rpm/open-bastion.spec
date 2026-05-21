@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -179,6 +179,43 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Thu May 21 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.2-1
+- Fix (ob-bastion-setup): prevent bastion lockout when enrollment fails.
+  Pre-flight check on /oauth2/device, reorder main() so SSH/PAM lockdown
+  only runs AFTER successful enrollment, rollback inert files on
+  enrollment failure, and refuse to apply --max-security if the server
+  could not be enrolled.
+- Fix (ob-bastion-setup): handle commented or missing passwd:/group:
+  lines in /etc/nsswitch.conf. The previous sed-based logic silently
+  did nothing on minimal images where these lines ship commented out,
+  leaving NSS unable to resolve any LLNG-managed user.
+- Fix (ob-bastion-setup): always write authorize_only=true to
+  /etc/open-bastion/openbastion.conf so pam_openbastion does not
+  require client_id/client_secret at runtime (bastion uses SSH cert
+  auth, not OIDC tokens).
+- Feat (ob-bastion-setup): add -c/--client-id, -S/--client-secret-file
+  and honour the OB_CLIENT_SECRET env var. On enrollment failure,
+  prompt interactively for credentials and retry (up to 3 attempts);
+  credentials that succeed are persisted in openbastion.conf for
+  future re-enrollments.
+- Feat (ob-bastion-setup): prompt for --server-group and --client-id
+  when omitted in interactive mode; require both explicitly under
+  --yes. The silent SERVER_GROUP="bastion" default is gone.
+- Fix (ob-enroll): drop "curl -f" so HTTP 4xx responses surface the
+  portal's actual error body (e.g. invalid_client, unauthorized_client)
+  with common-cause hints, instead of the misleading "Failed to
+  contact portal".
+- Fix (ob-session-recorder): scp, sftp and rsync transfers now work.
+  is_file_transfer() detects scp -t/-f, sftp-server, internal-sftp
+  and rsync --server; those commands exec directly with raw stdio so
+  their binary protocol is not corrupted by the PTY wrapper.
+- Fix (ob-session-recorder): release SSH channel FDs in the background
+  timeout subshell. Without this redirect, sshd waited for the leaked
+  sleep child (up to MAX_SESSION_DURATION = 8h) before closing the
+  channel — visible as "scp completes but never returns the prompt".
+  A TERM/HUP trap in the subshell now kills the sleep grandchild on
+  cleanup so we don't leak an 8-hour sleep per session.
+
 * Wed May 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.1-1
 - Maintenance release. No behavioural change in the PAM or NSS
   modules.
