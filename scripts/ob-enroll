@@ -315,9 +315,14 @@ validate_config() {
     PORTAL_URL="${PORTAL_URL%/}"
 }
 
-# Build curl options array
+# Build curl options array.
+# NOTE: we intentionally do NOT pass -f. With -f, curl exits non-zero on any
+# HTTP 4xx/5xx and prints nothing, which would mask the portal's actual error
+# response. The script checks the HTTP status code manually at each call site,
+# and the response body is needed to diagnose Device Authorization failures
+# (e.g. unknown client_id, missing scope, grant not enabled).
 build_curl_opts() {
-    CURL_OPTS=("-s" "-f")
+    CURL_OPTS=("-s")
 
     if [ -n "${INSECURE:-}" ]; then
         CURL_OPTS+=("-k")
@@ -343,8 +348,9 @@ initiate_device_auth() {
         -d "scope=${SCOPE}" \
         -d "code_challenge=${CODE_CHALLENGE}" \
         -d "code_challenge_method=${CODE_CHALLENGE_METHOD}" 2>&1) || {
-        log_error "Failed to contact portal at ${PORTAL_URL}/oauth2/device"
-        log_info "Check that the portal URL is correct and Device Authorization is enabled"
+        log_error "Network failure contacting ${PORTAL_URL}/oauth2/device"
+        log_info "DNS, TCP or TLS handshake failed. Test: curl -v ${PORTAL_URL}/oauth2/device"
+        log_info "If portal uses a self-signed cert, retry with -k/--insecure."
         exit 1
     }
 
@@ -352,8 +358,13 @@ initiate_device_auth() {
     response=$(echo "$response" | sed '$d')
 
     if [ "$http_code" != "200" ]; then
-        log_error "Portal returned HTTP $http_code"
+        log_error "Portal rejected the device-authorization request (HTTP $http_code)"
         log_error "Response: $response"
+        log_info "Common causes:"
+        log_info "  - client_id '${CLIENT_ID}' is not registered on the LLNG portal"
+        log_info "  - scope '${SCOPE}' is not allowed for this client"
+        log_info "  - Device Authorization Grant is not enabled (oidcRPMetaDataOptionsGrantTypes)"
+        log_info "  - PKCE method 'S256' is not allowed for this client"
         exit 1
     fi
 

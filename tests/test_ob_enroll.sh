@@ -367,10 +367,13 @@ test_build_curl_opts_secure() {
 
     build_curl_opts
 
-    # Should contain -s and -f
+    # Should contain -s; must NOT contain -f (we want HTTP error bodies
+    # so we can show the portal's actual rejection reason).
     local opts_str="${CURL_OPTS[*]}"
     echo "$opts_str" | grep -q -- "-s" || return 1
-    echo "$opts_str" | grep -q -- "-f" || return 1
+    if echo "$opts_str" | grep -q -- "-f"; then
+        return 1
+    fi
 
     # Should NOT contain -k
     if echo "$opts_str" | grep -q -- "-k"; then
@@ -389,11 +392,13 @@ test_build_curl_opts_insecure() {
 
     build_curl_opts
 
-    # Should contain -s, -f, and -k
+    # Should contain -s and -k; must NOT contain -f (see secure test).
     local opts_str="${CURL_OPTS[*]}"
     echo "$opts_str" | grep -q -- "-s" || return 1
-    echo "$opts_str" | grep -q -- "-f" || return 1
     echo "$opts_str" | grep -q -- "-k" || return 1
+    if echo "$opts_str" | grep -q -- "-f"; then
+        return 1
+    fi
 
     return 0
 }
