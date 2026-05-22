@@ -669,7 +669,7 @@ auto_enroll_setup: no
 self_delete: no
 EOF
 
-    if ! "$builder" --config "$cfg" --output-shell "$artefact" --insecure >"${workdir}/builder.log" 2>&1; then
+    if ! "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure >"${workdir}/builder.log" 2>&1; then
         fail "ob-builder failed to produce artefact" "$(cat "${workdir}/builder.log")"
         rm -rf "$workdir"
         return 1
