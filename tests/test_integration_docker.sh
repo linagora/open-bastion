@@ -759,12 +759,31 @@ test_builder_auto_approve_protocol() {
     log "Testing LLNG auto-approve protocol (ob-enroll + cookie + /device)..."
 
     # Obtain a session cookie for admin user dwho.
-    local cookie
-    cookie=$(llng --llng-url "${PORTAL_URL}" --login "${TEST_USER}" --password "${TEST_PASSWORD}" llng_cookie 2>/dev/null || true)
-    if [ -z "$cookie" ]; then
-        fail "Could not obtain LLNG session cookie via llng CLI"
+    local cookie cookie_jar llng_log
+    cookie_jar=$(mktemp -t llng-auto-approve.XXXXXX)
+    llng_log=$(mktemp -t llng-auto-approve-log.XXXXXX)
+    if ! llng --llng-url "${PORTAL_URL}" \
+              --login "${TEST_USER}" \
+              --password "${TEST_PASSWORD}" \
+              --cookie-jar "$cookie_jar" \
+              llng_cookie > "$llng_log" 2>&1; then
+        fail "llng CLI failed to obtain a session cookie" "$(cat "$llng_log")"
+        rm -f "$cookie_jar" "$llng_log"
         return 1
     fi
+    # llng_cookie prints the Cookie header value to stdout (e.g. "lemonldap=ABC123")
+    cookie=$(tr -d '\r\n' < "$llng_log")
+    if [ -z "$cookie" ]; then
+        # Fallback: extract from the cookie jar (Netscape format).
+        cookie=$(awk '!/^#/ && $6=="lemonldap" {print $6 "=" $7; exit}' "$cookie_jar")
+    fi
+    rm -f "$llng_log"
+    if [ -z "$cookie" ] || ! echo "$cookie" | grep -q "lemonldap="; then
+        fail "Could not extract a 'lemonldap=' cookie value" "stdout/jar: $(cat "$cookie_jar" 2>/dev/null | head -5)"
+        rm -f "$cookie_jar"
+        return 1
+    fi
+    rm -f "$cookie_jar"
     log_verbose "Got cookie: $(echo "$cookie" | cut -c1-40)…"
 
     # Backend-new needs the open-bastion config in place. The previous
