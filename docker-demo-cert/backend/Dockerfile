@@ -56,7 +56,7 @@ RUN mkdir -p build && cd build && \
     # NSS loader (libc) traditionally searches /lib/x86_64-linux-gnu first.
     # On merged-/usr Debian /lib IS /usr/lib, so the symlink would self-loop.
     # Only create the link when the two directories are genuinely distinct.
-    sh -c 'if [ "$(readlink -f /lib/x86_64-linux-gnu)" != "$(readlink -f /usr/lib/x86_64-linux-gnu)" ]; then ln -sf /usr/lib/x86_64-linux-gnu/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/libnss_openbastion.so.2; fi' && \
+    { if [ "$(readlink -f /lib/x86_64-linux-gnu)" != "$(readlink -f /usr/lib/x86_64-linux-gnu)" ]; then ln -sf /usr/lib/x86_64-linux-gnu/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/libnss_openbastion.so.2; fi ; } && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 

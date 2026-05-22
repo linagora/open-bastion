@@ -965,6 +965,38 @@ EOF
                     details="${details}- $scenario/$role: Mode E expected min_tls_version=13"$'\n'
                     continue
                 fi
+            else
+                if grep -q "min_tls_version = 13" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E setting min_tls_version=13 leaked into non-max-security artefact"$'\n'
+                    continue
+                fi
+            fi
+            # Mode E specifics: cache_ttl tightened to 60, rate-limit on.
+            if [ "$scenario" = "max-security" ]; then
+                if ! grep -q "^cache_ttl = 60" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E expected cache_ttl=60"$'\n'
+                    continue
+                fi
+                if ! grep -q "cache_rate_limit_enabled = true" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E expected cache_rate_limit_enabled=true"$'\n'
+                    continue
+                fi
+            fi
+            # The generated script must keep the safety prelude. Regression
+            # detector for any future change that drops it.
+            if ! grep -qE "^set -euo? pipefail" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: generated script missing 'set -euo pipefail' prelude"$'\n'
+                continue
+            fi
+            # portal_url must be embedded into the conf section.
+            if ! grep -qF "portal_url = ${PORTAL_URL}" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: portal_url not embedded in artefact"$'\n'
+                continue
             fi
         done
     done
@@ -1051,25 +1083,18 @@ test_ob_bastion_id() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing ob-bastion-id on the pre-enrolled bastion..."
 
-    # The docker-demo-cert bastion entrypoint stores the server token in
-    # JSON form at /etc/open-bastion/server_token.json (legacy format),
-    # while ob-bastion-id (and ob-enroll, the canonical source) expects
-    # a raw bearer token at /etc/open-bastion/token. Bridge the two by
-    # extracting .access_token into the raw form for this test.
-    docker exec ob-cert-bastion bash -c '
-        if [ -f /etc/open-bastion/server_token.json ] && [ ! -s /etc/open-bastion/token ]; then
-            jq -r ".access_token" /etc/open-bastion/server_token.json > /etc/open-bastion/token
-            chmod 0600 /etc/open-bastion/token
-        fi
-    '
+    # ob-bastion-id now reads `server_token_file` from openbastion.conf
+    # and accepts both plain-text and JSON-with-.access_token formats —
+    # matching what the PAM module already does. No test-side bridge needed.
 
-    local id err
+    local id
     if ! id=$(docker exec ob-cert-bastion ob-bastion-id --quiet 2>&1); then
-        # 403 from /pam/bastion-token means the demo SSO does not have
-        # the bastion-token plugin enabled, or the bridged token lacks
-        # the right LLNG rule — neither is an ob-bastion-id bug.
-        if echo "$id" | grep -q "HTTP 403\|error: 403"; then
-            log_warn "/pam/bastion-token returned 403 in docker-demo-cert — endpoint not provisioned"
+        # /pam/bastion-token returning 403 means the demo SSO is missing
+        # the bastion-token plugin (or the enrolled token lacks the LLNG
+        # rule) — not an ob-bastion-id bug. Anchor the match on a status
+        # boundary to avoid accidental matches on bodies containing "403".
+        if echo "$id" | grep -qE 'HTTP[/ ]403|HTTP_STATUS__:403|"status"[[:space:]]*:[[:space:]]*403'; then
+            log_warn "/pam/bastion-token returned 403 — endpoint not provisioned in this demo"
             pass "ob-bastion-id test skipped (LLNG endpoint not available in this demo)"
             return 0
         fi
