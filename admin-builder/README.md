@@ -49,6 +49,7 @@ server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend
 auto_enroll_setup: prompt
+ansible_auto_approve: no       # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
@@ -101,6 +102,30 @@ ansible-playbook -i inventory.yml playbook.yml \
 ```
 
 For full details on role variables and usage, see [`templates/ansible/role/README.md`](templates/ansible/role/README.md).
+
+### Unattended fleet deployments — device-code auto-approval
+
+For fleets where opening a browser to approve every host is impractical, the
+Ansible role can be built with `ansible_auto_approve: yes`. At play time it
+asks for an LLNG session cookie via `vars_prompt` (never stored on disk) and
+uses it to POST to LLNG's `/device` endpoint, approving the device code
+without human interaction.
+
+```bash
+# Build the role with auto-approve enabled
+ob-builder --config build.yml --output-ansible /tmp/role/
+
+# Run the playbook — paste the cookie when prompted
+ansible-playbook -i inventory.yml /tmp/role/playbook.yml
+
+# Or pass the cookie non-interactively (CI)
+ansible-playbook -i inventory.yml /tmp/role/playbook.yml \
+  --extra-vars "ob_llng_cookie=$(llng --llng-server https://sso.example.com llng_cookie)"
+```
+
+The cookie is short-lived (typically under 24 h, matching the LLNG session
+lifetime), so it is not worth persisting. An empty cookie falls back to the
+manual browser-approval flow.
 
 ## Shell Installer Options
 
