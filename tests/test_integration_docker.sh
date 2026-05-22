@@ -790,7 +790,7 @@ test_builder_auto_approve_protocol() {
     # builder test deposited it (run-order dependency: that test must
     # have passed). Re-deposit a minimal config in case a previous run
     # invalidated it.
-    docker exec ob-cert-backend-new bash -c "cat > /etc/open-bastion/openbastion.conf" <<EOF
+    docker exec -i ob-cert-backend-new bash -c "cat > /etc/open-bastion/openbastion.conf" <<EOF
 portal_url = http://sso:8080
 client_id = ${CLIENT_ID}
 client_secret = ${CLIENT_SECRET}
@@ -798,6 +798,13 @@ server_group = backend-new
 verify_ssl = false
 EOF
     docker exec ob-cert-backend-new chmod 0600 /etc/open-bastion/openbastion.conf
+    # Sanity check: confirm portal_url landed in the conf — without -i the
+    # earlier docker exec would silently write an empty file.
+    if ! docker exec ob-cert-backend-new grep -q "^portal_url = http://sso:8080" /etc/open-bastion/openbastion.conf; then
+        fail "Could not write openbastion.conf inside ob-cert-backend-new" \
+             "$(docker exec ob-cert-backend-new cat /etc/open-bastion/openbastion.conf)"
+        return 1
+    fi
 
     # Start ob-enroll asynchronously inside the container.
     docker exec ob-cert-backend-new bash -c \
