@@ -393,6 +393,12 @@ if(BUILD_BUILDER)
     set(BUILDER_DEB_DIR "${BUILDER_STAGE_DIR}/deb")
     set(BUILDER_DEB_ROOT "${BUILDER_DEB_DIR}/root")
 
+    # CMake's configure_file does create missing parent directories on
+    # recent versions, but be explicit: ensures correctness on older
+    # CMake and silences static-analysis tooling that flags the implicit
+    # behaviour.
+    file(MAKE_DIRECTORY "${BUILDER_DEB_ROOT}/DEBIAN")
+
     # Generate DEBIAN/control with the real version substituted
     configure_file(
         "${CMAKE_SOURCE_DIR}/admin-builder/debian/control"
