@@ -91,10 +91,10 @@ base64url_decode() {
     # newlines, but our padding calculation below uses ${#s} which would
     # otherwise be wrong.
     s="${s//[$' \t\r\n']/}"
-    s="${s//-/+}"
-    # Bash ${var//pattern/replacement} — replace every '_' with '/'.
-    # The middle '/' is the separator; the trailing '/' is the replacement.
-    s="${s//_//}"
+    # Translate the base64url alphabet to standard base64 in one pass.
+    # (Previous form `${s//_//}` was correct but easily misread as
+    #  "delete _" by reviewers and static-analysis tools.)
+    s=$(printf '%s' "$s" | tr '\-_' '+/')
     local pad=$(( (4 - ${#s} % 4) % 4 ))
     case "$pad" in
         1) s="${s}=" ;;
