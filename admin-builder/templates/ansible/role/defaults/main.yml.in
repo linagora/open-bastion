@@ -36,6 +36,17 @@ ob_auto_enroll: @@AUTO_ENROLL_BOOL@@  # true when AUTO_ENROLL_SETUP includes enr
 # When true, the role runs ob-bastion-setup / ob-backend-setup during the play.
 ob_auto_setup: @@AUTO_SETUP_BOOL@@
 
+# ── Device-code auto-approval (Ansible-only, opt-in at build time) ───────────
+# When ob_ansible_auto_approve is true AND ob_llng_cookie is non-empty, the
+# enrollment task auto-approves the user_code via the LLNG /device endpoint
+# instead of waiting for a human to validate it in a browser. The cookie is
+# obtained with the `llng` CLI from simple-oidc-client:
+#   llng --llng-server <portal> llng_cookie
+# It is asked for at every play run via vars_prompt in playbook.yml and is
+# never persisted to disk. Falls back to the manual flow if the cookie is empty.
+ob_ansible_auto_approve: @@ANSIBLE_AUTO_APPROVE_BOOL@@
+ob_llng_cookie: ""
+
 # ── APT repository ────────────────────────────────────────────────────────────
 ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 

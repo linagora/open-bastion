@@ -17,5 +17,6 @@
 
 - hosts: all
   become: true
+@@ANSIBLE_VARS_PROMPT_BLOCK@@
   roles:
     - role: open-bastion
