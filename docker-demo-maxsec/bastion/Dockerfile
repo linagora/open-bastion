@@ -58,6 +58,10 @@ RUN mkdir -p build && cd build && \
           .. && \
     make -j$(nproc) && \
     make install && \
+    # ob-service-account-keys is referenced by an absolute path
+    # (/usr/local/bin/) in this bastion's sshd_config; keep an explicit
+    # install there so AuthorizedKeysCommand keeps resolving.
+    install -Dm 0755 ../scripts/ob-service-account-keys /usr/local/bin/ob-service-account-keys && \
     # NSS loader (libc) traditionally searches /lib/x86_64-linux-gnu first.
     # On merged-/usr Debian /lib IS /usr/lib, so the symlink would self-loop.
     # Only create the link when the two directories are genuinely distinct.
