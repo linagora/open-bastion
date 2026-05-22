@@ -36,7 +36,7 @@ QUIET=false
 
 log_info()  { [ "$QUIET" = "true" ] || printf '[INFO] %s\n' "$*" >&2; }
 log_error() { printf '[ERROR] %s\n' "$*" >&2; }
-die() { log_error "$*"; exit 1; }
+die() { log_error "$*"; exit "${2:-1}"; }
 
 usage() {
     cat <<EOF
@@ -86,6 +86,11 @@ read_config() {
 # base64url uses '-' and '_' where standard base64 uses '+' and '/'.
 base64url_decode() {
     local s="$1"
+    # Strip whitespace (CR/LF/tab/space) that may have been introduced
+    # by sloppy HTTP intermediaries — base64 -d tolerates internal
+    # newlines, but our padding calculation below uses ${#s} which would
+    # otherwise be wrong.
+    s="${s//[$' \t\r\n']/}"
     s="${s//-/+}"
     # Bash ${var//pattern/replacement} — replace every '_' with '/'.
     # The middle '/' is the separator; the trailing '/' is the replacement.
@@ -172,13 +177,13 @@ main() {
 
     local jwt
     jwt=$(printf '%s' "$body" | jq -r '.bastion_jwt // empty' 2>/dev/null)
-    [ -n "$jwt" ] || die "No bastion_jwt in response: $body"
+    [ -n "$jwt" ] || die "No bastion_jwt in response: $body" 2
 
     # JWT is header.payload.signature — decode the middle segment.
     local b64payload claims
     b64payload="${jwt#*.}"; b64payload="${b64payload%.*}"
     claims=$(base64url_decode "$b64payload")
-    [ -n "$claims" ] || die "Failed to base64url-decode JWT payload"
+    [ -n "$claims" ] || die "Failed to base64url-decode JWT payload" 3
 
     if [ "$VERBOSE" = "true" ]; then
         printf '%s\n' "$claims" | jq .

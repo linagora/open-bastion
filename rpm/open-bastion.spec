@@ -107,6 +107,7 @@ ctest --output-on-failure --verbose
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
 %{_mandir}/man1/ob-ssh-cert.1*
+%{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
 %{_mandir}/man8/ob-bastion-setup.8*

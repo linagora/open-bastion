@@ -1,0 +1,84 @@
+.TH OB-BASTION-ID 1 "May 2026" "open-bastion 0.2.2" "User Commands"
+.SH NAME
+ob-bastion-id \- Print this bastion's identifier (as seen by backends)
+.SH SYNOPSIS
+.B ob-bastion-id
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B ob-bastion-id
+issues a probe request to the LemonLDAP::NG
+.I /pam/bastion-token
+endpoint using this host's enrolled server token, decodes the returned
+JWT, and prints the
+.I bastion_id
+claim assigned by LLNG at enrolment.
+.PP
+Backends consult this value when their
+.I /etc/open-bastion/openbastion.conf
+sets a
+.B bastion_jwt_allowed_bastions
+whitelist. The administrator running
+.BR ob-builder (1)
+in
+.B \-\-target\-role=backend
+mode is asked to provide that list; running this utility on each enrolled
+bastion is the canonical way to discover the right value (the alternative
+being the LLNG Manager).
+.SH OPTIONS
+.TP
+.B \-v ", " \-\-verbose
+Print all JWT claims as pretty JSON instead of just the
+.I bastion_id .
+.TP
+.B \-j ", " \-\-json
+Print
+.RS
+.EX
+{"bastion_id": "..."}
+.EE
+.RE
+for machine-readable use.
+.TP
+.B \-q ", " \-\-quiet
+Suppress informational logs (errors still go to stderr).
+.TP
+.B \-c ", " \-\-config \fIFILE\fR
+Path to \fIopenbastion.conf\fR (default: \fI/etc/open-bastion/openbastion.conf\fR).
+.TP
+.B \-t ", " \-\-token \fIFILE\fR
+Path to the server token file (default: \fI/etc/open-bastion/token\fR).
+.TP
+.B \-h ", " \-\-help
+Show help.
+.TP
+.B \-V ", " \-\-version
+Print the version.
+.SH EXIT STATUS
+.TP
+.B 0
+.I bastion_id
+printed successfully.
+.TP
+.B 1
+Configuration or token file missing / unreadable.
+.TP
+.B 2
+.I /pam/bastion-token
+request failed (network error, HTTP non-200, or missing
+.I bastion_jwt
+field in the response).
+.TP
+.B 3
+JWT decoded but the
+.I bastion_id
+claim is absent (also returned when base64url decoding fails).
+.SH SECURITY
+Must be run as root in order to read
+.I /etc/open-bastion/token
+(mode 0600).
+.SH SEE ALSO
+.BR ob-enroll (8),
+.BR ob-bastion-setup (8),
+.BR ob-builder (1)
+.SH AUTHOR
+Open Bastion team <open-bastion@linagora.com>

@@ -4,7 +4,7 @@ Architecture: all
 Section: admin
 Priority: optional
 Maintainer: Open Bastion team <open-bastion@linagora.com>
-Depends: bash (>= 4.0), curl, openssl, jq, coreutils, openssh-client
+Depends: bash (>= 4.0), curl, jq, coreutils, openssh-client
 Recommends: yq
 Description: Open Bastion deployment artefact builder
  Interactive tool for administrators to generate self-extracting

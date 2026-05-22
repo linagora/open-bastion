@@ -14,16 +14,18 @@ is_valid_slug() {
 }
 
 # is_valid_url <url>
-# Accepts http:// or https://. The caller decides whether to refuse http
-# based on --allow-http.
+# Accepts http:// or https://. Excludes shell metacharacters ($, `, ", ', \)
+# so the URL can be safely embedded as a bash double-quoted literal in the
+# generated installer.sh — preventing command-substitution at install time.
+# The caller decides whether to refuse http based on --allow-http.
 is_valid_url() {
-    [[ "$1" =~ ^https?://[A-Za-z0-9._:/?#@!$\&\(\)*+,\;=~%-]+$ ]]
+    [[ "$1" =~ ^https?://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]
 }
 
 # is_valid_https_url <url>
-# Strict HTTPS check.
+# Strict HTTPS check. Same shell-safe character class as is_valid_url.
 is_valid_https_url() {
-    [[ "$1" =~ ^https://[A-Za-z0-9._:/?#@!$\&\(\)*+,\;=~%-]+$ ]]
+    [[ "$1" =~ ^https://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]
 }
 
 # is_valid_server_group <s>

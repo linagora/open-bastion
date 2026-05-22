@@ -286,6 +286,7 @@ install(FILES
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-proxy.1
+    ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
@@ -444,6 +445,13 @@ if(BUILD_BUILDER)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/admin-builder/keyrings"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
+
+        # Install man page
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/share/man/man1"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/admin-builder/man/ob-builder.1"
+            "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1"
 
         # Fix permissions: DEBIAN scripts must be 0755
         COMMAND chmod 0755

@@ -204,7 +204,6 @@ parse_args() {
             --bundle)        BUNDLE=1; shift ;;
             --allow-http)    ALLOW_HTTP=1; shift ;;
             --insecure)
-                # shellcheck disable=SC2034  # kept for future "summary" output; env var is the active channel
                 INSECURE=1
                 export OB_BUILDER_INSECURE=1
                 shift
@@ -253,20 +252,32 @@ load_config() {
 
 _load_config_yq() {
     local f="$1" v
-    # Try Go yq syntax (yq eval); fall back to Python yq syntax.
+    # Detect yq flavor ONCE so a transient failure on one query does not
+    # silently fall back to the other parser (which could produce different
+    # semantics for the same key — see PR #116 review).
+    local _yq_flavor=""
+    if yq --version 2>&1 | grep -qi "mikefarah"; then
+        _yq_flavor="go"
+    elif yq --help 2>&1 | grep -qi "yq is a wrapper\|kislyuk"; then
+        _yq_flavor="python"
+    else
+        # Heuristic: Go yq accepts `eval`, Python yq doesn't.
+        if yq eval '.' "$f" >/dev/null 2>&1; then
+            _yq_flavor="go"
+        else
+            _yq_flavor="python"
+        fi
+    fi
     _yq_get() {
         local key="$1"
         local out
-        if out=$(yq eval ".${key} // \"\"" "$f" 2>/dev/null); then
+        if [ "$_yq_flavor" = "go" ]; then
+            out=$(yq eval ".${key} // \"\"" "$f" 2>/dev/null) || out=""
             [ "$out" = "null" ] && out=""
-            printf '%s' "$out"
-            return 0
+        else
+            out=$(yq -r ".${key} // empty" "$f" 2>/dev/null) || out=""
         fi
-        if out=$(yq -r ".${key} // empty" "$f" 2>/dev/null); then
-            printf '%s' "$out"
-            return 0
-        fi
-        printf ''
+        printf '%s' "$out"
     }
 
     v=$(_yq_get deployment_slug);     [ -n "$v" ] && DEPLOYMENT_SLUG="$v"
@@ -307,8 +318,8 @@ _load_config_awk() {
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.*)$ ]]; then
             key="${BASH_REMATCH[1]}"
             val="${BASH_REMATCH[2]}"
-            # Strip inline comment (only if preceded by whitespace).
-            val="${val%%  #*}"
+            # Strip inline comment per YAML rule: '#' preceded by a space.
+            val="${val%% #*}"
             # Strip surrounding whitespace.
             val="${val#"${val%%[![:space:]]*}"}"
             val="${val%"${val##*[![:space:]]}"}"
@@ -597,6 +608,8 @@ print_recap() {
   Sign with:           ${SIGN_WITH:-<none>}
   Bundle:              $([ "$BUNDLE" = 1 ] && echo yes || echo no)
   Dry-run:             $([ "$DRY_RUN" = 1 ] && echo yes || echo no)
+  TLS verification:    $([ "$INSECURE" = 1 ] && echo "DISABLED (--insecure)" || echo enabled)
+  Allow http://:       $([ "$ALLOW_HTTP" = 1 ] && echo yes || echo no)
 EOF
     if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
         log_warn "Embedded client_secret will be written in clear text into every generated artefact."
@@ -872,7 +885,11 @@ JWTYAML
     ph_set CLIENT_ID            "$CLIENT_ID"
     ph_set CLIENT_ID_POLICY     "$CLIENT_ID_POLICY"
     ph_set CLIENT_SECRET_MODE     "$CLIENT_SECRET_MODE"
-    ph_set EMBEDDED_CLIENT_SECRET "$EMBEDDED_CLIENT_SECRET"
+    # Embed the secret base64-encoded — keeps shell metacharacters from
+    # breaking out of the bash literal in the generated installer.
+    local _emb_b64=""
+    [ -n "$EMBEDDED_CLIENT_SECRET" ] && _emb_b64=$(base64_string "$EMBEDDED_CLIENT_SECRET")
+    ph_set EMBEDDED_CLIENT_SECRET_B64 "$_emb_b64"
     ph_set SERVER_GROUP         "$SERVER_GROUP"
     ph_set SERVER_GROUP_POLICY  "$SERVER_GROUP_POLICY"
     ph_set AUTO_ENROLL_SETUP    "$AUTO_ENROLL_SETUP"

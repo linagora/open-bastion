@@ -9,7 +9,6 @@ Source0:        %{name}-%{version}.tar.gz
 
 Requires:       bash >= 4.0
 Requires:       curl
-Requires:       openssl
 Requires:       jq
 Requires:       coreutils
 Requires:       openssh-clients
@@ -27,6 +26,7 @@ artefacts are then distributed to the production servers.
 
 %install
 install -Dm 0755 ob-builder %{buildroot}/usr/bin/ob-builder
+install -Dm 0644 man/ob-builder.1 %{buildroot}/usr/share/man/man1/ob-builder.1
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/lib
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/templates
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/keyrings
@@ -36,6 +36,7 @@ cp -r keyrings/. %{buildroot}/usr/share/open-bastion-builder/keyrings/
 
 %files
 /usr/bin/ob-builder
+%{_mandir}/man1/ob-builder.1*
 /usr/share/open-bastion-builder/
 
 %changelog

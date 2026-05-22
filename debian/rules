@@ -25,6 +25,7 @@ override_dh_auto_install:
 	cp -a admin-builder/lib/.       debian/tmp/usr/share/open-bastion-builder/lib/
 	cp -a admin-builder/templates/. debian/tmp/usr/share/open-bastion-builder/templates/
 	cp -a admin-builder/keyrings/.  debian/tmp/usr/share/open-bastion-builder/keyrings/
+	install -Dm 0644 admin-builder/man/ob-builder.1 debian/tmp/usr/share/man/man1/ob-builder.1
 
 # NSS and PAM modules need ldconfig but no development symlinks
 override_dh_makeshlibs:

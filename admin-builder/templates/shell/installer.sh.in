@@ -37,9 +37,12 @@ SERVER_GROUP_EMBEDDED="@@SERVER_GROUP@@"
 CLIENT_SECRET_MODE="@@CLIENT_SECRET_MODE@@"
 
 # Embedded client_secret — populated only when CLIENT_SECRET_MODE=embedded.
-# WARNING: this artefact contains the OIDC client_secret in clear text.
-# Anyone who can read this file can read the secret. Distribute accordingly.
-EMBEDDED_CLIENT_SECRET="@@EMBEDDED_CLIENT_SECRET@@"
+# WARNING: this artefact contains the OIDC client_secret. Anyone who can read
+# this file can read the secret (base64 is encoding, not encryption).
+# The value is base64-encoded so secrets containing shell metacharacters
+# ($, `, ", \) cannot break out of the bash literal — i.e. cannot achieve
+# code execution as root during install.
+EMBEDDED_CLIENT_SECRET_B64="@@EMBEDDED_CLIENT_SECRET_B64@@"
 
 # Enroll/setup automation: yes | no | prompt
 AUTO_ENROLL_SETUP="@@AUTO_ENROLL_SETUP@@"
@@ -94,10 +97,10 @@ else
     _NC=''
 fi
 
-log_step()  { echo -e "${_BLUE}[STEP]${_NC} $*"; }
-log_info()  { echo -e "${_GREEN}[INFO]${_NC} $*"; }
-log_warn()  { echo -e "${_YELLOW}[WARN]${_NC} $*" >&2; }
-log_error() { echo -e "${_RED}[ERROR]${_NC} $*" >&2; }
+log_step()  { printf '%s[STEP]%s %s\n' "${_BLUE}"   "${_NC}" "$*"; }
+log_info()  { printf '%s[INFO]%s %s\n' "${_GREEN}"  "${_NC}" "$*"; }
+log_warn()  { printf '%s[WARN]%s %s\n' "${_YELLOW}" "${_NC}" "$*" >&2; }
+log_error() { printf '%s[ERROR]%s %s\n' "${_RED}"   "${_NC}" "$*" >&2; }
 die()       { log_error "$*"; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -240,7 +243,7 @@ resolve_client_id() {
             die "client_id is required but not set (no default embedded; pass --client-id or OB_CLIENT_ID)"
         fi
         printf "OIDC client_id [pam-access]: " >&2
-        IFS= read -r CLIENT_ID
+        IFS= read -r CLIENT_ID < /dev/tty
         CLIENT_ID="${CLIENT_ID:-pam-access}"
     fi
 }
@@ -268,7 +271,7 @@ resolve_server_group() {
             die "server_group is required but not set (no default embedded; pass --server-group or OB_SERVER_GROUP)"
         fi
         printf "Server group (must match a group defined in LLNG): " >&2
-        IFS= read -r SERVER_GROUP
+        IFS= read -r SERVER_GROUP < /dev/tty
         [ -n "${SERVER_GROUP}" ] || die "server_group cannot be empty"
     fi
 }
@@ -294,14 +297,17 @@ resolve_client_secret() {
     elif [ -n "${OB_CLIENT_SECRET:-}" ]; then
         CLIENT_SECRET="${OB_CLIENT_SECRET}"
     elif [ "${CLIENT_SECRET_MODE}" = "embedded" ]; then
-        CLIENT_SECRET="${EMBEDDED_CLIENT_SECRET}"
-        log_warn "Using embedded client_secret from artefact (clear-text)."
+        CLIENT_SECRET=$(printf '%s' "${EMBEDDED_CLIENT_SECRET_B64}" | base64 -d 2>/dev/null || true)
+        if [ -z "${CLIENT_SECRET}" ]; then
+            die "embedded client_secret decode failed (artefact may be corrupted)"
+        fi
+        log_warn "Using embedded client_secret from artefact (clear-text after decode)."
     else
         if [ "${OPT_NON_INTERACTIVE}" = "true" ]; then
             die "client_secret required but not provided (pass --client-secret-file or set OB_CLIENT_SECRET)"
         fi
         printf "client_secret for OIDC RP (input hidden): " >&2
-        IFS= read -rs CLIENT_SECRET
+        IFS= read -rs CLIENT_SECRET < /dev/tty
         echo "" >&2
     fi
 }
@@ -365,7 +371,7 @@ prompt_yn() {
         prompt="${msg} [y/N] "
     fi
     printf '%s' "${prompt}" >&2
-    IFS= read -r _answer
+    IFS= read -r _answer < /dev/tty
     case "${_answer:-${default}}" in
         [yY]*) return 0 ;;
         *)     return 1 ;;
@@ -454,23 +460,22 @@ step_config() {
     # already substituted by ob-builder at build time. sed is used
     # instead of bash ${var//pat/repl} because ## is a valid bash prefix
     # operator and would be misinterpreted inside ${ }.
-    local _conf_tmp
-    _conf_tmp=$(mktemp /etc/open-bastion/openbastion.conf.XXXXXX)
-    # shellcheck disable=SC2016
-    cat > "${_conf_tmp}" << 'OB_CONF_EOF'
+    # Build the conf in memory with bash literal substitution — no sed.
+    # This avoids any delimiter/escape gymnastics for secrets that may
+    # contain |, /, &, \, or newlines.
+    local _conf_template _conf_content
+    _conf_template=$(cat << 'OB_CONF_EOF'
 @@OPENBASTION_CONF_TEMPLATE@@
 OB_CONF_EOF
-    # Escape CLIENT_SECRET for use as a sed replacement string (& and \n)
-    local _secret_esc
-    _secret_esc=$(printf '%s\n' "${CLIENT_SECRET}" | sed -e 's/[&\\/]/\\&/g')
-    local _id_esc _sg_esc
-    _id_esc=$(printf '%s\n' "${CLIENT_ID}"     | sed -e 's/[&\\/]/\\&/g')
-    _sg_esc=$(printf '%s\n' "${SERVER_GROUP}"  | sed -e 's/[&\\/]/\\&/g')
-    sed -i \
-        -e "s|##CLIENT_ID##|${_id_esc}|g" \
-        -e "s|##SERVER_GROUP##|${_sg_esc}|g" \
-        -e "s|##CLIENT_SECRET##|${_secret_esc}|g" \
-        "${_conf_tmp}"
+)
+    _conf_content="${_conf_template//##CLIENT_ID##/${CLIENT_ID}}"
+    _conf_content="${_conf_content//##SERVER_GROUP##/${SERVER_GROUP}}"
+    _conf_content="${_conf_content//##CLIENT_SECRET##/${CLIENT_SECRET}}"
+
+    # Atomic write at 0600 root:root.
+    local _conf_tmp
+    _conf_tmp=$(mktemp /etc/open-bastion/openbastion.conf.XXXXXX)
+    printf '%s\n' "${_conf_content}" > "${_conf_tmp}"
     chmod 0600 "${_conf_tmp}"
     chown root:root "${_conf_tmp}"
     mv -f "${_conf_tmp}" /etc/open-bastion/openbastion.conf
