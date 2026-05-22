@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # No setup needed: ob-builder reads templates from /usr/share/open-bastion-builder/templates/
+        :
+        ;;
+esac
+
+exit 0

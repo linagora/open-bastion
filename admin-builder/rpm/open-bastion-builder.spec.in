@@ -1,0 +1,43 @@
+Name:           open-bastion-builder
+Version:        @PROJECT_VERSION@
+Release:        1%{?dist}
+Summary:        Open Bastion deployment artefact builder
+License:        AGPL-3.0
+Group:          System Environment/Base
+BuildArch:      noarch
+Source0:        %{name}-%{version}.tar.gz
+
+Requires:       bash >= 4.0
+Requires:       curl
+Requires:       openssl
+Requires:       jq
+Requires:       coreutils
+Requires:       openssh-clients
+
+%description
+Interactive tool for administrators to generate self-extracting
+shell installers and Ansible roles that deploy and configure
+Open Bastion (PAM/NSS + LLNG SSO) on target servers.
+
+The builder is installed on the admin workstation; the generated
+artefacts are then distributed to the production servers.
+
+%prep
+%setup -q
+
+%install
+install -Dm 0755 ob-builder %{buildroot}/usr/bin/ob-builder
+install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/lib
+install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/templates
+install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/keyrings
+cp -r lib/. %{buildroot}/usr/share/open-bastion-builder/lib/
+cp -r templates/. %{buildroot}/usr/share/open-bastion-builder/templates/
+cp -r keyrings/. %{buildroot}/usr/share/open-bastion-builder/keyrings/
+
+%files
+/usr/bin/ob-builder
+/usr/share/open-bastion-builder/
+
+%changelog
+* Thu May 22 2025 Open Bastion team <open-bastion@linagora.com> - @PROJECT_VERSION@-1
+- Initial packaging of open-bastion-builder

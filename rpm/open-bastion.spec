@@ -95,6 +95,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh-proxy
+%{_bindir}/ob-bastion-id
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
 %dir %{_datadir}/open-bastion

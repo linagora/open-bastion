@@ -1,0 +1,6 @@
+# open-bastion-builder — admin-side artefact generator.
+# Files come from admin-builder/ (copied into debian/tmp/ by debian/rules).
+usr/bin/ob-builder
+usr/share/open-bastion-builder/lib/*
+usr/share/open-bastion-builder/templates/*
+usr/share/open-bastion-builder/keyrings/*

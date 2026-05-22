@@ -30,6 +30,24 @@ Description: Open Bastion PAM/NSS module for SSH bastion authentication
  Open Bastion, supporting both token-based authentication and
  key-based authorization with server groups support.
 
+Package: open-bastion-builder
+Architecture: all
+Depends: ${misc:Depends},
+ bash (>= 4.0),
+ curl,
+ openssl,
+ jq,
+ coreutils,
+ openssh-client,
+Recommends: yq
+Description: Open Bastion deployment artefact builder
+ Interactive tool for administrators to generate self-extracting
+ shell installers and Ansible roles that deploy and configure
+ Open Bastion (PAM/NSS + LLNG SSO) on target servers.
+ .
+ The builder is installed on the admin's workstation; the generated
+ artefacts are then distributed to the production servers.
+
 Package: open-bastion-desktop
 Architecture: all
 Depends: ${misc:Depends},

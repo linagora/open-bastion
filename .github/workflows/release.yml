@@ -123,10 +123,24 @@ jobs:
         run: |
           rpmbuild -bb ~/rpmbuild/SPECS/open-bastion.spec
 
+      - name: Build open-bastion-builder RPM
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Render the .in spec with the right version
+          sed "s/@PROJECT_VERSION@/${VERSION}/g" \
+            admin-builder/rpm/open-bastion-builder.spec.in \
+            > ~/rpmbuild/SPECS/open-bastion-builder.spec
+          # Tarball expected by the spec (Source0: %{name}-%{version}.tar.gz)
+          tar czf ~/rpmbuild/SOURCES/open-bastion-builder-${VERSION}.tar.gz \
+            --transform "s|^admin-builder|open-bastion-builder-${VERSION}|" \
+            admin-builder
+          rpmbuild -bb ~/rpmbuild/SPECS/open-bastion-builder.spec
+
       - name: Move packages
         run: |
           mkdir -p packages
-          mv ~/rpmbuild/RPMS/x86_64/*.rpm packages/
+          mv ~/rpmbuild/RPMS/x86_64/*.rpm packages/ 2>/dev/null || true
+          mv ~/rpmbuild/RPMS/noarch/*.rpm packages/ 2>/dev/null || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

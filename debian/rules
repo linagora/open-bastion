@@ -15,6 +15,16 @@ override_dh_auto_configure:
 
 override_dh_auto_install:
 	dh_auto_install
+	# Stage the admin-builder tree so debian/open-bastion-builder.install
+	# can pick it up. The builder is a pure-bash tool that CMake does not
+	# need to compile; we install it from source directly.
+	install -Dm 0755 admin-builder/ob-builder debian/tmp/usr/bin/ob-builder
+	install -dm 0755 debian/tmp/usr/share/open-bastion-builder/lib
+	install -dm 0755 debian/tmp/usr/share/open-bastion-builder/templates
+	install -dm 0755 debian/tmp/usr/share/open-bastion-builder/keyrings
+	cp -a admin-builder/lib/.       debian/tmp/usr/share/open-bastion-builder/lib/
+	cp -a admin-builder/templates/. debian/tmp/usr/share/open-bastion-builder/templates/
+	cp -a admin-builder/keyrings/.  debian/tmp/usr/share/open-bastion-builder/keyrings/
 
 # NSS and PAM modules need ldconfig but no development symlinks
 override_dh_makeshlibs:

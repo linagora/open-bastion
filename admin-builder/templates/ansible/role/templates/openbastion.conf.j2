@@ -1,0 +1,68 @@
+# /etc/open-bastion/openbastion.conf
+# Managed by Ansible — do not edit manually; changes will be overwritten.
+# Generated from open-bastion Ansible role (ob_role={{ ob_role }}, ob_pam_mode={{ ob_pam_mode }}).
+
+# ── Portal ────────────────────────────────────────────────────────────────────
+portal_url = {{ ob_portal_url }}
+
+# ── OIDC client ───────────────────────────────────────────────────────────────
+client_id = {{ ob_client_id }}
+{% if ob_client_secret | length > 0 %}
+client_secret = {{ ob_client_secret }}
+{% endif %}
+
+# ── Server identity ───────────────────────────────────────────────────────────
+server_group = {{ ob_server_group }}
+
+# ── TLS ───────────────────────────────────────────────────────────────────────
+verify_ssl = true
+{% if ob_min_tls_version is defined %}
+min_tls_version = {{ ob_min_tls_version }}
+{% endif %}
+
+# ── Authorization cache ───────────────────────────────────────────────────────
+cache_enabled = true
+cache_dir = /var/cache/open-bastion
+{% if ob_cache_ttl is defined %}
+cache_ttl = {{ ob_cache_ttl }}
+{% else %}
+cache_ttl = 300
+{% endif %}
+
+# ── SSH key policy ────────────────────────────────────────────────────────────
+{% if ob_ssh_key_policy_enabled is defined %}
+ssh_key_policy_enabled = {{ ob_ssh_key_policy_enabled | lower }}
+{% endif %}
+{% if ob_ssh_key_allowed_types is defined %}
+ssh_key_allowed_types = {{ ob_ssh_key_allowed_types }}
+{% endif %}
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+{% if ob_cache_rate_limit_enabled is defined %}
+cache_rate_limit_enabled = {{ ob_cache_rate_limit_enabled | lower }}
+{% endif %}
+{% if ob_cache_rate_limit_max_attempts is defined %}
+cache_rate_limit_max_attempts = {{ ob_cache_rate_limit_max_attempts }}
+{% endif %}
+
+# ── Logging / audit ───────────────────────────────────────────────────────────
+log_level = warn
+audit_enabled = true
+audit_to_syslog = true
+
+# ── Backend: JWT verification from bastion ────────────────────────────────────
+# These settings are only active when ob_role == 'backend'.
+# bastion_jwt_issuer must match the LLNG portal URL (not the bastion URL):
+# the JWT is issued by LLNG and the bastion forwards it to the backend.
+{% if ob_role == 'backend' %}
+bastion_jwt_required = {{ ob_bastion_jwt_required | lower }}
+bastion_jwt_issuer = {{ ob_bastion_jwt_issuer }}
+bastion_jwt_jwks_url = {{ ob_bastion_jwt_jwks_url }}
+bastion_jwt_jwks_cache = {{ ob_bastion_jwt_jwks_cache }}
+{% if ob_bastion_jwt_cache_ttl is defined %}
+bastion_jwt_cache_ttl = {{ ob_bastion_jwt_cache_ttl }}
+{% endif %}
+{% if ob_bastion_jwt_clock_skew is defined %}
+bastion_jwt_clock_skew = {{ ob_bastion_jwt_clock_skew }}
+{% endif %}
+{% endif %}
