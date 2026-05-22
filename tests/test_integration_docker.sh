@@ -669,8 +669,15 @@ auto_enroll_setup: no
 self_delete: no
 EOF
 
-    if ! "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure >"${workdir}/builder.log" 2>&1; then
-        fail "ob-builder failed to produce artefact" "$(cat "${workdir}/builder.log")"
+    local rc=0
+    "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure \
+        >"${workdir}/builder.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        local size
+        size=$(wc -c <"${workdir}/builder.log")
+        fail "ob-builder failed (exit=$rc, log_size=${size}B)" "--- begin log ---
+$(cat "${workdir}/builder.log")
+--- end log ---"
         rm -rf "$workdir"
         return 1
     fi
