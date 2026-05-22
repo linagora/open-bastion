@@ -403,6 +403,10 @@ if(BUILD_BUILDER)
     set(BUILDER_DEB_OUTPUT
         "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}_${BUILDER_PKG_VERSION}_all.deb")
 
+    find_program(DPKG_DEB_EXECUTABLE dpkg-deb)
+    if(NOT DPKG_DEB_EXECUTABLE)
+        message(STATUS "dpkg-deb not found — skipping open-bastion-builder DEB target")
+    else()
     add_custom_target(builder-deb ALL
         # Install the main script
         COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -446,6 +450,7 @@ if(BUILD_BUILDER)
         COMMENT "Building ${BUILDER_PKG_NAME} Debian package"
         VERBATIM
     )
+    endif()
 
     # ── RPM package ──────────────────────────────────────────────────────
     # Only attempted when rpmbuild is available; silently skipped otherwise.
