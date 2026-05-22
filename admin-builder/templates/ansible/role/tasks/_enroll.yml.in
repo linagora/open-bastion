@@ -71,10 +71,14 @@
 
 - name: "Extract CSRF token from the verification page"
   ansible.builtin.set_fact:
+    # regex_findall always returns a list; on a single hidden token input
+    # it is a single-element list of strings. `| first` then yields the
+    # token value cleanly (avoids the ambiguous regex_search + backref +
+    # first combo that some Ansible versions interpret as "first character").
     _ob_csrf_token: >-
-      {{ (_ob_verify_page.content
-          | regex_search('name="token"\s+value="([^"]+)"', '\1')
-          | first) | default('') }}
+      {{ ((_ob_verify_page.content
+            | regex_findall('name="token"\s+value="([^"]+)"')) | first)
+         | default('') }}
   when: _ob_use_auto_approve
 
 - name: "Refuse to proceed when the CSRF token could not be extracted (cookie expired?)"

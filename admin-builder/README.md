@@ -185,7 +185,7 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 ## Limitations
 
 - **APT-focused**: The shell installer uses APT (Debian/Ubuntu). On RPM-based systems (RHEL, Rocky), it prints a warning and skips repository setup; administrators must configure YUM/DNF separately.
-- **Device Authorization Grant requires browser approval**: The `ob-enroll` command uses the OIDC Device Authorization Grant flow, which displays a URL and code. An administrator must open that URL in a browser and approve the request before the enrollment completes. This step cannot be automated.
+- **Device Authorization Grant approval**: The `ob-enroll` command uses the OIDC Device Authorization Grant flow, which displays a URL and code. By default an administrator must open that URL in a browser and approve the request before enrollment completes. For Ansible fleet deployments, an opt-in auto-approval path is available (`ansible_auto_approve: yes`) — see [Unattended fleet deployments](#unattended-fleet-deployments--device-code-auto-approval). The shell installer remains manual by design (it is meant to run on one machine at a time).
 
 ## See Also
 

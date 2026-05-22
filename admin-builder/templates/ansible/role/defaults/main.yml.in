@@ -29,8 +29,10 @@ ob_server_group: "@@SERVER_GROUP@@"
 
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.
-# Note: ob-enroll uses Device Authorization Grant — the admin must open the
-# printed URL in a browser to approve the request. Ansible cannot bypass this.
+# Note: ob-enroll uses Device Authorization Grant. By default the admin must
+# open the printed URL in a browser to approve the request; this role can
+# automate that approval when ob_ansible_auto_approve is true AND an LLNG
+# session cookie is supplied at play time (see below).
 ob_auto_enroll: @@AUTO_ENROLL_BOOL@@  # true when AUTO_ENROLL_SETUP includes enrollment
 
 # When true, the role runs ob-bastion-setup / ob-backend-setup during the play.

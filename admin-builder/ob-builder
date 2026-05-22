@@ -775,49 +775,47 @@ MODE
     esac
 }
 
-# Same content as YAML scalars under an ob_mode_settings mapping. Each line
-# is "  key: value" — the calling defaults/main.yml.in places the
-# placeholder under an "ob_mode_settings:" parent.
+# Emit each mode-specific setting as a top-level ob_* Ansible variable so
+# operators can override individual values via host_vars / extra-vars, and so
+# the templates/openbastion.conf.j2 `is defined` checks actually see them
+# (previously they were nested under ob_mode_settings: which made them
+# invisible to top-level Jinja2 lookups).
 _mode_settings_yaml() {
     local mode="$1"
     case "$mode" in
         A|B)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
 YML
             ;;
         C)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
-  ssh_key_policy_enabled: true
-  ssh_key_allowed_types: "ed25519,rsa"
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
+ob_ssh_key_policy_enabled: true
+ob_ssh_key_allowed_types: "ed25519,rsa"
 YML
             ;;
         D)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
 YML
             ;;
         E)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  min_tls_version: 13
-  cache_enabled: true
-  cache_ttl: 60
-  ssh_key_policy_enabled: true
-  ssh_key_allowed_types: "ed25519,rsa"
-  cache_rate_limit_enabled: true
-  cache_rate_limit_max_attempts: 3
+ob_verify_ssl: true
+ob_min_tls_version: 13
+ob_cache_enabled: true
+ob_cache_ttl: 60
+ob_ssh_key_policy_enabled: true
+ob_ssh_key_allowed_types: "ed25519,rsa"
+ob_cache_rate_limit_enabled: true
+ob_cache_rate_limit_max_attempts: 3
 YML
             ;;
     esac
