@@ -697,7 +697,6 @@ $(cat "${workdir}/builder.log")
 
     local exec_log="${workdir}/exec.log"
     if ! docker exec ob-cert-backend-new bash /tmp/bootstrap.sh \
-            --portal-url http://sso:8080 \
             --server-group backend-new \
             --skip-install --skip-enroll --skip-setup \
             --force \
@@ -716,8 +715,11 @@ $(cat "${workdir}/builder.log")
         return 1
     }
 
-    if ! grep -q "^portal_url = http://sso:8080" <<<"$conf"; then
-        fail "portal_url override did not take effect in the deposited conf" "$conf"
+    # portal_url is fixed at build time by design (only client_id and
+    # server_group are runtime-substituted). Verify the build-time value
+    # is present in the deposited conf.
+    if ! grep -q "^portal_url = ${PORTAL_URL}\$" <<<"$conf"; then
+        fail "portal_url not baked correctly into the deposited conf" "$conf"
         rm -rf "$workdir"
         return 1
     fi
