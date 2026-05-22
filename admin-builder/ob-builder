@@ -88,6 +88,7 @@ TARGET_ROLE=""
 AUTO_ENROLL_SETUP=""
 SELF_DELETE=""
 ALLOWED_BASTIONS=""
+ANSIBLE_AUTO_APPROVE=""
 
 # Derived values populated after the questionnaire.
 PAM_MODE=""
@@ -293,6 +294,7 @@ _load_config_yq() {
     v=$(_yq_get auto_enroll_setup);   [ -n "$v" ] && AUTO_ENROLL_SETUP="$v"
     v=$(_yq_get self_delete);         [ -n "$v" ] && SELF_DELETE="$v"
     v=$(_yq_get allowed_bastions);    [ -n "$v" ] && ALLOWED_BASTIONS="$v"
+    v=$(_yq_get ansible_auto_approve); [ -n "$v" ] && ANSIBLE_AUTO_APPROVE="$v"
     v=$(_yq_get repo_keyring);        [ -n "$v" ] && [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$v"
     v=$(_yq_get apt_url);             [ -n "$v" ] && [ "$APT_URL" = "$DEFAULT_APT_URL" ] && APT_URL="$v"
     v=$(_yq_get apt_suite);           [ -n "$v" ] && [ "$APT_SUITE" = "$DEFAULT_APT_SUITE" ] && APT_SUITE="$v"
@@ -342,6 +344,7 @@ _load_config_awk() {
                 auto_enroll_setup)   AUTO_ENROLL_SETUP="$val" ;;
                 self_delete)         SELF_DELETE="$val" ;;
                 allowed_bastions)    ALLOWED_BASTIONS="$val" ;;
+                ansible_auto_approve) ANSIBLE_AUTO_APPROVE="$val" ;;
                 repo_keyring)        [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$val" ;;
                 apt_url)             [ "$APT_URL"       = "$DEFAULT_APT_URL"       ] && APT_URL="$val" ;;
                 apt_suite)           [ "$APT_SUITE"     = "$DEFAULT_APT_SUITE"     ] && APT_SUITE="$val" ;;
@@ -517,6 +520,15 @@ EOF
         yes|no) ;;
         *) die "Invalid self_delete: $SELF_DELETE" ;;
     esac
+
+    # q10. (Ansible only) Offer auto-approval of the device code via an LLNG cookie
+    # Only asked when the user requested an Ansible output — the shell installer
+    # is designed for one machine at a time, where a manual browser approval is
+    # acceptable. Ansible deploys to fleets, where it's the value-add.
+    if [ -n "$OUTPUT_ANSIBLE" ] && [ -z "$ANSIBLE_AUTO_APPROVE" ]; then
+        explain "When enabled, the generated Ansible role can approve the device code automatically by POSTing to LLNG with a session cookie. The cookie is asked for at every play run (vars_prompt) and never stored. Disable if you prefer manual browser approval, or if your operators don't have permission to run the LLNG verification endpoint."
+        ANSIBLE_AUTO_APPROVE=$(ask_choice "Enable Ansible auto-approval via LLNG cookie?" "yes|no" "no")
+    fi
 }
 
 # Validate / normalise after either YAML or questionnaire so behaviour is
@@ -572,6 +584,9 @@ validate_inputs() {
     fi
     case "$SELF_DELETE" in yes|no) ;; *) die "Invalid self_delete: $SELF_DELETE" ;; esac
 
+    : "${ANSIBLE_AUTO_APPROVE:=no}"
+    case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
+
     if [ -z "$REPO_KEYRING" ]; then
         if [ -f "$DEFAULT_REPO_KEYRING" ]; then
             REPO_KEYRING="$DEFAULT_REPO_KEYRING"
@@ -601,6 +616,7 @@ print_recap() {
   Auto enroll/setup:   $AUTO_ENROLL_SETUP
   Self-delete (shell): $SELF_DELETE
   Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
+  Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
   Output shell:        ${OUTPUT_SHELL:-<none>}
@@ -759,49 +775,47 @@ MODE
     esac
 }
 
-# Same content as YAML scalars under an ob_mode_settings mapping. Each line
-# is "  key: value" — the calling defaults/main.yml.in places the
-# placeholder under an "ob_mode_settings:" parent.
+# Emit each mode-specific setting as a top-level ob_* Ansible variable so
+# operators can override individual values via host_vars / extra-vars, and so
+# the templates/openbastion.conf.j2 `is defined` checks actually see them
+# (previously they were nested under ob_mode_settings: which made them
+# invisible to top-level Jinja2 lookups).
 _mode_settings_yaml() {
     local mode="$1"
     case "$mode" in
         A|B)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
 YML
             ;;
         C)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
-  ssh_key_policy_enabled: true
-  ssh_key_allowed_types: "ed25519,rsa"
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
+ob_ssh_key_policy_enabled: true
+ob_ssh_key_allowed_types: "ed25519,rsa"
 YML
             ;;
         D)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  cache_enabled: true
-  cache_ttl: 300
+ob_verify_ssl: true
+ob_cache_enabled: true
+ob_cache_ttl: 300
 YML
             ;;
         E)
             cat << 'YML'
-ob_mode_settings:
-  verify_ssl: true
-  min_tls_version: 13
-  cache_enabled: true
-  cache_ttl: 60
-  ssh_key_policy_enabled: true
-  ssh_key_allowed_types: "ed25519,rsa"
-  cache_rate_limit_enabled: true
-  cache_rate_limit_max_attempts: 3
+ob_verify_ssl: true
+ob_min_tls_version: 13
+ob_cache_enabled: true
+ob_cache_ttl: 60
+ob_ssh_key_policy_enabled: true
+ob_ssh_key_allowed_types: "ed25519,rsa"
+ob_cache_rate_limit_enabled: true
+ob_cache_rate_limit_max_attempts: 3
 YML
             ;;
     esac
@@ -885,11 +899,15 @@ JWTYAML
     ph_set CLIENT_ID            "$CLIENT_ID"
     ph_set CLIENT_ID_POLICY     "$CLIENT_ID_POLICY"
     ph_set CLIENT_SECRET_MODE     "$CLIENT_SECRET_MODE"
-    # Embed the secret base64-encoded — keeps shell metacharacters from
-    # breaking out of the bash literal in the generated installer.
+    # Shell installer: embed the secret base64-encoded so shell metacharacters
+    # cannot break out of the bash literal.
     local _emb_b64=""
     [ -n "$EMBEDDED_CLIENT_SECRET" ] && _emb_b64=$(base64_string "$EMBEDDED_CLIENT_SECRET")
     ph_set EMBEDDED_CLIENT_SECRET_B64 "$_emb_b64"
+    # Ansible defaults: the secret lands as a plain YAML string. No shell
+    # parsing happens, so clear-text is safe; the encoding concern only applies
+    # to the bash literal in the shell installer.
+    ph_set EMBEDDED_CLIENT_SECRET "$EMBEDDED_CLIENT_SECRET"
     ph_set SERVER_GROUP         "$SERVER_GROUP"
     ph_set SERVER_GROUP_POLICY  "$SERVER_GROUP_POLICY"
     ph_set AUTO_ENROLL_SETUP    "$AUTO_ENROLL_SETUP"
@@ -906,6 +924,28 @@ JWTYAML
     ph_set MAX_SECURITY_BOOL     "$max_security_bool"
     ph_set AUTO_ENROLL_BOOL      "$auto_enroll_bool"
     ph_set AUTO_SETUP_BOOL       "$auto_setup_bool"
+
+    # Ansible-only: device-code auto-approval via LLNG session cookie.
+    local _auto_approve_bool="false" _vars_prompt_block=""
+    if [ "$ANSIBLE_AUTO_APPROVE" = "yes" ]; then
+        _auto_approve_bool="true"
+        _vars_prompt_block=$(cat << 'VARSPROMPT'
+  vars_prompt:
+    - name: ob_llng_cookie
+      prompt: |
+        LLNG session cookie used to auto-approve device codes.
+        Obtain with: llng --llng-server <portal> llng_cookie
+        Leave empty to skip auto-approval and fall back to manual browser approval.
+      private: true
+      unsafe: true
+      default: ""
+VARSPROMPT
+)
+    fi
+    ph_set ANSIBLE_AUTO_APPROVE_BOOL "$_auto_approve_bool"
+    ph_set ANSIBLE_VARS_PROMPT_BLOCK "$_vars_prompt_block"
+
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -37,9 +37,11 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 | `ob_role` | `bastion`, `backend`, or `standalone` |
 | `ob_pam_mode` | PAM mode A–E (see doc/pam-modes.md) |
 | `ob_max_security` | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token) |
-| `ob_auto_enroll` | Run ob-enroll during the play (requires browser approval) |
+| `ob_auto_enroll` | Run ob-enroll during the play |
 | `ob_auto_setup` | Run ob-bastion-setup / ob-backend-setup during the play |
 | `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository |
+| `ob_ansible_auto_approve` | Enable LLNG-cookie-based device-code auto-approval (build-time) |
+| `ob_llng_cookie` | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored |
 
 Backend-only JWT variables (populated by ob-builder for backend scenarios):
 
@@ -75,12 +77,66 @@ echo 'ob_client_secret: mysecret' | ansible-vault encrypt \
 
 Then run with `--ask-vault-pass` or `--vault-password-file`.
 
-## Enrollment note
+## Enrollment
 
 When `ob_auto_enroll: true`, the `ob-enroll` command uses the OIDC Device
-Authorization Grant flow.  Ansible executes the command and waits, but an
-administrator must open the printed URL in a browser and approve the request
-before `ob-enroll` returns.  This interactive step cannot be automated.
+Authorization Grant flow. Two modes are supported:
+
+### Manual approval (default)
+
+Ansible executes `ob-enroll`, which prints a URL and an 8-character user code.
+An administrator opens the URL in a browser, logs into LLNG, and approves the
+code. `ob-enroll` polls the token endpoint and returns once approved.
+
+### Auto-approval via LLNG cookie (opt-in)
+
+If `ob_ansible_auto_approve: true` was chosen at build time, the role can
+approve the device code automatically without any human interaction by
+posting to LLNG's `/device` endpoint with a session cookie.
+
+Obtain the cookie with the `llng` CLI from
+[simple-oidc-client](https://github.com/linagora/simple-oidc-client):
+
+```bash
+llng --llng-server https://sso.example.com llng_cookie
+```
+
+Pass the returned cookie to ansible-playbook. The role declares a
+`vars_prompt` for `ob_llng_cookie` so you can paste it interactively each
+run — the value is **never persisted to disk**:
+
+```bash
+ansible-playbook -i inventory.yml playbook.yml
+# > LLNG session cookie used to auto-approve device codes.
+# >   Obtain with: llng --llng-server <portal> llng_cookie
+# >   Leave empty to skip auto-approval and fall back to manual browser approval.
+# > <paste the cookie here>
+```
+
+For CI/non-interactive use, supply the cookie via `--extra-vars` (it lives in
+process memory only):
+
+```bash
+ansible-playbook -i inventory.yml playbook.yml \
+  --extra-vars "ob_llng_cookie=$(llng --llng-server https://sso.example.com llng_cookie)"
+```
+
+The cookie's lifetime is the LLNG session lifetime (typically under 24 h),
+so it's not worth persisting. An empty `ob_llng_cookie` falls back to the
+manual flow above.
+
+Under the hood, the auto-approve path:
+1. Runs `ob-enroll` asynchronously on the target, with
+   `OB_ENROLL_STATE_FILE=/run/open-bastion/enroll-state.json` so the user code
+   and verification URI are written to disk as soon as LLNG issues them.
+2. Slurps that file back to the Ansible controller, where the play `delegate_to:
+   localhost` performs:
+   - `GET ${portal}/device?user_code=...` with the cookie, to extract the CSRF
+     token from the form.
+   - `POST ${portal}/device` with `user_code`, `action=approve`, and the CSRF
+     token.
+3. Waits for the original `ob-enroll` to finish polling and emit the server
+   token to `/etc/open-bastion/token`.
 
 ## Example playbook invocation
 

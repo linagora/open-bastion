@@ -59,6 +59,9 @@ bastion_jwt_required = {{ ob_bastion_jwt_required | lower }}
 bastion_jwt_issuer = {{ ob_bastion_jwt_issuer }}
 bastion_jwt_jwks_url = {{ ob_bastion_jwt_jwks_url }}
 bastion_jwt_jwks_cache = {{ ob_bastion_jwt_jwks_cache }}
+{% if ob_bastion_jwt_allowed_bastions is defined and ob_bastion_jwt_allowed_bastions | length > 0 %}
+bastion_jwt_allowed_bastions = {{ ob_bastion_jwt_allowed_bastions }}
+{% endif %}
 {% if ob_bastion_jwt_cache_ttl is defined %}
 bastion_jwt_cache_ttl = {{ ob_bastion_jwt_cache_ttl }}
 {% endif %}

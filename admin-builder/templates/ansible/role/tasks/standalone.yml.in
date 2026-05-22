@@ -7,22 +7,16 @@
 # a backend (target of bastion-forwarded sessions).  It therefore runs both
 # ob-enroll and ob-bastion-setup (which also applies the backend PAM stack).
 
-# ob-enroll uses Device Authorization Grant.  When ob_auto_enroll is true,
-# the task will print a URL that an admin must open in a browser to approve
-# the device.  Ansible cannot bypass that interactive step; it waits for
-# ob-enroll to return.  The client secret is passed via environment variable
-# to keep it out of /proc/<pid>/cmdline.
-- name: Enroll standalone host with LLNG (ob-enroll)
-  ansible.builtin.command:
-    argv:
-      - /usr/sbin/ob-enroll
-      - -g
-      - "{{ ob_server_group }}"
-      - --quiet
-  environment:
-    OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+# Enrollment uses Device Authorization Grant. By default the admin must open
+# the printed URL and approve in a browser; if ob_ansible_auto_approve was
+# enabled at build time and an LLNG cookie is provided at play time, the
+# included tasks below approve the device code via the LLNG /device endpoint
+# instead, so the play can run unattended on a fleet.
+- name: "Run enrollment flow (auto-approve or manual)"
+  ansible.builtin.include_tasks: _enroll.yml
   when: ob_auto_enroll
-  changed_when: true
+  vars:
+    ob_role: standalone
 
 - name: Configure standalone host (ob-bastion-setup)
   ansible.builtin.command:
