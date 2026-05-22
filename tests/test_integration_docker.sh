@@ -1051,6 +1051,15 @@ test_ob_bastion_id() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing ob-bastion-id on the pre-enrolled bastion..."
 
+    # The docker-demo-cert bastion image is built from a Dockerfile that
+    # selectively copies scripts/ob-* — ob-bastion-id was added later and
+    # is not in the baked image. Ship it in at test time.
+    if ! docker cp "${PROJECT_DIR}/scripts/ob-bastion-id" ob-cert-bastion:/usr/bin/ob-bastion-id; then
+        fail "Could not copy ob-bastion-id into ob-cert-bastion"
+        return 1
+    fi
+    docker exec ob-cert-bastion chmod 0755 /usr/bin/ob-bastion-id
+
     local id err
     if ! id=$(docker exec ob-cert-bastion ob-bastion-id --quiet 2>&1); then
         fail "ob-bastion-id exited non-zero" "$id"
