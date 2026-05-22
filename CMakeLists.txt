@@ -369,6 +369,13 @@ include(CPack)
 # ────────────────────────────────────────────────────────────────────────────
 option(BUILD_BUILDER "Build the open-bastion-builder package" ON)
 
+# Auto-disable when the admin-builder/ tree is absent — typical for Docker
+# integration tests that COPY only the runtime source paths.
+if(BUILD_BUILDER AND NOT EXISTS "${CMAKE_SOURCE_DIR}/admin-builder/debian/control")
+    message(STATUS "admin-builder/ tree not present — disabling BUILD_BUILDER")
+    set(BUILD_BUILDER OFF)
+endif()
+
 if(BUILD_BUILDER)
     set(BUILDER_PKG_NAME "open-bastion-builder")
     set(BUILDER_PKG_VERSION ${PROJECT_VERSION})
