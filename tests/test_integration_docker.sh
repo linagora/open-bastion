@@ -746,6 +746,132 @@ $(cat "${workdir}/builder.log")
     pass "ob-builder artefact correctly configured backend-new"
 }
 
+# Drives the auto-approve protocol end-to-end: obtain an LLNG session cookie,
+# start ob-enroll on the unenrolled backend container, slurp the
+# device-state file, GET /device to extract the CSRF token, POST action=approve,
+# and verify enrollment completed (the server token file appears).
+#
+# This validates the LLNG-side flow that the Ansible role's _enroll.yml
+# automates. Ansible itself is not exercised in CI (would require installing
+# ansible + SSH into the container), but the protocol surface is identical.
+test_builder_auto_approve_protocol() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing LLNG auto-approve protocol (ob-enroll + cookie + /device)..."
+
+    # Obtain a session cookie for admin user dwho.
+    local cookie
+    cookie=$(llng --llng-url "${PORTAL_URL}" --login "${TEST_USER}" --password "${TEST_PASSWORD}" llng_cookie 2>/dev/null || true)
+    if [ -z "$cookie" ]; then
+        fail "Could not obtain LLNG session cookie via llng CLI"
+        return 1
+    fi
+    log_verbose "Got cookie: $(echo "$cookie" | cut -c1-40)…"
+
+    # Backend-new needs the open-bastion config in place. The previous
+    # builder test deposited it (run-order dependency: that test must
+    # have passed). Re-deposit a minimal config in case a previous run
+    # invalidated it.
+    docker exec ob-cert-backend-new bash -c "cat > /etc/open-bastion/openbastion.conf" <<EOF
+portal_url = http://sso:8080
+client_id = ${CLIENT_ID}
+client_secret = ${CLIENT_SECRET}
+server_group = backend-new
+verify_ssl = false
+EOF
+    docker exec ob-cert-backend-new chmod 0600 /etc/open-bastion/openbastion.conf
+
+    # Start ob-enroll asynchronously inside the container.
+    docker exec ob-cert-backend-new bash -c \
+        "mkdir -p /run/open-bastion && rm -f /etc/open-bastion/token /run/open-bastion/enroll.json"
+    docker exec -d ob-cert-backend-new bash -c \
+        "OB_ENROLL_STATE_FILE=/run/open-bastion/enroll.json /usr/sbin/ob-enroll -g backend-new --quiet > /tmp/enroll.log 2>&1"
+
+    # Wait for the state file to appear (device-auth initiate succeeded).
+    local i=0
+    while [ "$i" -lt 30 ]; do
+        if docker exec ob-cert-backend-new test -f /run/open-bastion/enroll.json 2>/dev/null; then
+            break
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    if [ "$i" -eq 30 ]; then
+        local enroll_log
+        enroll_log=$(docker exec ob-cert-backend-new cat /tmp/enroll.log 2>&1 || true)
+        fail "ob-enroll did not publish the device-state file" "$enroll_log"
+        return 1
+    fi
+
+    local state
+    state=$(docker exec ob-cert-backend-new cat /run/open-bastion/enroll.json)
+    local user_code
+    user_code=$(echo "$state" | jq -r .user_code)
+    log_verbose "Device user_code: $user_code"
+
+    # The container reports portal_url=http://sso:8080 (its own network view),
+    # but our host sees the portal at http://localhost:80. Use the host view.
+    local cookie_jar
+    cookie_jar=$(mktemp)
+    local verify_page
+    verify_page=$(curl -sS -L \
+        -H "Cookie: $cookie" \
+        -c "$cookie_jar" -b "$cookie_jar" \
+        "${PORTAL_URL}/device?user_code=$(echo "$user_code" | tr -d -)")
+    local csrf
+    csrf=$(echo "$verify_page" | grep -oE 'name="token"[^>]*value="[^"]+"' | head -1 | sed -E 's/.*value="([^"]+)".*/\1/')
+    if [ -z "$csrf" ]; then
+        rm -f "$cookie_jar"
+        fail "Could not extract CSRF token from /device verification page" "$(echo "$verify_page" | head -50)"
+        return 1
+    fi
+    log_verbose "Got CSRF token: $(echo "$csrf" | cut -c1-20)…"
+
+    # Approve.
+    local approve_resp
+    approve_resp=$(curl -sS -i -L \
+        -H "Cookie: $cookie" \
+        -c "$cookie_jar" -b "$cookie_jar" \
+        -X POST \
+        --data-urlencode "user_code=$(echo "$user_code" | tr -d -)" \
+        --data-urlencode "action=approve" \
+        --data-urlencode "token=$csrf" \
+        "${PORTAL_URL}/device")
+    rm -f "$cookie_jar"
+
+    if echo "$approve_resp" | head -1 | grep -qvE "HTTP/[0-9.]+ (200|30[0-9])"; then
+        fail "/device approve POST returned non-2xx/3xx" "$(echo "$approve_resp" | head -20)"
+        return 1
+    fi
+
+    # Wait for ob-enroll to complete and write the token.
+    i=0
+    while [ "$i" -lt 60 ]; do
+        if docker exec ob-cert-backend-new test -f /etc/open-bastion/token 2>/dev/null; then
+            break
+        fi
+        i=$((i + 1))
+        sleep 1
+    done
+    if [ "$i" -eq 60 ]; then
+        local enroll_log
+        enroll_log=$(docker exec ob-cert-backend-new cat /tmp/enroll.log 2>&1 || true)
+        fail "ob-enroll never wrote /etc/open-bastion/token after auto-approve" "$enroll_log"
+        return 1
+    fi
+
+    local token_size
+    token_size=$(docker exec ob-cert-backend-new stat -c '%s' /etc/open-bastion/token)
+    if [ "$token_size" -lt 10 ]; then
+        fail "Token file is suspiciously small (${token_size}B)"
+        return 1
+    fi
+
+    # Cleanup state file (should already be removed by ob-enroll on success).
+    docker exec ob-cert-backend-new rm -f /run/open-bastion/enroll.json
+
+    pass "Auto-approve protocol completed; ob-enroll obtained token (${token_size}B)"
+}
+
 test_nss_user_resolution() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing NSS user resolution..."
@@ -824,6 +950,7 @@ main() {
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
     test_builder_deployed_backend
+    test_builder_auto_approve_protocol
 
     echo ""
     echo "=== Phase 6: Cert revocation via fingerprint binding ==="
