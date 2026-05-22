@@ -1138,6 +1138,10 @@ run_outputs_for_role() {
 
     [ -n "$shell_out" ]   && render_shell_installer "$shell_out" "$role"
     [ -n "$ansible_out" ] && render_ansible_role    "$ansible_out" "$role"
+    # When one of the outputs is empty the corresponding `cmd && X` is
+    # false; the function would otherwise return non-zero and trip set -e
+    # in main(). Explicit success keeps execution flowing.
+    return 0
 }
 
 main() {
@@ -1188,6 +1192,7 @@ main() {
     log_step "Done"
     [ -n "$OUTPUT_SHELL" ]   && log_info "Shell installer:  $OUTPUT_SHELL"
     [ -n "$OUTPUT_ANSIBLE" ] && log_info "Ansible role:     $OUTPUT_ANSIBLE"
+    return 0
 }
 
 main "$@"
