@@ -1051,14 +1051,17 @@ test_ob_bastion_id() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing ob-bastion-id on the pre-enrolled bastion..."
 
-    # The docker-demo-cert bastion image is built from a Dockerfile that
-    # selectively copies scripts/ob-* — ob-bastion-id was added later and
-    # is not in the baked image. Ship it in at test time.
-    if ! docker cp "${PROJECT_DIR}/scripts/ob-bastion-id" ob-cert-bastion:/usr/bin/ob-bastion-id; then
-        fail "Could not copy ob-bastion-id into ob-cert-bastion"
-        return 1
-    fi
-    docker exec ob-cert-bastion chmod 0755 /usr/bin/ob-bastion-id
+    # The docker-demo-cert bastion entrypoint stores the server token in
+    # JSON form at /etc/open-bastion/server_token.json (legacy format),
+    # while ob-bastion-id (and ob-enroll, the canonical source) expects
+    # a raw bearer token at /etc/open-bastion/token. Bridge the two by
+    # extracting .access_token into the raw form for this test.
+    docker exec ob-cert-bastion bash -c '
+        if [ -f /etc/open-bastion/server_token.json ] && [ ! -s /etc/open-bastion/token ]; then
+            jq -r ".access_token" /etc/open-bastion/server_token.json > /etc/open-bastion/token
+            chmod 0600 /etc/open-bastion/token
+        fi
+    '
 
     local id err
     if ! id=$(docker exec ob-cert-bastion ob-bastion-id --quiet 2>&1); then

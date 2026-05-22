@@ -40,15 +40,23 @@ COPY include/ /src/open-bastion/include/
 COPY nss/ /src/open-bastion/nss/
 COPY scripts/ /src/open-bastion/scripts/
 WORKDIR /src/open-bastion
+# `make install` with CMAKE_INSTALL_PREFIX=/usr puts every ob-* script at the
+# same path the production .deb does (/usr/sbin/ob-enroll, /usr/bin/ob-ssh-cert,
+# etc.). New scripts added to CMakeLists.txt land in the demo automatically;
+# no per-Dockerfile allowlist to maintain.
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TESTING=OFF .. && \
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DBUILD_TESTING=OFF \
+          -DINSTALL_SYSTEMD=OFF \
+          -DINSTALL_DESKTOP=OFF \
+          -DBUILD_BUILDER=OFF \
+          .. && \
     make -j$(nproc) && \
-    cp pam_openbastion.so /usr/lib/x86_64-linux-gnu/security/ && \
-    cp nss/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/ && \
-    cp ../scripts/ob-session-recorder /usr/sbin/ && \
-    cp ../scripts/ob-ssh-proxy /usr/bin/ && \
-    chmod 755 /usr/sbin/ob-session-recorder && \
-    chmod 755 /usr/bin/ob-ssh-proxy && \
+    make install && \
+    # NSS loader (libc) traditionally searches /lib/x86_64-linux-gnu first.
+    # On merged-/usr Debian this is a symlink to /usr/lib, but be explicit.
+    ln -sf /usr/lib/x86_64-linux-gnu/libnss_openbastion.so.2 \
+           /lib/x86_64-linux-gnu/libnss_openbastion.so.2 && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 
