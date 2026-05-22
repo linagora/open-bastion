@@ -67,6 +67,7 @@ OPT_PORTAL_URL=""
 OPT_YES=false
 OPT_SKIP_ENROLL=false
 OPT_SKIP_SETUP=false
+OPT_SKIP_INSTALL=false
 OPT_DRY_RUN=false
 OPT_FORCE=false
 OPT_NON_INTERACTIVE=false
@@ -120,6 +121,8 @@ Options:
   -y, --yes                 Answer Y to all prompts (enroll + setup run automatically)
   --skip-enroll             Deploy config and install package, skip ob-enroll
   --skip-setup              Run ob-enroll but skip ob-{bastion,backend}-setup
+  --skip-install            Don't install the open-bastion package (assume it
+                            is already present, e.g. built from source)
   --dry-run                 Print actions without executing them
   --force                   Overwrite existing /etc/open-bastion (normally refused)
   --non-interactive         Fail instead of prompting (for CI)
@@ -166,6 +169,8 @@ parse_args() {
                 OPT_SKIP_ENROLL=true; shift ;;
             --skip-setup)
                 OPT_SKIP_SETUP=true; shift ;;
+            --skip-install)
+                OPT_SKIP_INSTALL=true; shift ;;
             --dry-run)
                 OPT_DRY_RUN=true; shift ;;
             --force)
@@ -514,6 +519,11 @@ OB_KRL_EOF
 
 step_install() {
     log_step "3/5  Installing open-bastion package"
+
+    if [ "${OPT_SKIP_INSTALL}" = "true" ]; then
+        log_info "Skipping package install (--skip-install)"
+        return 0
+    fi
 
     if [ "${DISTRO}" = "rhel" ]; then
         if [ "${OPT_DRY_RUN}" = "true" ]; then
