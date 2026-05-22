@@ -286,6 +286,10 @@ _load_config_yq() {
     v=$(_yq_get apt_url);             [ -n "$v" ] && [ "$APT_URL" = "$DEFAULT_APT_URL" ] && APT_URL="$v"
     v=$(_yq_get apt_suite);           [ -n "$v" ] && [ "$APT_SUITE" = "$DEFAULT_APT_SUITE" ] && APT_SUITE="$v"
     v=$(_yq_get apt_component);       [ -n "$v" ] && [ "$APT_COMPONENT" = "$DEFAULT_APT_COMPONENT" ] && APT_COMPONENT="$v"
+    # Trailing `cmd && X` returns non-zero when `cmd` is false. Without an
+    # explicit success status the function exit code propagates and triggers
+    # set -e in the caller. Keep this `return 0` at the end of the function.
+    return 0
 }
 
 # Awk parser: emits "KEY\tVALUE" lines for known keys, strips quotes.
@@ -335,6 +339,7 @@ _load_config_awk() {
             esac
         fi
     done < "$f"
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────

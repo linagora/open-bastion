@@ -670,15 +670,8 @@ self_delete: no
 EOF
 
     local rc=0
-    # Diagnostic: show yq presence (different yq flavors behave differently).
-    {
-        echo "=== which yq ==="
-        which yq 2>&1 || echo "(no yq)"
-        yq --version 2>&1 | head -2 || true
-        echo "=== bash trace begin ==="
-    } >"${workdir}/builder.log" 2>&1
-    bash -x "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure \
-        >>"${workdir}/builder.log" 2>&1 || rc=$?
+    "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure \
+        >"${workdir}/builder.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
         local size
         size=$(wc -c <"${workdir}/builder.log")
