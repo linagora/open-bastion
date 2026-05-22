@@ -282,7 +282,9 @@ resolve_client_secret() {
             IFS= read -r CLIENT_SECRET
         else
             [ -f "${OPT_CLIENT_SECRET_FILE}" ] || die "client_secret file not found: ${OPT_CLIENT_SECRET_FILE}"
-            CLIENT_SECRET=$(cat "${OPT_CLIENT_SECRET_FILE}")
+            # Strip trailing CR/LF so files ending with a newline (most editors)
+            # do not inject whitespace into the OIDC request.
+            CLIENT_SECRET=$(tr -d '\r\n' < "${OPT_CLIENT_SECRET_FILE}")
         fi
     elif [ -n "${OB_CLIENT_SECRET:-}" ]; then
         CLIENT_SECRET="${OB_CLIENT_SECRET}"
@@ -349,7 +351,7 @@ prompt_yn() {
         return 0
     fi
     if [ "${OPT_NON_INTERACTIVE}" = "true" ]; then
-        return 0
+        die "--non-interactive set but a yes/no prompt is required: \"${msg}\". Pass --yes to confirm all, or --skip-enroll/--skip-setup to skip the relevant step."
     fi
     local prompt
     if [ "${default}" = "y" ]; then

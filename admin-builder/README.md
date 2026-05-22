@@ -27,7 +27,7 @@ This launches an interactive questionnaire:
 2. Security scenario (`token-only`, `token+unix`, `keys+llng`, `mixed`, `max-security`)
 3. SSO portal URL (validated via OIDC discovery)
 4. OIDC client_id and policy (`fixed` or `modifiable`)
-5. OIDC client_secret mode (`none` or `prompt`)
+5. OIDC client_secret mode (`none`, `prompt`, or `embedded`)
 6. Server group and policy
 7. Target role (`bastion`, `standalone`, or `backend`)
 8. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`)
@@ -43,7 +43,8 @@ scenario: max-security
 portal_url: https://sso.example.com
 client_id: backend-prod
 client_id_policy: fixed
-client_secret_mode: prompt
+client_secret_mode: prompt    # none | prompt | embedded
+# embedded_client_secret: ...  # required when client_secret_mode=embedded
 server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend
@@ -151,7 +152,7 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 ## Security Notes
 
 - **TLS 1.3 enforced**: The builder refuses `http://` SSO URLs by default (use `--allow-http` only for testing).
-- **Client secrets never embedded**: The `client_secret` is not included in any artifact. It is either prompted for on the target (mode `prompt`) or passed via a secure file at deployment time (`--client-secret-file`).
+- **Client secret handling**: Three modes are supported. With `none` the relying party is public (no secret). With `prompt` the secret is asked for at install time on the target (recommended). With `embedded` the secret is baked into the artifact in clear text — convenient but the artifact must then be treated as confidential; the generated installer defaults to `--self-delete` so the script removes itself from disk after a successful run.
 - **GPG signatures**: Use `--sign-with KEYID` to GPG-sign the shell installer; targets can verify with `gpg --verify bootstrap-<slug>.sh.sig bootstrap-<slug>.sh` before execution.
 - **Repository keyring**: Defaults to the Linagora keyring shipped with the builder package (`/usr/share/open-bastion-builder/keyrings/open-bastion-linagora.gpg`). Override via `--repo-keyring` or the `repo_keyring` config key when targeting a different APT mirror.
 - **Existing config protection**: The shell installer refuses to overwrite `/etc/open-bastion` unless `--force` is passed, preventing accidental clobbering of production configurations.

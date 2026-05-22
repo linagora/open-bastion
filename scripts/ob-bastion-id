@@ -83,9 +83,12 @@ read_config() {
 }
 
 # Decode base64url to raw bytes (stdout). Pure bash + base64.
+# base64url uses '-' and '_' where standard base64 uses '+' and '/'.
 base64url_decode() {
     local s="$1"
     s="${s//-/+}"
+    # Bash ${var//pattern/replacement} — replace every '_' with '/'.
+    # The middle '/' is the separator; the trailing '/' is the replacement.
     s="${s//_//}"
     local pad=$(( (4 - ${#s} % 4) % 4 ))
     case "$pad" in
