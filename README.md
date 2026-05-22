@@ -84,6 +84,18 @@ Pre-built packages are available for:
 
 See installation instructions at: **https://linagora.github.io/open-bastion/**
 
+### Deploying to a fleet — `open-bastion-builder`
+
+For administrators rolling Open Bastion out to several servers, a separate
+`open-bastion-builder` package provides an interactive CLI (`ob-builder`)
+that generates a self-extracting shell installer and/or an Ansible role
+tailored to your SSO, scenario, and target role (bastion / standalone /
+backend). Install it once on an admin workstation, run the questionnaire,
+then push the resulting artefact to every target machine.
+
+See [admin-builder/README.md](admin-builder/README.md) for the questionnaire,
+configuration keys, and usage examples.
+
 ### From Source
 
 ```bash
@@ -167,6 +179,7 @@ See the full [documentation index](doc/README.md) or jump directly to:
 | [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting        |
 | [Security Features](doc/security.md)                     | Key policies, rate limiting, audit     |
 | [Admin Guide](doc/admin-guide.md)                        | Complete administration guide          |
+| [Deployment Builder](admin-builder/README.md)            | Generate shell / Ansible deploy artefacts |
 
 ## Troubleshooting
 

@@ -1,0 +1,204 @@
+#!/bin/bash
+#
+# ob-bastion-id - Print this bastion's identifier (as seen by backends)
+#
+# After a bastion has been enrolled (ob-enroll + ob-bastion-setup) it can ask
+# LLNG to issue a bastion JWT (POST /pam/bastion-token). The 'bastion_id'
+# claim in that JWT is the value backends consult when their
+# bastion_jwt_allowed_bastions whitelist is set.
+#
+# This utility issues a probe request, decodes the returned JWT, and prints
+# the bastion_id (or the full claims with --verbose). Useful when configuring
+# a new backend that must restrict which bastions can reach it.
+#
+# Usage:
+#   ob-bastion-id                    # prints bastion_id on stdout
+#   ob-bastion-id --verbose          # full JWT claims as JSON
+#   ob-bastion-id --json             # bastion_id wrapped in JSON (machine-readable)
+#
+# Copyright (C) 2026 Linagora
+# License: AGPL-3.0
+
+set -euo pipefail
+
+VERSION="0.2.2"
+PROG_NAME=$(basename "$0")
+
+CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+TOKEN_FILE="/etc/open-bastion/token"
+PORTAL_URL=""
+SERVER_GROUP=""
+VERIFY_SSL=true
+TIMEOUT=10
+VERBOSE=false
+JSON_OUT=false
+QUIET=false
+
+log_info()  { [ "$QUIET" = "true" ] || printf '[INFO] %s\n' "$*" >&2; }
+log_error() { printf '[ERROR] %s\n' "$*" >&2; }
+die() { log_error "$*"; exit "${2:-1}"; }
+
+usage() {
+    cat <<EOF
+$PROG_NAME $VERSION
+
+Print this bastion's identifier (the 'bastion_id' claim it gets in JWTs from
+LLNG). Run on a bastion that has been enrolled and configured.
+
+Backends consult this value when their /etc/open-bastion/openbastion.conf
+sets 'bastion_jwt_allowed_bastions = id1,id2,...'.
+
+USAGE:
+  $PROG_NAME [OPTIONS]
+
+OPTIONS:
+  -v, --verbose          Print all JWT claims as pretty JSON
+  -j, --json             Print {"bastion_id":"..."} for scripting
+  -q, --quiet            Suppress informational logs (errors still go to stderr)
+  -c, --config FILE      Path to openbastion.conf  (default: $CONFIG_FILE)
+  -t, --token FILE       Path to server token file (default: $TOKEN_FILE)
+  -h, --help             Show this help
+  -V, --version          Print version
+
+EXIT STATUS:
+  0  bastion_id printed successfully
+  1  configuration or token missing / unreadable
+  2  /pam/bastion-token request failed
+  3  JWT decoded but bastion_id claim absent
+EOF
+    exit 0
+}
+
+# Read a key=value from openbastion.conf (mirrors ob-enroll's read_config).
+read_config() {
+    local key="$1" file="$2"
+    [ -f "$file" ] || return 0
+    grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null \
+        | sed -E 's/^[^=]+=\s*//' \
+        | sed -E 's/^["'\'']//' \
+        | sed -E 's/["'\'']$//' \
+        | sed -E 's/\s*#.*$//' \
+        | tail -1 \
+        || true
+}
+
+# Decode base64url to raw bytes (stdout). Pure bash + base64.
+# base64url uses '-' and '_' where standard base64 uses '+' and '/'.
+base64url_decode() {
+    local s="$1"
+    # Strip whitespace (CR/LF/tab/space) that may have been introduced
+    # by sloppy HTTP intermediaries — base64 -d tolerates internal
+    # newlines, but our padding calculation below uses ${#s} which would
+    # otherwise be wrong.
+    s="${s//[$' \t\r\n']/}"
+    s="${s//-/+}"
+    # Bash ${var//pattern/replacement} — replace every '_' with '/'.
+    # The middle '/' is the separator; the trailing '/' is the replacement.
+    s="${s//_//}"
+    local pad=$(( (4 - ${#s} % 4) % 4 ))
+    case "$pad" in
+        1) s="${s}=" ;;
+        2) s="${s}==" ;;
+        3) s="${s}===" ;;
+    esac
+    printf '%s' "$s" | base64 -d 2>/dev/null
+}
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -v|--verbose)  VERBOSE=true; shift ;;
+            -j|--json)     JSON_OUT=true; shift ;;
+            -q|--quiet)    QUIET=true; shift ;;
+            -c|--config)   CONFIG_FILE="${2:?--config requires a path}"; shift 2 ;;
+            -t|--token)    TOKEN_FILE="${2:?--token requires a path}"; shift 2 ;;
+            -h|--help)     usage ;;
+            -V|--version)  echo "$PROG_NAME $VERSION"; exit 0 ;;
+            *) die "Unknown option: $1 (use --help)" ;;
+        esac
+    done
+}
+
+main() {
+    parse_args "$@"
+
+    command -v curl >/dev/null || die "curl is required"
+    command -v jq   >/dev/null || die "jq is required"
+
+    [ -r "$CONFIG_FILE" ] || die "Config file not readable: $CONFIG_FILE (run as root?)"
+    [ -r "$TOKEN_FILE" ]  || die "Token file not readable: $TOKEN_FILE (bastion not enrolled?)"
+
+    PORTAL_URL=$(read_config "portal_url" "$CONFIG_FILE")
+    SERVER_GROUP=$(read_config "server_group" "$CONFIG_FILE")
+    local verify_ssl_raw
+    verify_ssl_raw=$(read_config "verify_ssl" "$CONFIG_FILE")
+    case "$verify_ssl_raw" in false|no|0) VERIFY_SSL=false ;; esac
+
+    [ -n "$PORTAL_URL" ]   || die "portal_url missing from $CONFIG_FILE"
+    [ -n "$SERVER_GROUP" ] || die "server_group missing from $CONFIG_FILE"
+
+    local server_token
+    server_token=$(tr -d '\r\n' < "$TOKEN_FILE")
+    [ -n "$server_token" ] || die "Token file is empty: $TOKEN_FILE"
+
+    log_info "Probing $PORTAL_URL/pam/bastion-token (group=$SERVER_GROUP)"
+
+    local curl_opts=( -sS --max-time "$TIMEOUT" -fL )
+    [ "$VERIFY_SSL" = "true" ] || curl_opts+=( --insecure )
+
+    # Probe payload — user/target_host are placeholders; LLNG signs the JWT
+    # using its own knowledge of this bastion (identified by the bearer token).
+    local payload
+    payload=$(jq -n \
+        --arg user "ob-bastion-id-probe" \
+        --arg target_host "127.0.0.1" \
+        --arg target_group "$SERVER_GROUP" \
+        --arg bastion_group "$SERVER_GROUP" \
+        '{user: $user, target_host: $target_host, target_group: $target_group, bastion_group: $bastion_group}')
+
+    local response http_status body
+    response=$(curl "${curl_opts[@]}" \
+        -X POST \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -w '\n__HTTP_STATUS__:%{http_code}' \
+        -d "$payload" \
+        "${PORTAL_URL}/pam/bastion-token" 2>&1) || {
+            log_error "Request failed: $response"
+            exit 2
+        }
+
+    http_status="${response##*__HTTP_STATUS__:}"
+    body="${response%$'\n'__HTTP_STATUS__:*}"
+    if [ "$http_status" != "200" ]; then
+        log_error "LLNG returned HTTP $http_status: $body"
+        exit 2
+    fi
+
+    local jwt
+    jwt=$(printf '%s' "$body" | jq -r '.bastion_jwt // empty' 2>/dev/null)
+    [ -n "$jwt" ] || die "No bastion_jwt in response: $body" 2
+
+    # JWT is header.payload.signature — decode the middle segment.
+    local b64payload claims
+    b64payload="${jwt#*.}"; b64payload="${b64payload%.*}"
+    claims=$(base64url_decode "$b64payload")
+    [ -n "$claims" ] || die "Failed to base64url-decode JWT payload" 3
+
+    if [ "$VERBOSE" = "true" ]; then
+        printf '%s\n' "$claims" | jq .
+        exit 0
+    fi
+
+    local bastion_id
+    bastion_id=$(printf '%s' "$claims" | jq -r '.bastion_id // .sub // empty')
+    [ -n "$bastion_id" ] || { log_error "JWT has neither bastion_id nor sub claim"; exit 3; }
+
+    if [ "$JSON_OUT" = "true" ]; then
+        jq -nc --arg id "$bastion_id" '{bastion_id: $id}'
+    else
+        printf '%s\n' "$bastion_id"
+    fi
+}
+
+main "$@"

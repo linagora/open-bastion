@@ -639,6 +639,113 @@ test_ssh_connection_bastion() {
     fi
 }
 
+test_builder_deployed_backend() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing artefact produced by admin-builder on backend-new..."
+
+    local builder="${PROJECT_DIR}/admin-builder/ob-builder"
+    if [[ ! -x "$builder" ]]; then
+        fail "ob-builder not found at $builder"
+        return 1
+    fi
+
+    local workdir
+    workdir=$(mktemp -d -t ob-builder-test.XXXXXX)
+    local cfg="${workdir}/build.yml"
+    local artefact="${workdir}/bootstrap-backend-new.sh"
+
+    cat > "$cfg" <<EOF
+deployment_slug: cert-demo-backend-new
+scenario: max-security
+portal_url: ${PORTAL_URL}
+client_id: ${CLIENT_ID}
+client_id_policy: modifiable
+client_secret_mode: embedded
+embedded_client_secret: ${CLIENT_SECRET}
+server_group: backend-new
+server_group_policy: modifiable
+target_role: backend
+auto_enroll_setup: no
+self_delete: no
+EOF
+
+    local rc=0
+    "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure \
+        >"${workdir}/builder.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        local size
+        size=$(wc -c <"${workdir}/builder.log")
+        fail "ob-builder failed (exit=$rc, log_size=${size}B)" "--- begin log ---
+$(cat "${workdir}/builder.log")
+--- end log ---"
+        rm -rf "$workdir"
+        return 1
+    fi
+    log_verbose "ob-builder produced $(wc -c < "$artefact") bytes"
+
+    # Copy and execute the artefact inside the unconfigured backend container.
+    # The container has the PAM module built from source already, so we
+    # skip the apt package install. enroll/setup are skipped too because
+    # the demo SSO is not wired for the Device Authorization Grant flow
+    # that ob-enroll expects — this test only validates that the artefact
+    # correctly deposits configs.
+    if ! docker cp "$artefact" ob-cert-backend-new:/tmp/bootstrap.sh; then
+        fail "Could not copy artefact into ob-cert-backend-new"
+        rm -rf "$workdir"
+        return 1
+    fi
+
+    local exec_log="${workdir}/exec.log"
+    if ! docker exec ob-cert-backend-new bash /tmp/bootstrap.sh \
+            --server-group backend-new \
+            --skip-install --skip-enroll --skip-setup \
+            --force \
+            > "$exec_log" 2>&1; then
+        fail "Generated bootstrap.sh failed inside backend-new" "$(tail -20 "$exec_log")"
+        rm -rf "$workdir"
+        return 1
+    fi
+    log_verbose "Bootstrap output (last lines): $(tail -3 "$exec_log")"
+
+    # Now validate what landed on disk inside the container.
+    local conf
+    conf=$(docker exec ob-cert-backend-new cat /etc/open-bastion/openbastion.conf 2>&1) || {
+        fail "/etc/open-bastion/openbastion.conf was not created"
+        rm -rf "$workdir"
+        return 1
+    }
+
+    # portal_url is fixed at build time by design (only client_id and
+    # server_group are runtime-substituted). Verify the build-time value
+    # is present in the deposited conf.
+    if ! grep -q "^portal_url = ${PORTAL_URL}\$" <<<"$conf"; then
+        fail "portal_url not baked correctly into the deposited conf" "$conf"
+        rm -rf "$workdir"
+        return 1
+    fi
+
+    if ! grep -q "^server_group = backend-new" <<<"$conf"; then
+        fail "server_group not correctly set in deposited conf" "$conf"
+        rm -rf "$workdir"
+        return 1
+    fi
+
+    if ! grep -q "^bastion_jwt_required = true" <<<"$conf"; then
+        fail "bastion_jwt_required missing — backend role config incomplete" "$conf"
+        rm -rf "$workdir"
+        return 1
+    fi
+
+    if ! docker exec ob-cert-backend-new test -f /etc/ssh/open-bastion_ca.pub; then
+        fail "SSH CA pubkey not deposited at /etc/ssh/open-bastion_ca.pub"
+        rm -rf "$workdir"
+        return 1
+    fi
+
+    rm -rf "$workdir"
+    pass "ob-builder artefact correctly configured backend-new"
+}
+
 test_nss_user_resolution() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing NSS user resolution..."
@@ -716,6 +823,7 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+    test_builder_deployed_backend
 
     echo ""
     echo "=== Phase 6: Cert revocation via fingerprint binding ==="

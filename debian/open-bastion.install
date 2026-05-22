@@ -1,52 +1,54 @@
 # Open Bastion base package
 
 # PAM module
-debian/tmp/usr/lib/*/security/pam_openbastion.so*
+usr/lib/*/security/pam_openbastion.so*
 
 # NSS module
-debian/tmp/usr/lib/*/libnss_openbastion.so*
+usr/lib/*/libnss_openbastion.so*
 
 # Configuration files
-debian/tmp/etc/open-bastion/openbastion.conf.example
-debian/tmp/etc/open-bastion/nss_openbastion.conf.example
-debian/tmp/etc/open-bastion/service-accounts.conf.example
-debian/tmp/etc/open-bastion/session-recorder.conf.example
-debian/tmp/etc/open-bastion/ssh-proxy.conf.example
+etc/open-bastion/openbastion.conf.example
+etc/open-bastion/nss_openbastion.conf.example
+etc/open-bastion/service-accounts.conf.example
+etc/open-bastion/session-recorder.conf.example
+etc/open-bastion/ssh-proxy.conf.example
 
 # Admin scripts
-debian/tmp/usr/sbin/ob-enroll
-debian/tmp/usr/sbin/ob-heartbeat
-debian/tmp/usr/sbin/ob-session-recorder
-debian/tmp/usr/sbin/ob-session-recorder-wrapper
-debian/tmp/usr/sbin/ob-bastion-setup
-debian/tmp/usr/sbin/ob-backend-setup
-debian/tmp/usr/sbin/ob-cache-admin
+usr/sbin/ob-enroll
+usr/sbin/ob-heartbeat
+usr/sbin/ob-session-recorder
+usr/sbin/ob-session-recorder-wrapper
+usr/sbin/ob-bastion-setup
+usr/sbin/ob-backend-setup
+usr/sbin/ob-cache-admin
 
 # User scripts
-debian/tmp/usr/bin/ob-ssh-cert
-debian/tmp/usr/bin/ob-ssh-proxy
+usr/bin/ob-ssh-cert
+usr/bin/ob-ssh-proxy
+usr/bin/ob-bastion-id
 
 # Man pages
-debian/tmp/usr/share/man/man1/ob-ssh-cert.1
-debian/tmp/usr/share/man/man1/ob-ssh-proxy.1
-debian/tmp/usr/share/man/man8/ob-enroll.8
-debian/tmp/usr/share/man/man8/ob-heartbeat.8
-debian/tmp/usr/share/man/man8/ob-bastion-setup.8
-debian/tmp/usr/share/man/man8/ob-backend-setup.8
-debian/tmp/usr/share/man/man8/ob-session-recorder.8
+usr/share/man/man1/ob-ssh-cert.1
+usr/share/man/man1/ob-ssh-proxy.1
+usr/share/man/man1/ob-bastion-id.1
+usr/share/man/man8/ob-enroll.8
+usr/share/man/man8/ob-heartbeat.8
+usr/share/man/man8/ob-bastion-setup.8
+usr/share/man/man8/ob-backend-setup.8
+usr/share/man/man8/ob-session-recorder.8
 
 # Audit trace templates (deployed by `ob-bastion-setup --enable-audit-trace`)
-debian/tmp/usr/share/open-bastion/audit/rules.d/open-bastion.rules
-debian/tmp/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate
+usr/share/open-bastion/audit/rules.d/open-bastion.rules
+usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 
 # Hardening templates (deployed by `ob-bastion-setup --enable-hardening`)
-debian/tmp/usr/share/open-bastion/hardening/logind.conf.d/open-bastion.conf
-debian/tmp/usr/share/open-bastion/hardening/security/limits.d/open-bastion.conf
-debian/tmp/usr/share/open-bastion/hardening/at.allow
-debian/tmp/usr/share/open-bastion/hardening/cron.allow
+usr/share/open-bastion/hardening/logind.conf.d/open-bastion.conf
+usr/share/open-bastion/hardening/security/limits.d/open-bastion.conf
+usr/share/open-bastion/hardening/at.allow
+usr/share/open-bastion/hardening/cron.allow
 
 # Documentation
-debian/tmp/usr/share/doc/open-bastion/README.md
+usr/share/doc/open-bastion/README.md
 
 # Heartbeat systemd timer and service (not installed by cmake when INSTALL_SYSTEMD=OFF)
 systemd/ob-heartbeat.timer lib/systemd/system/

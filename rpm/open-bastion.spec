@@ -95,6 +95,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh-proxy
+%{_bindir}/ob-bastion-id
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
 %dir %{_datadir}/open-bastion
@@ -106,6 +107,7 @@ ctest --output-on-failure --verbose
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
 %{_mandir}/man1/ob-ssh-cert.1*
+%{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
 %{_mandir}/man8/ob-bastion-setup.8*

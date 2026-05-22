@@ -216,6 +216,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-proxy
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Bastion identity helper (used when configuring backend whitelists)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-id
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 # Install SSH proxy config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
@@ -281,6 +286,7 @@ install(FILES
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-proxy.1
+    ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
@@ -350,3 +356,149 @@ set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
 include(CPack)
+
+# ── open-bastion-builder package ────────────────────────────────────────────
+# The builder is an admin workstation tool: pure bash, no dependency on the
+# open-bastion runtime package. It is packaged separately so it can be
+# installed on machines that never run the PAM/NSS module.
+#
+# We deliberately avoid CPACK_DEB_COMPONENT_INSTALL here because enabling it
+# would rename every existing install() destination to *-unspecified, breaking
+# the main open-bastion package. Instead we stage the builder files into the
+# build tree and invoke dpkg-deb (Debian) / rpmbuild (RPM) directly via a
+# custom target.
+# ────────────────────────────────────────────────────────────────────────────
+option(BUILD_BUILDER "Build the open-bastion-builder package" ON)
+
+# Auto-disable when the admin-builder/ tree is absent — typical for Docker
+# integration tests that COPY only the runtime source paths.
+if(BUILD_BUILDER AND NOT EXISTS "${CMAKE_SOURCE_DIR}/admin-builder/debian/control")
+    message(STATUS "admin-builder/ tree not present — disabling BUILD_BUILDER")
+    set(BUILD_BUILDER OFF)
+endif()
+
+if(BUILD_BUILDER)
+    set(BUILDER_PKG_NAME "open-bastion-builder")
+    set(BUILDER_PKG_VERSION ${PROJECT_VERSION})
+    set(BUILDER_STAGE_DIR "${CMAKE_BINARY_DIR}/builder-pkg")
+
+    # ── Debian package ───────────────────────────────────────────────────
+    # Stage directory mirrors the final filesystem layout:
+    #   usr/bin/ob-builder
+    #   usr/share/open-bastion-builder/lib/*.sh
+    #   usr/share/open-bastion-builder/templates/...
+    #   DEBIAN/control
+    #   DEBIAN/postinst
+
+    set(BUILDER_DEB_DIR "${BUILDER_STAGE_DIR}/deb")
+    set(BUILDER_DEB_ROOT "${BUILDER_DEB_DIR}/root")
+
+    # Generate DEBIAN/control with the real version substituted
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/admin-builder/debian/control"
+        "${BUILDER_DEB_ROOT}/DEBIAN/control"
+        @ONLY
+    )
+
+    # Copy postinst verbatim; chmod 0755 is applied by the custom command below
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/admin-builder/debian/postinst"
+        "${BUILDER_DEB_ROOT}/DEBIAN/postinst"
+        COPYONLY
+    )
+
+    # Produce the .deb via a custom target (requires dpkg-deb at build time)
+    set(BUILDER_DEB_OUTPUT
+        "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}_${BUILDER_PKG_VERSION}_all.deb")
+
+    find_program(DPKG_DEB_EXECUTABLE dpkg-deb)
+    if(NOT DPKG_DEB_EXECUTABLE)
+        message(STATUS "dpkg-deb not found — skipping open-bastion-builder DEB target")
+    else()
+    add_custom_target(builder-deb ALL
+        # Install the main script
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/bin"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/admin-builder/ob-builder"
+            "${BUILDER_DEB_ROOT}/usr/bin/ob-builder"
+        COMMAND chmod 0755
+            "${BUILDER_DEB_ROOT}/usr/bin/ob-builder"
+
+        # Install lib scripts
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/lib"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/admin-builder/lib"
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/lib"
+
+        # Install templates
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/templates"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/admin-builder/templates"
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/templates"
+
+        # Install bundled GPG keyrings (default = Linagora)
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/admin-builder/keyrings"
+            "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
+
+        # Install man page
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BUILDER_DEB_ROOT}/usr/share/man/man1"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/admin-builder/man/ob-builder.1"
+            "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1"
+
+        # Fix permissions: DEBIAN scripts must be 0755
+        COMMAND chmod 0755
+            "${BUILDER_DEB_ROOT}/DEBIAN/postinst"
+
+        # Build the .deb
+        COMMAND dpkg-deb --build --root-owner-group
+            "${BUILDER_DEB_ROOT}"
+            "${BUILDER_DEB_OUTPUT}"
+
+        COMMENT "Building ${BUILDER_PKG_NAME} Debian package"
+        VERBATIM
+    )
+    endif()
+
+    # ── RPM package ──────────────────────────────────────────────────────
+    # Only attempted when rpmbuild is available; silently skipped otherwise.
+    find_program(RPMBUILD_EXECUTABLE rpmbuild)
+    if(RPMBUILD_EXECUTABLE)
+        set(BUILDER_RPM_OUTPUT
+            "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1.noarch.rpm")
+
+        # Generate the spec from the .in template
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/admin-builder/rpm/open-bastion-builder.spec.in"
+            "${CMAKE_BINARY_DIR}/open-bastion-builder.spec"
+            @ONLY
+        )
+
+        # rpmbuild needs a proper SOURCES tree; we build a tarball of the admin-builder dir
+        set(BUILDER_RPM_TARBALL "${CMAKE_BINARY_DIR}/builder-pkg/rpm/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}.tar.gz")
+        add_custom_target(builder-rpm ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${CMAKE_BINARY_DIR}/builder-pkg/rpm"
+            COMMAND tar -czf "${BUILDER_RPM_TARBALL}"
+                -C "${CMAKE_SOURCE_DIR}"
+                --transform "s|^admin-builder|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}|"
+                admin-builder
+            COMMAND ${RPMBUILD_EXECUTABLE}
+                --define "_topdir ${CMAKE_BINARY_DIR}/builder-pkg/rpm/rpmbuild"
+                --define "_sourcedir ${CMAKE_BINARY_DIR}/builder-pkg/rpm"
+                --define "_rpmdir ${CMAKE_BINARY_DIR}"
+                -bb "${CMAKE_BINARY_DIR}/open-bastion-builder.spec"
+            COMMENT "Building ${BUILDER_PKG_NAME} RPM package"
+            VERBATIM
+        )
+    else()
+        message(STATUS "rpmbuild not found — skipping open-bastion-builder RPM target")
+    endif()
+endif()

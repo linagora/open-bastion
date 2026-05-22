@@ -1,0 +1,112 @@
+.TH OB-BUILDER 1 "May 2026" "open-bastion 0.2.2" "User Commands"
+.SH NAME
+ob-builder \- Generate Open Bastion deployment artefacts
+.SH SYNOPSIS
+.B ob-builder
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B ob-builder
+is run on an administrator workstation to produce a self-contained
+deployment artefact (a self-extracting shell installer and/or an Ansible
+role) that a target server can later execute to install and configure
+Open Bastion against a LemonLDAP::NG SSO.
+.PP
+The builder asks a short questionnaire (security scenario, SSO URL,
+OIDC client_id and client_secret handling, target role, server group,
+auto-launch policy, optional bastion whitelist for backends) and then
+fetches the SSH CA public key and JWKS from the chosen SSO. The generated
+artefacts deposit
+.IR /etc/open-bastion/openbastion.conf ,
+install the
+.B open-bastion
+package via the bundled APT keyring, and prompt step-by-step for
+.BR ob-enroll (8)
+followed by
+.BR ob-bastion-setup (8)
+or
+.BR ob-backend-setup (8) .
+.SH OPTIONS
+.TP
+.B \-\-config \fIFILE\fR
+Read all answers from a YAML config file (non-interactive). The accepted
+keys are listed in the README shipped with the package.
+.TP
+.B \-\-output\-shell \fIPATH\fR
+Write a self-extracting shell installer to \fIPATH\fR.
+.TP
+.B \-\-output\-ansible \fIPATH\fR
+Write an Ansible role tree to \fIPATH\fR (a directory).
+.TP
+.B \-\-bundle
+Generate paired bastion + backend artefacts in one run, sharing the
+same SSO context.
+.TP
+.B \-\-repo\-keyring \fIPATH\fR
+GPG keyring used to sign the APT repository. Defaults to the Linagora
+keyring bundled with the package
+(\fI/usr/share/open-bastion-builder/keyrings/open-bastion-linagora.gpg\fR).
+.TP
+.B \-\-apt\-url \fIURL\fR
+APT repo base URL. Default: \fIhttps://linagora.github.io/open-bastion\fR.
+.TP
+.B \-\-apt\-suite \fISUITE\fR
+APT suite/codename. Default: \fItrixie\fR.
+.TP
+.B \-\-apt\-component \fICOMP\fR
+APT component. Default: \fImain\fR.
+.TP
+.B \-\-sign\-with \fIKEYID\fR
+GPG-sign the shell output with this key (produces a \fI.sig\fR sidecar).
+.TP
+.B \-\-allow\-http
+Allow an \fIhttp://\fR SSO URL (default is to refuse non-TLS portals).
+.TP
+.B \-\-insecure
+Skip TLS verification when fetching from the SSO. Debug only.
+.TP
+.B \-\-dry\-run
+Print the actions that would be taken without writing any files.
+.TP
+.B \-h ", " \-\-help
+Show help.
+.TP
+.B \-V ", " \-\-version
+Print the builder version.
+.SH FILES
+.TP
+.I /usr/share/open-bastion-builder/templates/
+Source templates for the generated shell installer and Ansible role.
+.TP
+.I /usr/share/open-bastion-builder/keyrings/
+Bundled APT repository keyrings (default = Linagora).
+.SH SECURITY
+The generated shell installer is executed as root on the target host.
+The builder validates the SSO URL character class to forbid shell
+metacharacters and embeds the optional client_secret base64-encoded so
+that secrets containing
+.BR \" ,
+.BR $ ,
+.BR ` ,
+or backslash cannot break out of the generated literal. The
+.B \-\-self\-delete
+default is automatically enabled when the embedded client_secret mode is
+chosen, so the installer removes itself from disk after a successful run.
+.SH EXAMPLES
+Interactive run targeting the Linagora SSO:
+.PP
+.RS
+ob-builder --output-shell /tmp/bootstrap.sh
+.RE
+.PP
+Replayable build from YAML (e.g. for CI):
+.PP
+.RS
+ob-builder --config build.yml --output-shell /tmp/boot.sh --output-ansible /tmp/role
+.RE
+.SH SEE ALSO
+.BR ob-enroll (8),
+.BR ob-bastion-setup (8),
+.BR ob-backend-setup (8),
+.BR ob-bastion-id (1)
+.SH AUTHOR
+Open Bastion team <open-bastion@linagora.com>

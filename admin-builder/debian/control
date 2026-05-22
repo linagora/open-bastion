@@ -1,0 +1,15 @@
+Package: open-bastion-builder
+Version: @PROJECT_VERSION@
+Architecture: all
+Section: admin
+Priority: optional
+Maintainer: Open Bastion team <open-bastion@linagora.com>
+Depends: bash (>= 4.0), curl, jq, coreutils, openssh-client
+Recommends: yq
+Description: Open Bastion deployment artefact builder
+ Interactive tool for administrators to generate self-extracting
+ shell installers and Ansible roles that deploy and configure
+ Open Bastion (PAM/NSS + LLNG SSO) on target servers.
+ .
+ The builder is installed on the admin's workstation; the generated
+ artefacts are then distributed to the production servers.
