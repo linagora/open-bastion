@@ -126,7 +126,6 @@ main() {
     command -v jq   >/dev/null || die "jq is required"
 
     [ -r "$CONFIG_FILE" ] || die "Config file not readable: $CONFIG_FILE (run as root?)"
-    [ -r "$TOKEN_FILE" ]  || die "Token file not readable: $TOKEN_FILE (bastion not enrolled?)"
 
     PORTAL_URL=$(read_config "portal_url" "$CONFIG_FILE")
     SERVER_GROUP=$(read_config "server_group" "$CONFIG_FILE")
@@ -134,12 +133,30 @@ main() {
     verify_ssl_raw=$(read_config "verify_ssl" "$CONFIG_FILE")
     case "$verify_ssl_raw" in false|no|0) VERIFY_SSL=false ;; esac
 
+    # Honour `server_token_file = ...` in the conf, falling back to the
+    # canonical /etc/open-bastion/token when unset. Mirrors the PAM module
+    # so ob-bastion-id reads the same file PAM does, without manual --token.
+    if [ "$TOKEN_FILE" = "/etc/open-bastion/token" ]; then
+        local conf_token_file
+        conf_token_file=$(read_config "server_token_file" "$CONFIG_FILE")
+        [ -n "$conf_token_file" ] && TOKEN_FILE="$conf_token_file"
+    fi
+    [ -r "$TOKEN_FILE" ]  || die "Token file not readable: $TOKEN_FILE (bastion not enrolled?)"
+
     [ -n "$PORTAL_URL" ]   || die "portal_url missing from $CONFIG_FILE"
     [ -n "$SERVER_GROUP" ] || die "server_group missing from $CONFIG_FILE"
 
+    # Accept both formats the PAM module's token_manager_load_file accepts:
+    #  1. Plain text bearer token (canonical, written by ob-enroll)
+    #  2. JSON with .access_token (docker-demo entrypoints, refresh-token aware)
     local server_token
-    server_token=$(tr -d '\r\n' < "$TOKEN_FILE")
-    [ -n "$server_token" ] || die "Token file is empty: $TOKEN_FILE"
+    if server_token=$(jq -er '.access_token' "$TOKEN_FILE" 2>/dev/null) \
+       && [ -n "$server_token" ] && [ "$server_token" != "null" ]; then
+        :  # JSON form, server_token is the .access_token value
+    else
+        server_token=$(tr -d '\r\n' < "$TOKEN_FILE")
+    fi
+    [ -n "$server_token" ] || die "Token file is empty or unparseable: $TOKEN_FILE"
 
     log_info "Probing $PORTAL_URL/pam/bastion-token (group=$SERVER_GROUP)"
 

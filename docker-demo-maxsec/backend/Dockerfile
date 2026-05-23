@@ -40,12 +40,27 @@ COPY src/ /src/open-bastion/src/
 COPY include/ /src/open-bastion/include/
 COPY nss/ /src/open-bastion/nss/
 COPY scripts/ /src/open-bastion/scripts/
+COPY config/ /src/open-bastion/config/
+COPY README.md /src/open-bastion/README.md
+COPY man/ /src/open-bastion/man/
 WORKDIR /src/open-bastion
+# `make install` with CMAKE_INSTALL_PREFIX=/usr puts every ob-* script at the
+# same path the production .deb does (/usr/sbin/ob-enroll, /usr/bin/ob-ssh-cert,
+# etc.). New scripts added to CMakeLists.txt land in the demo automatically;
+# no per-Dockerfile allowlist to maintain.
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TESTING=OFF .. && \
+    cmake -DCMAKE_INSTALL_PREFIX=/usr \
+          -DBUILD_TESTING=OFF \
+          -DINSTALL_SYSTEMD=OFF \
+          -DINSTALL_DESKTOP=OFF \
+          -DBUILD_BUILDER=OFF \
+          .. && \
     make -j$(nproc) && \
-    cp pam_openbastion.so /usr/lib/x86_64-linux-gnu/security/ && \
-    cp nss/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/ && \
+    make install && \
+    # NSS loader (libc) traditionally searches /lib/x86_64-linux-gnu first.
+    # On merged-/usr Debian /lib IS /usr/lib, so the symlink would self-loop.
+    # Only create the link when the two directories are genuinely distinct.
+    { if [ "$(readlink -f /lib/x86_64-linux-gnu)" != "$(readlink -f /usr/lib/x86_64-linux-gnu)" ]; then ln -sf /usr/lib/x86_64-linux-gnu/libnss_openbastion.so.2 /lib/x86_64-linux-gnu/libnss_openbastion.so.2; fi ; } && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 

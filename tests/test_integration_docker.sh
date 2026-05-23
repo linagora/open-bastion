@@ -898,6 +898,238 @@ EOF
     pass "Auto-approve protocol completed; ob-enroll obtained token (${token_size}B)"
 }
 
+# Smoke-generate every supported (scenario, target_role) combination and verify
+# the artefacts have valid bash syntax and contain the expected config keys.
+# Lightweight — does not deploy, just exercises the generator code paths.
+test_builder_scenarios_matrix() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing builder across scenarios × target_roles..."
+
+    local builder="${PROJECT_DIR}/admin-builder/ob-builder"
+    local scenarios=("token-only" "token+unix" "keys+llng" "mixed" "max-security")
+    local roles=("bastion" "standalone" "backend")
+    local matrix_dir
+    matrix_dir=$(mktemp -d -t ob-builder-matrix.XXXXXX)
+    local failures=0 total=0 details=""
+
+    local scenario role
+    for scenario in "${scenarios[@]}"; do
+        for role in "${roles[@]}"; do
+            total=$((total + 1))
+            local slug="m-${scenario//+/-}-${role}"
+            local cfg="${matrix_dir}/${slug}.yml"
+            local out="${matrix_dir}/${slug}.sh"
+            cat > "$cfg" <<EOF
+deployment_slug: ${slug}
+scenario: ${scenario}
+portal_url: ${PORTAL_URL}
+client_id: ${CLIENT_ID}
+client_id_policy: modifiable
+client_secret_mode: prompt
+server_group: smoke
+server_group_policy: modifiable
+target_role: ${role}
+auto_enroll_setup: no
+self_delete: no
+EOF
+            if ! "$builder" --config "$cfg" --output-shell "$out" --allow-http --insecure \
+                   > "${matrix_dir}/${slug}.log" 2>&1; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: ob-builder failed (see ${matrix_dir}/${slug}.log)"$'\n'
+                continue
+            fi
+            if ! bash -n "$out" 2>>"${matrix_dir}/${slug}.log"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: generated script syntax error"$'\n'
+                continue
+            fi
+            # Backend role MUST embed the bastion JWT verification block;
+            # bastion/standalone roles MUST NOT.
+            if [ "$role" = "backend" ]; then
+                if ! grep -q "bastion_jwt_required = true" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: missing bastion_jwt_required"$'\n'
+                    continue
+                fi
+            else
+                if grep -q "bastion_jwt_required" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: bastion_jwt_required leaked into non-backend artefact"$'\n'
+                    continue
+                fi
+            fi
+            # Mode E artefacts must include min_tls_version=13; other modes must not.
+            if [ "$scenario" = "max-security" ]; then
+                if ! grep -q "min_tls_version = 13" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E expected min_tls_version=13"$'\n'
+                    continue
+                fi
+            else
+                if grep -q "min_tls_version = 13" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E setting min_tls_version=13 leaked into non-max-security artefact"$'\n'
+                    continue
+                fi
+            fi
+            # Mode E specifics: cache_ttl tightened to 60, rate-limit on.
+            if [ "$scenario" = "max-security" ]; then
+                if ! grep -q "^cache_ttl = 60" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E expected cache_ttl=60"$'\n'
+                    continue
+                fi
+                if ! grep -q "cache_rate_limit_enabled = true" "$out"; then
+                    failures=$((failures + 1))
+                    details="${details}- $scenario/$role: Mode E expected cache_rate_limit_enabled=true"$'\n'
+                    continue
+                fi
+            fi
+            # The generated script must keep the safety prelude. Regression
+            # detector for any future change that drops it.
+            if ! grep -qE "^set -euo? pipefail" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: generated script missing 'set -euo pipefail' prelude"$'\n'
+                continue
+            fi
+            # portal_url must be embedded into the conf section.
+            if ! grep -qF "portal_url = ${PORTAL_URL}" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: portal_url not embedded in artefact"$'\n'
+                continue
+            fi
+        done
+    done
+
+    if [ "$failures" -gt 0 ]; then
+        fail "$failures/$total scenario×role combinations failed" "$details"
+        rm -rf "$matrix_dir"
+        return 1
+    fi
+    rm -rf "$matrix_dir"
+    pass "All $total scenario×role combinations generated and validated"
+}
+
+# Generate an Ansible role with ob_ansible_auto_approve=yes and run
+# `ansible-playbook --syntax-check`. Catches YAML/Jinja2 errors and missing
+# `include_tasks` references that the bash-only auto-approve test cannot see.
+# Skipped if ansible-playbook is not on PATH.
+test_builder_ansible_syntax() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing Ansible role syntax-check..."
+
+    if ! command -v ansible-playbook >/dev/null 2>&1; then
+        log_warn "ansible-playbook not installed — skipping"
+        pass "Ansible syntax-check skipped (ansible-playbook not on PATH)"
+        return 0
+    fi
+
+    local builder="${PROJECT_DIR}/admin-builder/ob-builder"
+    local outdir cfg
+    outdir=$(mktemp -d -t ob-ansible-syntax.XXXXXX)
+    cfg="${outdir}/build.yml"
+    cat > "$cfg" <<EOF
+deployment_slug: ansible-syntax
+scenario: max-security
+portal_url: ${PORTAL_URL}
+client_id: ${CLIENT_ID}
+client_id_policy: modifiable
+client_secret_mode: prompt
+server_group: smoke
+server_group_policy: modifiable
+target_role: backend
+auto_enroll_setup: yes
+self_delete: no
+ansible_auto_approve: yes
+EOF
+
+    if ! "$builder" --config "$cfg" --output-ansible "${outdir}/role" --allow-http --insecure \
+           > "${outdir}/builder.log" 2>&1; then
+        fail "ob-builder failed to render Ansible role" "$(cat "${outdir}/builder.log")"
+        rm -rf "$outdir"
+        return 1
+    fi
+
+    # Build a minimal inventory pointing at localhost (we only need the parser
+    # to bind hosts; we are not actually running tasks here).
+    cat > "${outdir}/role/inventory.yml" <<EOF
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+EOF
+
+    # Pass dummy values for vars referenced by tasks so Jinja2 evaluation
+    # during --syntax-check has every variable bound.
+    if ! ansible-playbook --syntax-check \
+            -i "${outdir}/role/inventory.yml" \
+            -e "ob_client_secret=dummy ob_llng_cookie=lemonldap=dummy" \
+            "${outdir}/role/playbook.yml" \
+            > "${outdir}/syntax.log" 2>&1; then
+        fail "ansible-playbook --syntax-check failed on the generated role" \
+             "$(cat "${outdir}/syntax.log")"
+        rm -rf "$outdir"
+        return 1
+    fi
+
+    rm -rf "$outdir"
+    pass "Ansible role passes syntax-check (auto-approve variant)"
+}
+
+# ob-bastion-id runs on a pre-enrolled bastion, requests a bastion JWT from
+# LLNG via /pam/bastion-token, decodes the JWT, and prints the bastion_id
+# claim. The pre-enrolled docker-demo-cert bastion is the perfect target.
+test_ob_bastion_id() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing ob-bastion-id on the pre-enrolled bastion..."
+
+    # ob-bastion-id now reads `server_token_file` from openbastion.conf
+    # and accepts both plain-text and JSON-with-.access_token formats —
+    # matching what the PAM module already does. No test-side bridge needed.
+
+    local id
+    if ! id=$(docker exec ob-cert-bastion ob-bastion-id --quiet 2>&1); then
+        # /pam/bastion-token returning 403 means the demo SSO is missing
+        # the bastion-token plugin (or the enrolled token lacks the LLNG
+        # rule) — not an ob-bastion-id bug. Anchor the match on a status
+        # boundary to avoid accidental matches on bodies containing "403".
+        if echo "$id" | grep -qE 'HTTP[/ ]403|HTTP_STATUS__:403|"status"[[:space:]]*:[[:space:]]*403'; then
+            log_warn "/pam/bastion-token returned 403 — endpoint not provisioned in this demo"
+            pass "ob-bastion-id test skipped (LLNG endpoint not available in this demo)"
+            return 0
+        fi
+        fail "ob-bastion-id exited non-zero" "$id"
+        return 1
+    fi
+    # Trim any trailing newline / log noise from --quiet
+    id=$(printf '%s' "$id" | tr -d '\r\n')
+    if [ -z "$id" ]; then
+        fail "ob-bastion-id returned an empty identifier"
+        return 1
+    fi
+    # bastion_id values are typically hostname-like — accept the conservative
+    # alphanumeric + - . _ : @ class so we don't over-constrain LLNG's choice.
+    if ! echo "$id" | grep -qE '^[A-Za-z0-9._:@-]+$'; then
+        fail "ob-bastion-id returned an identifier outside the expected charset" "$id"
+        return 1
+    fi
+    log_verbose "bastion_id: $id"
+
+    # Verify --verbose returns valid JSON with at least one expected claim.
+    local verbose_out
+    if ! verbose_out=$(docker exec ob-cert-bastion ob-bastion-id --verbose --quiet 2>&1); then
+        fail "ob-bastion-id --verbose failed" "$verbose_out"
+        return 1
+    fi
+    if ! echo "$verbose_out" | jq -e '.iss // .sub // .bastion_id' >/dev/null 2>&1; then
+        fail "ob-bastion-id --verbose did not produce valid JWT claims JSON" \
+             "$(echo "$verbose_out" | head -10)"
+        return 1
+    fi
+
+    pass "ob-bastion-id returned bastion_id=$id (and valid JSON claims under --verbose)"
+}
+
 test_nss_user_resolution() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing NSS user resolution..."
@@ -975,6 +1207,9 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+    test_builder_scenarios_matrix
+    test_builder_ansible_syntax
+    test_ob_bastion_id
     test_builder_deployed_backend
     test_builder_auto_approve_protocol
 
