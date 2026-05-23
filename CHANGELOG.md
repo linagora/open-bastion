@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-23
+
+Tooling release: ships a new admin builder for fleet deployments
+(`open-bastion-builder`), a small helper to discover bastion identities
+(`ob-bastion-id`), and an Ansible role with opt-in device-code
+auto-approval. The PAM/NSS modules themselves are unchanged on the
+wire — only operator-side ergonomics and packaging.
+
+### Added
+
+- **`open-bastion-builder`** (new admin-side package): interactive Bash
+  CLI `ob-builder` that asks a short questionnaire (security scenario,
+  SSO URL, OIDC client_id / client_secret policy, server group, target
+  role, optional bastion whitelist, optional Ansible auto-approve) and
+  emits either a self-extracting shell installer or an Ansible role
+  (or both). The generated artefact configures the open-bastion package
+  on target servers against an LLNG SSO without ad-hoc per-host
+  scripts. Ships its own `.deb` / `.rpm`, distributed separately from
+  the runtime package so the builder is only installed on admin
+  workstations. See `admin-builder/README.md`.
+
+- **`ob-bastion-id`**: small utility that runs on an enrolled bastion,
+  requests a JWT from LLNG's `/pam/bastion-token`, decodes it and
+  prints the `bastion_id` claim.
+
+- **Ansible auto-approval of the OIDC Device Authorization Grant**:
+  the generated Ansible role can drive LLNG's `/device` endpoint with
+  a session cookie obtained ahead of time via the `llng` CLI from
+  `simple-oidc-client`, automating the per-host browser approval that
+  required by RFC 8628. Opt-in at build time; the cookie is asked for via
+  `vars_prompt` at every play run and is never persisted.
+
+- **`ob-enroll`**: new `OB_ENROLL_STATE_FILE` env var. When set,
+  `ob-enroll` writes `{user_code, verification_uri, portal_url,
+  interval}` to that file as soon as LLNG returns the device-grant
+  initiation, then continues polling. External orchestrators
+  (notably the new Ansible auto-approve flow) can read this file
+  to drive the approval while `ob-enroll` is still polling. The
+  file is removed on successful enrolment.
+
+### Changed
+
+- **Docker demo images** (`docker-demo-{cert,token,maxsec,token-svc}/`):
+  all 10 build Dockerfiles now use `cmake -DCMAKE_INSTALL_PREFIX=/usr
+  ... && make install` instead of per-Dockerfile allowlists of
+  `cp ../scripts/ob-X` lines. New ob-* scripts added to `CMakeLists.txt`
+  automatically land in the demo containers; no per-Dockerfile
+  maintenance needed.
+
+- **Debian packaging**: `debian/{config,templates,postinst,postrm}`
+  renamed to `debian/open-bastion.{config,templates,postinst,postrm}`
+  to disambiguate now that three binary packages are produced
+  (`open-bastion`, `open-bastion-desktop`, `open-bastion-builder`).
+  `debian/*.install` files dropped the redundant `debian/tmp/` prefix.
+
+### Fixed
+
+- **`ob-enroll`** no longer overrides the bash positional `set -e` due
+  to `[ ... ] && X` chains at the end of `_load_config_yq`,
+  `_load_config_awk`, `run_outputs_for_role` and `main` — these
+  silently exited the process when their trailing test was false.
+  All four functions now end with an explicit `return 0`.
+
+- **`open-bastion-builder` (security)**: embedded client_secret is now
+  stored base64-encoded in the generated shell installer so that a
+  secret containing shell meta-characters (`$`, `` ` ``, `"`, `\`) can
+  no longer break out of the bash literal and achieve command
+  execution as root at install time. Tightened `is_valid_url` for the
+  same reason. Conf-file substitution at install time switched from
+  `sed` (which used `|` as a delimiter without escaping) to bash
+  native `${var//pattern/repl}`.
+
+- **`make install`** ships `config/openbastion.conf.example`,
+  `config/service-accounts.conf.example`, the hardening / audit
+  templates under `/usr/share/open-bastion/`, `README.md`, and the
+  man pages, instead of leaving them out of the install set.
+
 ## [0.2.2] - 2026-05-21
 
 Robustness release for the setup scripts and the session recorder. The

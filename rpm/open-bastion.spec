@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.2.2
+Version:        0.2.3
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -182,6 +182,8 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Sat May 23 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.3-1
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Thu May 21 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.2-1
 - See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Wed May 20 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.1-1

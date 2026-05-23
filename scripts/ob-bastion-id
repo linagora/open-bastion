@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.2"
+VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
