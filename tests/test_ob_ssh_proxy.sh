@@ -154,7 +154,7 @@ load_config 2>/dev/null
 # Output variables for verification
 echo "PORTAL_URL=$PORTAL_URL"
 echo "SERVER_TOKEN_FILE=$SERVER_TOKEN_FILE"
-echo "SERVER_GROUP=$SERVER_GROUP"
+echo "TARGET_GROUP=$TARGET_GROUP"
 echo "TIMEOUT=$TIMEOUT"
 echo "VERIFY_SSL=$VERIFY_SSL"
 echo "SSH_OPTIONS_COUNT=${#SSH_OPTIONS_ARRAY[@]}"
@@ -166,7 +166,7 @@ TESTSCRIPT
     cat > "$test_config" <<'EOF'
 PORTAL_URL=https://test.example.com
 SERVER_TOKEN_FILE=/tmp/test_token
-SERVER_GROUP=mygroup
+TARGET_GROUP=mygroup
 # This is a comment
 TIMEOUT=15
 VERIFY_SSL=false
@@ -188,9 +188,9 @@ EOF
         all_good=false
         details+="SERVER_TOKEN_FILE wrong; "
     fi
-    if ! echo "$output" | grep -q "SERVER_GROUP=mygroup"; then
+    if ! echo "$output" | grep -q "TARGET_GROUP=mygroup"; then
         all_good=false
-        details+="SERVER_GROUP wrong; "
+        details+="TARGET_GROUP wrong; "
     fi
     if ! echo "$output" | grep -q "TIMEOUT=15"; then
         all_good=false
@@ -230,21 +230,21 @@ CONFIG_FILE="$test_config"
 load_config 2>/dev/null
 
 echo "PORTAL_URL=$PORTAL_URL"
-echo "SERVER_GROUP=$SERVER_GROUP"
+echo "TARGET_GROUP=$TARGET_GROUP"
 TESTSCRIPT
 
     chmod +x "$test_script"
     local test_config="$TEST_TMPDIR/test_config_quotes"
     cat > "$test_config" <<'EOF'
 PORTAL_URL="https://quoted.example.com"
-SERVER_GROUP='single-quoted'
+TARGET_GROUP='single-quoted'
 EOF
 
     local output
     output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
 
     if echo "$output" | grep -q "PORTAL_URL=https://quoted.example.com" && \
-       echo "$output" | grep -q "SERVER_GROUP=single-quoted"; then
+       echo "$output" | grep -q "TARGET_GROUP=single-quoted"; then
         test_pass "Config parsing handles quotes correctly"
     else
         test_fail "Config parsing handles quotes" "Output: $output"
@@ -269,7 +269,7 @@ CONFIG_FILE="$test_config"
 load_config 2>/dev/null
 
 echo "PORTAL_URL=$PORTAL_URL"
-echo "SERVER_GROUP=$SERVER_GROUP"
+echo "TARGET_GROUP=$TARGET_GROUP"
 TESTSCRIPT
 
     chmod +x "$test_script"
@@ -279,7 +279,7 @@ TESTSCRIPT
 PORTAL_URL=https://example.com
 
 # Another comment
-SERVER_GROUP=testgroup  # inline comment
+TARGET_GROUP=testgroup  # inline comment
 
 EOF
 
@@ -287,7 +287,7 @@ EOF
     output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
 
     if echo "$output" | grep -q "PORTAL_URL=https://example.com" && \
-       echo "$output" | grep -q "SERVER_GROUP=testgroup"; then
+       echo "$output" | grep -q "TARGET_GROUP=testgroup"; then
         test_pass "Config parsing ignores comments and blank lines"
     else
         test_fail "Config parsing with comments" "Output: $output"
@@ -459,7 +459,7 @@ TESTSCRIPT
     fi
 }
 
-# Test 14: parse_args sets TARGET_HOST and TARGET_PORT
+# Test 14: parse_args sets TARGET_SPEC and TARGET_PORT
 test_parse_args_host_port() {
     local test_script="$TEST_TMPDIR/test_parse_args.sh"
     cat > "$test_script" <<'TESTSCRIPT'
@@ -471,7 +471,7 @@ eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
 
 parse_args "backend.example.com" "2222"
 
-echo "TARGET_HOST=$TARGET_HOST"
+echo "TARGET_SPEC=$TARGET_SPEC"
 echo "TARGET_PORT=$TARGET_PORT"
 TESTSCRIPT
 
@@ -479,11 +479,11 @@ TESTSCRIPT
     local output
     output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
 
-    if echo "$output" | grep -q "TARGET_HOST=backend.example.com" && \
+    if echo "$output" | grep -q "TARGET_SPEC=backend.example.com" && \
        echo "$output" | grep -q "TARGET_PORT=2222"; then
-        test_pass "parse_args sets TARGET_HOST and TARGET_PORT"
+        test_pass "parse_args sets TARGET_SPEC and TARGET_PORT"
     else
-        test_fail "parse_args sets TARGET_HOST and TARGET_PORT" "Output: $output"
+        test_fail "parse_args sets TARGET_SPEC and TARGET_PORT" "Output: $output"
     fi
 }
 
@@ -499,7 +499,7 @@ eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
 
 parse_args "backend.example.com"
 
-echo "TARGET_HOST=$TARGET_HOST"
+echo "TARGET_SPEC=$TARGET_SPEC"
 echo "TARGET_PORT=$TARGET_PORT"
 TESTSCRIPT
 
@@ -507,7 +507,7 @@ TESTSCRIPT
     local output
     output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
 
-    if echo "$output" | grep -q "TARGET_HOST=backend.example.com" && \
+    if echo "$output" | grep -q "TARGET_SPEC=backend.example.com" && \
        echo "$output" | grep -q "TARGET_PORT=22"; then
         test_pass "parse_args default port is 22"
     else

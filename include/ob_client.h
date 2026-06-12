@@ -61,6 +61,12 @@ typedef struct {
     ob_permissions_t permissions;
     bool has_permissions;   /* True if permissions object was present */
 
+    /* Bastion vouching (/pam/authorize on a bastion): a reusable, per-(bastion,
+     * user) capability the bastion later presents to /pam/bastion-cert to get
+     * a short-lived cert for this user. NULL when the caller is not a bastion. */
+    char *bastion_voucher;
+    int bastion_voucher_expires_in;
+
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Offline settings from /pam/authorize */
     ob_offline_settings_t offline;

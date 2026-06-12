@@ -1,25 +1,30 @@
 #!/bin/bash
 # shellcheck disable=SC2155
 #
-# ob-ssh-proxy - SSH proxy command for bastion-to-backend authentication
+# ob-ssh-proxy - bastion-to-backend connector with LLNG certificate vouching
 #
-# This script is used as a ProxyCommand (or ForceCommand) on bastion servers
-# to request a JWT from LLNG before connecting to backend servers. The JWT
-# is passed to the backend via SSH's SendEnv mechanism.
+# Run on a bastion server, by a user already authenticated to the bastion, to
+# reach a backend WITHOUT any SSH key of their own on the bastion and without
+# agent forwarding. The bastion mints a short-lived, LLNG-signed certificate
+# for this user and re-originates the SSH connection to the backend with it.
 #
-# Usage:
-#   As ProxyCommand (in ~/.ssh/config):
-#     Host backend-*
-#       ProxyCommand /usr/bin/ob-ssh-proxy %h %p
+# Usage (on the bastion):
+#     ob-ssh-proxy [user@]backend [port]
 #
-#   As ForceCommand (in sshd_config):
-#     Match User *
-#       ForceCommand /usr/bin/ob-ssh-proxy
+# Flow:
+#   1. Reads the per-session bastion voucher from $LLNG_BASTION_VOUCHER (set by
+#      pam_openbastion at bastion login; it proves THIS user connected to THIS
+#      bastion).
+#   2. Generates an ephemeral keypair in tmpfs (the private key never leaves the
+#      bastion and is wiped on exit).
+#   3. POSTs the ephemeral public key + voucher to LLNG /pam/bastion-cert and
+#      receives a short-lived user certificate (principal = user, pinned to the
+#      bastion IP, bastion_id in the key-id).
+#   4. Connects to the backend with `ssh -i <ephkey> -o CertificateFile=<cert>`.
 #
-# The script:
-# 1. Requests a bastion JWT from LLNG /pam/bastion-token endpoint
-# 2. Exports the JWT as LLNG_BASTION_JWT environment variable
-# 3. Connects to the target backend via SSH with SendEnv
+# This replaces the old (broken) JWT-over-SendEnv transport: SendEnv/AcceptEnv
+# never populate the PAM environment pam_getenv reads, so the backend rejected
+# every session. See doc/design/bastion-cert-vouching.md.
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>
@@ -33,12 +38,16 @@ PROG_NAME=$(basename "$0")
 # Configuration (can be overridden via /etc/open-bastion/ssh-proxy.conf)
 PORTAL_URL=""
 SERVER_TOKEN_FILE="/etc/open-bastion/token"
-SERVER_GROUP="bastion"
 TARGET_GROUP="default"
 TIMEOUT=10
 VERIFY_SSL=true
 SSH_OPTIONS_ARRAY=()
 DEBUG=false
+
+# Per-session voucher proving this user connected to this bastion. Set by
+# pam_openbastion (pam_putenv) at bastion login and inherited by this session
+# on the SAME host — unlike the old SendEnv JWT, this transport actually works.
+VOUCHER="${LLNG_BASTION_VOUCHER:-}"
 
 # Configuration file (must be owned by root and not group/world-writable)
 CONFIG_FILE="/etc/open-bastion/ssh-proxy.conf"
@@ -84,7 +93,9 @@ load_config() {
             case "$key" in
                 PORTAL_URL)          PORTAL_URL="$value" ;;
                 SERVER_TOKEN_FILE)   SERVER_TOKEN_FILE="$value" ;;
-                SERVER_GROUP)        SERVER_GROUP="$value" ;;
+                # SERVER_GROUP accepted-but-ignored (back-compat): the bastion's
+                # group is resolved server-side from its enrolled token.
+                SERVER_GROUP)        : ;;
                 TARGET_GROUP)        TARGET_GROUP="$value" ;;
                 TIMEOUT)             TIMEOUT="$value" ;;
                 VERIFY_SSL)          VERIFY_SSL="$value" ;;
@@ -140,62 +151,6 @@ get_server_token() {
     fi
 }
 
-# Request bastion JWT from LLNG
-request_bastion_jwt() {
-    local user="$1"
-    local target_host="$2"
-    local server_token
-
-    server_token=$(get_server_token)
-    if [ -z "$server_token" ]; then
-        error "Failed to read server token"
-        exit 1
-    fi
-
-    debug "Requesting bastion JWT for user $user to host $target_host"
-
-    local response
-    build_curl_opts
-
-    # Build JSON payload safely using jq to avoid injection
-    local json_payload
-    json_payload=$(jq -n \
-        --arg user "$user" \
-        --arg target_host "$target_host" \
-        --arg target_group "$TARGET_GROUP" \
-        --arg bastion_group "$SERVER_GROUP" \
-        '{user: $user, target_host: $target_host, target_group: $target_group, bastion_group: $bastion_group}')
-
-    response=$(curl "${CURL_OPTS[@]}" \
-        -X POST \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload" \
-        "${PORTAL_URL}/pam/bastion-token" 2>&1) || {
-        error "Failed to request bastion JWT: $response"
-        exit 1
-    }
-
-    # Check if response is valid JSON with a token
-    # LLNG returns the JWT in the 'bastion_jwt' field
-    local jwt
-    jwt=$(echo "$response" | jq -r '.bastion_jwt // empty' 2>/dev/null)
-
-    if [ -z "$jwt" ]; then
-        # Check for error message
-        local err_msg
-        err_msg=$(echo "$response" | jq -r '.error // .message // empty' 2>/dev/null)
-        if [ -n "$err_msg" ]; then
-            error "LLNG returned error: $err_msg"
-        else
-            error "Invalid response from LLNG: $response"
-        fi
-        exit 1
-    fi
-
-    echo "$jwt"
-}
-
 # Validate hostname to prevent SSH option injection
 # Only allows: alphanumeric, dots, hyphens, colons (IPv6), brackets
 validate_hostname() {
@@ -211,37 +166,147 @@ validate_hostname() {
     fi
 }
 
-# Main function for ProxyCommand mode
-proxy_command_mode() {
+# Request a short-lived bastion certificate from LLNG.
+# Args: <user> <target_host> <ephemeral_public_key>
+# Prints the signed certificate on stdout; returns non-zero on failure (with a
+# clear message on stderr).
+request_bastion_cert() {
+    local user="$1"
+    local target_host="$2"
+    local pubkey="$3"
+
+    if [ -z "$VOUCHER" ]; then
+        error "No bastion voucher found ($LLNG_BASTION_VOUCHER is unset)."
+        error "This session was not vouched by the bastion PAM module (or it"
+        error "predates the cert-vouching feature). Reconnect to the bastion."
+        return 1
+    fi
+
+    local server_token
+    server_token=$(get_server_token)
+    if [ -z "$server_token" ]; then
+        error "Failed to read server token"
+        return 1
+    fi
+
+    debug "Requesting bastion cert for user $user to host $target_host"
+    build_curl_opts
+
+    # Build JSON payload safely with jq to avoid injection
+    local json_payload
+    json_payload=$(jq -n \
+        --arg user "$user" \
+        --arg target_host "$target_host" \
+        --arg target_group "$TARGET_GROUP" \
+        --arg public_key "$pubkey" \
+        --arg voucher "$VOUCHER" \
+        '{user: $user, target_host: $target_host, target_group: $target_group, public_key: $public_key, voucher: $voucher}')
+
+    local response
+    response=$(curl "${CURL_OPTS[@]}" \
+        -X POST \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" \
+        "${PORTAL_URL}/pam/bastion-cert" 2>&1) || {
+        error "Failed to request bastion certificate: $response"
+        return 1
+    }
+
+    local cert
+    cert=$(echo "$response" | jq -r '.certificate // empty' 2>/dev/null)
+    if [ -z "$cert" ]; then
+        local reason err_msg
+        reason=$(echo "$response" | jq -r '.reason // empty' 2>/dev/null)
+        err_msg=$(echo "$response" | jq -r '.error // .message // empty' 2>/dev/null)
+        if [ "$reason" = "voucher_expired" ]; then
+            error "Your bastion authorization has expired."
+            error "Reconnect to the bastion to refresh it, then retry."
+        elif [ -n "$err_msg" ]; then
+            error "LLNG refused to issue a certificate: $err_msg${reason:+ ($reason)}"
+        else
+            error "Invalid response from LLNG: $response"
+        fi
+        return 1
+    fi
+
+    printf '%s\n' "$cert"
+}
+
+# Mint an ephemeral cert and re-originate the SSH connection to the backend.
+# Args: <target_host> <target_user> [target_port]
+connect_via_cert() {
     local target_host="$1"
-    local target_port="${2:-22}"
-    local user="${USER:-$(whoami)}"
+    local target_user="$2"
+    local target_port="${3:-22}"
 
     validate_hostname "$target_host"
 
-    # Request JWT
-    local jwt
-    jwt=$(request_bastion_jwt "$user" "$target_host")
+    # Ephemeral keypair in tmpfs; private key never leaves the bastion.
+    local tmpd
+    tmpd=$(mktemp -d "${XDG_RUNTIME_DIR:-/dev/shm}/ob-hop.XXXXXX") || {
+        error "Failed to create ephemeral key directory"
+        exit 1
+    }
+    chmod 700 "$tmpd"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmpd'" EXIT INT TERM
 
-    debug "Got bastion JWT, connecting to $target_host:$target_port"
+    ssh-keygen -t ed25519 -N '' -q -f "$tmpd/id" -C "ob-ephemeral" || {
+        error "Failed to generate ephemeral keypair"
+        exit 1
+    }
+    local pubkey
+    pubkey=$(cat "$tmpd/id.pub")
 
-    # Connect to backend with JWT in environment
-    # The backend's sshd must have AcceptEnv LLNG_BASTION_JWT
-    export LLNG_BASTION_JWT="$jwt"
+    local cert
+    cert=$(request_bastion_cert "$target_user" "$target_host" "$pubkey") || exit 1
+    printf '%s\n' "$cert" > "$tmpd/id-cert.pub"
 
-    exec ssh -o SendEnv=LLNG_BASTION_JWT \
-             -o StrictHostKeyChecking=accept-new \
-             "${SSH_OPTIONS_ARRAY[@]}" \
-             -W "$target_host:$target_port" \
-             -- "$target_host"
+    debug "Got ephemeral cert, connecting to ${target_user}@${target_host}:${target_port}"
+
+    # Re-originate: the BASTION authenticates to the backend with the cert.
+    local rc=0
+    ssh -i "$tmpd/id" \
+        -o CertificateFile="$tmpd/id-cert.pub" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=accept-new \
+        -p "$target_port" \
+        "${SSH_OPTIONS_ARRAY[@]}" \
+        -l "$target_user" \
+        -- "$target_host" || rc=$?
+
+    rm -rf "$tmpd"
+    trap - EXIT INT TERM
+    exit $rc
 }
 
-# Main function for ForceCommand mode
+# Parse a "[user@]host" spec into globals SPEC_USER / SPEC_HOST.
+parse_target_spec() {
+    local spec="$1"
+    local default_user="$2"
+    if [[ "$spec" == *@* ]]; then
+        SPEC_USER="${spec%%@*}"
+        SPEC_HOST="${spec#*@}"
+    else
+        SPEC_USER="$default_user"
+        SPEC_HOST="$spec"
+    fi
+}
+
+# Direct mode: user runs `ob-ssh-proxy [user@]backend [port]` on the bastion.
+direct_mode() {
+    local spec="$1"
+    local port="${2:-22}"
+    local user="${USER:-$(whoami)}"
+    parse_target_spec "$spec" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
+}
+
+# ForceCommand mode: the original command is in SSH_ORIGINAL_COMMAND
+# (e.g. "ssh backend" or "ssh user@backend").
 force_command_mode() {
     local user="${USER:-$(whoami)}"
-
-    # In ForceCommand mode, the original command is in SSH_ORIGINAL_COMMAND
-    # Format: "ssh user@host" or just a command to run
     local ssh_cmd="${SSH_ORIGINAL_COMMAND:-}"
 
     if [ -z "$ssh_cmd" ]; then
@@ -251,89 +316,54 @@ force_command_mode() {
 
     debug "Original command: $ssh_cmd"
 
-    # Parse target from command
-    local target_host=""
-    local target_user=""
-
+    local target=""
     if [[ "$ssh_cmd" =~ ^ssh[[:space:]]+(.+)$ ]]; then
-        local target="${BASH_REMATCH[1]}"
-        # Parse user@host format
-        if [[ "$target" =~ ^([^@]+)@([^[:space:]]+)(.*)$ ]]; then
-            target_user="${BASH_REMATCH[1]}"
-            target_host="${BASH_REMATCH[2]}"
-        elif [[ "$target" =~ ^([^[:space:]]+)(.*)$ ]]; then
-            target_host="${BASH_REMATCH[1]}"
-            target_user="$user"
-        fi
+        # First whitespace-separated token after `ssh` is the [user@]host.
+        target=$(echo "${BASH_REMATCH[1]}" | awk '{print $1}')
     fi
-
-    if [ -z "$target_host" ]; then
+    if [ -z "$target" ]; then
         error "Could not parse target host from command: $ssh_cmd"
         exit 1
     fi
 
-    validate_hostname "$target_host"
-
-    # Request JWT
-    local jwt
-    jwt=$(request_bastion_jwt "$user" "$target_host")
-
-    debug "Got bastion JWT, connecting to $target_host"
-
-    # Connect to backend with JWT
-    export LLNG_BASTION_JWT="$jwt"
-
-    exec ssh -o SendEnv=LLNG_BASTION_JWT \
-             -o StrictHostKeyChecking=accept-new \
-             "${SSH_OPTIONS_ARRAY[@]}" \
-             ${target_user:+-l "$target_user"} \
-             -- "$target_host"
+    parse_target_spec "$target" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" 22
 }
 
-# Interactive shell mode (user connects to bastion directly)
+# Interactive mode: prompt for a target.
 interactive_mode() {
     local user="${USER:-$(whoami)}"
 
     echo "Welcome to the LLNG bastion server"
     echo ""
-    echo "Usage: ssh <backend-hostname>"
+    echo "Usage: ob-ssh-proxy [user@]<backend-hostname> [port]"
     echo ""
-    echo -n "Enter target hostname: "
-    read -r target_host
+    echo -n "Enter target host ([user@]host): "
+    read -r spec
 
-    if [ -z "$target_host" ]; then
+    if [ -z "$spec" ]; then
         error "No target specified"
         exit 1
     fi
 
-    validate_hostname "$target_host"
-
-    # Request JWT
-    local jwt
-    jwt=$(request_bastion_jwt "$user" "$target_host")
-
-    debug "Got bastion JWT, connecting to $target_host"
-
-    # Connect to backend with JWT
-    export LLNG_BASTION_JWT="$jwt"
-
-    exec ssh -o SendEnv=LLNG_BASTION_JWT \
-             -o StrictHostKeyChecking=accept-new \
-             "${SSH_OPTIONS_ARRAY[@]}" \
-             -- "$target_host"
+    parse_target_spec "$spec" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" 22
 }
 
 # Show usage
 usage() {
     cat <<EOF
-Usage: $PROG_NAME [OPTIONS] [target_host] [target_port]
+Usage: $PROG_NAME [OPTIONS] [user@]backend [port]
 
-SSH proxy command for bastion-to-backend authentication with LLNG JWT.
+Bastion-to-backend connector with LLNG certificate vouching. Run on a bastion
+by a user already authenticated to it; the bastion mints a short-lived,
+LLNG-signed certificate and re-originates the SSH connection to the backend.
+No SSH key of your own on the bastion and no agent forwarding are needed.
 
 Modes:
-  ProxyCommand mode:  $PROG_NAME <host> [port]
-  ForceCommand mode:  $PROG_NAME (reads SSH_ORIGINAL_COMMAND)
-  Interactive mode:   $PROG_NAME (prompts for target)
+  Direct mode:        $PROG_NAME [user@]backend [port]
+  ForceCommand mode:  $PROG_NAME            (reads SSH_ORIGINAL_COMMAND)
+  Interactive mode:   $PROG_NAME            (prompts for target)
 
 Options:
   -c, --config FILE   Use alternate config file (default: $CONFIG_FILE)
@@ -341,26 +371,17 @@ Options:
   -h, --help          Show this help
   -V, --version       Show version
 
-Configuration:
-  The script reads configuration from $CONFIG_FILE
-
-  Example configuration:
+Configuration ($CONFIG_FILE):
     PORTAL_URL="https://auth.example.com"
     SERVER_TOKEN_FILE="/etc/open-bastion/token"
     SERVER_GROUP="bastion"
     TARGET_GROUP="default"
     TIMEOUT=10
     VERIFY_SSL=true
-    SSH_OPTIONS_ARRAY=(-o ConnectTimeout=10)
     DEBUG=false
 
-SSH Configuration (bastion ~/.ssh/config):
-  Host backend-*
-    ProxyCommand $PROG_NAME %h %p
-
-SSH Configuration (backend /etc/ssh/sshd_config):
-  AcceptEnv LLNG_BASTION_JWT
-
+The backend's sshd must trust the LLNG SSH CA (TrustedUserCAKeys). No AcceptEnv
+is required (the old LLNG_BASTION_JWT / SendEnv transport is gone).
 EOF
 }
 
@@ -395,8 +416,8 @@ parse_args() {
         esac
     done
 
-    # Remaining arguments
-    TARGET_HOST="${1:-}"
+    # Remaining arguments: [user@]host [port]
+    TARGET_SPEC="${1:-}"
     TARGET_PORT="${2:-22}"
 }
 
@@ -416,17 +437,14 @@ main() {
         warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 
-    # Determine mode based on arguments and environment
-    if [ -n "$TARGET_HOST" ]; then
-        # ProxyCommand mode: target specified as argument
-        debug "ProxyCommand mode: $TARGET_HOST:$TARGET_PORT"
-        proxy_command_mode "$TARGET_HOST" "$TARGET_PORT"
+    # Determine mode
+    if [ -n "$TARGET_SPEC" ]; then
+        debug "Direct mode: $TARGET_SPEC:$TARGET_PORT"
+        direct_mode "$TARGET_SPEC" "$TARGET_PORT"
     elif [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
-        # ForceCommand mode: parse SSH_ORIGINAL_COMMAND
         debug "ForceCommand mode"
         force_command_mode
     else
-        # Interactive mode: prompt for target
         debug "Interactive mode"
         interactive_mode
     fi

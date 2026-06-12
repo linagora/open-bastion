@@ -12,6 +12,7 @@ ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
 SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
+mkdir -p /etc/open-bastion
 
 echo "=== LLNG Backend Starting ==="
 echo "Portal URL: $PORTAL_URL"

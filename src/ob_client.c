@@ -1058,6 +1058,16 @@ static int ob_authorize_user_internal(ob_client_t *client,
         }
     }
 
+    /* Parse bastion vouching fields (present only when the caller is a bastion).
+     * The voucher proves THIS user connected to THIS bastion; the bastion later
+     * presents it to /pam/bastion-cert. */
+    if (json_object_object_get_ex(json, "bastion_voucher", &val)) {
+        response->bastion_voucher = safe_json_strdup(val);
+    }
+    if (json_object_object_get_ex(json, "bastion_voucher_expires_in", &val)) {
+        response->bastion_voucher_expires_in = json_object_get_int(val);
+    }
+
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Parse offline settings object */
     struct json_object *offline_obj;
@@ -1119,6 +1129,12 @@ void ob_response_free(ob_response_t *response)
     free(response->gecos);
     free(response->shell);
     free(response->home);
+
+    /* Voucher is a bearer secret; scrub before freeing. */
+    if (response->bastion_voucher) {
+        explicit_bzero(response->bastion_voucher, strlen(response->bastion_voucher));
+        free(response->bastion_voucher);
+    }
 
     if (response->groups) {
         for (size_t i = 0; i < response->groups_count; i++) {
