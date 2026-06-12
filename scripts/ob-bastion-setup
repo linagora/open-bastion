@@ -1221,6 +1221,28 @@ preflight_check_portal() {
     return 0
 }
 
+# Abort if the saved server token has no refresh_token. Without an offline
+# refresh token the short-lived access token cannot be renewed, and SSO/NSS
+# lookups (getent passwd <user>) stop working ~1h after setup. A missing
+# refresh_token means the OIDC client does not grant offline access.
+require_refresh_token() {
+    [ -s "$OB_TOKEN" ] || return 0
+    local rt
+    rt=$(jq -r '.refresh_token // ""' "$OB_TOKEN" 2>/dev/null)
+    if [ -z "$rt" ]; then
+        error "The server token at $OB_TOKEN has NO refresh_token."
+        error "The access token cannot be renewed, so SSO/NSS lookups will stop"
+        error "working about 1 hour after this setup."
+        error ""
+        error "The OIDC client '${CLIENT_ID:-pam-access}' must grant offline access:"
+        error "  - set oidcRPMetaDataOptionsAllowOffline = 1 on that client in LLNG"
+        error "  - ensure 'offline_access' is an allowed scope"
+        error "Then delete $OB_TOKEN and re-run this setup."
+        return 1
+    fi
+    return 0
+}
+
 # Enroll server with LLNG. Sets ENROLL_RESULT and returns 0 on success,
 # 1 on failure. Callers must inspect the return code to decide whether to
 # proceed with SSH/PAM lockdown.
@@ -1251,6 +1273,7 @@ enroll_server() {
     # if you deliberately want to re-enroll.
     if [ -s "$OB_TOKEN" ]; then
         info "Existing server token found at $OB_TOKEN — reusing it (no re-enrollment)."
+        require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
         ENROLL_RESULT="reused"
         return 0
     fi
@@ -1286,11 +1309,13 @@ enroll_server() {
     # ob-enroll honours OB_CLIENT_SECRET with highest priority (see ob-enroll).
     if [ -n "$CLIENT_SECRET" ]; then
         if OB_CLIENT_SECRET="$CLIENT_SECRET" /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
             ENROLL_RESULT="success"
             return 0
         fi
     else
         if /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
             ENROLL_RESULT="success"
             return 0
         fi

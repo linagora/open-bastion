@@ -151,6 +151,26 @@ build_curl_opts() {
     fi
 }
 
+# Persist a freshly minted access token into the JSON token file, keeping the
+# existing refresh_token / enrolled_at. Atomic replace, root-only perms.
+update_access_token() {
+    local at="$1" ttl="$2"
+    local now exp tmp
+    now=$(date +%s)
+    exp=$((now + ttl))
+    tmp=$(mktemp "${TOKEN_FILE}.XXXXXX") || return 1
+    if AT="$at" jq --argjson exp "$exp" \
+        '.access_token = env.AT | .expires_at = $exp' \
+        "$TOKEN_FILE" > "$tmp" 2>/dev/null; then
+        chmod 600 "$tmp"
+        mv -f "$tmp" "$TOKEN_FILE"
+        log_debug "Refreshed access token (expires in ${ttl}s)"
+    else
+        rm -f "$tmp"
+        log_error "Failed to update access token in $TOKEN_FILE"
+    fi
+}
+
 # Send heartbeat
 send_heartbeat() {
     local hostname
@@ -204,6 +224,16 @@ send_heartbeat() {
         next_interval=$(echo "$response" | jq -r '.next_heartbeat // empty' 2>/dev/null)
         if [ -n "$next_interval" ]; then
             log_debug "Next heartbeat in ${next_interval}s"
+        fi
+
+        # The portal mints a fresh access token on every heartbeat (the RFC
+        # refresh loop: short access token, long-lived refresh token). Persist
+        # it so NSS/PAM keep working; the refresh_token is left untouched.
+        local new_at new_ttl
+        new_at=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
+        new_ttl=$(echo "$response" | jq -r '.expires_in // empty' 2>/dev/null)
+        if [ -n "$new_at" ]; then
+            update_access_token "$new_at" "${new_ttl:-3600}"
         fi
     elif [ "$http_code" = "401" ]; then
         log_error "Heartbeat rejected: invalid or expired refresh_token"
