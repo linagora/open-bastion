@@ -730,8 +730,13 @@ $(cat "${workdir}/builder.log")
         return 1
     fi
 
-    if ! grep -q "^bastion_jwt_required = true" <<<"$conf"; then
-        fail "bastion_jwt_required missing — backend role config incomplete" "$conf"
+    # The backend conf no longer carries the (broken) bastion_jwt transport.
+    # Backend "accept only this bastion" enforcement moved to the sshd layer
+    # (TrustedUserCAKeys + AuthorizedPrincipalsCommand + the allowed_bastions
+    # file written by ob-backend-setup, which --skip-setup deliberately skips
+    # here), so the deposited conf must contain NO bastion_jwt remnant.
+    if grep -q "bastion_jwt" <<<"$conf"; then
+        fail "obsolete bastion_jwt config present in backend conf" "$conf"
         rm -rf "$workdir"
         return 1
     fi
