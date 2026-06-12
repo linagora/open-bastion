@@ -23,6 +23,8 @@
          '-g', ob_server_group,
          '--non-interactive']
         + (['--max-security'] if ob_max_security else [])
+        + (['--enable-hardening'] if ob_enable_hardening else [])
+        + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
