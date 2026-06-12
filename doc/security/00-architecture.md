@@ -11,7 +11,7 @@ Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open 
 | **Autorisation SSH**     | Vérification LLNG `/pam/authorize` à chaque connexion                    |
 | **Escalade sudo**        | Token temporaire LLNG uniquement (réauthentification SSO)                |
 | **Révocation**           | KRL obligatoire + désactivation compte LLNG                              |
-| **Bastion → Backend**    | JWT signé vérifié cryptographiquement                                    |
+| **Bastion → Backend**    | Certificat éphémère signé par la CA LLNG (vouching par cert)             |
 
 ```mermaid
 flowchart TB
@@ -27,16 +27,16 @@ flowchart TB
 
         subgraph Backend["Backend"]
             sshd_be["sshd\nTrustedCA + KRL\nAuthorizedKeysFile none"]
-            pam_be["PAM\n/pam/authorize\n+ bastion JWT"]
+            pam_be["PAM\n/pam/authorize\n+ allowlist bastions"]
             sudo_be["sudo\nToken LLNG\n(réauth SSO)"]
         end
     end
 
-    LLNG["Portail LLNG\n(CA, authorize, KRL)"]
+    LLNG["Portail LLNG\n(CA, authorize, bastion-cert, KRL)"]
 
     Client -->|SSH + certificat| Bastion
-    Bastion -->|SSH + JWT bastion| Backend
-    pam_b -->|/pam/authorize| LLNG
+    Bastion -->|SSH + cert éphémère (source-address épinglée)| Backend
+    pam_b -->|/pam/authorize → voucher| LLNG
     pam_be -->|/pam/authorize\n/pam/verify (sudo)| LLNG
 ```
 
@@ -117,9 +117,11 @@ Pour les opérations d'introspection et de rafraîchissement de tokens OAuth2, l
 
 Lorsque `token_rotate_refresh = true` (défaut), le module fait automatiquement tourner le token de rafraîchissement après chaque rafraîchissement de token réussi. Cela limite la fenêtre d'opportunité si un token est compromis, car les tokens volés deviennent invalides après la prochaine utilisation légitime.
 
-## Authentification Bastion vers Backend (JWT)
+## Authentification Bastion vers Backend (vouching par certificat éphémère)
 
-Dans les architectures bastion/backend, le module PAM prend en charge la vérification cryptographique que les connexions SSH vers les backends proviennent de serveurs bastion autorisés.
+Dans les architectures bastion/backend, le mécanisme de vouching par certificat garantit cryptographiquement que les connexions SSH vers les backends proviennent d'un bastion autorisé ayant réellement authentifié l'utilisateur.
+
+> **Note :** L'ancien mécanisme JWT (`LLNG_BASTION_JWT` / `SendEnv`) était structurellement cassé — `SendEnv`/`AcceptEnv` ne renseignent que l'environnement du processus enfant SSH, jamais l'environnement PAM lu par `pam_getenv`. Il a été remplacé par ce mécanisme basé sur des certificats éphémères.
 
 ### Architecture
 
@@ -127,77 +129,95 @@ Dans les architectures bastion/backend, le module PAM prend en charge la vérifi
 flowchart LR
     subgraph Bastion["Serveur Bastion"]
         proxy["ob-ssh-proxy"]
+        helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
+        voucher["LLNG_BASTION_VOUCHER\n(pam_putenv, tmpfs)"]
     end
 
     subgraph LLNG["Portail LLNG"]
-        bastion_token["/pam/bastion-token"]
-        jwks["/.well-known/jwks.json"]
+        authorize["/pam/authorize\n(émet le voucher)"]
+        bastion_cert["/pam/bastion-cert\n(signe le cert éphémère)"]
+        sshca["CA ssh-ca"]
     end
 
     subgraph Backend["Serveur Backend"]
-        pam["pam_openbastion.so"]
-        cache["Cache JWKS"]
+        sshd_be["sshd\nTrustedUserCAKeys\nsource-address"]
+        pam_be["pam_openbastion\nallowed_bastions\n(key-id du cert)"]
     end
 
-    proxy -->|1. Demande JWT| bastion_token
-    bastion_token -->|2. JWT signé| proxy
-    proxy -->|3. SSH + JWT| pam
-    pam -->|4. Récupère les clés publiques| jwks
-    jwks -->|5. Clés en cache| cache
-    pam -->|6. Vérifie la signature| cache
+    authorize -->|voucher lié à (bastion_id, user)| voucher
+    proxy -->|1. voucher + clé pub éphémère| helper
+    helper -->|2. POST Bearer=server_token| bastion_cert
+    bastion_cert -->|3. signe via| sshca
+    sshca -->|4. cert éphémère ~120s| helper
+    helper -->|5. cert| proxy
+    proxy -->|6. SSH -i eph -o CertificateFile=cert| sshd_be
+    sshd_be -->|source-address + CA valide| pam_be
 ```
+
+### Flux détaillé
+
+1. L'utilisateur se connecte au bastion avec son certificat SSO. `pam_openbastion` appelle `POST /pam/authorize` → LLNG émet un **voucher réutilisable** lié à `(bastion_id, utilisateur)`, le stocke dans la session persistante de l'utilisateur et le renvoie. Le module PAM l'exporte via `pam_putenv("LLNG_BASTION_VOUCHER=…")` (transport **local au bastion** — contrairement à `SendEnv`, `sshd` fusionne l'environnement PAM dans la session via `pam_getenvlist`).
+2. Sur le bastion, `ob-ssh-proxy [user@]backend` :
+   a. génère une paire de clés éphémère **ed25519** en tmpfs (clé privée ne quitte jamais le bastion) ;
+   b. via le helper réservé à root `ob-bastion-cert-helper` (règle sudoers NOPASSWD étroite, pas de setuid), `POST /pam/bastion-cert` avec le **jeton serveur** (réservé à root) en Bearer, le voucher, la clé publique, l'utilisateur et l'hôte cible ;
+   c. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA `ssh-ca` : principal = utilisateur, `key-id = bastion=<bastion_id>;user=<user>;target=<hôte>`, validité ~120 s, option critique `source-address` épinglée à l'IP du bastion ;
+   d. `ssh -i <eph> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>` ; les fichiers temporaires sont effacés après connexion.
+3. Le backend sshd valide nativement : signature CA, fenêtre de validité, `principal == utilisateur`, **`source-address`** (refus si la connexion ne vient pas de l'IP du bastion). `pam_openbastion` (`acct_mgmt`) lit le `key-id` depuis `SSH_USER_AUTH` et vérifie `bastion_id` contre `/etc/open-bastion/allowed_bastions`.
+
+### Propriétés de Sécurité du Voucher
+
+- **Validité** : `min(now + pamAccessBastionVoucherTtl [défaut 43200 s = 12 h], expires_at du cert SSO)` — la durée de vie du cert SSO est le vrai plafond.
+- **Réutilisable** : plusieurs sauts simultanés (`scp host1: host2:`) utilisent le même voucher.
+- **Renouvellement FAIL-CLOSED** : si le voucher est expiré, `ob-ssh-proxy` affiche « Votre autorisation bastion a expiré. Reconnectez-vous au bastion » et sort en erreur. Pas de re-vouching silencieux.
+- **Inutilisable seul** : un voucher volé est sans valeur sans le jeton serveur root requis en Bearer sur `/pam/bastion-cert`.
 
 ### Bénéfices de Sécurité
 
-| Menace                          | Sans JWT Bastion              | Avec JWT Bastion             |
-| ------------------------------- | ----------------------------- | ---------------------------- |
-| Accès direct au backend         | Possible si réseau accessible | Bloqué (pas de JWT valide)   |
-| Contournement VPN vers backend  | Possible                      | Bloqué                       |
-| Mauvaise configuration pare-feu | Expose les backends           | Backends toujours protégés   |
-| Clés bastion compromises        | Accès aux backends            | Chaque saut toujours vérifié |
+| Menace                          | Sans vouching cert                    | Avec vouching cert                                                               |
+| ------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| Accès direct au backend         | Possible si réseau accessible         | Bloqué — cert SSO direct refusé (key-id sans `bastion=`), cert épinglé à l'IP du bastion |
+| Contournement VPN vers backend  | Possible                              | Bloqué — `source-address` critique dans le cert, sshd refuse hors IP bastion    |
+| Mauvaise configuration pare-feu | Expose les backends                   | Backends toujours protégés — enforcement sshd-natif                             |
+| Rejeu d'un identifiant volé     | Clé/token compromis = accès backend   | Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement    |
+| Bastion non autorisé            | N/A                                   | Bloqué — `allowed_bastions` vérifié par `pam_openbastion` via le key-id du cert |
 
 ### Configuration (Backend)
 
-```ini
-# /etc/open-bastion/openbastion.conf
-bastion_jwt_required = true
-bastion_jwt_issuer = https://auth.example.com
-bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_cache_ttl = 3600
-bastion_jwt_clock_skew = 60
-# Optionnel : restreindre à des bastions spécifiques
-bastion_jwt_allowed_bastions = bastion-01,bastion-02
+```bash
+# ob-backend-setup --allowed-bastions bastion-01,bastion-02
+# ou Ansible : ob_bastion_allowed_bastions: "bastion-01,bastion-02"
+# → écrit /etc/open-bastion/allowed_bastions (0644, répertoire 0711)
+# Vide = tout bastion vouché accepté ; absent = mode hérité (pas de vérification)
+# FAIL-CLOSED si le fichier est illisible
 ```
 
 ```bash
 # /etc/ssh/sshd_config
-AcceptEnv LLNG_BASTION_JWT
+TrustedUserCAKeys /etc/ssh/llng_ca.pub          # déjà requis
+AuthorizedPrincipalsCommand /usr/sbin/ob-ssh-principals %u %f %i
+AuthorizedPrincipalsCommandUser nobody
+# Supprimer : AcceptEnv LLNG_BASTION_JWT
 ```
 
-### Claims JWT
+### Champs du Certificat Éphémère
 
-| Claim           | Description                                                    |
-| --------------- | -------------------------------------------------------------- |
-| `iss`           | URL du portail LLNG (doit correspondre à `bastion_jwt_issuer`) |
-| `sub`           | Nom d'utilisateur proxifié                                     |
-| `aud`           | `pam:bastion-backend`                                          |
-| `exp`           | Horodatage d'expiration (courte durée de vie)                  |
-| `bastion_id`    | Identifiant du serveur bastion                                 |
-| `bastion_group` | Groupe serveur du bastion                                      |
-| `target_host`   | Nom d'hôte du backend cible                                    |
-| `user_groups`   | Groupes LLNG de l'utilisateur                                  |
+| Champ cert SSH   | Valeur                                                                  |
+| ---------------- | ----------------------------------------------------------------------- |
+| `principal`      | Nom d'utilisateur proxifié                                              |
+| `key-id`         | `bastion=<bastion_id>;user=<user>;target=<target_host>`                 |
+| `validity`       | ~120 s (`pamAccessBastionCertTtl`)                                      |
+| `source-address` | IP du bastion (option critique — sshd refuse si connexion hors IP)      |
+| `extension`      | `bastion-id@open-bastion = <bastion_id>` (optionnel, audit)             |
 
-### Vérification Hors-Ligne
+### Paramètres LLNG (`pam-access`)
 
-Le cache JWKS permet la vérification des JWT sans accès réseau au LLNG :
-
-1. La première connexion récupère les JWKS depuis le portail LLNG
-2. Les clés publiques sont mises en cache localement avec un TTL configurable
-3. Les vérifications suivantes utilisent les clés en cache
-4. Le cache est rafraîchi à l'expiration du TTL ou lors de la rencontre d'un identifiant de clé inconnu
-
-Cela offre une résilience face aux interruptions du LLNG tout en maintenant la sécurité.
+| Paramètre                     | Défaut  | Description                                                                |
+| ----------------------------- | ------- | -------------------------------------------------------------------------- |
+| `pamAccessBastionGroups`      | bastion | Groupes autorisés à obtenir des vouchers / certs bastion                   |
+| `pamAccessBastionVoucherTtl`  | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime |
+| `pamAccessBastionCertTtl`     | 120     | Validité du certificat éphémère en secondes                                |
+| `pamAccessServerGroups`       | —       | Table `client_id → groupe` ; `/pam/bastion-cert` ne fait jamais confiance à un groupe revendiqué |
+| `sshCaActivation`             | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme |
 
 ## Sécurité du Cache de Tokens
 
@@ -631,7 +651,7 @@ Cette configuration n'autorise que les clés Ed25519 et les clés de sécurité 
 | Dépassement d'entier        | Validation des entrées dans l'encodage base64, calculs d'attente                          |
 | JSON malformé               | Validation de type pour les champs de réponse critiques                                   |
 | Exposition du secret client | JWT Client Assertion (RFC 7523) - secret jamais transmis                                  |
-| Contournement du bastion    | Vérification JWT bastion sur les backends (signé RS256)                                   |
-| Accès direct au backend     | JWT requis + vérification hors-ligne basée sur JWKS                                       |
+| Contournement du bastion    | Certificat éphémère lié à `(bastion_id, user)` via voucher serveur ; `source-address` épinglée à l'IP du bastion |
+| Accès direct au backend     | Cert SSO direct refusé (key-id sans `bastion=`) ; cert éphémère épinglé à l'IP du bastion via `source-address` critique |
 | Clés SSH faibles            | Application de la politique de clés SSH avec restrictions de type/taille                  |
 | Force brute sur le cache    | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle |

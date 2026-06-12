@@ -145,8 +145,8 @@ A bastion is a hardened jump host that:
 
 ```mermaid
 flowchart LR
-    User -->|SSH| Bastion
-    Bastion -->|SSH + JWT| Backend[Backend Servers]
+    User -->|SSH + SSO cert| Bastion
+    Bastion -->|SSH + ephemeral cert| Backend[Backend Servers]
     Bastion -->|Record| Sessions[(Session Recording)]
 ```
 
@@ -268,7 +268,10 @@ systemctl restart sshd
 
 ### Step 7: Configure SSH Proxy for Backend Access
 
-When bastion JWT verification is enabled on backends, configure the SSH proxy:
+The SSH proxy uses certificate-based vouching to authenticate to backends.
+`ob-bastion-cert-helper` (installed by `ob-bastion-setup`, called via a narrow NOPASSWD
+sudoers rule) contacts LLNG on behalf of the user to obtain a short-lived ephemeral
+certificate. Configure the proxy:
 
 ```bash
 mkdir -p /etc/open-bastion
@@ -336,8 +339,8 @@ They auto-create Unix accounts for LLNG users.
 
 ```mermaid
 flowchart LR
-    Bastion -->|SSH + JWT| Backend
-    Backend -->|Verify JWT| JWKS[(JWKS Cache)]
+    Bastion -->|SSH + ephemeral cert| Backend
+    Backend -->|Verify cert CA + key-id + source-address| TrustedCA[(Trusted CA)]
     Backend -->|Auto-create| Account
 ```
 
@@ -378,15 +381,11 @@ create_user_home_base = /home
 create_user_shell = /bin/bash
 create_user_skel = /etc/skel
 
-# Bastion JWT verification (REQUIRED for backends)
-bastion_jwt_required = true
-bastion_jwt_issuer = https://auth.example.com
-bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_cache_ttl = 3600
-bastion_jwt_clock_skew = 60
-# Optionally restrict to specific bastions:
-# bastion_jwt_allowed_bastions = bastion-01,bastion-02
+# Allowed bastions (cert vouching — REQUIRED for backends)
+# Comma or space-separated list of OIDC client_id values for authorized bastions.
+# Leave empty to allow any vouched bastion; remove the file entirely for legacy mode.
+# Managed by ob-backend-setup --allowed-bastions <ids>  (Ansible: ob_bastion_allowed_bastions)
+# The file /etc/open-bastion/allowed_bastions is checked at runtime by pam_openbastion.
 
 # Logging
 log_level = warn
@@ -467,13 +466,20 @@ cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << 'EOF'
 # PAM required for authorization and user creation
 UsePAM yes
 
-# SSH key authentication only (via bastion)
+# SSH certificate authentication only (via bastion ephemeral certs)
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 
-# Accept bastion JWT environment variable
-AcceptEnv LLNG_BASTION_JWT
+# Trust the LLNG CA for user certificates
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
+
+# Validate certificate principal and bastion key-id via pam_openbastion
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
+AuthorizedPrincipalsCommandUser nobody
+
+# Expose cert info to PAM (required for bastion_id + allowed_bastions check)
+ExposeAuthInfo yes
 
 # Accept connections from bastion only
 # (combine with firewall rules)
@@ -504,8 +510,12 @@ grep $USER /etc/passwd
 ls -la /home/$USER
 ```
 
-> **Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
-> even with valid SSH keys. This ensures all access goes through authorized bastions.
+> **Note**: Direct SSH connections to the backend (without a valid bastion-issued ephemeral
+> certificate) will be rejected. The backend sshd enforces this at the TLS/cert layer via
+> `TrustedUserCAKeys`, the `source-address` critical option (bastion IP pinned in the cert),
+> and the `ob-ssh-principals` helper (which only emits a principal for a cert whose key-id
+> encodes a recognized `bastion=<id>` matching `/etc/open-bastion/allowed_bastions`). This
+> ensures all access goes through authorized bastions.
 
 ---
 
@@ -811,7 +821,7 @@ journalctl -u sshd | grep "SSH key policy"
 | `/etc/open-bastion/session-recorder.conf` | Session recorder configuration    |
 | `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion) |
 | `/var/lib/open-bastion/sessions/`         | Session recordings                |
-| `/var/cache/open-bastion/jwks.json`       | JWKS cache for JWT verification   |
+| `/etc/open-bastion/allowed_bastions`      | Allowed bastion client_ids (backend) |
 | `/var/log/open-bastion/audit.json`        | Audit log                         |
 
 ### Commands
@@ -821,7 +831,7 @@ journalctl -u sshd | grep "SSH key policy"
 | `ob-enroll`           | Enroll server with LLNG             |
 | `ob-enroll -g GROUP`  | Enroll with specific server group   |
 | `ob-session-recorder` | Record SSH session (ForceCommand)   |
-| `ob-ssh-proxy HOST`   | Connect to backend with bastion JWT |
+| `ob-ssh-proxy HOST`   | Connect to backend via bastion ephemeral cert |
 
 ## CrowdSec Integration
 

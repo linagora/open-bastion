@@ -43,9 +43,9 @@ The module supports two authentication methods:
   - Fine-grained sudo permissions
   - Automatic account creation
 - **[Bastion-to-backend authentication](doc/bastion-architecture.md)**:
-  - JWT-based proof of connection origin
-  - Backends only accept SSH from authorized bastions
-  - Offline verification via cached JWKS public keys
+  - Certificate-based proof of connection origin (LLNG-signed ephemeral SSH cert, ~120 s)
+  - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)
+  - No agent forwarding or user key on the bastion required
   - `ob-ssh-proxy` script for seamless bastion connections
 - **[Session recording](doc/session-recording.md)** (optional):
   - Record all terminal I/O for audit compliance
@@ -174,7 +174,7 @@ See the full [documentation index](doc/README.md) or jump directly to:
 | [PAM Authentication Modes](doc/pam-modes.md)             | All 4 PAM configurations with examples |
 | [Configuration Reference](doc/configuration.md)          | All configuration options              |
 | [Service Accounts](doc/service-accounts.md)              | Ansible, backup, CI/CD accounts        |
-| [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend JWT authentication  |
+| [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend certificate vouching |
 | [Session Recording](doc/session-recording.md)            | SSH session recording for audit        |
 | [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting        |
 | [Security Features](doc/security.md)                     | Key policies, rate limiting, audit     |
