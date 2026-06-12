@@ -657,7 +657,7 @@ print_recap() {
   Self-delete (shell): $SELF_DELETE
   Hardening:           $ENABLE_HARDENING
   Audit trace:         $ENABLE_AUDIT_TRACE
-  Session recording:   $([ "$DISABLE_SESSION_RECORDER" = "yes" ] && echo "disabled (opt-out)" || echo "enabled")
+  Session recording:   $([ "$TARGET_ROLE" = "backend" ] && echo "n/a (backend role)" || { [ "$DISABLE_SESSION_RECORDER" = "yes" ] && echo "disabled (opt-out)" || echo "enabled"; })
   Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)

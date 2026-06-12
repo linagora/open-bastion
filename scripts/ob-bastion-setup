@@ -85,6 +85,7 @@ AUDIT_CRON_FILE="/etc/cron.daily/open-bastion-audit-rotate"
 #   not-attempted (default — step never ran)
 #   success       (enrollment completed; server token stored)
 #   token-provided (caller passed --token-file, no portal contact needed)
+#   reused        (existing token at $OB_TOKEN adopted, no re-enrollment)
 #   dry-run       (--dry-run, no enrollment attempted)
 #   failed        (portal contact or device-authorization failed)
 ENROLL_RESULT="not-attempted"
@@ -1250,7 +1251,7 @@ enroll_server() {
     # if you deliberately want to re-enroll.
     if [ -s "$OB_TOKEN" ]; then
         info "Existing server token found at $OB_TOKEN — reusing it (no re-enrollment)."
-        ENROLL_RESULT="token-provided"
+        ENROLL_RESULT="reused"
         return 0
     fi
 
@@ -1421,6 +1422,9 @@ print_summary() {
         token-provided)
             echo "  ✓ Server token installed (provided via --token-file)"
             ;;
+        reused)
+            echo "  ✓ Existing server token reused (no re-enrollment)"
+            ;;
         dry-run)
             echo "  ✓ Server enrollment (dry-run — nothing actually saved)"
             ;;
@@ -1505,7 +1509,9 @@ Options:
                           Read OIDC client_secret from file (use - for stdin).
                           Alternative: set OB_CLIENT_SECRET env var.
                           Required when the LLNG client is a confidential client.
-  -y, --yes               Non-interactive mode (requires --token-file)
+  -y, --yes               Non-interactive mode. Requires --token-file unless a
+                          server token already exists at the canonical path
+                          ($OB_TOKEN), in which case it is reused.
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
   --enable-hardening      Apply system-wide containment hardening (logind KillUserProcesses,
@@ -1533,7 +1539,7 @@ Example:
 What this script does:
   1. Downloads SSH CA public key from LLNG
   2. Configures sshd for certificate authentication
-  3. Enables session recording via ForceCommand
+  3. Enables session recording via ForceCommand (unless --disable-session-recorder)
   4. Configures PAM for LLNG authorization
   5. Enrolls the server with LLNG (Device Authorization)
   6. Restarts SSH service
@@ -1758,7 +1764,7 @@ main() {
         info "Retrying enrollment..."
     done
 
-    if [ "$ENROLL_RESULT" != "success" ] && [ "$ENROLL_RESULT" != "token-provided" ] && [ "$ENROLL_RESULT" != "dry-run" ]; then
+    if [ "$ENROLL_RESULT" != "success" ] && [ "$ENROLL_RESULT" != "token-provided" ] && [ "$ENROLL_RESULT" != "reused" ] && [ "$ENROLL_RESULT" != "dry-run" ]; then
         if [ "$MAX_SECURITY" = "true" ]; then
             error "Refusing to apply --max-security lockdown: without enrollment, no user"
             error "can authenticate (SSO certs cannot be issued, sudo would require"
