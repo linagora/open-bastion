@@ -23,9 +23,9 @@
     argv: >-
       {{
         ['/usr/sbin/ob-bastion-setup',
-         '--portal-url', ob_portal_url,
+         '--portal', ob_portal_url,
          '-g', ob_server_group,
-         '--non-interactive']
+         '--yes']
         + (['--max-security'] if ob_max_security else [])
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
