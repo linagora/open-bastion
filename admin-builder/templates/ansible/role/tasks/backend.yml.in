@@ -22,6 +22,8 @@
          '--portal', ob_portal_url,
          '-g', ob_server_group,
          '--yes']
+        + (['--allowed-bastions', ob_bastion_allowed_bastions]
+           if ob_bastion_allowed_bastions is defined else [])
         + (['--max-security'] if ob_max_security else [])
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])

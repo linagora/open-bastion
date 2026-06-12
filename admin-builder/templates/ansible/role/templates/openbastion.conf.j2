@@ -50,22 +50,11 @@ log_level = warn
 audit_enabled = true
 audit_to_syslog = true
 
-# ── Backend: JWT verification from bastion ────────────────────────────────────
-# These settings are only active when ob_role == 'backend'.
-# bastion_jwt_issuer must match the LLNG portal URL (not the bastion URL):
-# the JWT is issued by LLNG and the bastion forwards it to the backend.
-{% if ob_role == 'backend' %}
-bastion_jwt_required = {{ ob_bastion_jwt_required | lower }}
-bastion_jwt_issuer = {{ ob_bastion_jwt_issuer }}
-bastion_jwt_jwks_url = {{ ob_bastion_jwt_jwks_url }}
-bastion_jwt_jwks_cache = {{ ob_bastion_jwt_jwks_cache }}
-{% if ob_bastion_jwt_allowed_bastions is defined and ob_bastion_jwt_allowed_bastions | length > 0 %}
-bastion_jwt_allowed_bastions = {{ ob_bastion_jwt_allowed_bastions }}
-{% endif %}
-{% if ob_bastion_jwt_cache_ttl is defined %}
-bastion_jwt_cache_ttl = {{ ob_bastion_jwt_cache_ttl }}
-{% endif %}
-{% if ob_bastion_jwt_clock_skew is defined %}
-bastion_jwt_clock_skew = {{ ob_bastion_jwt_clock_skew }}
-{% endif %}
-{% endif %}
+# ── Backend: "accept only this bastion" ───────────────────────────────────────
+# Enforcement is NOT in this file. The old LLNG_BASTION_JWT transport was broken
+# (pam_getenv can't read a SendEnv var). It is replaced by certificate vouching:
+# ob-backend-setup writes /etc/open-bastion/allowed_bastions and wires an
+# AuthorizedPrincipalsCommand that only accepts a cert whose key-id carries an
+# allowed bastion=<id>, plus the cert's source-address critical option. Pass the
+# allowlist via `ob-backend-setup --allowed-bastions` (ob_bastion_allowed_bastions).
+# See doc/design/bastion-cert-vouching.md.

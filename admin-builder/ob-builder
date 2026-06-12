@@ -875,34 +875,17 @@ build_placeholder_map() {
 
     pam_mode=$(scenario_to_pam_mode "$SCENARIO")
 
-    # bastion_jwt_block is only meaningful for backend targets. The block
-    # follows the format documented in doc/bastion-architecture.md lines
-    # 510-520 — bastion_jwt_issuer is the LLNG portal URL, NOT a specific
-    # bastion (the JWT is signed by LLNG itself via /pam/bastion-token).
-    if [ "$role" = "backend" ]; then
-        local _allowed_line="" _allowed_yaml=""
-        if [ -n "${ALLOWED_BASTIONS:-}" ]; then
-            _allowed_line="bastion_jwt_allowed_bastions = ${ALLOWED_BASTIONS}"
-            _allowed_yaml="ob_bastion_jwt_allowed_bastions: \"${ALLOWED_BASTIONS}\""
-        fi
-        bastion_jwt_block=$(cat << JWTBLOCK
-bastion_jwt_required = true
-bastion_jwt_issuer = ${PORTAL_URL}
-bastion_jwt_jwks_url = ${PORTAL_URL}/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-${_allowed_line}
-JWTBLOCK
-)
-        bastion_jwt_yaml=$(cat << JWTYAML
-ob_bastion_jwt_required: true
-ob_bastion_jwt_issuer: "${PORTAL_URL}"
-ob_bastion_jwt_jwks_url: "${PORTAL_URL}/.well-known/jwks.json"
-ob_bastion_jwt_jwks_cache: "/var/cache/open-bastion/jwks.json"
-${_allowed_yaml}
-JWTYAML
-)
+    # Backend "accept only this bastion": enforcement is NOT in openbastion.conf
+    # anymore (the old bastion_jwt / LLNG_BASTION_JWT transport was broken —
+    # pam_getenv can't read a SendEnv var). It is replaced by certificate
+    # vouching: ob-backend-setup writes /etc/open-bastion/allowed_bastions and
+    # wires an AuthorizedPrincipalsCommand keyed on the cert key-id + the cert's
+    # source-address. So the conf block is empty; we only pass the allowlist to
+    # the Ansible role (which forwards it as ob-backend-setup --allowed-bastions).
+    bastion_jwt_block=""
+    if [ "$role" = "backend" ] && [ -n "${ALLOWED_BASTIONS:-}" ]; then
+        bastion_jwt_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
     else
-        bastion_jwt_block=""
         bastion_jwt_yaml=""
     fi
 
