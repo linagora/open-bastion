@@ -943,20 +943,25 @@ EOF
                 details="${details}- $scenario/$role: generated script syntax error"$'\n'
                 continue
             fi
-            # Backend role MUST embed the bastion JWT verification block;
-            # bastion/standalone roles MUST NOT.
-            if [ "$role" = "backend" ]; then
-                if ! grep -q "bastion_jwt_required = true" "$out"; then
-                    failures=$((failures + 1))
-                    details="${details}- $scenario/$role: missing bastion_jwt_required"$'\n'
-                    continue
-                fi
-            else
-                if grep -q "bastion_jwt_required" "$out"; then
-                    failures=$((failures + 1))
-                    details="${details}- $scenario/$role: bastion_jwt_required leaked into non-backend artefact"$'\n'
-                    continue
-                fi
+            # The old bastion→backend JWT transport (bastion_jwt_required /
+            # LLNG_BASTION_JWT over SendEnv) was structurally broken and has been
+            # replaced by certificate vouching. It must no longer appear in ANY
+            # generated artefact, for any role — regression guard so it cannot
+            # creep back. Backend enforcement now lives at the sshd layer
+            # (TrustedUserCAKeys + AuthorizedPrincipalsCommand + the
+            # /etc/open-bastion/allowed_bastions list written by ob-backend-setup),
+            # not in this conf.
+            if grep -q "bastion_jwt" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: obsolete bastion_jwt config leaked into artefact"$'\n'
+                continue
+            fi
+            # The target role must be embedded so the runtime dispatch picks the
+            # right setup (ob-backend-setup vs ob-bastion-setup).
+            if ! grep -q "TARGET_ROLE=\"${role}\"" "$out"; then
+                failures=$((failures + 1))
+                details="${details}- $scenario/$role: TARGET_ROLE not embedded as '${role}'"$'\n'
+                continue
             fi
             # Mode E artefacts must include min_tls_version=13; other modes must not.
             if [ "$scenario" = "max-security" ]; then

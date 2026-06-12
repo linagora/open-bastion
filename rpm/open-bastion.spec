@@ -92,6 +92,7 @@ ctest --output-on-failure --verbose
 %attr(2755,root,ob-sessions) %{_sbindir}/ob-session-recorder-wrapper
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-backend-setup
+%{_sbindir}/ob-bastion-cert-helper
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh-proxy
