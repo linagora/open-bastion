@@ -1022,6 +1022,9 @@ install_hardening_allowlist() {
         else
             warn "$dst already exists with custom content — leaving untouched"
             warn "Review it manually against $src to ensure containment is preserved"
+            # The shipped allow-list was NOT applied; containment may be weaker
+            # than intended, so the overall hardening outcome is only partial.
+            HARDENING_RESULT="partial"
         fi
         return 0
     fi

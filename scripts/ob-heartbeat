@@ -158,17 +158,23 @@ update_access_token() {
     local now exp tmp
     now=$(date +%s)
     exp=$((now + ttl))
-    tmp=$(mktemp "${TOKEN_FILE}.XXXXXX") || return 1
-    if AT="$at" jq --argjson exp "$exp" \
+    tmp=$(mktemp "${TOKEN_FILE}.XXXXXX") || { log_error "mktemp failed for $TOKEN_FILE"; return 1; }
+    if ! AT="$at" jq --argjson exp "$exp" \
         '.access_token = env.AT | .expires_at = $exp' \
         "$TOKEN_FILE" > "$tmp" 2>/dev/null; then
-        chmod 600 "$tmp"
-        mv -f "$tmp" "$TOKEN_FILE"
-        log_debug "Refreshed access token (expires in ${ttl}s)"
-    else
         rm -f "$tmp"
-        log_error "Failed to update access token in $TOKEN_FILE"
+        log_error "Failed to rewrite access token in $TOKEN_FILE (jq error)"
+        return 1
     fi
+    # Fail loudly if we cannot install the new file: otherwise the timer would
+    # look healthy while NSS/PAM keep using a token that will soon expire.
+    if ! chmod 600 "$tmp" || ! mv -f "$tmp" "$TOKEN_FILE"; then
+        rm -f "$tmp"
+        log_error "Failed to install updated token file $TOKEN_FILE"
+        return 1
+    fi
+    log_debug "Refreshed access token (expires in ${ttl}s)"
+    return 0
 }
 
 # Send heartbeat
@@ -233,7 +239,10 @@ send_heartbeat() {
         new_at=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
         new_ttl=$(echo "$response" | jq -r '.expires_in // empty' 2>/dev/null)
         if [ -n "$new_at" ]; then
-            update_access_token "$new_at" "${new_ttl:-3600}"
+            # Persisting the fresh access token is critical: if it fails, exit
+            # non-zero so the systemd unit reports the problem instead of
+            # silently letting the on-disk token expire.
+            update_access_token "$new_at" "${new_ttl:-3600}" || exit 1
         fi
     elif [ "$http_code" = "401" ]; then
         log_error "Heartbeat rejected: invalid or expired refresh_token"
