@@ -600,6 +600,39 @@ TESTSCRIPT
     fi
 }
 
+# Test 19: validate_hostname accepts legit targets, rejects injection.
+# Regression: the old bracket expression used '\]' which (ERE) closed the set
+# and made even a plain IPv4 fail validation — caught live on the VM lab.
+test_validate_hostname() {
+    local test_script="$TEST_TMPDIR/test_validate_hostname.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+source_file="$1"
+
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+for ok in 192.168.122.32 backend backend-01.example.com "[2001:db8::1]"; do
+    ( validate_hostname "$ok" ) || { echo "REJECTED_GOOD:$ok"; exit 1; }
+done
+for bad in "bad;host" 'bad$(id)' "bad host" "-oProxyCommand=x"; do
+    if ( validate_hostname "$bad" ) 2>/dev/null; then
+        echo "ACCEPTED_BAD:$bad"; exit 1
+    fi
+done
+echo "VALIDATE_HOSTNAME_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "VALIDATE_HOSTNAME_OK"; then
+        test_pass "validate_hostname: IPv4/FQDN/IPv6 accepted, injection rejected"
+    else
+        test_fail "validate_hostname matrix" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-ssh-proxy (llng-ssh-proxy)"
@@ -624,6 +657,7 @@ test_parse_args_default_port
 test_parse_args_config_file
 test_parse_args_debug
 test_missing_portal_url
+test_validate_hostname
 
 # Summary
 echo ""

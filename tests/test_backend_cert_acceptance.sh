@@ -60,6 +60,10 @@ chown nobody:nogroup /run/open-bastion/ssh-fp 2>/dev/null || chown nobody:nobody
 mkdir -p /etc/open-bastion
 printf 'pam-access\n' > /etc/open-bastion/allowed_bastions
 chmod 644 /etc/open-bastion/allowed_bastions
+# Production perms: the helper runs as nobody and must traverse this dir to
+# read the 0644 allowlist. ob-backend-setup sets 0711 for exactly this reason
+# (a 0700 dir silently broke enforcement — see the fail-closed case below).
+chmod 0711 /etc/open-bastion
 cp /helper /usr/local/sbin/ob-ssh-principals
 chmod 755 /usr/local/sbin/ob-ssh-principals
 
@@ -75,6 +79,11 @@ KbdInteractiveAuthentication no
 UsePAM no
 ExposeAuthInfo yes
 PermitRootLogin no
+# This matrix makes many deliberately-failing auth attempts from 127.0.0.1;
+# OpenSSH >=9.8 would otherwise rate-limit the source (PerSourcePenalties on by
+# default) and refuse later legitimate attempts, masking the result.
+PerSourcePenalties no
+MaxStartups 100
 EOF
 grep -q "Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config \
     || echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
@@ -109,6 +118,15 @@ expect "deny wrong bastion id"                DENIED    "$(try "$(mint 'bastion=
 expect "deny cert-user != login"              DENIED    "$(try "$(mint 'bastion=pam-access;user=root;target=b1' dwho '')")"
 expect "deny off-bastion source-address"      DENIED    "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' dwho 10.0.0.1)")"
 expect "deny principal mismatch"              DENIED    "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' root '')")"
+
+# Regression: if nobody cannot read the allowlist (config dir 0700), the helper
+# must FAIL CLOSED — deny even an otherwise-valid vouched cert — instead of
+# falling open and accepting everything (the bug that let a direct SSO cert in
+# on a real 0700 /etc/open-bastion while this very matrix passed 7/7).
+chmod 0700 /etc/open-bastion
+expect "fail-closed when dir unreadable (0700)" DENIED  "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' dwho 127.0.0.1)")"
+chmod 0711 /etc/open-bastion
+expect "recovers once dir traversable (0711)"   CONNECTED "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' dwho 127.0.0.1)")"
 
 exit $fail
 DRIVER

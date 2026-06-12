@@ -155,7 +155,9 @@ get_server_token() {
 # Only allows: alphanumeric, dots, hyphens, colons (IPv6), brackets
 validate_hostname() {
     local host="$1"
-    if [[ ! "$host" =~ ^[a-zA-Z0-9.:_\[\]-]+$ ]]; then
+    # NB: in an ERE bracket expression a literal ']' must come FIRST (and '-'
+    # last); '\]' does NOT escape it — it closes the set and breaks the regex.
+    if [[ ! "$host" =~ ^[][a-zA-Z0-9.:_-]+$ ]]; then
         error "Invalid hostname: $host"
         exit 1
     fi
@@ -176,42 +178,61 @@ request_bastion_cert() {
     local pubkey="$3"
 
     if [ -z "$VOUCHER" ]; then
-        error "No bastion voucher found ($LLNG_BASTION_VOUCHER is unset)."
+        error "No bastion voucher found (LLNG_BASTION_VOUCHER is unset)."
         error "This session was not vouched by the bastion PAM module (or it"
         error "predates the cert-vouching feature). Reconnect to the bastion."
         return 1
     fi
 
-    local server_token
-    server_token=$(get_server_token)
-    if [ -z "$server_token" ]; then
-        error "Failed to read server token"
-        return 1
-    fi
-
     debug "Requesting bastion cert for user $user to host $target_host"
-    build_curl_opts
-
-    # Build JSON payload safely with jq to avoid injection
-    local json_payload
-    json_payload=$(jq -n \
-        --arg user "$user" \
-        --arg target_host "$target_host" \
-        --arg target_group "$TARGET_GROUP" \
-        --arg public_key "$pubkey" \
-        --arg voucher "$VOUCHER" \
-        '{user: $user, target_host: $target_host, target_group: $target_group, public_key: $public_key, voucher: $voucher}')
 
     local response
-    response=$(curl "${CURL_OPTS[@]}" \
-        -X POST \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload" \
-        "${PORTAL_URL}/pam/bastion-cert" 2>&1) || {
-        error "Failed to request bastion certificate: $response"
-        return 1
-    }
+    if [ -r "$SERVER_TOKEN_FILE" ]; then
+        # Privileged path (root, or a relaxed lab setup): call LLNG directly.
+        local server_token
+        server_token=$(get_server_token)
+        if [ -z "$server_token" ]; then
+            error "Failed to read server token"
+            return 1
+        fi
+
+        build_curl_opts
+
+        # Build JSON payload safely with jq to avoid injection
+        local json_payload
+        json_payload=$(jq -n \
+            --arg user "$user" \
+            --arg target_host "$target_host" \
+            --arg target_group "$TARGET_GROUP" \
+            --arg public_key "$pubkey" \
+            --arg voucher "$VOUCHER" \
+            '{user: $user, target_host: $target_host, target_group: $target_group, public_key: $public_key, voucher: $voucher}')
+
+        response=$(curl "${CURL_OPTS[@]}" \
+            -X POST \
+            -H "Authorization: Bearer $server_token" \
+            -H "Content-Type: application/json" \
+            -d "$json_payload" \
+            "${PORTAL_URL}/pam/bastion-cert" 2>&1) || {
+            error "Failed to request bastion certificate: $response"
+            return 1
+        }
+    else
+        # Normal user path: the server token is root-only BY DESIGN (a user
+        # reading their own voucher must gain nothing). Delegate the single
+        # privileged call to ob-bastion-cert-helper through the narrow
+        # NOPASSWD sudoers rule installed by ob-bastion-setup. The helper
+        # always mints for the INVOKING user, whatever we send it.
+        debug "Server token not readable; delegating to ob-bastion-cert-helper"
+        local rc=0
+        response=$(printf '%s\n%s\n' "$VOUCHER" "$pubkey" \
+            | sudo -n /usr/sbin/ob-bastion-cert-helper "$target_host" "$TARGET_GROUP") || rc=$?
+        if [ -z "$response" ]; then
+            error "Failed to request bastion certificate via ob-bastion-cert-helper (rc=$rc)."
+            error "Is the sudoers rule installed? (re-run ob-bastion-setup on this bastion)"
+            return 1
+        fi
+    fi
 
     local cert
     cert=$(echo "$response" | jq -r '.certificate // empty' 2>/dev/null)
