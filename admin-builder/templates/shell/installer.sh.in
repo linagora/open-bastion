@@ -50,6 +50,14 @@ AUTO_ENROLL_SETUP="@@AUTO_ENROLL_SETUP@@"
 # Self-delete after success: yes | no
 SELF_DELETE_DEFAULT="@@SELF_DELETE@@"
 
+# Optional opt-in features passed through to ob-{bastion,backend}-setup
+# (yes | no). Hardening and audit-trace are intrusive and default to no.
+# DISABLE_SESSION_RECORDER=yes opts out of session recording on a
+# bastion/standalone (no effect for the backend role, which never records).
+ENABLE_HARDENING="@@ENABLE_HARDENING@@"
+ENABLE_AUDIT_TRACE="@@ENABLE_AUDIT_TRACE@@"
+DISABLE_SESSION_RECORDER="@@DISABLE_SESSION_RECORDER@@"
+
 # ---------------------------------------------------------------------------
 # Runtime variables (resolved during execution)
 # ---------------------------------------------------------------------------
@@ -625,7 +633,10 @@ step_setup() {
         yes)   _do_setup=true ;;
         no)    log_info "Setup skipped (auto_enroll_setup=no in artifact)"; return 0 ;;
         prompt)
-            if prompt_yn "Run ob-${TARGET_ROLE}-setup now?"; then
+            # standalone runs ob-bastion-setup (there is no ob-standalone-setup)
+            local _setup_label="ob-${TARGET_ROLE}-setup"
+            [ "${TARGET_ROLE}" = "standalone" ] && _setup_label="ob-bastion-setup"
+            if prompt_yn "Run ${_setup_label} now?"; then
                 _do_setup=true
             else
                 log_info "Setup skipped by user"
@@ -639,12 +650,27 @@ step_setup() {
     fi
 
     case "${TARGET_ROLE}" in
-        bastion)
-            local _setup_opts=()
+        bastion|standalone)
+            # bastion and standalone both run ob-bastion-setup: a standalone
+            # host is simultaneously a bastion (inbound user SSH) and a backend
+            # (target of forwarded sessions), and ob-bastion-setup applies the
+            # full stack (this matches the Ansible standalone role).
+            # ob-bastion-setup REQUIRES --portal and needs the group/client-id
+            # to enroll. Passing them is mandatory: without --portal the setup
+            # dies immediately ("Portal URL is required (-p/--portal)") and the
+            # install never completes. The client_secret travels via
+            # OB_CLIENT_SECRET (kept out of /proc/<pid>/cmdline). ob-enroll
+            # already ran in step_enroll and wrote the token, so ob-bastion-setup
+            # reuses it (no second device-code approval).
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}")
+            [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
+            [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
+            [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
+            [ "${DISABLE_SESSION_RECORDER}" = "yes" ] && _setup_opts+=("--disable-session-recorder")
             if [ "${OPT_DRY_RUN}" = "true" ]; then
-                log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-bastion-setup${_setup_opts:+ ${_setup_opts[*]}}"
+                log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-bastion-setup ${_setup_opts[*]}"
                 return 0
             fi
             if [ ! -x /usr/sbin/ob-bastion-setup ]; then
@@ -654,11 +680,16 @@ step_setup() {
             OB_CLIENT_SECRET="${CLIENT_SECRET}" /usr/sbin/ob-bastion-setup "${_setup_opts[@]}"
             ;;
         backend)
-            local _setup_opts=()
+            # Backends never record sessions, so --disable-session-recorder is
+            # not applicable here; hardening / audit-trace stay opt-in.
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}")
+            [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
+            [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
+            [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             if [ "${OPT_DRY_RUN}" = "true" ]; then
-                log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-backend-setup${_setup_opts:+ ${_setup_opts[*]}}"
+                log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-backend-setup ${_setup_opts[*]}"
                 return 0
             fi
             if [ ! -x /usr/sbin/ob-backend-setup ]; then
@@ -666,10 +697,6 @@ step_setup() {
                 return 1
             fi
             OB_CLIENT_SECRET="${CLIENT_SECRET}" /usr/sbin/ob-backend-setup "${_setup_opts[@]}"
-            ;;
-        standalone)
-            log_info "Standalone role: enrollment is sufficient."
-            log_info "Configure PAM manually if needed (see doc/pam-modes.md for Mode ${PAM_MODE})."
             ;;
         *)
             log_warn "Unknown target role '${TARGET_ROLE}'; skipping role-specific setup"

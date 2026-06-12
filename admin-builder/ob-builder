@@ -89,6 +89,12 @@ AUTO_ENROLL_SETUP=""
 SELF_DELETE=""
 ALLOWED_BASTIONS=""
 ANSIBLE_AUTO_APPROVE=""
+# Optional opt-in features (yes/no). Hardening and audit-trace are intrusive
+# and OFF by default; session recording is ON by default on bastion/standalone
+# and DISABLE_SESSION_RECORDER=yes opts out of it (never applies to backend).
+ENABLE_HARDENING=""
+ENABLE_AUDIT_TRACE=""
+DISABLE_SESSION_RECORDER=""
 
 # Derived values populated after the questionnaire.
 PAM_MODE=""
@@ -295,6 +301,9 @@ _load_config_yq() {
     v=$(_yq_get self_delete);         [ -n "$v" ] && SELF_DELETE="$v"
     v=$(_yq_get allowed_bastions);    [ -n "$v" ] && ALLOWED_BASTIONS="$v"
     v=$(_yq_get ansible_auto_approve); [ -n "$v" ] && ANSIBLE_AUTO_APPROVE="$v"
+    v=$(_yq_get enable_hardening);    [ -n "$v" ] && ENABLE_HARDENING="$v"
+    v=$(_yq_get enable_audit_trace);  [ -n "$v" ] && ENABLE_AUDIT_TRACE="$v"
+    v=$(_yq_get disable_session_recorder); [ -n "$v" ] && DISABLE_SESSION_RECORDER="$v"
     v=$(_yq_get repo_keyring);        [ -n "$v" ] && [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$v"
     v=$(_yq_get apt_url);             [ -n "$v" ] && [ "$APT_URL" = "$DEFAULT_APT_URL" ] && APT_URL="$v"
     v=$(_yq_get apt_suite);           [ -n "$v" ] && [ "$APT_SUITE" = "$DEFAULT_APT_SUITE" ] && APT_SUITE="$v"
@@ -345,6 +354,9 @@ _load_config_awk() {
                 self_delete)         SELF_DELETE="$val" ;;
                 allowed_bastions)    ALLOWED_BASTIONS="$val" ;;
                 ansible_auto_approve) ANSIBLE_AUTO_APPROVE="$val" ;;
+                enable_hardening)    ENABLE_HARDENING="$val" ;;
+                enable_audit_trace)  ENABLE_AUDIT_TRACE="$val" ;;
+                disable_session_recorder) DISABLE_SESSION_RECORDER="$val" ;;
                 repo_keyring)        [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$val" ;;
                 apt_url)             [ "$APT_URL"       = "$DEFAULT_APT_URL"       ] && APT_URL="$val" ;;
                 apt_suite)           [ "$APT_SUITE"     = "$DEFAULT_APT_SUITE"     ] && APT_SUITE="$val" ;;
@@ -499,6 +511,25 @@ EOF
         ALLOWED_BASTIONS=$(ask "Allowed bastion ids (empty = any)" "")
     fi
 
+    # q7c. Optional opt-in features: system hardening, audit trace, and
+    # (bastion/standalone only) whether to OPT OUT of session recording.
+    # Hardening and audit-trace are intrusive/system-wide, so they default to
+    # OFF and must be opted into (see SECURITY.md). Session recording is a core
+    # bastion guarantee: it stays ON unless explicitly disabled here. Backends
+    # never record sessions, so the recorder question is skipped for them.
+    if [ -z "$ENABLE_HARDENING" ]; then
+        explain "System containment hardening applies logind KillUserProcesses, an nproc cap, at/cron allow-lists and masks atd on the target. It changes system-wide behaviour, so it is OFF by default — enable it only on hosts dedicated to this role."
+        ENABLE_HARDENING=$(ask_choice "Enable system containment hardening (--enable-hardening)?" "yes|no" "no")
+    fi
+    if [ -z "$ENABLE_AUDIT_TRACE" ]; then
+        explain "Audit trace installs auditd rules and a daily rotation cron on the target (requires the auditd package). OFF by default."
+        ENABLE_AUDIT_TRACE=$(ask_choice "Enable primary audit trace via auditd (--enable-audit-trace)?" "yes|no" "no")
+    fi
+    if [ "$TARGET_ROLE" != "backend" ] && [ -z "$DISABLE_SESSION_RECORDER" ]; then
+        explain "A bastion records every session by default (sshd ForceCommand -> ob-session-recorder). Disable this only when session capture is handled by another mechanism — turning it off weakens the audit guarantee. Backends never record sessions, so this does not apply to them."
+        DISABLE_SESSION_RECORDER=$(ask_choice "Disable session recording on this bastion/standalone (--disable-session-recorder)?" "yes|no" "no")
+    fi
+
     # q8. Auto-launch enroll/setup
     if [ -z "$AUTO_ENROLL_SETUP" ]; then
         explain "Once the configs are deposited and the open-bastion package is installed, the target still needs to run ob-enroll then ob-*-setup. Choose whether the installer runs them automatically, skips them entirely, or asks the admin before each step."
@@ -584,6 +615,15 @@ validate_inputs() {
     fi
     case "$SELF_DELETE" in yes|no) ;; *) die "Invalid self_delete: $SELF_DELETE" ;; esac
 
+    : "${ENABLE_HARDENING:=no}"
+    case "$ENABLE_HARDENING" in yes|no) ;; *) die "Invalid enable_hardening: $ENABLE_HARDENING" ;; esac
+    : "${ENABLE_AUDIT_TRACE:=no}"
+    case "$ENABLE_AUDIT_TRACE" in yes|no) ;; *) die "Invalid enable_audit_trace: $ENABLE_AUDIT_TRACE" ;; esac
+    : "${DISABLE_SESSION_RECORDER:=no}"
+    case "$DISABLE_SESSION_RECORDER" in yes|no) ;; *) die "Invalid disable_session_recorder: $DISABLE_SESSION_RECORDER" ;; esac
+    # Session recording does not exist on a backend; never emit the opt-out for it.
+    [ "$TARGET_ROLE" = "backend" ] && DISABLE_SESSION_RECORDER="no"
+
     : "${ANSIBLE_AUTO_APPROVE:=no}"
     case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
 
@@ -615,6 +655,9 @@ print_recap() {
   server_group:        ${SERVER_GROUP:-<empty>}  (policy: $SERVER_GROUP_POLICY)
   Auto enroll/setup:   $AUTO_ENROLL_SETUP
   Self-delete (shell): $SELF_DELETE
+  Hardening:           $ENABLE_HARDENING
+  Audit trace:         $ENABLE_AUDIT_TRACE
+  Session recording:   $([ "$TARGET_ROLE" = "backend" ] && echo "n/a (backend role)" || { [ "$DISABLE_SESSION_RECORDER" = "yes" ] && echo "disabled (opt-out)" || echo "enabled"; })
   Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
@@ -924,6 +967,19 @@ JWTYAML
     ph_set MAX_SECURITY_BOOL     "$max_security_bool"
     ph_set AUTO_ENROLL_BOOL      "$auto_enroll_bool"
     ph_set AUTO_SETUP_BOOL       "$auto_setup_bool"
+
+    # Optional opt-in features. Shell installer consumes the yes/no strings;
+    # the Ansible role consumes the true/false boolean variants.
+    local _harden_bool="false" _audit_bool="false" _norec_bool="false"
+    [ "$ENABLE_HARDENING" = "yes" ]         && _harden_bool="true"
+    [ "$ENABLE_AUDIT_TRACE" = "yes" ]       && _audit_bool="true"
+    [ "$DISABLE_SESSION_RECORDER" = "yes" ] && _norec_bool="true"
+    ph_set ENABLE_HARDENING              "$ENABLE_HARDENING"
+    ph_set ENABLE_AUDIT_TRACE            "$ENABLE_AUDIT_TRACE"
+    ph_set DISABLE_SESSION_RECORDER      "$DISABLE_SESSION_RECORDER"
+    ph_set ENABLE_HARDENING_BOOL         "$_harden_bool"
+    ph_set ENABLE_AUDIT_TRACE_BOOL       "$_audit_bool"
+    ph_set DISABLE_SESSION_RECORDER_BOOL "$_norec_bool"
 
     # Ansible-only: device-code auto-approval via LLNG session cookie.
     local _auto_approve_bool="false" _vars_prompt_block=""

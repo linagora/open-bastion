@@ -16,7 +16,11 @@ PROG_NAME=$(basename "$0")
 # Default values
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/etc/open-bastion/token"
-SCOPE="pam:server"
+# offline_access is REQUIRED: it makes LLNG issue a long-lived offline refresh
+# token (the durable machine identity). Without it the server only gets a
+# short-lived access token, SSO/NSS lookups break after ~1h, and there is no
+# way to refresh. The RP must allow it (oidcRPMetaDataOptionsAllowOffline=1).
+SCOPE="pam:server offline_access"
 POLL_INTERVAL=5
 TIMEOUT=300
 
@@ -578,6 +582,13 @@ save_token() {
     if [ -n "$REFRESH_TOKEN" ]; then
         log_info "Refresh token saved - can be used for automatic token renewal"
         log_info "Token expires at: $(date -d "@$expires_at" 2>/dev/null || date -r "$expires_at" 2>/dev/null || echo "$expires_at")"
+    else
+        log_error "No refresh_token was issued by the portal."
+        log_error "The server got only a short-lived access token; SSO/NSS lookups"
+        log_error "will break after it expires and cannot be renewed."
+        log_error "The OIDC client '${CLIENT_ID:-pam-access}' must allow offline access:"
+        log_error "  set oidcRPMetaDataOptionsAllowOffline = 1 on that client in LLNG,"
+        log_error "  and make sure 'offline_access' is an allowed scope."
     fi
 }
 

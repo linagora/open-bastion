@@ -163,15 +163,18 @@ main() {
     local curl_opts=( -sS --max-time "$TIMEOUT" -fL )
     [ "$VERIFY_SSL" = "true" ] || curl_opts+=( --insecure )
 
-    # Probe payload — user/target_host are placeholders; LLNG signs the JWT
-    # using its own knowledge of this bastion (identified by the bearer token).
+    # Probe payload — "probe":true tells LLNG this is a self-identification
+    # request, not a real vouching: the endpoint returns the bastion_id
+    # directly (no usable JWT) and skips the per-user _pamSeen recency gate,
+    # which would otherwise reject our synthetic probe user. user/target_host
+    # remain as harmless placeholders for older portals that still mint a JWT.
     local payload
     payload=$(jq -n \
         --arg user "ob-bastion-id-probe" \
         --arg target_host "127.0.0.1" \
         --arg target_group "$SERVER_GROUP" \
         --arg bastion_group "$SERVER_GROUP" \
-        '{user: $user, target_host: $target_host, target_group: $target_group, bastion_group: $bastion_group}')
+        '{user: $user, target_host: $target_host, target_group: $target_group, bastion_group: $bastion_group, probe: true}')
 
     local response http_status body
     response=$(curl "${curl_opts[@]}" \
@@ -190,6 +193,24 @@ main() {
     if [ "$http_status" != "200" ]; then
         log_error "LLNG returned HTTP $http_status: $body"
         exit 2
+    fi
+
+    # Probe response (LLNG with probe mode): bastion_id is returned directly,
+    # with no JWT. Prefer it when present; fall back to JWT decoding for older
+    # portals that answer the probe by minting a placeholder JWT.
+    local direct_id
+    direct_id=$(printf '%s' "$body" | jq -r '.bastion_id // empty' 2>/dev/null)
+    if [ -n "$direct_id" ]; then
+        if [ "$VERBOSE" = "true" ]; then
+            printf '%s\n' "$body" | jq .
+            exit 0
+        fi
+        if [ "$JSON_OUT" = "true" ]; then
+            jq -nc --arg id "$direct_id" '{bastion_id: $id}'
+        else
+            printf '%s\n' "$direct_id"
+        fi
+        exit 0
     fi
 
     local jwt

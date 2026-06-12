@@ -38,6 +38,15 @@ ob_auto_enroll: @@AUTO_ENROLL_BOOL@@  # true when AUTO_ENROLL_SETUP includes enr
 # When true, the role runs ob-bastion-setup / ob-backend-setup during the play.
 ob_auto_setup: @@AUTO_SETUP_BOOL@@
 
+# ── Optional opt-in features ──────────────────────────────────────────────────
+# Hardening and audit-trace are intrusive/system-wide and default to false
+# (see SECURITY.md). They apply to every role. Session recording is ON by
+# default on bastion/standalone; set ob_disable_session_recorder to true to opt
+# out (no effect for the backend role, which never records sessions).
+ob_enable_hardening: @@ENABLE_HARDENING_BOOL@@
+ob_enable_audit_trace: @@ENABLE_AUDIT_TRACE_BOOL@@
+ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
+
 # ── Device-code auto-approval (Ansible-only, opt-in at build time) ───────────
 # When ob_ansible_auto_approve is true AND ob_llng_cookie is non-empty, the
 # enrollment task auto-approves the user_code via the LLNG /device endpoint

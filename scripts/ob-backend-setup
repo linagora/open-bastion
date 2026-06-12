@@ -40,7 +40,7 @@ CLIENT_ID=""
 CLIENT_SECRET=""
 
 # Result of enroll_server, consumed by print_summary. One of:
-#   not-attempted (default), success, token-provided, dry-run, failed
+#   not-attempted (default), success, token-provided, reused, dry-run, failed
 ENROLL_RESULT="not-attempted"
 
 # Files created (not just modified) during this run. Used by
@@ -59,6 +59,31 @@ OB_CONFIG="/etc/open-bastion/openbastion.conf"
 OB_TOKEN="/etc/open-bastion/token"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
+
+# Hardening (session containment) — see doc/hardening.md
+HARDENING_TEMPLATE_DIR="/usr/share/open-bastion/hardening"
+HARDENING_LOGIND_DST="/etc/systemd/logind.conf.d/open-bastion.conf"
+HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
+HARDENING_AT_ALLOW="/etc/at.allow"
+HARDENING_CRON_ALLOW="/etc/cron.allow"
+ENABLE_HARDENING=false
+# Result of setup_hardening, consumed by print_summary. One of:
+#   not-applied (default — step never ran or was opt-out)
+#   applied     (all sub-steps succeeded)
+#   partial     (one or more sub-steps emitted warn/error but step continued)
+#   declined    (user said no at the confirm prompt)
+#   failed      (hard refusal: templates missing, linger gate, etc.)
+#   dry-run     (--dry-run, nothing was actually applied)
+HARDENING_RESULT="not-applied"
+
+# Audit trace paths (opt-in, see --enable-audit-trace)
+ENABLE_AUDIT_TRACE=false
+# Audit outcome for the summary: not-applied (default), applied, skipped
+# (auditd missing), declined (user said no), dry-run, failed.
+AUDIT_RESULT="not-applied"
+AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
+AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
+AUDIT_CRON_FILE="/etc/cron.daily/open-bastion-audit-rotate"
 
 # Colors (only if terminal)
 if [ -t 1 ]; then
@@ -768,6 +793,28 @@ preflight_check_portal() {
     return 0
 }
 
+# Abort if the saved server token has no refresh_token. Without an offline
+# refresh token the short-lived access token cannot be renewed, and SSO/NSS
+# lookups (getent passwd <user>) stop working ~1h after setup. A missing
+# refresh_token means the OIDC client does not grant offline access.
+require_refresh_token() {
+    [ -s "$OB_TOKEN" ] || return 0
+    local rt
+    rt=$(jq -r '.refresh_token // ""' "$OB_TOKEN" 2>/dev/null)
+    if [ -z "$rt" ]; then
+        error "The server token at $OB_TOKEN has NO refresh_token."
+        error "The access token cannot be renewed, so SSO/NSS lookups will stop"
+        error "working about 1 hour after this setup."
+        error ""
+        error "The OIDC client '${CLIENT_ID:-pam-access}' must grant offline access:"
+        error "  - set oidcRPMetaDataOptionsAllowOffline = 1 on that client in LLNG"
+        error "  - ensure 'offline_access' is an allowed scope"
+        error "Then delete $OB_TOKEN and re-run this setup."
+        return 1
+    fi
+    return 0
+}
+
 # Enroll server with LLNG. Sets ENROLL_RESULT and returns 0 on success,
 # 1 on failure.
 enroll_server() {
@@ -784,6 +831,20 @@ enroll_server() {
         chmod 600 "$OB_TOKEN"
         info "Server token saved"
         ENROLL_RESULT="token-provided"
+        return 0
+    fi
+
+    # Reuse an existing token instead of re-enrolling. A prior ob-enroll run
+    # (e.g. the installer's separate enrollment step, or a previous setup)
+    # may already have written the canonical token file. Re-running the
+    # device-authorization flow would force a second browser approval and,
+    # in --non-interactive mode, fail outright ("requires --token-file").
+    # If the token file exists and is non-empty, adopt it. Delete it first
+    # if you deliberately want to re-enroll.
+    if [ -s "$OB_TOKEN" ]; then
+        info "Existing server token found at $OB_TOKEN — reusing it (no re-enrollment)."
+        require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
+        ENROLL_RESULT="reused"
         return 0
     fi
 
@@ -817,11 +878,13 @@ enroll_server() {
     # Pass the secret via env var (not CLI) to keep it out of /proc/<pid>/cmdline.
     if [ -n "$CLIENT_SECRET" ]; then
         if OB_CLIENT_SECRET="$CLIENT_SECRET" /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
             ENROLL_RESULT="success"
             return 0
         fi
     else
         if /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
+            require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
             ENROLL_RESULT="success"
             return 0
         fi
@@ -916,6 +979,384 @@ restart_sshd() {
     fi
 }
 
+# Install one hardening template by absolute source/destination path,
+# creating the destination directory if missing and backing up any
+# existing file. Mode 0644 root:root.
+install_hardening_file() {
+    local src="$1"
+    local dst="$2"
+    local dst_dir
+    dst_dir=$(dirname "$dst")
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src (package not fully installed?)"
+        return 1
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $src -> $dst (0644 root:root)"
+        return 0
+    fi
+
+    [ -d "$dst_dir" ] || mkdir -p "$dst_dir"
+    backup_file "$dst"
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Installed $dst"
+}
+
+# Conditionally drop a *.allow whitelist if absent, keeping any
+# pre-existing admin file untouched. We only warn — overwriting an
+# admin-managed file silently would be hostile.
+install_hardening_allowlist() {
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -f "$src" ]; then
+        warn "Hardening template missing: $src"
+        return 1
+    fi
+
+    if [ -f "$dst" ]; then
+        if cmp -s "$src" "$dst"; then
+            info "$dst already matches template, leaving as-is"
+        else
+            warn "$dst already exists with custom content — leaving untouched"
+            warn "Review it manually against $src to ensure containment is preserved"
+            # The shipped allow-list was NOT applied; containment may be weaker
+            # than intended, so the overall hardening outcome is only partial.
+            HARDENING_RESULT="partial"
+        fi
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would create $dst from $src (0644 root:root)"
+        return 0
+    fi
+
+    install -m 0644 -o root -g root "$src" "$dst"
+    info "Created $dst"
+}
+
+# Detect non-root users that have `loginctl enable-linger` set.
+# A lingering user keeps a per-user systemd manager running after
+# logout, which lets them schedule deferred work via
+#   systemd-run --user --on-active=…
+# That bypasses both KillUserProcesses=yes and the at/cron allowlists.
+# This function prints offending "<user>:<uid>" lines to stdout (one
+# per line, empty if none) and returns 0. It returns 1 only when
+# loginctl is missing — callers should treat that as "skip with a
+# warning" since a host without systemd cannot enable linger anyway.
+detect_lingering_users() {
+    if ! command -v loginctl >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local users_raw
+    # `loginctl list-users --no-legend` prints "<uid> <user> [..]" per row.
+    # Some versions trail a header/legend even with --no-legend on older
+    # systemd; we filter defensively by requiring a leading numeric uid.
+    users_raw=$(loginctl list-users --no-legend 2>/dev/null || true)
+    [ -n "$users_raw" ] || return 0
+
+    local uid user linger
+    while read -r uid user _rest; do
+        case "$uid" in
+            ''|*[!0-9]*) continue ;;     # skip non-numeric rows / headers
+        esac
+        [ "$uid" = "0" ] && continue     # root is allowed to linger
+        [ -n "$user" ] || continue
+        linger=$(loginctl show-user "$user" --property=Linger --value 2>/dev/null || echo "")
+        if [ "$linger" = "yes" ]; then
+            printf '%s:%s\n' "$user" "$uid"
+        fi
+    done <<< "$users_raw"
+
+    return 0
+}
+
+# Configure host-level session containment. All steps are pure system
+# config — no setuid binary is added. See doc/hardening.md for rationale.
+setup_hardening() {
+    step "Applying session containment hardening..."
+
+    if [ ! -d "$HARDENING_TEMPLATE_DIR" ]; then
+        warn "Hardening templates not found in $HARDENING_TEMPLATE_DIR"
+        warn "Skipping hardening step — install the open-bastion package."
+        HARDENING_RESULT="failed"
+        return 1
+    fi
+
+    # Pre-flight: refuse to harden if any non-root user has linger
+    # enabled. Such a user could schedule jobs via `systemd-run --user`
+    # that survive logout, defeating both KillUserProcesses=yes and the
+    # at/cron allow-lists. This is a security gate, not a UX one — we
+    # fail even in --yes mode. In --dry-run, only log so operators can
+    # discover the problem before committing.
+    local linger_offenders
+    if linger_offenders=$(detect_lingering_users); then
+        if [ -n "$linger_offenders" ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+                warn "[DRY-RUN] Linger enabled for the following non-root users (would abort in real run):"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    warn "[DRY-RUN]   $u (uid $uid)"
+                done <<< "$linger_offenders"
+            else
+                error "Hardening refused: the following users have systemd linger enabled,"
+                error "        which would let them schedule deferred jobs via 'systemd-run --user',"
+                error "        bypassing this hardening:"
+                while IFS=: read -r u uid; do
+                    [ -n "$u" ] || continue
+                    error "          $u (uid $uid)"
+                done <<< "$linger_offenders"
+                error ""
+                error "        To proceed, disable linger for these users:"
+                error "          loginctl disable-linger <user>"
+                error ""
+                error "        Then re-run: ob-backend-setup --portal $PORTAL_URL --enable-hardening [...]"
+                HARDENING_RESULT="failed"
+                return 1
+            fi
+        fi
+    else
+        warn "loginctl not available, skipping linger pre-check"
+    fi
+
+    if ! confirm "Apply session containment hardening (KillUserProcesses, nproc cap, at/cron allowlists, mask atd)?"; then
+        info "Hardening skipped by user"
+        HARDENING_RESULT="declined"
+        return 0
+    fi
+
+    # Optimistic: assume each sub-step will succeed; downgrade to
+    # "partial" on any failure that we choose to recover from rather
+    # than abort. Final state is reported by print_summary and by the
+    # closing log line below.
+    HARDENING_RESULT="applied"
+
+    # 1. logind: KillUserProcesses=yes
+    if ! install_hardening_file \
+            "$HARDENING_TEMPLATE_DIR/logind.conf.d/open-bastion.conf" \
+            "$HARDENING_LOGIND_DST"; then
+        warn "Failed to install $HARDENING_LOGIND_DST — containment is incomplete"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 2. limits.d: nproc cap
+    if ! install_hardening_file \
+            "$HARDENING_TEMPLATE_DIR/security/limits.d/open-bastion.conf" \
+            "$HARDENING_LIMITS_DST"; then
+        warn "Failed to install $HARDENING_LIMITS_DST — fork-bomb cap not in place"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 3. at.allow / cron.allow — never overwrite an admin-managed file
+    if ! install_hardening_allowlist \
+            "$HARDENING_TEMPLATE_DIR/at.allow" \
+            "$HARDENING_AT_ALLOW"; then
+        warn "Failed to deploy $HARDENING_AT_ALLOW — at(1) lockdown skipped"
+        HARDENING_RESULT="partial"
+    fi
+
+    if ! install_hardening_allowlist \
+            "$HARDENING_TEMPLATE_DIR/cron.allow" \
+            "$HARDENING_CRON_ALLOW"; then
+        warn "Failed to deploy $HARDENING_CRON_ALLOW — crontab(1) lockdown skipped"
+        HARDENING_RESULT="partial"
+    fi
+
+    # 3b. Warn if cron.allow doesn't list 'root'. The Mode E KRL refresh
+    #     job (/etc/cron.d/open-bastion-krl) runs as root, and cron
+    #     refuses to dispatch jobs for users absent from cron.allow when
+    #     the file exists. An admin-managed cron.allow without 'root'
+    #     would silently break KRL refresh.
+    if [ -f "$HARDENING_CRON_ALLOW" ] \
+       && ! grep -qE '^[[:space:]]*root[[:space:]]*$' "$HARDENING_CRON_ALLOW"; then
+        warn "$HARDENING_CRON_ALLOW exists but does not list 'root' — this will break"
+        warn "the KRL refresh job (/etc/cron.d/open-bastion-krl). Add 'root' on its"
+        warn "own line to $HARDENING_CRON_ALLOW."
+    fi
+
+    # 4. Mask atd if it exists. We do NOT mask cron because
+    #    --max-security writes /etc/cron.d/open-bastion-krl which needs
+    #    a running cron daemon.
+    if systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
+        if [ "$DRY_RUN" = "true" ]; then
+            info "[DRY-RUN] Would systemctl mask atd && systemctl stop atd"
+        else
+            systemctl stop atd 2>/dev/null || true
+            if systemctl mask atd 2>/dev/null; then
+                info "Masked atd.service (deferred at(1) jobs disabled)"
+            else
+                warn "Failed to mask atd.service — at(1) jobs may still run"
+                HARDENING_RESULT="partial"
+            fi
+        fi
+    else
+        info "atd.service not present, nothing to mask"
+    fi
+
+    # 5. Reload logind so KillUserProcesses=yes takes effect.
+    #    `systemctl reload` (SIGHUP) is non-disruptive: logind re-reads
+    #    its drop-ins without restarting and without killing active
+    #    sessions. KillUserProcesses=yes is consulted at session-end
+    #    cleanup, so the new behaviour applies to existing sessions
+    #    when they eventually log out, while currently-connected admins
+    #    keep their shells. Avoid `reload-or-restart` here: a fallback
+    #    to restart would terminate every user session, including the
+    #    admin running this setup.
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would systemctl reload systemd-logind (SIGHUP, non-disruptive)"
+        # In dry-run, nothing was actually written; report as such so
+        # the operator doesn't read "applied" and assume the host is
+        # configured.
+        HARDENING_RESULT="dry-run"
+    else
+        info "Reloading systemd-logind (SIGHUP, no session disruption)"
+        if systemctl reload systemd-logind 2>/dev/null; then
+            info "Reloaded systemd-logind"
+        else
+            warn "Failed to reload systemd-logind — run 'systemctl reload systemd-logind' manually"
+            HARDENING_RESULT="partial"
+        fi
+    fi
+
+    case "$HARDENING_RESULT" in
+        applied)
+            info "Hardening applied. Verify with: loginctl show-user <user> | grep Linger"
+            ;;
+        partial)
+            warn "Hardening applied with warnings — review the output above before relying on containment"
+            ;;
+        dry-run)
+            info "[DRY-RUN] Hardening would be applied. Re-run without --dry-run to commit."
+            ;;
+        *)
+            ;;
+    esac
+}
+
+# Configure primary audit trace via auditd (opt-in).
+# Goal: tamper-evident syscall-level evidence of non-sudo user activity,
+# independent of the pty session recording (which a malicious user could
+# wipe or bypass via setsid/at/cron). Targets auid >= 1000.
+#
+# Caller decides whether this runs (see ENABLE_AUDIT_TRACE in main()).
+# This function never tries to install the auditd package itself: it only
+# *configures* an auditd that is already present (Recommends in packaging).
+setup_audit_trace() {
+    step "Configuring primary audit trace (auditd)..."
+
+    # 1. Sanity: auditd must be installed. We don't try to be clever — both
+    #    `auditctl` (the CLI) and `augenrules` (the rules.d compiler) are
+    #    needed at runtime. systemctl probe is an additional belt-and-braces.
+    local auditd_ok=true
+    if ! command -v auditctl >/dev/null 2>&1; then
+        auditd_ok=false
+    fi
+    if ! command -v augenrules >/dev/null 2>&1; then
+        auditd_ok=false
+    fi
+    if [ "$auditd_ok" != "true" ]; then
+        warn "auditd is not installed; skipping audit trace setup."
+        warn "  To enable audit trace later, install auditd then re-run with --enable-audit-trace:"
+        warn "    Debian/Ubuntu: apt install auditd"
+        warn "    RHEL/Rocky/Fedora: dnf install audit"
+        AUDIT_RESULT="skipped"
+        return 0
+    fi
+
+    # 2. Templates must be deployed (CMake installs them under datarootdir).
+    local rules_template="$AUDIT_TEMPLATE_DIR/rules.d/open-bastion.rules"
+    local cron_template="$AUDIT_TEMPLATE_DIR/cron.daily/open-bastion-audit-rotate"
+    if [ ! -f "$rules_template" ]; then
+        error "Audit rules template not found: $rules_template"
+        error "Reinstall the open-bastion package, or set AUDIT_TEMPLATE_DIR=<path>."
+        AUDIT_RESULT="failed"
+        return 1
+    fi
+    if [ ! -f "$cron_template" ]; then
+        error "Audit cron template not found: $cron_template"
+        AUDIT_RESULT="failed"
+        return 1
+    fi
+
+    # 3. Confirmation: this deploys rules.d/cron.daily entries and restarts
+    #    auditd. Default-OFF policy applies. /etc/audit/auditd.conf is NOT
+    #    touched — see rationale below.
+    if ! confirm "Enable primary audit trace? Installs rules.d + cron.daily and restarts auditd."; then
+        info "Audit trace setup skipped by user."
+        AUDIT_RESULT="declined"
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install $AUDIT_RULES_FILE (0640 root:root)"
+        info "[DRY-RUN] Would install $AUDIT_CRON_FILE (0755 root:root)"
+        info "[DRY-RUN] Would augenrules --load and restart auditd"
+        info "[DRY-RUN] /etc/audit/auditd.conf intentionally NOT modified"
+        AUDIT_RESULT="dry-run"
+        return 0
+    fi
+
+    # 4. Install rules template into /etc/audit/rules.d/.
+    #    auditd's default rules.d entries (e.g. audit.rules) ship as 0640
+    #    root:root on Debian; we match that.
+    #    Guard against `set -e` aborting the whole ob-backend-setup run if
+    #    /etc/audit/rules.d/ is missing, RO, or perms-denied — return 1
+    #    instead so main() catches it via `setup_audit_trace || warn …`.
+    if ! install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"; then
+        error "Failed to install $AUDIT_RULES_FILE"
+        AUDIT_RESULT="failed"
+        return 1
+    fi
+    info "Installed $AUDIT_RULES_FILE"
+
+    # 5. Install daily rotation cron. cron.daily entries must be executable
+    #    and unsuffixed (run-parts ignores files with dots/tildes).
+    if ! install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"; then
+        error "Failed to install $AUDIT_CRON_FILE"
+        AUDIT_RESULT="failed"
+        return 1
+    fi
+    info "Installed $AUDIT_CRON_FILE"
+
+    # /etc/audit/auditd.conf is intentionally NOT modified. It is a single
+    # admin-tunable file owned by the audit distro package. Drop-in mechanisms
+    # (rules.d/, cron.daily/) are used where they exist; auditd.conf is left
+    # for the administrator to tune manually (see doc/audit.md).
+    info "Audit trace deployed. /etc/audit/auditd.conf is intentionally NOT modified."
+    info "For ~1 week retention, set num_logs=7 max_log_file=50 max_log_file_action=ROTATE in /etc/audit/auditd.conf manually (see doc/audit.md)."
+
+    # 6. Compile + load rules. augenrules merges everything under
+    #    /etc/audit/rules.d/*.rules into /etc/audit/audit.rules and tells
+    #    auditctl to load them. A non-zero exit usually means a bad rule
+    #    (e.g. arch mismatch on 32-bit kernel) — surface it but don't abort:
+    #    the cron rotation is still in effect.
+    if augenrules --load >/dev/null 2>&1; then
+        info "auditd rules loaded via augenrules"
+    else
+        warn "augenrules --load failed; check 'augenrules --check' output."
+    fi
+
+    # 7. Restart auditd to activate the new rules.d entries.
+    #    auditd does not honour SIGHUP for rules.d changes — restart is the
+    #    documented way. Unlike logind, restarting auditd does NOT terminate
+    #    SSH sessions, so this is safe to run on a live backend.
+    if systemctl is-active --quiet auditd 2>/dev/null; then
+        if systemctl restart auditd 2>/dev/null; then
+            info "Restarted auditd.service"
+        else
+            warn "Failed to restart auditd; run 'systemctl restart auditd' manually."
+        fi
+    else
+        warn "auditd.service is not active; start it with 'systemctl enable --now auditd'."
+    fi
+
+    AUDIT_RESULT="applied"
+}
+
 # Print summary
 print_summary() {
     echo ""
@@ -951,6 +1392,9 @@ print_summary() {
         token-provided)
             echo "  ✓ Server token installed (provided via --token-file)"
             ;;
+        reused)
+            echo "  ✓ Existing server token reused (no re-enrollment)"
+            ;;
         dry-run)
             echo "  ✓ Server enrollment (dry-run — nothing actually saved)"
             ;;
@@ -963,12 +1407,52 @@ print_summary() {
             echo "  ? Server enrollment status unknown ($ENROLL_RESULT)"
             ;;
     esac
+    case "$HARDENING_RESULT" in
+        applied)
+            echo "  ✓ Session containment (logind KillUserProcesses, nproc cap, at/cron allowlists)"
+            ;;
+        partial)
+            echo "  ⚠ Session containment partially applied — see [WARN] lines above"
+            ;;
+        dry-run)
+            echo "  ✓ Session containment (dry-run — nothing actually written)"
+            ;;
+        declined)
+            echo "  ✗ Session containment hardening (declined at confirm prompt)"
+            ;;
+        failed)
+            echo "  ✗ Session containment hardening (failed — see [ERROR] lines above)"
+            ;;
+        *)
+            echo "  ✗ Session containment hardening (not applied — use --enable-hardening to opt in)"
+            ;;
+    esac
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "  ✓ Maximum Security Mode E"
         echo "    - SSH: SSO-signed certificates only"
         echo "    - sudo: LLNG temporary token required"
         echo "    - KRL: mandatory, refreshed every ${KRL_REFRESH_INTERVAL} min"
     fi
+    case "$AUDIT_RESULT" in
+        applied)
+            echo "  ✓ Audit trace: applied (auditd rules + daily rotation)"
+            ;;
+        skipped)
+            echo "  ✗ Audit trace: NOT applied (auditd not installed)"
+            ;;
+        declined)
+            echo "  ✗ Audit trace: NOT applied (declined at prompt)"
+            ;;
+        dry-run)
+            echo "  ✓ Audit trace: dry-run (nothing actually changed)"
+            ;;
+        failed)
+            echo "  ✗ Audit trace: FAILED — see [ERROR] lines above"
+            ;;
+        *)
+            echo "  ✗ Audit trace: not applied (opt-in: --enable-audit-trace)"
+            ;;
+    esac
     echo ""
     echo "Backup location: $BACKUP_DIR"
     echo ""
@@ -1012,11 +1496,23 @@ Options:
                           Read OIDC client_secret from file (use - for stdin).
                           Alternative: set OB_CLIENT_SECRET env var.
                           Required when the LLNG client is a confidential client.
-  -y, --yes               Non-interactive mode (requires --token-file)
+  -y, --yes               Non-interactive mode. Requires --token-file unless a
+                          server token already exists at the canonical path
+                          ($OB_TOKEN), in which case it is reused.
   -k, --insecure          Skip SSL certificate verification
   --no-sudo               Don't configure sudo with LLNG
   --no-create-user        Don't enable automatic user creation
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
+  --enable-hardening      Apply system-wide containment hardening (logind KillUserProcesses,
+                          mask atd, at/cron allow-lists, nproc limit). OFF by default —
+                          modifies system-wide behaviour, opt in only on dedicated backend hosts.
+  --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
+                          Installs audit rules (rules.d/open-bastion.rules)
+                          and a daily rotation cron, then restarts auditd.
+                          /etc/audit/auditd.conf is NOT modified; tune
+                          retention manually (see doc/audit.md).
+                          Requires auditd package (apt install auditd /
+                          dnf install audit).
   -n, --dry-run           Show what would be done without making changes
   -h, --help              Show this help
   -V, --version           Show version
@@ -1113,6 +1609,14 @@ parse_args() {
                 ;;
             --max-security)
                 MAX_SECURITY=true
+                shift
+                ;;
+            --enable-hardening)
+                ENABLE_HARDENING=true
+                shift
+                ;;
+            --enable-audit-trace)
+                ENABLE_AUDIT_TRACE=true
                 shift
                 ;;
             -n|--dry-run)
@@ -1242,7 +1746,7 @@ main() {
         info "Retrying enrollment..."
     done
 
-    if [ "$ENROLL_RESULT" != "success" ] && [ "$ENROLL_RESULT" != "token-provided" ] && [ "$ENROLL_RESULT" != "dry-run" ]; then
+    if [ "$ENROLL_RESULT" != "success" ] && [ "$ENROLL_RESULT" != "token-provided" ] && [ "$ENROLL_RESULT" != "reused" ] && [ "$ENROLL_RESULT" != "dry-run" ]; then
         if [ "$MAX_SECURITY" = "true" ]; then
             error "Refusing to apply --max-security lockdown: without enrollment, no user"
             error "can authenticate (SSO certs cannot be issued, sudo would require"
@@ -1271,7 +1775,19 @@ main() {
     configure_pam_sudo || true
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
+    if [ "$ENABLE_HARDENING" = "true" ]; then
+        setup_hardening || warn "Hardening step reported errors"
+    else
+        info "Session containment hardening not applied (opt-in: pass --enable-hardening to activate)"
+    fi
     download_krl || warn "KRL download failed"
+
+    # Optional primary audit trace (default OFF — modifies global system).
+    if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
+        setup_audit_trace || warn "Audit trace setup failed (see errors above)"
+    else
+        info "Audit trace not applied (opt-in: pass --enable-audit-trace)"
+    fi
 
     if [ "$DRY_RUN" = "false" ]; then
         restart_sshd || warn "Failed to restart SSH"
