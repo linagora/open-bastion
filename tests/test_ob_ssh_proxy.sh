@@ -633,6 +633,43 @@ TESTSCRIPT
     fi
 }
 
+# Test 20: ForceCommand mode parses options before the target.
+# Regression: the old parser took the first token after `ssh` as the host, so
+# `ssh -p 2222 backend` mis-read "-p" as the hostname and was rejected.
+test_force_command_parse() {
+    local test_script="$TEST_TMPDIR/test_force_parse.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+source_file="$1"
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+# Stub the connector: print what force_command_mode resolved instead of dialing.
+connect_via_cert() { echo "HOST=$1 USER=$2 PORT=$3"; }
+USER=alice
+
+check() { # $1 SSH_ORIGINAL_COMMAND  $2 expected "HOST=.. USER=.. PORT=.."
+    local got; got=$(SSH_ORIGINAL_COMMAND="$1" force_command_mode 2>/dev/null)
+    [ "$got" = "$2" ] || { echo "MISMATCH for [$1]: got [$got] want [$2]"; exit 1; }
+}
+check "ssh backend"                 "HOST=backend USER=alice PORT=22"
+check "ssh bob@backend"             "HOST=backend USER=bob PORT=22"
+check "ssh -p 2222 backend"         "HOST=backend USER=alice PORT=2222"
+check "ssh -o StrictHostKeyChecking=no bob@backend" "HOST=backend USER=bob PORT=22"
+check "ssh -4 -p 22 -l carol backend" "HOST=backend USER=carol PORT=22"
+echo "FORCE_PARSE_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "FORCE_PARSE_OK"; then
+        test_pass "ForceCommand mode: options skipped, host/user/port resolved"
+    else
+        test_fail "ForceCommand parse matrix" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-ssh-proxy (llng-ssh-proxy)"
@@ -658,6 +695,7 @@ test_parse_args_config_file
 test_parse_args_debug
 test_missing_portal_url
 test_validate_hostname
+test_force_command_parse
 
 # Summary
 echo ""

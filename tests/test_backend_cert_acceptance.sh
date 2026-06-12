@@ -52,7 +52,12 @@ apt-get update -qq >/dev/null
 apt-get install -y -qq openssh-server openssh-client >/dev/null
 
 useradd -m -s /bin/bash dwho
-usermod -p '*' dwho   # unlock (UsePAM no would refuse a locked account)
+# Give dwho a real password hash. useradd leaves the shadow field '!' (locked),
+# and '*' is also a locked/no-login marker on some platforms — under UsePAM no
+# sshd may then refuse the account regardless of the (cert) auth. A genuine hash
+# is unambiguously "not locked" everywhere; the password itself is never used
+# (auth is certificate-only).
+printf 'dwho:ob-cert-test-pw\n' | chpasswd
 
 mkdir -p /ca; ssh-keygen -t ed25519 -N '' -q -f /ca/ca -C test-ca
 install -d -m0700 /run/open-bastion/ssh-fp

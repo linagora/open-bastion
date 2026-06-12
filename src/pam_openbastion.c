@@ -3234,7 +3234,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      *   - `source-address` critical option makes sshd itself refuse the cert off
      *     the vouching bastion's IP, and
      *   - `bastion=<id>;user=<u>;target=<host>` key-id is validated by the
-     *     backend's AuthorizedPrincipalsCommand (ob-backend-principals): it only
+     *     backend's AuthorizedPrincipalsCommand (ob-ssh-principals): it only
      *     emits a principal when the key-id carries an allowed bastion_id and the
      *     encoded user matches the login, so a direct user SSO cert (no bastion
      *     key-id) is denied before PAM even runs.

@@ -337,18 +337,38 @@ force_command_mode() {
 
     debug "Original command: $ssh_cmd"
 
-    local target=""
-    if [[ "$ssh_cmd" =~ ^ssh[[:space:]]+(.+)$ ]]; then
-        # First whitespace-separated token after `ssh` is the [user@]host.
-        target=$(echo "${BASH_REMATCH[1]}" | awk '{print $1}')
-    fi
+    # Walk the tokens the way ssh(1) parses them: skip flags and the argument of
+    # any option that takes one, so `ssh -p 2222 backend` or
+    # `ssh -o Foo=bar user@backend` resolve to the host — not the option or its
+    # value. -p / -l additionally seed the target port / user.
+    local -a toks=()
+    read -r -a toks <<<"$ssh_cmd"
+    [ "${toks[0]:-}" = "ssh" ] && toks=("${toks[@]:1}")
+
+    local target="" port=22 i=0 n=${#toks[@]}
+    while [ "$i" -lt "$n" ]; do
+        local t="${toks[$i]}"
+        case "$t" in
+            --)  i=$((i + 1)); target="${toks[$i]:-}"; break ;;
+            -p)  port="${toks[$((i + 1))]:-22}";   i=$((i + 2)); continue ;;
+            -l)  user="${toks[$((i + 1))]:-$user}"; i=$((i + 2)); continue ;;
+            # Options that consume the NEXT token as their argument.
+            -b|-c|-D|-E|-e|-F|-I|-i|-J|-L|-m|-O|-o|-Q|-R|-S|-W|-w)
+                 i=$((i + 2)); continue ;;
+            -p*) port="${t#-p}"; i=$((i + 1)); continue ;;
+            -l*) user="${t#-l}"; i=$((i + 1)); continue ;;
+            -*)  i=$((i + 1)); continue ;;   # attached-value or bare flag(s)
+            *)   target="$t"; break ;;
+        esac
+    done
+
     if [ -z "$target" ]; then
         error "Could not parse target host from command: $ssh_cmd"
         exit 1
     fi
 
     parse_target_spec "$target" "$user"
-    connect_via_cert "$SPEC_HOST" "$SPEC_USER" 22
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
 }
 
 # Interactive mode: prompt for a target.
