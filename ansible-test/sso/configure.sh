@@ -1,7 +1,7 @@
 #!/bin/bash
 # Rebuild and install the Open Bastion LLNG conf (OIDC + pam-access RP).
 # Run from any directory; requires: docker, jq, openssl.
-# Usage: bash local/sso/configure.sh [--regen-keys]
+# Usage: bash ansible-test/sso/configure.sh [--regen-keys]
 #
 # By default, reuses /tmp/ob_sig.key + /tmp/ob_sig.pub if they already exist.
 # Pass --regen-keys to force regeneration of a new keypair.

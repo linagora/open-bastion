@@ -154,15 +154,21 @@ in the task files:
 
 ### Regenerating the role
 
+`ob-builder` shells out to `curl`, so the shim must be reachable **as `curl`**
+on `PATH` (it resolves `auth.example.com` to the gateway and returns the lab CA
+for `/ssh/ca`). Symlink it into a temp dir and prepend that dir:
+
 ```bash
-PATH="$(dirname sso/ob-builder-curl-shim.sh):$PATH" \
+shimdir="$(mktemp -d)"
+ln -s "$PWD/sso/ob-builder-curl-shim.sh" "$shimdir/curl"
+PATH="$shimdir:$PATH" \
   admin-builder/ob-builder --config ansible/build-bastion.yml \
   --output-ansible /tmp/role-bastion --allow-http
 ```
-(the shim must be named `curl` on PATH; it resolves `auth.example.com` to the
-gateway and returns the lab CA for `/ssh/ca`.) Then re-apply the post-edits
-above. See [`doc/ansible-quickstart.md`](../doc/ansible-quickstart.md) for the
-general (non-lab) `ob-builder` → Ansible workflow.
+
+Then re-apply the post-edits above. See
+[`doc/ansible-quickstart.md`](../doc/ansible-quickstart.md) for the general
+(non-lab) `ob-builder` → Ansible workflow.
 
 ## SSO token TTLs
 
