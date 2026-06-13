@@ -764,8 +764,8 @@ test_authorized_keys_disabled() {
     log "Testing AuthorizedKeysFile is disabled..."
 
     local bastion_conf backend_conf
-    bastion_conf=$(docker exec ob-maxsec-bastion grep "AuthorizedKeysFile" /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf 2>&1) || true
-    backend_conf=$(docker exec ob-maxsec-backend grep "AuthorizedKeysFile" /etc/ssh/sshd_config.d/50-open-bastion-backend.conf 2>&1) || true
+    bastion_conf=$(docker exec ob-maxsec-bastion grep "AuthorizedKeysFile" /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf 2>&1) || true
+    backend_conf=$(docker exec ob-maxsec-backend grep "AuthorizedKeysFile" /etc/ssh/sshd_config.d/00-open-bastion-backend.conf 2>&1) || true
 
     if echo "$bastion_conf" | grep -q "none" && echo "$backend_conf" | grep -q "none"; then
         pass "AuthorizedKeysFile none on both bastion and backend"
@@ -781,8 +781,8 @@ test_krl_configured() {
     log "Testing KRL (RevokedKeys) is configured..."
 
     local bastion_krl backend_krl
-    bastion_krl=$(docker exec ob-maxsec-bastion grep "RevokedKeys" /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf 2>&1) || true
-    backend_krl=$(docker exec ob-maxsec-backend grep "RevokedKeys" /etc/ssh/sshd_config.d/50-open-bastion-backend.conf 2>&1) || true
+    bastion_krl=$(docker exec ob-maxsec-bastion grep "RevokedKeys" /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf 2>&1) || true
+    backend_krl=$(docker exec ob-maxsec-backend grep "RevokedKeys" /etc/ssh/sshd_config.d/00-open-bastion-backend.conf 2>&1) || true
 
     if echo "$bastion_krl" | grep -q "revoked_keys" && echo "$backend_krl" | grep -q "revoked_keys"; then
         pass "RevokedKeys configured on both bastion and backend"
@@ -862,8 +862,8 @@ test_password_auth_disabled() {
     log "Testing password authentication is disabled..."
 
     local bastion_pw backend_pw
-    bastion_pw=$(docker exec ob-maxsec-bastion grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf 2>&1) || true
-    backend_pw=$(docker exec ob-maxsec-backend grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/50-open-bastion-backend.conf 2>&1) || true
+    bastion_pw=$(docker exec ob-maxsec-bastion grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf 2>&1) || true
+    backend_pw=$(docker exec ob-maxsec-backend grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/00-open-bastion-backend.conf 2>&1) || true
 
     if echo "$bastion_pw" | grep -q "no" && echo "$backend_pw" | grep -q "no"; then
         pass "PasswordAuthentication disabled on both servers"

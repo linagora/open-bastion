@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# test_sshd_dropin_precedence.sh
+# test_ob_sshd_dropin_precedence.sh
 #
 # Regression test for the cert-only lockdown being silently defeated by a
 # distro sshd drop-in. Cloud images ship /etc/ssh/sshd_config.d/50-cloud-init.conf
@@ -24,6 +24,13 @@ bastion_dropin=$(grep -oE '[0-9]+-open-bastion-bastion\.conf' "$SCRIPT_DIR/scrip
 backend_dropin=$(grep -oE '[0-9]+-open-bastion-backend\.conf' "$SCRIPT_DIR/scripts/ob-backend-setup" | head -1)
 echo "bastion drop-in: $bastion_dropin"
 echo "backend drop-in: $backend_dropin"
+
+# Fail fast: an empty name (grep matched nothing) would vacuously "sort first"
+# below and let a real regression slip through.
+if [ -z "$bastion_dropin" ] || [ -z "$backend_dropin" ]; then
+    echo "FAIL: could not extract the open-bastion sshd drop-in name from the setup scripts"
+    exit 1
+fi
 
 # Static check: must sort before 50-cloud-init.conf.
 for d in "$bastion_dropin" "$backend_dropin"; do
@@ -67,7 +74,7 @@ rm -f "/etc/ssh/sshd_config.d/$backend_dropin"
 printf 'PasswordAuthentication no\n' > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf
 ctl=\$(sshd -T 2>/dev/null | awk '/^passwordauthentication /{print \$2}')
 echo "with legacy 50-open-bastion-backend.conf → passwordauthentication=\$ctl (expected yes: proves ordering matters)"
-[ "\$ctl" = "yes" ] || echo "NOTE: negative control unexpectedly \$ctl"
+[ "\$ctl" = "yes" ] || { echo "FAIL: negative control expected yes, got \$ctl — ordering is NOT what defeats cloud-init, test is not proving the regression"; exit 1; }
 echo "PRECEDENCE_OK"
 DRIVER
 

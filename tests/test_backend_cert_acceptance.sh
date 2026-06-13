@@ -73,7 +73,7 @@ cp /helper /usr/local/sbin/ob-ssh-principals
 chmod 755 /usr/local/sbin/ob-ssh-principals
 
 mkdir -p /etc/ssh/sshd_config.d /run/sshd
-cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf <<EOF
+cat > /etc/ssh/sshd_config.d/00-open-bastion-backend.conf <<EOF
 TrustedUserCAKeys /ca/ca.pub
 AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
 AuthorizedPrincipalsCommandUser nobody

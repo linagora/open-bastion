@@ -72,7 +72,7 @@ chmod 644 /etc/cron.d/open-bastion-krl
 cron
 
 # Configure sshd for maximum security (Mode E)
-cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << EOF
+cat > /etc/ssh/sshd_config.d/00-open-bastion-backend.conf << EOF
 # Open Bastion Maximum Security Configuration (Mode E)
 
 # Trust LLNG SSH CA
