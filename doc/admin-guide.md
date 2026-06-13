@@ -819,16 +819,16 @@ journalctl -u sshd | grep "SSH key policy"
 
 ### File Locations
 
-| File                                      | Purpose                              |
-| ----------------------------------------- | ------------------------------------ |
-| `/etc/open-bastion/openbastion.conf`      | PAM module configuration             |
+| File                                      | Purpose                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `/etc/open-bastion/openbastion.conf`      | PAM module configuration                                           |
 | `/var/lib/open-bastion/token`             | Server enrollment token (runtime state, refreshed by ob-heartbeat) |
-| `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration             |
-| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration       |
-| `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion)    |
-| `/var/lib/open-bastion/sessions/`         | Session recordings                   |
-| `/etc/open-bastion/allowed_bastions`      | Allowed bastion client_ids (backend) |
-| `/var/log/open-bastion/audit.json`        | Audit log                            |
+| `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration                                           |
+| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration                                     |
+| `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion)                                  |
+| `/var/lib/open-bastion/sessions/`         | Session recordings                                                 |
+| `/etc/open-bastion/allowed_bastions`      | Allowed bastion client_ids (backend)                               |
+| `/var/log/open-bastion/audit.json`        | Audit log                                                          |
 
 ### Commands
 

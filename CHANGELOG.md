@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and return `EAGAIN` / `NSS_STATUS_UNAVAIL` instead of being cached as a miss.
 - **sshd hardening drop-in could be silently overridden by cloud-init.** Cloud
   images ship `/etc/ssh/sshd_config.d/50-cloud-init.conf` with
-  `PasswordAuthentication yes`, and sshd keeps the *first* value seen while
+  `PasswordAuthentication yes`, and sshd keeps the _first_ value seen while
   `Include` expands the drop-in directory alphabetically. The open-bastion
   drop-in was written as `50-open-bastion-{bastion,backend}.conf`, which sorts
-  *after* `50-cloud-init.conf`, so password authentication stayed enabled on
+  _after_ `50-cloud-init.conf`, so password authentication stayed enabled on
   freshly provisioned bastions and backends. `ob-bastion-setup` /
   `ob-backend-setup` now write `00-open-bastion-{bastion,backend}.conf` (and
   remove the legacy `50-` file on rerun) so the cert-only lockdown wins.
