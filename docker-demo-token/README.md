@@ -161,14 +161,14 @@ sequenceDiagram
 
 ## API Endpoints
 
-| Endpoint                 | Method   | Description                                |
-| ------------------------ | -------- | ------------------------------------------ |
-| `/pam/authorize`         | POST     | Check user authorization                   |
+| Endpoint                 | Method   | Description                                             |
+| ------------------------ | -------- | ------------------------------------------------------- |
+| `/pam/authorize`         | POST     | Check user authorization                                |
 | `/pam/bastion-cert`      | POST     | Get vouched SSH certificate for bastion-to-backend auth |
-| `/oauth2/device`         | POST     | Start device authorization                 |
-| `/device`                | GET/POST | User device verification page              |
-| `/oauth2/token`          | POST     | Exchange device code for token             |
-| `/.well-known/jwks.json` | GET      | Public keys for JWT verification           |
+| `/oauth2/device`         | POST     | Start device authorization                              |
+| `/device`                | GET/POST | User device verification page                           |
+| `/oauth2/token`          | POST     | Exchange device code for token                          |
+| `/.well-known/jwks.json` | GET      | Public keys for JWT verification                        |
 
 ## Troubleshooting
 
