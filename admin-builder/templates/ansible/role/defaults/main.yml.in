@@ -19,6 +19,11 @@ ob_max_security: @@MAX_SECURITY_BOOL@@  # true when ob_pam_mode == E
 # ── OIDC / portal settings ────────────────────────────────────────────────────
 ob_portal_url: "@@PORTAL_URL@@"
 ob_client_id: "@@CLIENT_ID@@"
+# Verify the portal's TLS certificate. Keep true in production (HTTPS portal).
+# Set false ONLY for a plain-http or self-signed test portal: it makes
+# ob-*-setup pass --insecure and writes verify_ssl=false so pam_openbastion
+# accepts the non-HTTPS portal (it refuses http unless verify_ssl is false).
+ob_verify_ssl: true
 # ob_client_secret — provided at runtime when client_secret_mode=prompt
 # (use ansible-vault), or baked here when client_secret_mode=embedded.
 # Embedded mode trades convenience for risk: anyone with read access to this
@@ -57,6 +62,15 @@ ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
 # never persisted to disk. Falls back to the manual flow if the cookie is empty.
 ob_ansible_auto_approve: @@ANSIBLE_AUTO_APPROVE_BOOL@@
 ob_llng_cookie: ""
+
+# Controller-side approval reachability override (optional). The device-code
+# approval runs on the Ansible control node and talks to the portal directly.
+# By default it uses ob_portal_url. Set these only when the control node reaches
+# the portal at a different address than the managed hosts do (split-horizon
+# DNS, NAT, a lab behind a gateway):
+#   ob_approve_base_url: base URL the controller uses, e.g. "http://10.0.0.1"
+#   ob_approve_host:     Host: header to send (the portal's vhost name)
+# Left unset here so the portal URL is used unchanged.
 
 # ── APT repository ────────────────────────────────────────────────────────────
 ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"

@@ -55,12 +55,17 @@
     _ob_enroll_state: "{{ _ob_enroll_state_raw.content | b64decode | from_json }}"
   when: _ob_use_auto_approve
 
+# The controller approves the device code by talking to the portal directly.
+# By default that is ob_portal_url, but the control node may reach the portal
+# at a different address than the target servers do (split-horizon DNS, NAT, a
+# lab behind a gateway). Override with ob_approve_base_url (+ ob_approve_host
+# for the Host: header) in that case; both default to the portal URL / no
+# override, so normal deployments are unaffected.
 - name: "Controller: fetch the /device page to obtain the CSRF token"
   ansible.builtin.uri:
-    url: "{{ _ob_enroll_state.portal_url }}/device?user_code={{ _ob_enroll_state.user_code | urlencode }}"
+    url: "{{ ob_approve_base_url | default(_ob_enroll_state.portal_url) }}/device?user_code={{ _ob_enroll_state.user_code | urlencode }}"
     method: GET
-    headers:
-      Cookie: "{{ ob_llng_cookie }}"
+    headers: "{{ {'Cookie': ob_llng_cookie} | combine({'Host': ob_approve_host} if (ob_approve_host | default('')) | length > 0 else {}) }}"
     return_content: true
     follow_redirects: all
     status_code: [200]
@@ -84,7 +89,7 @@
 - name: "Refuse to proceed when the CSRF token could not be extracted (cookie expired?)"
   ansible.builtin.fail:
     msg: >-
-      Could not extract CSRF token from {{ _ob_enroll_state.portal_url }}/device.
+      Could not extract CSRF token from {{ ob_approve_base_url | default(_ob_enroll_state.portal_url) }}/device.
       The LLNG session cookie is likely expired or lacks permission. Obtain a
       fresh cookie with `llng --llng-server <portal> llng_cookie` and re-run.
   when:
@@ -93,15 +98,14 @@
 
 - name: "Controller: approve the device code"
   ansible.builtin.uri:
-    url: "{{ _ob_enroll_state.portal_url }}/device"
+    url: "{{ ob_approve_base_url | default(_ob_enroll_state.portal_url) }}/device"
     method: POST
     body_format: form-urlencoded
     body:
       user_code: "{{ _ob_enroll_state.user_code }}"
       action: approve
       token: "{{ _ob_csrf_token }}"
-    headers:
-      Cookie: "{{ ob_llng_cookie }}"
+    headers: "{{ {'Cookie': ob_llng_cookie} | combine({'Host': ob_approve_host} if (ob_approve_host | default('')) | length > 0 else {}) }}"
     follow_redirects: none
     status_code: [200, 302]
   delegate_to: localhost
