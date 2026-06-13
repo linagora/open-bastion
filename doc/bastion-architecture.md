@@ -76,8 +76,8 @@ Jump servers that users connect to first:
 
 Internal servers accessed through bastions:
 
-| Component               | Purpose                                |
-| ----------------------- | -------------------------------------- |
+| Component               | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
 | `pam_openbastion.so`    | Authorize access; enforce bastion allowlist via cert key-id |
 | `libnss_openbastion.so` | Resolve users, auto-create accounts                         |
 | Standard SSH            | Accept connections through bastion (cert vouching)          |
@@ -582,24 +582,24 @@ SSO cert (no `bastion=` key-id prefix) is rejected before PAM runs.
 
 #### LLNG Portal (`pam-access` plugin)
 
-| Parameter                    | Default  | Description                                      |
-| ---------------------------- | -------- | ------------------------------------------------ |
-| `pamAccessBastionGroups`     | `bastion`| Server groups whose tokens may call `/pam/bastion-cert` |
-| `pamAccessBastionVoucherTtl` | `43200`  | Max voucher age in seconds (12 h); effective exp also capped by SSO cert expiry |
-| `pamAccessBastionCertTtl`    | `120`    | Ephemeral user-cert validity in seconds          |
+| Parameter                    | Default   | Description                                                                     |
+| ---------------------------- | --------- | ------------------------------------------------------------------------------- |
+| `pamAccessBastionGroups`     | `bastion` | Server groups whose tokens may call `/pam/bastion-cert`                         |
+| `pamAccessBastionVoucherTtl` | `43200`   | Max voucher age in seconds (12 h); effective exp also capped by SSO cert expiry |
+| `pamAccessBastionCertTtl`    | `120`     | Ephemeral user-cert validity in seconds                                         |
 
 The `ssh-ca` plugin must be active (`sshCaActivation=1`). `bastion_id` equals the
 enrolling OIDC `client_id`; give each bastion its own OIDC client to distinguish them.
 
 ### Ephemeral Certificate Fields
 
-| Field              | Value                                                            |
-| ------------------ | ---------------------------------------------------------------- |
-| Principal          | username                                                         |
-| Key-ID             | `bastion=<bastion_id>;user=<user>;target=<target_host>`          |
-| Validity           | ~120 s (`pamAccessBastionCertTtl`)                               |
-| `source-address`   | Bastion IP (sshd rejects cert from any other source)             |
-| Extension          | `bastion-id@open-bastion = <bastion_id>` (optional, for tooling) |
+| Field            | Value                                                            |
+| ---------------- | ---------------------------------------------------------------- |
+| Principal        | username                                                         |
+| Key-ID           | `bastion=<bastion_id>;user=<user>;target=<target_host>`          |
+| Validity         | ~120 s (`pamAccessBastionCertTtl`)                               |
+| `source-address` | Bastion IP (sshd rejects cert from any other source)             |
+| Extension        | `bastion-id@open-bastion = <bastion_id>` (optional, for tooling) |
 
 ## See Also
 

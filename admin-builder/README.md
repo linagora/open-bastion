@@ -43,13 +43,13 @@ scenario: max-security
 portal_url: https://sso.example.com
 client_id: backend-prod
 client_id_policy: fixed
-client_secret_mode: prompt    # none | prompt | embedded
+client_secret_mode: prompt # none | prompt | embedded
 # embedded_client_secret: ...  # required when client_secret_mode=embedded
 server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend
 auto_enroll_setup: prompt
-ansible_auto_approve: no       # yes = Ansible role can approve device codes via LLNG cookie
+ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
@@ -79,6 +79,7 @@ ssh server.example.com sudo /tmp/bootstrap-prod-backend.sh
 ```
 
 The script performs:
+
 - Repository configuration (APT sources + GPG key)
 - Deployment of Open Bastion configuration to `/etc/open-bastion/openbastion.conf`
 - Installation of the `open-bastion` package
@@ -89,6 +90,7 @@ Run with `./bootstrap-prod-backend.sh info` to inspect embedded metadata (scenar
 ### Ansible Role Tree
 
 The generated Ansible role is ready for fleet deployments. It includes:
+
 - Pre-populated defaults (configuration from the build)
 - Tasks for repository setup, package installation, and enrollment
 - SSH CA and signing keys embedded as files
@@ -131,20 +133,20 @@ manual browser-approval flow.
 
 The generated shell installer accepts CLI flags to override embedded defaults. Precedence: **CLI flag > environment variable > embedded default > interactive prompt**.
 
-| Flag | Environment | Description |
-|------|-------------|-------------|
-| `--client-id ID` | `OB_CLIENT_ID` | Override OIDC client_id (if policy allows) |
-| `--client-secret SECRET` | `OB_CLIENT_SECRET` | Provide secret directly (insecure; visible in `/proc`) |
+| Flag                        | Environment             | Description                                                                  |
+| --------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `--client-id ID`            | `OB_CLIENT_ID`          | Override OIDC client_id (if policy allows)                                   |
+| `--client-secret SECRET`    | `OB_CLIENT_SECRET`      | Provide secret directly (insecure; visible in `/proc`)                       |
 | `--client-secret-file PATH` | `OB_CLIENT_SECRET_FILE` | Read secret from file (use `-` for stdin); recommended for fleet deployments |
-| `--server-group GROUP` | `OB_SERVER_GROUP` | Override server group |
-| `--portal-url URL` | `OB_PORTAL_URL` | Override SSO URL (rare; mainly for testing) |
-| `-y, --yes` | - | Answer yes to all prompts (auto-enroll and auto-setup) |
-| `--skip-enroll` | - | Install package and config, but skip `ob-enroll` |
-| `--skip-setup` | - | Run `ob-enroll` but skip `ob-bastion-setup` / `ob-backend-setup` |
-| `--dry-run` | - | Print actions without executing them |
-| `--force` | - | Overwrite existing `/etc/open-bastion` (normally refused) |
-| `--non-interactive` | - | Fail instead of prompting (for CI strict mode) |
-| `-h, --help` | - | Show help and embedded scenario details |
+| `--server-group GROUP`      | `OB_SERVER_GROUP`       | Override server group                                                        |
+| `--portal-url URL`          | `OB_PORTAL_URL`         | Override SSO URL (rare; mainly for testing)                                  |
+| `-y, --yes`                 | -                       | Answer yes to all prompts (auto-enroll and auto-setup)                       |
+| `--skip-enroll`             | -                       | Install package and config, but skip `ob-enroll`                             |
+| `--skip-setup`              | -                       | Run `ob-enroll` but skip `ob-bastion-setup` / `ob-backend-setup`             |
+| `--dry-run`                 | -                       | Print actions without executing them                                         |
+| `--force`                   | -                       | Overwrite existing `/etc/open-bastion` (normally refused)                    |
+| `--non-interactive`         | -                       | Fail instead of prompting (for CI strict mode)                               |
+| `-h, --help`                | -                       | Show help and embedded scenario details                                      |
 
 Example: deploy with a secret from a file and auto-enroll:
 

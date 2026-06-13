@@ -162,11 +162,11 @@ flowchart LR
 
 The `key-id` field of the ephemeral cert carries structured audit and enforcement data:
 
-| Field       | Format                 | Description                                    |
-| ----------- | ---------------------- | ---------------------------------------------- |
-| `bastion`   | `bastion=<bastion_id>` | Enrolling OIDC `client_id` of the bastion      |
-| `user`      | `user=<username>`      | Username authorized on the bastion             |
-| `target`    | `target=<hostname>`    | Target backend hostname                        |
+| Field     | Format                 | Description                               |
+| --------- | ---------------------- | ----------------------------------------- |
+| `bastion` | `bastion=<bastion_id>` | Enrolling OIDC `client_id` of the bastion |
+| `user`    | `user=<username>`      | Username authorized on the bastion        |
+| `target`  | `target=<hostname>`    | Target backend hostname                   |
 
 Full key-id example: `bastion=bastion-01;user=alice;target=db-server`
 
@@ -203,13 +203,13 @@ when an `allowed_bastions` file is present.
 
 ### Voucher Lifecycle
 
-| Property   | Value                                                                         |
-| ---------- | ----------------------------------------------------------------------------- |
-| Bound to   | `(bastion_id, user)` — minted at `/pam/authorize`, keyed per pair             |
-| Validity   | `min(now + pamAccessBastionVoucherTtl, SSO cert expires_at)`, default 12 h    |
-| Reusable   | Yes — multiplexed hops and `scp host1: host2:` all work with the same voucher |
-| Expiry     | Fail-closed: `ob-ssh-proxy` prints a clear error and exits non-zero           |
-| Renewal    | User reconnects to the bastion; no silent re-vouching                         |
+| Property | Value                                                                         |
+| -------- | ----------------------------------------------------------------------------- |
+| Bound to | `(bastion_id, user)` — minted at `/pam/authorize`, keyed per pair             |
+| Validity | `min(now + pamAccessBastionVoucherTtl, SSO cert expires_at)`, default 12 h    |
+| Reusable | Yes — multiplexed hops and `scp host1: host2:` all work with the same voucher |
+| Expiry   | Fail-closed: `ob-ssh-proxy` prints a clear error and exits non-zero           |
+| Renewal  | User reconnects to the bastion; no silent re-vouching                         |
 
 ## Token Cache Security
 
@@ -366,22 +366,22 @@ For real-time security monitoring:
 
 ### Secrets Management
 
-| Setting                | Default    | Description             |
-| ---------------------- | ---------- | ----------------------- |
-| `secrets_encrypted`    | true       | Encrypt secrets at rest |
-| `secrets_use_keyring`  | true       | Use kernel keyring      |
+| Setting                | Default        | Description             |
+| ---------------------- | -------------- | ----------------------- |
+| `secrets_encrypted`    | true           | Encrypt secrets at rest |
+| `secrets_use_keyring`  | true           | Use kernel keyring      |
 | `secrets_keyring_name` | "open-bastion" | Keyring identifier      |
 
 ### File Permissions
 
 Recommended permissions:
 
-| File                 | Permissions | Owner |
-| -------------------- | ----------- | ----- |
+| File                                 | Permissions | Owner |
+| ------------------------------------ | ----------- | ----- |
 | `/etc/open-bastion/openbastion.conf` | 0600        | root  |
-| Server token file    | 0600        | root  |
-| Cache directory      | 0700        | root  |
-| Rate limit state dir | 0700        | root  |
+| Server token file                    | 0600        | root  |
+| Cache directory                      | 0700        | root  |
+| Rate limit state dir                 | 0700        | root  |
 
 ## Operational Security Considerations
 
@@ -767,25 +767,25 @@ sessions are terminated after `offline_max_sso_unreachable` seconds (default: 1h
 
 ## Threat Mitigations
 
-| Threat                    | Mitigation                                                       |
-| ------------------------- | ---------------------------------------------------------------- |
-| Token replay              | Single-use tokens, cache invalidation                            |
-| MITM attacks              | TLS 1.3, certificate pinning                                     |
-| Brute force               | Rate limiting with exponential backoff                           |
-| Cache tampering           | AES-256-GCM authenticated encryption                             |
-| Path injection            | Strict path validation, approved lists                           |
-| Buffer overflow           | Bounds-checked string operations, snprintf with null-termination |
-| UID collision             | Fail-safe collision detection                                    |
-| Request tampering         | Optional HMAC request signing with nonces                        |
-| Memory exhaustion DoS     | Response size limits (256KB), group limits (256 max)             |
-| Integer overflow          | Input validation in base64 encoding, backoff calculations        |
-| Malformed JSON            | Type validation for critical response fields                     |
-| Client secret exposure    | JWT Client Assertion (RFC 7523) - secret never transmitted       |
+| Threat                    | Mitigation                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------- |
+| Token replay              | Single-use tokens, cache invalidation                                                  |
+| MITM attacks              | TLS 1.3, certificate pinning                                                           |
+| Brute force               | Rate limiting with exponential backoff                                                 |
+| Cache tampering           | AES-256-GCM authenticated encryption                                                   |
+| Path injection            | Strict path validation, approved lists                                                 |
+| Buffer overflow           | Bounds-checked string operations, snprintf with null-termination                       |
+| UID collision             | Fail-safe collision detection                                                          |
+| Request tampering         | Optional HMAC request signing with nonces                                              |
+| Memory exhaustion DoS     | Response size limits (256KB), group limits (256 max)                                   |
+| Integer overflow          | Input validation in base64 encoding, backoff calculations                              |
+| Malformed JSON            | Type validation for critical response fields                                           |
+| Client secret exposure    | JWT Client Assertion (RFC 7523) - secret never transmitted                             |
 | Bastion bypass            | LLNG-signed ephemeral cert; source-address critical option; allowed_bastions allowlist |
 | Direct backend access     | TrustedUserCAKeys + cert source-address + AuthorizedPrincipalsCommand enforcement      |
-| Offline cache theft       | AES-256-GCM encryption + machine-id binding                      |
-| Offline brute force       | Argon2id + per-user lockout after 5 attempts                     |
-| Stale offline credentials | Configurable TTL (default 7 days)                                |
+| Offline cache theft       | AES-256-GCM encryption + machine-id binding                                            |
+| Offline brute force       | Argon2id + per-user lockout after 5 attempts                                           |
+| Stale offline credentials | Configurable TTL (default 7 days)                                                      |
 
 ## Security Reporting
 

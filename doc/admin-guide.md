@@ -818,24 +818,24 @@ journalctl -u sshd | grep "SSH key policy"
 
 ### File Locations
 
-| File                                      | Purpose                           |
-| ----------------------------------------- | --------------------------------- |
-| `/etc/open-bastion/openbastion.conf`      | PAM module configuration          |
-| `/etc/open-bastion/token`                 | Server enrollment token           |
-| `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration          |
-| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration    |
-| `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion) |
-| `/var/lib/open-bastion/sessions/`         | Session recordings                |
+| File                                      | Purpose                              |
+| ----------------------------------------- | ------------------------------------ |
+| `/etc/open-bastion/openbastion.conf`      | PAM module configuration             |
+| `/etc/open-bastion/token`                 | Server enrollment token              |
+| `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration             |
+| `/etc/open-bastion/session-recorder.conf` | Session recorder configuration       |
+| `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion)    |
+| `/var/lib/open-bastion/sessions/`         | Session recordings                   |
 | `/etc/open-bastion/allowed_bastions`      | Allowed bastion client_ids (backend) |
-| `/var/log/open-bastion/audit.json`        | Audit log                         |
+| `/var/log/open-bastion/audit.json`        | Audit log                            |
 
 ### Commands
 
-| Command               | Purpose                             |
-| --------------------- | ----------------------------------- |
-| `ob-enroll`           | Enroll server with LLNG             |
-| `ob-enroll -g GROUP`  | Enroll with specific server group   |
-| `ob-session-recorder` | Record SSH session (ForceCommand)   |
+| Command               | Purpose                                       |
+| --------------------- | --------------------------------------------- |
+| `ob-enroll`           | Enroll server with LLNG                       |
+| `ob-enroll -g GROUP`  | Enroll with specific server group             |
+| `ob-session-recorder` | Record SSH session (ForceCommand)             |
 | `ob-ssh-proxy HOST`   | Connect to backend via bastion ephemeral cert |
 
 ## CrowdSec Integration

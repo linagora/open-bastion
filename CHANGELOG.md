@@ -39,7 +39,7 @@ wire — only operator-side ergonomics and packaging.
 
 - **`ob-enroll`**: new `OB_ENROLL_STATE_FILE` env var. When set,
   `ob-enroll` writes `{user_code, verification_uri, portal_url,
-  interval}` to that file as soon as LLNG returns the device-grant
+interval}` to that file as soon as LLNG returns the device-grant
   initiation, then continues polling. External orchestrators
   (notably the new Ansible auto-approve flow) can read this file
   to drive the approval while `ob-enroll` is still polling. The
@@ -49,8 +49,8 @@ wire — only operator-side ergonomics and packaging.
 
 - **Docker demo images** (`docker-demo-{cert,token,maxsec,token-svc}/`):
   all 10 build Dockerfiles now use `cmake -DCMAKE_INSTALL_PREFIX=/usr
-  ... && make install` instead of per-Dockerfile allowlists of
-  `cp ../scripts/ob-X` lines. New ob-* scripts added to `CMakeLists.txt`
+... && make install` instead of per-Dockerfile allowlists of
+  `cp ../scripts/ob-X` lines. New ob-\* scripts added to `CMakeLists.txt`
   automatically land in the demo containers; no per-Dockerfile
   maintenance needed.
 
@@ -196,18 +196,18 @@ or NSS modules.
 - **`ob-bastion-setup` / `ob-backend-setup`**: stop looking for the
   defunct `/usr/sbin/llng-pam-enroll` (renamed to `ob-enroll`); a
   fresh setup no longer prints `[WARN] Server not enrolled. Run
-  llng-pam-enroll manually after installation.` after a successful
+llng-pam-enroll manually after installation.` after a successful
   enrollment.
 
 - **`ob-bastion-setup`**: give /var/lib/open-bastion/sessions mode 3771
-    ob-bastion-setup posed mode 1770 (drwxrwx--T) on the sessions
-    parent. The ob-session-recorder-wrapper setgid binary creates the
-    per-user subdir while it holds effective gid ob-sessions, then
-    drops back to the user's gid and execs the recorder script. With
-    the parent at 1770 the connecting user (not a member of ob-sessions)
-    has no traverse right on the parent, so the script cannot stat
-    its own subdir and logs "User sessions directory ... does not
-    exist and could not be created", leaving sessions unrecorded.
+  ob-bastion-setup posed mode 1770 (drwxrwx--T) on the sessions
+  parent. The ob-session-recorder-wrapper setgid binary creates the
+  per-user subdir while it holds effective gid ob-sessions, then
+  drops back to the user's gid and execs the recorder script. With
+  the parent at 1770 the connecting user (not a member of ob-sessions)
+  has no traverse right on the parent, so the script cannot stat
+  its own subdir and logs "User sessions directory ... does not
+  exist and could not be created", leaving sessions unrecorded.
 
 - Sweep the remaining `llng-*` leftovers across scripts, docs,
   configs and Docker demos so paths, modules, units, packages and
@@ -271,7 +271,7 @@ never published; its contents are folded into v0.2.0.)
     `tests/test_integration_maxsec.sh`).
 
 - **Session-containment hardening** (`ob-bastion-setup
-  --enable-hardening`, opt-in, off by default) — closes the known
+--enable-hardening`, opt-in, off by default) — closes the known
   SSH evasion channels (`setsid`+`nohup` orphans, deferred
   `at`/`cron` jobs, `systemd-run --user` timers) without any new
   setuid binary.
@@ -284,7 +284,7 @@ never published; its contents are folded into v0.2.0.)
     `/etc/cron.d/open-bastion-krl`).
   - Pre-flight refusal if any non-root user has `Linger=yes`, which
     would let them schedule jobs via `systemd-run --user
-    --on-active=…` (operator must `loginctl disable-linger <user>`
+--on-active=…` (operator must `loginctl disable-linger <user>`
     before re-running).
   - `nproc` cap (256, `@ob-service` group exempt) as defense in depth
     against fork-bomb-style runaway processes.
@@ -295,7 +295,7 @@ never published; its contents are folded into v0.2.0.)
     (20 tests).
 
 - **Primary audit trace via auditd** (`ob-bastion-setup
-  --enable-audit-trace`, opt-in, off by default) — syscall-level,
+--enable-audit-trace`, opt-in, off by default) — syscall-level,
   tamper-evident audit independent of the pty session recording.
   - `/etc/audit/rules.d/open-bastion.rules`: `-S execve -S execveat`
     (both — `execveat` alone bypasses an `execve`-only rule),
@@ -321,20 +321,20 @@ never published; its contents are folded into v0.2.0.)
 - **Security analysis updated** (`doc/security/02-ssh-connection.md`,
   `doc/security/99-risk-reduce.md`):
   - **R-S18 corrected** — the previous claim that the setgid wrapper
-    + sticky bit prevented users from deleting their own recordings
-    was inaccurate: the per-user subdirectory is
-    `2770 user:ob-sessions`, so the user is owner and can `rm` their
-    own files. Score revised from `(P=1, I=1)` to `(P=2, I=1)` —
-    syslog `auth.info` (start/end) and the new auditd watch on
-    `/var/lib/open-bastion/sessions/` preserve the timeline and
-    record any unlink even if the file is deleted. The wrapper still
-    provides cross-user isolation (which is what it was always
-    really doing).
+    - sticky bit prevented users from deleting their own recordings
+      was inaccurate: the per-user subdirectory is
+      `2770 user:ob-sessions`, so the user is owner and can `rm` their
+      own files. Score revised from `(P=1, I=1)` to `(P=2, I=1)` —
+      syslog `auth.info` (start/end) and the new auditd watch on
+      `/var/lib/open-bastion/sessions/` preserve the timeline and
+      record any unlink even if the file is deleted. The wrapper still
+      provides cross-user isolation (which is what it was always
+      really doing).
   - **R-S19 (new)** — session-containment evasion via `setsid`/`nohup`.
     Initial `(P=3, I=3)`; residual `(P=1, I=1)` with hardening +
     audit trace activated.
   - **R-S20 (new)** — deferred action via `at`/`cron`/`systemd-run
-    --user --on-active=…`. Initial `(P=2, I=3)`; residual `(P=1, I=2)`
+--user --on-active=…`. Initial `(P=2, I=3)`; residual `(P=1, I=2)`
     with hardening (limit: pre-existing crontabs in
     `/var/spool/cron/crontabs/` are not purged on activation).
   - **R-S21 (new)** — action not captured by the pty (`execveat`,
