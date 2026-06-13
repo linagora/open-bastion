@@ -34,16 +34,16 @@ overrides, a VM bootstrap step, a repacked `.deb`); see
 
 ## Prerequisites
 
-| Need                                                                                     | Why                                                                             |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `libvirt` + `virt-install` + `qemu-img` + `cloud-localds`, user in `libvirt` group       | create/boot the VMs on the `default` NAT network (`virbr0`, `192.168.122.0/24`) |
-| A Debian **genericcloud** golden image (`debian-*-genericcloud-*.qcow2`)                 | base for the overlays — put it in `vm/` or set `OB_GOLDEN`                      |
-| `docker` + `docker compose`                                                              | the `ob-sso` LemonLDAP::NG container                                            |
-| `ansible` (for `deploy-ansible.sh`)                                                      | deployment                                                                      |
-| `dpkg-buildpackage`, `dpkg-scanpackages`, `python3`, `curl`, `jq`                        | build/serve the `.deb`, probe the SSO, run assertions                           |
-| The `llng` client ([simple-oidc-client](https://github.com/linagora/simple-oidc-client)) | fetch the device-code auto-approval cookie                                      |
-| A passphrase-less lab key at `~/.ssh/id_oblab`                                           | the host ssh-agent hangs on signing; the VMs trust this key                     |
-| A dwho SSO cert at `/tmp/ob-e2e/id_dwho` (+ `-cert.pub`)                                 | the connection-phase assertions (absent ⇒ that phase is skipped)                |
+| Need                                                                                     | Why                                                                                    |
+| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `libvirt` + `virt-install` + `qemu-img` + `cloud-localds`, user in `libvirt` group       | create/boot the VMs on the `default` NAT network (`virbr0`, `192.168.122.0/24`)        |
+| A Debian **genericcloud** golden image (`debian-*-genericcloud-*.qcow2`)                 | base for the overlays — auto-detected in `vm/` or `../local/VM/`, else set `OB_GOLDEN` |
+| `docker` + `docker compose`                                                              | the `ob-sso` LemonLDAP::NG container                                                   |
+| `ansible` (for `deploy-ansible.sh`)                                                      | deployment                                                                             |
+| `dpkg-buildpackage`, `dpkg-scanpackages`, `python3`, `curl`, `jq`                        | build/serve the `.deb`, probe the SSO, run assertions                                  |
+| The `llng` client ([simple-oidc-client](https://github.com/linagora/simple-oidc-client)) | fetch the device-code auto-approval cookie                                             |
+| A passphrase-less lab key at `~/.ssh/id_oblab`                                           | the host ssh-agent hangs on signing; the VMs trust this key                            |
+| A dwho SSO cert at `/tmp/ob-e2e/id_dwho` (+ `-cert.pub`)                                 | the connection-phase assertions (absent ⇒ that phase is skipped)                       |
 
 ## Run
 
@@ -58,16 +58,16 @@ the cookie land in `local-test/.work/` (git-ignored).
 
 ### Knobs (environment variables)
 
-| Variable                           | Default                           | Effect                                            |
-| ---------------------------------- | --------------------------------- | ------------------------------------------------- |
-| `SKIP_BUILD=1`                     | off                               | reuse the `.deb` already staged in `sso/aptrepo/` |
-| `OB_GOLDEN`                        | search `vm/`                      | path to the genericcloud golden qcow2             |
-| `GW_IP`                            | `192.168.122.1`                   | libvirt gateway serving the APT repo + SSO        |
-| `OB_SSH_KEY`                       | `~/.ssh/id_oblab`                 | lab management key                                |
-| `OB_DWHO_KEY` / `OB_DWHO_CERT`     | `/tmp/ob-e2e/id_dwho[-cert.pub]`  | dwho SSO cert for phase-2 assertions              |
-| `OB_SSO_USER` / `OB_SSO_PASS`      | `dwho` / `dwho`                   | login used to fetch the approval cookie           |
-| `LLNG`                             | `llng` on PATH, else `~/bin/llng` | the OIDC client                                   |
-| `OB_BASTION_VM` / `OB_BACKEND_VMS` | `lab-a` / `lab-b lab-c`           | VM names                                          |
+| Variable                           | Default                               | Effect                                            |
+| ---------------------------------- | ------------------------------------- | ------------------------------------------------- |
+| `SKIP_BUILD=1`                     | off                                   | reuse the `.deb` already staged in `sso/aptrepo/` |
+| `OB_GOLDEN`                        | auto-detect `vm/` then `../local/VM/` | path to the genericcloud golden qcow2             |
+| `GW_IP`                            | `192.168.122.1`                       | libvirt gateway serving the APT repo + SSO        |
+| `OB_SSH_KEY`                       | `~/.ssh/id_oblab`                     | lab management key                                |
+| `OB_DWHO_KEY` / `OB_DWHO_CERT`     | `/tmp/ob-e2e/id_dwho[-cert.pub]`      | dwho SSO cert for phase-2 assertions              |
+| `OB_SSO_USER` / `OB_SSO_PASS`      | `dwho` / `dwho`                       | login used to fetch the approval cookie           |
+| `LLNG`                             | `llng` on PATH, else `~/bin/llng`     | the OIDC client                                   |
+| `OB_BASTION_VM` / `OB_BACKEND_VMS` | `lab-a` / `lab-b lab-c`               | VM names                                          |
 
 ## The two-phase workflow
 

@@ -20,7 +20,7 @@ WORK="${OB_LT_WORK:-$LT_DIR/.work}"   # generated roles/installers/cookie (git-i
 GW_IP="${GW_IP:-192.168.122.1}"
 APT_PORT="${APT_PORT:-8088}"
 SSH_KEY="${OB_SSH_KEY:-$HOME/.ssh/id_oblab}"
-DEB="open-bastion_0.2.3_amd64.deb"
+DEB="open-bastion_0.3.0_amd64.deb"
 BASTION_VM="${OB_BASTION_VM:-lab-a}"
 read -ra BACKEND_VMS <<< "${OB_BACKEND_VMS:-lab-b lab-c}"
 ALL_VMS=("$BASTION_VM" "${BACKEND_VMS[@]}")
@@ -65,8 +65,18 @@ preflight(){
     [ -x "$LLNG" ] || die "llng client not found (set \$LLNG)"
     [ -f "$SSH_KEY" ] || die "lab SSH key not found: $SSH_KEY"
     [ -x "$VM" ] || die "mkvm.sh not executable: $VM"
+    # Auto-detect the genericcloud golden image (mkvm.sh honours $OB_GOLDEN) so
+    # the operator need not export it. Search vm/ first, then the throwaway
+    # local/VM/ tree where it usually lives.
+    if [ -z "${OB_GOLDEN:-}" ]; then
+        local g
+        g=$(ls -1t "$LT_DIR"/vm/debian-*-genericcloud-*.qcow2 \
+                   "$REPO_ROOT"/local/VM/debian-*-genericcloud-*.qcow2 2>/dev/null | head -1 || true)
+        [ -n "$g" ] && export OB_GOLDEN="$g"
+    fi
+    [ -n "${OB_GOLDEN:-}" ] || die "no genericcloud golden image (put one in vm/ or set OB_GOLDEN)"
     mkdir -p "$WORK" "$APTREPO"
-    ok "tools present; llng=$LLNG"
+    ok "tools present; llng=$LLNG; golden=$(basename "$OB_GOLDEN")"
 }
 
 # ── 1. build + stage the .deb (repack libsodium dep for trixie; LAB-ONLY) ─────

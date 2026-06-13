@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.2.3
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -206,6 +206,10 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Sat Jun 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.0-1
+- Certificate-based bastion->backend vouching (replaces the broken JWT/SendEnv
+  transport); ob-scp; token-lifecycle/NSS/sshd/recorder fixes; ob-builder
+  artefacts deploy unattended. See CHANGELOG.md
 * Sat May 23 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.3-1
 - See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Thu May 21 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.2-1

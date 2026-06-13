@@ -7,8 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-13
+
+Headline: **certificate-based bastion→backend vouching** replaces the
+previous `LLNG_BASTION_JWT` / `SendEnv` mechanism, which was structurally
+broken (a `SendEnv`/`AcceptEnv` variable only ever reaches the eventual child
+process environment, never the PAM environment `pam_getenv` reads, so a backend
+with `bastion_jwt_required=true` rejected every session). The bastion now
+vouches for each hop by obtaining a short-lived, LLNG-signed SSH user
+certificate; backends validate it natively. Also bundles the token-lifecycle,
+NSS, sshd-lockdown and session-recorder fixes, and makes the `ob-builder`
+artefacts (Ansible role and shell installer) deploy fully unattended.
+
 ### Added
 
+- **Certificate-based bastion→backend vouching.** `ob-ssh` (on the bastion)
+  generates an ephemeral keypair in tmpfs and asks LLNG to sign it
+  (`POST /pam/bastion-cert`, authorised by the bastion's device-grant server
+  token plus a per-`(bastion_id, user)` voucher proving the user actually
+  connected to _this_ bastion). The resulting ~120 s user certificate carries
+  `principal = user`, a `bastion=<id>;user=<u>;target=<host>` key-id and a
+  `source-address` critical option. The backend's sshd validates it against the
+  LLNG CA (`TrustedUserCAKeys`) and refuses it off-bastion (source-address),
+  while an `AuthorizedPrincipalsCommand` enforces the `allowed_bastions`
+  allowlist from the cert key-id. No agent forwarding and no user key on the
+  bastion are required. See `doc/bastion-architecture.md` and
+  `doc/design/bastion-cert-vouching.md`.
 - **`ob-scp`**: bastion file-copy counterpart of `ob-ssh`. Copies files
   bastion→backend, backend→bastion, or backend↔backend using a short-lived
   vouched certificate. All transfers are forced through the bastion (`scp -3`)
@@ -16,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a direct backend-to-backend transfer would be rejected). All remote
   endpoints must share the same remote user (one vouched certificate = one
   principal).
+- **Ansible quick-start guide** (`doc/ansible-quickstart.md`): generate the
+  bastion + backend roles with `ob-builder`, declare hosts and their IPs in an
+  inventory, and apply with `ansible-playbook` (including unattended
+  device-code auto-approval via an LLNG cookie). Linked from the main README,
+  which now points at the two quick-starts (Docker try-it and Ansible fleet)
+  instead of inlining a third.
 
 ### Changed
 
@@ -23,6 +53,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now `ob-ssh`; the certificate-minting logic it shares with the new `ob-scp`
   was factored into a sourced library, `ob-cert-lib.sh` (installed under
   `/usr/lib/open-bastion/`).
+- **Server token relocated from `/etc/open-bastion/token` to
+  `/var/lib/open-bastion/token`.** The token is runtime state (refreshed every
+  few minutes by `ob-heartbeat`), not configuration, so per the FHS it belongs
+  under `/var/lib`. This also lets the `ob-heartbeat.service` sandbox keep
+  `/etc` fully read-only (`ProtectSystem=strict`) instead of having to leave
+  `/etc/open-bastion` writable. Upgrades migrate automatically: the Debian
+  `postinst` / RPM `%post` move an existing token and repoint
+  `server_token_file` / `SERVER_TOKEN_FILE` in the deployed config files. The
+  path remains configurable via `server_token_file`.
+- **`ob-heartbeat` renews the access token from the offline refresh token.**
+  The server is enrolled with an `offline_access` grant; the timer (every
+  5 min, below the access-token lifetime) refreshes the short-lived access
+  token so NSS resolution and authorization keep working — previously the
+  access token could lapse (e.g. overnight) and `getent passwd` went empty.
+- **`ob-builder` artefacts deploy fully unattended.** The generated Ansible role
+  and self-extracting shell installer now run `ob-{bastion,backend}-setup`
+  non-interactively end to end: they pass `--client-id` and `--yes` (setup
+  otherwise aborted on a "Missing --client-id" / a `[y/N]` prompt), pass
+  `--insecure` when `verify_ssl` is false (an http test portal was otherwise
+  rejected), the shell installer forwards `--allowed-bastions`, and the Ansible
+  role gained `ob_approve_base_url` / `ob_approve_host` overrides for
+  controller-side device-code approval in split-horizon / NAT topologies.
+  `ob-builder` also fails fast when neither `--output-shell` nor
+  `--output-ansible` is given, and validates `allowed_bastions` against a safe
+  character set before embedding it.
+
+### Removed
+
+- **The bastion-JWT transport and its verification subsystem.** The
+  `bastion_jwt_*` configuration keys and the `AcceptEnv LLNG_BASTION_JWT` sshd
+  directive are gone, along with the in-module JWT verifier (and its JWKS / JTI
+  caches). They are replaced by the certificate vouching above; the
+  "accept only this bastion" policy is now `ob-backend-setup --allowed-bastions`
+  writing `/etc/open-bastion/allowed_bastions`. Existing configs still load
+  (the removed keys are silently ignored). The unrelated `client_secret_jwt`
+  OIDC client-assertion authentication is unaffected.
 
 ### Fixed
 
@@ -53,18 +119,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freshly provisioned bastions and backends. `ob-bastion-setup` /
   `ob-backend-setup` now write `00-open-bastion-{bastion,backend}.conf` (and
   remove the legacy `50-` file on rerun) so the cert-only lockdown wins.
+- **Session recording aborted the session on a fresh install.** The per-user
+  recording lives under `/var/lib/open-bastion/sessions/`, but the recorder runs
+  as the connecting user (its `ob-sessions` gid is dropped before exec) and
+  could not traverse into its own subdir. The Debian `postinst` / RPM `%post`
+  now create `/var/lib/open-bastion` as `711` and `sessions/` as `3771`
+  (setgid + sticky + o+x, no o+r) so the de-privileged recorder can traverse
+  without being able to list other users' sessions.
+- **`ob-heartbeat` could not rewrite the access token** under its own sandbox
+  (the path was effectively read-only), so token renewal silently failed.
+- **`ob-bastion-id` hit a 403** fetching the bastion identity; it now uses the
+  probe mode of `/pam/bastion-token`.
 
-### Changed
+### Security
 
-- **Server token relocated from `/etc/open-bastion/token` to
-  `/var/lib/open-bastion/token`.** The token is runtime state (refreshed every
-  few minutes by `ob-heartbeat`), not configuration, so per the FHS it belongs
-  under `/var/lib`. This also lets the `ob-heartbeat.service` sandbox keep
-  `/etc` fully read-only (`ProtectSystem=strict`) instead of having to leave
-  `/etc/open-bastion` writable. Upgrades migrate automatically: the Debian
-  `postinst` / RPM `%post` move an existing token and repoint
-  `server_token_file` / `SERVER_TOKEN_FILE` in the deployed config files. The
-  path remains configurable via `server_token_file`.
+- Refreshed threat model for the cert-vouching + heartbeat model
+  (`doc/security/`). "Only this bastion" is enforced defence-in-depth, both by
+  the certificate `source-address` critical option (sshd-native) and the
+  `bastion_id` allowlist parsed from the cert key-id by `pam_openbastion`.
 
 ## [0.2.3] - 2026-05-23
 
