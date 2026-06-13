@@ -113,10 +113,10 @@ sudo make install
 
 Two quick-starts cover the two ways to get going:
 
-| Quick-start | Use it to… |
-| ----------- | ---------- |
-| **[Try it in Docker](quick-start/README.md)** | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
-| **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment. |
+| Quick-start                                                  | Use it to…                                                                                                                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
+| **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.   |
 
 For the underlying concepts and per-step manual configuration, see [PAM Authentication Modes](doc/pam-modes.md) and the [Configuration Reference](doc/configuration.md).
 
