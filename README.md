@@ -111,58 +111,14 @@ sudo make install
 
 ## Quick Start
 
-### 1. Configure LemonLDAP::NG
+Two quick-starts cover the two ways to get going:
 
-See [LemonLDAP::NG Configuration](doc/llng-configuration.md) for detailed setup.
+| Quick-start | Use it to… |
+| ----------- | ---------- |
+| **[Try it in Docker](quick-start/README.md)** | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
+| **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment. |
 
-### 2. Create Configuration
-
-```bash
-sudo cp /etc/open-bastion/openbastion.conf.example /etc/open-bastion/openbastion.conf
-sudo chmod 600 /etc/open-bastion/openbastion.conf
-```
-
-Edit with your settings:
-
-```ini
-portal_url = https://auth.example.com
-client_id = pam-access
-client_secret = your-secret
-server_group = default
-```
-
-### 3. Enroll the Server
-
-```bash
-sudo ob-enroll
-```
-
-The script will display a user code. An administrator must visit the LLNG portal and enter this code to approve the server.
-
-### 4. Configure PAM
-
-Edit `/etc/pam.d/sshd` (recommended mode - LLNG tokens only):
-
-```
-auth       sufficient   pam_openbastion.so
-auth       required     pam_deny.so
-
-account    required     pam_openbastion.so
-account    required     pam_unix.so
-
-session    required     pam_unix.so
-```
-
-See [PAM Authentication Modes](doc/pam-modes.md) for other configurations.
-
-### 5. Test
-
-**Important**: Open a **new terminal** and keep your current session open as backup!
-
-```bash
-ssh user@server
-Password: <paste LLNG token from portal>
-```
+For the underlying concepts and per-step manual configuration, see [PAM Authentication Modes](doc/pam-modes.md) and the [Configuration Reference](doc/configuration.md).
 
 ## Documentation
 
