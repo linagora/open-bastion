@@ -180,6 +180,7 @@ See the full [documentation index](doc/README.md) or jump directly to:
 | [Security Features](doc/security.md)                     | Key policies, rate limiting, audit        |
 | [Admin Guide](doc/admin-guide.md)                        | Complete administration guide             |
 | [Deployment Builder](admin-builder/README.md)            | Generate shell / Ansible deploy artefacts |
+| [Ansible Quick-start](doc/ansible-quickstart.md)         | Generate + apply roles, fleet deployment  |
 
 ## Troubleshooting
 

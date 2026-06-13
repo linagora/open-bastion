@@ -7,6 +7,7 @@
 | [LemonLDAP::NG Configuration](llng-configuration.md) | Server-side LLNG setup and plugins     |
 | [PAM Authentication Modes](pam-modes.md)             | All 4 PAM configurations with examples |
 | [Configuration Reference](configuration.md)          | All configuration options              |
+| [Ansible Quick-start](ansible-quickstart.md)         | Generate + apply roles with ob-builder |
 
 ## Features
 
