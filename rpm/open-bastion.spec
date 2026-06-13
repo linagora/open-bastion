@@ -158,6 +158,17 @@ chmod 711 /var/lib/open-bastion
 mkdir -p /var/lib/open-bastion/sessions
 chgrp ob-sessions /var/lib/open-bastion/sessions
 chmod 1770 /var/lib/open-bastion/sessions
+# Migrate the server token out of /etc (config) into /var/lib (runtime state,
+# FHS) so the heartbeat sandbox can keep /etc read-only. Idempotent.
+if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then
+    mv /etc/open-bastion/token /var/lib/open-bastion/token
+    chown root:root /var/lib/open-bastion/token
+    chmod 600 /var/lib/open-bastion/token
+fi
+for _cf in /etc/open-bastion/openbastion.conf /etc/open-bastion/nss_openbastion.conf; do
+    [ -f "$_cf" ] && sed -i 's#^\([[:space:]]*server_token_file[[:space:]]*=[[:space:]]*\)/etc/open-bastion/token#\1/var/lib/open-bastion/token#' "$_cf"
+done
+[ -f /etc/open-bastion/ssh-proxy.conf ] && sed -i 's#^\([[:space:]]*SERVER_TOKEN_FILE=\)"\{0,1\}/etc/open-bastion/token"\{0,1\}#\1"/var/lib/open-bastion/token"#' /etc/open-bastion/ssh-proxy.conf
 
 %preun
 %systemd_preun ob-heartbeat.timer

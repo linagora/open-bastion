@@ -15,7 +15,7 @@ PROG_NAME=$(basename "$0")
 
 # Default values
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
-TOKEN_FILE="/etc/open-bastion/token"
+TOKEN_FILE="/var/lib/open-bastion/token"
 STATS_FILE="/var/lib/open-bastion/stats.json"
 TIMEOUT=10
 

@@ -15,7 +15,7 @@ PROG_NAME=$(basename "$0")
 
 # Default values
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
-TOKEN_FILE="/etc/open-bastion/token"
+TOKEN_FILE="/var/lib/open-bastion/token"
 # offline_access is REQUIRED: it makes LLNG issue a long-lived offline refresh
 # token (the durable machine identity). Without it the server only gets a
 # short-lived access token, SSO/NSS lookups break after ~1h, and there is no
@@ -543,12 +543,14 @@ save_token() {
     local token_dir
     token_dir=$(dirname "$TOKEN_FILE")
 
-    # Create directory if needed
+    # Create directory if needed. The token is runtime state, so it lives under
+    # /var/lib/open-bastion (FHS), created 0700 root if the package didn't.
     if [ ! -d "$token_dir" ]; then
         mkdir -p "$token_dir" || {
             log_error "Failed to create directory: $token_dir"
             exit 1
         }
+        chmod 0700 "$token_dir" 2>/dev/null || true
     fi
 
     # Save token in JSON format with metadata for token lifecycle management

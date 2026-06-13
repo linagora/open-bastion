@@ -37,7 +37,7 @@ PROG_NAME=$(basename "$0")
 
 # Configuration (can be overridden via /etc/open-bastion/ssh-proxy.conf)
 PORTAL_URL=""
-SERVER_TOKEN_FILE="/etc/open-bastion/token"
+SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
 TARGET_GROUP="default"
 TIMEOUT=10
 VERIFY_SSL=true
@@ -425,7 +425,7 @@ Options:
 
 Configuration ($CONFIG_FILE):
     PORTAL_URL="https://auth.example.com"
-    SERVER_TOKEN_FILE="/etc/open-bastion/token"
+    SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
     SERVER_GROUP="bastion"
     TARGET_GROUP="default"
     TIMEOUT=10

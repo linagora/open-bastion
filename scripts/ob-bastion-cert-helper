@@ -34,7 +34,7 @@ set -euo pipefail
 PROG_NAME=$(basename "$0")
 OB_CONFIG="/etc/open-bastion/openbastion.conf"
 PROXY_CONFIG="/etc/open-bastion/ssh-proxy.conf"
-SERVER_TOKEN_FILE="/etc/open-bastion/token"
+SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
 TIMEOUT=10
 VERIFY_SSL=true
 PORTAL_URL=""

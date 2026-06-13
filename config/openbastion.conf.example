@@ -19,7 +19,7 @@ client_secret = your-client-secret-here
 # Path to file containing the server's access token
 # This token is obtained during server enrollment via Device Authorization Grant
 # The file should contain only the token and be readable only by root
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 
 # Server group name for authorization rules
 # This must match a group defined in LLNG's pamAccessServerGroups

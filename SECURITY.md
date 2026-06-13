@@ -436,7 +436,7 @@ The encryption key for cached tokens and secrets is derived from `/etc/machine-i
 
 ```bash
 # 1. The old token file is now unusable - remove it
-rm /etc/open-bastion/token
+rm /var/lib/open-bastion/token
 
 # 2. Re-run enrollment
 ob-enroll --portal https://auth.example.com --client-id pam-access

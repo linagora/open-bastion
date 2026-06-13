@@ -234,7 +234,7 @@ shadow: files
 
 ```ini
 portal_url = https://auth.example.com
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 timeout = 5
 cache_ttl = 300
 min_uid = 10000
@@ -545,7 +545,7 @@ not the sudoers target). No setuid binary is introduced.
 ```bash
 # /etc/open-bastion/ssh-proxy.conf
 PORTAL_URL=https://auth.example.com
-SERVER_TOKEN_FILE=/etc/open-bastion/token
+SERVER_TOKEN_FILE=/var/lib/open-bastion/token
 SERVER_GROUP=bastion
 TARGET_GROUP=backend
 ```

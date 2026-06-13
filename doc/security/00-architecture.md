@@ -493,7 +493,7 @@ La clé de chiffrement pour les tokens et secrets en cache est dérivée de `/et
 
 ```bash
 # 1. L'ancien fichier token est maintenant inutilisable - le supprimer
-rm /etc/open-bastion/token
+rm /var/lib/open-bastion/token
 
 # 2. Relancer l'enrôlement
 ob-enroll --portal https://auth.example.com --client-id pam-access

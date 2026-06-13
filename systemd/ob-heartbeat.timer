@@ -3,7 +3,7 @@ Description=Open Bastion Heartbeat Timer
 Documentation=man:ob-heartbeat(8)
 After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/open-bastion/token
+ConditionPathExists=/var/lib/open-bastion/token
 
 [Timer]
 # First heartbeat 1 minute after boot
