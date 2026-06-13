@@ -9,12 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **NSS module kept serving a stale access token after rotation.**
+  `libnss_openbastion` loaded the server token once per process and never
+  re-read it, so once `ob-heartbeat` rotated the token the cached value
+  expired and the portal answered `401`. That was treated as
+  "user not found", poisoning the (nscd) negative cache and breaking
+  `getent passwd` / SSH logins roughly once per access-token lifetime until
+  the resolver was restarted. The module now reloads the token when its mtime
+  changes and distinguishes an authoritative "not found" from a transient
+  error (HTTP ≠ 200 / curl failure): transient errors trigger a reload+retry
+  and return `EAGAIN` / `NSS_STATUS_UNAVAIL` instead of being cached as a miss.
 - **sshd hardening drop-in could be silently overridden by cloud-init.** Cloud
   images ship `/etc/ssh/sshd_config.d/50-cloud-init.conf` with
-  `PasswordAuthentication yes`, and sshd keeps the *first* value seen while
+  `PasswordAuthentication yes`, and sshd keeps the _first_ value seen while
   `Include` expands the drop-in directory alphabetically. The open-bastion
   drop-in was written as `50-open-bastion-{bastion,backend}.conf`, which sorts
-  *after* `50-cloud-init.conf`, so password authentication stayed enabled on
+  _after_ `50-cloud-init.conf`, so password authentication stayed enabled on
   freshly provisioned bastions and backends. `ob-bastion-setup` /
   `ob-backend-setup` now write `00-open-bastion-{bastion,backend}.conf` (and
   remove the legacy `50-` file on rerun) so the cert-only lockdown wins.

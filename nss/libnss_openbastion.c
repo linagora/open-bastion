@@ -67,6 +67,7 @@ typedef struct {
     char *portal_url;
     char *server_token_file;
     char *server_token;
+    time_t server_token_mtime;    /* mtime of server_token_file at last load */
     int timeout;
     int verify_ssl;
     int cache_ttl;
@@ -374,29 +375,56 @@ static int load_server_token(nss_llng_config_t *config)
         buffer[--len] = '\0';
     }
 
-    /* Try to parse as JSON first (format: {"access_token": "..."}) */
+    /* Parse the NEW token into a local first; only swap it in on success so a
+     * reload that hits a transiently bad/partial file keeps the old token. */
+    char *new_token = NULL;
     struct json_object *json = json_tokener_parse(buffer);
     if (json) {
         struct json_object *token_obj;
         if (json_object_object_get_ex(json, "access_token", &token_obj)) {
             const char *token = json_object_get_string(token_obj);
-            if (token) {
-                free(config->server_token);
-                config->server_token = strdup(token);
-            }
+            if (token) new_token = strdup(token);
         }
         json_object_put(json);
     }
-
     /* If JSON parsing failed or no access_token found, treat as plain token */
-    if (!config->server_token && len > 0) {
-        config->server_token = strdup(buffer);
+    if (!new_token && len > 0) {
+        new_token = strdup(buffer);
     }
 
     /* Clear sensitive token from stack buffer */
     explicit_bzero(buffer, sizeof(buffer));
 
-    return config->server_token ? 0 : -1;
+    if (!new_token) return -1;          /* keep any previously loaded token */
+    free(config->server_token);
+    config->server_token = new_token;
+    /* Remember the file's mtime so callers can detect rotation by ob-heartbeat
+     * and reload, instead of caching a stale (soon-expired) access token for
+     * the whole process lifetime. */
+    config->server_token_mtime = st.st_mtime;
+    return 0;
+}
+
+/* Reload the server token if the token file changed on disk since last load
+ * (ob-heartbeat rotates it every few minutes). Long-running NSS consumers like
+ * nscd otherwise keep using the first token they loaded; once it expires the
+ * LLNG calls 401 and users stop resolving until the consumer is restarted. */
+static void maybe_reload_server_token(void)
+{
+    /* The whole stat() + mtime comparison + reload runs under g_init_lock:
+     * server_token_mtime is written under that lock by load_server_token(), so
+     * reading it (or the token pointer) outside the lock would be a data race,
+     * and a pre-lock stat() could also miss a rotation that lands between the
+     * stat() and acquiring the lock. stat() is cheap enough to hold the lock. */
+    pthread_mutex_lock(&g_init_lock);
+    if (g_config.server_token_file) {
+        struct stat st;
+        if (stat(g_config.server_token_file, &st) == 0 &&
+            st.st_mtime != g_config.server_token_mtime) {
+            load_server_token(&g_config);
+        }
+    }
+    pthread_mutex_unlock(&g_init_lock);
 }
 
 /* Load configuration */
@@ -1050,12 +1078,29 @@ static int query_service_account(const char *username, struct passwd *pw,
 static int query_llng_userinfo(const char *username, struct passwd *pw,
                                 char *buffer, size_t buflen)
 {
-    if (!g_config.portal_url || !g_config.server_token) {
+    if (!g_config.portal_url) {
+        return -1;
+    }
+
+    /* Snapshot the server token under g_init_lock. A concurrent
+     * maybe_reload_server_token() can free and replace g_config.server_token at
+     * any time (rotation by ob-heartbeat), so reading it directly across the
+     * curl network I/O below would be a use-after-free in multi-threaded NSS
+     * consumers such as nscd. Copy it under the lock, release the lock before
+     * any I/O, and free the copy as soon as the header is built. portal_url is
+     * set once at init and never reloaded, so it needs no such guard. */
+    pthread_mutex_lock(&g_init_lock);
+    char *server_token = g_config.server_token ? strdup(g_config.server_token) : NULL;
+    pthread_mutex_unlock(&g_init_lock);
+    if (!server_token) {
         return -1;
     }
 
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) {
+        free(server_token);
+        return -1;
+    }
 
     /* Build URL */
     char url[512];
@@ -1066,9 +1111,13 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     json_object_object_add(req_json, "user", json_object_new_string(username));
     const char *req_body = json_object_to_json_string(req_json);
 
-    /* Build Authorization header */
+    /* Build Authorization header from the snapshot, then drop the token copy:
+     * auth_header now holds its own bytes and server_token is no longer needed. */
     char auth_header[512];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_config.server_token);
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", server_token);
+    explicit_bzero(server_token, strlen(server_token));
+    free(server_token);
+    server_token = NULL;
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -1098,12 +1147,25 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     }
 
     CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     curl_slist_free_all(headers);
     json_object_put(req_json);
     curl_easy_cleanup(curl);
 
+    /* Return convention: 0 = found, 1 = authoritatively not found (HTTP 200
+     * with found=false), -1 = transient/unavailable (network error, 401/403
+     * from a stale token, 5xx, unparseable). Only an authoritative not-found
+     * may be negatively cached; -1 must NOT poison the cache and lets the
+     * caller reload the token and retry. */
     if (res != CURLE_OK || !response.data) {
+        free(response.data);
+        return -1;
+    }
+    if (http_code != 200) {
+        /* 401/403 = stale/invalid token, 5xx = server, 404/other = unexpected:
+         * all transient from NSS's point of view. */
         free(response.data);
         return -1;
     }
@@ -1124,7 +1186,7 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
 
     if (!found) {
         json_object_put(json);
-        return -1;
+        return 1;    /* authoritative "no such user" → safe to negative-cache */
     }
 
     /* Extract user info with safe bounds checking */
@@ -1374,8 +1436,23 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
         return NSS_STATUS_SUCCESS;
     }
 
-    /* Query LLNG server */
-    if (query_llng_userinfo(name, result, buffer, buflen) == 0) {
+    /* Pick up a token rotated by ob-heartbeat before querying, so a long-lived
+     * consumer (nscd) never queries LLNG with a stale, soon-401 token. */
+    maybe_reload_server_token();
+
+    /* Query LLNG server. On a transient failure (-1) the likeliest cause is a
+     * token that rotated between the reload above and the call (or a brief
+     * server hiccup): force a reload and retry once. Never negative-cache a
+     * transient failure. */
+    int qr = query_llng_userinfo(name, result, buffer, buflen);
+    if (qr < 0) {
+        pthread_mutex_lock(&g_init_lock);
+        load_server_token(&g_config);
+        pthread_mutex_unlock(&g_init_lock);
+        qr = query_llng_userinfo(name, result, buffer, buflen);
+    }
+
+    if (qr == 0) {
         /* Add to memory cache */
         cache_add(name, result, 1);
         /* Also save to file cache for cross-process UID lookups */
@@ -1384,11 +1461,20 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
         return NSS_STATUS_SUCCESS;
     }
 
-    /* Not found - cache negative result */
-    cache_add(name, NULL, 0);
+    if (qr == 1) {
+        /* Authoritative "no such user" — safe to negative-cache. */
+        cache_add(name, NULL, 0);
+        g_in_nss_lookup = 0;
+        *errnop = ENOENT;
+        return NSS_STATUS_NOTFOUND;
+    }
+
+    /* qr < 0: transient/unavailable (network, persistent 401, 5xx). Do NOT
+     * cache, and return UNAVAIL so nscd does not store an authoritative
+     * negative that would lock the user out until nscd is restarted. */
     g_in_nss_lookup = 0;
-    *errnop = ENOENT;
-    return NSS_STATUS_NOTFOUND;
+    *errnop = EAGAIN;
+    return NSS_STATUS_UNAVAIL;
 }
 
 /* NSS entry point: getpwuid_r */
