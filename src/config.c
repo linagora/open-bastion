@@ -154,17 +154,6 @@ void config_init(pam_openbastion_config_t *config)
     config->offline_max_sso_unreachable = 3600;  /* 1 hour */
 #endif /* ENABLE_DESKTOP_SSO */
 
-    /* Bastion JWT verification - disabled by default */
-    config->bastion_jwt_required = false;
-    config->bastion_jwt_verify_local = true;  /* Local verification preferred */
-    config->bastion_jwt_cache_ttl = 3600;     /* 1 hour JWKS cache */
-    config->bastion_jwt_clock_skew = 60;      /* 1 minute clock skew allowed */
-
-    /* JTI replay detection - enabled by default when bastion JWT is used */
-    config->bastion_jwt_replay_detection = true;
-    config->bastion_jwt_replay_cache_size = 10000;
-    config->bastion_jwt_replay_cleanup_interval = 60;
-
     /* CrowdSec integration - disabled by default */
     config->crowdsec_enabled = false;
     config->crowdsec_url = strdup("http://127.0.0.1:8080");
@@ -256,12 +245,6 @@ void config_free(pam_openbastion_config_t *config)
 
     /* Service accounts */
     free(config->service_accounts_file);
-
-    /* Bastion JWT verification */
-    free(config->bastion_jwt_issuer);
-    free(config->bastion_jwt_jwks_url);
-    free(config->bastion_jwt_jwks_cache);
-    free(config->bastion_jwt_allowed_bastions);
 
     /* CrowdSec integration */
     free(config->crowdsec_url);
@@ -618,41 +601,6 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
         config->offline_max_sso_unreachable = parse_int(value, 3600, 600, 86400);  /* 10 min to 24 hours */
     }
 #endif /* ENABLE_DESKTOP_SSO */
-    /* Bastion JWT verification settings */
-    else if (strcmp(key, "bastion_jwt_required") == 0 || strcmp(key, "require_bastion") == 0) {
-        config->bastion_jwt_required = parse_bool(value);
-    }
-    else if (strcmp(key, "bastion_jwt_verify_local") == 0) {
-        config->bastion_jwt_verify_local = parse_bool(value);
-    }
-    else if (strcmp(key, "bastion_jwt_issuer") == 0) {
-        SET_STRING_FIELD(config->bastion_jwt_issuer, value, key);
-    }
-    else if (strcmp(key, "bastion_jwt_jwks_url") == 0) {
-        SET_STRING_FIELD(config->bastion_jwt_jwks_url, value, key);
-    }
-    else if (strcmp(key, "bastion_jwt_jwks_cache") == 0) {
-        SET_STRING_FIELD(config->bastion_jwt_jwks_cache, value, key);
-    }
-    else if (strcmp(key, "bastion_jwt_cache_ttl") == 0) {
-        config->bastion_jwt_cache_ttl = parse_int(value, 3600, 60, 86400);
-    }
-    else if (strcmp(key, "bastion_jwt_clock_skew") == 0) {
-        config->bastion_jwt_clock_skew = parse_int(value, 60, 0, 600);
-    }
-    else if (strcmp(key, "bastion_jwt_allowed_bastions") == 0 || strcmp(key, "allowed_bastions") == 0) {
-        SET_STRING_FIELD(config->bastion_jwt_allowed_bastions, value, key);
-    }
-    /* JTI replay detection options */
-    else if (strcmp(key, "bastion_jwt_replay_detection") == 0) {
-        config->bastion_jwt_replay_detection = parse_bool(value);
-    }
-    else if (strcmp(key, "bastion_jwt_replay_cache_size") == 0) {
-        config->bastion_jwt_replay_cache_size = parse_int(value, 10000, 100, 1000000);
-    }
-    else if (strcmp(key, "bastion_jwt_replay_cleanup_interval") == 0) {
-        config->bastion_jwt_replay_cleanup_interval = parse_int(value, 60, 10, 3600);
-    }
     /* CrowdSec integration options */
     else if (strcmp(key, "crowdsec_enabled") == 0 || strcmp(key, "crowdsec") == 0) {
         config->crowdsec_enabled = parse_bool(value);

@@ -869,7 +869,7 @@ YML
 # values).
 build_placeholder_map() {
     local role="$1"
-    local pam_mode bastion_jwt_block bastion_jwt_yaml ca_b64 krl_b64 gpg_b64 apt_sources
+    local pam_mode bastion_backend_block bastion_allowlist_yaml ca_b64 krl_b64 gpg_b64 apt_sources
     local mode_settings mode_settings_yaml max_security_bool
     local auto_enroll_bool auto_setup_bool
 
@@ -882,11 +882,11 @@ build_placeholder_map() {
     # wires an AuthorizedPrincipalsCommand keyed on the cert key-id + the cert's
     # source-address. So the conf block is empty; we only pass the allowlist to
     # the Ansible role (which forwards it as ob-backend-setup --allowed-bastions).
-    bastion_jwt_block=""
+    bastion_backend_block=""
     if [ "$role" = "backend" ] && [ -n "${ALLOWED_BASTIONS:-}" ]; then
-        bastion_jwt_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
+        bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
     else
-        bastion_jwt_yaml=""
+        bastion_allowlist_yaml=""
     fi
 
     mode_settings=$(_mode_settings_conf "$pam_mode")
@@ -943,8 +943,8 @@ build_placeholder_map() {
     ph_set KRL_B64              "$krl_b64"
     ph_set GPG_KEY_B64          "$gpg_b64"
     ph_set APT_SOURCES_LIST     "$apt_sources"
-    ph_set BASTION_JWT_BLOCK     "$bastion_jwt_block"
-    ph_set BASTION_JWT_VARS_YAML "$bastion_jwt_yaml"
+    ph_set BASTION_BACKEND_BLOCK     "$bastion_backend_block"
+    ph_set BASTION_ALLOWLIST_VARS_YAML "$bastion_allowlist_yaml"
     ph_set MODE_SETTINGS         "$mode_settings"
     ph_set MODE_SETTINGS_YAML    "$mode_settings_yaml"
     ph_set MAX_SECURITY_BOOL     "$max_security_bool"
