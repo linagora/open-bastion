@@ -5,8 +5,8 @@
 | Impact ↓ / Probabilité → | 1 - Très improbable                                  | 2 - Peu probable | 3 - Probable | 4 - Très probable |
 | ------------------------ | ---------------------------------------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4, R-SA2                                          | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11                                      | R-S6             |              |                   |
-| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21 | R6, R-S8         |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11, R-S23                               | R-S6             |              |                   |
+| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21, R-S22 | R6, R-S8   |              |                   |
 | **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                         | R-S3, R-S18      |              |                   |
 
 > **Note :** R-S3 et R-S15 ont été descendus d'un cran sur l'axe Impact grâce au **binding fingerprint SSH** introduit dans le plugin PamAccess ≥ 0.1.16. La vérification est effectuée côté LLNG à la fois sur `/pam/authorize` (à chaque ouverture de session SSH, phase PAM `account`) et sur `/pam/verify` (à chaque utilisation d'un token PAM pour sudo ou ré-authentification) : tant que l'empreinte de la clef SSH n'est pas présente, active et non révoquée dans la session persistante LLNG, ni la session SSH ni l'escalade sudo ne sont autorisées, indépendamment de la fraîcheur de la KRL locale. Voir [02-ssh-connection.md](02-ssh-connection.md) pour les détails.
@@ -87,8 +87,9 @@ Pistes pour réduire P à 1 :
 
 Pistes pour réduire I à 2 :
 
-1. **Segmentation fine** : Plusieurs bastions par zone de sécurité
+1. **Segmentation fine** : Plusieurs bastions par zone de sécurité, **chacun avec son propre `client_id` (= `bastion_id`)** et un `allowed_bastions` distinct par backend → un bastion compromis ne peut voucher que pour les backends de sa zone
 2. **Session recording** : Enregistrement de toutes les sessions transitant par le bastion
+3. **Réduire `pamAccessBastionVoucherTtl`** (défaut 43200 s = 12 h) : borne la durée pendant laquelle un bastion compromis peut continuer à obtenir des certificats pour les utilisateurs récemment vouchés sans nouvelle connexion de leur part. Compromis ergonomie (les admins doivent se reconnecter plus souvent) vs exposition.
 
 ### R-S8 _(P=2, I=2)_ - Session persistante après révocation
 
@@ -107,20 +108,49 @@ Pistes pour réduire P à 1 :
 
 ---
 
-## Pistes d'Amélioration - JWT Bastion
+## Pistes d'Amélioration - Vouching par certificat (Bastion→Backend)
 
-### R-S9 _(P=1, I=2)_ - Replay JWT bastion
+> Le transport `LLNG_BASTION_JWT` via `SendEnv`/`AcceptEnv` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher `(bastion_id, user)` émis par `/pam/authorize`, transporté localement via `pam_putenv`, échangé par `ob-ssh-proxy` (via `ob-bastion-cert-helper`) contre un certificat ~120 s signé par la CA `ssh-ca` (`/pam/bastion-cert`), épinglé à l'IP du bastion par `source-address`. Voir [02-ssh-connection.md](02-ssh-connection.md) et [doc/design/bastion-cert-vouching.md](../design/bastion-cert-vouching.md).
+
+### R-S9 _(P=1, I=2)_ - Interception ou vol du certificat éphémère bastion
 
 Pistes supplémentaires (non implémentées) :
 
-1. **Vérification stricte IP** : Rejeter si `bastion_ip` != IP source SSH
-2. **Nonce challenge** : Le backend génère un nonce (complexifie le protocole)
+1. **Réduire `pamAccessBastionCertTtl`** (défaut 120 s → 30-60 s) pour les zones les plus sensibles : raccourcit encore la fenêtre d'exploitation d'un certificat volé dans le tmpfs.
+2. **Émission KRL pour les certificats éphémères** : aujourd'hui leur TTL très court remplace la révocation ; en cas de besoin de révocation immédiate sub-120 s, pousser le serial sur la KRL des backends (utile uniquement en réponse à incident).
 
-### R-S10 _(P=1, I=1)_ - Rotation JWKS non propagée
+### R-S10 _(P=1, I=1)_ - Voucher expiré ou rotation/compromission de la CA `ssh-ca`
 
-Piste supplémentaire (optionnelle) :
+Pistes supplémentaires (optionnelles) :
 
-1. **Push de notification** : LLNG notifie les backends via webhook pour refresh immédiat (utile uniquement en cas de compromission)
+1. **Push de notification rotation CA** : lors d'une rotation (ou compromission) de la CA `ssh-ca`, LLNG notifie les backends via webhook pour rafraîchir `TrustedUserCAKeys` immédiatement, au lieu d'attendre le redéploiement.
+2. **Monitoring de fraîcheur de `TrustedUserCAKeys`** : alerter si l'empreinte de la CA déployée sur un backend diverge de la CA active côté LLNG.
+
+### R-S22 _(P=1, I=2)_ - Certificat vouché réutilisé vers un autre backend
+
+Le key-id porte `target=<hôte>` mais `ob-ssh-principals` ne vérifie que `bastion=<id>` et `user=<u>`. Pistes (non implémentées) pour épingler le certificat à son backend :
+
+1. **Vérification de `target=` dans `ob-ssh-principals`** : comparer `target=<hôte>` au FQDN local (`hostname -f` ou le token sshd `%h`) et refuser le principal si divergence. C'est la mitigation directe ; coût : robustesse du matching FQDN (alias, CNAME, IP vs nom) à valider.
+2. **`target` côté LLNG dans `source-address`** : impossible (source-address épingle l'origine, pas la destination) — c'est bien `ob-ssh-principals` qui doit porter ce contrôle.
+
+### R-S23 _(P=1, I=3)_ - Backend en mode hérité fail-open
+
+`ob-backend-setup` écrit toujours le fichier et `ob-ssh-principals` est fail-closed si le fichier est présent mais illisible. Le résidu ne concerne qu'un backend jamais passé par le setup. Pistes (non implémentées) pour fermer ce mode :
+
+1. **Fichier vide par défaut (postinst)** : faire écrire `/etc/open-bastion/allowed_bastions` vide par le paquet à l'installation, pour que l'« absent » n'arrive jamais (vide = « tout bastion vouché », ce qui reste contraignant : un cert SSO direct sans `bastion=` est refusé).
+2. **Mode strict** : option (`ob-backend-setup --strict-vouching` ou clé de conf) où l'absence du fichier = **refus** au lieu du mode hérité, à activer sur les déploiements neufs sans backend legacy.
+
+---
+
+## Pistes d'Amélioration - Cycle de vie des tokens (heartbeat)
+
+### Supervision du rafraîchissement (suite au fix #121)
+
+Le timer `ob-heartbeat` rafraîchit l'access_token (TTL 3600 s) toutes les 5 min ; un échec silencieux du timer fait expirer le token (NSS + `/pam/authorize` cassés ~1 h après — c'était le cas avant #121 à cause du sandbox `ProtectSystem=strict` rendant le token en lecture seule). Pistes (non implémentées) pour détecter une régression future :
+
+1. **Alerte sur échec de `ob-heartbeat.service`** : `OnFailure=` systemd → notification (mail/webhook/SIEM) dès qu'un run du timer échoue, plutôt que de découvrir l'expiration par la perte d'accès.
+2. **Monitoring de l'âge du token** : exporter `expires_at - now` (node_exporter textfile, ou un check Nagios/Prometheus) et alerter quand il descend sous ~2× l'intervalle du timer.
+3. **Test d'intégration sur fenêtre > TTL** : ajouter un test (CI longue ou lab) qui vérifie le refresh **via le chemin du timer** (`systemctl start ob-heartbeat.service`, donc avec le sandbox) sur une fenêtre dépassant 3600 s — un `sudo ob-heartbeat` manuel masque les régressions du sandbox. Recoupe R-S17 (lockout).
 
 ---
 

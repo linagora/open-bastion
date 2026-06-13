@@ -1250,6 +1250,67 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 ---
 
+### R-S22 - Réutilisation d'un certificat vouché vers un autre backend (`target` non vérifié)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   2   |
+
+**Description :** Le key-id du certificat éphémère porte `bastion=<id>;user=<u>;target=<hôte>`, mais `ob-ssh-principals` n'enforce que `bastion=<id>` (allowlist) et `user=<u>` — il **ne vérifie pas** `target=`. Un certificat émis pour `backendA` est donc techniquement accepté par `backendB` si `backendB` fait confiance à la même CA et liste le même bastion dans son `allowed_bastions`, pendant la fenêtre de validité (~120 s).
+
+**Vecteurs d'attaque :**
+
+- root sur le bastion réutilisant un certificat fraîchement émis (dans le tmpfs, avant effacement) pour rebondir vers un autre backend de la même zone
+- Le processus bastion lui-même, détourné, présentant le certificat à un backend non visé
+
+**Facteurs atténuants :**
+
+- **`source-address` critique** : le certificat n'est présentable que depuis l'IP du bastion émetteur — la réutilisation suppose donc déjà un contrôle du bastion (cf. R-S6), pas un attaquant réseau arbitraire
+- **TTL ~120 s** : fenêtre très courte
+- **Allowlist par backend** : un backend d'une autre zone de sécurité qui ne liste pas ce bastion dans son `allowed_bastions` refuse le certificat
+- **Modèle de confiance** : à l'intérieur d'une même zone, le bastion est déjà l'autorité de vouching pour tous ses backends ; la distinction inter-zones se fait en donnant à chaque bastion un `client_id` (= `bastion_id`) distinct et en restreignant `allowed_bastions` par zone
+
+**Piste non implémentée :** faire vérifier `target=<hôte>` par `ob-ssh-principals` contre le FQDN local (`%h`/`hostname -f`). Voir [99-risk-reduce.md](99-risk-reduce.md#r-s22-p1-i2---certificat-vouché-réutilisé-vers-un-autre-backend).
+
+|                 |                              Score résiduel                               |
+| --------------- | :-----------------------------------------------------------------------: |
+| **Probabilité** | 1 (suppose le contrôle du bastion ; `source-address` + TTL court + allowlist) |
+| **Impact**      |          2 (réutilisation limitée aux backends de la même zone)           |
+
+---
+
+### R-S23 - Backend en mode hérité : `allowed_bastions` absent (fail-open)
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   3   |
+
+**Description :** Si le fichier `/etc/open-bastion/allowed_bastions` est **absent**, `ob-ssh-principals` retombe dans un mode hérité non contraignant et émet le principal pour tout certificat signé par la CA dont le principal correspond au login — **y compris un certificat SSO direct** (key-id sans `bastion=`). Le vouching est alors contourné : accès direct au backend possible. Ce mode existe pour la rétro-compatibilité avec des backends antérieurs au vouching par certificat.
+
+**Vecteurs d'attaque :**
+
+- Backend déployé sans jamais exécuter `ob-backend-setup` (qui écrit toujours le fichier)
+- Suppression manuelle du fichier `allowed_bastions`
+
+**Facteurs atténuants (implémentés) :**
+
+- `ob-backend-setup` écrit **toujours** `/etc/open-bastion/allowed_bastions` (0644 dans un répertoire 0711) lors de la configuration backend — sur un déploiement nominal, le fichier est donc toujours présent
+- **Fail-closed sur ambiguïté** : si le fichier est présent mais illisible (ou le répertoire non traversable par `nobody`), `ob-ssh-principals` **refuse** (n'émet aucun principal) au lieu de retomber en mode ouvert — c'est le correctif du bug où un répertoire `/etc/open-bastion` en 0700 faisait silencieusement accepter un certificat SSO direct
+- Le test `tests/test_backend_cert_acceptance.sh` vérifie les deux comportements (présent → enforce ; présent-mais-illisible → deny)
+
+> ⚠️ Contrairement à un certificat vouché, un certificat SSO direct n'a **pas** d'option `source-address` : en mode hérité, il serait donc accepté depuis n'importe quelle IP, d'où l'impact I=3 (contournement complet du bastion sur ce backend).
+
+**Piste non implémentée :** faire écrire au paquet (postinst) un `allowed_bastions` vide par défaut pour que l'« absent » n'arrive jamais, ou un mode strict où l'absence du fichier = refus. Voir [99-risk-reduce.md](99-risk-reduce.md#r-s23-p1-i3---backend-en-mode-hérité-fail-open).
+
+|                 |                              Score résiduel                               |
+| --------------- | :-----------------------------------------------------------------------: |
+| **Probabilité** | 1 (`ob-backend-setup` écrit toujours le fichier ; fail-closed si illisible) |
+| **Impact**      |        3 (contournement complet du vouching sur un backend hérité)        |
+
+---
+
 ## 4. Matrice des Risques
 
 ### Avant remédiation
@@ -1257,8 +1318,8 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                    | 3 - Probable | 4 - Très probable |
 | ------------------------ | ------------------- | --------------------------------------------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4                | R-S6 R-S17                                          |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 | R-S19        |                   |
-| **2 - Limité**           | R-S16               | R-S9 R-S10 R-S12                                    | R-S8         |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 R-S23 | R-S19   |                   |
+| **2 - Limité**           | R-S16 R-S22         | R-S9 R-S10 R-S12                                    | R-S8         |                   |
 | **1 - Négligeable**      |                     |                                                     |              |                   |
 
 > **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18).
@@ -1268,8 +1329,8 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 | Impact ↓ / Probabilité → | 1 - Très improbable                                             | 2 - Peu probable | 3 - Probable | 4 - Très probable |
 | ------------------------ | --------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
 | **4 - Critique**         | R-S4                                                            |                  |              |                   |
-| **3 - Important**        | R-S5                                                            | R-S6             |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 | R-S8             |              |                   |
+| **3 - Important**        | R-S5 R-S23                                                      | R-S6             |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 R-S22 | R-S8       |              |                   |
 | **1 - Négligeable**      | R-S15 R-S19                                                     | R-S3 R-S18       |              |                   |
 
 **Profil de risque de la cible maximale :**
@@ -1284,6 +1345,8 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - R-S18 (effacement sessions) : **traçable mais reste effaçable techniquement** ; l'imputation tient grâce à syslog `auth.info` (start/end de session) et, si PR2 (#113) est activée, grâce au watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement lui-même
 - R-S19 (évasion containment via `setsid`/`nohup`), R-S20 (action différée via `at`/`cron`/`systemd-run`), R-S21 (action non capturée par le pty) : **nouvellement identifiés** et mitigés par PR1 (#112) et PR2 (#113) sous condition d'activation opt-in
 - **Conditions d'activation :** ces nouveaux risques (R-S19, R-S20, R-S21) ne sont mitigés à leur niveau résiduel **que si** le hardening (PR1) ET la trace auditd (PR2) sont activés via `ob-bastion-setup --enable-hardening --enable-audit-trace`. En l'absence d'activation, ces risques restent en zone jaune (P=3, I=3 pour R-S19 ; P=2, I=3 pour R-S20 et R-S21). Voir [doc/hardening.md](../hardening.md) et [doc/audit.md](../audit.md) (documentations techniques en anglais) pour les détails opérationnels.
+- R-S22 (certificat vouché réutilisé vers un autre backend) : **P=1, I=2** — `target=` non vérifié par `ob-ssh-principals`, mais `source-address` impose le contrôle du bastion et l'allowlist par backend cloisonne les zones (piste : vérifier `target=` contre le FQDN local)
+- R-S23 (backend en mode hérité, `allowed_bastions` absent) : **P=1, I=3** — `ob-backend-setup` écrit toujours le fichier et `ob-ssh-principals` est fail-closed si illisible ; le risque résiduel ne concerne qu'un backend jamais configuré par le setup (piste : postinst écrivant un fichier vide par défaut)
 - Seuls risques résiduels significatifs en zone jaune (PR1 et PR2 activées) : R-S4 (CA compromise) et R-S6 (bastion compromis)
 
 ---
