@@ -128,7 +128,7 @@ Dans les architectures bastion/backend, le mécanisme de vouching par certificat
 ```mermaid
 flowchart LR
     subgraph Bastion["Serveur Bastion"]
-        proxy["ob-ssh-proxy"]
+        proxy["ob-ssh"]
         helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
         voucher["LLNG_BASTION_VOUCHER\n(pam_putenv, tmpfs)"]
     end
@@ -157,7 +157,7 @@ flowchart LR
 ### Flux détaillé
 
 1. L'utilisateur se connecte au bastion avec son certificat SSO. `pam_openbastion` appelle `POST /pam/authorize` → LLNG émet un **voucher réutilisable** lié à `(bastion_id, utilisateur)`, le stocke dans la session persistante de l'utilisateur et le renvoie. Le module PAM l'exporte via `pam_putenv("LLNG_BASTION_VOUCHER=…")` (transport **local au bastion** — contrairement à `SendEnv`, `sshd` fusionne l'environnement PAM dans la session via `pam_getenvlist`).
-2. Sur le bastion, `ob-ssh-proxy [user@]backend` :
+2. Sur le bastion, `ob-ssh [user@]backend` :
    a. génère une paire de clés éphémère **ed25519** en tmpfs (clé privée ne quitte jamais le bastion) ;
    b. via le helper réservé à root `ob-bastion-cert-helper` (règle sudoers NOPASSWD étroite, pas de setuid), `POST /pam/bastion-cert` avec le **jeton serveur** (réservé à root) en Bearer, le voucher, la clé publique, l'utilisateur et l'hôte cible ;
    c. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA `ssh-ca` : principal = utilisateur, `key-id = bastion=<bastion_id>;user=<user>;target=<hôte>`, validité ~120 s, option critique `source-address` épinglée à l'IP du bastion ;
@@ -168,7 +168,7 @@ flowchart LR
 
 - **Validité** : `min(now + pamAccessBastionVoucherTtl [défaut 43200 s = 12 h], expires_at du cert SSO)` — la durée de vie du cert SSO est le vrai plafond.
 - **Réutilisable** : plusieurs sauts simultanés (`scp host1: host2:`) utilisent le même voucher.
-- **Renouvellement FAIL-CLOSED** : si le voucher est expiré, `ob-ssh-proxy` affiche « Votre autorisation bastion a expiré. Reconnectez-vous au bastion » et sort en erreur. Pas de re-vouching silencieux.
+- **Renouvellement FAIL-CLOSED** : si le voucher est expiré, `ob-ssh` affiche « Votre autorisation bastion a expiré. Reconnectez-vous au bastion » et sort en erreur. Pas de re-vouching silencieux.
 - **Inutilisable seul** : un voucher volé est sans valeur sans le jeton serveur root requis en Bearer sur `/pam/bastion-cert`.
 
 ### Bénéfices de Sécurité
@@ -412,7 +412,7 @@ Permissions recommandées :
 
 ## Sécurité des Scripts
 
-Les scripts shell (`ob-ssh-proxy`, `ob-enroll`, `ob-ssh-cert`) mettent en œuvre des mesures de sécurité :
+Les scripts shell (`ob-ssh`, `ob-enroll`, `ob-ssh-cert`) mettent en œuvre des mesures de sécurité :
 
 ### Construction JSON
 

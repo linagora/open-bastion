@@ -23,14 +23,19 @@ usr/sbin/ob-backend-setup
 usr/sbin/ob-bastion-cert-helper
 usr/sbin/ob-cache-admin
 
+# Shared cert-vouching library (sourced by ob-ssh / ob-scp)
+usr/lib/open-bastion/ob-cert-lib.sh
+
 # User scripts
 usr/bin/ob-ssh-cert
-usr/bin/ob-ssh-proxy
+usr/bin/ob-ssh
+usr/bin/ob-scp
 usr/bin/ob-bastion-id
 
 # Man pages
 usr/share/man/man1/ob-ssh-cert.1
-usr/share/man/man1/ob-ssh-proxy.1
+usr/share/man/man1/ob-ssh.1
+usr/share/man/man1/ob-scp.1
 usr/share/man/man1/ob-bastion-id.1
 usr/share/man/man8/ob-enroll.8
 usr/share/man/man8/ob-heartbeat.8

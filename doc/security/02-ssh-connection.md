@@ -41,7 +41,7 @@ flowchart TB
 
         subgraph ConnectionFlow["Flux de connexion"]
             Client[Client SSH<br/>cert signé CA] -->|1. ssh bastion| Bastion[Bastion<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none]
-            Bastion -->|2. ob-ssh-proxy + cert éphémère| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>TrustedUserCAKeys + source-address]
+            Bastion -->|2. ob-ssh + cert éphémère| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>TrustedUserCAKeys + source-address]
         end
 
         LLNG -->|KRL toutes 30 min| KRL
@@ -80,7 +80,7 @@ sequenceDiagram
     Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion<br/>→ voucher(bastion_id, user) stocké
     LLNG-->>Bastion: 4. authorized: true + voucher
     Note over Bastion: 4b. pam_putenv("LLNG_BASTION_VOUCHER=…")
-    Note over Client: 5. Sur le bastion :<br/>ob-ssh-proxy backend
+    Note over Client: 5. Sur le bastion :<br/>ob-ssh backend
     Note over Bastion: 6. Génère paire de clés éphémère ed25519<br/>(clé privée ne quitte pas le bastion)
     Bastion->>LLNG: 7. ob-bastion-cert-helper (sudo NOPASSWD)<br/>POST /pam/bastion-cert<br/>Bearer=jeton_serveur_bastion<br/>body={user, target_host, clé_pub_éphémère, voucher}
     Note over LLNG: 8. Vérifie voucher (bastion_id, user)<br/>Vérifie gardes (grant device_code,<br/>server_group ∈ pamAccessBastionGroups)<br/>Signe clé_pub_éphémère avec CA ssh-ca
@@ -92,7 +92,7 @@ sequenceDiagram
     Backend-->>Client: 14. Session SSH établie
 ```
 
-> **Pourquoi ob-ssh-proxy et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité de s'authentifier avec un certificat éphémère en son propre nom. `ob-ssh-proxy` résout ce problème : il s'exécute **sur le bastion**, obtient un certificat utilisateur éphémère (~120 s) via `POST /pam/bastion-cert` (délégué à `ob-bastion-cert-helper` par une règle sudoers NOPASSWD étroite), puis ouvre la connexion SSH vers le backend avec cette clé et ce certificat éphémères. Le backend vérifie le certificat nativement (CA, `source-address`, `AuthorizedPrincipalsCommand`) pour s'assurer que la connexion provient bien d'un bastion autorisé et que l'utilisateur y est bien connecté (voucher).
+> **Pourquoi `ob-ssh` et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité de s'authentifier avec un certificat éphémère en son propre nom. `ob-ssh` résout ce problème : il s'exécute **sur le bastion**, obtient un certificat utilisateur éphémère (~120 s) via `POST /pam/bastion-cert` (délégué à `ob-bastion-cert-helper` par une règle sudoers NOPASSWD étroite), puis ouvre la connexion SSH vers le backend avec cette clé et ce certificat éphémères. Le backend vérifie le certificat nativement (CA, `source-address`, `AuthorizedPrincipalsCommand`) pour s'assurer que la connexion provient bien d'un bastion autorisé et que l'utilisateur y est bien connecté (voucher).
 
 #### 3. Escalade de privilèges (sudo)
 
@@ -182,7 +182,7 @@ iptables -A INPUT -p tcp --dport 22 -j DROP
 
 ### Transport du voucher bastion (côté bastion)
 
-Le voucher `LLNG_BASTION_VOUCHER` est propagé par PAM (transport **local au bastion**, sans `SendEnv`/`AcceptEnv`). À la connexion de l'utilisateur sur le bastion, `pam_openbastion` reçoit le voucher via la réponse `/pam/authorize` et l'exporte avec `pam_putenv("LLNG_BASTION_VOUCHER=…")`. OpenSSH fusionne l'environnement PAM dans la session via `pam_getenvlist` (directive `UsePAM yes`), ce qui rend la variable disponible dans le shell de l'utilisateur sur le bastion. `ob-ssh-proxy` la lit directement depuis son propre environnement ; aucun `AcceptEnv` ni `SendEnv` n'est nécessaire — et ce transport fonctionne là où `SendEnv` échouait, car `pam_getenv` lit bien l'environnement PAM local.
+Le voucher `LLNG_BASTION_VOUCHER` est propagé par PAM (transport **local au bastion**, sans `SendEnv`/`AcceptEnv`). À la connexion de l'utilisateur sur le bastion, `pam_openbastion` reçoit le voucher via la réponse `/pam/authorize` et l'exporte avec `pam_putenv("LLNG_BASTION_VOUCHER=…")`. OpenSSH fusionne l'environnement PAM dans la session via `pam_getenvlist` (directive `UsePAM yes`), ce qui rend la variable disponible dans le shell de l'utilisateur sur le bastion. `ob-ssh` la lit directement depuis son propre environnement ; aucun `AcceptEnv` ni `SendEnv` n'est nécessaire — et ce transport fonctionne là où `SendEnv` échouait, car `pam_getenv` lit bien l'environnement PAM local.
 
 ```bash
 # Aucune directive AcceptEnv n'est nécessaire sur les backends.
@@ -463,8 +463,8 @@ ssh backend.internal.example.com
 # sshd: certificate presented from wrong source address (source-address critical option)
 # ou : Permission denied (publickey) si pas de cert éphémère bastion
 
-# Depuis le bastion via ob-ssh-proxy, doit fonctionner :
-ob-ssh-proxy backend.internal.example.com
+# Depuis le bastion via ob-ssh, doit fonctionner :
+ob-ssh backend.internal.example.com
 ```
 
 |                 |                           Score résiduel                            |
@@ -508,10 +508,10 @@ ob-ssh-proxy backend.internal.example.com
 # /etc/ssh/sshd_config
 AllowAgentForwarding no
 
-# Utiliser ob-ssh-proxy (pas ProxyJump natif, qui contournerait le vouching par certificat)
+# Utiliser ob-ssh (pas ProxyJump natif, qui contournerait le vouching par certificat)
 # ~/.ssh/config
 Host backend
-    ProxyCommand ssh bastion ob-ssh-proxy %h %p
+    ProxyCommand ssh bastion ob-ssh %h %p
 ```
 
 **Remédiation procédurale :**
@@ -661,7 +661,7 @@ pamAccessBastionCertTtl: 60 # 1 minute au lieu de 2 (si politique plus stricte)
 
 **Cas a — Voucher expiré :**
 
-- **Comportement fail-closed :** `/pam/bastion-cert` renvoie `reason: voucher_expired` ; `ob-ssh-proxy` affiche une erreur claire (« Votre autorisation bastion a expiré — reconnectez-vous au bastion ») et sort en erreur. L'utilisateur se reconnecte au bastion (normal), PAM rejoue `/pam/authorize` et émet un nouveau voucher.
+- **Comportement fail-closed :** `/pam/bastion-cert` renvoie `reason: voucher_expired` ; `ob-ssh` affiche une erreur claire (« Votre autorisation bastion a expiré — reconnectez-vous au bastion ») et sort en erreur. L'utilisateur se reconnecte au bastion (normal), PAM rejoue `/pam/authorize` et émet un nouveau voucher.
 - **Validité du voucher :** `min(now + pamAccessBastionVoucherTtl [défaut 43200 s = 12 h], expires_at du certificat SSO de l'utilisateur)` — la révocation SSO invalide donc le voucher sans délai supplémentaire.
 - Pas de re-vouching silencieux : la reconnexion est la preuve de présence auditable.
 
@@ -1374,7 +1374,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 ### Bastion et vouching par certificat éphémère
 
 - [ ] `AllowAgentForwarding no` sur le bastion
-- [ ] Clients configurés avec `ob-ssh-proxy` (ProxyJump natif interdit car contourne le vouching)
+- [ ] Clients configurés avec `ob-ssh` (ProxyJump natif interdit car contourne le vouching)
 - [ ] `AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i` dans sshd_config des backends
 - [ ] `/etc/open-bastion/allowed_bastions` configuré sur les backends (via `ob-backend-setup --allowed-bastions <client_ids>`)
 - [ ] Plugin `ssh-ca` LLNG actif (`sshCaActivation=1`)
@@ -1646,7 +1646,7 @@ sequenceDiagram
 | Monitoring KRL + alertes                                | Détection rapide de R-S15                                              |
 | `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion                |
 | `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                                       |
-| `ob-ssh-proxy` (pas ProxyJump natif)                    | Vouching par certificat éphémère + clé privée ne quitte pas le bastion |
+| `ob-ssh` (pas ProxyJump natif)                          | Vouching par certificat éphémère + clé privée ne quitte pas le bastion |
 | `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation              |
 | 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                                    |
 

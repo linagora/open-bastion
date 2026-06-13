@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Create directories (including JWKS cache for bastion JWT verification)
+# Create directories for open-bastion runtime data
 RUN mkdir -p /var/run/sshd \
     /var/cache/open-bastion \
     && chmod 750 /var/cache/open-bastion

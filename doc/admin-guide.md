@@ -294,11 +294,11 @@ Users can then connect to backends using:
 
 ```bash
 # Direct command
-ob-ssh-proxy backend-server
+ob-ssh backend-server
 
 # Or via SSH config on bastion (~/.ssh/config):
 Host backend-*
-    ProxyCommand ob-ssh-proxy %h %p
+    ProxyCommand ob-ssh %h %p
 ```
 
 ### Step 8: Configure Log Rotation
@@ -506,8 +506,8 @@ ufw enable
 ### Step 10: Test
 
 ```bash
-# From bastion, connect to backend using ob-ssh-proxy
-ob-ssh-proxy backend-server
+# From bastion, connect to backend using ob-ssh
+ob-ssh backend-server
 
 # Verify user was created
 grep $USER /etc/passwd
@@ -837,7 +837,7 @@ journalctl -u sshd | grep "SSH key policy"
 | `ob-enroll`           | Enroll server with LLNG                       |
 | `ob-enroll -g GROUP`  | Enroll with specific server group             |
 | `ob-session-recorder` | Record SSH session (ForceCommand)             |
-| `ob-ssh-proxy HOST`   | Connect to backend via bastion ephemeral cert |
+| `ob-ssh HOST`         | Connect to backend via bastion ephemeral cert |
 
 ## CrowdSec Integration
 

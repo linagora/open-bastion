@@ -1,0 +1,185 @@
+#!/bin/bash
+# shellcheck disable=SC2155
+#
+# ob-scp - bastion file copy to/between backends with LLNG certificate vouching
+#
+# The scp counterpart of ob-ssh. Run on a bastion by a user already
+# authenticated to it; the bastion mints a short-lived, LLNG-signed certificate
+# for this user and runs scp with it, so files can be copied:
+#   * bastion  -> backend            ob-scp file user@backend:/path
+#   * backend  -> bastion            ob-scp user@backend:/path file
+#   * backend  <-> backend           ob-scp user@b1:/path user@b2:/path
+#
+# All transfers are forced through the bastion (scp -3). This is not just
+# convenience: the vouched certificate is pinned to the BASTION's source
+# address, so a direct backend-to-backend transfer would be rejected. Routing
+# every connection through the bastion keeps the source address matching the
+# certificate.
+#
+# Usage (on the bastion):
+#     ob-scp [scp-options] SOURCE ... DEST
+#
+# where SOURCE/DEST are local paths or [user@]backend:/path specs. All remote
+# endpoints must use the SAME remote user (one vouched certificate = one
+# principal).
+#
+# Copyright (C) 2025 Linagora
+# Author: Xavier Guimard <xguimard@linagora.com>
+# License: AGPL-3.0
+
+set -euo pipefail
+
+VERSION="0.2.3"
+PROG_NAME=$(basename "$0")
+
+# Source the shared cert-vouching library: the installed path first, then
+# alongside this script (running from the source tree / tests).
+_OB_LIB="${OB_CERT_LIB:-/usr/lib/open-bastion/ob-cert-lib.sh}"
+if [ ! -r "$_OB_LIB" ]; then
+    _OB_LIB="$(dirname "$(readlink -f "$0")")/ob-cert-lib.sh"
+fi
+if [ ! -r "$_OB_LIB" ]; then
+    echo "[ERROR] cannot find ob-cert-lib.sh (looked at \$OB_CERT_LIB, /usr/lib/open-bastion, and \$0's dir)" >&2
+    exit 1
+fi
+# shellcheck source=scripts/ob-cert-lib.sh
+. "$_OB_LIB"
+
+usage() {
+    cat <<EOF
+Usage: $PROG_NAME [OPTIONS] [scp-options] SOURCE ... DEST
+
+Copy files to / from / between backends through the bastion, using an LLNG
+vouched certificate. SOURCE/DEST are local paths or [user@]backend:/path specs.
+All remote endpoints must share the same remote user. Transfers are routed
+through the bastion (scp -3) so they match the certificate's pinned source
+address.
+
+Options (consumed by $PROG_NAME, must come first):
+  -c, --config FILE   Use alternate config file (default: $CONFIG_FILE)
+  -d, --debug         Enable debug output
+  -h, --help          Show this help
+  -V, --version       Show version
+
+Any further options are passed straight to scp (e.g. -r, -P PORT, -p, -C, -l).
+
+Examples:
+  $PROG_NAME ./data.tar dwho@backend1:/tmp/
+  $PROG_NAME dwho@backend1:/var/log/app.log ./
+  $PROG_NAME -r dwho@backend1:/etc/app dwho@backend2:/etc/app
+EOF
+}
+
+# Return 0 if the argument is a remote spec ([user@]host:path), i.e. it has a
+# ':' before any '/'. A leading './x:y' or '/abs:path' is a LOCAL file.
+is_remote_spec() {
+    local arg="$1"
+    case "$arg" in
+        */*) # a slash appears; remote only if the ':' is before the first '/'
+            local before_slash="${arg%%/*}"
+            [[ "$before_slash" == *:* ]] ;;
+        *:*) return 0 ;;   # has ':' and no '/': remote
+        *)   return 1 ;;   # no ':': local
+    esac
+}
+
+# Parse [user@]host:path -> sets REMOTE_USER / REMOTE_HOST (path ignored here).
+split_remote_spec() {
+    local spec="$1"
+    local hostpart="${spec%%:*}"        # strip ":path"
+    if [[ "$hostpart" == *@* ]]; then
+        REMOTE_USER="${hostpart%%@*}"
+        REMOTE_HOST="${hostpart#*@}"
+    else
+        REMOTE_USER=""
+        REMOTE_HOST="$hostpart"
+    fi
+}
+
+# Parse our own options (must precede scp args), leaving SCP_ARGS as the rest.
+SCP_ARGS=()
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -c|--config) CONFIG_FILE="$2"; shift 2 ;;
+            -d|--debug)
+                # DEBUG is consumed by debug() in ob-cert-lib.sh (sourced above).
+                # shellcheck disable=SC2034
+                DEBUG=true
+                shift ;;
+            -h|--help)   usage; exit 0 ;;
+            -V|--version) echo "$PROG_NAME version $VERSION"; exit 0 ;;
+            --) shift; break ;;
+            *)  break ;;
+        esac
+    done
+    SCP_ARGS=("$@")
+}
+
+main() {
+    parse_args "$@"
+    load_config
+    validate_config
+
+    if [ "${#SCP_ARGS[@]}" -lt 2 ]; then
+        error "Need at least a SOURCE and a DEST"
+        usage
+        exit 1
+    fi
+
+    # Walk SCP_ARGS to find the remote endpoints and their user. Options that
+    # take a separate argument must not have that argument mistaken for a path.
+    local default_user="${USER:-$(whoami)}"
+    local resolved_user="" first_host=""
+    local i=0 n=${#SCP_ARGS[@]}
+    while [ "$i" -lt "$n" ]; do
+        local t="${SCP_ARGS[$i]}"
+        case "$t" in
+            # scp options that consume the NEXT token as their argument.
+            -c|-D|-F|-i|-J|-l|-o|-P|-S|-X)
+                i=$((i + 2)); continue ;;
+            -*)  i=$((i + 1)); continue ;;   # bundled flags / attached values
+            *)
+                if is_remote_spec "$t"; then
+                    split_remote_spec "$t"
+                    validate_hostname "$REMOTE_HOST"
+                    local u="${REMOTE_USER:-$default_user}"
+                    if [ -z "$resolved_user" ]; then
+                        resolved_user="$u"
+                        first_host="$REMOTE_HOST"
+                    elif [ "$u" != "$resolved_user" ]; then
+                        error "All remote endpoints must use the same user (got '$resolved_user' and '$u')."
+                        error "One vouched certificate authenticates as a single principal."
+                        exit 1
+                    fi
+                fi
+                i=$((i + 1)) ;;
+        esac
+    done
+
+    if [ -z "$resolved_user" ]; then
+        error "No remote [user@]host:path endpoint found — nothing to vouch for."
+        error "ob-scp copies to/from/between backends; at least one side must be remote."
+        exit 1
+    fi
+
+    debug "Remote user=$resolved_user, vouching via host=$first_host"
+    mint_ephemeral_cert "$resolved_user" "$first_host" || exit 1
+    # shellcheck disable=SC2064
+    trap "rm -rf '$OB_EPH_DIR'" EXIT INT TERM
+
+    # Force -3: route every connection through the bastion so the source address
+    # matches the cert pin (and so backend<->backend works at all).
+    local rc=0
+    scp -3 \
+        -i "$OB_EPH_KEY" \
+        -o CertificateFile="$OB_EPH_CERT" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=accept-new \
+        "${SSH_OPTIONS_ARRAY[@]}" \
+        "${SCP_ARGS[@]}" || rc=$?
+
+    exit $rc
+}
+
+main "$@"

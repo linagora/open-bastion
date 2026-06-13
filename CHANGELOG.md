@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ob-scp`**: bastion file-copy counterpart of `ob-ssh`. Copies files
+  bastion→backend, backend→bastion, or backend↔backend using a short-lived
+  vouched certificate. All transfers are forced through the bastion (`scp -3`)
+  so the connection's source address matches the certificate's pinned address
+  (a direct backend-to-backend transfer would be rejected). All remote
+  endpoints must share the same remote user (one vouched certificate = one
+  principal).
+
+### Changed
+
+- **`ob-ssh-proxy` renamed to `ob-ssh`.** The bastion-to-backend connector is
+  now `ob-ssh`; the certificate-minting logic it shares with the new `ob-scp`
+  was factored into a sourced library, `ob-cert-lib.sh` (installed under
+  `/usr/lib/open-bastion/`).
+
 ### Fixed
 
+- **`ob-ssh` interactive sessions: double echo, and Ctrl-C / a failing command
+  tearing down the connection.** The connector relied on ssh's TTY
+  auto-detection when re-originating to the backend, which is fragile across a
+  bastion-pty → backend-pty hop and could leave the bastion-side terminal in
+  cooked mode (input echoed twice) and deliver signals to the connector instead
+  of the remote shell. `ob-ssh` now controls TTY allocation explicitly: `-tt`
+  when stdin is a terminal (so the bastion-side tty goes raw — single echo, and
+  Ctrl-C / failures act on the remote shell), `-T` otherwise.
 - **NSS module kept serving a stale access token after rotation.**
   `libnss_openbastion` loaded the server token once per process and never
   re-read it, so once `ob-heartbeat` rotated the token the cached value

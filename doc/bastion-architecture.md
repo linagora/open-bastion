@@ -135,8 +135,8 @@ sequenceDiagram
     LLNG-->>Bastion: {authorized: true, bastion_voucher: "..."}
     Note over Bastion: pam_putenv("LLNG_BASTION_VOUCHER=...")<br/>merged into session env (UsePAM yes)
 
-    User->>Bastion: ob-ssh-proxy user@backend
-    Note over Bastion: ob-ssh-proxy mints ephemeral ed25519 keypair in tmpfs
+    User->>Bastion: ob-ssh user@backend
+    Note over Bastion: ob-ssh mints ephemeral ed25519 keypair in tmpfs
     Bastion->>Bastion: sudo ob-bastion-cert-helper (NOPASSWD, root-only server token)
     Bastion->>LLNG: POST /pam/bastion-cert (Bearer=server token,<br/>body={voucher, pubkey, user, target_host, target_group})
     Note over LLNG: Re-checks gates: device-code grant,<br/>pam:server scope, server_group ∈ pamAccessBastionGroups,<br/>per-(bastion_id,user) voucher
@@ -166,7 +166,7 @@ The ephemeral certificate carries:
 
 The voucher is reusable for the duration of the user's SSO session (up to
 `pamAccessBastionVoucherTtl`, default 12 h, capped by the user's SSO cert expiry). On
-expiry `ob-ssh-proxy` exits with a clear error and the user reconnects to the bastion to
+expiry `ob-ssh` exits with a clear error and the user reconnects to the bastion to
 obtain a fresh voucher (fail-closed; no silent re-vouching).
 
 ## Server Groups
@@ -493,7 +493,7 @@ recording and audit controls. With certificate vouching:
 ```mermaid
 flowchart LR
     subgraph Bastion["Bastion Server"]
-        proxy["ob-ssh-proxy"]
+        proxy["ob-ssh"]
         helper["ob-bastion-cert-helper\n(sudoers NOPASSWD)"]
     end
 
@@ -515,25 +515,25 @@ flowchart LR
     sshd -->|6. check key-id + allowed_bastions| principals
 ```
 
-### How the Voucher Reaches `ob-ssh-proxy`
+### How the Voucher Reaches `ob-ssh`
 
 When the user SSHes to the bastion, `pam_openbastion` (account stage) calls
 `POST /pam/authorize`. LLNG mints a reusable voucher bound to `(bastion_id, user)`,
 stores it in the user's persistent LLNG session, and returns it in the authorize
 response. `pam_openbastion` calls `pam_putenv("LLNG_BASTION_VOUCHER=...")`. Because
 the bastion runs `UsePAM yes`, sshd merges the PAM environment into the session via
-`pam_getenvlist`, so `ob-ssh-proxy` inherits the variable directly — no cross-host
+`pam_getenvlist`, so `ob-ssh` inherits the variable directly — no cross-host
 transport, no `SendEnv`.
 
 The voucher is reusable (e.g. `scp backend1:/f backend2:/g` = two cert requests, same
 voucher). Its validity is `min(now + pamAccessBastionVoucherTtl, userCert.expires_at)`
 (default cap: 43200 s / 12 h). On expiry, `POST /pam/bastion-cert` returns
-`voucher_expired`; `ob-ssh-proxy` prints a clear reconnect message and exits non-zero.
+`voucher_expired`; `ob-ssh` prints a clear reconnect message and exits non-zero.
 
 ### Why `ob-bastion-cert-helper` (no setuid)
 
 The bastion's server token (Bearer for `POST /pam/bastion-cert`) must be root-readable
-only. `ob-ssh-proxy` runs as the connecting user, so it cannot read the token directly.
+only. `ob-ssh` runs as the connecting user, so it cannot read the token directly.
 A narrow `sudoers` `NOPASSWD` rule allows the user to invoke `ob-bastion-cert-helper`,
 which reads the token, calls LLNG, and always mints for `$SUDO_USER` (the invoking user,
 not the sudoers target). No setuid binary is introduced.

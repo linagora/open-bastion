@@ -1,0 +1,157 @@
+.TH OB-SSH 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-ssh \- bastion-to-backend SSH connector with LLNG certificate vouching
+.SH SYNOPSIS
+.B ob-ssh
+[\fIOPTIONS\fR] [\fIuser@\fR]\fIbackend\fR [\fIport\fR]
+.SH DESCRIPTION
+.B ob-ssh
+runs on a bastion server, invoked by a user already authenticated to the
+bastion, to reach a backend WITHOUT any SSH key of their own on the bastion and
+without agent forwarding. The bastion mints a short-lived, LemonLDAP::NG-signed
+SSH certificate for this user and re-originates the SSH connection to the
+backend with it.
+.PP
+This replaces the former JWT-over-SendEnv transport (which never worked, because
+SendEnv/AcceptEnv do not populate the PAM environment the backend reads). See
+.IR doc/design/bastion-cert-vouching.md .
+.SS Flow
+.IP 1. 4
+Reads the per-session bastion voucher from \fB$LLNG_BASTION_VOUCHER\fR (set by
+.BR pam_openbastion (8)
+at bastion login; it proves THIS user connected to THIS bastion).
+.IP 2. 4
+Generates an ephemeral keypair in tmpfs (the private key never leaves the
+bastion and is wiped on exit).
+.IP 3. 4
+POSTs the ephemeral public key plus the voucher to LemonLDAP::NG
+\fI/pam/bastion-cert\fR and receives a short-lived user certificate (principal =
+user, pinned to the bastion's source address, bastion_id in the key-id).
+.IP 4. 4
+Connects to the backend with that certificate.
+.SS Modes
+.TP
+.B Direct mode
+Called with a target host argument (the common case).
+.TP
+.B ForceCommand mode
+When \fBSSH_ORIGINAL_COMMAND\fR is set (used as an sshd ForceCommand).
+.TP
+.B Interactive mode
+When neither a target argument nor SSH_ORIGINAL_COMMAND is set, prompts for one.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
+.TP
+.BR \-d ", " \-\-debug
+Enable debug output to stderr
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit
+.TP
+.BR \-V ", " \-\-version
+Show version and exit
+.SH CONFIGURATION
+The command reads configuration from \fI/etc/open-bastion/ssh-proxy.conf\fR
+(written by \fBob-bastion-setup\fR(8)):
+.PP
+.nf
+# LemonLDAP::NG portal URL (required)
+PORTAL_URL="https://auth.example.com"
+
+# Server token file (from ob-enroll); root-only by design
+SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
+
+# Target server group for backends
+TARGET_GROUP="default"
+
+# HTTP timeout (seconds)
+TIMEOUT=10
+
+# Verify SSL certificates
+VERIFY_SSL=true
+
+# Additional SSH options (passed through to ssh)
+SSH_OPTIONS=""
+
+# Enable debug output
+DEBUG=false
+.fi
+.PP
+A normal (non-root) user cannot read the root-only server token; the single
+privileged call is delegated to
+.BR ob-bastion-cert-helper (8)
+through a narrow NOPASSWD sudoers rule installed by
+.BR ob-bastion-setup (8).
+No setuid binary is involved.
+.SH "TTY HANDLING"
+When standard input is a terminal,
+.B ob-ssh
+forces a remote pty (\fBssh -tt\fR) so the bastion-side terminal is put into raw
+mode: input is echoed once (by the backend), and Ctrl-C or a failing command
+act on the remote shell rather than tearing down the connector. When stdin is
+not a terminal (piped input), no pty is requested (\fBssh -T\fR).
+.SH SECURITY
+The vouched certificate provides cryptographic proof that the user authenticated
+to this bastion. It is short-lived, carries the user as its only principal, and
+is pinned to the bastion's source address, so it cannot be replayed from
+elsewhere. The backend enforces acceptance via
+.BR TrustedUserCAKeys ,
+an
+.B AuthorizedPrincipalsCommand
+that checks the bastion_id in the key-id against its allow-list, and the
+certificate's source-address restriction. No
+.B AcceptEnv
+is required.
+.SH FILES
+.TP
+.I /etc/open-bastion/ssh-proxy.conf
+Configuration file (world-readable; contains no secret)
+.TP
+.I /usr/lib/open-bastion/ob-cert-lib.sh
+Shared cert-vouching library sourced by ob-ssh and ob-scp
+.TP
+.I /var/lib/open-bastion/token
+Server authentication token (root-only, from ob-enroll)
+.SH ENVIRONMENT
+.TP
+.B LLNG_BASTION_VOUCHER
+The per-session voucher set by pam_openbastion at bastion login.
+.TP
+.B SSH_ORIGINAL_COMMAND
+Used in ForceCommand mode to determine the target host.
+.TP
+.B OB_CERT_LIB
+Override the path to the shared cert-vouching library (testing).
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+Error (configuration, network, authentication, or no valid voucher)
+.PP
+Otherwise the exit status of the underlying
+.BR ssh (1).
+.SH EXAMPLES
+.nf
+# Connect from the bastion to a backend as the same user:
+$ ob-ssh backend-web01
+
+# Different remote user and port:
+$ ob-ssh admin@backend-web01 2222
+.fi
+.SH SEE ALSO
+.BR ob-scp (1),
+.BR ob-bastion-cert-helper (8),
+.BR ob-bastion-setup (8),
+.BR ob-backend-setup (8),
+.BR ob-enroll (8),
+.BR ssh (1),
+.BR sshd_config (5)
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0
+.SH AUTHORS
+Xavier Guimard <xguimard@linagora.com>
