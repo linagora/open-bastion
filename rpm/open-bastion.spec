@@ -166,7 +166,9 @@ chgrp ob-sessions /var/lib/open-bastion/sessions
 # o+r) so a connecting user — who is NOT in ob-sessions and whose elevated gid
 # the recorder wrapper deliberately drops before exec — can still traverse into
 # its own subdir created by the wrapper. Without o+x the recorder fails with
-# "session directory ... does not exist and could not be created".
+# "User sessions directory ... does not exist and could not be created". The
+# parent /var/lib/open-bastion is likewise 711 (above) so it stays traversable
+# by that de-privileged recorder.
 chmod 3771 /var/lib/open-bastion/sessions
 # Migrate the server token out of /etc (config) into /var/lib (runtime state,
 # FHS) so the heartbeat sandbox can keep /etc read-only. Idempotent.
