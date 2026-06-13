@@ -4,7 +4,7 @@
 # - Downloads KRL (Key Revocation List)
 # - Configures sshd for certificate-only auth
 # - Sets up KRL refresh cron
-# - Configures bastion JWT verification
+# - Relies on certificate vouching (bastion-minted cert key-id + source-address)
 
 set -e
 
@@ -104,8 +104,6 @@ UsePAM yes
 X11Forwarding no
 PermitRootLogin no
 
-# Accept bastion JWT environment variable from SSH connection
-AcceptEnv LLNG_BASTION_JWT
 EOF
 
 # Enroll server via Device Authorization Grant
@@ -238,13 +236,6 @@ create_user = true
 create_home = true
 default_shell = /bin/bash
 
-# Bastion JWT verification
-bastion_jwt_required = true
-bastion_jwt_issuer = $PORTAL_URL
-bastion_jwt_jwks_url = $PORTAL_URL/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_cache_ttl = 3600
-bastion_jwt_clock_skew = 60
 
 log_level = info
 EOF
@@ -310,8 +301,10 @@ echo "Authentication: SSO-signed certificates ONLY"
 echo "Unsigned keys: REJECTED (AuthorizedKeysFile none)"
 echo "KRL: ACTIVE (refreshed every ${KRL_REFRESH_INTERVAL} min)"
 echo "sudo: requires fresh LLNG temporary token"
-echo "Bastion JWT: REQUIRED"
+echo "Backend trust: LLNG SSH CA only (TrustedUserCAKeys)"
 echo ""
-echo "Direct SSH connections without valid bastion JWT will be DENIED"
+echo "NOTE: this hand-rolled demo trusts any LLNG-CA-signed cert; per-bastion"
+echo "      origin enforcement (AuthorizedPrincipalsCommand + allowed_bastions)"
+echo "      is applied by ob-backend-setup in a real deployment, not here."
 
 exec "$@"

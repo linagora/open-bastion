@@ -42,9 +42,6 @@ set(PAM_MODULE_SOURCES
     src/secret_store.c
     src/auth_cache.c
     src/cache_key.c
-    src/bastion_jwt.c
-    src/jwks_cache.c
-    src/jti_cache.c
     src/crowdsec.c
     src/service_account.c
     src/ssh_key_policy.c

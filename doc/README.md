@@ -14,7 +14,7 @@
 | Document                                        | Description                                   |
 | ----------------------------------------------- | --------------------------------------------- |
 | [Service Accounts](service-accounts.md)         | Ansible, backup, CI/CD accounts               |
-| [Bastion Architecture](bastion-architecture.md) | Bastion-to-backend JWT authentication         |
+| [Bastion Architecture](bastion-architecture.md) | Bastion-to-backend certificate vouching       |
 | [Session Recording](session-recording.md)       | SSH session recording for audit               |
 | [Session Containment Hardening](hardening.md)   | logind, limits, at/cron containment           |
 | [Primary Audit Trace](audit.md)                 | Optional auditd-based syscall audit trail     |

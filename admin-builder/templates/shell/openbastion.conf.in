@@ -20,4 +20,4 @@ server_group = ##SERVER_GROUP##
 log_level = warn
 audit_enabled = true
 
-@@BASTION_JWT_BLOCK@@
+@@BASTION_BACKEND_BLOCK@@

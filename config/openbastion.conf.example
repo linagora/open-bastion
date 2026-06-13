@@ -159,55 +159,17 @@ log_level = warn
 # offline_max_sso_unreachable = 3600
 
 # ==============================================================================
-# Bastion JWT Verification (for backend servers)
+# Bastion → backend authentication (certificate vouching)
 # ==============================================================================
-
-# Require JWT from bastion for authentication
-# When enabled, connections without a valid bastion JWT are rejected
-# Default: false
-# bastion_jwt_required = false
-
-# Expected JWT issuer (LLNG portal URL)
-# Must match the portal that signed the JWT
-# bastion_jwt_issuer = https://auth.example.com
-
-# JWKS endpoint URL for public key retrieval
-# Default: {portal_url}/.well-known/jwks.json
-# bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-
-# Local cache file for JWKS (enables offline verification)
-# Default: /var/cache/open-bastion/jwks.json
-# bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-
-# JWKS cache TTL in seconds
-# Default: 3600 (1 hour)
-# bastion_jwt_cache_ttl = 3600
-
-# Allowed clock skew in seconds for JWT expiration checks
-# Default: 60
-# bastion_jwt_clock_skew = 60
-
-# Comma-separated list of allowed bastion IDs (client_id)
-# Leave empty to allow all bastions
-# bastion_jwt_allowed_bastions = bastion-prod-01,bastion-prod-02
-
-# ==============================================================================
-# JWT Replay Detection
-# ==============================================================================
-
-# Enable JTI-based replay detection
-# Each JWT ID (jti) is cached and rejected if reused
-# Default: true
-# bastion_jwt_replay_detection = true
-
-# Maximum number of JTI entries in cache
-# Should be large enough to hold all expected JTIs during their TTL
-# Default: 10000
-# bastion_jwt_replay_cache_size = 10000
-
-# Cleanup interval for expired JTI entries (seconds)
-# Default: 60
-# bastion_jwt_replay_cleanup_interval = 60
+# There is NO config here. The bastion vouches for a hop by obtaining a
+# short-lived, LLNG-signed SSH user certificate; the backend's sshd validates
+# it natively (TrustedUserCAKeys + source-address critical option) and the
+# "accept only this bastion" allowlist is enforced by an
+# AuthorizedPrincipalsCommand reading /etc/open-bastion/allowed_bastions
+# (written by `ob-backend-setup --allowed-bastions <client_ids>`).
+# The legacy `bastion_jwt_*` keys (LLNG_BASTION_JWT over SendEnv) have been
+# removed — that transport was structurally broken. See
+# doc/bastion-architecture.md and doc/design/bastion-cert-vouching.md.
 
 # ==============================================================================
 # CrowdSec Integration (optional)

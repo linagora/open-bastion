@@ -8,7 +8,7 @@ A 2-container setup to try Open Bastion in under 2 minutes:
 - a single SSH server that enrolls itself against the portal on startup,
   then accepts LLNG access tokens as SSH passwords.
 
-For richer scenarios (bastion → backend with JWT proof-of-origin, SSH
+For richer scenarios (bastion → backend with certificate proof-of-origin, SSH
 certificate authentication, hardened security settings), see
 `docker-demo-token/`, `docker-demo-cert/` and `docker-demo-maxsec/`.
 
@@ -66,7 +66,7 @@ docker compose down -v
 
 ## What this demo does not show
 
-- Bastion → backend split with JWT proof-of-origin (see `docker-demo-token/`)
+- Bastion → backend split with certificate proof-of-origin (see `docker-demo-token/`)
 - SSH certificate authentication (see `docker-demo-cert/`)
 - Session recording, CrowdSec, offline cache hardening (see `docker-demo-maxsec/`)
 - `ob-enroll` manual enrollment — the server here enrolls itself in its
@@ -84,12 +84,12 @@ certificate authentication — the PAM module on each server still calls
 and server self-enrollment uses the `oidc-device-authorization` /
 `oidc-device-organization` plugins.
 
-| Plugin                      | Role                                                    |
-| --------------------------- | ------------------------------------------------------- |
-| `pam-access`                | `/pam/authorize`, `/pam/userinfo`, `/pam/bastion-token` |
-| `ssh-ca`                    | SSH certificate signing (`/ssh/sign`, `/ssh/ca`)        |
-| `oidc-device-authorization` | RFC 8628 Device Authorization Grant (enrollment)        |
-| `oidc-device-organization`  | Admin approval flow for device codes                    |
+| Plugin                      | Role                                                   |
+| --------------------------- | ------------------------------------------------------ |
+| `pam-access`                | `/pam/authorize`, `/pam/userinfo`, `/pam/bastion-cert` |
+| `ssh-ca`                    | SSH certificate signing (`/ssh/sign`, `/ssh/ca`)       |
+| `oidc-device-authorization` | RFC 8628 Device Authorization Grant (enrollment)       |
+| `oidc-device-organization`  | Admin approval flow for device codes                   |
 
 ### Option A — via `lemonldap-ng-store` (LLNG ≥ 2.23.0, recommended)
 

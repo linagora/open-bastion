@@ -71,4 +71,4 @@ ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 # client_id) when an allowlist was given at build time. Enforcement is via
 # ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not the
 # old broken bastion_jwt config.
-@@BASTION_JWT_VARS_YAML@@
+@@BASTION_ALLOWLIST_VARS_YAML@@

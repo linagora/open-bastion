@@ -29,6 +29,7 @@
 #include <grp.h>
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 #include <sys/file.h>
 #include <fcntl.h>
 
@@ -39,9 +40,6 @@
 #include "auth_cache.h"
 #include "cache_key.h"
 #include "token_manager.h"
-#include "bastion_jwt.h"
-#include "jwks_cache.h"
-#include "jti_cache.h"
 #include "crowdsec.h"
 #include "service_account.h"
 #include "ssh_key_policy.h"
@@ -82,9 +80,6 @@ typedef struct {
     audit_context_t *audit;
     rate_limiter_t *rate_limiter;
     auth_cache_t *auth_cache;  /* Authorization cache for offline mode */
-    jwks_cache_t *jwks_cache;  /* JWKS cache for bastion JWT verification */
-    jti_cache_t *jti_cache;    /* JTI cache for bastion JWT replay detection */
-    bastion_jwt_verifier_t *bastion_jwt_verifier;  /* Bastion JWT verifier */
     crowdsec_context_t *crowdsec;  /* CrowdSec bouncer/watcher */
     crowdsec_action_t crowdsec_action;  /* Parsed CrowdSec action (reject/warn) */
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
@@ -1174,15 +1169,6 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
             offline_cache_destroy(ob_data->offline_cache);
         }
 #endif /* ENABLE_DESKTOP_SSO */
-        if (ob_data->bastion_jwt_verifier) {
-            bastion_jwt_verifier_destroy(ob_data->bastion_jwt_verifier);
-        }
-        if (ob_data->jwks_cache) {
-            jwks_cache_destroy(ob_data->jwks_cache);
-        }
-        if (ob_data->jti_cache) {
-            jti_cache_destroy(ob_data->jti_cache);
-        }
         if (ob_data->client) {
             ob_client_destroy(ob_data->client);
         }
@@ -1528,83 +1514,6 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
         crowdsec_free_whitelist(whitelist_entries);
         if (!data->crowdsec) {
             OB_LOG_WARN(pamh, "Failed to initialize CrowdSec, continuing without");
-        }
-    }
-
-    /* Initialize bastion JWT verification if required */
-    if (data->config.bastion_jwt_required && data->config.bastion_jwt_verify_local) {
-        /* Build JWKS URL from portal_url if not specified */
-        char *jwks_url = data->config.bastion_jwt_jwks_url;
-        char jwks_url_buf[512] = {0};
-        if (!jwks_url && data->config.portal_url) {
-            snprintf(jwks_url_buf, sizeof(jwks_url_buf), "%s/.well-known/jwks.json",
-                     data->config.portal_url);
-            jwks_url = jwks_url_buf;
-        }
-
-        /* Build JWKS cache file path if not specified */
-        char *jwks_cache_file = data->config.bastion_jwt_jwks_cache;
-        char jwks_cache_buf[256] = {0};
-        if (!jwks_cache_file) {
-            snprintf(jwks_cache_buf, sizeof(jwks_cache_buf),
-                     "%s/jwks.json", data->config.cache_dir ? data->config.cache_dir : "/var/cache/open-bastion");
-            jwks_cache_file = jwks_cache_buf;
-        }
-
-        /* Initialize JWKS cache */
-        if (jwks_url) {
-            jwks_cache_config_t jwks_cfg = {
-                .jwks_url = jwks_url,
-                .cache_file = jwks_cache_file,
-                .refresh_interval = data->config.bastion_jwt_cache_ttl,
-                .timeout = data->config.timeout,
-                .verify_ssl = data->config.verify_ssl,
-                .ca_cert = data->config.ca_cert
-            };
-            data->jwks_cache = jwks_cache_init(&jwks_cfg);
-            if (!data->jwks_cache) {
-                OB_LOG_WARN(pamh, "Failed to initialize JWKS cache for bastion JWT");
-            }
-        }
-
-        /* Initialize JTI cache for replay detection if enabled */
-        if (data->config.bastion_jwt_replay_detection) {
-            jti_cache_config_t jti_cfg = {
-                .max_entries = (size_t)data->config.bastion_jwt_replay_cache_size,
-                .cleanup_interval = data->config.bastion_jwt_replay_cleanup_interval,
-                .persist_path = NULL  /* Memory-only for now */
-            };
-            data->jti_cache = jti_cache_create(&jti_cfg);
-            if (!data->jti_cache) {
-                OB_LOG_WARN(pamh, "Failed to initialize JTI cache for replay detection");
-            }
-        }
-
-        /* Initialize bastion JWT verifier */
-        if (data->jwks_cache) {
-            /* Use portal_url as issuer if not specified */
-            char *issuer = data->config.bastion_jwt_issuer;
-            if (!issuer) {
-                issuer = data->config.portal_url;
-            }
-
-            bastion_jwt_config_t jwt_cfg = {
-                .issuer = issuer,
-                .audience = "pam:bastion-backend",
-                .max_clock_skew = data->config.bastion_jwt_clock_skew,
-                .allowed_bastions = data->config.bastion_jwt_allowed_bastions,
-                .jwks_cache = data->jwks_cache,
-                .jti_cache = data->jti_cache  /* May be NULL if disabled */
-            };
-            data->bastion_jwt_verifier = bastion_jwt_verifier_init(&jwt_cfg);
-            if (!data->bastion_jwt_verifier) {
-                OB_LOG_WARN(pamh, "Failed to initialize bastion JWT verifier");
-            }
-        }
-
-        if (data->config.bastion_jwt_required && !data->bastion_jwt_verifier) {
-            OB_LOG_ERR(pamh, "Bastion JWT verification required but failed to initialize");
-            goto error;
         }
     }
 

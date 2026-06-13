@@ -145,6 +145,6 @@ LemonLDAP::NG offers the most comprehensive and cost-effective solution.
 
 ## See Also
 
-- [Bastion Architecture](bastion-architecture.md) - JWT-based bastion authentication
+- [Bastion Architecture](bastion-architecture.md) - certificate-vouching bastion authentication
 - [Session Recording](session-recording.md) - SSH session recording
 - [Admin Guide](admin-guide.md) - Complete administration guide

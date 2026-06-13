@@ -5,7 +5,7 @@ This Docker Compose demo demonstrates the **maximum security configuration** (Mo
 - **SSH**: only SSO-signed certificates accepted (`AuthorizedKeysFile none`)
 - **sudo**: only LLNG temporary tokens accepted (PAM-access re-authentication)
 - **KRL**: mandatory Key Revocation List, refreshed every 30 minutes
-- **Bastion JWT**: backend requires cryptographic proof of bastion origin
+- **CA-signed certificates only**: the backend trusts the LLNG SSH CA and rejects unsigned keys. Per-bastion origin enforcement (`AuthorizedPrincipalsCommand` + allowed_bastions) is added by `ob-backend-setup` in a real deployment; this hand-rolled demo does not wire it.
 
 ## Architecture
 
@@ -19,7 +19,7 @@ flowchart LR
 
     User["User"] -->|:80| SSO
     User -->|:2222| Bastion
-    Bastion -->|SSH + JWT| Backend
+    Bastion -->|SSH + CA cert| Backend
 
     style Backend fill:#f9f,stroke:#333
 ```
@@ -184,5 +184,5 @@ docker compose up -d
 - KRL refresh interval should match your revocation SLA
 - Consider shorter certificate validity in high-security environments
 - Enable audit logging for compliance
-- **Bastion JWT**: Backends require a valid JWT from the bastion
+- **Bastion-only origin** (production): wire `ob-backend-setup --allowed-bastions` so the backend's `AuthorizedPrincipalsCommand` rejects direct user certs — not configured in this hand-rolled demo
 - **sudo tokens**: Each sudo operation requires a fresh LLNG authentication

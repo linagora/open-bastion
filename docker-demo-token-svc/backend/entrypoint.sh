@@ -47,8 +47,6 @@ UsePAM yes
 X11Forwarding no
 PermitRootLogin no
 
-# (legacy AcceptEnv kept for compatibility; bastion-to-backend auth now uses certificate vouching)
-AcceptEnv LLNG_BASTION_JWT
 EOF
 
 # Enroll server via Device Authorization Grant
@@ -211,13 +209,6 @@ create_user = true
 create_home = true
 default_shell = /bin/bash
 
-# Bastion certificate vouching (require connection from authorized bastion via ob-ssh)
-bastion_jwt_required = true
-bastion_jwt_issuer = $PORTAL_URL
-bastion_jwt_jwks_url = $PORTAL_URL/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_cache_ttl = 3600
-bastion_jwt_clock_skew = 60
 
 # Logging
 log_level = info

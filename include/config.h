@@ -115,21 +115,6 @@ typedef struct {
     int offline_max_sso_unreachable;    /* Max time SSO can be unreachable while network is up (default: 3600 = 1h) */
 #endif /* ENABLE_DESKTOP_SSO */
 
-    /* Bastion JWT verification (for backend servers) */
-    bool bastion_jwt_required;      /* Require JWT from bastion (default: false) */
-    bool bastion_jwt_verify_local;  /* Verify JWT locally with JWKS (default: true) */
-    char *bastion_jwt_issuer;       /* Expected JWT issuer (LLNG portal URL) */
-    char *bastion_jwt_jwks_url;     /* JWKS endpoint URL (default: portal_url/.well-known/jwks.json) */
-    char *bastion_jwt_jwks_cache;   /* Local JWKS cache path (default: /var/cache/open-bastion/jwks.json) */
-    int bastion_jwt_cache_ttl;      /* JWKS cache TTL in seconds (default: 3600) */
-    int bastion_jwt_clock_skew;     /* Allowed clock skew in seconds (default: 60) */
-    char *bastion_jwt_allowed_bastions; /* Comma-separated list of allowed bastion IDs */
-
-    /* JTI replay detection (for bastion JWT) */
-    bool bastion_jwt_replay_detection;     /* Enable JTI replay detection (default: true) */
-    int bastion_jwt_replay_cache_size;     /* Max JTI cache entries (default: 10000) */
-    int bastion_jwt_replay_cleanup_interval; /* Cleanup interval in seconds (default: 60) */
-
     /* CrowdSec integration (disabled by default) */
     bool crowdsec_enabled;                 /* Enable CrowdSec integration (default: false) */
     char *crowdsec_url;                    /* LAPI URL (default: http://127.0.0.1:8080) */

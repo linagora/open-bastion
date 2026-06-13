@@ -44,14 +44,12 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 | `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                  |
 | `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored |
 
-Backend-only JWT variables (populated by ob-builder for backend scenarios):
+Backend-only "accept only this bastion" variable (populated by ob-builder for
+backend scenarios when an allowlist was given):
 
-| Variable                    | Description                                        |
-| --------------------------- | -------------------------------------------------- |
-| `ob_bastion_jwt_required`   | Require bastion-forwarded JWT (true/false)         |
-| `ob_bastion_jwt_issuer`     | JWT issuer — the LLNG portal URL (not the bastion) |
-| `ob_bastion_jwt_jwks_url`   | LLNG JWKS endpoint for signature verification      |
-| `ob_bastion_jwt_jwks_cache` | Local JWKS cache path                              |
+| Variable                      | Description                                                                                                                                                                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_bastion_allowed_bastions` | Comma/space-separated `bastion_id` (= the enrolling `client_id`) the backend accepts certs from. Empty/undefined = any vouched bastion. Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address — not the old (removed) `bastion_jwt_*` config. |
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):
 
