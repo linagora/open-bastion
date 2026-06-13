@@ -148,12 +148,16 @@ cookie (it auto-approves the device-code enrolment for the whole fleet — no
 browser needed) and pass it at run time:
 
 ```bash
-COOKIE=$(llng --llng-url https://sso.example.com --login admin --password '***' llng_cookie)
+COOKIE=$(llng --llng-server sso.example.com --login admin --password '***' llng_cookie)
 
 ansible-playbook -i inventory.yml playbook.yml \
   --ask-vault-pass \
   --extra-vars "ob_llng_cookie='$COOKIE'"
 ```
+
+`--llng-server` takes a **server name** (not a URL) and assumes **HTTPS** — the
+production case. For a plain `http://` test SSO, pass the full URL instead with
+`--llng-url http://sso.test`.
 
 Without auto-approve, omit `ob_llng_cookie`: the play prints a device URL + code
 per host for manual browser approval.
