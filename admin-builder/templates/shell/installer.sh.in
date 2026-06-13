@@ -57,6 +57,9 @@ SELF_DELETE_DEFAULT="@@SELF_DELETE@@"
 ENABLE_HARDENING="@@ENABLE_HARDENING@@"
 ENABLE_AUDIT_TRACE="@@ENABLE_AUDIT_TRACE@@"
 DISABLE_SESSION_RECORDER="@@DISABLE_SESSION_RECORDER@@"
+# Backend-only "accept only this bastion" allowlist (comma/space-separated
+# bastion_id = enrolling client_id). Empty = accept any vouched bastion.
+ALLOWED_BASTIONS="@@ALLOWED_BASTIONS@@"
 
 # ---------------------------------------------------------------------------
 # Runtime variables (resolved during execution)
@@ -662,7 +665,11 @@ step_setup() {
             # OB_CLIENT_SECRET (kept out of /proc/<pid>/cmdline). ob-enroll
             # already ran in step_enroll and wrote the token, so ob-bastion-setup
             # reuses it (no second device-code approval).
-            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}")
+            # --yes: the installer already confirmed (its own prompt / -y), so
+            # run ob-bastion-setup non-interactively. Without it, setup prompts
+            # "Continue with bastion setup? [y/N]", reads nothing on a piped
+            # stdin, and ABORTS — leaving sshd unconfigured (no TrustedUserCAKeys).
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--yes")
             [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
@@ -682,8 +689,14 @@ step_setup() {
         backend)
             # Backends never record sessions, so --disable-session-recorder is
             # not applicable here; hardening / audit-trace stay opt-in.
-            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}")
+            # --yes: run ob-backend-setup non-interactively (see bastion note).
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--yes")
             [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
+            # "Accept only this bastion": forward the embedded allowlist so the
+            # backend's AuthorizedPrincipalsCommand rejects certs whose key-id
+            # bastion=<id> is not listed. Without this the backend would accept
+            # any vouched bastion (parity with the Ansible backend role).
+            [ -n "${ALLOWED_BASTIONS}" ] && _setup_opts+=("--allowed-bastions" "${ALLOWED_BASTIONS}")
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
             [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")

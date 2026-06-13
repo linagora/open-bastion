@@ -605,6 +605,15 @@ validate_inputs() {
     [ -n "$TARGET_ROLE" ]        || die "target_role is required"
     is_valid_target_role "$TARGET_ROLE" || die "Invalid target_role: $TARGET_ROLE"
 
+    # allowed_bastions is embedded verbatim into the generated artefacts (the
+    # self-extracting shell installer and the Ansible vars). Restrict it to safe
+    # identifier characters so a malicious or typo'd value cannot inject shell
+    # metacharacters ($(), backticks, quotes, newlines) into the installer that
+    # runs as root. bastion_ids are [A-Za-z0-9._-], separated by comma/space.
+    if [ -n "${ALLOWED_BASTIONS:-}" ] && ! [[ "$ALLOWED_BASTIONS" =~ ^[A-Za-z0-9._,\ -]+$ ]]; then
+        die "Invalid allowed_bastions (only letters, digits, '.', '_', '-', ',' and spaces allowed): $ALLOWED_BASTIONS"
+    fi
+
     : "${AUTO_ENROLL_SETUP:=prompt}"
     case "$AUTO_ENROLL_SETUP" in yes|no|prompt) ;; *) die "Invalid auto_enroll_setup: $AUTO_ENROLL_SETUP" ;; esac
 
@@ -880,7 +889,12 @@ build_placeholder_map() {
     # source-address. So the conf block is empty; we only pass the allowlist to
     # the Ansible role (which forwards it as ob-backend-setup --allowed-bastions).
     bastion_backend_block=""
+    # Role-scoped: the allowlist is meaningful only for a backend. Keep it empty
+    # for bastion/standalone artefacts (matters in --bundle, where one config
+    # produces both roles — the bastion installer must NOT embed the allowlist).
+    local allowlist_for_role=""
     if [ "$role" = "backend" ] && [ -n "${ALLOWED_BASTIONS:-}" ]; then
+        allowlist_for_role="$ALLOWED_BASTIONS"
         bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
     else
         bastion_allowlist_yaml=""
@@ -933,6 +947,7 @@ build_placeholder_map() {
     ph_set EMBEDDED_CLIENT_SECRET "$EMBEDDED_CLIENT_SECRET"
     ph_set SERVER_GROUP         "$SERVER_GROUP"
     ph_set SERVER_GROUP_POLICY  "$SERVER_GROUP_POLICY"
+    ph_set ALLOWED_BASTIONS     "$allowlist_for_role"
     ph_set AUTO_ENROLL_SETUP    "$AUTO_ENROLL_SETUP"
     ph_set SELF_DELETE          "$SELF_DELETE"
     ph_set CA_SSH_PUB_B64       "$ca_b64"
