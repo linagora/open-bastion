@@ -211,8 +211,17 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Install SSH proxy for bastion
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-proxy
+# Shared cert-vouching library, sourced by ob-ssh / ob-scp. Installed to a
+# fixed (non-multiarch) /usr/lib/open-bastion path that the scripts look up.
+install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-cert-lib.sh
+    DESTINATION lib/open-bastion
+)
+
+# Bastion-to-backend SSH / SCP connectors (cert vouching).
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-scp
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -226,7 +235,7 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Privileged half of ob-ssh-proxy's certificate request: only root may use it
+# Privileged half of ob-ssh's certificate request: only root may use it
 # directly; normal users go through the sudoers rule installed by
 # ob-bastion-setup (configure_ssh_proxy_sudoers). No setuid bit involved.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-cert-helper
@@ -292,7 +301,8 @@ install(FILES
 # Install man pages (section 1 - user commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
-    ${CMAKE_SOURCE_DIR}/man/ob-ssh-proxy.1
+    ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
+    ${CMAKE_SOURCE_DIR}/man/ob-scp.1
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )

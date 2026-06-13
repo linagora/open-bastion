@@ -1,6 +1,6 @@
-# ob-ssh-proxy configuration
+# ob-ssh configuration
 #
-# This file is sourced by ob-ssh-proxy when the bastion connects to backends.
+# This file is sourced by ob-ssh when the bastion connects to backends.
 # Copy this file to /etc/open-bastion/ssh-proxy.conf and adjust the values.
 
 # LemonLDAP::NG portal URL (required)

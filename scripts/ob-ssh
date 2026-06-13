@@ -1,0 +1,279 @@
+#!/bin/bash
+# shellcheck disable=SC2155
+#
+# ob-ssh - bastion-to-backend SSH connector with LLNG certificate vouching
+#
+# Run on a bastion server, by a user already authenticated to the bastion, to
+# reach a backend WITHOUT any SSH key of their own on the bastion and without
+# agent forwarding. The bastion mints a short-lived, LLNG-signed certificate
+# for this user and re-originates the SSH connection to the backend with it.
+#
+# Usage (on the bastion):
+#     ob-ssh [user@]backend [port]
+#
+# Flow:
+#   1. Reads the per-session bastion voucher from $LLNG_BASTION_VOUCHER (set by
+#      pam_openbastion at bastion login; it proves THIS user connected to THIS
+#      bastion).
+#   2. Generates an ephemeral keypair in tmpfs (the private key never leaves the
+#      bastion and is wiped on exit).
+#   3. POSTs the ephemeral public key + voucher to LLNG /pam/bastion-cert and
+#      receives a short-lived user certificate (principal = user, pinned to the
+#      bastion IP, bastion_id in the key-id).
+#   4. Connects to the backend with `ssh -i <ephkey> -o CertificateFile=<cert>`.
+#
+# This replaces the old (broken) JWT-over-SendEnv transport: SendEnv/AcceptEnv
+# never populate the PAM environment pam_getenv reads, so the backend rejected
+# every session. See doc/design/bastion-cert-vouching.md.
+#
+# Copyright (C) 2025 Linagora
+# Author: Xavier Guimard <xguimard@linagora.com>
+# License: AGPL-3.0
+
+set -euo pipefail
+
+VERSION="0.2.3"
+PROG_NAME=$(basename "$0")
+
+# Source the shared cert-vouching library: the installed path first, then
+# alongside this script (running from the source tree / tests).
+_OB_LIB="${OB_CERT_LIB:-/usr/lib/open-bastion/ob-cert-lib.sh}"
+if [ ! -r "$_OB_LIB" ]; then
+    _OB_LIB="$(dirname "$(readlink -f "$0")")/ob-cert-lib.sh"
+fi
+if [ ! -r "$_OB_LIB" ]; then
+    echo "[ERROR] cannot find ob-cert-lib.sh (looked at \$OB_CERT_LIB, /usr/lib/open-bastion, and \$0's dir)" >&2
+    exit 1
+fi
+# shellcheck source=scripts/ob-cert-lib.sh
+. "$_OB_LIB"
+
+# Mint an ephemeral cert and re-originate the SSH connection to the backend.
+# Args: <target_host> <target_user> [target_port]
+connect_via_cert() {
+    local target_host="$1"
+    local target_user="$2"
+    local target_port="${3:-22}"
+
+    mint_ephemeral_cert "$target_user" "$target_host" || exit 1
+    # Clean the ephemeral key dir on exit. We do NOT trap INT/TERM to also clean
+    # up here: once `ssh` runs interactively it puts the local tty in raw mode
+    # and Ctrl-C is delivered as a keystroke to the REMOTE pty (see -tt below),
+    # so this script is not signalled mid-session. A signal that arrives before
+    # ssh starts (during minting) still triggers the EXIT trap via the default
+    # disposition, so the tmpfs key is never left behind.
+    # shellcheck disable=SC2064
+    trap "rm -rf '$OB_EPH_DIR'" EXIT
+
+    # TTY handling — the crux of correct interactive behaviour through the hop:
+    #   * interactive (stdin is a tty): force a remote pty with -tt. ssh then
+    #     puts the bastion-side tty into raw mode, so input is echoed ONCE (by
+    #     the backend pty, not also by the bastion tty), and Ctrl-C / a failing
+    #     command act on the REMOTE shell instead of tearing down this proxy.
+    #     Relying on ssh's tty auto-detection here is fragile and is what
+    #     produced the double-echo / shell-killed-on-Ctrl-C reports.
+    #   * non-interactive (piped stdin, e.g. a scripted command): -T, no pty.
+    local -a tty_opt
+    if [ -t 0 ]; then
+        tty_opt=(-tt)
+    else
+        tty_opt=(-T)
+    fi
+
+    # Re-originate: the BASTION authenticates to the backend with the cert.
+    local rc=0
+    ssh -i "$OB_EPH_KEY" \
+        -o CertificateFile="$OB_EPH_CERT" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=accept-new \
+        "${tty_opt[@]}" \
+        -p "$target_port" \
+        "${SSH_OPTIONS_ARRAY[@]}" \
+        -l "$target_user" \
+        -- "$target_host" || rc=$?
+
+    exit $rc
+}
+
+# Parse a "[user@]host" spec into globals SPEC_USER / SPEC_HOST.
+parse_target_spec() {
+    local spec="$1"
+    local default_user="$2"
+    if [[ "$spec" == *@* ]]; then
+        SPEC_USER="${spec%%@*}"
+        SPEC_HOST="${spec#*@}"
+    else
+        SPEC_USER="$default_user"
+        SPEC_HOST="$spec"
+    fi
+}
+
+# Direct mode: user runs `ob-ssh [user@]backend [port]` on the bastion.
+direct_mode() {
+    local spec="$1"
+    local port="${2:-22}"
+    local user="${USER:-$(whoami)}"
+    parse_target_spec "$spec" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
+}
+
+# ForceCommand mode: the original command is in SSH_ORIGINAL_COMMAND
+# (e.g. "ssh backend" or "ssh user@backend").
+force_command_mode() {
+    local user="${USER:-$(whoami)}"
+    local ssh_cmd="${SSH_ORIGINAL_COMMAND:-}"
+
+    if [ -z "$ssh_cmd" ]; then
+        error "No SSH_ORIGINAL_COMMAND set"
+        exit 1
+    fi
+
+    debug "Original command: $ssh_cmd"
+
+    # Walk the tokens the way ssh(1) parses them: skip flags and the argument of
+    # any option that takes one, so `ssh -p 2222 backend` or
+    # `ssh -o Foo=bar user@backend` resolve to the host — not the option or its
+    # value. -p / -l additionally seed the target port / user.
+    local -a toks=()
+    read -r -a toks <<<"$ssh_cmd"
+    [ "${toks[0]:-}" = "ssh" ] && toks=("${toks[@]:1}")
+
+    local target="" port=22 i=0 n=${#toks[@]}
+    while [ "$i" -lt "$n" ]; do
+        local t="${toks[$i]}"
+        case "$t" in
+            --)  i=$((i + 1)); target="${toks[$i]:-}"; break ;;
+            -p)  port="${toks[$((i + 1))]:-22}";   i=$((i + 2)); continue ;;
+            -l)  user="${toks[$((i + 1))]:-$user}"; i=$((i + 2)); continue ;;
+            # Options that consume the NEXT token as their argument.
+            -b|-c|-D|-E|-e|-F|-I|-i|-J|-L|-m|-O|-o|-Q|-R|-S|-W|-w)
+                 i=$((i + 2)); continue ;;
+            -p*) port="${t#-p}"; i=$((i + 1)); continue ;;
+            -l*) user="${t#-l}"; i=$((i + 1)); continue ;;
+            -*)  i=$((i + 1)); continue ;;   # attached-value or bare flag(s)
+            *)   target="$t"; break ;;
+        esac
+    done
+
+    if [ -z "$target" ]; then
+        error "Could not parse target host from command: $ssh_cmd"
+        exit 1
+    fi
+
+    parse_target_spec "$target" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
+}
+
+# Interactive mode: prompt for a target.
+interactive_mode() {
+    local user="${USER:-$(whoami)}"
+
+    echo "Welcome to the LLNG bastion server"
+    echo ""
+    echo "Usage: ob-ssh [user@]<backend-hostname> [port]"
+    echo ""
+    echo -n "Enter target host ([user@]host): "
+    read -r spec
+
+    if [ -z "$spec" ]; then
+        error "No target specified"
+        exit 1
+    fi
+
+    parse_target_spec "$spec" "$user"
+    connect_via_cert "$SPEC_HOST" "$SPEC_USER" 22
+}
+
+# Show usage
+usage() {
+    cat <<EOF
+Usage: $PROG_NAME [OPTIONS] [user@]backend [port]
+
+Bastion-to-backend SSH connector with LLNG certificate vouching. Run on a
+bastion by a user already authenticated to it; the bastion mints a short-lived,
+LLNG-signed certificate and re-originates the SSH connection to the backend.
+No SSH key of your own on the bastion and no agent forwarding are needed.
+
+Modes:
+  Direct mode:        $PROG_NAME [user@]backend [port]
+  ForceCommand mode:  $PROG_NAME            (reads SSH_ORIGINAL_COMMAND)
+  Interactive mode:   $PROG_NAME            (prompts for target)
+
+Options:
+  -c, --config FILE   Use alternate config file (default: $CONFIG_FILE)
+  -d, --debug         Enable debug output
+  -h, --help          Show this help
+  -V, --version       Show version
+
+Configuration ($CONFIG_FILE):
+    PORTAL_URL="https://auth.example.com"
+    SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
+    SERVER_GROUP="bastion"
+    TARGET_GROUP="default"
+    TIMEOUT=10
+    VERIFY_SSL=true
+    DEBUG=false
+
+The backend's sshd must trust the LLNG SSH CA (TrustedUserCAKeys). No AcceptEnv
+is required (the old LLNG_BASTION_JWT / SendEnv transport is gone).
+EOF
+}
+
+# Parse arguments
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -c|--config)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            -d|--debug)
+                # DEBUG is consumed by debug() in ob-cert-lib.sh (sourced above).
+                # shellcheck disable=SC2034
+                DEBUG=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -V|--version)
+                echo "$PROG_NAME version $VERSION"
+                exit 0
+                ;;
+            -*)
+                error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    # Remaining arguments: [user@]host [port]
+    TARGET_SPEC="${1:-}"
+    TARGET_PORT="${2:-22}"
+}
+
+# Main
+main() {
+    parse_args "$@"
+    load_config
+    validate_config
+
+    # Determine mode
+    if [ -n "$TARGET_SPEC" ]; then
+        debug "Direct mode: $TARGET_SPEC:$TARGET_PORT"
+        direct_mode "$TARGET_SPEC" "$TARGET_PORT"
+    elif [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+        debug "ForceCommand mode"
+        force_command_mode
+    else
+        debug "Interactive mode"
+        interactive_mode
+    fi
+}
+
+main "$@"

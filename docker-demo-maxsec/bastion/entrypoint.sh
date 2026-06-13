@@ -446,6 +446,6 @@ echo "KRL: ACTIVE (refreshed every ${KRL_REFRESH_INTERVAL} min)"
 echo "sudo: requires fresh LLNG temporary token"
 echo ""
 echo "To connect to backend via bastion:"
-echo "  From bastion: ob-ssh-proxy backend"
+echo "  From bastion: ob-ssh backend"
 
 exec "$@"

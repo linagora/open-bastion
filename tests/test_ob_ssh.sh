@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# Comprehensive test suite for ob-ssh-proxy (llng-ssh-proxy)
+# Comprehensive test suite for ob-ssh (llng bastion SSH connector)
 #
-# This test suite validates the core functionality of the SSH proxy script
-# by sourcing its functions and testing them in isolation.
+# Tests core functionality by sourcing the shared library (ob-cert-lib.sh)
+# and the ob-ssh script's own functions, testing them in isolation.
 #
 
 set -u
@@ -20,7 +20,9 @@ NC='\033[0m' # No Color
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROXY_SCRIPT="$SCRIPT_DIR/scripts/ob-ssh-proxy"
+PROXY_SCRIPT="$SCRIPT_DIR/scripts/ob-ssh"
+LIB="$SCRIPT_DIR/scripts/ob-cert-lib.sh"
+export OB_CERT_LIB="$LIB"
 
 # Temp directory for test files
 TEST_TMPDIR=$(mktemp -d)
@@ -95,8 +97,8 @@ set -u
 source_file="$1"
 test_config="$2"
 
-# Source the script without running main
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+# Source the library directly (no stripping needed)
+source "$source_file"
 
 # Override stat to return group-writable permissions
 stat() {
@@ -117,7 +119,7 @@ TESTSCRIPT
     echo "PORTAL_URL=https://test.example.com" > "$test_config"
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
+    output=$("$test_script" "$LIB" "$test_config" 2>&1)
 
     if [[ "$output" =~ "Insecure config file" ]]; then
         test_pass "Config file permission check: rejects non-root ownership"
@@ -135,8 +137,8 @@ set -u
 source_file="$1"
 test_config="$2"
 
-# Source the script without running main
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+# Source the library directly (no stripping needed)
+source "$source_file"
 
 # Override stat to return safe permissions
 stat() {
@@ -175,7 +177,7 @@ MALICIOUS=$(echo pwned)
 EOF
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
+    output=$("$test_script" "$LIB" "$test_config" 2>&1)
 
     local all_good=true
     local details=""
@@ -221,7 +223,7 @@ set -u
 source_file="$1"
 test_config="$2"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 stat() { if [[ "$*" =~ test_config ]]; then echo "0:644"; else command stat "$@"; fi; }
 export -f stat
@@ -241,7 +243,7 @@ TARGET_GROUP='single-quoted'
 EOF
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
+    output=$("$test_script" "$LIB" "$test_config" 2>&1)
 
     if echo "$output" | grep -q "PORTAL_URL=https://quoted.example.com" && \
        echo "$output" | grep -q "TARGET_GROUP=single-quoted"; then
@@ -260,7 +262,7 @@ set -u
 source_file="$1"
 test_config="$2"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 stat() { if [[ "$*" =~ test_config ]]; then echo "0:644"; else command stat "$@"; fi; }
 export -f stat
@@ -284,7 +286,7 @@ TARGET_GROUP=testgroup  # inline comment
 EOF
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$test_config" 2>&1)
+    output=$("$test_script" "$LIB" "$test_config" 2>&1)
 
     if echo "$output" | grep -q "PORTAL_URL=https://example.com" && \
        echo "$output" | grep -q "TARGET_GROUP=testgroup"; then
@@ -302,7 +304,7 @@ test_curl_opts_ssl_verify() {
 set -u
 source_file="$1"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 VERIFY_SSL=true
 TIMEOUT=10
@@ -326,7 +328,7 @@ TESTSCRIPT
 
     chmod +x "$test_script"
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+    output=$("$test_script" "$LIB" 2>&1)
 
     if [[ "$output" == "NO_K" ]]; then
         test_pass "build_curl_opts without SSL skip: no -k flag"
@@ -343,7 +345,7 @@ test_curl_opts_ssl_skip() {
 set -u
 source_file="$1"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 VERIFY_SSL=false
 TIMEOUT=10
@@ -366,7 +368,7 @@ TESTSCRIPT
 
     chmod +x "$test_script"
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+    output=$("$test_script" "$LIB" 2>&1)
 
     if [[ "$output" == "HAS_K" ]]; then
         test_pass "build_curl_opts with SSL skip: has -k flag"
@@ -384,7 +386,7 @@ set -u
 source_file="$1"
 token_file="$2"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 SERVER_TOKEN_FILE="$token_file"
 get_server_token 2>/dev/null
@@ -395,7 +397,7 @@ TESTSCRIPT
     echo '{"access_token": "mytoken123", "refresh_token": "rt"}' > "$token_file"
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$token_file" 2>&1)
+    output=$("$test_script" "$LIB" "$token_file" 2>&1)
 
     if [[ "$output" == "mytoken123" ]]; then
         test_pass "get_server_token reads JSON format"
@@ -413,7 +415,7 @@ set -u
 source_file="$1"
 token_file="$2"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 SERVER_TOKEN_FILE="$token_file"
 get_server_token 2>/dev/null
@@ -424,7 +426,7 @@ TESTSCRIPT
     echo "plaintoken456" > "$token_file"
 
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" "$token_file" 2>&1)
+    output=$("$test_script" "$LIB" "$token_file" 2>&1)
 
     if [[ "$output" == "plaintoken456" ]]; then
         test_pass "get_server_token reads plain text format"
@@ -440,7 +442,7 @@ test_get_token_missing() {
 #!/bin/bash
 source_file="$1"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 SERVER_TOKEN_FILE="/nonexistent/path/to/token"
 get_server_token 2>&1
@@ -450,7 +452,7 @@ TESTSCRIPT
     chmod +x "$test_script"
     local output
     local exit_code=0
-    output=$("$test_script" "$PROXY_SCRIPT" 2>&1) || exit_code=$?
+    output=$("$test_script" "$LIB" 2>&1) || exit_code=$?
 
     if [ $exit_code -ne 0 ]; then
         test_pass "get_server_token rejects missing file"
@@ -460,6 +462,7 @@ TESTSCRIPT
 }
 
 # Test 14: parse_args sets TARGET_SPEC and TARGET_PORT
+# parse_args is ob-ssh-specific; use the sed-strip approach with OB_CERT_LIB exported.
 test_parse_args_host_port() {
     local test_script="$TEST_TMPDIR/test_parse_args.sh"
     cat > "$test_script" <<'TESTSCRIPT'
@@ -574,7 +577,7 @@ test_missing_portal_url() {
 #!/bin/bash
 source_file="$1"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 # Set empty PORTAL_URL (as would happen with empty config)
 PORTAL_URL=""
@@ -591,7 +594,7 @@ TESTSCRIPT
 
     local output
     local exit_code=0
-    output=$("$test_script" "$PROXY_SCRIPT" 2>&1) || exit_code=$?
+    output=$("$test_script" "$LIB" 2>&1) || exit_code=$?
 
     if [ $exit_code -ne 0 ] && [[ "$output" =~ "PORTAL_URL not configured" ]]; then
         test_pass "Missing PORTAL_URL fails with error"
@@ -609,7 +612,7 @@ test_validate_hostname() {
 #!/bin/bash
 source_file="$1"
 
-eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+source "$source_file"
 
 for ok in 192.168.122.32 backend backend-01.example.com "[2001:db8::1]"; do
     ( validate_hostname "$ok" ) || { echo "REJECTED_GOOD:$ok"; exit 1; }
@@ -624,7 +627,7 @@ TESTSCRIPT
 
     chmod +x "$test_script"
     local output
-    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+    output=$("$test_script" "$LIB" 2>&1)
 
     if echo "$output" | grep -q "VALIDATE_HOSTNAME_OK"; then
         test_pass "validate_hostname: IPv4/FQDN/IPv6 accepted, injection rejected"
@@ -672,7 +675,7 @@ TESTSCRIPT
 
 # Main test execution
 echo "=========================================="
-echo "Testing ob-ssh-proxy (llng-ssh-proxy)"
+echo "Testing ob-ssh (llng bastion SSH connector)"
 echo "=========================================="
 echo ""
 

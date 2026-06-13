@@ -3505,7 +3505,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     /*
      * Bastion vouching: when LLNG returns a voucher, this server is a bastion
      * and the voucher proves THIS user just connected here. Export it into the
-     * PAM environment so ob-ssh-proxy (running later in this same session, on
+     * PAM environment so ob-ssh (running later in this same session, on
      * this same host) can present it to /pam/bastion-cert to mint a short-lived
      * certificate for onward hops. This transport is bastion-LOCAL, so unlike
      * the old SendEnv JWT it actually reaches the session (sshd merges the PAM

@@ -1,0 +1,89 @@
+.TH OB-SCP 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-scp \- bastion file copy to/from/between backends with LLNG certificate vouching
+.SH SYNOPSIS
+.B ob-scp
+[\fIOPTIONS\fR] [\fIscp-options\fR] \fISOURCE\fR ... \fIDEST\fR
+.SH DESCRIPTION
+.B ob-scp
+is the
+.BR scp (1)
+counterpart of
+.BR ob-ssh (1).
+Run on a bastion by a user already authenticated to it, it mints a short-lived,
+LemonLDAP::NG-signed certificate for this user and runs
+.B scp
+with it, so files can be copied:
+.IP \(bu 2
+bastion to backend:  \fBob-scp\fR file user@backend:/path
+.IP \(bu 2
+backend to bastion:  \fBob-scp\fR user@backend:/path file
+.IP \(bu 2
+backend to backend:  \fBob-scp\fR user@b1:/path user@b2:/path
+.PP
+\fISOURCE\fR/\fIDEST\fR are local paths or [\fIuser@\fR]\fIbackend\fR:/\fIpath\fR
+specs. All remote endpoints must use the SAME remote user, because a single
+vouched certificate authenticates as exactly one principal.
+.PP
+All transfers are forced through the bastion (\fBscp -3\fR). This is not just
+convenience: the vouched certificate is pinned to the bastion's source address,
+so a direct backend-to-backend transfer would be rejected. Routing every
+connection through the bastion keeps the source address matching the
+certificate.
+.SH OPTIONS
+Options consumed by ob-scp itself must come first:
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
+.TP
+.BR \-d ", " \-\-debug
+Enable debug output to stderr
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit
+.TP
+.BR \-V ", " \-\-version
+Show version and exit
+.PP
+Any further options are passed straight through to
+.BR scp (1)
+(for example \fB\-r\fR, \fB\-P\fR \fIPORT\fR, \fB\-p\fR, \fB\-C\fR, \fB\-l\fR).
+.SH CONFIGURATION
+Shares \fI/etc/open-bastion/ssh-proxy.conf\fR with
+.BR ob-ssh (1);
+see that page for the keys.
+.SH FILES
+.TP
+.I /etc/open-bastion/ssh-proxy.conf
+Configuration file (world-readable; contains no secret)
+.TP
+.I /usr/lib/open-bastion/ob-cert-lib.sh
+Shared cert-vouching library sourced by ob-ssh and ob-scp
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+Error (configuration, no valid voucher, mismatched remote users, or no remote
+endpoint)
+.PP
+Otherwise the exit status of the underlying
+.BR scp (1).
+.SH EXAMPLES
+.nf
+$ ob-scp ./data.tar dwho@backend1:/tmp/
+$ ob-scp dwho@backend1:/var/log/app.log ./
+$ ob-scp -r dwho@backend1:/etc/app dwho@backend2:/etc/app
+.fi
+.SH SEE ALSO
+.BR ob-ssh (1),
+.BR ob-bastion-cert-helper (8),
+.BR ob-bastion-setup (8),
+.BR scp (1),
+.BR ssh (1)
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0
+.SH AUTHORS
+Xavier Guimard <xguimard@linagora.com>

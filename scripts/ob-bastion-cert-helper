@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# ob-bastion-cert-helper - privileged half of ob-ssh-proxy's certificate request
+# ob-bastion-cert-helper - privileged half of ob-ssh's certificate request
 #
-# ob-ssh-proxy runs as the logged-in bastion user, but /pam/bastion-cert must be
+# ob-ssh runs as the logged-in bastion user, but /pam/bastion-cert must be
 # authenticated with the bastion's server token, which is root-only BY DESIGN
 # (a user reading their own voucher must gain nothing). This helper is the
 # bridge: it is invoked through a `sudo -n` rule installed by ob-bastion-setup
@@ -23,7 +23,7 @@
 #
 # Usage:  ob-bastion-cert-helper <target_host> [target_group]
 # Stdin:  line 1 = voucher, line 2 = ephemeral SSH public key
-# Stdout: the LLNG /pam/bastion-cert JSON response (ob-ssh-proxy parses it)
+# Stdout: the LLNG /pam/bastion-cert JSON response (ob-ssh parses it)
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>
@@ -97,7 +97,7 @@ if [ -f "$OB_CONFIG" ]; then
     PORTAL_URL=$(read_ini "$OB_CONFIG" portal_url)
     v=$(read_ini "$OB_CONFIG" verify_ssl); [ -n "$v" ] && VERIFY_SSL="$v"
 fi
-# ssh-proxy.conf (shell style KEY="value") may override, same keys as ob-ssh-proxy
+# ssh-proxy.conf (shell style KEY="value") may override, same keys as ob-ssh
 if [ -f "$PROXY_CONFIG" ]; then
     file_stat=$(stat -c '%u:%a' "$PROXY_CONFIG" 2>/dev/null)
     owner=${file_stat%%:*}; mode=${file_stat##*:}
@@ -149,7 +149,7 @@ json_payload=$(jq -n \
     '{user: $user, target_host: $target_host, target_group: $target_group, public_key: $public_key, voucher: $voucher}')
 
 # --fail-with-body: non-2xx still prints the JSON error body (reason codes like
-# voucher_expired) so ob-ssh-proxy can show the right message to the user.
+# voucher_expired) so ob-ssh can show the right message to the user.
 response=$(curl "${CURL_OPTS[@]}" \
     -X POST \
     -H "Authorization: Bearer $SERVER_TOKEN" \

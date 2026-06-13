@@ -274,7 +274,7 @@ chmod 644 /etc/open-bastion/nss_openbastion.conf
 # Create SSH proxy configuration for bastion-to-backend connections
 cat > /etc/open-bastion/ssh-proxy.conf << EOF
 # Open Bastion SSH Proxy configuration
-# Used by ob-ssh-proxy to request JWT for bastion-to-backend auth
+# Used by ob-ssh to request JWT for bastion-to-backend auth
 
 PORTAL_URL=$PORTAL_URL
 SERVER_TOKEN_FILE=$TOKEN_FILE
@@ -357,8 +357,8 @@ echo "Users connect with: ssh -p 2222 <username>@localhost"
 echo "Password: Use your LLNG access token"
 echo ""
 echo "To connect to backend via bastion:"
-echo "  From bastion: ob-ssh-proxy backend"
-echo "  Or: ssh -o ProxyCommand='ob-ssh-proxy %h %p' backend"
+echo "  From bastion: ob-ssh backend"
+echo "  Or: ssh -o ProxyCommand='ob-ssh %h %p' backend"
 
 # Execute the command (sshd)
 exec "$@"

@@ -110,7 +110,7 @@ From the bastion, connect to backend and try sudo:
 
 ```bash
 # On bastion - connect to backend
-ob-ssh-proxy backend
+ob-ssh backend
 
 # On backend - try sudo
 sudo whoami

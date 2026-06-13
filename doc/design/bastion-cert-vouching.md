@@ -5,7 +5,7 @@ Branch: `various-setup-fixes`. Spans two repos: `open-bastion` and `lemonldap-ng
 
 ## Why the current mechanism is dead
 
-`ob-ssh-proxy` requested a JWT from `POST /pam/bastion-token` and passed it to the
+`ob-ssh` requested a JWT from `POST /pam/bastion-token` and passed it to the
 backend via `ssh -o SendEnv=LLNG_BASTION_JWT`; `pam_openbastion` read it with
 `pam_getenv("LLNG_BASTION_JWT")` (`pam_sm_acct_mgmt`) and rejected the session when
 `bastion_jwt_required=true` and it was empty.
@@ -30,7 +30,7 @@ vouches by obtaining a per-hop certificate.
 
 1. User SSHes to the bastion with their SSO-issued cert (`ssh-ca` / `ob-ssh-cert`).
    `pam_openbastion` on the bastion authorizes them and stamps `_pamSeen` (already done).
-2. `ob-ssh-proxy <backend>` on the bastion:
+2. `ob-ssh <backend>` on the bastion:
    a. generates an **ephemeral** keypair in tmpfs (private key never leaves the bastion);
    b. `POST /pam/bastion-cert` to LLNG, **Bearer = the bastion's device-grant server
    token**, body `{ user, target_host, target_group, public_key, voucher }`
@@ -79,15 +79,15 @@ pamAccessBastionVoucherTtl, userCert.expires_at)`, where `userCert.expires_at` c
   bastion (which they must do anyway, their cert being dead). No sliding window needed.
 
 **Renewal = fail-closed + reconnect (no hidden re-vouching).** If a hop arrives after the
-window, `/pam/bastion-cert` returns `voucher_expired`; `ob-ssh-proxy` prints a clear,
+window, `/pam/bastion-cert` returns `voucher_expired`; `ob-ssh` prints a clear,
 actionable error on stderr ("Your bastion authorization has expired. Reconnect to the
 bastion: ssh <bastion>") and exits non-zero. The user reconnects to the bastion (cheap,
 normal), pam re-runs `/pam/authorize`, a fresh voucher is minted. We deliberately do NOT
-have `ob-ssh-proxy` silently re-authorize: reconnecting is the explicit, auditable proof
+have `ob-ssh` silently re-authorize: reconnecting is the explicit, auditable proof
 of presence, and it removes the threat-model ambiguity of on-demand re-vouching.
 
 **Transport (bastion-local, so the `SendEnv`/`pam_getenv` trap does not apply):** the
-voucher reaches `ob-ssh-proxy` on the _same host_ — `pam_putenv` at login seeds it into the
+voucher reaches `ob-ssh` on the _same host_ — `pam_putenv` at login seeds it into the
 session, and/or it is cached in a per-session tmpfs file (`$XDG_RUNTIME_DIR`, mode 600)
 so renewals/refreshes persist across hops. The voucher is useless without the bastion's
 root-only server token (required as Bearer on `/pam/bastion-cert`), so a user reading their
@@ -111,7 +111,7 @@ user cert with:
 
 ### open-bastion changes
 
-- `scripts/ob-ssh-proxy`: ephemeral keypair → `/pam/bastion-cert` → `CertificateFile`
+- `scripts/ob-ssh`: ephemeral keypair → `/pam/bastion-cert` → `CertificateFile`
   connect; drop `SendEnv=LLNG_BASTION_JWT`.
 - `src/pam_openbastion.c`: read `bastion_id` from the presented cert (extend existing
   `ob_ssh_cert_info` parsing) and enforce `allowed_bastions`; remove the

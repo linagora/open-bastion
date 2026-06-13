@@ -69,14 +69,14 @@ ssh -p 2222 dwho@localhost
 ### 4. From bastion, connect to backend
 
 The backend server requires a signed JWT from the bastion to prove the connection
-comes from an authorized bastion server. Use the `ob-ssh-proxy` command:
+comes from an authorized bastion server. Use the `ob-ssh` command:
 
 ```bash
 # On bastion - the proxy automatically gets a JWT and forwards it
-ob-ssh-proxy backend
+ob-ssh backend
 
 # Or using SSH with ProxyCommand
-ssh -o ProxyCommand='ob-ssh-proxy %h %p' dwho@backend
+ssh -o ProxyCommand='ob-ssh %h %p' dwho@backend
 ```
 
 **Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
@@ -153,7 +153,7 @@ sequenceDiagram
 ### How it works:
 
 1. User SSH to bastion with LLNG token
-2. From bastion, user runs `ob-ssh-proxy backend`
+2. From bastion, user runs `ob-ssh backend`
 3. Proxy requests a signed JWT from LLNG `/pam/bastion-token`
 4. Proxy connects to backend with JWT in `LLNG_BASTION_JWT` env var
 5. Backend verifies JWT signature using cached JWKS (offline capable)

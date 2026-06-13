@@ -95,8 +95,11 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-bastion-cert-helper
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
-%{_bindir}/ob-ssh-proxy
+%{_bindir}/ob-ssh
+%{_bindir}/ob-scp
 %{_bindir}/ob-bastion-id
+%dir %{_prefix}/lib/open-bastion
+%{_prefix}/lib/open-bastion/ob-cert-lib.sh
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/ssh-proxy.conf.example
 %dir %{_datadir}/open-bastion
@@ -114,7 +117,8 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-bastion-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
-%{_mandir}/man1/ob-ssh-proxy.1*
+%{_mandir}/man1/ob-ssh.1*
+%{_mandir}/man1/ob-scp.1*
 # Hardening templates (session containment - deployed by ob-bastion-setup)
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/hardening

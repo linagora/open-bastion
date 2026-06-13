@@ -99,7 +99,7 @@ flowchart LR
 
     subgraph Bastion["Bastion Server"]
         pam_b["pam_openbastion (authorize)"]
-        proxy["ob-ssh-proxy"]
+        proxy["ob-ssh"]
         helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
     end
 
@@ -133,7 +133,7 @@ flowchart LR
    `POST /pam/authorize`; LLNG mints a **voucher** bound to `(bastion_id, user)` and returns it.
    The voucher is exported via `pam_putenv("LLNG_BASTION_VOUCHER=...")` — bastion-local, so the
    `SendEnv`/`pam_getenv` trap does not apply.
-2. `ob-ssh-proxy [user@]backend` generates an **ephemeral** ed25519 keypair in tmpfs (private key
+2. `ob-ssh [user@]backend` generates an **ephemeral** ed25519 keypair in tmpfs (private key
    never leaves the bastion). It invokes `ob-bastion-cert-helper` (reached via a narrow
    `NOPASSWD` sudoers rule — no setuid binary) which POSTs the voucher and the ephemeral public key
    to `POST /pam/bastion-cert`, authenticating with the bastion's root-only server token as Bearer.
@@ -141,7 +141,7 @@ flowchart LR
    certificate (~120 s validity) with `principal=user`, `key-id` encoding
    `bastion=<bastion_id>;user=<user>;target=<host>`, and a `source-address` critical option pinned
    to the bastion's IP.
-4. `ob-ssh-proxy` connects to the backend: `ssh -i <ephkey> -o CertificateFile=<cert> -o IdentitiesOnly=yes`.
+4. `ob-ssh` connects to the backend: `ssh -i <ephkey> -o CertificateFile=<cert> -o IdentitiesOnly=yes`.
    Temp files are wiped afterwards.
 5. Backend `sshd` validates the certificate natively (CA signature, validity window, `principal`,
    `source-address`). `AuthorizedPrincipalsCommand ob-ssh-principals` checks the `key-id` field
@@ -208,7 +208,7 @@ when an `allowed_bastions` file is present.
 | Bound to | `(bastion_id, user)` — minted at `/pam/authorize`, keyed per pair             |
 | Validity | `min(now + pamAccessBastionVoucherTtl, SSO cert expires_at)`, default 12 h    |
 | Reusable | Yes — multiplexed hops and `scp host1: host2:` all work with the same voucher |
-| Expiry   | Fail-closed: `ob-ssh-proxy` prints a clear error and exits non-zero           |
+| Expiry   | Fail-closed: `ob-ssh` prints a clear error and exits non-zero                 |
 | Renewal  | User reconnects to the bastion; no silent re-vouching                         |
 
 ## Token Cache Security
