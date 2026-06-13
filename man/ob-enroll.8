@@ -28,7 +28,7 @@ OIDC client secret (required if not in config file).
 Server group name for authorization rules. Default: default
 .TP
 .BR \-t ", " \-\-token\-file " " \fIFILE\fR
-Where to save the server token. Default: /etc/open-bastion/token
+Where to save the server token. Default: /var/lib/open-bastion/token
 .TP
 .BR \-C ", " \-\-config " " \fIFILE\fR
 Read settings from config file. Default: /etc/open-bastion/openbastion.conf
@@ -71,7 +71,7 @@ sudo ob-enroll \-g production
 .I /etc/open-bastion/openbastion.conf
 Main configuration file for the PAM module.
 .TP
-.I /etc/open-bastion/token
+.I /var/lib/open-bastion/token
 Server token file created by this script.
 .SH SECURITY
 .PP

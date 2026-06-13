@@ -20,7 +20,7 @@ every 5 minutes.
 Read settings from config file. Default: /etc/open-bastion/openbastion.conf
 .TP
 .BR \-t ", " \-\-token\-file " " \fIFILE\fR
-Server token file. Default: /etc/open-bastion/token
+Server token file. Default: /var/lib/open-bastion/token
 .TP
 .BR \-k ", " \-\-insecure
 Skip SSL certificate verification.
@@ -53,7 +53,7 @@ systemctl status ob-heartbeat.timer
 .I /etc/open-bastion/openbastion.conf
 Main configuration file for the PAM module.
 .TP
-.I /etc/open-bastion/token
+.I /var/lib/open-bastion/token
 Server token file containing access and refresh tokens.
 .TP
 .I /var/lib/open-bastion/

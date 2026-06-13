@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Server token relocated from `/etc/open-bastion/token` to
+  `/var/lib/open-bastion/token`.** The token is runtime state (refreshed every
+  few minutes by `ob-heartbeat`), not configuration, so per the FHS it belongs
+  under `/var/lib`. This also lets the `ob-heartbeat.service` sandbox keep
+  `/etc` fully read-only (`ProtectSystem=strict`) instead of having to leave
+  `/etc/open-bastion` writable. Upgrades migrate automatically: the Debian
+  `postinst` / RPM `%post` move an existing token and repoint
+  `server_token_file` / `SERVER_TOKEN_FILE` in the deployed config files. The
+  path remains configurable via `server_token_file`.
+
 ## [0.2.3] - 2026-05-23
 
 Tooling release: ships a new admin builder for fleet deployments

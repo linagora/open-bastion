@@ -813,7 +813,7 @@ EOF
 
     # Start ob-enroll asynchronously inside the container.
     docker exec ob-cert-backend-new bash -c \
-        "mkdir -p /run/open-bastion && rm -f /var/lib/open-bastion/token /run/open-bastion/enroll.json"
+        "mkdir -p /run/open-bastion && rm -f /var/lib/open-bastion/token /etc/open-bastion/token /run/open-bastion/enroll.json"
     docker exec -d ob-cert-backend-new bash -c \
         "OB_ENROLL_STATE_FILE=/run/open-bastion/enroll.json /usr/sbin/ob-enroll -g backend-new --quiet > /tmp/enroll.log 2>&1"
 
