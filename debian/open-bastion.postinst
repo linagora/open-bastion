@@ -129,7 +129,7 @@ client_id = $client_id
 client_secret = $client_secret
 
 # Server authentication
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 server_group = $server_group
 
 # HTTP settings
@@ -220,6 +220,25 @@ case "$1" in
             # Create state directory
             mkdir -p /var/lib/open-bastion
             chmod 700 /var/lib/open-bastion
+
+            # Migrate the server token from its legacy /etc location (config) to
+            # /var/lib (runtime state — FHS). The token is rewritten every few
+            # minutes by ob-heartbeat; keeping it in /etc forced the heartbeat
+            # service's ProtectSystem=strict sandbox to leave /etc writable.
+            # Relocating it lets /etc go back to read-only. Idempotent.
+            if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then
+                mv /etc/open-bastion/token /var/lib/open-bastion/token
+                chown root:root /var/lib/open-bastion/token
+                chmod 600 /var/lib/open-bastion/token
+            fi
+            for _cf in /etc/open-bastion/openbastion.conf /etc/open-bastion/nss_openbastion.conf; do
+                [ -f "$_cf" ] && sed -i \
+                    's#^\([[:space:]]*server_token_file[[:space:]]*=[[:space:]]*\)/etc/open-bastion/token#\1/var/lib/open-bastion/token#' \
+                    "$_cf"
+            done
+            [ -f /etc/open-bastion/ssh-proxy.conf ] && sed -i \
+                's#^\([[:space:]]*SERVER_TOKEN_FILE=\)"\{0,1\}/etc/open-bastion/token"\{0,1\}#\1"/var/lib/open-bastion/token"#' \
+                /etc/open-bastion/ssh-proxy.conf
 
             # Clear secret from debconf database for security
             db_set open-bastion/client-secret ""

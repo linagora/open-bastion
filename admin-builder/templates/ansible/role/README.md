@@ -136,7 +136,7 @@ localhost` performs:
    - `POST ${portal}/device` with `user_code`, `action=approve`, and the CSRF
      token.
 3. Waits for the original `ob-enroll` to finish polling and emit the server
-   token to `/etc/open-bastion/token`.
+   token to `/var/lib/open-bastion/token`.
 
 ## Example playbook invocation
 

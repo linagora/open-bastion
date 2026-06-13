@@ -25,7 +25,7 @@ VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
-TOKEN_FILE="/etc/open-bastion/token"
+TOKEN_FILE="/var/lib/open-bastion/token"
 PORTAL_URL=""
 SERVER_GROUP=""
 VERIFY_SSL=true
@@ -134,9 +134,9 @@ main() {
     case "$verify_ssl_raw" in false|no|0) VERIFY_SSL=false ;; esac
 
     # Honour `server_token_file = ...` in the conf, falling back to the
-    # canonical /etc/open-bastion/token when unset. Mirrors the PAM module
+    # canonical /var/lib/open-bastion/token when unset. Mirrors the PAM module
     # so ob-bastion-id reads the same file PAM does, without manual --token.
-    if [ "$TOKEN_FILE" = "/etc/open-bastion/token" ]; then
+    if [ "$TOKEN_FILE" = "/var/lib/open-bastion/token" ]; then
         local conf_token_file
         conf_token_file=$(read_config "server_token_file" "$CONFIG_FILE")
         [ -n "$conf_token_file" ] && TOKEN_FILE="$conf_token_file"

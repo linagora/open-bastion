@@ -813,7 +813,7 @@ EOF
 
     # Start ob-enroll asynchronously inside the container.
     docker exec ob-cert-backend-new bash -c \
-        "mkdir -p /run/open-bastion && rm -f /etc/open-bastion/token /run/open-bastion/enroll.json"
+        "mkdir -p /run/open-bastion && rm -f /var/lib/open-bastion/token /etc/open-bastion/token /run/open-bastion/enroll.json"
     docker exec -d ob-cert-backend-new bash -c \
         "OB_ENROLL_STATE_FILE=/run/open-bastion/enroll.json /usr/sbin/ob-enroll -g backend-new --quiet > /tmp/enroll.log 2>&1"
 
@@ -877,7 +877,7 @@ EOF
     # Wait for ob-enroll to complete and write the token.
     i=0
     while [ "$i" -lt 60 ]; do
-        if docker exec ob-cert-backend-new test -f /etc/open-bastion/token 2>/dev/null; then
+        if docker exec ob-cert-backend-new test -f /var/lib/open-bastion/token 2>/dev/null; then
             break
         fi
         i=$((i + 1))
@@ -886,12 +886,12 @@ EOF
     if [ "$i" -eq 60 ]; then
         local enroll_log
         enroll_log=$(docker exec ob-cert-backend-new cat /tmp/enroll.log 2>&1 || true)
-        fail "ob-enroll never wrote /etc/open-bastion/token after auto-approve" "$enroll_log"
+        fail "ob-enroll never wrote /var/lib/open-bastion/token after auto-approve" "$enroll_log"
         return 1
     fi
 
     local token_size
-    token_size=$(docker exec ob-cert-backend-new stat -c '%s' /etc/open-bastion/token)
+    token_size=$(docker exec ob-cert-backend-new stat -c '%s' /var/lib/open-bastion/token)
     if [ "$token_size" -lt 10 ]; then
         fail "Token file is suspiciously small (${token_size}B)"
         return 1

@@ -64,8 +64,9 @@ client_secret = your-client-secret
 # Server group (must match LLNG configuration)
 server_group = standalone
 
-# Token file (created by enrollment)
-server_token_file = /etc/open-bastion/token
+# Token file (runtime state, refreshed automatically by ob-heartbeat)
+# The token lives under /var/lib/open-bastion/ (FHS: runtime state, not config).
+server_token_file = /var/lib/open-bastion/token
 
 # Security settings
 verify_ssl = true
@@ -174,8 +175,8 @@ client_secret = your-client-secret
 # Server group for bastions
 server_group = bastion
 
-# Token file
-server_token_file = /etc/open-bastion/token
+# Token file (runtime state, refreshed automatically by ob-heartbeat)
+server_token_file = /var/lib/open-bastion/token
 
 # Security settings (stricter for bastion)
 verify_ssl = true
@@ -278,7 +279,7 @@ mkdir -p /etc/open-bastion
 cat > /etc/open-bastion/ssh-proxy.conf << 'EOF'
 # LLNG SSH Proxy configuration
 PORTAL_URL=https://auth.example.com
-SERVER_TOKEN_FILE=/etc/open-bastion/token
+SERVER_TOKEN_FILE=/var/lib/open-bastion/token
 SERVER_GROUP=bastion
 TARGET_GROUP=production
 TIMEOUT=10
@@ -368,8 +369,8 @@ client_secret = your-client-secret
 # Server group (production, staging, dev, etc.)
 server_group = production
 
-# Token file
-server_token_file = /etc/open-bastion/token
+# Token file (runtime state, refreshed automatically by ob-heartbeat)
+server_token_file = /var/lib/open-bastion/token
 
 # Security settings
 verify_ssl = true
@@ -404,7 +405,7 @@ cat > /etc/open-bastion/nss_openbastion.conf << 'EOF'
 portal_url = https://auth.example.com
 
 # Server token (same as PAM)
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 
 # Timeouts
 timeout = 5
@@ -571,7 +572,7 @@ It performs all of the following automatically:
   - `ExposeAuthInfo yes`
 - Writes `/etc/pam.d/sshd` and `/etc/pam.d/sudo` for Mode E
 - Configures NSS: adds `openbastion` to `passwd` and `group` in `/etc/nsswitch.conf`
-- Runs `ob-enroll` to obtain `/etc/open-bastion/token`
+- Runs `ob-enroll` to obtain `/var/lib/open-bastion/token`
 - Downloads the initial KRL to `/etc/ssh/revoked_keys`
 - Creates `/etc/sudoers.d/open-bastion` for sudo authorization
 
@@ -675,10 +676,10 @@ oidcRPMetaDataOptionsRefreshTokenRotation: 1
 
 ```bash
 # Check token file exists
-ls -la /etc/open-bastion/token
+ls -la /var/lib/open-bastion/token
 
 # Re-enroll if needed
-rm /etc/open-bastion/token
+rm /var/lib/open-bastion/token
 ob-enroll -g <server_group>
 ```
 
@@ -821,7 +822,7 @@ journalctl -u sshd | grep "SSH key policy"
 | File                                      | Purpose                              |
 | ----------------------------------------- | ------------------------------------ |
 | `/etc/open-bastion/openbastion.conf`      | PAM module configuration             |
-| `/etc/open-bastion/token`                 | Server enrollment token              |
+| `/var/lib/open-bastion/token`             | Server enrollment token (runtime state, refreshed by ob-heartbeat) |
 | `/etc/open-bastion/nss_openbastion.conf`  | NSS module configuration             |
 | `/etc/open-bastion/session-recorder.conf` | Session recorder configuration       |
 | `/etc/open-bastion/ssh-proxy.conf`        | SSH proxy configuration (bastion)    |

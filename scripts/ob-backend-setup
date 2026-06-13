@@ -63,7 +63,7 @@ PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 OB_CONFIG="/etc/open-bastion/openbastion.conf"
-OB_TOKEN="/etc/open-bastion/token"
+OB_TOKEN="/var/lib/open-bastion/token"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 

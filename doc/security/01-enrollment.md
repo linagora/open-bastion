@@ -111,7 +111,7 @@ sequenceDiagram
     end
     Note over LLNG: 10b. Vérifie PKCE:<br/>SHA256(code_verifier) == code_challenge
     LLNG-->>Srv: 11. access_token, refresh_token
-    Note over Srv: 12. Sauvegarde token<br/>/etc/open-bastion/token
+    Note over Srv: 12. Sauvegarde token<br/>/var/lib/open-bastion/token
     Srv->>LLNG: 13. POST /pam/authorize (vérification)
     Srv-->>Op: 14. "Enrollment complete"
 ```
@@ -256,7 +256,7 @@ Le token est sauvegardé en JSON :
 }
 ```
 
-Fichier : `/etc/open-bastion/token`
+Fichier : `/var/lib/open-bastion/token`
 Permissions : `0600` (lecture/écriture root uniquement)
 Propriétaire : `root:root`
 
@@ -345,7 +345,7 @@ auth required pam_openbastion.so no_rotate_refresh  # Pour désactiver (non reco
 ```mermaid
 sequenceDiagram
     participant Srv as Serveur SSH
-    participant Token as /etc/open-bastion/<br/>token
+    participant Token as /var/lib/open-bastion/<br/>token
     participant LLNG as Portail LLNG
 
     Note over Srv,LLNG: Phase initiale : Enrôlement (Device Grant)
@@ -618,7 +618,7 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 | **Probabilité** |   3   |
 | **Impact**      |   4   |
 
-**Description :** Le fichier `/etc/open-bastion/token` contient l'`access_token` du serveur. Sa compromission permet d'usurper l'identité du serveur auprès de LLNG.
+**Description :** Le fichier `/var/lib/open-bastion/token` contient l'`access_token` du serveur. Sa compromission permet d'usurper l'identité du serveur auprès de LLNG.
 
 **Vecteurs d'attaque :**
 
@@ -645,15 +645,24 @@ oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
 
 ```bash
 # Vérifier les permissions
-chmod 0600 /etc/open-bastion/token
-chown root:root /etc/open-bastion/token
+chmod 0600 /var/lib/open-bastion/token
+chown root:root /var/lib/open-bastion/token
 
-# SELinux context (si applicable)
-semanage fcontext -a -t pam_var_run_t "/etc/open-bastion/token"
-restorecon -v /etc/open-bastion/token
+# Protection MAC (optionnelle, défense en profondeur — spécifique à la distribution).
+# La protection PRINCIPALE du token est multi-plateforme : permissions 0600 root
+# + sandbox systemd de ob-heartbeat (ProtectSystem=strict, seul /var/lib/open-bastion
+# est ReadWritePaths). Le label MAC ne fait que s'ajouter à cela.
+#
+#   • Debian (plateforme par défaut, paquet .deb) → AppArmor. open-bastion ne livre
+#     pas (encore) de profil AppArmor ; si vous en écrivez un pour /usr/sbin/ob-heartbeat,
+#     accordez `owner /var/lib/open-bastion/token rwk` et limitez le reste.
+#   • RHEL/Rocky (paquet .rpm) → SELinux. Le type var_lib_t convient à /var/lib
+#     (état runtime persistant) ; l'ancien pam_var_run_t visait /var/run, pas /var/lib :
+#       semanage fcontext -a -t var_lib_t "/var/lib/open-bastion/token"
+#       restorecon -v /var/lib/open-bastion/token
 
-# Monitoring des accès
-auditctl -w /etc/open-bastion/token -p rwa -k pam_token_access
+# Monitoring des accès (auditd — Debian et RHEL)
+auditctl -w /var/lib/open-bastion/token -p rwa -k pam_token_access
 ```
 
 **Remédiation infrastructure :**
@@ -946,7 +955,7 @@ timedatectl set-ntp true
 | **Probabilité** |   2   |
 | **Impact**      |   4   |
 
-**Description :** Le `refresh_token` est stocké avec l'`access_token` dans `/etc/open-bastion/token`. Contrairement à l'`access_token` qui expire rapidement (ex: 1h), le `refresh_token` a une durée de vie longue et permet d'obtenir de nouveaux `access_token` sans ré-enrôlement.
+**Description :** Le `refresh_token` est stocké avec l'`access_token` dans `/var/lib/open-bastion/token`. Contrairement à l'`access_token` qui expire rapidement (ex: 1h), le `refresh_token` a une durée de vie longue et permet d'obtenir de nouveaux `access_token` sans ré-enrôlement.
 
 **Vecteurs d'attaque :**
 
@@ -1167,8 +1176,8 @@ min_tls_version = 1.3
 client_id = pam-access
 client_secret = <secret>
 
-# Fichier token
-server_token_file = /etc/open-bastion/token
+# Fichier token (état runtime réécrit par ob-heartbeat → /var/lib, pas /etc)
+server_token_file = /var/lib/open-bastion/token
 ```
 
 ### Configuration renforcée
@@ -1189,7 +1198,7 @@ ca_cert = /etc/ssl/certs/internal-ca.pem
 client_id = pam-access
 client_secret = <secret>
 
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 
 # Segmentation par environnement
 server_group = production
@@ -1203,9 +1212,9 @@ server_group = production
 
 # Permissions strictes
 chmod 0600 /etc/open-bastion/openbastion.conf
-chmod 0600 /etc/open-bastion/token
+chmod 0600 /var/lib/open-bastion/token
 chown root:root /etc/open-bastion/openbastion.conf
-chown root:root /etc/open-bastion/token
+chown root:root /var/lib/open-bastion/token
 
 # Désactiver core dumps
 echo "* hard core 0" >> /etc/security/limits.conf
@@ -1218,7 +1227,7 @@ echo "kernel.yama.ptrace_scope = 1" >> /etc/sysctl.conf
 sysctl -p
 
 # Audit des accès au fichier token
-auditctl -w /etc/open-bastion/token -p rwa -k pam_token_access
+auditctl -w /var/lib/open-bastion/token -p rwa -k pam_token_access
 auditctl -w /etc/open-bastion/openbastion.conf -p rwa -k pam_config_access
 
 # Synchronisation NTP
@@ -1448,7 +1457,7 @@ flowchart TB
 
 ### Après l'enrôlement
 
-- [ ] Fichier token en 0600/root:root vérifié
+- [ ] Fichier token (`/var/lib/open-bastion/token`) en 0600/root:root vérifié
 - [ ] Certificate pinning configuré (recommandé)
 - [ ] Core dumps désactivés
 - [ ] Swap chiffré (si applicable)

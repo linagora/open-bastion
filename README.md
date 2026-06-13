@@ -213,7 +213,7 @@ curl -X POST https://auth.example.com/oauth2/introspect \
 
 ```bash
 curl -X POST https://auth.example.com/pam/authorize \
-  -H "Authorization: Bearer $(sudo cat /etc/open-bastion/token)" \
+  -H "Authorization: Bearer $(sudo cat /var/lib/open-bastion/token)" \
   -H "Content-Type: application/json" \
   -d '{"user": "testuser", "host": "'$(hostname)'", "server_group": "default"}'
 ```
@@ -233,7 +233,7 @@ curl -X POST https://auth.example.com/pam/authorize \
 If the server token expires or is compromised:
 
 ```bash
-sudo rm /etc/open-bastion/token
+sudo rm /var/lib/open-bastion/token
 sudo ob-enroll
 ```
 

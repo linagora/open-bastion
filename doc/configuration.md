@@ -12,8 +12,10 @@ portal_url = https://auth.example.com
 client_id = pam-access
 client_secret = your-secret
 
-# Server token file (created by enrollment)
-server_token_file = /etc/open-bastion/token
+# Server token file (created and refreshed by ob-heartbeat)
+# The token lives under /var/lib/open-bastion/ (runtime state, per the FHS)
+# rather than /etc; it is refreshed automatically by ob-heartbeat.
+server_token_file = /var/lib/open-bastion/token
 
 # Server group for authorization rules
 server_group = default
@@ -100,7 +102,7 @@ sudo ob-enroll [OPTIONS]
 | `-c, --client-id ID`         | OIDC client ID (default: pam-access)                             |
 | `-s, --client-secret SECRET` | OIDC client secret                                               |
 | `-g, --server-group GROUP`   | Server group name (default: default)                             |
-| `-t, --token-file FILE`      | Where to save the token (default: /etc/open-bastion/token)       |
+| `-t, --token-file FILE`      | Where to save the token (default: /var/lib/open-bastion/token)   |
 | `-C, --config FILE`          | Configuration file (default: /etc/open-bastion/openbastion.conf) |
 | `-k, --insecure`             | Skip SSL certificate verification                                |
 | `-q, --quiet`                | Quiet mode                                                       |
@@ -119,7 +121,7 @@ sudo ob-enroll -p https://auth.example.com -s mysecret
 sudo ob-enroll -g production
 
 # Enroll with custom token file location
-sudo ob-enroll -t /etc/open-bastion/server.token
+sudo ob-enroll -t /var/lib/open-bastion/server.token
 ```
 
 ### Manual Enrollment (Without Script)
@@ -162,8 +164,8 @@ curl -X POST https://auth.example.com/oauth2/token \
 #### 4. Save the token
 
 ```bash
-echo "<access_token>" | sudo tee /etc/open-bastion/token
-sudo chmod 600 /etc/open-bastion/token
+echo "<access_token>" | sudo tee /var/lib/open-bastion/token
+sudo chmod 600 /var/lib/open-bastion/token
 ```
 
 ## See Also

@@ -256,7 +256,7 @@ docker exec ob-cert-backend-new chmod 600 /etc/open-bastion/openbastion.conf
 docker exec ob-cert-backend-new tee /etc/open-bastion/nss_openbastion.conf << 'EOF'
 # Open Bastion NSS configuration
 portal_url = http://sso:8080
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 cache_ttl = 300
 min_uid = 10000
 max_uid = 60000
@@ -307,7 +307,7 @@ While the script is waiting, open a browser:
 
 After approval, the script will:
 
-- Save the token to `/etc/open-bastion/token`
+- Save the token to `/var/lib/open-bastion/token`
 - Verify the enrollment
 
 #### Step 9: Restart sshd to apply configuration
@@ -353,7 +353,7 @@ The `ob-enroll` script automates the entire Device Authorization flow:
 2. **Requests device code** from `/oauth2/device` endpoint
 3. **Displays instructions** with user code for administrator approval
 4. **Polls for token** at configurable intervals
-5. **Saves token** securely to `/etc/open-bastion/token`
+5. **Saves token** securely to `/var/lib/open-bastion/token`
 6. **Verifies enrollment** by calling `/pam/authorize`
 
 Options:
@@ -366,7 +366,7 @@ Options:
   -c, --client-id ID     OIDC client ID (default: pam-access)
   -s, --client-secret S  OIDC client secret (prefer OB_CLIENT_SECRET env var)
   -g, --server-group G   Server group name
-  -t, --token-file FILE  Where to save the token (default: /etc/open-bastion/token)
+  -t, --token-file FILE  Where to save the token (default: /var/lib/open-bastion/token)
   -C, --config FILE      Read settings from config file
   -k, --insecure         Skip SSL certificate verification
   -q, --quiet            Quiet mode
@@ -377,7 +377,7 @@ Options:
 1. **Server Token**: Each SSH server needs an OAuth2 access token to authenticate
    its PAM module requests to the LLNG portal.
 
-2. **Token Configuration**: The token is stored in `/etc/open-bastion/token` and
+2. **Token Configuration**: The token is stored in `/var/lib/open-bastion/token` and
    referenced by `server_token_file` in `/etc/open-bastion/openbastion.conf`.
 
 3. **PAM Authorization Flow**:
@@ -410,8 +410,8 @@ TOKEN_RESP=$(curl -s -X POST https://sso.example.com/oauth2/token \
   -d "client_secret=<secret>")
 
 # 4. Save the token
-echo $TOKEN_RESP | jq -r '.access_token' > /etc/open-bastion/token
-chmod 600 /etc/open-bastion/token
+echo $TOKEN_RESP | jq -r '.access_token' > /var/lib/open-bastion/token
+chmod 600 /var/lib/open-bastion/token
 ```
 
 ### PAM Configuration
@@ -428,7 +428,7 @@ client_id = pam-access
 client_secret = <secret>
 
 # Server token for authorization
-server_token_file = /etc/open-bastion/token
+server_token_file = /var/lib/open-bastion/token
 
 # HTTP settings
 timeout = 10

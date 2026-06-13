@@ -116,7 +116,7 @@ sudo ob-enroll
 2. Displays user code (e.g., `ABCD-EFGH`)
 3. Admin approves on LLNG portal
 4. Script receives `access_token` + `refresh_token`
-5. Tokens saved to `/etc/open-bastion/token`
+5. Tokens saved to `/var/lib/open-bastion/token`
 
 <!-- end_slide -->
 
@@ -456,7 +456,7 @@ log_level = debug
 ## Re-enrollment
 
 ```bash
-sudo rm /etc/open-bastion/token
+sudo rm /var/lib/open-bastion/token
 sudo ob-enroll
 ```
 

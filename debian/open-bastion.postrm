@@ -5,7 +5,8 @@ CONF_FILE="/etc/open-bastion/openbastion.conf"
 BACKUP_DIR="/var/backups/open-bastion"
 PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
-TOKEN_FILE="/etc/open-bastion/token"
+TOKEN_FILE="/var/lib/open-bastion/token"
+LEGACY_TOKEN_FILE="/etc/open-bastion/token"
 CACHE_DIR="/var/cache/open-bastion"
 STATS_DIR="/var/lib/open-bastion"
 
@@ -25,6 +26,7 @@ case "$1" in
         # Remove configuration files
         rm -f "$CONF_FILE"
         rm -f "$TOKEN_FILE"
+        rm -f "$LEGACY_TOKEN_FILE"
 
         # Remove cache directory
         rm -rf "$CACHE_DIR"

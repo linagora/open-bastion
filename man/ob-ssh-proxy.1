@@ -41,7 +41,7 @@ The script reads configuration from \fI/etc/open-bastion/ssh-proxy.conf\fR:
 PORTAL_URL="https://auth.example.com"
 
 # Server token file (from ob-enroll)
-SERVER_TOKEN_FILE="/etc/open-bastion/token"
+SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
 
 # Server group for this bastion
 SERVER_GROUP="bastion"
@@ -103,7 +103,7 @@ knows the backend's SSH configuration.
 .I /etc/open-bastion/ssh-proxy.conf
 Main configuration file
 .TP
-.I /etc/open-bastion/token
+.I /var/lib/open-bastion/token
 Server authentication token (from ob-enroll)
 .SH ENVIRONMENT
 .TP

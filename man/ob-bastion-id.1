@@ -46,7 +46,7 @@ Suppress informational logs (errors still go to stderr).
 Path to \fIopenbastion.conf\fR (default: \fI/etc/open-bastion/openbastion.conf\fR).
 .TP
 .B \-t ", " \-\-token \fIFILE\fR
-Path to the server token file (default: \fI/etc/open-bastion/token\fR).
+Path to the server token file (default: \fI/var/lib/open-bastion/token\fR).
 .TP
 .B \-h ", " \-\-help
 Show help.
@@ -74,7 +74,7 @@ JWT decoded but the
 claim is absent (also returned when base64url decoding fails).
 .SH SECURITY
 Must be run as root in order to read
-.I /etc/open-bastion/token
+.I /var/lib/open-bastion/token
 (mode 0600).
 .SH SEE ALSO
 .BR ob-enroll (8),
