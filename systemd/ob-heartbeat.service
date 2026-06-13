@@ -23,9 +23,17 @@ RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
-# Allow reading config and token files
+# ob-heartbeat refreshes the access token, so it must REWRITE
+# /etc/open-bastion/token — atomically (mktemp in the directory + rename),
+# which requires the directory itself to be writable. Under
+# ProtectSystem=strict the previous ReadOnlyPaths=/etc/open-bastion/token (and
+# the implicitly read-only directory) made every timer-triggered refresh fail
+# with "Read-only file system", so the access token silently expired after ~1h
+# (a manual `ob-heartbeat`, which runs without the sandbox, masked this).
+# Make the directory writable; keep the config file read-only (the more
+# restrictive entry wins). The token's on-disk perms remain 0600 root.
+ReadWritePaths=/etc/open-bastion
 ReadOnlyPaths=/etc/open-bastion/openbastion.conf
-ReadOnlyPaths=/etc/open-bastion/token
 ReadWritePaths=/var/lib/open-bastion
 
 # Network access required
