@@ -169,8 +169,10 @@ case "$1" in
         # entries; o+x (NO o+r) so a connecting user — who is NOT in ob-sessions
         # and whose elevated gid the recorder wrapper deliberately drops before
         # exec — can still traverse into its own subdir created by the wrapper.
-        # Without o+x the recorder fails with "session directory ... does not
-        # exist and could not be created" and the session is torn down.
+        # Without o+x the recorder fails with "User sessions directory ... does
+        # not exist and could not be created" and the session is torn down.
+        # NOTE: the parent /var/lib/open-bastion must also stay traversable
+        # (711, set both above and in the MODE block below) for the same reason.
         chmod 3771 /var/lib/open-bastion/sessions
         # Set setgid on the session recorder wrapper so it runs with gid ob-sessions
         if [ -f /usr/sbin/ob-session-recorder-wrapper ]; then
@@ -224,9 +226,14 @@ case "$1" in
             mkdir -p /var/cache/open-bastion
             chmod 700 /var/cache/open-bastion
 
-            # Create state directory
+            # Create state directory. Mode 711 (NOT 700): the session recorder
+            # runs as the connecting user (the wrapper drops its ob-sessions gid
+            # before exec) and must traverse this directory to reach its own
+            # subdir under sessions/. Secrets here stay protected by their own
+            # modes (token is 600 root), so o+x exposes only traversal, not
+            # listing. 700 here silently re-breaks session recording.
             mkdir -p /var/lib/open-bastion
-            chmod 700 /var/lib/open-bastion
+            chmod 711 /var/lib/open-bastion
 
             # Migrate the server token from its legacy /etc location (config) to
             # /var/lib (runtime state — FHS). The token is rewritten every few
