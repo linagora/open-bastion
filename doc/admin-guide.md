@@ -474,11 +474,16 @@ PubkeyAuthentication yes
 # Trust the LLNG CA for user certificates
 TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
 
-# Validate certificate principal and bastion key-id via pam_openbastion
+# Enforce the bastion key-id + allowed_bastions allowlist BEFORE PAM runs:
+# ob-ssh-principals (run as nobody) only emits the principal when the cert
+# key-id carries an allowed bastion=<id> and user=<u> matches the login, so a
+# direct user SSO cert is rejected here, pre-PAM.
 AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
 AuthorizedPrincipalsCommandUser nobody
 
-# Expose cert info to PAM (required for bastion_id + allowed_bastions check)
+# Expose cert metadata (key-id, fingerprint) to the PAM environment so
+# pam_openbastion can use it for /pam/authorize fingerprint binding. (This does
+# NOT perform the allowlist check — that is ob-ssh-principals' job above.)
 ExposeAuthInfo yes
 
 # Accept connections from bastion only

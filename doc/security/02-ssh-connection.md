@@ -633,7 +633,7 @@ pkill -u $USERNAME -KILL
 
 - **Durée de vie ~120 s** (`pamAccessBastionCertTtl`, défaut : 120 s) : la fenêtre d'exploitation est très courte ; le certificat est effacé du tmpfs dès la fin de la connexion
 - **Option `source-address` critique** : sshd refuse nativement le certificat si la connexion ne provient pas de l'IP du bastion émetteur — un certificat volé est inutilisable depuis une autre machine
-- **`target_host` dans le key-id** (`bastion=<id>;user=<u>;target=<h>`) : `ob-ssh-principals` vérifie que le certificat est présenté sur le bon backend
+- **`target_host` enregistré dans le key-id** (`bastion=<id>;user=<u>;target=<h>`) : tracé à des fins d'audit. Note : `ob-ssh-principals` n'enforce que `bastion=<id>` (allowlist) et `user=<u>` — il **ne vérifie pas** `target=`, donc le certificat n'est pas restreint à un backend précis ; c'est `source-address` qui le restreint au bastion émetteur
 - La clé privée éphémère ne quitte jamais le bastion (tmpfs, effacée à la sortie) : seul le certificat signé transite sur le réseau
 
 **Remédiation configuration :**

@@ -128,7 +128,11 @@ error() {
 # Build curl options array
 # Returns options via the global CURL_OPTS array (safer than mapfile)
 build_curl_opts() {
-    CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
+    # --fail-with-body (not -f): on a non-2xx response curl still writes the
+    # JSON error body to stdout AND returns non-zero, so the caller can detect
+    # structured reasons like {"reason":"voucher_expired"} instead of getting an
+    # empty body. (-f would discard the body and hide the reason.)
+    CURL_OPTS=("-s" "--fail-with-body" "--connect-timeout" "$TIMEOUT")
     if [ "$VERIFY_SSL" = "false" ]; then
         CURL_OPTS+=("-k")
     fi
@@ -208,15 +212,22 @@ request_bastion_cert() {
             --arg voucher "$VOUCHER" \
             '{user: $user, target_host: $target_host, target_group: $target_group, public_key: $public_key, voucher: $voucher}')
 
+        # 2>/dev/null (not 2>&1): keep curl's stderr OUT of $response so it stays
+        # valid JSON for the parsing below. With --fail-with-body the JSON error
+        # body is captured even on non-2xx, so we do NOT early-return on a
+        # non-zero rc — the shared parser below extracts .reason/.error (e.g.
+        # voucher_expired) and prints the right message. Only a truly empty
+        # response (network failure) is a hard error here.
         response=$(curl "${CURL_OPTS[@]}" \
             -X POST \
             -H "Authorization: Bearer $server_token" \
             -H "Content-Type: application/json" \
             -d "$json_payload" \
-            "${PORTAL_URL}/pam/bastion-cert" 2>&1) || {
-            error "Failed to request bastion certificate: $response"
+            "${PORTAL_URL}/pam/bastion-cert" 2>/dev/null) || true
+        if [ -z "$response" ]; then
+            error "Failed to request bastion certificate (no response from ${PORTAL_URL}/pam/bastion-cert)"
             return 1
-        }
+        fi
     else
         # Normal user path: the server token is root-only BY DESIGN (a user
         # reading their own voucher must gain nothing). Delegate the single

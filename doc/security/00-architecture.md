@@ -140,8 +140,8 @@ flowchart LR
     end
 
     subgraph Backend["Serveur Backend"]
-        sshd_be["sshd\nTrustedUserCAKeys\nsource-address"]
-        pam_be["pam_openbastion\nallowed_bastions\n(key-id du cert)"]
+        sshd_be["sshd\nTrustedUserCAKeys + source-address\nAuthorizedPrincipalsCommand →\nob-ssh-principals (key-id + allowed_bastions)"]
+        pam_be["pam_openbastion\n/pam/authorize (autorisation LLNG)"]
     end
 
     authorize -->|voucher lié à (bastion_id, user)| voucher
@@ -162,7 +162,7 @@ flowchart LR
    b. via le helper réservé à root `ob-bastion-cert-helper` (règle sudoers NOPASSWD étroite, pas de setuid), `POST /pam/bastion-cert` avec le **jeton serveur** (réservé à root) en Bearer, le voucher, la clé publique, l'utilisateur et l'hôte cible ;
    c. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA `ssh-ca` : principal = utilisateur, `key-id = bastion=<bastion_id>;user=<user>;target=<hôte>`, validité ~120 s, option critique `source-address` épinglée à l'IP du bastion ;
    d. `ssh -i <eph> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>` ; les fichiers temporaires sont effacés après connexion.
-3. Le backend sshd valide nativement : signature CA, fenêtre de validité, `principal == utilisateur`, **`source-address`** (refus si la connexion ne vient pas de l'IP du bastion). `pam_openbastion` (`acct_mgmt`) lit le `key-id` depuis `SSH_USER_AUTH` et vérifie `bastion_id` contre `/etc/open-bastion/allowed_bastions`.
+3. Le backend sshd valide nativement : signature CA, fenêtre de validité, `principal == utilisateur`, **`source-address`** (refus si la connexion ne vient pas de l'IP du bastion). **Avant PAM**, `AuthorizedPrincipalsCommand` exécute `ob-ssh-principals` (en tant que `nobody`) qui lit le `key-id` (`%i`), vérifie que `bastion=<id>` figure dans `/etc/open-bastion/allowed_bastions` et que `user=<u>` correspond au login, et n'émet le principal que dans ce cas — un cert SSO direct (sans `bastion=`) est donc **refusé avant PAM**. `pam_openbastion` (`acct_mgmt`) effectue ensuite l'autorisation applicative via `/pam/authorize`.
 
 ### Propriétés de Sécurité du Voucher
 
@@ -179,7 +179,7 @@ flowchart LR
 | Contournement VPN vers backend  | Possible                              | Bloqué — `source-address` critique dans le cert, sshd refuse hors IP bastion    |
 | Mauvaise configuration pare-feu | Expose les backends                   | Backends toujours protégés — enforcement sshd-natif                             |
 | Rejeu d'un identifiant volé     | Clé/token compromis = accès backend   | Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement    |
-| Bastion non autorisé            | N/A                                   | Bloqué — `allowed_bastions` vérifié par `pam_openbastion` via le key-id du cert |
+| Bastion non autorisé            | N/A                                   | Bloqué — `allowed_bastions` vérifié par `ob-ssh-principals` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert |
 
 ### Configuration (Backend)
 
