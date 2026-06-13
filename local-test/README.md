@@ -9,16 +9,17 @@ real two-phase admin workflow:
 ob-builder → bastion → deploy → ob-bastion-id → ob-builder → backends → deploy → verify
 ```
 
-| Script | Path it validates |
-| ------ | ----------------- |
+| Script                                   | Path it validates                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/ansible-quickstart.md)) |
-| [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer |
+| [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer                                                        |
 
 Both use [`lib.sh`](lib.sh) for the shared steps (build the `.deb`, serve the
 repo, bring up the SSO, recreate + bootstrap VMs, fetch the approval cookie,
 verify e2e).
 
 > ## ⚠️ Not part of CI — on purpose
+>
 > These need **libvirt VMs** (nested virtualisation) and a **Docker SSO**, which
 > GitHub's hosted runners don't provide. Nothing here is referenced by a
 > workflow, CMake or `ctest`; the shellcheck action only scans `./scripts`. Run
@@ -27,22 +28,22 @@ verify e2e).
 
 The **ob-builder-generated artefacts are used UNCHANGED** — that is the point:
 the harness validates the generator's output as a real admin would receive it.
-All lab-only adaptations live *outside* the generated role/installer (inventory
+All lab-only adaptations live _outside_ the generated role/installer (inventory
 overrides, a VM bootstrap step, a repacked `.deb`); see
 [Lab-only quirks](#lab-only-quirks).
 
 ## Prerequisites
 
-| Need | Why |
-|------|-----|
-| `libvirt` + `virt-install` + `qemu-img` + `cloud-localds`, user in `libvirt` group | create/boot the VMs on the `default` NAT network (`virbr0`, `192.168.122.0/24`) |
-| A Debian **genericcloud** golden image (`debian-*-genericcloud-*.qcow2`) | base for the overlays — put it in `vm/` or set `OB_GOLDEN` |
-| `docker` + `docker compose` | the `ob-sso` LemonLDAP::NG container |
-| `ansible` (for `deploy-ansible.sh`) | deployment |
-| `dpkg-buildpackage`, `dpkg-scanpackages`, `python3`, `curl`, `jq` | build/serve the `.deb`, probe the SSO, run assertions |
-| The `llng` client ([simple-oidc-client](https://github.com/linagora/simple-oidc-client)) | fetch the device-code auto-approval cookie |
-| A passphrase-less lab key at `~/.ssh/id_oblab` | the host ssh-agent hangs on signing; the VMs trust this key |
-| A dwho SSO cert at `/tmp/ob-e2e/id_dwho` (+ `-cert.pub`) | the connection-phase assertions (absent ⇒ that phase is skipped) |
+| Need                                                                                     | Why                                                                             |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `libvirt` + `virt-install` + `qemu-img` + `cloud-localds`, user in `libvirt` group       | create/boot the VMs on the `default` NAT network (`virbr0`, `192.168.122.0/24`) |
+| A Debian **genericcloud** golden image (`debian-*-genericcloud-*.qcow2`)                 | base for the overlays — put it in `vm/` or set `OB_GOLDEN`                      |
+| `docker` + `docker compose`                                                              | the `ob-sso` LemonLDAP::NG container                                            |
+| `ansible` (for `deploy-ansible.sh`)                                                      | deployment                                                                      |
+| `dpkg-buildpackage`, `dpkg-scanpackages`, `python3`, `curl`, `jq`                        | build/serve the `.deb`, probe the SSO, run assertions                           |
+| The `llng` client ([simple-oidc-client](https://github.com/linagora/simple-oidc-client)) | fetch the device-code auto-approval cookie                                      |
+| A passphrase-less lab key at `~/.ssh/id_oblab`                                           | the host ssh-agent hangs on signing; the VMs trust this key                     |
+| A dwho SSO cert at `/tmp/ob-e2e/id_dwho` (+ `-cert.pub`)                                 | the connection-phase assertions (absent ⇒ that phase is skipped)                |
 
 ## Run
 
@@ -57,22 +58,22 @@ the cookie land in `local-test/.work/` (git-ignored).
 
 ### Knobs (environment variables)
 
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `SKIP_BUILD=1` | off | reuse the `.deb` already staged in `sso/aptrepo/` |
-| `OB_GOLDEN` | search `vm/` | path to the genericcloud golden qcow2 |
-| `GW_IP` | `192.168.122.1` | libvirt gateway serving the APT repo + SSO |
-| `OB_SSH_KEY` | `~/.ssh/id_oblab` | lab management key |
-| `OB_DWHO_KEY` / `OB_DWHO_CERT` | `/tmp/ob-e2e/id_dwho[-cert.pub]` | dwho SSO cert for phase-2 assertions |
-| `OB_SSO_USER` / `OB_SSO_PASS` | `dwho` / `dwho` | login used to fetch the approval cookie |
-| `LLNG` | `llng` on PATH, else `~/bin/llng` | the OIDC client |
-| `OB_BASTION_VM` / `OB_BACKEND_VMS` | `lab-a` / `lab-b lab-c` | VM names |
+| Variable                           | Default                           | Effect                                            |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------- |
+| `SKIP_BUILD=1`                     | off                               | reuse the `.deb` already staged in `sso/aptrepo/` |
+| `OB_GOLDEN`                        | search `vm/`                      | path to the genericcloud golden qcow2             |
+| `GW_IP`                            | `192.168.122.1`                   | libvirt gateway serving the APT repo + SSO        |
+| `OB_SSH_KEY`                       | `~/.ssh/id_oblab`                 | lab management key                                |
+| `OB_DWHO_KEY` / `OB_DWHO_CERT`     | `/tmp/ob-e2e/id_dwho[-cert.pub]`  | dwho SSO cert for phase-2 assertions              |
+| `OB_SSO_USER` / `OB_SSO_PASS`      | `dwho` / `dwho`                   | login used to fetch the approval cookie           |
+| `LLNG`                             | `llng` on PATH, else `~/bin/llng` | the OIDC client                                   |
+| `OB_BASTION_VM` / `OB_BACKEND_VMS` | `lab-a` / `lab-b lab-c`           | VM names                                          |
 
 ## The two-phase workflow
 
 1. **Bastion.** `ob-builder` generates the bastion artefact from
    [`config/build-bastion.yml`](config/build-bastion.yml) (it enrols as
-   `client_id: ob-bastion`, which the lab LLNG maps to a *bastion* server group).
+   `client_id: ob-bastion`, which the lab LLNG maps to a _bastion_ server group).
    Deploy it to `lab-a`.
 2. **`ob-bastion-id`.** Read the bastion's id from the freshly-deployed bastion.
    It is `ob-bastion` (= its client_id). This is the value the backends must
@@ -117,7 +118,7 @@ harness, not in what `ob-builder` produced.
 (`pam_openbastion` rejects the local `debian` user). So once a host is deployed
 you **cannot redeploy over port 22** — a fresh connection is refused. To
 re-run, **recreate the VMs** (both scripts do this every run). This is also why
-the shell path reads `ob-bastion-id` *before* running setup.
+the shell path reads `ob-bastion-id` _before_ running setup.
 
 ## SSO
 
