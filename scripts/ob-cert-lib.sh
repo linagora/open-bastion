@@ -255,14 +255,21 @@ mint_ephemeral_cert() {
     }
     chmod 700 "$OB_EPH_DIR"
 
-    ssh-keygen -t ed25519 -N '' -q -f "$OB_EPH_DIR/id" -C "ob-ephemeral" || {
+    # Any failure from here on must wipe the tmpfs dir before returning: the
+    # caller only arms its cleanup trap AFTER we succeed, so an early return
+    # would otherwise leave the ephemeral private key on disk.
+    if ! ssh-keygen -t ed25519 -N '' -q -f "$OB_EPH_DIR/id" -C "ob-ephemeral"; then
         error "Failed to generate ephemeral keypair"
+        rm -rf "$OB_EPH_DIR"
         return 1
-    }
+    fi
 
     local pubkey cert
     pubkey=$(cat "$OB_EPH_DIR/id.pub")
-    cert=$(request_bastion_cert "$target_user" "$target_host" "$pubkey") || return 1
+    if ! cert=$(request_bastion_cert "$target_user" "$target_host" "$pubkey"); then
+        rm -rf "$OB_EPH_DIR"
+        return 1
+    fi
     printf '%s\n' "$cert" > "$OB_EPH_DIR/id-cert.pub"
 
     # Consumed by the sourcing script (ob-ssh / ob-scp), not within this lib.

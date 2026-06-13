@@ -337,7 +337,7 @@ chmod 644 /etc/open-bastion/nss_openbastion.conf
 # Create SSH proxy configuration for bastion-to-backend connections
 cat > /etc/open-bastion/ssh-proxy.conf << EOF
 # Open Bastion SSH Proxy configuration
-# Used by ob-ssh to request JWT for bastion-to-backend auth
+# Used by ob-ssh to mint an ephemeral vouched certificate via /pam/bastion-cert for bastion-to-backend auth
 
 PORTAL_URL=$PORTAL_URL
 SERVER_TOKEN_FILE=$TOKEN_FILE

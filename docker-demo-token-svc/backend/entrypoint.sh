@@ -47,7 +47,7 @@ UsePAM yes
 X11Forwarding no
 PermitRootLogin no
 
-# Accept bastion JWT environment variable from SSH connection
+# (legacy AcceptEnv kept for compatibility; bastion-to-backend auth now uses certificate vouching)
 AcceptEnv LLNG_BASTION_JWT
 EOF
 
@@ -211,7 +211,7 @@ create_user = true
 create_home = true
 default_shell = /bin/bash
 
-# Bastion JWT verification (require connection from authorized bastion)
+# Bastion certificate vouching (require connection from authorized bastion via ob-ssh)
 bastion_jwt_required = true
 bastion_jwt_issuer = $PORTAL_URL
 bastion_jwt_jwks_url = $PORTAL_URL/.well-known/jwks.json
@@ -297,8 +297,8 @@ echo "SSH listening on port 22"
 echo "Users connect with their LLNG token as password"
 echo "Sudo available for authorized users (rtyler)"
 echo ""
-echo "Bastion JWT verification ENABLED"
-echo "Direct SSH connections without valid bastion JWT will be DENIED"
+echo "Bastion certificate vouching ENABLED"
+echo "Direct SSH connections without a valid bastion-vouched certificate will be DENIED"
 
 # Execute the command (sshd)
 exec "$@"

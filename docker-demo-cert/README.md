@@ -21,7 +21,7 @@ flowchart LR
 
     User["User"] -->|:80| SSO
     User -->|:2222| Bastion
-    Bastion -->|SSH + JWT| Backend
+    Bastion -->|SSH + cert| Backend
 
     style Backend fill:#f9f,stroke:#333
 ```
@@ -98,19 +98,19 @@ ssh -p 2222 dwho@localhost
 
 ### 5. From bastion, connect to backend
 
-The backend server requires a signed JWT from the bastion to prove the connection
+The backend server requires a bastion-vouched SSH certificate to prove the connection
 comes from an authorized bastion server. Use the `ob-ssh` command:
 
 ```bash
-# On bastion - the proxy automatically gets a JWT and forwards it
+# On bastion - ob-ssh mints an ephemeral certificate via /pam/bastion-cert and connects with it
 ob-ssh backend
 
 # Or using SSH with ProxyCommand
 ssh -o ProxyCommand='ob-ssh %h %p' dwho@backend
 ```
 
-**Note**: Direct SSH connections to the backend (without the bastion JWT) will be rejected,
-even with a valid SSH certificate. This ensures backends only accept connections from authorized bastions.
+**Note**: Direct SSH connections to the backend (without a valid bastion-vouched certificate) will be rejected,
+even with a valid user SSH certificate. This ensures backends only accept connections from authorized bastions.
 
 ## Demo Users
 
@@ -448,9 +448,9 @@ account    required     pam_openbastion.so
 session    required     pam_unix.so
 ```
 
-## Bastion JWT Verification
+## Bastion Certificate Vouching
 
-The backend server is configured to require a JWT from the bastion server. This provides
+The backend server is configured to require a bastion-vouched SSH certificate. This provides
 cryptographic proof that the SSH connection originates from an authorized bastion.
 
 ```mermaid
@@ -461,12 +461,12 @@ sequenceDiagram
     participant Backend
 
     User->>Bastion: SSH with certificate
-    Bastion->>LLNG: Request JWT (/pam/bastion-token)
-    LLNG-->>Bastion: Signed JWT
+    Bastion->>LLNG: POST ephemeral pubkey + voucher (/pam/bastion-cert)
+    LLNG-->>Bastion: Short-lived signed SSH certificate
 
-    Bastion->>Backend: SSH + LLNG_BASTION_JWT
+    Bastion->>Backend: SSH with ephemeral certificate
 
-    Note over Backend: Verify JWT using<br/>cached JWKS (offline)
+    Note over Backend: Verify certificate via<br/>TrustedUserCAKeys + AuthorizedPrincipalsCommand
     Backend-->>Bastion: Access granted
 ```
 
@@ -474,10 +474,10 @@ sequenceDiagram
 
 1. User SSH to bastion with SSH certificate
 2. From bastion, user runs `ob-ssh backend`
-3. Proxy requests a signed JWT from LLNG `/pam/bastion-token`
-4. Proxy connects to backend with JWT in `LLNG_BASTION_JWT` env var
-5. Backend verifies JWT signature using cached JWKS (offline capable)
-6. If valid, SSH connection proceeds; otherwise, denied
+3. ob-ssh generates an ephemeral keypair and POSTs the public key + a per-session voucher to LLNG `/pam/bastion-cert`
+4. LLNG returns a short-lived SSH certificate (principal = user, pinned to the bastion's source address)
+5. ob-ssh connects to backend using the ephemeral key and certificate
+6. Backend validates the certificate natively via TrustedUserCAKeys; if valid, SSH connection proceeds; otherwise, denied
 
 ## API Endpoints
 
@@ -487,7 +487,7 @@ sequenceDiagram
 | `/ssh/ca`                | GET      | Get SSH CA public key                          |
 | `/ssh/sign`              | POST     | Sign a user's public key                       |
 | `/pam/authorize`         | POST     | Check user authorization                       |
-| `/pam/bastion-token`     | POST     | Get signed JWT for bastion-to-backend auth     |
+| `/pam/bastion-cert`      | POST     | Get vouched SSH certificate for bastion-to-backend auth |
 | `/oauth2/device`         | POST     | Start device authorization                     |
 | `/device`                | GET/POST | User device verification page                  |
 | `/oauth2/token`          | POST     | Exchange device code for token                 |
@@ -609,5 +609,4 @@ docker exec ob-cert-bastion ls -la /var/cache/open-bastion/
 - Tokens should be rotated regularly
 - Enable `verify_ssl = true` in production
 - Consider enabling audit logging
-- **Bastion JWT**: Backends require a valid JWT from the bastion, preventing direct access even with valid SSH certificates
-- The JWKS cache allows backends to verify JWTs offline (useful for network partitions)
+- **Bastion certificate vouching**: Backends require a valid bastion-vouched SSH certificate, preventing direct access even with valid user SSH certificates

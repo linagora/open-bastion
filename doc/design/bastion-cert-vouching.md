@@ -5,7 +5,8 @@ Branch: `various-setup-fixes`. Spans two repos: `open-bastion` and `lemonldap-ng
 
 ## Why the current mechanism is dead
 
-`ob-ssh` requested a JWT from `POST /pam/bastion-token` and passed it to the
+The original connector (then named `ob-ssh-proxy`) requested a JWT from
+`POST /pam/bastion-token` and passed it to the
 backend via `ssh -o SendEnv=LLNG_BASTION_JWT`; `pam_openbastion` read it with
 `pam_getenv("LLNG_BASTION_JWT")` (`pam_sm_acct_mgmt`) and rejected the session when
 `bastion_jwt_required=true` and it was empty.

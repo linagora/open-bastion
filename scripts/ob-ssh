@@ -208,7 +208,6 @@ Options:
 Configuration ($CONFIG_FILE):
     PORTAL_URL="https://auth.example.com"
     SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
-    SERVER_GROUP="bastion"
     TARGET_GROUP="default"
     TIMEOUT=10
     VERIFY_SSL=true
