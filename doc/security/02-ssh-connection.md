@@ -9,7 +9,7 @@ Cette analyse porte sur la cible de sécurité maximale d'Open Bastion, qui comb
 - **Certificats uniquement** : `AuthorizedKeysFile none` (pas de clés non signées)
 - **KRL obligatoire** : révocation centralisée via Key Revocation List
 - **sudo via token LLNG** : réauthentification SSO pour chaque escalade de privilèges
-- **JWT bastion** : preuve cryptographique de l'origine des connexions vers les backends
+- **Certificat éphémère bastion** : preuve cryptographique de l'origine des connexions vers les backends (vouching par certificat signé par la CA LLNG)
 
 > **Note** : D'autres architectures moins restrictives sont possibles (serveur isolé sans CA, sans bastion, avec mots de passe). Elles offrent un niveau de sécurité inférieur et ne sont pas couvertes par cette analyse.
 
@@ -41,7 +41,7 @@ flowchart TB
 
         subgraph ConnectionFlow["Flux de connexion"]
             Client[Client SSH<br/>cert signé CA] -->|1. ssh bastion| Bastion[Bastion<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none]
-            Bastion -->|2. ob-ssh-proxy + JWT| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>bastion_jwt_required]
+            Bastion -->|2. ob-ssh-proxy + cert éphémère| Backend[Backend<br/>PAM LLNG<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none<br/>TrustedUserCAKeys + source-address]
         end
 
         LLNG -->|KRL toutes 30 min| KRL
@@ -49,7 +49,7 @@ flowchart TB
         KRL -->|RevokedKeys| Backend
 
         Bastion -->|Vérifie cert +<br/>autorise via LLNG| LLNG
-        Backend -->|Vérifie cert + JWT bastion +<br/>autorise via LLNG| LLNG
+        Backend -->|Vérifie cert éphémère +<br/>autorise via LLNG| LLNG
     end
 ```
 
@@ -70,26 +70,29 @@ ob-ssh-cert --portal https://auth.example.com
 sequenceDiagram
     participant Client as Client SSH<br/>(cert 1 an)
     participant Bastion as Bastion<br/>(TrustedCA + KRL)
-    participant Backend as Backend<br/>(TrustedCA + KRL + JWT)
+    participant Backend as Backend<br/>(TrustedCA + KRL + cert éphémère)
     participant LLNG as Portail LLNG
 
     Note over Client: 1x/an : ob-ssh-cert<br/>→ certificat signé CA
 
     Client->>Bastion: 1. ssh dwho@bastion<br/>(présente certificat)
     Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
-    Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion
-    LLNG-->>Bastion: 4. authorized: true
+    Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion<br/>→ voucher(bastion_id, user) stocké
+    LLNG-->>Bastion: 4. authorized: true + voucher
+    Note over Bastion: 4b. pam_putenv("LLNG_BASTION_VOUCHER=…")
     Note over Client: 5. Sur le bastion :<br/>ob-ssh-proxy backend
-    Bastion->>LLNG: 6. ob-ssh-proxy demande JWT<br/>POST /pam/bastion-token
-    LLNG-->>Bastion: 7. JWT signé (TTL 300s,<br/>target=backend)
-    Bastion->>Backend: 8. ssh + SendEnv LLNG_BASTION_JWT
-    Note over Backend: 9. Vérifie signature CA<br/>Vérifie KRL<br/>Vérifie JWT bastion (JWKS)
-    Backend->>LLNG: 10. PAM: /pam/authorize<br/>user=X, host=backend
-    LLNG-->>Backend: 11. authorized: true
-    Backend-->>Client: 12. Session SSH établie
+    Note over Bastion: 6. Génère paire de clés éphémère ed25519<br/>(clé privée ne quitte pas le bastion)
+    Bastion->>LLNG: 7. ob-bastion-cert-helper (sudo NOPASSWD)<br/>POST /pam/bastion-cert<br/>Bearer=jeton_serveur_bastion<br/>body={user, target_host, clé_pub_éphémère, voucher}
+    Note over LLNG: 8. Vérifie voucher (bastion_id, user)<br/>Vérifie gardes (grant device_code,<br/>server_group ∈ pamAccessBastionGroups)<br/>Signe clé_pub_éphémère avec CA ssh-ca
+    LLNG-->>Bastion: 9. Certificat éphémère (~120s)<br/>principal=user, source-address=IP_bastion<br/>key-id=bastion=<id>;user=<u>;target=<h>
+    Bastion->>Backend: 10. ssh -i <clé_éph> -o CertificateFile=<cert><br/>(ré-origination : le bastion s'authentifie)
+    Note over Backend: 11. sshd : vérifie CA, fenêtre de validité,<br/>source-address (IP bastion), principal<br/>AuthorizedPrincipalsCommand : key-id bastion=<id>;<br/>bastion_id ∈ /etc/open-bastion/allowed_bastions
+    Backend->>LLNG: 12. PAM: /pam/authorize<br/>user=X, host=backend
+    LLNG-->>Backend: 13. authorized: true
+    Backend-->>Client: 14. Session SSH établie
 ```
 
-> **Pourquoi ob-ssh-proxy et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité d'injecter un JWT. `ob-ssh-proxy` résout ce problème : il s'exécute **sur le bastion**, demande un JWT signé à LLNG (`/pam/bastion-token`), puis ouvre la connexion SSH vers le backend avec `SendEnv LLNG_BASTION_JWT`. Le backend vérifie ce JWT pour s'assurer que la connexion provient bien d'un bastion autorisé.
+> **Pourquoi ob-ssh-proxy et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité de s'authentifier avec un certificat éphémère en son propre nom. `ob-ssh-proxy` résout ce problème : il s'exécute **sur le bastion**, obtient un certificat utilisateur éphémère (~120 s) via `POST /pam/bastion-cert` (délégué à `ob-bastion-cert-helper` par une règle sudoers NOPASSWD étroite), puis ouvre la connexion SSH vers le backend avec cette clé et ce certificat éphémères. Le backend vérifie le certificat nativement (CA, `source-address`, `AuthorizedPrincipalsCommand`) pour s'assurer que la connexion provient bien d'un bastion autorisé et que l'utilisateur y est bien connecté (voucher).
 
 #### 3. Escalade de privilèges (sudo)
 
@@ -120,11 +123,11 @@ RevokedKeys /etc/ssh/revoked_keys                 # KRL obligatoire
 ExposeAuthInfo yes                                # Requis pour SSH_CERT_* variables
 AllowAgentForwarding no                           # Pas de forwarding agent (sécurité)
 PermitRootLogin no                                # Root uniquement via console (ttyS0)
-AuthorizedPrincipalsCommand /bin/echo %u          # Accepte les certificats dont le principal = nom d'utilisateur
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
 AuthorizedPrincipalsCommandUser nobody
 ```
 
-> **Note `AuthorizedPrincipalsCommand` :** Cette directive permet d'accepter les certificats SSH dont le principal correspond exactement au nom d'utilisateur de la connexion. C'est nécessaire pour les utilisateurs résolus dynamiquement via NSS (`openbastion` dans `nsswitch.conf`), qui n'ont pas d'entrée `~/.ssh/authorized_principals` sur le système de fichiers. `ob-bastion-setup` configure cette directive automatiquement.
+> **Note `AuthorizedPrincipalsCommand` :** Sur le **bastion**, `ob-ssh-principals` n'émet le principal que si le certificat est un certificat utilisateur ordinaire (key-id sans `bastion=`), afin d'accepter les connexions des utilisateurs finaux. Sur les **backends**, `ob-ssh-principals` n'émet le principal QUE si le key-id est de la forme `bastion=<id>;user=<u>;...`, que `<u>` correspond à l'utilisateur de login, et que `<id>` figure dans `/etc/open-bastion/allowed_bastions`. Ainsi, un certificat SSO direct (key-id sans `bastion=`) est refusé par sshd avant même PAM. Le token `%i` est nécessaire car sshd standard ne peuple pas `SSH_CERT_KEY_ID` dans l'environnement de la commande. `ob-bastion-setup` et `ob-backend-setup` configurent cette directive automatiquement.
 
 ### Configuration PAM (sshd)
 
@@ -152,21 +155,17 @@ portal_url = https://auth.example.com
 server_group = backend-prod
 verify_ssl = true
 
-# JWT bastion obligatoire
-bastion_jwt_required = true
-bastion_jwt_issuer = https://auth.example.com
-bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_allowed_bastions = bastion-prod-01,bastion-prod-02
-
-# Détection de replay JWT
-bastion_jwt_replay_detection = true
-bastion_jwt_replay_cache_size = 10000
-bastion_jwt_replay_cleanup_interval = 60
-
 # Politique de clés SSH (CA obligatoire, pas de clés faibles)
 ssh_key_policy_enabled = true
 ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa
+```
+
+> **Paramètres JWT bastion supprimés.** Les clés `bastion_jwt_*` (et la ligne `AcceptEnv LLNG_BASTION_JWT` dans `sshd_config`) ont été retirées : le mécanisme JWT bastion était structurellement cassé (`SendEnv`/`AcceptEnv` ne peuplent que l'environnement du processus enfant SSH, jamais l'environnement PAM que `pam_getenv` lit — le backend avec `bastion_jwt_required=true` rejetait donc toutes les sessions). Il est remplacé par le vouching par certificat éphémère décrit ci-dessus. L'allowlist des bastions se configure désormais via `ob-backend-setup --allowed-bastions <client_ids>`, qui écrit `/etc/open-bastion/allowed_bastions` et câble `AuthorizedPrincipalsCommand`.
+
+```bash
+# /etc/ssh/sshd_config sur les backends (ajout pour le vouching par certificat)
+# L'option source-address du certificat éphémère est vérifiée nativement par sshd.
+# Aucun AcceptEnv n'est nécessaire.
 ```
 
 ### Restriction réseau des backends
@@ -181,11 +180,14 @@ iptables -A INPUT -p tcp --dport 22 -j DROP
 # Security groups (cloud) : Backend SG → SSH (22) depuis Bastion-SG uniquement
 ```
 
-### Variable d'environnement SSH pour le JWT bastion
+### Transport du voucher bastion (côté bastion)
+
+Le voucher `LLNG_BASTION_VOUCHER` est propagé par PAM (transport **local au bastion**, sans `SendEnv`/`AcceptEnv`). À la connexion de l'utilisateur sur le bastion, `pam_openbastion` reçoit le voucher via la réponse `/pam/authorize` et l'exporte avec `pam_putenv("LLNG_BASTION_VOUCHER=…")`. OpenSSH fusionne l'environnement PAM dans la session via `pam_getenvlist` (directive `UsePAM yes`), ce qui rend la variable disponible dans le shell de l'utilisateur sur le bastion. `ob-ssh-proxy` la lit directement depuis son propre environnement ; aucun `AcceptEnv` ni `SendEnv` n'est nécessaire — et ce transport fonctionne là où `SendEnv` échouait, car `pam_getenv` lit bien l'environnement PAM local.
 
 ```bash
-# /etc/ssh/sshd_config sur les backends
-AcceptEnv LLNG_BASTION_JWT
+# Aucune directive AcceptEnv n'est nécessaire sur les backends.
+# Sur le bastion, UsePAM yes (défaut) suffit pour que le voucher soit
+# disponible dans la session de l'utilisateur.
 ```
 
 ### Durée de vie des certificats SSH
@@ -425,7 +427,7 @@ chmod 400 /secure/ca_key
 | **Probabilité** |   1   |
 | **Impact**      |   3   |
 
-**Description :** Tentative d'accès direct aux backends sans passer par le bastion. En cible de sécurité maximale, ce risque est fortement réduit car les backends exigent un certificat CA LLNG **et** un JWT bastion valide.
+**Description :** Tentative d'accès direct aux backends sans passer par le bastion. En cible de sécurité maximale, ce risque est fortement réduit car les backends exigent un certificat CA LLNG **éphémère et signé pour ce bastion précis**, avec une option `source-address` épinglée à l'IP du bastion.
 
 **Vecteurs d'attaque :**
 
@@ -436,7 +438,8 @@ chmod 400 /secure/ca_key
 **Facteurs atténuants en cible maximale :**
 
 - `AuthorizedKeysFile none` + `TrustedUserCAKeys` : sans certificat CA LLNG, rejet par sshd avant même PAM
-- `bastion_jwt_required = true` : même avec certificat valide, rejet si pas de JWT bastion
+- `AuthorizedPrincipalsCommand ob-ssh-principals` : un certificat SSO direct (key-id sans `bastion=`) est refusé par sshd avant PAM ; seul un certificat éphémère avec key-id `bastion=<id>;user=<u>;...` est accepté
+- Option `source-address` dans le certificat éphémère : sshd refuse nativement le certificat si la connexion ne provient pas de l'IP du bastion qui l'a obtenu
 - Restriction réseau : backends non accessibles hors bastion (firewall/security groups)
 
 **Remédiation configuration (défense en profondeur) :**
@@ -447,8 +450,9 @@ chmod 400 /secure/ca_key
 iptables -A INPUT -p tcp --dport 22 -s <IP_BASTION> -j ACCEPT
 iptables -A INPUT -p tcp --dport 22 -j DROP
 
-# 2. Cryptographique : JWT bastion obligatoire
-# (même si les restrictions réseau sont contournées via VPN)
+# 2. Cryptographique : certificat éphémère avec source-address obligatoire
+# (même si les restrictions réseau sont contournées via VPN,
+#  l'option source-address du certificat bloque toute présentation hors bastion)
 ```
 
 **Vérification :**
@@ -456,17 +460,17 @@ iptables -A INPUT -p tcp --dport 22 -j DROP
 ```bash
 # Depuis l'extérieur, doit échouer même avec credentials valides :
 ssh backend.internal.example.com
-# sshd: No supported authentication methods available (server sent: publickey)
-# ou : PAM: Bastion JWT required but not provided
+# sshd: certificate presented from wrong source address (source-address critical option)
+# ou : Permission denied (publickey) si pas de cert éphémère bastion
 
 # Depuis le bastion via ob-ssh-proxy, doit fonctionner :
 ob-ssh-proxy backend.internal.example.com
 ```
 
-|                 |                    Score résiduel                     |
-| --------------- | :---------------------------------------------------: |
-| **Probabilité** | 1 (cert CA requis + JWT bastion + restriction réseau) |
-| **Impact**      |                           3                           |
+|                 |                         Score résiduel                          |
+| --------------- | :-------------------------------------------------------------: |
+| **Probabilité** | 1 (cert éphémère + source-address + allowlist + restriction réseau) |
+| **Impact**      |                               3                                 |
 
 ---
 
@@ -488,7 +492,7 @@ ob-ssh-proxy backend.internal.example.com
 **Conséquence :**
 
 - Interception des connexions transitant par le bastion
-- Pivot vers les backends avec JWT bastion légitime généré par le bastion compromis
+- Pivot vers les backends : le bastion compromis peut obtenir des certificats éphémères légitimes via son jeton serveur root pour tout utilisateur disposant d'un voucher actif
 - Accès aux backends pour les utilisateurs actifs dans LLNG
 
 **Facteurs atténuants :**
@@ -504,7 +508,7 @@ ob-ssh-proxy backend.internal.example.com
 # /etc/ssh/sshd_config
 AllowAgentForwarding no
 
-# Utiliser ob-ssh-proxy (pas ProxyJump natif, qui contournerait le JWT bastion)
+# Utiliser ob-ssh-proxy (pas ProxyJump natif, qui contournerait le vouching par certificat)
 # ~/.ssh/config
 Host backend
     ProxyCommand ssh bastion ob-ssh-proxy %h %p
@@ -611,106 +615,71 @@ pkill -u $USERNAME -KILL
 
 ---
 
-### R-S9 - Replay d'un JWT bastion intercepté
-
-|                 | Score |
-| --------------- | :---: |
-| **Probabilité** |   2   |
-| **Impact**      |   2   |
-
-**Description :** Un attaquant qui intercepte un JWT bastion en transit pourrait le rejouer pour usurper une connexion dans la fenêtre de validité du token (5 minutes par défaut).
-
-**Vecteurs d'attaque :**
-
-- MITM entre bastion et backend (rare si réseau interne)
-- Lecture de la variable d'environnement `LLNG_BASTION_JWT` sur le bastion
-- Logs applicatifs exposant le JWT
-
-**Facteurs atténuants :**
-
-- Le JWT a une durée de vie très courte (300s par défaut)
-- Le JWT contient `target_host` : utilisable uniquement vers ce backend spécifique
-- Le JWT contient `bastion_ip` : le backend peut vérifier la cohérence IP
-- Le `jti` (JWT ID) est unique et généré avec `Crypt::URandom` ou `/dev/urandom`
-
-**Remédiation embarquée :**
-
-- TTL court configurable via `pamAccessBastionJwtTtl` (défaut: 300s)
-- Claim `target_host` limite le scope du JWT à un seul backend
-- UUID cryptographiquement sécurisé pour le `jti`
-- **Cache JTI pour détection de replay** : chaque `jti` utilisé est stocké localement jusqu'à expiration
-
-**Configuration détection replay (activée par défaut) :**
-
-```ini
-# /etc/open-bastion/openbastion.conf (backend)
-bastion_jwt_replay_detection = true   # Activer la détection (défaut: true)
-bastion_jwt_replay_cache_size = 10000 # Capacité du cache (défaut: 10000)
-bastion_jwt_replay_cleanup_interval = 60  # Nettoyage toutes les N sec (défaut: 60)
-```
-
-**Remédiation configuration :**
-
-```ini
-# /etc/open-bastion/openbastion.conf (backend) - Réduire le TTL accepté
-bastion_jwt_clock_skew = 30   # Réduire la tolérance (défaut: 60s)
-```
-
-```yaml
-# LLNG Manager - Réduire la durée de vie du JWT
-pamAccessBastionJwtTtl: 60 # 1 minute au lieu de 5
-```
-
-|                 |            Score résiduel             |
-| --------------- | :-----------------------------------: |
-| **Probabilité** | 1 (avec détection replay + TTL court) |
-| **Impact**      |  2 (usurpation de session si bypass)  |
-
----
-
-### R-S10 - Rotation des clés JWKS non propagée
+### R-S9 - Interception ou vol du certificat éphémère bastion
 
 |                 | Score |
 | --------------- | :---: |
 | **Probabilité** |   1   |
 | **Impact**      |   2   |
 
-**Description :** Si les clés de signature LLNG sont rotées, le cache JWKS local sur les backends doit être mis à jour pour accepter les JWT signés avec la nouvelle clé.
+**Description :** Un attaquant qui intercepte un certificat éphémère en transit (ou le vole dans le tmpfs du bastion) tente de l'utiliser pour accéder à un backend.
 
-**Remédiation embarquée (LLNG) :**
+**Vecteurs d'attaque :**
 
-LemonLDAP::NG gère la rotation des clés de manière sécurisée :
+- MITM entre bastion et backend (rare si réseau interne)
+- Accès root au bastion permettant de lire le tmpfs avant effacement
 
-1. **Publication anticipée** : La future clé est publiée dans le JWKS avant d'être utilisée pour signer
-2. **Maintien de l'ancienne** : L'ancienne clé reste dans le JWKS après rotation pour les JWT en cours de validité
-3. **Transition transparente** : Avec un refresh du cache JWKS au moins quotidien, la rotation est automatique
+**Facteurs atténuants structurels :**
 
-**Remédiation embarquée (PAM) :**
+- **Durée de vie ~120 s** (`pamAccessBastionCertTtl`, défaut : 120 s) : la fenêtre d'exploitation est très courte ; le certificat est effacé du tmpfs dès la fin de la connexion
+- **Option `source-address` critique** : sshd refuse nativement le certificat si la connexion ne provient pas de l'IP du bastion émetteur — un certificat volé est inutilisable depuis une autre machine
+- **`target_host` enregistré dans le key-id** (`bastion=<id>;user=<u>;target=<h>`) : tracé à des fins d'audit. Note : `ob-ssh-principals` n'enforce que `bastion=<id>` (allowlist) et `user=<u>` — il **ne vérifie pas** `target=`, donc le certificat n'est pas restreint à un backend précis ; c'est `source-address` qui le restreint au bastion émetteur
+- La clé privée éphémère ne quitte jamais le bastion (tmpfs, effacée à la sortie) : seul le certificat signé transite sur le réseau
 
-- TTL du cache JWKS configurable (défaut: 3600s = 1h)
-- Refresh automatique du cache si `kid` (Key ID) non trouvé
-- Vérification du claim `iss` (issuer) pour éviter les JWT d'autres sources
+**Remédiation configuration :**
 
-**Configuration recommandée :**
-
-```ini
-# /etc/open-bastion/openbastion.conf (backend)
-# Le TTL par défaut (1h) est suffisant grâce à la publication anticipée LLNG
-bastion_jwt_cache_ttl = 3600
+```yaml
+# LLNG Manager - Réduire la durée de vie du certificat éphémère
+pamAccessBastionCertTtl: 60 # 1 minute au lieu de 2 (si politique plus stricte)
 ```
 
-**Cas particulier - Compromission clé LLNG :**
+|                 |                          Score résiduel                          |
+| --------------- | :--------------------------------------------------------------: |
+| **Probabilité** | 1 (source-address + TTL très court + clé privée jamais exportée) |
+| **Impact**      |        2 (usurpation limitée au backend cible si bypass)         |
 
-En cas de compromission de la clé privée LLNG (urgence), purger manuellement les caches :
+---
 
-```bash
-rm -f /var/cache/open-bastion/jwks.json
+### R-S10 - Voucher bastion expiré ou révocation de la CA ssh-ca
+
+|                 | Score |
+| --------------- | :---: |
+| **Probabilité** |   1   |
+| **Impact**      |   2   |
+
+**Description :** Deux scénarios de rupture de confiance sur la chaîne vouching → certificat : (a) le voucher `(bastion_id, user)` a expiré ou le certificat SSO de l'utilisateur a été révoqué ; (b) la clé CA ssh-ca a été compromise ou renouvelée et les backends n'ont pas encore le nouveau `TrustedUserCAKeys`.
+
+**Cas a — Voucher expiré :**
+
+- **Comportement fail-closed :** `/pam/bastion-cert` renvoie `reason: voucher_expired` ; `ob-ssh-proxy` affiche une erreur claire (« Votre autorisation bastion a expiré — reconnectez-vous au bastion ») et sort en erreur. L'utilisateur se reconnecte au bastion (normal), PAM rejoue `/pam/authorize` et émet un nouveau voucher.
+- **Validité du voucher :** `min(now + pamAccessBastionVoucherTtl [défaut 43200 s = 12 h], expires_at du certificat SSO de l'utilisateur)` — la révocation SSO invalide donc le voucher sans délai supplémentaire.
+- Pas de re-vouching silencieux : la reconnexion est la preuve de présence auditable.
+
+**Cas b — Rotation ou compromission de la CA ssh-ca :**
+
+- En cas de rotation planifiée, mettre à jour `TrustedUserCAKeys` sur les backends **avant** la rotation (même procédure que la CA utilisateur).
+- En cas de compromission : remplacer immédiatement la CA et mettre à jour `TrustedUserCAKeys` sur tous les backends ; les certificats éphémères (~120 s) expirent très rapidement, limitant la fenêtre d'exploitation.
+
+```yaml
+# LLNG Manager - Ajuster le plafond TTL du voucher
+pamAccessBastionVoucherTtl: 43200   # 12 h (défaut)
+pamAccessBastionCertTtl: 120        # 2 min (défaut)
 ```
 
-|                 |                     Score résiduel                      |
-| --------------- | :-----------------------------------------------------: |
-| **Probabilité** | 1 (rotation transparente grâce à publication anticipée) |
-| **Impact**      |              1 (en fonctionnement normal)               |
+|                 |                           Score résiduel                            |
+| --------------- | :-----------------------------------------------------------------: |
+| **Probabilité** |          1 (fail-closed, TTL court du cert, lié à SSO cert)         |
+| **Impact**      | 1 (expiration propagée ; cert ~120 s limite l'exposition en cas b)  |
 
 ---
 
@@ -1308,7 +1277,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - R-S1 (brute-force mot de passe) : **ÉLIMINÉ** (pas de mot de passe SSH)
 - R-S2 (vol clé SSH sans certificat) : **ÉLIMINÉ** (AuthorizedKeysFile none)
 - R-S3 (certificat compromis) : **contrôlé par KRL** (mécanisme principal) + **binding fingerprint LLNG sur `/pam/authorize` et `/pam/verify`** qui bloque aussi bien l'ouverture SSH que l'escalade sudo dès que la révocation est publiée côté LLNG, même si la KRL locale n'est pas encore à jour
-- R-S5 (contournement bastion) : **P=1** (certificat CA requis + JWT bastion)
+- R-S5 (contournement bastion) : **P=1** (certificat éphémère CA requis + `source-address` + `AuthorizedPrincipalsCommand`)
 - R-S15 (KRL stale) : **I=1** grâce au binding fingerprint sur `/pam/authorize` : une révocation LLNG interdit l'ouverture d'une session SSH à chaque nouvelle connexion, indépendamment de la fraîcheur de la KRL
 - R-S16 (escalade sudo) : **contrôlé par réauthentification SSO obligatoire**
 - R-S17 (lockout) : **contrôlé par compte de service secours** + procédure console documentée
@@ -1339,15 +1308,17 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - [ ] Monitoring KRL (alerte si > 1h sans mise à jour)
 - [ ] Processus de révocation documenté et testé
 
-### Bastion et JWT
+### Bastion et vouching par certificat éphémère
 
 - [ ] `AllowAgentForwarding no` sur le bastion
-- [ ] Clients configurés avec `ob-ssh-proxy` (ProxyJump natif interdit car contourne le JWT)
-- [ ] `bastion_jwt_required = true` sur les backends
-- [ ] `bastion_jwt_replay_detection = true` activé
-- [ ] `AcceptEnv LLNG_BASTION_JWT` dans sshd_config des backends
+- [ ] Clients configurés avec `ob-ssh-proxy` (ProxyJump natif interdit car contourne le vouching)
+- [ ] `AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i` dans sshd_config des backends
+- [ ] `/etc/open-bastion/allowed_bastions` configuré sur les backends (via `ob-backend-setup --allowed-bastions <client_ids>`)
+- [ ] Plugin `ssh-ca` LLNG actif (`sshCaActivation=1`)
+- [ ] `ob-bastion-cert-helper` déployé avec règle sudoers NOPASSWD étroite sur le bastion
 - [ ] Restriction réseau : backends accessibles uniquement depuis le bastion
-- [ ] `bastion_jwt_allowed_bastions` configuré (whitelist des bastions)
+- [ ] `pamAccessBastionGroups` configuré côté LLNG (groupes autorisés à voucher, défaut : bastion)
+- [ ] Aucune directive `AcceptEnv LLNG_BASTION_JWT` dans sshd_config des backends (supprimée)
 
 ### PAM et sudo
 
@@ -1599,7 +1570,7 @@ sequenceDiagram
 | ----------------------------- | ----------------------------------------------------------- |
 | `AuthorizedKeysFile none`     | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
 | KRL avec cron 30 min          | Contrôle compensatoire pour les certificats 1 an            |
-| `bastion_jwt_required = true` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
+| Cert éphémère + `source-address` + `AuthorizedPrincipalsCommand` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
 | PAM sudo avec token LLNG      | Bloque toute escalade sans réauthentification SSO           |
 | Restriction réseau backends   | Défense en profondeur contre le contournement bastion       |
 
@@ -1612,7 +1583,7 @@ sequenceDiagram
 | Monitoring KRL + alertes                                | Détection rapide de R-S15                                     |
 | `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion       |
 | `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                              |
-| `ob-ssh-proxy` (pas ProxyJump natif)                    | JWT bastion obligatoire + clé privée ne touche pas le bastion |
+| `ob-ssh-proxy` (pas ProxyJump natif)                    | Vouching par certificat éphémère + clé privée ne quitte pas le bastion |
 | `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation     |
 | 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                           |
 
@@ -1622,7 +1593,7 @@ sequenceDiagram
 | ----------------------------------------- | --------- | ------------------------ |
 | Connexion SSH sans certificat rejetée     | Medium    | Log + alerte récurrente  |
 | Connexion avec certificat révoqué (KRL)   | High      | Alerte immédiate         |
-| Connexion backend sans JWT bastion        | High      | Alerte immédiate         |
+| Connexion backend sans certificat éphémère bastion (rejet source-address ou AuthorizedPrincipalsCommand) | High      | Alerte immédiate         |
 | KRL non mise à jour depuis > 1h           | High      | Alerte immédiate         |
 | Sudo refusé (token absent/invalide)       | Medium    | Log                      |
 | Même certificat depuis 2+ IPs différentes | High      | Alerte + investigation   |

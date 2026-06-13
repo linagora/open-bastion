@@ -20,6 +20,7 @@ usr/sbin/ob-session-recorder
 usr/sbin/ob-session-recorder-wrapper
 usr/sbin/ob-bastion-setup
 usr/sbin/ob-backend-setup
+usr/sbin/ob-bastion-cert-helper
 usr/sbin/ob-cache-admin
 
 # User scripts

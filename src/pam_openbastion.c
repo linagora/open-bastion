@@ -67,6 +67,9 @@
 /* Security: Maximum length for SSH_USER_AUTH environment variable */
 #define MAX_SSH_AUTH_LEN 8192
 
+/* Buffer for "LLNG_BASTION_VOUCHER=<nonce>" (nonce is a UUID; allow slack) */
+#define OB_MAX_VOUCHER_ENV 256
+
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /* Offline session marker directory (for ob-session-monitor) */
 #define OFFLINE_SESSION_MARKER_DIR "/run/open-bastion/offline_sessions"
@@ -3219,121 +3222,26 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     }
 
     /*
-     * Bastion JWT verification for backend servers.
-     * If bastion_jwt_required is enabled, we require a valid JWT from the bastion
-     * server before allowing SSH access. The JWT is passed via the LLNG_BASTION_JWT
-     * environment variable (set by SSH's SendEnv/AcceptEnv).
+     * Backend "only this bastion" enforcement lives at the SSH layer, not here.
+     *
+     * The old design passed a JWT from the bastion via LLNG_BASTION_JWT and read
+     * it with pam_getenv — which can NEVER work: SendEnv/AcceptEnv only populate
+     * the child process environment, never the PAM environment pam_getenv reads,
+     * so a bastion_jwt_required backend rejected every session. That dead block
+     * has been removed (see doc/design/bastion-cert-vouching.md).
+     *
+     * Instead, the bastion presents a short-lived, LLNG-signed certificate whose:
+     *   - `source-address` critical option makes sshd itself refuse the cert off
+     *     the vouching bastion's IP, and
+     *   - `bastion=<id>;user=<u>;target=<host>` key-id is validated by the
+     *     backend's AuthorizedPrincipalsCommand (ob-ssh-principals): it only
+     *     emits a principal when the key-id carries an allowed bastion_id and the
+     *     encoded user matches the login, so a direct user SSO cert (no bastion
+     *     key-id) is denied before PAM even runs.
+     * pam_openbastion then performs its normal /pam/authorize (LLNG-side rules)
+     * and account provisioning on top of that already-vouched connection.
      */
-    if (data->config.bastion_jwt_required &&
-        (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0)) {
-
-        const char *bastion_jwt = pam_getenv(pamh, "LLNG_BASTION_JWT");
-
-        if (!bastion_jwt || !*bastion_jwt) {
-            OB_LOG_ERR(pamh, "Bastion JWT required but not provided for user %s", user);
-
-            if (data->audit) {
-                audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);
-                audit_event.user = user;
-                audit_event.service = service;
-                audit_event.client_ip = client_ip;
-                audit_event.tty = tty;
-                audit_event.result_code = PAM_PERM_DENIED;
-                audit_event.reason = "Bastion JWT required but not provided";
-                audit_event_set_end_time(&audit_event);
-                audit_log_event(data->audit, &audit_event);
-            }
-
-            return PAM_PERM_DENIED;
-        }
-
-        /* Verify the JWT */
-        if (data->bastion_jwt_verifier) {
-            bastion_jwt_claims_t claims = {0};
-            bastion_jwt_result_t jwt_result = bastion_jwt_verify(
-                data->bastion_jwt_verifier, bastion_jwt, &claims);
-
-            if (jwt_result != BASTION_JWT_OK) {
-                OB_LOG_ERR(pamh, "Bastion JWT verification failed for user %s: %s",
-                             user, bastion_jwt_result_str(jwt_result));
-
-                if (data->audit) {
-                    audit_event_init(&audit_event, AUDIT_SECURITY_ERROR);
-                    audit_event.user = user;
-                    audit_event.service = service;
-                    audit_event.client_ip = client_ip;
-                    audit_event.tty = tty;
-                    audit_event.result_code = PAM_PERM_DENIED;
-                    audit_event.reason = bastion_jwt_result_str(jwt_result);
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                }
-
-                bastion_jwt_claims_free(&claims);
-                return PAM_PERM_DENIED;
-            }
-
-            /* Verify the JWT subject matches the PAM user */
-            if (!claims.sub || strcmp(claims.sub, user) != 0) {
-                OB_LOG_ERR(pamh, "Bastion JWT subject mismatch: expected %s, got %s",
-                             user, claims.sub ? claims.sub : "(null)");
-
-                if (data->audit) {
-                    /* Use AUDIT_AUTHZ_DENIED for authorization failures,
-                     * AUDIT_SECURITY_ERROR is for crypto/verification failures */
-                    audit_event_init(&audit_event, AUDIT_AUTHZ_DENIED);
-                    audit_event.user = user;
-                    audit_event.service = service;
-                    audit_event.client_ip = client_ip;
-                    audit_event.tty = tty;
-                    audit_event.result_code = PAM_PERM_DENIED;
-                    audit_event.reason = "Bastion JWT subject mismatch";
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                }
-
-                bastion_jwt_claims_free(&claims);
-                return PAM_PERM_DENIED;
-            }
-
-            /* Optionally verify the bastion IP matches the connecting client */
-            if (claims.bastion_ip && client_ip && strcmp(client_ip, "local") != 0) {
-                if (strcmp(claims.bastion_ip, client_ip) != 0) {
-                    OB_LOG_WARN(pamh, "Bastion IP mismatch: JWT claims %s, connection from %s",
-                                  claims.bastion_ip, client_ip);
-                    /* This is a warning, not an error - the bastion might be behind NAT */
-                }
-            }
-
-            OB_LOG_INFO(pamh, "Bastion JWT verified for user %s from bastion %s",
-                          user, claims.bastion_id ? claims.bastion_id : "(unknown)");
-
-            /* Store bastion info in PAM environment for potential use */
-            if (claims.bastion_id) {
-                char env_buf[256];
-                int env_len = snprintf(env_buf, sizeof(env_buf),
-                                       "LLNG_BASTION_ID=%s", claims.bastion_id);
-                if (env_len < 0) {
-                    OB_LOG_WARN(pamh,
-                                  "Failed to format LLNG_BASTION_ID environment variable");
-                } else if ((size_t)env_len >= sizeof(env_buf)) {
-                    OB_LOG_WARN(pamh,
-                                  "Truncated LLNG_BASTION_ID (length %d, buffer %zu)",
-                                  env_len, sizeof(env_buf));
-                }
-                pam_putenv(pamh, env_buf);
-            }
-
-            bastion_jwt_claims_free(&claims);
-        } else {
-            /*
-             * No local verifier available - this shouldn't happen if
-             * bastion_jwt_required is true, but handle it gracefully.
-             */
-            OB_LOG_ERR(pamh, "Bastion JWT required but verifier not initialized");
-            return PAM_SERVICE_ERR;
-        }
-    }
+    (void)0;
 
     /*
      * Detect if this is an SSH connection with certificate authentication.
@@ -3592,6 +3500,32 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         if (response.permissions.sudo_allowed) {
             pam_putenv(pamh, "LLNG_SUDO_ALLOWED=1");
         }
+    }
+
+    /*
+     * Bastion vouching: when LLNG returns a voucher, this server is a bastion
+     * and the voucher proves THIS user just connected here. Export it into the
+     * PAM environment so ob-ssh-proxy (running later in this same session, on
+     * this same host) can present it to /pam/bastion-cert to mint a short-lived
+     * certificate for onward hops. This transport is bastion-LOCAL, so unlike
+     * the old SendEnv JWT it actually reaches the session (sshd merges the PAM
+     * env into the child via pam_getenvlist). The voucher is useless without
+     * the root-only server token required as Bearer on /pam/bastion-cert.
+     */
+    if (response.bastion_voucher && *response.bastion_voucher) {
+        char voucher_env[OB_MAX_VOUCHER_ENV];
+        int n = snprintf(voucher_env, sizeof(voucher_env),
+                         "LLNG_BASTION_VOUCHER=%s", response.bastion_voucher);
+        if (n < 0 || (size_t)n >= sizeof(voucher_env)) {
+            OB_LOG_WARN(pamh, "Bastion voucher too long for env buffer, not exported");
+        } else if (pam_putenv(pamh, voucher_env) != PAM_SUCCESS) {
+            OB_LOG_WARN(pamh, "Failed to export LLNG_BASTION_VOUCHER to PAM environment");
+        } else {
+            OB_LOG_DEBUG(pamh, "Exported bastion voucher for user %s (expires_in=%d)",
+                         user, response.bastion_voucher_expires_in);
+        }
+        /* Scrub the local copy of the bearer secret. */
+        explicit_bzero(voucher_env, sizeof(voucher_env));
     }
 
     /*

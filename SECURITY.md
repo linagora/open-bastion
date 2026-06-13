@@ -82,88 +82,134 @@ For OAuth2 token introspection and refresh operations, the module uses **JWT Cli
 
 When `token_rotate_refresh = true` (default), the module automatically rotates the refresh token after each successful token refresh. This limits the window of opportunity if a token is compromised, as stolen tokens become invalid after the next legitimate use.
 
-## Bastion-to-Backend Authentication (JWT)
+## Bastion-to-Backend Authentication (Certificate Vouching)
 
 In bastion/backend architectures, the PAM module supports cryptographic verification that SSH connections
-to backends originate from authorized bastion servers.
+to backends originate from authorized bastion servers. This is implemented via **LLNG-signed ephemeral
+SSH certificates** — not JWTs — because the JWT/`SendEnv` approach was structurally broken (`SendEnv`/`AcceptEnv`
+populate only the child-process environment, never the PAM environment that `pam_getenv` reads).
 
 ### Architecture
 
 ```mermaid
 flowchart LR
+    subgraph User["User"]
+        client["SSH client"]
+    end
+
     subgraph Bastion["Bastion Server"]
+        pam_b["pam_openbastion (authorize)"]
         proxy["ob-ssh-proxy"]
+        helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
     end
 
     subgraph LLNG["LLNG Portal"]
-        bastion_token["/pam/bastion-token"]
-        jwks["/.well-known/jwks.json"]
+        authorize["/pam/authorize\n(mints voucher)"]
+        bastion_cert["/pam/bastion-cert\n(signs ephemeral cert)"]
     end
 
     subgraph Backend["Backend Server"]
-        pam["pam_openbastion.so"]
-        cache["JWKS Cache"]
+        sshd["sshd\n(TrustedUserCAKeys)"]
+        principals["ob-ssh-principals\n(AuthorizedPrincipalsCommand)"]
+        pam_bk["pam_openbastion (acct_mgmt)"]
     end
 
-    proxy -->|1. Request JWT| bastion_token
-    bastion_token -->|2. Signed JWT| proxy
-    proxy -->|3. SSH + JWT| pam
-    pam -->|4. Get public keys| jwks
-    jwks -->|5. Cache keys| cache
-    pam -->|6. Verify signature| cache
+    client -->|1. SSH with SSO cert| pam_b
+    pam_b -->|2. POST /pam/authorize| authorize
+    authorize -->|3. voucher| pam_b
+    pam_b -->|4. pam_putenv LLNG_BASTION_VOUCHER| proxy
+    proxy -->|5. ephemeral pubkey + voucher| helper
+    helper -->|6. POST /pam/bastion-cert + Bearer server token| bastion_cert
+    bastion_cert -->|7. signed ~120s cert| helper
+    helper -->|8. cert| proxy
+    proxy -->|9. SSH -i ephkey -o CertificateFile=cert| sshd
+    sshd -->|10. validate CA + source-address + principal| principals
+    principals -->|11. check key-id bastion= vs allowed_bastions| pam_bk
 ```
+
+### Flow
+
+1. User SSHes to the bastion using their SSO-issued certificate. `pam_openbastion` calls
+   `POST /pam/authorize`; LLNG mints a **voucher** bound to `(bastion_id, user)` and returns it.
+   The voucher is exported via `pam_putenv("LLNG_BASTION_VOUCHER=...")` — bastion-local, so the
+   `SendEnv`/`pam_getenv` trap does not apply.
+2. `ob-ssh-proxy [user@]backend` generates an **ephemeral** ed25519 keypair in tmpfs (private key
+   never leaves the bastion). It invokes `ob-bastion-cert-helper` (reached via a narrow
+   `NOPASSWD` sudoers rule — no setuid binary) which POSTs the voucher and the ephemeral public key
+   to `POST /pam/bastion-cert`, authenticating with the bastion's root-only server token as Bearer.
+3. LLNG verifies the voucher against the stored `(bastion_id, user)` record, then signs a
+   certificate (~120 s validity) with `principal=user`, `key-id` encoding
+   `bastion=<bastion_id>;user=<user>;target=<host>`, and a `source-address` critical option pinned
+   to the bastion's IP.
+4. `ob-ssh-proxy` connects to the backend: `ssh -i <ephkey> -o CertificateFile=<cert> -o IdentitiesOnly=yes`.
+   Temp files are wiped afterwards.
+5. Backend `sshd` validates the certificate natively (CA signature, validity window, `principal`,
+   `source-address`). `AuthorizedPrincipalsCommand ob-ssh-principals` checks the `key-id` field
+   against `/etc/open-bastion/allowed_bastions`. `pam_openbastion` runs the normal `/pam/authorize`
+   user-authorization call unchanged.
 
 ### Security Benefits
 
-| Threat                    | Without Bastion JWT            | With Bastion JWT         |
-| ------------------------- | ------------------------------ | ------------------------ |
-| Direct backend access     | Possible if network accessible | Blocked (no valid JWT)   |
-| VPN bypass to backend     | Possible                       | Blocked                  |
-| Firewall misconfiguration | Exposes backends               | Backends still protected |
-| Compromised bastion keys  | Access to backends             | Each hop still verified  |
+| Threat                    | Without Cert Vouching          | With Cert Vouching                        |
+| ------------------------- | ------------------------------ | ----------------------------------------- |
+| Direct backend access     | Possible if network accessible | Blocked (no valid LLNG-signed cert)       |
+| VPN bypass to backend     | Possible                       | Blocked (source-address critical option)  |
+| Firewall misconfiguration | Exposes backends               | Backends still protected                  |
+| Rogue bastion             | Access if on network           | Blocked (bastion not in allowed_bastions) |
+| Voucher theft by user     | N/A                            | Useless without root-only server token    |
+
+### Certificate Key-ID Fields
+
+The `key-id` field of the ephemeral cert carries structured audit and enforcement data:
+
+| Field       | Format                 | Description                                    |
+| ----------- | ---------------------- | ---------------------------------------------- |
+| `bastion`   | `bastion=<bastion_id>` | Enrolling OIDC `client_id` of the bastion      |
+| `user`      | `user=<username>`      | Username authorized on the bastion             |
+| `target`    | `target=<hostname>`    | Target backend hostname                        |
+
+Full key-id example: `bastion=bastion-01;user=alice;target=db-server`
+
+The `source-address` critical option is set to the bastion's IP, so sshd refuses the cert
+from any other origin at the protocol level.
 
 ### Configuration (Backend)
 
-```ini
-# /etc/open-bastion/openbastion.conf
-bastion_jwt_required = true
-bastion_jwt_issuer = https://auth.example.com
-bastion_jwt_jwks_url = https://auth.example.com/.well-known/jwks.json
-bastion_jwt_jwks_cache = /var/cache/open-bastion/jwks.json
-bastion_jwt_cache_ttl = 3600
-bastion_jwt_clock_skew = 60
-# Optional: restrict to specific bastions
-bastion_jwt_allowed_bastions = bastion-01,bastion-02
+Backend configuration is managed via `ob-backend-setup`:
+
+```bash
+# Configure allowed bastions (by OIDC client_id)
+ob-backend-setup --allowed-bastions bastion-01,bastion-02
+# Ansible variable: ob_bastion_allowed_bastions
 ```
+
+This writes `/etc/open-bastion/allowed_bastions` (0644 inside a 0711 directory) and wires
+`AuthorizedPrincipalsCommand`. If the file is absent, legacy direct-user SSO certs are accepted.
+If the file is present but empty, any vouched bastion is accepted. If the file is unreadable,
+`ob-ssh-principals` fails closed (denies the connection).
+
+Required sshd settings (no `AcceptEnv` needed):
 
 ```bash
 # /etc/ssh/sshd_config
-AcceptEnv LLNG_BASTION_JWT
+TrustedUserCAKeys /etc/open-bastion/ca.pub
+ExposeAuthInfo yes
+AuthorizedPrincipalsCommand /usr/lib/open-bastion/ob-ssh-principals %u %f %i
+AuthorizedPrincipalsCommandUser nobody
 ```
 
-### JWT Claims
+Direct user SSO certs that do not carry a `bastion=` key-id field are denied before PAM runs
+when an `allowed_bastions` file is present.
 
-| Claim           | Description                                       |
-| --------------- | ------------------------------------------------- |
-| `iss`           | LLNG portal URL (must match `bastion_jwt_issuer`) |
-| `sub`           | Username being proxied                            |
-| `aud`           | `pam:bastion-backend`                             |
-| `exp`           | Expiration timestamp (short-lived)                |
-| `bastion_id`    | Identifier of the bastion server                  |
-| `bastion_group` | Server group of the bastion                       |
-| `target_host`   | Target backend hostname                           |
-| `user_groups`   | User's LLNG groups                                |
+### Voucher Lifecycle
 
-### Offline Verification
-
-The JWKS cache enables JWT verification without network access to LLNG:
-
-1. First connection fetches JWKS from LLNG portal
-2. Public keys cached locally with configurable TTL
-3. Subsequent verifications use cached keys
-4. Cache refreshed when TTL expires or unknown key ID encountered
-
-This provides resilience against LLNG outages while maintaining security.
+| Property   | Value                                                                         |
+| ---------- | ----------------------------------------------------------------------------- |
+| Bound to   | `(bastion_id, user)` — minted at `/pam/authorize`, keyed per pair             |
+| Validity   | `min(now + pamAccessBastionVoucherTtl, SSO cert expires_at)`, default 12 h    |
+| Reusable   | Yes — multiplexed hops and `scp host1: host2:` all work with the same voucher |
+| Expiry     | Fail-closed: `ob-ssh-proxy` prints a clear error and exits non-zero           |
+| Renewal    | User reconnects to the bastion; no silent re-vouching                         |
 
 ## Token Cache Security
 
@@ -735,8 +781,8 @@ sessions are terminated after `offline_max_sso_unreachable` seconds (default: 1h
 | Integer overflow          | Input validation in base64 encoding, backoff calculations        |
 | Malformed JSON            | Type validation for critical response fields                     |
 | Client secret exposure    | JWT Client Assertion (RFC 7523) - secret never transmitted       |
-| Bastion bypass            | Bastion JWT verification on backends (RS256 signed)              |
-| Direct backend access     | JWT required + JWKS-based offline verification                   |
+| Bastion bypass            | LLNG-signed ephemeral cert; source-address critical option; allowed_bastions allowlist |
+| Direct backend access     | TrustedUserCAKeys + cert source-address + AuthorizedPrincipalsCommand enforcement      |
 | Offline cache theft       | AES-256-GCM encryption + machine-id binding                      |
 | Offline brute force       | Argon2id + per-user lockout after 5 attempts                     |
 | Stale offline credentials | Configurable TTL (default 7 days)                                |

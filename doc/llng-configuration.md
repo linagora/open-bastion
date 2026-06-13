@@ -35,7 +35,7 @@ The `yadd/lemonldap-ng-portal` images already include all plugins. No extra inst
 
 - **OIDCDeviceAuthorization** - Server enrollment via OAuth 2.0 Device Authorization Grant (RFC 8628)
 - **OIDCDeviceOrganization** - Extension for organizational device enrollment (tokens identify the device, not the approving admin)
-- **PamAccess** _(optional)_ - Token-based authentication: authorization endpoints (`/pam/authorize`, `/pam/bastion-token`)
+- **PamAccess** _(optional)_ - Token-based authentication and bastion vouching: authorization endpoints (`/pam/authorize`, `/pam/bastion-cert`)
 - **SSHCA** _(optional)_ - Certificate-based authentication: SSH Certificate Authority
 
 > You need at least one of **PamAccess** or **SSHCA** depending on your authentication mode. See [PAM Authentication Modes](pam-modes.md).

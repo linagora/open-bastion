@@ -226,6 +226,13 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
+# Privileged half of ob-ssh-proxy's certificate request: only root may use it
+# directly; normal users go through the sudoers rule installed by
+# ob-bastion-setup (configure_ssh_proxy_sudoers). No setuid bit involved.
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-cert-helper
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Install SSH certificate tool (user-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}

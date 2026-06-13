@@ -31,6 +31,7 @@ debian/tmp/
 debian/open-bastion/
 debian/open-bastion-desktop/
 debian/open-bastion-dbgsym/
+debian/open-bastion-builder/
 debian/*.debhelper.log
 debian/*.substvars
 debian/*.postrm.debhelper

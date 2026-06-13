@@ -65,7 +65,10 @@ ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 # Expanded by ob-builder from the selected PAM mode (@@PAM_MODE@@).
 @@MODE_SETTINGS_YAML@@
 
-# ── Backend-only JWT verification ─────────────────────────────────────────────
-# Empty fragment for bastion/standalone roles. For backend roles ob-builder
-# expands this to the ob_bastion_jwt_* variables defined below.
+# ── Backend-only: "accept only this bastion" ──────────────────────────────────
+# Empty for bastion/standalone roles. For backend roles ob-builder expands this
+# to ob_bastion_allowed_bastions (comma/space-separated bastion_id = enrolling
+# client_id) when an allowlist was given at build time. Enforcement is via
+# ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not the
+# old broken bastion_jwt config.
 @@BASTION_JWT_VARS_YAML@@

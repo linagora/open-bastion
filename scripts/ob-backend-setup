@@ -31,6 +31,13 @@ ENABLE_SUDO=true
 CREATE_USERS=true
 MAX_SECURITY=false
 KRL_REFRESH_INTERVAL=30
+# Space/comma-separated list of bastion_id values (the enrolling client_id of a
+# bastion) this backend accepts certs from. Empty = accept any vouched bastion
+# (still rejects direct user SSO certs, which carry no bastion= key-id).
+BASTION_ALLOWED_IDS=""
+# nobody-readable allowlist consumed by the AuthorizedPrincipalsCommand helper
+# (openbastion.conf is 0600 root, so the helper cannot read the list from there).
+OB_ALLOWED_BASTIONS_FILE="/etc/open-bastion/allowed_bastions"
 
 # OIDC client credentials. CLIENT_ID defaults to "pam-access" inside ob-enroll
 # when empty here. CLIENT_SECRET is empty in public-client mode; if the LLNG
@@ -220,14 +227,67 @@ install_principals_helper() {
 
     cat > "$script_path" << 'PRINCIPALS'
 #!/bin/sh
-# ob-ssh-principals — sshd AuthorizedPrincipalsCommand helper.
-# Args: <username> <fingerprint>
-# Outputs the username if known; drops the SSH key fingerprint to
-# /run/open-bastion/ssh-fp/<sshd-session-pid>.fp so pam_openbastion can
-# pick it up in pam_acct_mgmt and forward it to LLNG.
+# ob-ssh-principals — sshd AuthorizedPrincipalsCommand helper (BACKEND).
+# Args: <username> <fingerprint> <key-id>
+#
+# Enforces bastion vouching: emits the username as an allowed principal ONLY
+# when the presented certificate is a bastion-vouched cert — its key-id is
+# "bastion=<id>;user=<u>;target=<host>", the encoded <u> equals the login
+# user, and <id> is in the allowed-bastions list (if one is configured). A
+# direct user SSO cert (no "bastion=" key-id) is therefore denied here, before
+# PAM runs. Combined with the cert's source-address critical option (sshd
+# refuses it off the bastion IP), this is the "only this bastion" enforcement.
+# Also drops the SSH key fingerprint to the spool for pam_openbastion.
 USERNAME="$1"
 FINGERPRINT="$2"
+KEYID="$3"
 SPOOL_DIR="/run/open-bastion/ssh-fp"
+ALLOWED_FILE="/etc/open-bastion/allowed_bastions"
+OB_DIR="/etc/open-bastion"
+
+# --- Decide whether bastion-vouching enforcement applies. ---
+# This helper runs as AuthorizedPrincipalsCommandUser (nobody), so it MUST be
+# able to read the allowlist: ob-backend-setup keeps $OB_DIR traversable (711)
+# and the file world-readable (644). FAIL CLOSED on any ambiguity — a config
+# the helper cannot read must never silently fall open and accept direct SSO
+# certs (that exact bug let an unvouched SSO cert in when $OB_DIR was 0700):
+#   - allowlist readable        -> enforce with its contents
+#   - allowlist truly absent    -> legacy non-enforcing (pre-vouching backend)
+#   - present-but-unreadable, or
+#     $OB_DIR not traversable   -> DENY (emit no principal)
+enforce=0
+if [ -r "$ALLOWED_FILE" ]; then
+    enforce=1
+elif [ -e "$ALLOWED_FILE" ]; then
+    exit 0   # exists but unreadable -> fail closed
+elif [ -d "$OB_DIR" ] && [ ! -x "$OB_DIR" ]; then
+    exit 0   # cannot traverse the config dir -> cannot trust "absent" -> deny
+fi
+
+if [ "$enforce" = 1 ]; then
+    # Must be a vouched cert: key-id "bastion=<id>;user=<u>;..."
+    case "$KEYID" in
+        bastion=*\;user=*) : ;;
+        *) exit 0 ;;   # not vouched (or direct SSO cert) -> deny
+    esac
+    bid=${KEYID#bastion=}; bid=${bid%%;*}
+    rest=${KEYID#*;user=}; cuser=${rest%%;*}
+    # Reject anything with unexpected characters (defence in depth; LLNG already
+    # sanitises these fields to [A-Za-z0-9._-]).
+    case "$bid"   in ""|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+    case "$cuser" in ""|*[!A-Za-z0-9._-]*) exit 0 ;; esac
+    # The cert's encoded user must match the login user.
+    [ "$cuser" = "$USERNAME" ] || exit 0
+    # Enforce the allowlist if it is non-empty (empty => any vouched bastion).
+    allowed=$(tr ',;' '  ' < "$ALLOWED_FILE" 2>/dev/null)
+    if [ -n "$(printf '%s' "$allowed" | tr -d '[:space:]')" ]; then
+        ok=0
+        for a in $allowed; do
+            [ "$a" = "$bid" ] && { ok=1; break; }
+        done
+        [ "$ok" = 1 ] || exit 0
+    fi
+fi
 
 case "$FINGERPRINT" in
     SHA256:[A-Za-z0-9+/]*) : ;;
@@ -262,6 +322,26 @@ PRINCIPALS
     chmod 755 "$script_path"
     track_created "$script_path"
 
+    # Allowed-bastions list, world-readable (no secrets — just client_id values)
+    # so the principals helper (running as nobody) can read it. Empty file means
+    # "any vouched bastion"; its mere presence turns on bastion-only enforcement.
+    backup_file "$OB_ALLOWED_BASTIONS_FILE"
+    mkdir -p "$(dirname "$OB_ALLOWED_BASTIONS_FILE")"
+    printf '%s\n' "$BASTION_ALLOWED_IDS" > "$OB_ALLOWED_BASTIONS_FILE"
+    chmod 644 "$OB_ALLOWED_BASTIONS_FILE"
+    track_created "$OB_ALLOWED_BASTIONS_FILE"
+    # CRITICAL: the principals helper runs as nobody and must traverse this
+    # directory to read the 0644 allowlist above. If the dir stays 0700 root,
+    # nobody cannot stat the file, the helper fails closed (post-fix) — or,
+    # before the fail-closed fix, silently fell OPEN and accepted direct SSO
+    # certs. Every secret inside is individually 0600, so 0711 is safe.
+    chmod 0711 "$(dirname "$OB_ALLOWED_BASTIONS_FILE")"
+    if [ -n "$BASTION_ALLOWED_IDS" ]; then
+        info "Backend accepts bastions: $BASTION_ALLOWED_IDS"
+    else
+        info "Backend accepts any vouched bastion (no bastion_id allowlist set)"
+    fi
+
     # Spool directory: owned by AuthorizedPrincipalsCommandUser (nobody),
     # mode 0700 — see ob-bastion-setup for rationale (a world-writable
     # directory would expose PAM to a spoofed-fingerprint attack via
@@ -295,9 +375,11 @@ configure_sshd() {
 # Trust LLNG SSH CA for certificate authentication
 TrustedUserCAKeys $SSH_CA_FILE
 
-# Accept certificate if principal matches the requested username and drop the
-# SSH key fingerprint for pam_openbastion to forward to LLNG.
-AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f
+# Accept a certificate only when it is bastion-vouched: the helper checks the
+# cert key-id (%i) carries an allowed bastion_id and the encoded user matches
+# %u, then emits the principal and drops the key fingerprint (%f) for
+# pam_openbastion to forward to LLNG. Direct user SSO certs are denied here.
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
 AuthorizedPrincipalsCommandUser nobody
 
 # Enable public key (certificate) authentication
@@ -417,12 +499,18 @@ configure_pam_sudo() {
     local pam_content="# PAM configuration for sudo with LemonLDAP::NG
 # Generated by $PROG_NAME on $(date)
 #
-# Authorization for sudo is controlled by LLNG rules
+# SSO users (resolved through NSS openbastion, absent from /etc/passwd) are
+# authenticated and authorized for sudo by LLNG. LOCAL Unix users (present in
+# /etc/passwd, e.g. the machine's break-glass admin) keep standard Unix sudo:
+# without these fallbacks a 'required pam_openbastion' line locks every local
+# admin out of sudo, since LLNG cannot authorize users it does not know.
 
-# Authentication - check with LLNG
+# Authentication - local Unix password first, then LLNG
+auth       sufficient   pam_unix.so
 auth       required     pam_openbastion.so service_type=sudo
 
-# Account - check with LLNG
+# Account - local users (in /etc/passwd) pass; SSO users checked with LLNG
+account    sufficient   pam_localuser.so
 account    required     pam_openbastion.so service_type=sudo
 
 # Session - standard Unix
@@ -1551,6 +1639,16 @@ parse_args() {
                     exit 1
                 fi
                 SERVER_GROUP="$2"
+                shift 2
+                ;;
+            --allowed-bastions)
+                # Comma/space-separated bastion_id allowlist. An explicit empty
+                # value ("") is allowed and means "any vouched bastion".
+                if [ -z "${2+x}" ]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                BASTION_ALLOWED_IDS="$2"
                 shift 2
                 ;;
             -t|--token-file)
