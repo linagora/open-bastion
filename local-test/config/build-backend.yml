@@ -1,3 +1,9 @@
+# ob-builder config for the lab BACKENDS.
+#
+# client_id `pam-access` is mapped to the *backend* server group by the lab LLNG
+# (see sso/configure.sh). `allowed_bastions` is left empty here and filled in by
+# the harness at run time with the bastion_id returned by `ob-bastion-id` on the
+# freshly deployed bastion — that is the whole point of the two-phase workflow.
 deployment_slug: oblab
 scenario: token-only
 portal_url: http://auth.example.com
@@ -13,7 +19,7 @@ ansible_auto_approve: yes
 apt_url: http://192.168.122.1:8088
 apt_suite: ./
 apt_component: ""
+allowed_bastions: ""
 enable_hardening: no
 enable_audit_trace: no
-disable_session_recorder: no
 self_delete: no

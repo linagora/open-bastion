@@ -1,0 +1,26 @@
+# ob-builder config for the lab BASTION (consumed by deploy-ansible.sh / deploy-shell.sh).
+#
+# The bastion must enrol with a client_id that the lab LLNG maps to a *bastion*
+# server group: sso/configure.sh sets pamAccessServerGroups = { ob-bastion ->
+# bastion, pam-access -> backend }, so the bastion enrols as `ob-bastion`. Its
+# bastion_id (returned by `ob-bastion-id` after deploy) is therefore `ob-bastion`,
+# which the harness feeds into the backend allowlist.
+deployment_slug: oblab
+scenario: token-only
+portal_url: http://auth.example.com
+client_id: ob-bastion
+client_id_policy: fixed
+client_secret_mode: embedded
+embedded_client_secret: bastionsecret
+server_group: bastion
+server_group_policy: fixed
+target_role: bastion
+auto_enroll_setup: yes
+ansible_auto_approve: yes
+apt_url: http://192.168.122.1:8088
+apt_suite: ./
+apt_component: ""
+enable_hardening: no
+enable_audit_trace: no
+disable_session_recorder: no
+self_delete: no
