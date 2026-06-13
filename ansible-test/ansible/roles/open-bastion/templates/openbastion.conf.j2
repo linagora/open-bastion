@@ -1,0 +1,60 @@
+# /etc/open-bastion/openbastion.conf
+# Managed by Ansible — do not edit manually; changes will be overwritten.
+# Generated from open-bastion Ansible role (ob_role={{ ob_role }}, ob_pam_mode={{ ob_pam_mode }}).
+
+# ── Portal ────────────────────────────────────────────────────────────────────
+portal_url = {{ ob_portal_url }}
+
+# ── OIDC client ───────────────────────────────────────────────────────────────
+client_id = {{ ob_client_id }}
+{% if ob_client_secret | length > 0 %}
+client_secret = {{ ob_client_secret }}
+{% endif %}
+
+# ── Server identity ───────────────────────────────────────────────────────────
+server_group = {{ ob_server_group }}
+
+# ── TLS ───────────────────────────────────────────────────────────────────────
+verify_ssl = {{ ob_verify_ssl | default(true) | lower }}
+{% if ob_min_tls_version is defined %}
+min_tls_version = {{ ob_min_tls_version }}
+{% endif %}
+
+# ── Authorization cache ───────────────────────────────────────────────────────
+cache_enabled = true
+cache_dir = /var/cache/open-bastion
+{% if ob_cache_ttl is defined %}
+cache_ttl = {{ ob_cache_ttl }}
+{% else %}
+cache_ttl = 300
+{% endif %}
+
+# ── SSH key policy ────────────────────────────────────────────────────────────
+{% if ob_ssh_key_policy_enabled is defined %}
+ssh_key_policy_enabled = {{ ob_ssh_key_policy_enabled | lower }}
+{% endif %}
+{% if ob_ssh_key_allowed_types is defined %}
+ssh_key_allowed_types = {{ ob_ssh_key_allowed_types }}
+{% endif %}
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+{% if ob_cache_rate_limit_enabled is defined %}
+cache_rate_limit_enabled = {{ ob_cache_rate_limit_enabled | lower }}
+{% endif %}
+{% if ob_cache_rate_limit_max_attempts is defined %}
+cache_rate_limit_max_attempts = {{ ob_cache_rate_limit_max_attempts }}
+{% endif %}
+
+# ── Logging / audit ───────────────────────────────────────────────────────────
+log_level = warn
+audit_enabled = true
+audit_to_syslog = true
+
+# ── Backend: "accept only this bastion" ───────────────────────────────────────
+# Enforcement is NOT in this file. The old LLNG_BASTION_JWT transport was broken
+# (pam_getenv can't read a SendEnv var). It is replaced by certificate vouching:
+# ob-backend-setup writes /etc/open-bastion/allowed_bastions and wires an
+# AuthorizedPrincipalsCommand that only accepts a cert whose key-id carries an
+# allowed bastion=<id>, plus the cert's source-address critical option. Pass the
+# allowlist via `ob-backend-setup --allowed-bastions` (ob_bastion_allowed_bastions).
+# See doc/design/bastion-cert-vouching.md.

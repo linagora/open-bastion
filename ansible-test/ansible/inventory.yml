@@ -1,0 +1,66 @@
+---
+# Open Bastion lab inventory (template).
+#
+#   lab-a -> bastion role, server group "bastion"
+#   lab-b -> backend role, server group "backend"
+#   lab-c -> backend role, server group "backend" (2nd backend)
+#
+# The ansible_host IPs below are placeholders. run-test.sh rewrites them with
+# the DHCP leases libvirt hands the freshly created VMs. To run by hand,
+# replace each REPLACE_ME_* with the VM's IP (vm/mkvm.sh ip lab-a, …).
+#
+# Connection goes over the dedicated lab key with the host ssh-agent disabled
+# (a forwarded/foreign agent hangs on signing), on the :2222 escape-hatch sshd
+# — NOT port 22. ob-*-setup locks port 22 down to SSO certs; a port-22 control
+# connection would be severed by that lockdown. The :2222 instance (UsePAM no)
+# is a LAB DEBUG AID only and is never part of a real deployment.
+
+all:
+  vars:
+    ansible_user: debian
+    ansible_ssh_private_key_file: ~/.ssh/id_oblab
+    ansible_port: 2222
+    ansible_ssh_common_args: >-
+      -o IdentityAgent=none -o IdentitiesOnly=yes
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    ansible_python_interpreter: /usr/bin/python3
+    # Controller-side device-code approval target (the host cannot resolve
+    # auth.example.com:80; the SSO is reachable at the libvirt gateway).
+    ob_approve_base_url: "http://192.168.122.1"
+    ob_approve_host: "auth.example.com"
+
+    # Apply the full production SSH/PAM lockdown so the backend really enforces
+    # "accept only this bastion". Management stays available on :2222, so the
+    # port-22 lockdown does not lock us out. ob-*-setup configures NSS itself,
+    # so the lab NSS shortcut is disabled.
+    ob_auto_setup: true
+    ob_lab_configure_nss: false
+
+  children:
+    bastions:
+      hosts:
+        lab-a:
+          ansible_host: REPLACE_ME_LAB_A
+          ob_role: bastion
+          ob_server_group: bastion
+          # Dedicated OIDC client for the bastion: /pam/bastion-cert derives
+          # bastion-ness from the client_id via the LLNG pamAccessServerGroups
+          # map, never from a caller-claimed group. bastion_id == client_id.
+          ob_client_id: ob-bastion
+          ob_client_secret: bastionsecret
+
+    backends:
+      hosts:
+        lab-b:
+          ansible_host: REPLACE_ME_LAB_B
+          ob_role: backend
+          ob_server_group: backend
+          # "Accept only this bastion": ob-backend-setup writes this allowlist
+          # and the AuthorizedPrincipalsCommand only accepts a cert whose key-id
+          # carries bastion=<id> with <id> in it. bastion_id == lab-a's client_id.
+          ob_bastion_allowed_bastions: "ob-bastion"
+        lab-c:
+          ansible_host: REPLACE_ME_LAB_C
+          ob_role: backend
+          ob_server_group: backend
+          ob_bastion_allowed_bastions: "ob-bastion"
