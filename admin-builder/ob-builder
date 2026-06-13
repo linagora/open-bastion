@@ -636,10 +636,7 @@ validate_inputs() {
         fi
     fi
     [ -f "$REPO_KEYRING" ] || die "Repo keyring not found: $REPO_KEYRING"
-
-    if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
-        die "At least one of --output-shell or --output-ansible is required"
-    fi
+    # (output-target presence is checked fail-fast in main(), before this.)
 }
 
 # Print a recap before doing any work — last chance for the admin to bail.
@@ -1249,6 +1246,13 @@ main() {
     ob_init_tmpdir_trap
 
     parse_args "$@"
+
+    # Fail fast: ob-builder produces nothing without an output target. Check
+    # this BEFORE the interactive questionnaire / config load so the admin is
+    # not made to answer every question only to be rejected at the end.
+    if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
+        die "At least one of --output-shell or --output-ansible is required (nothing to produce otherwise). See --help."
+    fi
 
     if [ -n "$CONFIG_FILE" ]; then
         load_config "$CONFIG_FILE"
