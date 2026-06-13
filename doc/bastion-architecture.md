@@ -567,7 +567,7 @@ directory so the helper, running as nobody, can read it) and wires
 `AuthorizedPrincipalsCommand`. Ansible variable: `ob_bastion_allowed_bastions`.
 
 ```ini
-# /etc/ssh/sshd_config.d/50-open-bastion.conf  (managed by ob-backend-setup)
+# /etc/ssh/sshd_config.d/00-open-bastion-backend.conf  (managed by ob-backend-setup)
 TrustedUserCAKeys /etc/open-bastion/llng_ca.pub
 AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
 AuthorizedPrincipalsCommandUser nobody

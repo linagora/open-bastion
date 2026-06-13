@@ -45,7 +45,7 @@ if [ ! -f "$SSH_CA_FILE" ]; then
 fi
 
 # Configure sshd for certificate authentication
-cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << EOF
+cat > /etc/ssh/sshd_config.d/00-open-bastion-backend.conf << EOF
 # LemonLDAP::NG Backend Configuration
 
 # Trust LLNG SSH CA

@@ -370,7 +370,15 @@ PermitRootLogin no
             info "Added Include directive to $SSHD_CONFIG"
         fi
 
-        local ob_config="$SSHD_CONFIG_DIR/50-open-bastion-bastion.conf"
+        # Sort BEFORE distro drop-ins such as 50-cloud-init.conf, which ships
+        # `PasswordAuthentication yes`. sshd uses the FIRST value seen for
+        # keywords like PasswordAuthentication / PermitRootLogin / KbdInteractive,
+        # so our cert-only hardening must be read first or it is silently
+        # overridden. The 00- prefix guarantees that.
+        local ob_config="$SSHD_CONFIG_DIR/00-open-bastion-bastion.conf"
+        # Drop the legacy 50- name from earlier installs (it sorted AFTER
+        # 50-cloud-init.conf and therefore lost the PasswordAuthentication race).
+        rm -f "$SSHD_CONFIG_DIR/50-open-bastion-bastion.conf"
         backup_file "$ob_config"
         echo "$config_content" > "$ob_config"
         chmod 644 "$ob_config"

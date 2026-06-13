@@ -248,7 +248,7 @@ EOF
 ### Step 6: Configure SSH with Recording
 
 ```bash
-cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << 'EOF'
+cat > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf << 'EOF'
 # LLNG PAM Authentication
 UsePAM yes
 PasswordAuthentication yes
@@ -463,7 +463,7 @@ EOF
 ### Step 7: Configure SSH
 
 ```bash
-cat > /etc/ssh/sshd_config.d/50-open-bastion-backend.conf << 'EOF'
+cat > /etc/ssh/sshd_config.d/00-open-bastion-backend.conf << 'EOF'
 # PAM required for authorization and user creation
 UsePAM yes
 

@@ -131,7 +131,7 @@ SCRIPT
 chmod 755 /usr/local/bin/ob-principals
 
 # Configure sshd for certificate authentication
-cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << EOF
+cat > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf << EOF
 # LemonLDAP::NG Bastion Configuration
 
 # Trust LLNG SSH CA

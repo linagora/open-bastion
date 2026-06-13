@@ -30,7 +30,7 @@ done
 # accounts) auth. AuthorizedKeysCommand yields a key only for usernames
 # declared in /etc/open-bastion/service-accounts.conf, so plain pubkey
 # auth is effectively restricted to those service accounts.
-cat > /etc/ssh/sshd_config.d/50-open-bastion-bastion.conf << EOF
+cat > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf << EOF
 # LemonLDAP::NG Bastion Configuration (Token Auth Mode + Service Accounts)
 
 # Enable public key authentication for service accounts. AuthorizedKeysFile
