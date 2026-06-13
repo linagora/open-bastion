@@ -157,13 +157,7 @@ mkdir -p /var/lib/open-bastion
 chmod 711 /var/lib/open-bastion
 mkdir -p /var/lib/open-bastion/sessions
 chgrp ob-sessions /var/lib/open-bastion/sessions
-# Mode 3771 (drwxrws--t root:ob-sessions): setgid so per-user subdirs inherit
-# group ob-sessions; sticky so users only unlink their own entries; o+x (NO
-# o+r) so a connecting user — who is NOT in ob-sessions and whose elevated gid
-# the recorder wrapper deliberately drops before exec — can still traverse into
-# its own subdir created by the wrapper. Without o+x the recorder fails with
-# "session directory ... does not exist and could not be created".
-chmod 3771 /var/lib/open-bastion/sessions
+chmod 1770 /var/lib/open-bastion/sessions
 # Migrate the server token out of /etc (config) into /var/lib (runtime state,
 # FHS) so the heartbeat sandbox can keep /etc read-only. Idempotent.
 if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then

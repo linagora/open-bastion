@@ -164,14 +164,7 @@ case "$1" in
         groupadd --system open-bastion-sudo 2>/dev/null || true
         mkdir -p /var/lib/open-bastion/sessions
         chgrp ob-sessions /var/lib/open-bastion/sessions
-        # Mode 3771 (drwxrws--t root:ob-sessions): setgid so per-user subdirs
-        # inherit group ob-sessions; sticky so users only unlink their own
-        # entries; o+x (NO o+r) so a connecting user — who is NOT in ob-sessions
-        # and whose elevated gid the recorder wrapper deliberately drops before
-        # exec — can still traverse into its own subdir created by the wrapper.
-        # Without o+x the recorder fails with "session directory ... does not
-        # exist and could not be created" and the session is torn down.
-        chmod 3771 /var/lib/open-bastion/sessions
+        chmod 1770 /var/lib/open-bastion/sessions
         # Set setgid on the session recorder wrapper so it runs with gid ob-sessions
         if [ -f /usr/sbin/ob-session-recorder-wrapper ]; then
             chgrp ob-sessions /usr/sbin/ob-session-recorder-wrapper
