@@ -1,0 +1,42 @@
+# Test SSO for the Open Bastion VM lab.
+#
+# All-in-one LemonLDAP::NG (portal + manager) with the Open Bastion community
+# plugins (PamAccess, SSHCA, OIDCDeviceAuthorization, OIDCDeviceOrganization)
+# already baked into the yadd/lemonldap-ng-full image. File-based conf, no DB.
+#
+# Reachable from the libvirt VMs as http://auth.example.com/ (the VMs resolve
+# auth.example.com -> 192.168.122.1, the libvirt gateway) and from the host
+# browser at http://127.0.0.1:8090/ (Host: auth.example.com).
+#
+# To test *unreleased* plugin code, drop a docker-compose.override.yml next to
+# this file (it is gitignored) that bind-mounts your working copies over the
+# baked-in versions, e.g.:
+#
+#   services:
+#     sso:
+#       volumes:
+#         - /path/to/lemonldap-ng-plugins/plugins/pam-access/lib/.../PamAccess.pm:/usr/share/perl5/.../PamAccess.pm:ro
+#         - /path/to/lemonldap-ng-plugins/plugins/ssh-ca/lib/.../SSHCA.pm:/usr/share/perl5/.../SSHCA.pm:ro
+#
+services:
+  sso:
+    image: yadd/lemonldap-ng-full
+    container_name: ob-sso
+    environment:
+      SSODOMAIN: example.com
+      PORTAL: http://auth.example.com/
+      LOGLEVEL: notice
+    ports:
+      - "192.168.122.1:80:80"   # for the libvirt VMs (bastion/backend)
+      - "127.0.0.1:8090:80"     # for host browser/manager access
+    volumes:
+      - ob-sso-conf:/var/lib/lemonldap-ng/conf
+      - ob-sso-psessions:/var/lib/lemonldap-ng/psessions
+      - ob-sso-sessions:/var/lib/lemonldap-ng/sessions
+      # SSH CA state (cert serial counter + KRL); survives container recreation.
+      - ob-sso-ssh:/var/lib/lemonldap-ng/ssh
+volumes:
+  ob-sso-conf:
+  ob-sso-psessions:
+  ob-sso-sessions:
+  ob-sso-ssh:

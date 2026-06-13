@@ -1,0 +1,17 @@
+# Generated VM artefacts (large / machine-specific) — never commit
+vm/*.qcow2
+vm/*-seed.iso
+vm/*.port
+# Golden cloud image (download separately, or symlink / set OB_GOLDEN)
+vm/debian-*-genericcloud-*.qcow2
+
+# Built package + flat-repo index served to the VMs
+sso/aptrepo/*.deb
+sso/aptrepo/Packages
+sso/aptrepo/Packages.gz
+
+# Optional local SSO override (e.g. bind-mounting unreleased plugin code)
+sso/docker-compose.override.yml
+
+# Transient
+*.log

@@ -1,0 +1,140 @@
+---
+# Shared enrollment flow used by bastion / backend / standalone roles.
+# Two paths:
+#  * Auto-approve via LLNG cookie (ob_ansible_auto_approve=true AND cookie set):
+#    - start ob-enroll async on the target
+#    - wait for /run/open-bastion/enroll-state.json to appear
+#    - controller-side: GET /device?user_code=… to grab the CSRF token
+#    - controller-side: POST /device with action=approve
+#    - wait for ob-enroll to finish polling
+#  * Manual: invoke ob-enroll synchronously and let the operator approve.
+
+- name: "Decide enrollment strategy"
+  ansible.builtin.set_fact:
+    _ob_use_auto_approve: "{{ ob_ansible_auto_approve | bool and (ob_llng_cookie | default('') | length) > 0 }}"
+
+# ── Auto-approve branch ──────────────────────────────────────────────────────
+- name: "Ensure /run/open-bastion exists for the device-state file"
+  ansible.builtin.file:
+    path: /run/open-bastion
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
+  when: _ob_use_auto_approve
+
+- name: "Start ob-enroll asynchronously (device code published to /run/open-bastion/enroll-state.json)"
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ob-enroll
+      - -g
+      - "{{ ob_server_group }}"
+      - --quiet
+  environment:
+    OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+    OB_ENROLL_STATE_FILE: /run/open-bastion/enroll-state.json
+  async: 600
+  poll: 0
+  register: _ob_enroll_async
+  when: _ob_use_auto_approve
+
+- name: "Wait for ob-enroll to publish the device code"
+  ansible.builtin.wait_for:
+    path: /run/open-bastion/enroll-state.json
+    timeout: 30
+  when: _ob_use_auto_approve
+
+- name: "Slurp the device-grant state file from the target"
+  ansible.builtin.slurp:
+    src: /run/open-bastion/enroll-state.json
+  register: _ob_enroll_state_raw
+  when: _ob_use_auto_approve
+
+- name: "Parse the device-grant state"
+  ansible.builtin.set_fact:
+    _ob_enroll_state: "{{ _ob_enroll_state_raw.content | b64decode | from_json }}"
+  when: _ob_use_auto_approve
+
+# LAB POST-EDIT: the controller (host) cannot resolve auth.example.com:80
+# (it points at 127.0.0.1 where nothing listens). The SSO is reachable at
+# the libvirt gateway 192.168.122.1:80 with the proper Host header, so the
+# controller-side approval uses ob_approve_base_url + an explicit Host header.
+- name: "Controller: fetch the /device page to obtain the CSRF token"
+  ansible.builtin.uri:
+    url: "{{ ob_approve_base_url | default(_ob_enroll_state.portal_url) }}/device?user_code={{ _ob_enroll_state.user_code | urlencode }}"
+    method: GET
+    headers: "{{ {'Cookie': ob_llng_cookie} | combine({'Host': ob_approve_host} if (ob_approve_host | default('')) | length > 0 else {}) }}"
+    return_content: true
+    follow_redirects: all
+    status_code: [200]
+  delegate_to: localhost
+  become: false
+  register: _ob_verify_page
+  when: _ob_use_auto_approve
+
+- name: "Extract CSRF token from the verification page"
+  ansible.builtin.set_fact:
+    # regex_findall always returns a list; on a single hidden token input
+    # it is a single-element list of strings. `| first` then yields the
+    # token value cleanly (avoids the ambiguous regex_search + backref +
+    # first combo that some Ansible versions interpret as "first character").
+    _ob_csrf_token: >-
+      {{ ((_ob_verify_page.content
+            | regex_findall('name="token"\s+value="([^"]+)"')) | first)
+         | default('') }}
+  when: _ob_use_auto_approve
+
+- name: "Refuse to proceed when the CSRF token could not be extracted (cookie expired?)"
+  ansible.builtin.fail:
+    msg: >-
+      Could not extract CSRF token from {{ _ob_enroll_state.portal_url }}/device.
+      The LLNG session cookie is likely expired or lacks permission. Obtain a
+      fresh cookie with `llng --llng-server <portal> llng_cookie` and re-run.
+  when:
+    - _ob_use_auto_approve
+    - (_ob_csrf_token | length) == 0
+
+- name: "Controller: approve the device code"
+  ansible.builtin.uri:
+    url: "{{ ob_approve_base_url | default(_ob_enroll_state.portal_url) }}/device"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      user_code: "{{ _ob_enroll_state.user_code }}"
+      action: approve
+      token: "{{ _ob_csrf_token }}"
+    headers: "{{ {'Cookie': ob_llng_cookie} | combine({'Host': ob_approve_host} if (ob_approve_host | default('')) | length > 0 else {}) }}"
+    follow_redirects: none
+    status_code: [200, 302]
+  delegate_to: localhost
+  become: false
+  when: _ob_use_auto_approve
+
+- name: "Wait for ob-enroll to complete (polling token endpoint)"
+  ansible.builtin.async_status:
+    jid: "{{ _ob_enroll_async.ansible_job_id }}"
+  register: _ob_enroll_result
+  until: _ob_enroll_result.finished
+  retries: 60
+  delay: 5
+  when: _ob_use_auto_approve
+
+- name: "Auto-approve path: confirm ob-enroll succeeded"
+  ansible.builtin.fail:
+    msg: "ob-enroll failed under auto-approve: rc={{ _ob_enroll_result.rc | default('?') }} stderr={{ _ob_enroll_result.stderr | default('') }}"
+  when:
+    - _ob_use_auto_approve
+    - (_ob_enroll_result.rc | default(1)) != 0
+
+# ── Manual branch (original behaviour) ───────────────────────────────────────
+- name: "Enroll {{ ob_role }} with LLNG (ob-enroll)"
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ob-enroll
+      - -g
+      - "{{ ob_server_group }}"
+      - --quiet
+  environment:
+    OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+  when: not _ob_use_auto_approve
+  changed_when: true
