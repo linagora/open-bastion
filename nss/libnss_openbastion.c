@@ -411,13 +411,18 @@ static int load_server_token(nss_llng_config_t *config)
  * LLNG calls 401 and users stop resolving until the consumer is restarted. */
 static void maybe_reload_server_token(void)
 {
-    if (!g_config.server_token_file) return;
-    struct stat st;
-    if (stat(g_config.server_token_file, &st) != 0) return;
-    if (st.st_mtime == g_config.server_token_mtime) return;
+    /* The whole stat() + mtime comparison + reload runs under g_init_lock:
+     * server_token_mtime is written under that lock by load_server_token(), so
+     * reading it (or the token pointer) outside the lock would be a data race,
+     * and a pre-lock stat() could also miss a rotation that lands between the
+     * stat() and acquiring the lock. stat() is cheap enough to hold the lock. */
     pthread_mutex_lock(&g_init_lock);
-    if (st.st_mtime != g_config.server_token_mtime) {
-        load_server_token(&g_config);
+    if (g_config.server_token_file) {
+        struct stat st;
+        if (stat(g_config.server_token_file, &st) == 0 &&
+            st.st_mtime != g_config.server_token_mtime) {
+            load_server_token(&g_config);
+        }
     }
     pthread_mutex_unlock(&g_init_lock);
 }
@@ -1073,12 +1078,29 @@ static int query_service_account(const char *username, struct passwd *pw,
 static int query_llng_userinfo(const char *username, struct passwd *pw,
                                 char *buffer, size_t buflen)
 {
-    if (!g_config.portal_url || !g_config.server_token) {
+    if (!g_config.portal_url) {
+        return -1;
+    }
+
+    /* Snapshot the server token under g_init_lock. A concurrent
+     * maybe_reload_server_token() can free and replace g_config.server_token at
+     * any time (rotation by ob-heartbeat), so reading it directly across the
+     * curl network I/O below would be a use-after-free in multi-threaded NSS
+     * consumers such as nscd. Copy it under the lock, release the lock before
+     * any I/O, and free the copy as soon as the header is built. portal_url is
+     * set once at init and never reloaded, so it needs no such guard. */
+    pthread_mutex_lock(&g_init_lock);
+    char *server_token = g_config.server_token ? strdup(g_config.server_token) : NULL;
+    pthread_mutex_unlock(&g_init_lock);
+    if (!server_token) {
         return -1;
     }
 
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) {
+        free(server_token);
+        return -1;
+    }
 
     /* Build URL */
     char url[512];
@@ -1089,9 +1111,13 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     json_object_object_add(req_json, "user", json_object_new_string(username));
     const char *req_body = json_object_to_json_string(req_json);
 
-    /* Build Authorization header */
+    /* Build Authorization header from the snapshot, then drop the token copy:
+     * auth_header now holds its own bytes and server_token is no longer needed. */
     char auth_header[512];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_config.server_token);
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", server_token);
+    explicit_bzero(server_token, strlen(server_token));
+    free(server_token);
+    server_token = NULL;
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
