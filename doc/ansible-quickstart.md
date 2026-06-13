@@ -145,7 +145,8 @@ A matching `playbook.yml` is trivial — apply the one role to everyone and let
 
 If you enabled `ansible_auto_approve: yes`, fetch a short-lived LLNG session
 cookie (it auto-approves the device-code enrolment for the whole fleet — no
-browser needed) and pass it at run time:
+browser needed) and pass it at run time. The `llng` CLI comes from
+[simple-oidc-client](https://github.com/linagora/simple-oidc-client):
 
 ```bash
 COOKIE=$(llng --llng-server sso.example.com --login admin --password '***' llng_cookie)
@@ -158,6 +159,15 @@ ansible-playbook -i inventory.yml playbook.yml \
 `--llng-server` takes a **server name** (not a URL) and assumes **HTTPS** — the
 production case. For a plain `http://` test SSO, pass the full URL instead with
 `--llng-url http://sso.test`.
+
+If your portal is built with a **choice** module (a login form offering several
+authentication backends), tell `llng` which one to use with `--choice`, e.g.
+`--choice lmAuth=1_LDAP` (replace `1_LDAP` with your backend's key):
+
+```bash
+COOKIE=$(llng --llng-server sso.example.com --choice lmAuth=1_LDAP \
+              --login admin --password '***' llng_cookie)
+```
 
 Without auto-approve, omit `ob_llng_cookie`: the play prints a device URL + code
 per host for manual browser approval.
