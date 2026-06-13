@@ -150,7 +150,7 @@ Le timer `ob-heartbeat` rafraîchit l'access_token (TTL 3600 s) toutes les 5 min
 
 1. **Alerte sur échec de `ob-heartbeat.service`** : `OnFailure=` systemd → notification (mail/webhook/SIEM) dès qu'un run du timer échoue, plutôt que de découvrir l'expiration par la perte d'accès.
 2. **Monitoring de l'âge du token** : exporter `expires_at - now` (node_exporter textfile, ou un check Nagios/Prometheus) et alerter quand il descend sous ~2× l'intervalle du timer.
-3. **Test d'intégration sur fenêtre > TTL** : ajouter un test (CI longue ou lab) qui vérifie le refresh **via le chemin du timer** (`systemctl start ob-heartbeat.service`, donc avec le sandbox) sur une fenêtre dépassant 3600 s — un `sudo ob-heartbeat` manuel masque les régressions du sandbox. Recoupe R-S17 (lockout).
+3. **Test d'intégration sur fenêtre > TTL** : ajouter un test (CI longue ou lab) qui vérifie le rafraîchissement **via le chemin du timer** (`systemctl start ob-heartbeat.service`, donc avec le sandbox) sur une fenêtre dépassant 3600 s — un `sudo ob-heartbeat` manuel masque les régressions du sandbox. Recoupe R-S17 (lockout).
 
 ---
 
