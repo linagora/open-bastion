@@ -1257,7 +1257,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 | **Probabilité** |   1   |
 | **Impact**      |   2   |
 
-**Description :** Le key-id du certificat éphémère porte `bastion=<id>;user=<u>;target=<hôte>`, mais `ob-ssh-principals` n'enforce que `bastion=<id>` (allowlist) et `user=<u>` — il **ne vérifie pas** `target=`. Un certificat émis pour `backendA` est donc techniquement accepté par `backendB` si `backendB` fait confiance à la même CA et liste le même bastion dans son `allowed_bastions`, pendant la fenêtre de validité (~120 s).
+**Description :** Le key-id du certificat éphémère porte `bastion=<id>;user=<u>;target=<hôte>`, mais `ob-ssh-principals` ne fait respecter que `bastion=<id>` (allowlist) et `user=<u>` — il **ne vérifie pas** `target=`. Un certificat émis pour `backendA` est donc techniquement accepté par `backendB` si `backendB` fait confiance à la même CA et liste le même bastion dans son `allowed_bastions`, pendant la fenêtre de validité (~120 s).
 
 **Vecteurs d'attaque :**
 
