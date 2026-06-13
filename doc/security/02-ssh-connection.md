@@ -467,10 +467,10 @@ ssh backend.internal.example.com
 ob-ssh-proxy backend.internal.example.com
 ```
 
-|                 |                         Score résiduel                          |
-| --------------- | :-------------------------------------------------------------: |
+|                 |                           Score résiduel                            |
+| --------------- | :-----------------------------------------------------------------: |
 | **Probabilité** | 1 (cert éphémère + source-address + allowlist + restriction réseau) |
-| **Impact**      |                               3                                 |
+| **Impact**      |                                  3                                  |
 
 ---
 
@@ -672,14 +672,14 @@ pamAccessBastionCertTtl: 60 # 1 minute au lieu de 2 (si politique plus stricte)
 
 ```yaml
 # LLNG Manager - Ajuster le plafond TTL du voucher
-pamAccessBastionVoucherTtl: 43200   # 12 h (défaut)
-pamAccessBastionCertTtl: 120        # 2 min (défaut)
+pamAccessBastionVoucherTtl: 43200 # 12 h (défaut)
+pamAccessBastionCertTtl: 120 # 2 min (défaut)
 ```
 
-|                 |                           Score résiduel                            |
-| --------------- | :-----------------------------------------------------------------: |
-| **Probabilité** |          1 (fail-closed, TTL court du cert, lié à SSO cert)         |
-| **Impact**      | 1 (expiration propagée ; cert ~120 s limite l'exposition en cas b)  |
+|                 |                           Score résiduel                           |
+| --------------- | :----------------------------------------------------------------: |
+| **Probabilité** |         1 (fail-closed, TTL court du cert, lié à SSO cert)         |
+| **Impact**      | 1 (expiration propagée ; cert ~120 s limite l'exposition en cas b) |
 
 ---
 
@@ -1273,10 +1273,10 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 **Piste non implémentée :** faire vérifier `target=<hôte>` par `ob-ssh-principals` contre le FQDN local (`%h`/`hostname -f`). Voir [99-risk-reduce.md](99-risk-reduce.md#r-s22-p1-i2---certificat-vouché-réutilisé-vers-un-autre-backend).
 
-|                 |                              Score résiduel                               |
-| --------------- | :-----------------------------------------------------------------------: |
+|                 |                                Score résiduel                                 |
+| --------------- | :---------------------------------------------------------------------------: |
 | **Probabilité** | 1 (suppose le contrôle du bastion ; `source-address` + TTL court + allowlist) |
-| **Impact**      |          2 (réutilisation limitée aux backends de la même zone)           |
+| **Impact**      |            2 (réutilisation limitée aux backends de la même zone)             |
 
 ---
 
@@ -1304,10 +1304,10 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 **Piste non implémentée :** faire écrire au paquet (postinst) un `allowed_bastions` vide par défaut pour que l'« absent » n'arrive jamais, ou un mode strict où l'absence du fichier = refus. Voir [99-risk-reduce.md](99-risk-reduce.md#r-s23-p1-i3---backend-en-mode-hérité-fail-open).
 
-|                 |                              Score résiduel                               |
-| --------------- | :-----------------------------------------------------------------------: |
+|                 |                               Score résiduel                                |
+| --------------- | :-------------------------------------------------------------------------: |
 | **Probabilité** | 1 (`ob-backend-setup` écrit toujours le fichier ; fail-closed si illisible) |
-| **Impact**      |        3 (contournement complet du vouching sur un backend hérité)        |
+| **Impact**      |         3 (contournement complet du vouching sur un backend hérité)         |
 
 ---
 
@@ -1315,23 +1315,23 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 
 ### Avant remédiation
 
-| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                    | 3 - Probable | 4 - Très probable |
-| ------------------------ | ------------------- | --------------------------------------------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                | R-S6 R-S17                                          |              |                   |
-| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 R-S23 | R-S19   |                   |
-| **2 - Limité**           | R-S16 R-S22         | R-S9 R-S10 R-S12                                    | R-S8         |                   |
-| **1 - Négligeable**      |                     |                                                     |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable                                          | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------- | --------------------------------------------------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                | R-S6 R-S17                                                |              |                   |
+| **3 - Important**        |                     | R-S3 R-S7 R-S11 R-S15 R-S13 R-S14 R-S18 R-S20 R-S21 R-S23 | R-S19        |                   |
+| **2 - Limité**           | R-S16 R-S22         | R-S9 R-S10 R-S12                                          | R-S8         |                   |
+| **1 - Négligeable**      |                     |                                                           |              |                   |
 
 > **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (`AuthorizedKeysFile none` + certificat CA requis). R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18).
 
 ### Après remédiation complète
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                             | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | --------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4                                                            |                  |              |                   |
-| **3 - Important**        | R-S5 R-S23                                                      | R-S6             |              |                   |
-| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 R-S22 | R-S8       |              |                   |
-| **1 - Négligeable**      | R-S15 R-S19                                                     | R-S3 R-S18       |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                                   | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | --------------------------------------------------------------------- | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4                                                                  |                  |              |                   |
+| **3 - Important**        | R-S5 R-S23                                                            | R-S6             |              |                   |
+| **2 - Limité**           | R-S7 R-S9 R-S10 R-S11 R-S12 R-S13 R-S14 R-S16 R-S17 R-S20 R-S21 R-S22 | R-S8             |              |                   |
+| **1 - Négligeable**      | R-S15 R-S19                                                           | R-S3 R-S18       |              |                   |
 
 **Profil de risque de la cible maximale :**
 
@@ -1629,35 +1629,35 @@ sequenceDiagram
 
 ### Mesures critiques (non négociables)
 
-| Mesure                        | Justification                                               |
-| ----------------------------- | ----------------------------------------------------------- |
-| `AuthorizedKeysFile none`     | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
-| KRL avec cron 30 min          | Contrôle compensatoire pour les certificats 1 an            |
+| Mesure                                                           | Justification                                               |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| `AuthorizedKeysFile none`                                        | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
+| KRL avec cron 30 min                                             | Contrôle compensatoire pour les certificats 1 an            |
 | Cert éphémère + `source-address` + `AuthorizedPrincipalsCommand` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
-| PAM sudo avec token LLNG      | Bloque toute escalade sans réauthentification SSO           |
-| Restriction réseau backends   | Défense en profondeur contre le contournement bastion       |
+| PAM sudo avec token LLNG                                         | Bloque toute escalade sans réauthentification SSO           |
+| Restriction réseau backends                                      | Défense en profondeur contre le contournement bastion       |
 
 ### Mesures recommandées
 
-| Mesure                                                  | Justification                                                 |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| CA sur HSM ou machine air-gap                           | Réduit l'impact catastrophique de R-S4                        |
-| LLNG en haute disponibilité                             | Réduit R-S7 à P=1                                             |
-| Monitoring KRL + alertes                                | Détection rapide de R-S15                                     |
-| `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion       |
-| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                              |
+| Mesure                                                  | Justification                                                          |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| CA sur HSM ou machine air-gap                           | Réduit l'impact catastrophique de R-S4                                 |
+| LLNG en haute disponibilité                             | Réduit R-S7 à P=1                                                      |
+| Monitoring KRL + alertes                                | Détection rapide de R-S15                                              |
+| `AllowAgentForwarding no`                               | Réduit l'impact de R-S6 en cas de compromission bastion                |
+| `ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa` | Élimine les clés faibles (R-S11)                                       |
 | `ob-ssh-proxy` (pas ProxyJump natif)                    | Vouching par certificat éphémère + clé privée ne quitte pas le bastion |
-| `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation     |
-| 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                           |
+| `ClientAliveInterval 300`                               | Limite l'exposition des sessions actives après révocation              |
+| 2FA sur LLNG pour les tokens sudo                       | Renforce la protection contre R-S16                                    |
 
 ### Points de surveillance (SIEM / monitoring)
 
-| Événement                                 | Criticité | Action recommandée       |
-| ----------------------------------------- | --------- | ------------------------ |
-| Connexion SSH sans certificat rejetée     | Medium    | Log + alerte récurrente  |
-| Connexion avec certificat révoqué (KRL)   | High      | Alerte immédiate         |
+| Événement                                                                                                | Criticité | Action recommandée       |
+| -------------------------------------------------------------------------------------------------------- | --------- | ------------------------ |
+| Connexion SSH sans certificat rejetée                                                                    | Medium    | Log + alerte récurrente  |
+| Connexion avec certificat révoqué (KRL)                                                                  | High      | Alerte immédiate         |
 | Connexion backend sans certificat éphémère bastion (rejet source-address ou AuthorizedPrincipalsCommand) | High      | Alerte immédiate         |
-| KRL non mise à jour depuis > 1h           | High      | Alerte immédiate         |
-| Sudo refusé (token absent/invalide)       | Medium    | Log                      |
-| Même certificat depuis 2+ IPs différentes | High      | Alerte + investigation   |
-| Modification `service-accounts.conf`      | Critical  | Alerte immédiate + audit |
+| KRL non mise à jour depuis > 1h                                                                          | High      | Alerte immédiate         |
+| Sudo refusé (token absent/invalide)                                                                      | Medium    | Log                      |
+| Même certificat depuis 2+ IPs différentes                                                                | High      | Alerte + investigation   |
+| Modification `service-accounts.conf`                                                                     | Critical  | Alerte immédiate + audit |

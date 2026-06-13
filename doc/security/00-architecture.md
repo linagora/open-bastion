@@ -173,13 +173,13 @@ flowchart LR
 
 ### Bénéfices de Sécurité
 
-| Menace                          | Sans vouching cert                    | Avec vouching cert                                                               |
-| ------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
-| Accès direct au backend         | Possible si réseau accessible         | Bloqué — cert SSO direct refusé (key-id sans `bastion=`), cert épinglé à l'IP du bastion |
-| Contournement VPN vers backend  | Possible                              | Bloqué — `source-address` critique dans le cert, sshd refuse hors IP bastion    |
-| Mauvaise configuration pare-feu | Expose les backends                   | Backends toujours protégés — enforcement sshd-natif                             |
-| Rejeu d'un identifiant volé     | Clé/token compromis = accès backend   | Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement    |
-| Bastion non autorisé            | N/A                                   | Bloqué — `allowed_bastions` vérifié par `ob-ssh-principals` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert |
+| Menace                          | Sans vouching cert                  | Avec vouching cert                                                                                                         |
+| ------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Accès direct au backend         | Possible si réseau accessible       | Bloqué — cert SSO direct refusé (key-id sans `bastion=`), cert épinglé à l'IP du bastion                                   |
+| Contournement VPN vers backend  | Possible                            | Bloqué — `source-address` critique dans le cert, sshd refuse hors IP bastion                                               |
+| Mauvaise configuration pare-feu | Expose les backends                 | Backends toujours protégés — enforcement sshd-natif                                                                        |
+| Rejeu d'un identifiant volé     | Clé/token compromis = accès backend | Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement                                               |
+| Bastion non autorisé            | N/A                                 | Bloqué — `allowed_bastions` vérifié par `ob-ssh-principals` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert |
 
 ### Configuration (Backend)
 
@@ -201,23 +201,23 @@ AuthorizedPrincipalsCommandUser nobody
 
 ### Champs du Certificat Éphémère
 
-| Champ cert SSH   | Valeur                                                                  |
-| ---------------- | ----------------------------------------------------------------------- |
-| `principal`      | Nom d'utilisateur proxifié                                              |
-| `key-id`         | `bastion=<bastion_id>;user=<user>;target=<target_host>`                 |
-| `validity`       | ~120 s (`pamAccessBastionCertTtl`)                                      |
-| `source-address` | IP du bastion (option critique — sshd refuse si connexion hors IP)      |
-| `extension`      | `bastion-id@open-bastion = <bastion_id>` (optionnel, audit)             |
+| Champ cert SSH   | Valeur                                                             |
+| ---------------- | ------------------------------------------------------------------ |
+| `principal`      | Nom d'utilisateur proxifié                                         |
+| `key-id`         | `bastion=<bastion_id>;user=<user>;target=<target_host>`            |
+| `validity`       | ~120 s (`pamAccessBastionCertTtl`)                                 |
+| `source-address` | IP du bastion (option critique — sshd refuse si connexion hors IP) |
+| `extension`      | `bastion-id@open-bastion = <bastion_id>` (optionnel, audit)        |
 
 ### Paramètres LLNG (`pam-access`)
 
-| Paramètre                     | Défaut  | Description                                                                |
-| ----------------------------- | ------- | -------------------------------------------------------------------------- |
-| `pamAccessBastionGroups`      | bastion | Groupes autorisés à obtenir des vouchers / certs bastion                   |
-| `pamAccessBastionVoucherTtl`  | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime |
-| `pamAccessBastionCertTtl`     | 120     | Validité du certificat éphémère en secondes                                |
-| `pamAccessServerGroups`       | —       | Table `client_id → groupe` ; `/pam/bastion-cert` ne fait jamais confiance à un groupe revendiqué |
-| `sshCaActivation`             | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme |
+| Paramètre                    | Défaut  | Description                                                                                      |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `pamAccessBastionGroups`     | bastion | Groupes autorisés à obtenir des vouchers / certs bastion                                         |
+| `pamAccessBastionVoucherTtl` | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime                   |
+| `pamAccessBastionCertTtl`    | 120     | Validité du certificat éphémère en secondes                                                      |
+| `pamAccessServerGroups`      | —       | Table `client_id → groupe` ; `/pam/bastion-cert` ne fait jamais confiance à un groupe revendiqué |
+| `sshCaActivation`            | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme                      |
 
 ## Sécurité du Cache de Tokens
 
@@ -393,22 +393,22 @@ Pour la surveillance de sécurité en temps réel :
 
 ### Gestion des Secrets
 
-| Paramètre              | Défaut     | Description                   |
-| ---------------------- | ---------- | ----------------------------- |
-| `secrets_encrypted`    | true       | Chiffrer les secrets au repos |
-| `secrets_use_keyring`  | true       | Utiliser le trousseau noyau   |
+| Paramètre              | Défaut         | Description                   |
+| ---------------------- | -------------- | ----------------------------- |
+| `secrets_encrypted`    | true           | Chiffrer les secrets au repos |
+| `secrets_use_keyring`  | true           | Utiliser le trousseau noyau   |
 | `secrets_keyring_name` | "open-bastion" | Identifiant du trousseau      |
 
 ### Permissions des Fichiers
 
 Permissions recommandées :
 
-| Fichier                             | Permissions | Propriétaire |
-| ----------------------------------- | ----------- | ------------ |
+| Fichier                              | Permissions | Propriétaire |
+| ------------------------------------ | ----------- | ------------ |
 | `/etc/open-bastion/openbastion.conf` | 0600        | root         |
-| Fichier token serveur               | 0600        | root         |
-| Répertoire cache                    | 0700        | root         |
-| Répertoire état limitation de débit | 0700        | root         |
+| Fichier token serveur                | 0600        | root         |
+| Répertoire cache                     | 0700        | root         |
+| Répertoire état limitation de débit  | 0700        | root         |
 
 ## Sécurité des Scripts
 
@@ -637,21 +637,21 @@ Cette configuration n'autorise que les clés Ed25519 et les clés de sécurité 
 
 ## Atténuation des Menaces
 
-| Menace                      | Atténuation                                                                               |
-| --------------------------- | ----------------------------------------------------------------------------------------- |
-| Rejeu de token              | Tokens à usage unique, invalidation du cache                                              |
-| Attaques MITM               | TLS 1.3, épinglage de certificat                                                          |
-| Force brute                 | Limitation de débit avec attente exponentielle                                            |
-| Falsification du cache      | Chiffrement authentifié AES-256-GCM                                                       |
-| Injection de chemin         | Validation stricte des chemins, listes approuvées                                         |
-| Débordement de tampon       | Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null      |
-| Collision d'UID             | Détection de collision à sécurité intégrée                                                |
-| Falsification de requête    | Signature HMAC optionnelle avec nonces                                                    |
-| DoS par épuisement mémoire  | Limites de taille de réponse (256 Ko), limites de groupes (256 max)                       |
-| Dépassement d'entier        | Validation des entrées dans l'encodage base64, calculs d'attente                          |
-| JSON malformé               | Validation de type pour les champs de réponse critiques                                   |
-| Exposition du secret client | JWT Client Assertion (RFC 7523) - secret jamais transmis                                  |
-| Contournement du bastion    | Certificat éphémère lié à `(bastion_id, user)` via voucher serveur ; `source-address` épinglée à l'IP du bastion |
+| Menace                      | Atténuation                                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Rejeu de token              | Tokens à usage unique, invalidation du cache                                                                            |
+| Attaques MITM               | TLS 1.3, épinglage de certificat                                                                                        |
+| Force brute                 | Limitation de débit avec attente exponentielle                                                                          |
+| Falsification du cache      | Chiffrement authentifié AES-256-GCM                                                                                     |
+| Injection de chemin         | Validation stricte des chemins, listes approuvées                                                                       |
+| Débordement de tampon       | Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null                                    |
+| Collision d'UID             | Détection de collision à sécurité intégrée                                                                              |
+| Falsification de requête    | Signature HMAC optionnelle avec nonces                                                                                  |
+| DoS par épuisement mémoire  | Limites de taille de réponse (256 Ko), limites de groupes (256 max)                                                     |
+| Dépassement d'entier        | Validation des entrées dans l'encodage base64, calculs d'attente                                                        |
+| JSON malformé               | Validation de type pour les champs de réponse critiques                                                                 |
+| Exposition du secret client | JWT Client Assertion (RFC 7523) - secret jamais transmis                                                                |
+| Contournement du bastion    | Certificat éphémère lié à `(bastion_id, user)` via voucher serveur ; `source-address` épinglée à l'IP du bastion        |
 | Accès direct au backend     | Cert SSO direct refusé (key-id sans `bastion=`) ; cert éphémère épinglé à l'IP du bastion via `source-address` critique |
-| Clés SSH faibles            | Application de la politique de clés SSH avec restrictions de type/taille                  |
-| Force brute sur le cache    | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle |
+| Clés SSH faibles            | Application de la politique de clés SSH avec restrictions de type/taille                                                |
+| Force brute sur le cache    | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle                               |

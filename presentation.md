@@ -477,12 +477,12 @@ sudo ob-enroll
 
 ## Components
 
-| Component            | Function                           |
-| -------------------- | ---------------------------------- |
-| `pam_openbastion.so`        | PAM authentication & authorization |
-| `libnss_openbastion.so`     | User resolution before PAM         |
-| `ob-enroll`          | Server enrollment                  |
-| `ob-heartbeat`       | Server monitoring                  |
+| Component               | Function                           |
+| ----------------------- | ---------------------------------- |
+| `pam_openbastion.so`    | PAM authentication & authorization |
+| `libnss_openbastion.so` | User resolution before PAM         |
+| `ob-enroll`             | Server enrollment                  |
+| `ob-heartbeat`          | Server monitoring                  |
 
 <!-- end_slide -->
 
