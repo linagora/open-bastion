@@ -39,16 +39,16 @@ matched pair:
 ```yaml
 # build.yml
 deployment_slug: acme
-scenario: token-only            # token-only | token+unix | keys+llng | mixed | max-security
+scenario: token-only # token-only | token+unix | keys+llng | mixed | max-security
 portal_url: https://sso.example.com
-client_id: ob-bastion           # the bastion's OIDC client (= its bastion_id)
+client_id: ob-bastion # the bastion's OIDC client (= its bastion_id)
 client_id_policy: fixed
-client_secret_mode: prompt      # none | prompt | embedded
+client_secret_mode: prompt # none | prompt | embedded
 server_group: bastion
 server_group_policy: fixed
-target_role: bastion            # bundle derives the matching backend automatically
+target_role: bastion # bundle derives the matching backend automatically
 auto_enroll_setup: yes
-ansible_auto_approve: yes        # let the play approve device codes via an LLNG cookie
+ansible_auto_approve: yes # let the play approve device codes via an LLNG cookie
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main
@@ -90,30 +90,30 @@ each machine is the `ansible_host` line:
 # inventory.yml
 all:
   vars:
-    ansible_user: admin                 # a sudo-capable account on the targets
+    ansible_user: admin # a sudo-capable account on the targets
     ansible_ssh_private_key_file: ~/.ssh/id_fleet
 
   children:
     bastions:
       hosts:
         bastion-1:
-          ansible_host: 10.0.0.10        # <-- IP (or DNS name) of the bastion
+          ansible_host: 10.0.0.10 # <-- IP (or DNS name) of the bastion
           ob_role: bastion
           ob_server_group: bastion
-          ob_client_id: ob-bastion       # this bastion's id (== client_id)
+          ob_client_id: ob-bastion # this bastion's id (== client_id)
           ob_client_secret: "{{ vault_bastion_secret }}"
 
     backends:
       hosts:
         web-1:
-          ansible_host: 10.0.0.21        # <-- IP of the first backend
+          ansible_host: 10.0.0.21 # <-- IP of the first backend
           ob_role: backend
           ob_server_group: backend
           # "Accept only this bastion": the backend refuses any cert whose
           # key-id does not carry bastion=<one of these ids>.
           ob_bastion_allowed_bastions: "ob-bastion"
         web-2:
-          ansible_host: 10.0.0.22        # <-- IP of the second backend
+          ansible_host: 10.0.0.22 # <-- IP of the second backend
           ob_role: backend
           ob_server_group: backend
           ob_bastion_allowed_bastions: "ob-bastion"

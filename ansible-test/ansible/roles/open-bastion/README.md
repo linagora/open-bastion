@@ -19,6 +19,7 @@ role/
 ```
 
 The `files/` directory (not shipped here) must contain:
+
 - `open-bastion.gpg` — APT signing key
 - `open-bastion-ca.pub` — SSH CA public key (downloaded from LLNG portal)
 - `open-bastion-krl` — Key Revocation List (Mode E only)
@@ -28,40 +29,40 @@ The `files/` directory (not shipped here) must contain:
 All variables are prefixed with `ob_`. Build-time defaults live in
 `defaults/main.yml`; override them via host_vars, group_vars, or extra-vars.
 
-| Variable | Description |
-|---|---|
-| `ob_portal_url` | LLNG portal URL (required) |
-| `ob_client_id` | OIDC client_id for enrollment |
-| `ob_client_secret` | OIDC client secret — use ansible-vault |
-| `ob_server_group` | Server group name (set per-host for fleet deployments) |
-| `ob_role` | `bastion`, `backend`, or `standalone` |
-| `ob_pam_mode` | PAM mode A–E (see doc/pam-modes.md) |
-| `ob_max_security` | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token) |
-| `ob_auto_enroll` | Run ob-enroll during the play |
-| `ob_auto_setup` | Run ob-bastion-setup / ob-backend-setup during the play |
-| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository |
-| `ob_ansible_auto_approve` | Enable LLNG-cookie-based device-code auto-approval (build-time) |
-| `ob_llng_cookie` | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored |
+| Variable                   | Description                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `ob_portal_url`            | LLNG portal URL (required)                                                                       |
+| `ob_client_id`             | OIDC client_id for enrollment                                                                    |
+| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                           |
+| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                           |
+| `ob_role`                  | `bastion`, `backend`, or `standalone`                                                            |
+| `ob_pam_mode`              | PAM mode A–E (see doc/pam-modes.md)                                                              |
+| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                      |
+| `ob_auto_enroll`           | Run ob-enroll during the play                                                                    |
+| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                          |
+| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                           |
+| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                  |
+| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored |
 
 Backend-only JWT variables (populated by ob-builder for backend scenarios):
 
-| Variable | Description |
-|---|---|
-| `ob_bastion_jwt_required` | Require bastion-forwarded JWT (true/false) |
-| `ob_bastion_jwt_issuer` | JWT issuer — the LLNG portal URL (not the bastion) |
-| `ob_bastion_jwt_jwks_url` | LLNG JWKS endpoint for signature verification |
-| `ob_bastion_jwt_jwks_cache` | Local JWKS cache path |
+| Variable                    | Description                                        |
+| --------------------------- | -------------------------------------------------- |
+| `ob_bastion_jwt_required`   | Require bastion-forwarded JWT (true/false)         |
+| `ob_bastion_jwt_issuer`     | JWT issuer — the LLNG portal URL (not the bastion) |
+| `ob_bastion_jwt_jwks_url`   | LLNG JWKS endpoint for signature verification      |
+| `ob_bastion_jwt_jwks_cache` | Local JWKS cache path                              |
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):
 
-| Variable | Example (Mode E) |
-|---|---|
-| `ob_min_tls_version` | `13` |
-| `ob_cache_ttl` | `60` |
-| `ob_ssh_key_policy_enabled` | `true` |
-| `ob_ssh_key_allowed_types` | `ed25519,rsa` |
-| `ob_cache_rate_limit_enabled` | `true` |
-| `ob_cache_rate_limit_max_attempts` | `3` |
+| Variable                           | Example (Mode E) |
+| ---------------------------------- | ---------------- |
+| `ob_min_tls_version`               | `13`             |
+| `ob_cache_ttl`                     | `60`             |
+| `ob_ssh_key_policy_enabled`        | `true`           |
+| `ob_ssh_key_allowed_types`         | `ed25519,rsa`    |
+| `ob_cache_rate_limit_enabled`      | `true`           |
+| `ob_cache_rate_limit_max_attempts` | `3`              |
 
 ## Protecting the client secret with ansible-vault
 
@@ -126,11 +127,12 @@ so it's not worth persisting. An empty `ob_llng_cookie` falls back to the
 manual flow above.
 
 Under the hood, the auto-approve path:
+
 1. Runs `ob-enroll` asynchronously on the target, with
    `OB_ENROLL_STATE_FILE=/run/open-bastion/enroll-state.json` so the user code
    and verification URI are written to disk as soon as LLNG issues them.
 2. Slurps that file back to the Ansible controller, where the play `delegate_to:
-   localhost` performs:
+localhost` performs:
    - `GET ${portal}/device?user_code=...` with the cookie, to extract the CSRF
      token from the form.
    - `POST ${portal}/device` with `user_code`, `action=approve`, and the CSRF
