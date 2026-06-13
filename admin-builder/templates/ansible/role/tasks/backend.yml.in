@@ -21,7 +21,9 @@
         ['/usr/sbin/ob-backend-setup',
          '--portal', ob_portal_url,
          '-g', ob_server_group,
+         '-c', ob_client_id,
          '--yes']
+        + (['--insecure'] if not (ob_verify_ssl | default(true)) else [])
         + (['--allowed-bastions', ob_bastion_allowed_bastions]
            if ob_bastion_allowed_bastions is defined else [])
         + (['--max-security'] if ob_max_security else [])

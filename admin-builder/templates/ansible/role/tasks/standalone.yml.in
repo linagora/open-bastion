@@ -25,7 +25,9 @@
         ['/usr/sbin/ob-bastion-setup',
          '--portal', ob_portal_url,
          '-g', ob_server_group,
+         '-c', ob_client_id,
          '--yes']
+        + (['--insecure'] if not (ob_verify_ssl | default(true)) else [])
         + (['--max-security'] if ob_max_security else [])
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
