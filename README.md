@@ -111,12 +111,13 @@ sudo make install
 
 ## Quick Start
 
-Two quick-starts cover the two ways to get going:
+Three quick-starts cover the ways to get going:
 
 | Quick-start                                                  | Use it to…                                                                                                                                           |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
 | **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.   |
+| **[Deploy with a shell installer](doc/shell-quickstart.md)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.   |
 
 For the underlying concepts and per-step manual configuration, see [PAM Authentication Modes](doc/pam-modes.md) and the [Configuration Reference](doc/configuration.md).
 
@@ -124,19 +125,20 @@ For the underlying concepts and per-step manual configuration, see [PAM Authenti
 
 See the full [documentation index](doc/README.md) or jump directly to:
 
-| Document                                                 | Description                               |
-| -------------------------------------------------------- | ----------------------------------------- |
-| [LemonLDAP::NG Configuration](doc/llng-configuration.md) | Server-side LLNG setup and plugins        |
-| [PAM Authentication Modes](doc/pam-modes.md)             | All 4 PAM configurations with examples    |
-| [Configuration Reference](doc/configuration.md)          | All configuration options                 |
-| [Service Accounts](doc/service-accounts.md)              | Ansible, backup, CI/CD accounts           |
-| [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend certificate vouching   |
-| [Session Recording](doc/session-recording.md)            | SSH session recording for audit           |
-| [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting           |
-| [Security Features](doc/security.md)                     | Key policies, rate limiting, audit        |
-| [Admin Guide](doc/admin-guide.md)                        | Complete administration guide             |
-| [Deployment Builder](admin-builder/README.md)            | Generate shell / Ansible deploy artefacts |
-| [Ansible Quick-start](doc/ansible-quickstart.md)         | Generate + apply roles, fleet deployment  |
+| Document                                                 | Description                                |
+| -------------------------------------------------------- | ------------------------------------------ |
+| [LemonLDAP::NG Configuration](doc/llng-configuration.md) | Server-side LLNG setup and plugins         |
+| [PAM Authentication Modes](doc/pam-modes.md)             | All 4 PAM configurations with examples     |
+| [Configuration Reference](doc/configuration.md)          | All configuration options                  |
+| [Service Accounts](doc/service-accounts.md)              | Ansible, backup, CI/CD accounts            |
+| [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend certificate vouching    |
+| [Session Recording](doc/session-recording.md)            | SSH session recording for audit            |
+| [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting            |
+| [Security Features](doc/security.md)                     | Key policies, rate limiting, audit         |
+| [Admin Guide](doc/admin-guide.md)                        | Complete administration guide              |
+| [Deployment Builder](admin-builder/README.md)            | Generate shell / Ansible deploy artefacts  |
+| [Ansible Quick-start](doc/ansible-quickstart.md)         | Generate + apply roles, fleet deployment   |
+| [Shell Installer Quick-start](doc/shell-quickstart.md)   | Generate + run a self-extracting installer |
 
 ## Troubleshooting
 
