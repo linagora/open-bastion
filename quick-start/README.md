@@ -142,9 +142,16 @@ Once the plugins are installed, configure them through the LLNG Manager:
    your `pamAccessSshRules` / `pamAccessSudoRules` per server group.
 2. **SSH CA** tab (only if you want certificate authentication) —
    enable it and generate or import a signing key.
-3. **OpenID Connect service** → enable the Device Authorization Grant on
-   the `pam-access` RP (checkbox _Allow Device Authorization_) and
-   require PKCE.
+3. **OpenID Connect service** → on the `pam-access` RP, enable the Device
+   Authorization Grant (_Allow Device Authorization_), set _Device ownership_
+   to `organization`, enable _Allow offline access_, add the `offline_access`
+   scope, and require PKCE.
+
+> For server enrollment to yield a **renewable** token you need _Allow offline
+> access_ **and** `oidc-device-organization` >= 0.3.3. See the full required
+> RP option set and the offline-refresh-token gotcha in
+> [LemonLDAP::NG Configuration](../doc/llng-configuration.md#step-2-create-the-oidc-relying-party).
 
 The `lmConf-1.json` shipped with this quick-start is a minimal working
-example you can use as a reference.
+example you can use as a reference (the bundled demo portal already has
+`pam-access` configured this way).

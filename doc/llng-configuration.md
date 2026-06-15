@@ -49,7 +49,27 @@ In the LLNG Manager, create a new OIDC Relying Party:
    - **Client ID**: `pam-access`
    - **Client secret**: Generate a strong secret
    - **Allowed grant types**: Enable `device_code` (for server enrollment)
-   - **Allowed scopes**: `openid`, `pam:server`
+   - **Allowed scopes**: `openid`, `pam:server`, `offline_access`
+3. Set the per-RP options that let servers enroll with a **renewable** identity
+   (see [Per-RP Device Authorization Parameters](#per-rp-device-authorization-parameters)):
+   - `oidcRPMetaDataOptionsAllowDeviceAuthorization` = `1`
+   - `oidcRPMetaDataOptionsDeviceOwnership` = `organization`
+   - `oidcRPMetaDataOptionsAllowOffline` = `1`
+
+> **Critical — the offline refresh token.** A server's access token lasts ~1 h
+> and is renewed by `ob-heartbeat` from an **offline refresh token**. That
+> refresh token is issued only when **all** of the following hold:
+>
+> - the enrollment requests the `offline_access` scope (`ob-enroll` always does),
+> - `oidcRPMetaDataOptionsAllowOffline = 1` on the RP, **and**
+> - the deployed **`oidc-device-organization` plugin is >= 0.3.3** — older
+>   versions strip `offline_access` from the device scope, so the portal returns
+>   **no refresh token**.
+>
+> Without a refresh token, `ob-enroll` fails and `ob-bastion-setup` refuses the
+> Mode E lockdown (NSS/SSO would break ~1 h after enrollment). The
+> authorization-code flow can still return a refresh token even when this is
+> misconfigured, so test the **device** flow, not auth-code.
 
 ## Step 3: Enable the Plugins
 
@@ -104,10 +124,11 @@ Additional and optional parameters that can be inserted into `lemonldap-ng.ini`,
 
 These are set in the LLNG Manager on each OIDC Relying Party:
 
-| Parameter                                       | Default | Description                                                               |
-| ----------------------------------------------- | ------- | ------------------------------------------------------------------------- |
-| `oidcRPMetaDataOptionsAllowDeviceAuthorization` | `0`     | Enable device grant. Can be a rule expression to restrict who can approve |
-| `oidcRPMetaDataOptionsDeviceOwnership`          | (empty) | Set to `organization` for organizational device mode (see below)          |
+| Parameter                                       | Default | Description                                                                                                                                                                                                           |
+| ----------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `oidcRPMetaDataOptionsAllowDeviceAuthorization` | `0`     | Enable device grant. Can be a rule expression to restrict who can approve                                                                                                                                             |
+| `oidcRPMetaDataOptionsDeviceOwnership`          | (empty) | Set to `organization` for organizational device mode (see below)                                                                                                                                                      |
+| `oidcRPMetaDataOptionsAllowOffline`             | `0`     | Set to `1` to issue an **offline refresh token** so `ob-heartbeat` can renew the server's access token. **Required** for server enrollment (with the `offline_access` scope and `oidc-device-organization` >= 0.3.3). |
 
 ### Organizational Device Enrollment
 
@@ -119,6 +140,12 @@ When `oidcRPMetaDataOptionsDeviceOwnership` is set to `organization` on an RP, t
 - Refresh tokens remain valid independently of the admin's session
 
 This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
+
+For the device to get a **durable** (offline) refresh token, also set
+`oidcRPMetaDataOptionsAllowOffline = 1` and deploy `oidc-device-organization`
+**>= 0.3.3** (earlier versions stripped `offline_access`, leaving the server
+with a non-renewable token). See the critical note under
+[Step 2](#step-2-create-the-oidc-relying-party).
 
 ### Device Authorization Security Features
 

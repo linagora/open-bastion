@@ -24,6 +24,12 @@ The flow is always the same three steps:
 - SSO reachable from your workstation (for the build-time OIDC discovery) **and**
   from the targets (at run time, for enrolment).
 - SSH access from your workstation to each target as a user that can `sudo`.
+- The **`pam-access` OIDC Relying Party** configured on the portal for device
+  enrollment — in particular _Allow Device Authorization_, _Device ownership_ =
+  `organization`, and **_Allow offline access_** (with `oidc-device-organization`
+  0.3.3 or newer), otherwise enrollment gets a non-renewable token and
+  `ob-bastion-setup` aborts in Mode E. See
+  [LemonLDAP::NG Configuration → Create the OIDC Relying Party](llng-configuration.md#step-2-create-the-oidc-relying-party).
 
 ## Step 1 — Generate the roles
 

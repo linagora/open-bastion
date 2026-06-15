@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Documented the full **`pam-access` OIDC Relying Party** setup in
+  `doc/llng-configuration.md`: the required options
+  (`AllowDeviceAuthorization`, `DeviceOwnership = organization`,
+  **`AllowOffline = 1`**), the `offline_access` scope, and the
+  offline-refresh-token gotcha (needs `oidc-device-organization` >= 0.3.3, or
+  the device flow returns a non-renewable token and enrollment fails in
+  Mode E). Referenced as a prerequisite from all three quick-starts (Docker,
+  Ansible, shell).
+
 ## [0.3.1] - 2026-06-15
 
 Maintenance release: `ob-heartbeat` now reports fleet visibility data
