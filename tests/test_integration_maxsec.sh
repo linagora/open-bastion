@@ -847,19 +847,22 @@ test_sudo_pam_config() {
     # for NSS-only SSO users (regression guard for the sudo-i fix).
     sudo_i_pam=$(docker exec ob-maxsec-backend cat /etc/pam.d/sudo-i 2>&1) || true
 
-    local has_openbastion has_deny no_nopasswd has_openbastion_i
+    local has_openbastion has_deny no_nopasswd has_openbastion_i has_deny_i
     has_openbastion=$(echo "$sudo_pam" | grep -c "pam_openbastion" || true)
     has_deny=$(echo "$sudo_pam" | grep -c "pam_deny" || true)
     has_openbastion_i=$(echo "$sudo_i_pam" | grep -c "pam_openbastion" || true)
+    # Mode E rejects Unix-password fallback via pam_deny; sudo -i must enforce it
+    # too, otherwise a stray fallback method could slip through (Copilot #141).
+    has_deny_i=$(echo "$sudo_i_pam" | grep -c "pam_deny" || true)
     no_nopasswd=$(docker exec ob-maxsec-backend grep -c "NOPASSWD" /etc/sudoers 2>&1) || true
 
     if [[ "$has_openbastion" -ge 1 ]] && [[ "$has_deny" -ge 1 ]] && \
-       [[ "$has_openbastion_i" -ge 1 ]] && [[ "$no_nopasswd" -eq 0 ]]; then
-        pass "sudo and sudo -i PAM correctly require LLNG token (no NOPASSWD)"
+       [[ "$has_openbastion_i" -ge 1 ]] && [[ "$has_deny_i" -ge 1 ]] && [[ "$no_nopasswd" -eq 0 ]]; then
+        pass "sudo and sudo -i PAM correctly require LLNG token (no NOPASSWD, no fallback)"
         return 0
     else
         fail "sudo PAM not properly configured for Mode E" \
-             "openbastion=$has_openbastion, deny=$has_deny, sudo-i=$has_openbastion_i, nopasswd=$no_nopasswd"
+             "openbastion=$has_openbastion, deny=$has_deny, sudo-i(openbastion=$has_openbastion_i, deny=$has_deny_i), nopasswd=$no_nopasswd"
         return 1
     fi
 }
