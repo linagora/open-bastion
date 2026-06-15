@@ -232,7 +232,10 @@ test_node_role() {
         [ "$NODE_ROLE" = "standalone" ] || exit 1
         PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
         CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
-        render_openbastion_conf | grep -q "^node_role = standalone$" && exit 0 || exit 1
+        # Capture first: piping into `grep -q` makes grep exit on first match,
+        # which SIGPIPEs render_openbastion_conf and trips `set -o pipefail`.
+        local conf; conf=$(render_openbastion_conf)
+        grep -q "^node_role = standalone$" <<<"$conf" && exit 0 || exit 1
     )
     if [ $? -eq 0 ]; then
         pass "--node-role is parsed and written to the config"
@@ -260,7 +263,8 @@ test_node_role_default() {
         source_script "ob-bastion-setup"
         PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
         CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
-        render_openbastion_conf | grep -q "^node_role = bastion$" && exit 0 || exit 1
+        local conf; conf=$(render_openbastion_conf)
+        grep -q "^node_role = bastion$" <<<"$conf" && exit 0 || exit 1
     )
     if [ $? -eq 0 ]; then
         pass "default node_role is bastion"
