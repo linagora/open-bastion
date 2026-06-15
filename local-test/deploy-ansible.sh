@@ -64,21 +64,31 @@ cat > "$WORK/role-bastion/deploy.yml" <<'EOF'
   become: true
   roles: [open-bastion]
   post_tasks:
+    # ob-bastion-id needs root to read the server token. In Mode E sudo is
+    # locked to LLNG tokens, so this become-task cannot run as the debian mgmt
+    # user — that is expected. Make it non-fatal; the bastion_id equals the
+    # enrolling client_id in this lab, so the caller falls back to that.
     - name: Capture bastion_id
       ansible.builtin.command: ob-bastion-id
       register: _bid
       changed_when: false
+      failed_when: false
     - ansible.builtin.copy:
         content: "{{ _bid.stdout }}\n"
         dest: "{{ bid_out }}"
       delegate_to: localhost
       become: false
+      when: _bid.rc == 0 and (_bid.stdout | default('') | length) > 0
 EOF
 ( cd "$WORK/role-bastion" && ansible-playbook -i inv.yml deploy.yml \
     --extra-vars "ob_llng_cookie='$COOKIE' bid_out=$WORK/bastion-id.txt" ) >"$WORK/deploy-bastion.log" 2>&1
-if grep -q "failed=0" "$WORK/deploy-bastion.log" && [ -s "$WORK/bastion-id.txt" ]; then
-    BID="$(cat "$WORK/bastion-id.txt")"; ok "bastion deployed; bastion_id=$BID"
-else bad "bastion deploy failed — see $WORK/deploy-bastion.log"; tail -20 "$WORK/deploy-bastion.log"; BID=""; fi
+if grep -q "failed=0" "$WORK/deploy-bastion.log"; then
+    # In Mode E the bastion_id capture is skipped (sudo locked), so fall back to
+    # the enrolling client_id, which is what the bastion_id resolves to here.
+    BID="$([ -s "$WORK/bastion-id.txt" ] && cat "$WORK/bastion-id.txt" || true)"
+    BID="${BID:-ob-bastion}"
+    ok "bastion deployed; bastion_id=$BID"
+else bad "bastion deploy failed — see $WORK/deploy-bastion.log"; tail -20 "$WORK/deploy-bastion.log"; BID="ob-bastion"; fi
 
 # ── Phase 2: generate + deploy the backends with allowed_bastions=bastion_id ─
 phase "Phase 2 — backends (ob-builder + ansible)"

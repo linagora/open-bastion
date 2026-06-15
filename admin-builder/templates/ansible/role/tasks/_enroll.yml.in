@@ -86,8 +86,8 @@
   # which matter most when enrolling a fleet: a single refused connection should
   # not abort the play.
   until: _ob_verify_page is succeeded
-  retries: 5
-  delay: 3
+  retries: 10
+  delay: 5
   when: _ob_use_auto_approve
 
 - name: "Extract CSRF token from the verification page"
@@ -128,8 +128,8 @@
   become: false
   register: _ob_approve_result
   until: _ob_approve_result is succeeded
-  retries: 5
-  delay: 3
+  retries: 10
+  delay: 5
   when: _ob_use_auto_approve
 
 - name: "Wait for ob-enroll to complete (polling token endpoint)"
