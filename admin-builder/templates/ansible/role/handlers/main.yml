@@ -1,5 +1,12 @@
 ---
+# Only restart sshd from Ansible when the role configured sshd itself
+# (ob_auto_setup = false). When ob_auto_setup is true, ob-bastion-setup /
+# ob-backend-setup already restart sshd at the end of their run — and Mode E
+# locks sudo behind an LLNG token, so a become-based handler running afterwards
+# can no longer escalate ("Missing sudo password"). Skipping it then avoids a
+# spurious failure on an otherwise-successful deployment.
 - name: Restart sshd
   ansible.builtin.service:
     name: "{{ 'sshd' if ansible_facts['os_family'] == 'RedHat' else 'ssh' }}"
     state: restarted
+  when: not (ob_auto_setup | default(true))
