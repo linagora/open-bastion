@@ -77,7 +77,8 @@ session    required     pam_openbastion.so create_user=true\n\
 session    required     pam_unix.so\n\
 ' > /etc/pam.d/sshd
 
-# Configure PAM for sudo (Mode E: LLNG temporary token required)
+# Configure PAM for sudo + sudo -i (Mode E: LLNG temporary token required).
+# `sudo -i` uses the separate "sudo-i" PAM service, so it gets the same stack.
 RUN echo '# PAM configuration for sudo with Open Bastion (Mode E)\n\
 # LLNG temporary token ONLY - Unix passwords REJECTED\n\
 auth       sufficient   pam_openbastion.so\n\
@@ -86,7 +87,7 @@ auth       required     pam_deny.so\n\
 account    required     pam_openbastion.so\n\
 \n\
 session    required     pam_unix.so\n\
-' > /etc/pam.d/sudo
+' | tee /etc/pam.d/sudo /etc/pam.d/sudo-i > /dev/null
 
 # Configure NSS to use Open Bastion
 RUN sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf && \

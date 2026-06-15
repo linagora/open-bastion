@@ -304,6 +304,13 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 
+# Man page for the ob-standalone-setup symlink (points at ob-bastion-setup.8).
+install(CODE "
+    set(_man8dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_MANDIR}/man8\")
+    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+        ob-bastion-setup.8 \"\${_man8dir}/ob-standalone-setup.8\")
+")
+
 # Install man pages (section 1 - user commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
