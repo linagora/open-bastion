@@ -96,6 +96,17 @@ load_config() {
     VERIFY_SSL=$(read_config "verify_ssl" "$CONFIG_FILE")
     [ -z "$VERIFY_SSL" ] && VERIFY_SSL="true"
 
+    # Whether to report the list of currently connected users to the SSO in the
+    # heartbeat ("who is connected on this machine"). Active sessions are
+    # privacy-sensitive, so this can be disabled. Default: true.
+    REPORT_SESSIONS=$(read_config "report_sessions" "$CONFIG_FILE")
+    [ -z "$REPORT_SESSIONS" ] && REPORT_SESSIONS="true"
+
+    # Upper bound on the number of sessions sent, to avoid a huge payload on a
+    # very busy machine. Default: 200.
+    MAX_SESSIONS=$(read_config "max_reported_sessions" "$CONFIG_FILE")
+    [ -z "$MAX_SESSIONS" ] && MAX_SESSIONS=200
+
     if [ -z "$PORTAL_URL" ]; then
         log_error "portal_url not configured"
         exit 1
@@ -139,6 +150,90 @@ get_stats() {
         cat "$STATS_FILE"
     else
         echo '{}'
+    fi
+}
+
+# Build a JSON array describing who is currently connected on this machine.
+# Each entry: { user, from (remote host), tty, since (login epoch or null) }.
+# Prefers systemd-logind (loginctl), falls back to who(1)/utmp when logind is
+# unavailable. Returns '[]' when reporting is disabled or nothing is found.
+get_sessions() {
+    case "$REPORT_SESSIONS" in
+        true | 1 | yes | on) ;;
+        *)
+            echo '[]'
+            return 0
+            ;;
+    esac
+
+    local objs="" count=0 truncated=0
+
+    if command -v loginctl >/dev/null 2>&1; then
+        local ids id props
+        ids=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}') || ids=""
+        for id in $ids; do
+            [ -n "$id" ] || continue
+            props=$(loginctl show-session "$id" \
+                -p Name -p RemoteHost -p TTY -p Timestamp -p Class 2>/dev/null) || props=""
+            local name="" remote="" tty="" class="" ts="" since="" key val
+            while IFS='=' read -r key val; do
+                case "$key" in
+                    Name) name="$val" ;;
+                    RemoteHost) remote="$val" ;;
+                    TTY) tty="$val" ;;
+                    Class) class="$val" ;;
+                    Timestamp) ts="$val" ;;
+                esac
+            done <<EOF
+$props
+EOF
+            # Only interactive user sessions (skip greeter/manager/etc.)
+            [ "$class" = "user" ] || continue
+            [ -n "$name" ] || continue
+            if [ "$count" -ge "$MAX_SESSIONS" ]; then
+                truncated=1
+                break
+            fi
+            [ -n "$ts" ] && since=$(date -d "$ts" +%s 2>/dev/null || echo "")
+            objs+=$(jq -cn \
+                --arg user "$name" \
+                --arg from "$remote" \
+                --arg tty "$tty" \
+                --argjson since "${since:-null}" \
+                '{user: $user, from: $from, tty: $tty, since: $since}')
+            objs+=$'\n'
+            count=$((count + 1))
+        done
+    else
+        # Fallback: who reads utmp. Columns are NAME LINE DATE TIME [(HOST)];
+        # the optional source host is the parenthesised trailing comment.
+        local user tty d t host since
+        while read -r user tty d t host; do
+            [ -n "$user" ] || continue
+            if [ "$count" -ge "$MAX_SESSIONS" ]; then
+                truncated=1
+                break
+            fi
+            host=$(echo "$host" | tr -d '()')
+            since=""
+            [ -n "$d" ] && [ -n "$t" ] && since=$(date -d "$d $t" +%s 2>/dev/null || echo "")
+            objs+=$(jq -cn \
+                --arg user "$user" \
+                --arg from "$host" \
+                --arg tty "$tty" \
+                --argjson since "${since:-null}" \
+                '{user: $user, from: $from, tty: $tty, since: $since}')
+            objs+=$'\n'
+            count=$((count + 1))
+        done < <(who 2>/dev/null || true)
+    fi
+
+    [ "$truncated" = "1" ] && log_warn "Reported session list truncated to $MAX_SESSIONS entries"
+
+    if [ -z "$objs" ]; then
+        echo '[]'
+    else
+        printf '%s' "$objs" | jq -s '.'
     fi
 }
 
@@ -188,6 +283,10 @@ send_heartbeat() {
     local stats
     stats=$(get_stats)
 
+    # List of users currently connected on this machine (may be '[]')
+    local sessions
+    sessions=$(get_sessions)
+
     # Build JSON payload using jq for safety
     local payload
     payload=$(jq -n \
@@ -197,13 +296,15 @@ send_heartbeat() {
         --arg version "$VERSION" \
         --argjson uptime "$uptime_seconds" \
         --argjson stats "$stats" \
+        --argjson sessions "$sessions" \
         '{
             refresh_token: $refresh_token,
             hostname: $hostname,
             server_group: $server_group,
             version: $version,
             uptime: $uptime,
-            stats: $stats
+            stats: $stats,
+            sessions: $sessions
         }')
 
     build_curl_opts

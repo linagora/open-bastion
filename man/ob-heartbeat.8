@@ -12,6 +12,16 @@ server is still active and using PAM authentication.
 The heartbeat allows administrators to monitor enrolled servers and detect
 "ghost" servers that have uninstalled the PAM module without proper unenrollment.
 .PP
+Each heartbeat also reports the list of users currently connected on this
+machine (user, source host, tty and login time), collected via
+.BR loginctl (1)
+when systemd-logind is available, otherwise via
+.BR who (1).
+The SSO stores this list per machine so administrators can see "who is
+connected" across the fleet. Reporting can be disabled with the
+.I report_sessions
+configuration setting.
+.PP
 This script is typically run by a systemd timer (ob-heartbeat.timer)
 every 5 minutes.
 .SH OPTIONS
