@@ -35,14 +35,20 @@ _inv_vars(){ cat <<EOF
 EOF
 }
 
+# The standalone host is part of the Ansible lab only (the shell harness leaves
+# it out), so add it to the VM set here rather than in the shared lib.
+[ -n "$STANDALONE_VM" ] && ALL_VMS+=("$STANDALONE_VM")
+
 preflight; build_deb; ensure_sso; recreate_vms
 phase "Bootstrap VMs"; for v in "${ALL_VMS[@]}"; do bootstrap_vm "$v" 0; done
 get_cookie
+mint_dwho_cert   # so the connection-phase + standalone assertions actually run
 
 # ── Phase 1: generate + deploy the bastion, capture bastion_id ───────────────
-phase "Phase 1 — bastion (ob-builder + ansible)"
+phase "Phase 1 — bastion (ob-builder + ansible, scenario=$SCENARIO)"
 rm -rf "$WORK/role-bastion"
-obbuild --config "$CONFIG_DIR/build-bastion.yml" --output-ansible "$WORK/role-bastion" >"$WORK/gen-bastion.log" 2>&1 \
+sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-bastion.yml" > "$WORK/build-bastion.yml"
+obbuild --config "$WORK/build-bastion.yml" --output-ansible "$WORK/role-bastion" >"$WORK/gen-bastion.log" 2>&1 \
     && ok "generated bastion role" || { bad "ob-builder bastion failed"; cat "$WORK/gen-bastion.log"; }
 cat > "$WORK/role-bastion/inv.yml" <<EOF
 all:
@@ -76,7 +82,8 @@ else bad "bastion deploy failed — see $WORK/deploy-bastion.log"; tail -20 "$WO
 
 # ── Phase 2: generate + deploy the backends with allowed_bastions=bastion_id ─
 phase "Phase 2 — backends (ob-builder + ansible)"
-sed "s/^allowed_bastions:.*/allowed_bastions: ${BID:-ob-bastion}/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
+sed -e "s/^allowed_bastions:.*/allowed_bastions: ${BID:-ob-bastion}/" \
+    -e "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
 rm -rf "$WORK/role-backend"
 obbuild --config "$WORK/build-backend.yml" --output-ansible "$WORK/role-backend" >"$WORK/gen-backend.log" 2>&1 \
     && ok "generated backend role (allowed_bastions=${BID:-ob-bastion})" || bad "ob-builder backend failed"
@@ -90,5 +97,34 @@ if grep -q "failed=0" "$WORK/deploy-backends.log" && ! grep -q "failed=[1-9]" "$
     ok "backends deployed"
 else bad "backend deploy failed — see $WORK/deploy-backends.log"; tail -20 "$WORK/deploy-backends.log"; fi
 
+# ── Phase 3: generate + deploy a standalone host (bastion+backend in one) ────
+if [ -n "$STANDALONE_VM" ]; then
+    phase "Phase 3 — standalone (ob-builder + ansible, scenario=$SCENARIO)"
+    rm -rf "$WORK/role-standalone"
+    sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-standalone.yml" > "$WORK/build-standalone.yml"
+    obbuild --config "$WORK/build-standalone.yml" --output-ansible "$WORK/role-standalone" >"$WORK/gen-standalone.log" 2>&1 \
+        && ok "generated standalone role" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
+    cat > "$WORK/role-standalone/inv.yml" <<EOF
+all:
+  vars:
+$(_inv_vars)
+  children:
+    standalones:
+      hosts:
+        $STANDALONE_VM: { ansible_host: ${IP[$STANDALONE_VM]}, ob_server_group: bastion }
+EOF
+    cat > "$WORK/role-standalone/deploy.yml" <<'EOF'
+- hosts: standalones
+  become: true
+  roles: [open-bastion]
+EOF
+    ( cd "$WORK/role-standalone" && ansible-playbook -i inv.yml deploy.yml \
+        --extra-vars "ob_llng_cookie='$COOKIE'" ) >"$WORK/deploy-standalone.log" 2>&1
+    if grep -q "failed=0" "$WORK/deploy-standalone.log" && ! grep -q "failed=[1-9]" "$WORK/deploy-standalone.log"; then
+        ok "standalone deployed"
+    else bad "standalone deploy failed — see $WORK/deploy-standalone.log"; tail -20 "$WORK/deploy-standalone.log"; fi
+fi
+
 verify_e2e
+verify_standalone
 summary
