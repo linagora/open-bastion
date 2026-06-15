@@ -2372,8 +2372,22 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
         return PAM_SUCCESS;
     }
 
-    /* If authorize_only mode, skip password check */
-    if (data->config.authorize_only) {
+    /*
+     * authorize_only mode skips the token check because the user already
+     * authenticated out-of-band: on a bastion, sshd validated an SSO
+     * certificate before PAM ran, so pam_sm_authenticate only needs to let
+     * pam_sm_acct_mgmt call /pam/authorize.
+     *
+     * That assumption does NOT hold for sudo: there is no prior certificate
+     * authentication for a sudo invocation, so honoring authorize_only here
+     * would make sudo passwordless whenever the bastion config sets it
+     * (Mode E sets authorize_only=true for sshd). That defeats the Mode E
+     * guarantee that sudo requires a fresh LLNG token. Always require a real
+     * token for the sudo PAM services, regardless of authorize_only.
+     */
+    bool is_sudo_service = service &&
+        (strcmp(service, "sudo") == 0 || strcmp(service, "sudo-i") == 0);
+    if (data->config.authorize_only && !is_sudo_service) {
         OB_LOG_DEBUG(pamh, "authorize_only mode, skipping password check");
         return PAM_SUCCESS;
     }

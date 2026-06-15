@@ -20,6 +20,16 @@ Disables password authentication
 The script downloads the SSH CA public key from LemonLDAP::NG, configures sshd to
 trust certificates signed by that CA, and sets up session recording via
 ForceCommand.
+.PP
+The command is also installed as
+.BR ob-standalone-setup ,
+a symlink to this script. Invoked under that name it defaults
+.B \-\-node\-role
+to
+.B standalone
+(a host that is both bastion and backend); an explicit
+.B \-\-node\-role
+always overrides the default.
 .SH OPTIONS
 .TP
 .BR \-p ", " \-\-portal " " \fIURL\fR

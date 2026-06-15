@@ -840,19 +840,26 @@ test_sudo_pam_config() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing sudo PAM requires LLNG token (Mode E)..."
 
-    local sudo_pam
+    local sudo_pam sudo_i_pam
     sudo_pam=$(docker exec ob-maxsec-backend cat /etc/pam.d/sudo 2>&1) || true
+    # `sudo -i` uses the separate "sudo-i" PAM service; it must carry the same
+    # open-bastion stack, otherwise `sudo -i` falls back to pam_unix and breaks
+    # for NSS-only SSO users (regression guard for the sudo-i fix).
+    sudo_i_pam=$(docker exec ob-maxsec-backend cat /etc/pam.d/sudo-i 2>&1) || true
 
-    local has_openbastion has_deny no_nopasswd
+    local has_openbastion has_deny no_nopasswd has_openbastion_i
     has_openbastion=$(echo "$sudo_pam" | grep -c "pam_openbastion" || true)
     has_deny=$(echo "$sudo_pam" | grep -c "pam_deny" || true)
+    has_openbastion_i=$(echo "$sudo_i_pam" | grep -c "pam_openbastion" || true)
     no_nopasswd=$(docker exec ob-maxsec-backend grep -c "NOPASSWD" /etc/sudoers 2>&1) || true
 
-    if [[ "$has_openbastion" -ge 1 ]] && [[ "$has_deny" -ge 1 ]] && [[ "$no_nopasswd" -eq 0 ]]; then
-        pass "sudo PAM correctly requires LLNG token (no NOPASSWD)"
+    if [[ "$has_openbastion" -ge 1 ]] && [[ "$has_deny" -ge 1 ]] && \
+       [[ "$has_openbastion_i" -ge 1 ]] && [[ "$no_nopasswd" -eq 0 ]]; then
+        pass "sudo and sudo -i PAM correctly require LLNG token (no NOPASSWD)"
         return 0
     else
-        fail "sudo PAM not properly configured for Mode E" "openbastion=$has_openbastion, deny=$has_deny, nopasswd=$no_nopasswd"
+        fail "sudo PAM not properly configured for Mode E" \
+             "openbastion=$has_openbastion, deny=$has_deny, sudo-i=$has_openbastion_i, nopasswd=$no_nopasswd"
         return 1
     fi
 }

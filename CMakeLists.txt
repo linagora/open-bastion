@@ -265,6 +265,15 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# ob-standalone-setup is a symlink to ob-bastion-setup: invoked under that name
+# the script defaults --node-role to "standalone", giving admins a clearer,
+# self-documenting command for combined bastion+backend hosts.
+install(CODE "
+    set(_sbindir \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_SBINDIR}\")
+    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+        ob-bastion-setup \"\${_sbindir}/ob-standalone-setup\")
+")
+
 # Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
 # Read-only templates under /usr/share/open-bastion/audit/. The setup function
 # copies them into /etc/audit/rules.d/ and /etc/cron.daily/ at deployment time.

@@ -27,9 +27,14 @@ SERVER_GROUP=""
 SERVER_TOKEN=""
 # Node role recorded in openbastion.conf and reported in the heartbeat. This
 # script serves both the bastion and standalone roles (a standalone host runs
-# the full bastion stack); the installer passes --node-role standalone when
-# appropriate. Defaults to "bastion".
-NODE_ROLE="bastion"
+# the full bastion stack). It is installed under two names: invoked as
+# "ob-standalone-setup" (a symlink) it defaults to the standalone role, so
+# admins get a self-documenting command; otherwise it defaults to "bastion".
+# An explicit --node-role always overrides this default.
+case "$PROG_NAME" in
+    ob-standalone-setup) NODE_ROLE="standalone" ;;
+    *)                   NODE_ROLE="bastion" ;;
+esac
 NON_INTERACTIVE=false
 VERIFY_SSL=true
 TIMEOUT=30
@@ -62,6 +67,11 @@ SESSION_RECORDER="/usr/sbin/ob-session-recorder-wrapper"
 SESSION_RECORDER_CONF="/etc/open-bastion/session-recorder.conf"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 PAM_SUDO="/etc/pam.d/sudo"
+# sudo 1.9 uses a separate PAM service ("sudo-i") for `sudo -i`. It must get the
+# same open-bastion stack, otherwise `sudo -i` falls back to the distro default
+# (common-auth/common-account = pam_unix), which cannot validate NSS-only SSO
+# users and fails with "account validation failure".
+PAM_SUDO_I="/etc/pam.d/sudo-i"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
@@ -792,6 +802,14 @@ session    required     pam_unix.so
     echo "$pam_content" > "$PAM_SUDO"
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO for LLNG token authentication"
+
+    # `sudo -i` uses the separate "sudo-i" PAM service. Give it the same stack,
+    # otherwise it falls back to the distro default (pam_unix) and fails for
+    # NSS-only SSO users ("account validation failure, is your account locked?").
+    backup_file "$PAM_SUDO_I"
+    echo "$pam_content" > "$PAM_SUDO_I"
+    chmod 644 "$PAM_SUDO_I"
+    info "Configured $PAM_SUDO_I for LLNG token authentication"
 
     # Create open-bastion-sudo group for defense-in-depth sudo authorization
     groupadd --system open-bastion-sudo 2>/dev/null || true
