@@ -834,14 +834,12 @@ _mode_settings_yaml() {
     case "$mode" in
         A|B)
             cat << 'YML'
-ob_verify_ssl: true
 ob_cache_enabled: true
 ob_cache_ttl: 300
 YML
             ;;
         C)
             cat << 'YML'
-ob_verify_ssl: true
 ob_cache_enabled: true
 ob_cache_ttl: 300
 ob_ssh_key_policy_enabled: true
@@ -850,14 +848,12 @@ YML
             ;;
         D)
             cat << 'YML'
-ob_verify_ssl: true
 ob_cache_enabled: true
 ob_cache_ttl: 300
 YML
             ;;
         E)
             cat << 'YML'
-ob_verify_ssl: true
 ob_min_tls_version: 13
 ob_cache_enabled: true
 ob_cache_ttl: 60
