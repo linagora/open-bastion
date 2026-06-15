@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-15
+
+Maintenance release: `ob-heartbeat` now reports fleet visibility data
+("who is connected", client version, node role) to the SSO, plus
+robustness fixes for enrollment and the `ob-builder` Ansible artefacts
+surfaced while deploying a Mode E bastion.
+
+### Added
+
+- **`ob-heartbeat` reports the connected users** ("who is connected on this
+  machine") to the SSO in each beat: a `sessions` array of
+  `{user, from, tty, since}`, collected via `loginctl` (with a `who(1)`/utmp
+  fallback when systemd-logind is unavailable). Two new config keys:
+  `report_sessions` (default `true`; the list is privacy-sensitive and can be
+  disabled) and `max_reported_sessions` (default 200, caps the payload). The
+  pam-access plugin stores it per machine as `_pamSessions` / `_pamSessionCount`
+  (requires the matching LLNG plugin).
+- **`ob-heartbeat` reports the open-bastion client version and the node role**
+  (`node_role`: `bastion` | `standalone` | `backend`). `ob-bastion-setup` /
+  `ob-backend-setup` gained `--node-role` (validated, written to
+  `openbastion.conf`), and the shell installer forwards the builder's target
+  role so standalone hosts are recorded correctly. Stored server-side as
+  `_pamVersion` / `_pamNodeRole`.
+- **Ansible quick-start for the shell installer** and documentation of the SSH
+  connection variables (`ansible_host` / `ansible_user` /
+  `ansible_ssh_private_key_file` / `ansible_become`, plus the
+  `IdentitiesOnly=yes` tip) in the example inventory.
+
+### Fixed
+
+- **`ob-enroll` now fails when `offline_access` was requested but no
+  `refresh_token` is issued.** It removes the unrenewable token and exits
+  non-zero with actionable guidance, instead of saving a token that would let
+  NSS/SSO work for ~1 h and then break (`ob-*-setup` only choked later, and the
+  dead token was reused on the next run). A refresh-less token is still accepted
+  when `offline_access` was not requested.
+- **`ob-builder`: dropped a duplicate `ob_verify_ssl` key** in the generated
+  Ansible defaults, which triggered Ansible's "duplicate mapping key" warning on
+  every run.
+- **Ansible role: the `Restart sshd` handler runs only when `ob_auto_setup` is
+  false** (`| bool`-cast so `--extra-vars` string overrides behave). With
+  `ob_auto_setup: true`, `ob-*-setup` already restarts sshd, and Mode E locks
+  `sudo` behind an LLNG token — so a `become` handler flushed afterwards failed
+  with "Missing sudo password" on an otherwise-successful deploy.
+- **`ob-heartbeat`: hardened session collection** — validate
+  `max_reported_sessions` (fall back to 200 on a non-integer), fall back to
+  `who(1)` when `loginctl` exists but `list-sessions` fails (containers/chroots
+  without logind), and fix the man page OPTIONS to match the script.
+
 ## [0.3.0] - 2026-06-13
 
 Headline: **certificate-based bastion→backend vouching** replaces the

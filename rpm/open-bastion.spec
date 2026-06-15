@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.3.0
+Version:        0.3.1
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -206,6 +206,10 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Mon Jun 15 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.1-1
+- ob-heartbeat reports connected users (who-is-connected), client version and
+  node role to the SSO; ob-enroll fails when offline_access yields no refresh
+  token; ob-builder/Ansible Mode E deploy fixes. See CHANGELOG.md
 * Sat Jun 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.0-1
 - Certificate-based bastion->backend vouching (replaces the broken JWT/SendEnv
   transport); ob-scp; token-lifecycle/NSS/sshd/recorder fixes; ob-builder
