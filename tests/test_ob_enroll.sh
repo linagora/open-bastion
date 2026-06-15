@@ -587,6 +587,44 @@ test_jwt_expiration() {
     return 0
 }
 
+# Test 26: save_token FAILS (and removes the token) when offline_access was
+# requested but the portal returned no refresh_token (the real-world cause of
+# the failure was a portal stripping offline_access).
+test_save_token_no_refresh_fails() {
+    local token_file="$TEMP_DIR/no_refresh_token.json"
+    (
+        source_script_functions
+        TOKEN_FILE="$token_file"
+        SCOPE="pam:server offline_access"
+        ACCESS_TOKEN="at_only"
+        REFRESH_TOKEN=""
+        EXPIRES_IN=3600
+        save_token > /dev/null 2>&1
+    )
+    local rc=$?
+    # Must fail (non-zero) AND not leave a dead, unrenewable token behind.
+    [ "$rc" -ne 0 ] || return 1
+    [ ! -f "$token_file" ] || return 1
+    return 0
+}
+
+# Test 27: save_token SUCCEEDS without a refresh_token when offline_access was
+# not requested (a refresh-less token is expected there, just a warning).
+test_save_token_no_offline_ok() {
+    local token_file="$TEMP_DIR/no_offline_token.json"
+    (
+        source_script_functions
+        TOKEN_FILE="$token_file"
+        SCOPE="pam:server"
+        ACCESS_TOKEN="at_only"
+        REFRESH_TOKEN=""
+        EXPIRES_IN=3600
+        save_token > /dev/null 2>&1
+    ) || return 1
+    [ -f "$token_file" ] || return 1
+    return 0
+}
+
 # Run all tests
 main() {
     echo "================================"
@@ -614,6 +652,8 @@ main() {
     run_test "build_curl_opts with insecure" test_build_curl_opts_insecure
     run_test "Color disabled when not terminal" test_colors_disabled_non_tty
     run_test "save_token creates valid JSON via jq" test_save_token_json
+    run_test "save_token fails + removes token when no refresh_token" test_save_token_no_refresh_fails
+    run_test "save_token ok without refresh when offline not requested" test_save_token_no_offline_ok
     run_test "Config file with 'portal' alias works" test_config_portal_alias
     run_test "Multiple values in config - last one wins" test_config_last_value_wins
     run_test "Empty config file doesn't break load_config" test_empty_config

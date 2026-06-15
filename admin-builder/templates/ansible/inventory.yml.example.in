@@ -8,6 +8,24 @@
 #
 # Override ob_client_secret per-host (or group_vars) via ansible-vault:
 #   ansible-vault encrypt_string 's3cr3t' --name ob_client_secret
+#
+# ── SSH connection variables ──────────────────────────────────────────────────
+# How Ansible reaches and escalates on each host (NOT the open-bastion users —
+# this is the admin account used only to deploy). Set per host or per group:
+#
+#   ansible_host                 IP/FQDN actually used to reach the host. The
+#                                inventory name above can stay logical/symbolic.
+#   ansible_user                 SSH login of the deploy account (needs sudo).
+#   ansible_ssh_private_key_file Path to that account's private key.
+#   ansible_become: true         Escalate to root with sudo for the tasks.
+#                                Add --ask-become-pass (-K) on the CLI, or set
+#                                ansible_become_password (via ansible-vault), if
+#                                sudo needs a password.
+#
+# Tip: if SSH fails with "Too many authentication failures", your agent is
+# offering too many keys. Force the chosen key only:
+#   ansible_ssh_common_args: "-o IdentitiesOnly=yes"
+# Test connectivity before deploying:  ansible -i inventory.yml all -m ping
 
 all:
   children:
@@ -16,6 +34,10 @@ all:
     bastions:
       hosts:
         bastion-01.example.com:
+          # ansible_host: 203.0.113.10
+          # ansible_user: admin
+          # ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          # ansible_become: true
           ob_server_group: "@@SERVER_GROUP@@"
         bastion-02.example.com:
           ob_server_group: "@@SERVER_GROUP@@"

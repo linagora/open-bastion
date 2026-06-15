@@ -579,18 +579,30 @@ save_token() {
         chmod 600 "$TOKEN_FILE"
     fi
 
-    log_success "Token saved to $TOKEN_FILE (JSON format)"
-
     if [ -n "$REFRESH_TOKEN" ]; then
+        log_success "Token saved to $TOKEN_FILE (JSON format)"
         log_info "Refresh token saved - can be used for automatic token renewal"
         log_info "Token expires at: $(date -d "@$expires_at" 2>/dev/null || date -r "$expires_at" 2>/dev/null || echo "$expires_at")"
-    else
-        log_error "No refresh_token was issued by the portal."
-        log_error "The server got only a short-lived access token; SSO/NSS lookups"
-        log_error "will break after it expires and cannot be renewed."
+    elif printf '%s' "$SCOPE" | grep -qw offline_access; then
+        # offline_access was requested but the portal returned no refresh_token:
+        # the server got only a short-lived access token that cannot be renewed,
+        # so NSS/SSO lookups would break ~1h later. Fail loudly HERE (instead of
+        # returning success and letting ob-*-setup choke later) and remove the
+        # dead token so it is not reused on the next run.
+        rm -f "$TOKEN_FILE"
+        log_error "No refresh_token was issued by the portal (enrollment FAILED)."
+        log_error "The server would get only a short-lived access token; SSO/NSS"
+        log_error "lookups would break after it expires and could not be renewed."
         log_error "The OIDC client '${CLIENT_ID:-pam-access}' must allow offline access:"
-        log_error "  set oidcRPMetaDataOptionsAllowOffline = 1 on that client in LLNG,"
-        log_error "  and make sure 'offline_access' is an allowed scope."
+        log_error "  - set oidcRPMetaDataOptionsAllowOffline = 1 on that client in LLNG,"
+        log_error "  - ensure 'offline_access' is an allowed scope,"
+        log_error "  - and (device flow) deploy oidc-device-organization >= 0.3.3,"
+        log_error "    which keeps offline_access instead of stripping it."
+        exit 1
+    else
+        # offline_access not requested: a refresh-less token is expected.
+        log_success "Token saved to $TOKEN_FILE (JSON format)"
+        log_warn "No refresh_token (offline_access not requested); token cannot be renewed."
     fi
 }
 
