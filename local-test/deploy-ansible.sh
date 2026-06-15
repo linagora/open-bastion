@@ -64,21 +64,23 @@ cat > "$WORK/role-bastion/deploy.yml" <<'EOF'
   become: true
   roles: [open-bastion]
   post_tasks:
-    # ob-bastion-id needs root to read the server token. In Mode E sudo is
-    # locked to LLNG tokens, so this become-task cannot run as the debian mgmt
-    # user — that is expected. Make it non-fatal; the bastion_id equals the
-    # enrolling client_id in this lab, so the caller falls back to that.
+    # ob-bastion-id needs root to read the server token. In Mode E sudo is locked
+    # to LLNG tokens, so the debian mgmt user cannot become root at all (a become
+    # failure isn't catchable with failed_when), so skip the capture there. The
+    # bastion_id equals the enrolling client_id in this lab, so the caller falls
+    # back to that.
     - name: Capture bastion_id
       ansible.builtin.command: ob-bastion-id
       register: _bid
       changed_when: false
       failed_when: false
+      when: not (ob_max_security | default(false) | bool)
     - ansible.builtin.copy:
         content: "{{ _bid.stdout }}\n"
         dest: "{{ bid_out }}"
       delegate_to: localhost
       become: false
-      when: _bid.rc == 0 and (_bid.stdout | default('') | length) > 0
+      when: (_bid.rc | default(1)) == 0 and (_bid.stdout | default('') | length) > 0
 EOF
 ( cd "$WORK/role-bastion" && ansible-playbook -i inv.yml deploy.yml \
     --extra-vars "ob_llng_cookie='$COOKIE' bid_out=$WORK/bastion-id.txt" ) >"$WORK/deploy-bastion.log" 2>&1
