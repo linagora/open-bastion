@@ -285,6 +285,163 @@ test_parse_args() {
     fi
 }
 
+# ── Test 13: load_config sanitizes invalid max_reported_sessions ──
+test_load_config_invalid_max_sessions() {
+    local tmpconf
+    tmpconf=$(mktemp)
+    cat > "$tmpconf" <<'CONF'
+portal_url = https://portal.test.com
+max_reported_sessions = abc
+CONF
+    (
+        source_script "ob-heartbeat"
+        CONFIG_FILE="$tmpconf"
+        load_config 2>/dev/null
+        [ "$MAX_SESSIONS" = "200" ] && exit 0 || exit 1
+    )
+    local rc=$?
+    rm -f "$tmpconf"
+    if [ $rc -eq 0 ]; then
+        pass "load_config sanitizes invalid max_reported_sessions to 200"
+    else
+        fail "load_config sanitizes invalid max_reported_sessions to 200"
+    fi
+}
+
+# ── Test 14: load_config keeps a valid max_reported_sessions / report_sessions ──
+test_load_config_session_settings() {
+    local tmpconf
+    tmpconf=$(mktemp)
+    cat > "$tmpconf" <<'CONF'
+portal_url = https://portal.test.com
+report_sessions = false
+max_reported_sessions = 50
+CONF
+    (
+        source_script "ob-heartbeat"
+        CONFIG_FILE="$tmpconf"
+        load_config 2>/dev/null
+        local ok=true
+        [ "$REPORT_SESSIONS" = "false" ] || ok=false
+        [ "$MAX_SESSIONS" = "50" ] || ok=false
+        $ok && exit 0 || exit 1
+    )
+    local rc=$?
+    rm -f "$tmpconf"
+    if [ $rc -eq 0 ]; then
+        pass "load_config keeps valid report_sessions/max_reported_sessions"
+    else
+        fail "load_config keeps valid report_sessions/max_reported_sessions"
+    fi
+}
+
+# ── Test 15: get_sessions returns [] when reporting disabled ──
+test_get_sessions_disabled() {
+    local out
+    out=$(
+        source_script "ob-heartbeat"
+        REPORT_SESSIONS=false
+        MAX_SESSIONS=200
+        get_sessions
+    )
+    if [ "$out" = "[]" ]; then
+        pass "get_sessions returns [] when report_sessions=false"
+    else
+        fail "get_sessions returns [] when report_sessions=false" "$out"
+    fi
+}
+
+# ── Test 16: get_sessions via loginctl (stubbed) ──
+test_get_sessions_loginctl() {
+    local out
+    out=$(
+        source_script "ob-heartbeat"
+        REPORT_SESSIONS=true
+        MAX_SESSIONS=200
+        loginctl() {
+            case "$1" in
+                list-sessions) printf '%s\n' "c1 1000 alice seat0 tty2" ;;
+                show-session)
+                    printf '%s\n' "Name=alice" "RemoteHost=10.0.0.9" \
+                        "TTY=pts/0" "Timestamp=Sun 2026-06-14 22:03:00 UTC" "Class=user" ;;
+            esac
+        }
+        get_sessions
+    )
+    if echo "$out" | jq -e \
+        '.[0].user=="alice" and .[0].from=="10.0.0.9" and .[0].tty=="pts/0"' >/dev/null 2>&1; then
+        pass "get_sessions (loginctl) reports user/from/tty"
+    else
+        fail "get_sessions (loginctl) reports user/from/tty" "$out"
+    fi
+}
+
+# ── Test 17: get_sessions skips non-user (greeter) loginctl sessions ──
+test_get_sessions_loginctl_skips_nonuser() {
+    local out
+    out=$(
+        source_script "ob-heartbeat"
+        REPORT_SESSIONS=true
+        MAX_SESSIONS=200
+        loginctl() {
+            case "$1" in
+                list-sessions) printf '%s\n' "c1 121 gdm seat0 tty1" ;;
+                show-session)
+                    printf '%s\n' "Name=gdm" "RemoteHost=" "TTY=tty1" \
+                        "Timestamp=Sun 2026-06-14 22:03:00 UTC" "Class=greeter" ;;
+            esac
+        }
+        get_sessions
+    )
+    if [ "$out" = "[]" ]; then
+        pass "get_sessions skips non-user loginctl sessions"
+    else
+        fail "get_sessions skips non-user loginctl sessions" "$out"
+    fi
+}
+
+# ── Test 18: get_sessions falls back to who when loginctl fails ──
+test_get_sessions_who_fallback() {
+    local out
+    out=$(
+        source_script "ob-heartbeat"
+        REPORT_SESSIONS=true
+        MAX_SESSIONS=200
+        # loginctl exists but list-sessions fails (logind/dbus down)
+        loginctl() { return 1; }
+        who() { printf '%s\n' "carol pts/1 2026-06-14 23:00 (192.168.1.5)"; }
+        get_sessions
+    )
+    if echo "$out" | jq -e \
+        '.[0].user=="carol" and .[0].from=="192.168.1.5" and .[0].tty=="pts/1"' >/dev/null 2>&1; then
+        pass "get_sessions falls back to who when loginctl fails"
+    else
+        fail "get_sessions falls back to who when loginctl fails" "$out"
+    fi
+}
+
+# ── Test 19: get_sessions honours max_reported_sessions cap ──
+test_get_sessions_cap() {
+    local out
+    out=$(
+        source_script "ob-heartbeat"
+        REPORT_SESSIONS=true
+        MAX_SESSIONS=1
+        loginctl() { return 1; }
+        who() {
+            printf '%s\n' \
+                "u1 pts/1 2026-06-14 23:00 (1.1.1.1)" \
+                "u2 pts/2 2026-06-14 23:01 (2.2.2.2)"
+        }
+        get_sessions 2>/dev/null
+    )
+    if [ "$(echo "$out" | jq 'length')" = "1" ]; then
+        pass "get_sessions caps the list at max_reported_sessions"
+    else
+        fail "get_sessions caps the list at max_reported_sessions" "$out"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-heartbeat ==="
 run_test test_syntax
@@ -301,6 +458,13 @@ run_test test_read_token_legacy
 run_test test_build_curl_opts_default
 run_test test_build_curl_opts_insecure
 run_test test_parse_args
+run_test test_load_config_invalid_max_sessions
+run_test test_load_config_session_settings
+run_test test_get_sessions_disabled
+run_test test_get_sessions_loginctl
+run_test test_get_sessions_loginctl_skips_nonuser
+run_test test_get_sessions_who_fallback
+run_test test_get_sessions_cap
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

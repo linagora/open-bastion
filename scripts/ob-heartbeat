@@ -103,9 +103,15 @@ load_config() {
     [ -z "$REPORT_SESSIONS" ] && REPORT_SESSIONS="true"
 
     # Upper bound on the number of sessions sent, to avoid a huge payload on a
-    # very busy machine. Default: 200.
+    # very busy machine. Must be a positive integer; fall back to 200 on an
+    # empty or invalid value (it is used in numeric `[ -ge ]` tests under
+    # `set -e`, where a non-integer would abort the heartbeat).
     MAX_SESSIONS=$(read_config "max_reported_sessions" "$CONFIG_FILE")
-    [ -z "$MAX_SESSIONS" ] && MAX_SESSIONS=200
+    if ! [[ "$MAX_SESSIONS" =~ ^[1-9][0-9]*$ ]]; then
+        [ -n "$MAX_SESSIONS" ] &&
+            log_warn "Invalid max_reported_sessions '$MAX_SESSIONS', using default 200"
+        MAX_SESSIONS=200
+    fi
 
     if [ -z "$PORTAL_URL" ]; then
         log_error "portal_url not configured"
@@ -168,9 +174,15 @@ get_sessions() {
 
     local objs="" count=0 truncated=0
 
-    if command -v loginctl >/dev/null 2>&1; then
-        local ids id props
-        ids=$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}') || ids=""
+    # Use loginctl only if it is present AND actually answers: on hosts where
+    # loginctl exists but systemd-logind/dbus is unavailable (containers,
+    # chroots) list-sessions fails, and we must fall back to who(1) rather than
+    # silently report an empty list.
+    local ids=""
+    if command -v loginctl >/dev/null 2>&1 &&
+        ids=$(loginctl list-sessions --no-legend 2>/dev/null); then
+        ids=$(printf '%s\n' "$ids" | awk '{print $1}')
+        local id props
         for id in $ids; do
             [ -n "$id" ] || continue
             props=$(loginctl show-session "$id" \
