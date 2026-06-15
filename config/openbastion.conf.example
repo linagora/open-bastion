@@ -26,6 +26,11 @@ server_token_file = /var/lib/open-bastion/token
 # Default: "default"
 server_group = default
 
+# Node role reported to the SSO in each heartbeat: bastion | standalone | backend
+# Normally written by the setup scripts (ob-bastion-setup / ob-backend-setup).
+# Leave empty/unset if unknown.
+node_role = bastion
+
 # ==============================================================================
 # Heartbeat reporting
 # ==============================================================================

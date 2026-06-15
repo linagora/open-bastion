@@ -335,6 +335,29 @@ CONF
     fi
 }
 
+# ── Test 14b: load_config reads node_role ──
+test_load_config_node_role() {
+    local tmpconf
+    tmpconf=$(mktemp)
+    cat > "$tmpconf" <<'CONF'
+portal_url = https://portal.test.com
+node_role = standalone
+CONF
+    (
+        source_script "ob-heartbeat"
+        CONFIG_FILE="$tmpconf"
+        load_config 2>/dev/null
+        [ "$NODE_ROLE" = "standalone" ] && exit 0 || exit 1
+    )
+    local rc=$?
+    rm -f "$tmpconf"
+    if [ $rc -eq 0 ]; then
+        pass "load_config reads node_role"
+    else
+        fail "load_config reads node_role"
+    fi
+}
+
 # ── Test 15: get_sessions returns [] when reporting disabled ──
 test_get_sessions_disabled() {
     local out
@@ -460,6 +483,7 @@ run_test test_build_curl_opts_insecure
 run_test test_parse_args
 run_test test_load_config_invalid_max_sessions
 run_test test_load_config_session_settings
+run_test test_load_config_node_role
 run_test test_get_sessions_disabled
 run_test test_get_sessions_loginctl
 run_test test_get_sessions_loginctl_skips_nonuser

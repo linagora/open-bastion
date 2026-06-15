@@ -207,6 +207,42 @@ test_max_security() {
     fi
 }
 
+# ── Test 14: default node_role is backend, --node-role overrides ──
+test_node_role_default() {
+    (
+        source_script "ob-backend-setup"
+        PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
+        CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
+        render_openbastion_conf | grep -q "^node_role = backend$" && exit 0 || exit 1
+    )
+    if [ $? -eq 0 ]; then
+        pass "default node_role is backend"
+    else
+        fail "default node_role is backend"
+    fi
+}
+
+test_node_role_override() {
+    local rc1 rc2
+    (
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --node-role bastion
+        [ "$NODE_ROLE" = "bastion" ] && exit 0 || exit 1
+    )
+    rc1=$?
+    # invalid role: parse_args errors out (exits non-zero)
+    (
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --node-role bogus 2>/dev/null
+    )
+    rc2=$?
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -ne 0 ]; then
+        pass "--node-role accepts valid role and rejects invalid"
+    else
+        fail "--node-role accepts valid role and rejects invalid"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-backend-setup ==="
 run_test test_syntax
@@ -223,6 +259,8 @@ run_test test_confirm_noninteractive
 run_test test_backup_file
 run_test test_trailing_slash
 run_test test_max_security
+run_test test_node_role_default
+run_test test_node_role_override
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

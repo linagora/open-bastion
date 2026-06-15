@@ -12,6 +12,10 @@ server is still active and using PAM authentication.
 The heartbeat allows administrators to monitor enrolled servers and detect
 "ghost" servers that have uninstalled the PAM module without proper unenrollment.
 .PP
+Each heartbeat also reports the open-bastion client version and the node role
+.RI ( node_role :
+bastion, standalone or backend) so the SSO can track what runs where.
+.PP
 Each heartbeat also reports the list of users currently connected on this
 machine (user, source host, tty and login time), collected via
 .BR loginctl (1)

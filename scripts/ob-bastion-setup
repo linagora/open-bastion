@@ -25,6 +25,11 @@ PORTAL_URL=""
 # main() if --server-group was not provided.
 SERVER_GROUP=""
 SERVER_TOKEN=""
+# Node role recorded in openbastion.conf and reported in the heartbeat. This
+# script serves both the bastion and standalone roles (a standalone host runs
+# the full bastion stack); the installer passes --node-role standalone when
+# appropriate. Defaults to "bastion".
+NODE_ROLE="bastion"
 NON_INTERACTIVE=false
 VERIFY_SSL=true
 TIMEOUT=30
@@ -455,6 +460,8 @@ render_openbastion_conf() {
     printf 'server_token_file = %s\n\n' "$OB_TOKEN"
     printf '# Server group for authorization rules\n'
     printf 'server_group = %s\n\n' "$SERVER_GROUP"
+    printf '# Node role reported to the SSO (bastion | standalone | backend)\n'
+    printf 'node_role = %s\n\n' "$NODE_ROLE"
     # Authorization-only mode: pam_sm_authenticate always succeeds (SSH already
     # validated the cert), only pam_sm_acct_mgmt calls /pam/authorize. Without
     # this, pam_openbastion would require client_id/client_secret in this file
@@ -1615,6 +1622,8 @@ Options:
   -g, --server-group NAME Server group name (must match a group defined in
                           LLNG). Prompted interactively if omitted; required
                           when --yes is used.
+      --node-role ROLE    Node role recorded in the config and reported to the
+                          SSO: bastion|standalone|backend (default: bastion).
   -t, --token-file FILE   Read server token from file (use - for stdin)
   -c, --client-id ID      OIDC client_id for enrollment. Prompted interactively
                           if omitted (suggested: pam-access); required when
@@ -1683,6 +1692,20 @@ parse_args() {
                     exit 1
                 fi
                 SERVER_GROUP="$2"
+                shift 2
+                ;;
+            --node-role)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                case "$2" in
+                    bastion | standalone | backend) NODE_ROLE="$2" ;;
+                    *)
+                        error "Invalid --node-role '$2' (bastion|standalone|backend)"
+                        exit 1
+                        ;;
+                esac
                 shift 2
                 ;;
             -t|--token-file)
