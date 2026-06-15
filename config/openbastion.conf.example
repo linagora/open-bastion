@@ -26,6 +26,28 @@ server_token_file = /var/lib/open-bastion/token
 # Default: "default"
 server_group = default
 
+# Node role reported to the SSO in each heartbeat: bastion | standalone | backend
+# Normally written by the setup scripts (ob-bastion-setup / ob-backend-setup).
+# Leave empty/unset if unknown.
+node_role = bastion
+
+# ==============================================================================
+# Heartbeat reporting
+# ==============================================================================
+
+# Report the list of currently connected users ("who is connected on this
+# machine") to the SSO in each heartbeat. The SSO stores it per machine so
+# administrators can see active sessions across the fleet.
+# NOTE: active sessions (user, source host, tty, login time) are
+# privacy-sensitive; set to false to disable this reporting.
+# Default: true
+report_sessions = true
+
+# Maximum number of sessions sent in a single heartbeat (avoids a huge payload
+# on a very busy machine). Extra sessions are dropped and a warning is logged.
+# Default: 200
+# max_reported_sessions = 200
+
 # ==============================================================================
 # HTTP Settings
 # ==============================================================================

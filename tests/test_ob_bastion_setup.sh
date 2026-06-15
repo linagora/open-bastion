@@ -224,6 +224,55 @@ test_max_security() {
     fi
 }
 
+# ── Test 14: --node-role parsed and rendered into the config ──
+test_node_role() {
+    (
+        source_script "ob-bastion-setup"
+        parse_args -p "https://x" --node-role standalone
+        [ "$NODE_ROLE" = "standalone" ] || exit 1
+        PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
+        CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
+        # Capture first: piping into `grep -q` makes grep exit on first match,
+        # which SIGPIPEs render_openbastion_conf and trips `set -o pipefail`.
+        local conf; conf=$(render_openbastion_conf)
+        grep -q "^node_role = standalone$" <<<"$conf" && exit 0 || exit 1
+    )
+    if [ $? -eq 0 ]; then
+        pass "--node-role is parsed and written to the config"
+    else
+        fail "--node-role is parsed and written to the config"
+    fi
+}
+
+# ── Test 15: invalid --node-role is rejected ──
+test_node_role_invalid() {
+    (
+        source_script "ob-bastion-setup"
+        parse_args -p "https://x" --node-role bogus 2>/dev/null
+    )
+    if [ $? -ne 0 ]; then
+        pass "invalid --node-role is rejected"
+    else
+        fail "invalid --node-role is rejected"
+    fi
+}
+
+# ── Test 16: default node_role is bastion ──
+test_node_role_default() {
+    (
+        source_script "ob-bastion-setup"
+        PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
+        CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
+        local conf; conf=$(render_openbastion_conf)
+        grep -q "^node_role = bastion$" <<<"$conf" && exit 0 || exit 1
+    )
+    if [ $? -eq 0 ]; then
+        pass "default node_role is bastion"
+    else
+        fail "default node_role is bastion"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-bastion-setup ==="
 run_test test_syntax
@@ -241,6 +290,9 @@ run_test test_backup_file
 run_test test_build_curl_opts_default
 run_test test_build_curl_opts_insecure
 run_test test_max_security
+run_test test_node_role
+run_test test_node_role_invalid
+run_test test_node_role_default
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

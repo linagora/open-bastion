@@ -669,7 +669,7 @@ step_setup() {
             # run ob-bastion-setup non-interactively. Without it, setup prompts
             # "Continue with bastion setup? [y/N]", reads nothing on a piped
             # stdin, and ABORTS — leaving sshd unconfigured (no TrustedUserCAKeys).
-            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--yes")
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--node-role" "${TARGET_ROLE}" "--yes")
             [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
@@ -690,7 +690,7 @@ step_setup() {
             # Backends never record sessions, so --disable-session-recorder is
             # not applicable here; hardening / audit-trace stay opt-in.
             # --yes: run ob-backend-setup non-interactively (see bastion note).
-            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--yes")
+            local _setup_opts=("-p" "${PORTAL_URL}" "-g" "${SERVER_GROUP}" "--node-role" "${TARGET_ROLE}" "--yes")
             [ -n "${CLIENT_ID}" ] && _setup_opts+=("-c" "${CLIENT_ID}")
             # "Accept only this bastion": forward the embedded allowlist so the
             # backend's AuthorizedPrincipalsCommand rejects certs whose key-id

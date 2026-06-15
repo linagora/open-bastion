@@ -10,7 +10,7 @@
 
 set -e
 
-VERSION="0.2.3"
+VERSION="0.3.0"
 PROG_NAME=$(basename "$0")
 
 # Default values
@@ -88,6 +88,10 @@ load_config() {
     SERVER_GROUP=$(read_config "server_group" "$CONFIG_FILE")
     [ -z "$SERVER_GROUP" ] && SERVER_GROUP="default"
 
+    # Node role reported to the SSO: bastion | standalone | backend. Written by
+    # the setup scripts (ob-bastion-setup / ob-backend-setup); empty if unknown.
+    NODE_ROLE=$(read_config "node_role" "$CONFIG_FILE")
+
     local token_file_config
     token_file_config=$(read_config "server_token_file" "$CONFIG_FILE")
     [ -z "$token_file_config" ] && token_file_config=$(read_config "token_file" "$CONFIG_FILE")
@@ -95,6 +99,23 @@ load_config() {
 
     VERIFY_SSL=$(read_config "verify_ssl" "$CONFIG_FILE")
     [ -z "$VERIFY_SSL" ] && VERIFY_SSL="true"
+
+    # Whether to report the list of currently connected users to the SSO in the
+    # heartbeat ("who is connected on this machine"). Active sessions are
+    # privacy-sensitive, so this can be disabled. Default: true.
+    REPORT_SESSIONS=$(read_config "report_sessions" "$CONFIG_FILE")
+    [ -z "$REPORT_SESSIONS" ] && REPORT_SESSIONS="true"
+
+    # Upper bound on the number of sessions sent, to avoid a huge payload on a
+    # very busy machine. Must be a positive integer; fall back to 200 on an
+    # empty or invalid value (it is used in numeric `[ -ge ]` tests under
+    # `set -e`, where a non-integer would abort the heartbeat).
+    MAX_SESSIONS=$(read_config "max_reported_sessions" "$CONFIG_FILE")
+    if ! [[ "$MAX_SESSIONS" =~ ^[1-9][0-9]*$ ]]; then
+        [ -n "$MAX_SESSIONS" ] &&
+            log_warn "Invalid max_reported_sessions '$MAX_SESSIONS', using default 200"
+        MAX_SESSIONS=200
+    fi
 
     if [ -z "$PORTAL_URL" ]; then
         log_error "portal_url not configured"
@@ -139,6 +160,96 @@ get_stats() {
         cat "$STATS_FILE"
     else
         echo '{}'
+    fi
+}
+
+# Build a JSON array describing who is currently connected on this machine.
+# Each entry: { user, from (remote host), tty, since (login epoch or null) }.
+# Prefers systemd-logind (loginctl), falls back to who(1)/utmp when logind is
+# unavailable. Returns '[]' when reporting is disabled or nothing is found.
+get_sessions() {
+    case "$REPORT_SESSIONS" in
+        true | 1 | yes | on) ;;
+        *)
+            echo '[]'
+            return 0
+            ;;
+    esac
+
+    local objs="" count=0 truncated=0
+
+    # Use loginctl only if it is present AND actually answers: on hosts where
+    # loginctl exists but systemd-logind/dbus is unavailable (containers,
+    # chroots) list-sessions fails, and we must fall back to who(1) rather than
+    # silently report an empty list.
+    local ids=""
+    if command -v loginctl >/dev/null 2>&1 &&
+        ids=$(loginctl list-sessions --no-legend 2>/dev/null); then
+        ids=$(printf '%s\n' "$ids" | awk '{print $1}')
+        local id props
+        for id in $ids; do
+            [ -n "$id" ] || continue
+            props=$(loginctl show-session "$id" \
+                -p Name -p RemoteHost -p TTY -p Timestamp -p Class 2>/dev/null) || props=""
+            local name="" remote="" tty="" class="" ts="" since="" key val
+            while IFS='=' read -r key val; do
+                case "$key" in
+                    Name) name="$val" ;;
+                    RemoteHost) remote="$val" ;;
+                    TTY) tty="$val" ;;
+                    Class) class="$val" ;;
+                    Timestamp) ts="$val" ;;
+                esac
+            done <<EOF
+$props
+EOF
+            # Only interactive user sessions (skip greeter/manager/etc.)
+            [ "$class" = "user" ] || continue
+            [ -n "$name" ] || continue
+            if [ "$count" -ge "$MAX_SESSIONS" ]; then
+                truncated=1
+                break
+            fi
+            [ -n "$ts" ] && since=$(date -d "$ts" +%s 2>/dev/null || echo "")
+            objs+=$(jq -cn \
+                --arg user "$name" \
+                --arg from "$remote" \
+                --arg tty "$tty" \
+                --argjson since "${since:-null}" \
+                '{user: $user, from: $from, tty: $tty, since: $since}')
+            objs+=$'\n'
+            count=$((count + 1))
+        done
+    else
+        # Fallback: who reads utmp. Columns are NAME LINE DATE TIME [(HOST)];
+        # the optional source host is the parenthesised trailing comment.
+        local user tty d t host since
+        while read -r user tty d t host; do
+            [ -n "$user" ] || continue
+            if [ "$count" -ge "$MAX_SESSIONS" ]; then
+                truncated=1
+                break
+            fi
+            host=$(echo "$host" | tr -d '()')
+            since=""
+            [ -n "$d" ] && [ -n "$t" ] && since=$(date -d "$d $t" +%s 2>/dev/null || echo "")
+            objs+=$(jq -cn \
+                --arg user "$user" \
+                --arg from "$host" \
+                --arg tty "$tty" \
+                --argjson since "${since:-null}" \
+                '{user: $user, from: $from, tty: $tty, since: $since}')
+            objs+=$'\n'
+            count=$((count + 1))
+        done < <(who 2>/dev/null || true)
+    fi
+
+    [ "$truncated" = "1" ] && log_warn "Reported session list truncated to $MAX_SESSIONS entries"
+
+    if [ -z "$objs" ]; then
+        echo '[]'
+    else
+        printf '%s' "$objs" | jq -s '.'
     fi
 }
 
@@ -188,6 +299,10 @@ send_heartbeat() {
     local stats
     stats=$(get_stats)
 
+    # List of users currently connected on this machine (may be '[]')
+    local sessions
+    sessions=$(get_sessions)
+
     # Build JSON payload using jq for safety
     local payload
     payload=$(jq -n \
@@ -195,15 +310,19 @@ send_heartbeat() {
         --arg hostname "$hostname" \
         --arg server_group "$SERVER_GROUP" \
         --arg version "$VERSION" \
+        --arg node_role "$NODE_ROLE" \
         --argjson uptime "$uptime_seconds" \
         --argjson stats "$stats" \
+        --argjson sessions "$sessions" \
         '{
             refresh_token: $refresh_token,
             hostname: $hostname,
             server_group: $server_group,
             version: $version,
+            node_role: $node_role,
             uptime: $uptime,
-            stats: $stats
+            stats: $stats,
+            sessions: $sessions
         }')
 
     build_curl_opts
