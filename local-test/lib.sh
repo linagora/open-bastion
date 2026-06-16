@@ -117,9 +117,15 @@ build_deb(){
 # ── 2. SSO ───────────────────────────────────────────────────────────────────
 ensure_sso(){
     phase "Test SSO"
+    # An explicit -f disables Compose's automatic override merge, so opt the
+    # gitignored docker-compose.override.yml back in when present (used to mount
+    # unreleased local plugin working copies — see that file's header).
+    local compose_files=(-f "$SSO_DIR/docker-compose.yml")
+    [ -f "$SSO_DIR/docker-compose.override.yml" ] && \
+        compose_files+=(-f "$SSO_DIR/docker-compose.override.yml")
     if ! docker ps --format '{{.Names}}' | grep -qx ob-sso; then
         info "starting + configuring ob-sso…"
-        docker compose -f "$SSO_DIR/docker-compose.yml" up -d >/dev/null 2>&1 || die "docker compose up failed"
+        docker compose "${compose_files[@]}" up -d >/dev/null 2>&1 || die "docker compose up failed"
         sleep 5
         bash "$SSO_DIR/configure.sh" >"$WORK/sso.log" 2>&1 || die "configure.sh failed — see $WORK/sso.log"
     fi
