@@ -7,12 +7,13 @@ Repo: `open-bastion` only (no LLNG change).
 
 ## Threat model (agreed)
 
-- **In scope:** an *unprivileged* user (no `sudo`/root) must not be able to
+- **In scope:** an _unprivileged_ user (no `sudo`/root) must not be able to
   delete, rename, truncate or otherwise alter the recording of their own
   session.
 - **Out of scope:** root / a sudoer can always tamper. We do not try to defend
-  against root (impossible without append-only media or remote shipping, which
-  is a separate, later concern).
+  against root — that would require an LSM (AppArmor/SELinux, distro-specific and
+  fail-open), append-only media, or remote log shipping; all are separate, later
+  concerns. **Decision: accepted** — root is trusted.
 
 ## Why the current mechanism cannot satisfy this
 
@@ -26,9 +27,9 @@ create the directory, then `setregid()`s back to the user). So:
 
 No permission-bit scheme fixes this: as long as the writing process shares the
 user's uid, the bytes are born in the user's privilege domain. The owner can
-always `chmod` the dir back, and `unlink` needs only write+exec on the *parent*
+always `chmod` the dir back, and `unlink` needs only write+exec on the _parent_
 dir regardless of file ownership. On Linux the directory `setuid` bit is ignored
-and `setgid` transfers only the *group*, never the owner. `chattr +a` on the dir
+and `setgid` transfers only the _group_, never the owner. `chattr +a` on the dir
 stops deletion but not truncation, and arming `+a`/`+i` on each file needs root
 anyway (race + breaks `script`'s `O_TRUNC`). Conclusion: the data must cross into
 a higher-privilege domain **at write time**.
@@ -60,7 +61,7 @@ user cannot touch.
 
 - The recording file is created and **owned by root**, group `ob-sessions`, mode
   `0640`, inside `/var/lib/open-bastion/sessions/<user>/` (`root:ob-sessions
-  0750`) under a parent that is also `root:ob-sessions 0750` (see §6 for the
+0750`) under a parent that is also `root:ob-sessions 0750` (see §6 for the
   canonical layout and the stricter `root:root 0700/0600` variant). The recorded
   user is **not** a member of `ob-sessions`, so its uid has **no DAC right** to
   list, read, unlink, rename or truncate any recording — its own included. The
@@ -75,7 +76,7 @@ user cannot touch.
 ## §1. The `SO_PEERCRED` authority (key security property)
 
 The socket is world-connectable (`0666`) but the sink does **not** trust
-anything the client says about *who* it is. It calls `getsockopt(SO_PEERCRED)`
+anything the client says about _who_ it is. It calls `getsockopt(SO_PEERCRED)`
 to obtain the connecting process's kernel-verified `uid`, resolves it to a
 username with `getpwuid`, and derives the storage path **from that** — exactly
 as `ob-cert-daemon` derives the cert user. Therefore a user cannot write into
@@ -91,8 +92,14 @@ A connection carries one session. It is **header line + opaque stream**:
 
 1. **Header**: a single `\n`-terminated JSON object (cap **8 KiB**), e.g.
    ```json
-   {"v":1,"client_ip":"203.0.113.5","ssh_tty":"/dev/pts/3",
-    "format":"script","original_command":"...", "start":"2026-06-16T17:43:42Z"}
+   {
+     "v": 1,
+     "client_ip": "203.0.113.5",
+     "ssh_tty": "/dev/pts/3",
+     "format": "script",
+     "original_command": "...",
+     "start": "2026-06-16T17:43:42Z"
+   }
    ```
    The sink uses these only as **metadata** (never for the path or uid). Fields
    are length-checked and the JSON is parsed defensively; a malformed/oversized
@@ -110,7 +117,7 @@ unbounded (a DoS, explicitly logged).
 
 ## §3. How `script(1)` writes to the socket — the `/dev/fd` trick
 
-`script` writes its typescript to a *file path* argument, not a stream. We give
+`script` writes its typescript to a _file path_ argument, not a stream. We give
 it the socket connection as a file descriptor.
 
 > **A POSIX shell cannot open an AF_UNIX socket.** `exec 3<>/path/to.sock` opens
@@ -154,18 +161,18 @@ raw stdio.
 
 ## §5. Metadata & exit status
 
-The metadata *file* is owned by the **sink** (root), so a user cannot edit it
+The metadata _file_ is owned by the **sink** (root), so a user cannot edit it
 after the fact. But we must be precise about what is sink-authoritative versus
 client-reported:
 
-- **Sink-authoritative** (the sink observes these directly): the *existence* of
-  the recording, the recorded *stream bytes*, the *user* (`SO_PEERCRED`), the
-  *start* (header receipt) and the *end* (stream EOF / connection close).
+- **Sink-authoritative** (the sink observes these directly): the _existence_ of
+  the recording, the recorded _stream bytes_, the _user_ (`SO_PEERCRED`), the
+  _start_ (header receipt) and the _end_ (stream EOF / connection close).
 - **Client-reported** (inherently trusted only as much as the client): the
   child's **exit status**. It is only known on the user side after `script`
   returns — i.e. after the stream has already been sent — and any unprivileged
-  user can connect to the status socket and report an arbitrary status for *their
-  own* `session_id`. So the exit status is an *advisory* field, **not** a
+  user can connect to the status socket and report an arbitrary status for _their
+  own_ `session_id`. So the exit status is an _advisory_ field, **not** a
   security guarantee. (The user can also just exit their shell with any code they
   like, so this leaks no authority they don't already have.)
 
@@ -176,7 +183,7 @@ JSON line `{"session_id":"…","end":"…","status":"completed"|"error:N"}`. The
 status sink re-verifies the peer uid via `SO_PEERCRED` and updates **only** a
 `<id>.json` it previously created for that **same uid** (path derived from uid +
 session-id, never from the client) — so a user can at worst rewrite the advisory
-status of their *own* session, never another's, and never the stream. The data
+status of their _own_ session, never another's, and never the stream. The data
 stream stays pure.
 
 Lifecycle:
@@ -260,31 +267,34 @@ the directory across `/run` wipes (mirrors the cert socket).
 
 ## §8. Components & build
 
-| Component | Priv | Role |
-|---|---|---|
-| `ob-session-recorder` (existing, modified) | user | produce the stream, open the socket, send header, stream via `script`, report status |
-| `ob-record-connect` (new, optional) | user | connect socket + write header, `exec script … /dev/fd/3` |
-| `ob-record-sink` (new) | root (socket-activated) | `SO_PEERCRED` → user, write root-owned files + metadata, enforce caps/timeouts |
-| `ob-record.socket` / `ob-record@.service` (new) | — | socket activation |
+| Component                                       | Priv                    | Role                                                                                 |
+| ----------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| `ob-session-recorder` (existing, modified)      | user                    | produce the stream, open the socket, send header, stream via `script`, report status |
+| `ob-record-connect` (new, optional)             | user                    | connect socket + write header, `exec script … /dev/fd/3`                             |
+| `ob-record-sink` (new)                          | root (socket-activated) | `SO_PEERCRED` → user, write root-owned files + metadata, enforce caps/timeouts       |
+| `ob-record.socket` / `ob-record@.service` (new) | —                       | socket activation                                                                    |
 
 Shared validators (`ob_valid_username`, `ob_read_line`, size caps) reuse
 `ob_cert_proto.c`/`.h`. CMake/debian/rpm install the new binary + units + man
 pages exactly like the `ob-cert-*` set (template already merged in #145).
 
-## §9. Fail-open vs fail-closed (config knob)
+## §9. Failure mode: recording is mandatory when enabled (no fail-open)
 
-`session_recording_required` (default **true** on Mode E, **false** otherwise):
+There is **no fail-open knob**. Recording has exactly two states, set by config:
 
-- **required=true (fail-closed):** if the recorder cannot connect to the sink or
-  the header is rejected, the session is **refused** (non-zero exit before the
-  shell starts). No unrecorded shell on a host that promises recording.
-- **required=false (fail-open):** log loudly and fall back to the *legacy*
-  user-owned local file (today's behavior) so a sink outage doesn't lock anyone
-  out. This is strictly weaker (the fallback file is user-deletable) and is for
-  non-audit deployments only.
+- **Disabled** (`--disable-session-recorder`): no `ForceCommand` recorder at all
+  — sessions simply are not recorded. This is an explicit operator choice and is
+  unchanged from today.
+- **Enabled** (the default): recording is **mandatory and fail-closed**. If the
+  recorder cannot connect to the sink, or the header is rejected, the session is
+  **refused** (non-zero exit before the shell starts). There is _no_ fallback to
+  a user-owned local file — that would re-introduce exactly the deletable
+  artifact (#151) this design removes.
 
-Being able to choose **fail-closed** is the main reason the sink is preferred for
-an audit control: the integrity guarantee never silently disappears.
+In other words: _if it is configured, it is enforced._ This is the core reason
+the sink is a sound audit control — the integrity guarantee can never silently
+degrade to "recorded but user-deletable". The legacy user-owned-file path is
+**removed**, not kept as a fallback (see §12, migration).
 
 ## §10. Security considerations
 
@@ -294,24 +304,24 @@ an audit control: the integrity guarantee never silently disappears.
   hardening as the wrapper's `ensure_user_session_dir`.
 - **Resource bounds:** header ≤ 8 KiB; per-session byte cap; idle + total
   timeouts; the `Accept=yes` model gives one process per connection so a stuck
-  session cannot block others. (DoS is explicitly *out* of the security-review
+  session cannot block others. (DoS is explicitly _out_ of the security-review
   exclusions, but bounding it is good hygiene.)
 - **No secrets in the stream:** the recording may capture whatever the user
   typed; files are `0640 root:ob-sessions` and never world-readable.
 - **Concurrency:** session-id is a UUID; `O_EXCL` create avoids collisions.
 - **Migration symlink hijack (one-shot):** legacy per-user dirs are currently
-  *user-writable*, so a user can pre-plant a symlink (`…/sessions/<me>` →
+  _user-writable_, so a user can pre-plant a symlink (`…/sessions/<me>` →
   `/etc`, say) before the migration step runs as root. A naïve `chown -R` /
-  `install` would then have root write or chown *through* the symlink. The
+  `install` would then have root write or chown _through_ the symlink. The
   migration (§12) must apply the same `O_NOFOLLOW` discipline: refuse any
   per-user entry that is a symlink or not a directory, and recreate the tree
   root-owned rather than chown-in-place. After migration the parent is `0750`
   `o-rwx`, so the planting vector is closed for steady state.
-- **Recordings are forgeable by their *own* purported owner (accepted limit):**
+- **Recordings are forgeable by their _own_ purported owner (accepted limit):**
   because the socket is world-connectable and authenticated only by uid, a user
   can connect directly and stream arbitrary bytes that the sink persists as a
-  root-owned recording *under their own name*, with no real SSH session. They
-  cannot forge *another* user's recording (uid authority, §1) and they can
+  root-owned recording _under their own name_, with no real SSH session. They
+  cannot forge _another_ user's recording (uid authority, §1) and they can
   already emit arbitrary terminal content in a genuine session, so impact is
   bounded — but "a recording exists / shows X" is **not** proof a real session
   occurred. Document this as a known non-repudiation limit; if stronger
@@ -332,20 +342,27 @@ privileged component.
 
 ## §12. Migration
 
-1. Ship `ob-record-sink` + units + recorder changes behind
-   `session_recording_required=false` (fail-open) so existing hosts keep working.
-2. `ob-bastion-setup`/`ob-backend-setup`: `systemctl enable --now
-   ob-record.socket`; create the `ob-sessions` group and the `root:ob-sessions
-   0750` parent; migrate any legacy user-owned dirs to root ownership **safely**
-   — reject symlinked/non-dir entries (`O_NOFOLLOW`) and recreate root-owned
-   rather than chown-in-place (see §10, migration symlink hijack).
-3. Flip Mode E to `required=true`.
-4. Remove the user-owned-dir code path once all hosts are migrated.
+There is no fail-open transition state. The switchover is **socket-first**, so
+recording is never silently weakened and no host is locked out by ordering:
+
+1. `ob-bastion-setup`/`ob-backend-setup`: create the `ob-sessions` group and the
+   `root:ob-sessions 0750` parent, then `systemctl enable --now ob-record.socket`
+   — confirm the sink is reachable **before** touching the recorder.
+2. Migrate any legacy user-owned dirs to root ownership **safely**: reject
+   symlinked/non-dir entries (`O_NOFOLLOW`) and recreate root-owned rather than
+   chown-in-place (see §10, migration symlink hijack).
+3. Switch `ob-session-recorder` to stream to the (now-confirmed) sink. From this
+   point recording is mandatory/fail-closed per §9.
+4. Remove the legacy user-owned-file code path entirely (no fallback).
 
 ## Open questions
 
-- §5 status transport: second control connection vs framed protocol — pick one
-  in review.
+- §5 exit-status transport (the value is *advisory* — client-reported — so the
+  question is how little machinery to spend on it): (a) drop the dedicated status
+  socket and have the sink record only the lifecycle states it observes
+  (`active`→`completed`/`aborted`/`truncated`); (b) carry the advisory child exit
+  code as a small trailer on the same data connection; (c) the dedicated
+  `rec-status.sock` (most machinery). Leaning (a).
 - `ob-record-connect` helper vs shell `/dev/fd` — measure reliability.
 - utmp line naming for `who` (the script pty vs the sshd `SSH_TTY`).
 - Keep timing data (separate `-t` stream / asciinema) in v1 or v2?
