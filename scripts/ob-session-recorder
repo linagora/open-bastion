@@ -133,8 +133,15 @@ build_header() {
             --arg start "$SESSION_START" \
             '{v:1,session_id:$sid,format:$fmt,client_ip:$ip,ssh_tty:$tty,original_command:$cmd,start:$start}'
     else
-        # Minimal fallback (jq is a package dependency; this is best-effort).
-        local c="${ORIGINAL_COMMAND//\\/\\\\}"; c="${c//\"/\\\"}"
+        # Minimal fallback (jq is a package dependency; this is best-effort). We
+        # MUST keep the header on one line, so JSON-escape backslash, quote and
+        # the control chars that would otherwise break it (newline/CR/tab) in the
+        # only field that can carry them, original_command.
+        local c="${ORIGINAL_COMMAND//\\/\\\\}"
+        c="${c//\"/\\\"}"
+        c="${c//$'\n'/\\n}"
+        c="${c//$'\r'/\\r}"
+        c="${c//$'\t'/\\t}"
         printf '{"v":1,"session_id":"%s","format":"%s","client_ip":"%s","ssh_tty":"%s","original_command":"%s","start":"%s"}' \
             "$SESSION_ID" "$FORMAT" "$CLIENT_IP" "$TTY_NAME" "$c" "$SESSION_START"
     fi

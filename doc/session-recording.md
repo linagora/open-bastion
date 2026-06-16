@@ -74,7 +74,10 @@ Create `/etc/open-bastion/session-recorder.conf`:
 format = script
 
 # Maximum session duration in seconds
-# Sessions exceeding this limit are terminated by the sink (status: truncated)
+# Enforced by ob-session-recorder itself (it terminates the session at the
+# limit). The sink then records the end like any torn-down session (status:
+# aborted). The sink's separate "truncated" status marks recordings that hit
+# the byte cap, not the time limit.
 # Set to 0 to disable (not recommended)
 max_duration = 86400
 ```

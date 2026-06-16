@@ -32,11 +32,16 @@ writes the recording and its metadata under
 \(em directory
 .BR "root:ob-sessions 0750" ,
 files
-.B 0640
-\(em created with
+.BR 0640 .
+The recording file is created with
 .B O_NOFOLLOW
-/
-.BR O_EXCL .
+and
+.B O_EXCL
+(no symlink, no clobber); the JSON metadata is created with
+.B O_NOFOLLOW
+and rewritten
+.RB ( O_TRUNC )
+when the session is finalized.
 .PP
 The sink records only what it observes: status
 .B active

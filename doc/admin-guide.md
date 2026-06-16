@@ -208,7 +208,9 @@ cat > /etc/open-bastion/session-recorder.conf << 'EOF'
 format = script
 
 # Max session duration (8 hours)
-# The sink enforces this and marks the session status "truncated" if exceeded.
+# Enforced by ob-session-recorder (it terminates the session at the limit); the
+# sink records the end as a torn-down session. The sink's "truncated" status is
+# for recordings that hit the byte cap, not the time limit.
 max_duration = 28800
 EOF
 

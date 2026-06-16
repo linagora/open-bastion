@@ -133,6 +133,34 @@ static const char *sessions_base(void)
     return (e && *e) ? e : SESSIONS_DIR;
 }
 
+/* Enforce root:gid ownership and mode on an open fd. In production the sink runs
+ * as root and this is a SECURITY requirement: if a legacy user-owned dir or file
+ * kept the user's ownership/write, the user could unlink/truncate root files —
+ * so a failure here must FAIL CLOSED (refuse the session). When NOT running as
+ * root (dev/test via OB_SESSIONS_DIR) the privilege model does not apply and the
+ * call cannot succeed anyway, so we only warn. Returns 0 ok / -1 fatal. */
+static int enforce_owner_mode(int fd, gid_t gid, mode_t mode, const char *what)
+{
+    int is_root = (geteuid() == 0);
+    if (fchown(fd, 0, gid) != 0) {
+        if (is_root) {
+            fail(what);
+            fail("cannot enforce root ownership; refusing (fail-closed)");
+            return -1;
+        }
+        fail("fchown failed, not root (dev/test) — continuing");
+    }
+    if (fchmod(fd, mode) != 0) {
+        if (is_root) {
+            fail(what);
+            fail("cannot enforce mode; refusing (fail-closed)");
+            return -1;
+        }
+        fail("fchmod failed, not root (dev/test) — continuing");
+    }
+    return 0;
+}
+
 /* Ensure <base>/<user> exists, root:gid 0750, no symlinks. Returns a dir
  * fd (O_DIRECTORY|O_NOFOLLOW) on success, -1 on error. */
 static int ensure_user_dir(const char *user, gid_t gid)
@@ -156,11 +184,12 @@ static int ensure_user_dir(const char *user, gid_t gid)
             return -1;
         }
     }
-    /* Enforce ownership/mode on the fd (no TOCTOU, no symlink). */
-    if (fchown(fd, 0, gid) != 0)
-        fail("fchown(session dir) failed (continuing)");
-    if (fchmod(fd, 0750) != 0)
-        fail("fchmod(session dir) failed (continuing)");
+    /* Enforce ownership/mode on the fd (no TOCTOU, no symlink). Fail closed as
+     * root: a user-owned/writable session dir defeats the whole design. */
+    if (enforce_owner_mode(fd, gid, 0750, "session dir") != 0) {
+        close(fd);
+        return -1;
+    }
     return fd;
 }
 
@@ -313,10 +342,12 @@ int main(void)
     char start_time[32], end_time[32];
     iso_utc(start_time, sizeof(start_time));
 
-    /* Write the initial metadata (status active) so a killed sink still leaves a
-     * record of the session having started. */
+    /* Write the initial metadata (status "active") so a killed sink still leaves
+     * a record of the session having started. The lifecycle status is always
+     * active → completed/truncated/aborted; the transfer vs script distinction
+     * is carried by the "format" field, not the status. */
     write_metadata(dirfd, meta_name, session_id, user, client_ip, tty,
-                   start_time, NULL, is_transfer ? "transfer" : "active",
+                   start_time, NULL, "active",
                    command, format, rec_name, gid);
 
     /* Create the recording file root-owned (root:ob-sessions 0640), no symlink,
@@ -326,10 +357,12 @@ int main(void)
         fail("openat(recording) failed");
         goto reject_dir;
     }
-    if (fchown(recfd, 0, gid) != 0)
-        fail("fchown(recording) failed (continuing)");
-    if (fchmod(recfd, 0640) != 0)
-        fail("fchmod(recording) failed (continuing)");
+    /* Fail closed as root if we cannot make the file root-owned: otherwise the
+     * recorded user could later alter/delete it. */
+    if (enforce_owner_mode(recfd, gid, 0640, "recording file") != 0) {
+        close(recfd);
+        goto reject_dir;
+    }
 
     const char *status = "completed";
     if (!is_transfer) {
