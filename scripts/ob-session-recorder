@@ -267,10 +267,19 @@ record_transfer() {
 record_script() {
     local shell="${SHELL:-/bin/bash}"
 
+    # -e (--return) makes script(1) exit with the CHILD's status. Without it
+    # script always exits 0, so any command run non-interactively through the
+    # bastion (ob-ssh / ob-scp hops, scripted ssh, CI jobs) reports success even
+    # when it failed, and the session metadata status is always "completed".
+    # util-linux >= 2.31 (Debian 11+, RHEL/Rocky 8+) supports -e; on anything
+    # older we fall back to the legacy behaviour rather than erroring out.
+    local ret_opt=""
+    script --help 2>/dev/null | grep -q -- '--return' && ret_opt="-e"
+
     if [ -n "$ORIGINAL_COMMAND" ]; then
-        script -q -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
+        script -q $ret_opt -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
     else
-        script -q -c "$shell" "$SESSION_FILE"
+        script -q $ret_opt -c "$shell" "$SESSION_FILE"
     fi
 }
 
