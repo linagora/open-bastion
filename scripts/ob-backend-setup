@@ -593,8 +593,16 @@ session    required     pam_unix.so
             echo "%open-bastion-sudo ALL=(ALL) ALL"
         } > "$tmp_sudoers"
         if visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
-            install -m 0440 -o root -g root "$tmp_sudoers" "$sudoers_file"
-            info "Created $sudoers_file"
+            # Ensure the drop-in directory exists (created 0750 root:root only
+            # when missing, so we never relax an existing one), then install and
+            # CHECK the result — otherwise a failed install would leave sudo
+            # broken while we log success.
+            [ -d /etc/sudoers.d ] || install -d -m 0750 -o root -g root /etc/sudoers.d
+            if install -m 0440 -o root -g root "$tmp_sudoers" "$sudoers_file"; then
+                info "Created $sudoers_file"
+            else
+                warn "Failed to install $sudoers_file; sudo may not work for SSO users"
+            fi
         else
             warn "Generated sudoers rule failed visudo validation; not installing"
         fi
