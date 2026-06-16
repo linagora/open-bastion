@@ -1,0 +1,67 @@
+.TH OB-RECORD-CONNECT 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-record-connect \- unprivileged connector for the session-recording sink
+.SH SYNOPSIS
+.B ob-record-connect
+.I HEADER_JSON
+.I STREAM_PATH
+.SH DESCRIPTION
+.B ob-record-connect
+is the unprivileged half of the tamper-evident session-recording flow. It is
+invoked by
+.BR ob-session-recorder (8)
+(running as the logged-in user); you do not normally run it by hand.
+.PP
+It connects to the local Unix socket served by
+.BR ob-record-sink (8)
+(default \fI/run/open-bastion/rec.sock\fR). If it cannot connect it exits
+non-zero \fBbefore\fR reading any stream, so the recorder can fail closed (refuse
+the session) before a shell starts. On success it writes the one-line JSON
+metadata
+.I HEADER_JSON
+to the socket, then opens
+.I STREAM_PATH
+and copies it to the socket until EOF, half-closing so the sink finalizes the
+recording.
+.PP
+For a PTY session,
+.I STREAM_PATH
+is a FIFO that
+.BR script (1)
+writes the typescript to; for a metadata-only transfer session it is
+\fI/dev/null\fR (immediate EOF). A FIFO is used rather than handing
+.BR script
+the socket directly because
+.BR script
+re-\fBopen\fR()s its typescript path and a Unix-domain socket cannot be opened
+via a path or \fI/dev/fd\fR (open() returns \fBENXIO\fR); a real FIFO inode opens
+fine. This helper carries no privilege and holds no secret: the sink derives the
+recorded user from the connection's
+.B SO_PEERCRED
+(kernel-verified), so the header cannot make the sink write under another
+user's name.
+.SH ENVIRONMENT
+.TP
+.B OB_RECORD_SOCKET
+Override the socket path (default \fI/run/open-bastion/rec.sock\fR).
+.SH EXIT STATUS
+.TP
+.B 0
+The stream was forwarded and the sink half-closed.
+.TP
+.B 1
+Could not reach the sink, or an I/O error occurred. Recording is mandatory, so
+the caller fails closed.
+.TP
+.B 2
+Usage error.
+.SH FILES
+.TP
+.I /run/open-bastion/rec.sock
+The session-recording socket
+.RB ( ob-record.socket ).
+.SH SEE ALSO
+.BR ob-record-sink (8),
+.BR ob-session-recorder (8)
+.SH AUTHOR
+Linagora

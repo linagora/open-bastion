@@ -980,7 +980,7 @@ L'escalade sudo est bloquée par conception :
 
 **Séparation des privilèges pour l'enregistrement de session :**
 
-L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrapper`) appartenant au groupe `ob-sessions`. Le répertoire `/var/lib/open-bastion/sessions` a les permissions `1770` avec ce groupe. Cette séparation garantit que les utilisateurs ne peuvent **ni lire ni supprimer les enregistrements des autres utilisateurs** (isolation latérale). En revanche, l'utilisateur reste propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres enregistrements — voir R-S18 ci-dessous pour le détail et les protections complémentaires (syslog `auth.info`, watch auditd).
+L'enregistrement de session est streamé vers le puits root `ob-record-sink` (socket-activé, utilisateur dérivé de `SO_PEERCRED`). Les fichiers sont **root-owned** (`root:ob-sessions 0640`) dans une arborescence `root:ob-sessions 0750` ; l'utilisateur enregistré n'étant pas membre de `ob-sessions`, il **ne peut ni lire, ni lister, ni supprimer, ni tronquer** aucun enregistrement, y compris les siens. L'enregistreur vivant sur le **bastion**, être root sur un backend n'y échappe pas. Voir R-S18 ci-dessous.
 
 |                 |                 Score résiduel                  |
 | --------------- | :---------------------------------------------: |
@@ -1073,40 +1073,46 @@ L'enregistrement de session utilise un wrapper setgid (`ob-session-recorder-wrap
 | **Probabilité** |   2   |
 | **Impact**      |   3   |
 
-**Description :** Un utilisateur malveillant ou un attaquant ayant compromis une session SSH efface ou modifie les fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler ses actions. Le wrapper setgid crée le sous-répertoire utilisateur en mode `2770 user:ob-sessions` : **l'utilisateur en est propriétaire** et dispose donc des permissions `wx` sur ce sous-répertoire, ce qui lui permet de faire `unlink` de ses propres fichiers de session via `rm`. Le sticky bit du parent `/var/lib/open-bastion/sessions` (mode `1770 root:ob-sessions`) protège uniquement le sous-répertoire utilisateur lui-même contre la suppression, **pas les fichiers à l'intérieur**.
+**Description :** Un utilisateur malveillant cherche à effacer ou modifier les
+fichiers d'enregistrement de session (typescript, métadonnées) pour dissimuler
+ses actions. Dans l'ancien modèle, le recorder tournait sous l'uid de
+l'utilisateur et écrivait dans un sous-répertoire `2770 user:ob-sessions` dont
+**l'utilisateur était propriétaire** : il pouvait `unlink`/tronquer ses propres
+fichiers via `rm` / `: > fichier`.
 
-**Conditions de la menace :**
+**Cadre — l'enregistreur est sur le bastion :** l'enregistrement se fait au
+**bastion**, point de passage obligé. Une session vers un backend transite par
+le pty du bastion ; **être root sur un backend ne permet donc ni d'échapper à
+l'enregistrement ni d'atteindre les fichiers** (qui sont sur le bastion,
+root-owned, hors d'atteinte d'un root de backend). Seul root **sur le bastion
+lui-même** (hôte d'audit, de confiance) pourrait altérer les traces.
 
-1. L'utilisateur a une session SSH active (authentifié par certificat + autorisé par PAM)
-2. Le session recorder (`ForceCommand`) crée les fichiers dans un sous-répertoire dont l'utilisateur est propriétaire (`2770 user:ob-sessions`)
-3. L'utilisateur a accès en écriture au sous-répertoire et est propriétaire des fichiers de session
+**Remédiation en place (PR #157, `ob-record-sink`) :** le recording est streamé
+vers un **puits root activé par socket** ; le recorder n'écrit plus aucun
+fichier. Voir [doc/design/tamper-evident-session-recording.md](../design/tamper-evident-session-recording.md).
 
-**Vecteurs :**
+1. **Puits root `ob-record-sink`** (socket-activé). Le recorder (uid utilisateur)
+   streame le typescript via `ob-record-connect` ; le sink (root) écrit les
+   fichiers. L'utilisateur enregistré est dérivé de `SO_PEERCRED` (vérifié par
+   le noyau, jamais de l'en-tête).
+2. **Fichiers root-owned** : `root:ob-sessions 0640` dans une arborescence
+   `root:ob-sessions 0750`. L'utilisateur enregistré n'étant pas membre de
+   `ob-sessions`, il n'a **aucun** droit (lister/lire/`unlink`/tronquer) — c'est
+   une frontière d'uid noyau (DAC).
+3. **Fail-closed** : si le puits est indisponible, la session est refusée (pas
+   de repli sur un fichier user-owned).
+4. **Wrapper setgid supprimé** : il créait justement le sous-répertoire
+   user-owned à l'origine du risque.
+5. **Syslog `auth.info`** (start/end, root-owned) et **watch auditd**
+   `-w /var/lib/open-bastion/sessions/ -p wa` (PR2 #113) restent en défense
+   complémentaire.
 
-- Suppression directe des fichiers de session (`rm`) depuis le shell
-- Modification du contenu (troncature, réécriture) pour masquer des commandes
-- Suppression des métadonnées JSON pour effacer les traces d'activité
+Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md).
 
-**Conséquence :** Perte du replay visuel de la session. La timeline (start/end, identifiant utilisateur) reste cependant traçable via syslog `auth.info`, et l'événement d'effacement lui-même peut être tracé si la trace auditd primaire est activée.
-
-**Remédiations en place :**
-
-1. **Wrapper setgid `ob-session-recorder-wrapper`** : empêche l'utilisateur d'**accéder aux recordings d'autres utilisateurs**. C'est la propriété principale réellement obtenue par le mécanisme setgid : isolation latérale entre utilisateurs, et non immutabilité des fichiers de l'utilisateur courant. Cette propriété reste valable et utile.
-2. **Sanitisation de l'environnement** (LD_PRELOAD, BASH_ENV, PATH durci) avant exec du script de session : empêche les vecteurs d'évasion via préchargement de bibliothèque.
-3. **Syslog `auth.info`** : le session recorder émet à l'ouverture une ligne `Session <UUID> started for user <user> from <ip>` et à la clôture `Session <UUID> ended for user <user> (status: <status>)` (cf. `scripts/ob-session-recorder:200,383`). Ce journal est root-owned et indépendant des fichiers de recording — il n'est pas accessible en écriture à l'utilisateur. Même si l'utilisateur supprime ses fichiers de session, ces deux lignes conservent la trace de l'ouverture et de la fermeture de la session, suffisante pour l'imputation temporelle.
-4. **Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa`** (PR2 #113, opt-in via `--enable-audit-trace`) : trace tout `unlink`, `truncate` ou `rename` sur les fichiers de session, **même si l'effacement réussit**. L'événement d'effacement devient lui-même une preuve d'audit.
-
-**Pistes non retenues :**
-
-- **Démon collecteur privilégié** (fichiers root-owned via fd-passing sur socket Unix) : architecture la plus robuste mais introduit un nouveau service permanent et un canal IPC privilégié. Discutée en brainstorm initial mais écartée à ce stade.
-- **Binaire setuid root** dédié à la création de fichiers root-owned : écarté en raison de la préférence projet pour ne pas multiplier les binaires setuid root sur le bastion.
-
-Voir [R-S18 dans 99-risk-reduce.md](99-risk-reduce.md) pour les pistes d'amélioration permettant de redescendre P à 1 sans setuid.
-
-|                 |                                       Score résiduel                                       |
-| --------------- | :----------------------------------------------------------------------------------------: |
-| **Probabilité** |                      2 (suppression triviale via `rm` reste possible)                      |
-| **Impact**      | 1 (syslog `auth.info` + watches auditd préservent la timeline et l'événement d'effacement) |
+|                 |                                 Score résiduel                                 |
+| --------------- | :----------------------------------------------------------------------------: |
+| **Probabilité** | 1 (effacement par le non-sudo techniquement impossible ; seul root du bastion) |
+| **Impact**      |          1 (syslog `auth.info` + watch auditd préservent la timeline)          |
 
 ---
 

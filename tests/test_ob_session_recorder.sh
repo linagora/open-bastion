@@ -139,128 +139,11 @@ test_generate_session_id() {
     fi
 }
 
-# ── Test 7: Session file path format based on format type ──
-test_session_file_script() {
-    (
-        source_script "ob-session-recorder"
-        FORMAT="script"
-        # Simulate what main does
-        case "$FORMAT" in
-            asciinema) ext=".cast" ;;
-            ttyrec) ext=".ttyrec" ;;
-            *) ext=".typescript" ;;
-        esac
-        [ "$ext" = ".typescript" ] && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "script format -> .typescript extension"
-    else
-        fail "script format -> .typescript extension"
-    fi
-}
-
-test_session_file_asciinema() {
-    (
-        source_script "ob-session-recorder"
-        FORMAT="asciinema"
-        case "$FORMAT" in
-            asciinema) ext=".cast" ;;
-            ttyrec) ext=".ttyrec" ;;
-            *) ext=".typescript" ;;
-        esac
-        [ "$ext" = ".cast" ] && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "asciinema format -> .cast extension"
-    else
-        fail "asciinema format -> .cast extension"
-    fi
-}
-
-test_session_file_ttyrec() {
-    (
-        source_script "ob-session-recorder"
-        FORMAT="ttyrec"
-        case "$FORMAT" in
-            asciinema) ext=".cast" ;;
-            ttyrec) ext=".ttyrec" ;;
-            *) ext=".typescript" ;;
-        esac
-        [ "$ext" = ".ttyrec" ] && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "ttyrec format -> .ttyrec extension"
-    else
-        fail "ttyrec format -> .ttyrec extension"
-    fi
-}
-
-# ── Test 8: Default format is "script" for unknown formats ──
-test_default_format_unknown() {
-    (
-        source_script "ob-session-recorder"
-        FORMAT="somethingweird"
-        case "$FORMAT" in
-            asciinema) fmt="asciinema" ;;
-            ttyrec) fmt="ttyrec" ;;
-            *) fmt="script" ;;
-        esac
-        [ "$fmt" = "script" ] && exit 0 || exit 1
-    )
-    if [ $? -eq 0 ]; then
-        pass "Default format is 'script' for unknown formats"
-    else
-        fail "Default format is 'script' for unknown formats"
-    fi
-}
-
-# ── Test 9: ensure_sessions_dir creates user subdir when parent exists ──
-test_ensure_sessions_dir() {
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    (
-        source_script "ob-session-recorder"
-        SESSIONS_DIR="$tmpdir"
-        SESSION_USER="testuser"
-        ensure_sessions_dir
-        [ -d "$tmpdir/testuser" ] || exit 1
-        local perms
-        perms=$(stat -c '%a' "$tmpdir/testuser" 2>/dev/null || stat -f '%Lp' "$tmpdir/testuser" 2>/dev/null)
-        [ "$perms" = "770" ] && exit 0 || exit 1
-    )
-    local rc=$?
-    rm -rf "$tmpdir"
-    if [ $rc -eq 0 ]; then
-        pass "ensure_sessions_dir creates user subdir when parent exists"
-    else
-        fail "ensure_sessions_dir creates user subdir when parent exists"
-    fi
-}
-
-# ── Test 9b: ensure_sessions_dir fails when parent dir missing ──
-test_ensure_sessions_dir_missing() {
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    local testdir="$tmpdir/nonexistent"
-    (
-        source_script "ob-session-recorder"
-        SESSIONS_DIR="$testdir"
-        SESSION_USER="testuser"
-        ensure_sessions_dir 2>/dev/null && exit 1 || exit 0
-    )
-    local rc=$?
-    rm -rf "$tmpdir"
-    if [ $rc -eq 0 ]; then
-        pass "ensure_sessions_dir fails when parent dir missing"
-    else
-        fail "ensure_sessions_dir fails when parent dir missing"
-    fi
-}
-
-# ── Test 10: write_metadata produces valid JSON with expected fields ──
-test_write_metadata() {
-    local tmpdir
-    tmpdir=$(mktemp -d)
+# ── Test 7: build_header emits a single-line JSON object with the session_id ──
+# The recording is now streamed to the root sink (ob-record-sink); the recorder
+# only builds a one-line JSON header (ob-record-connect rejects embedded
+# newlines). It no longer writes files or metadata itself.
+test_build_header_single_line() {
     (
         source_script "ob-session-recorder"
         SESSION_ID="test-uuid-123"
@@ -270,28 +153,73 @@ test_write_metadata() {
         SESSION_START="2025-01-01T00:00:00Z"
         ORIGINAL_COMMAND="ls -la"
         FORMAT="script"
-        SESSION_FILE="$tmpdir/session.typescript"
-        METADATA_FILE="$tmpdir/meta.json"
-        write_metadata "active"
-        # Verify it is valid JSON with expected fields
+        local h
+        h=$(build_header)
+        # Exactly one line.
+        [ "$(printf '%s' "$h" | wc -l)" -eq 0 ] || exit 1
         if command -v jq >/dev/null 2>&1; then
-            jq -e '.session_id' "$tmpdir/meta.json" >/dev/null 2>&1 || exit 1
-            jq -e '.user' "$tmpdir/meta.json" >/dev/null 2>&1 || exit 1
-            jq -e '.status' "$tmpdir/meta.json" >/dev/null 2>&1 || exit 1
-            local sid
-            sid=$(jq -r '.session_id' "$tmpdir/meta.json")
-            [ "$sid" = "test-uuid-123" ] || exit 1
-            exit 0
+            printf '%s' "$h" | jq -e '.session_id == "test-uuid-123"' >/dev/null 2>&1 || exit 1
+            printf '%s' "$h" | jq -e '.format == "script"' >/dev/null 2>&1 || exit 1
         else
-            grep -q "session_id" "$tmpdir/meta.json" && exit 0 || exit 1
+            printf '%s' "$h" | grep -q '"session_id":"test-uuid-123"' || exit 1
         fi
+        exit 0
     )
-    local rc=$?
-    rm -rf "$tmpdir"
-    if [ $rc -eq 0 ]; then
-        pass "write_metadata produces valid JSON with expected fields"
+    if [ $? -eq 0 ]; then
+        pass "build_header emits a single-line JSON header with session_id/format"
     else
-        fail "write_metadata produces valid JSON with expected fields"
+        fail "build_header emits a single-line JSON header with session_id/format"
+    fi
+}
+
+# ── Test 8: build_header keeps the header single-line even with a newline in the command ──
+test_build_header_no_newline_injection() {
+    (
+        source_script "ob-session-recorder"
+        SESSION_ID="id1"
+        FORMAT="script"
+        CLIENT_IP="x"; TTY_NAME="x"; SESSION_START="x"
+        ORIGINAL_COMMAND=$'evil\ninjected'
+        local h
+        h=$(build_header)
+        # Must remain a single line (jq escapes the newline as \n inside the string).
+        [ "$(printf '%s' "$h" | wc -l)" -eq 0 ] && exit 0 || exit 1
+    )
+    if [ $? -eq 0 ]; then
+        pass "build_header keeps one line when the command contains a newline"
+    else
+        fail "build_header keeps one line when the command contains a newline"
+    fi
+}
+
+# ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
+# script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
+# and ob-record-connect forwards the FIFO to the sink socket.
+test_streams_via_connect() {
+    if grep -q 'ob-record-connect' "$SCRIPT_DIR/ob-session-recorder" && \
+       grep -q 'mkfifo' "$SCRIPT_DIR/ob-session-recorder" && \
+       grep -qE 'script .*-c .*OB_REC_FIFO' "$SCRIPT_DIR/ob-session-recorder"; then
+        pass "recorder streams via ob-record-connect + FIFO"
+    else
+        fail "recorder should stream via ob-record-connect + a FIFO"
+    fi
+}
+
+# ── Test 10: recording is mandatory — recorder refuses when ob-record-connect is absent ──
+# main() checks `command -v ob-record-connect` and exits non-zero (fail-closed)
+# if it is missing, rather than running an unrecorded session.
+test_fail_closed_no_connect() {
+    # In CI the ob-record-connect binary is not installed and the rec.sock does
+    # not exist, so either way the recorder must refuse (non-zero) with a
+    # "recording is required/unavailable" message instead of running a shell.
+    local out rc
+    out=$(SSH_CLIENT="1.2.3.4 5 22" SSH_TTY="" SSH_ORIGINAL_COMMAND="id" \
+          /bin/bash "$SCRIPT_DIR/ob-session-recorder" 2>&1)
+    rc=$?
+    if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qiE "recording (is )?required|unavailable|refus"; then
+        pass "recorder fails closed when the sink is unavailable"
+    else
+        fail "recorder should refuse the session when the sink is unavailable" "rc=$rc out=$out"
     fi
 }
 
@@ -390,13 +318,10 @@ run_test test_unknown_option
 run_test test_config_parsing
 run_test test_config_comments
 run_test test_generate_session_id
-run_test test_session_file_script
-run_test test_session_file_asciinema
-run_test test_session_file_ttyrec
-run_test test_default_format_unknown
-run_test test_ensure_sessions_dir
-run_test test_ensure_sessions_dir_missing
-run_test test_write_metadata
+run_test test_build_header_single_line
+run_test test_build_header_no_newline_injection
+run_test test_streams_via_connect
+run_test test_fail_closed_no_connect
 run_test test_env_defaults
 run_test test_parse_args
 run_test test_invalid_session_user

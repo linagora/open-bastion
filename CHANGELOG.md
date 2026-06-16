@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tamper-evident session recording (#151).** Sessions are now streamed to a
+  root, systemd socket-activated sink (`ob-record-sink`) instead of being written
+  by the user-side recorder. The sink derives the recorded user from the
+  connection's `SO_PEERCRED` (kernel-verified) and writes the recording +
+  metadata **root-owned** under `/var/lib/open-bastion/sessions/<user>/`
+  (`root:ob-sessions 0750`, files `0640`). The recorded user is not in
+  `ob-sessions`, so it can no longer list, read, delete or truncate any
+  recording — including its own. The recorder reaches the sink through the new
+  unprivileged `ob-record-connect` connector (a POSIX shell cannot open an
+  `AF_UNIX` socket). Recording is **fail-closed**: if the sink is unreachable the
+  session is refused rather than falling back to a user-deletable file.
+  Because the recorder runs on the bastion, a user who is root on a backend does
+  not escape recording. New units `ob-record.socket` / `ob-record@.service`.
+  Drops R-S18 to P=1 (see `doc/security/99-risk-reduce.md`).
+
+### Changed
+
+- **The setgid `ob-session-recorder-wrapper` is removed.** It created the
+  user-owned per-user recording directory that made recordings deletable; with
+  the root sink it is obsolete. `ForceCommand` now points directly at
+  `ob-session-recorder`, and `/var/lib/open-bastion/sessions` is
+  `root:ob-sessions 0750` (was `3771` setgid+sticky). `ob-bastion-setup` enables
+  `ob-record.socket` and migrates any legacy user-owned per-user dirs to root
+  ownership.
+
 ## [0.4.1] - 2026-06-16
 
 Decouples bastion hop-certificate minting from the interactive `sudo` policy,

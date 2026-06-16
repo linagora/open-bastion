@@ -89,16 +89,17 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder
-%attr(2755,root,ob-sessions) %{_sbindir}/ob-session-recorder-wrapper
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup
 %{_sbindir}/ob-cert-daemon
+%{_sbindir}/ob-record-sink
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
 %{_bindir}/ob-cert-request
+%{_bindir}/ob-record-connect
 %{_bindir}/ob-bastion-id
 %dir %{_prefix}/lib/open-bastion
 %{_prefix}/lib/open-bastion/ob-cert-lib.sh
@@ -114,6 +115,8 @@ ctest --output-on-failure --verbose
 %{_unitdir}/ob-heartbeat.timer
 %{_unitdir}/ob-cert.socket
 %{_unitdir}/ob-cert@.service
+%{_unitdir}/ob-record.socket
+%{_unitdir}/ob-record@.service
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
@@ -123,9 +126,11 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
 %{_mandir}/man8/ob-cert-daemon.8*
+%{_mandir}/man8/ob-record-sink.8*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
 %{_mandir}/man1/ob-cert-request.1*
+%{_mandir}/man1/ob-record-connect.1*
 # Hardening templates (session containment - deployed by ob-bastion-setup)
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/hardening
@@ -167,16 +172,15 @@ chmod 700 /var/cache/open-bastion
 mkdir -p /var/lib/open-bastion
 chmod 711 /var/lib/open-bastion
 mkdir -p /var/lib/open-bastion/sessions
-chgrp ob-sessions /var/lib/open-bastion/sessions
-# Mode 3771 (drwxrws--t root:ob-sessions): setgid so per-user subdirs inherit
-# group ob-sessions; sticky so users only unlink their own entries; o+x (NO
-# o+r) so a connecting user — who is NOT in ob-sessions and whose elevated gid
-# the recorder wrapper deliberately drops before exec — can still traverse into
-# its own subdir created by the wrapper. Without o+x the recorder fails with
-# "User sessions directory ... does not exist and could not be created". The
-# parent /var/lib/open-bastion is likewise 711 (above) so it stays traversable
-# by that de-privileged recorder.
-chmod 3771 /var/lib/open-bastion/sessions
+# Tamper-evident layout: root:ob-sessions 0750. The recorded user is NOT in
+# ob-sessions, so o-rwx means it has no access to any recording (incl. its own);
+# recordings are written by the root sink (ob-record-sink). Auditors in
+# ob-sessions get group read. ob-bastion-setup re-asserts this and migrates any
+# legacy user-owned per-user subdirs.
+chown root:ob-sessions /var/lib/open-bastion/sessions
+chmod 0750 /var/lib/open-bastion/sessions
+# Remove the obsolete setgid recorder wrapper if upgrading from an older version.
+rm -f %{_sbindir}/ob-session-recorder-wrapper
 # Migrate the server token out of /etc (config) into /var/lib (runtime state,
 # FHS) so the heartbeat sandbox can keep /etc read-only. Idempotent.
 if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then
@@ -191,12 +195,15 @@ done
 
 %preun
 %systemd_preun ob-heartbeat.timer
-# Cert socket is enabled by ob-bastion-setup (not at install); disable on removal.
+# Cert/record sockets are enabled by ob-bastion-setup (not at install); disable
+# on removal.
 %systemd_preun ob-cert.socket
+%systemd_preun ob-record.socket
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
 %systemd_postun_with_restart ob-cert.socket
+%systemd_postun_with_restart ob-record.socket
 
 %post desktop
 %systemd_post ob-session-monitor.service

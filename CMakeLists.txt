@@ -182,26 +182,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-recorder
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Build and install session recorder setgid wrapper
-add_executable(ob-session-recorder-wrapper
-    src/ob-session-recorder-wrapper.c
-)
-target_compile_options(ob-session-recorder-wrapper PRIVATE
-    -Wall -Wextra -Werror
-    -D_GNU_SOURCE
-    -fstack-protector-strong
-    -Wformat -Wformat-security
-    $<$<CONFIG:Release>:-flto>
-)
-target_link_options(ob-session-recorder-wrapper PRIVATE
-    -Wl,-z,relro
-    -Wl,-z,now
-    -Wl,-z,noexecstack
-    $<$<CONFIG:Release>:-flto>
-)
-install(TARGETS ob-session-recorder-wrapper
-    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
-)
+# NOTE: the old setgid ob-session-recorder-wrapper has been removed. Recordings
+# are now streamed to the root ob-record-sink (socket-activated), which owns the
+# files; the recorder no longer needs an elevated gid or a per-user dir, so the
+# wrapper (and its setgid bit) is gone. See
+# doc/design/tamper-evident-session-recording.md.
 
 # Install session recorder config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
@@ -282,6 +267,54 @@ install(TARGETS ob-cert-request
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Tamper-evident session recording: socket-activated root sink + unprivileged
+# connector. ob-record-sink (root, socket-activated) writes recordings root-owned
+# under /var/lib/open-bastion/sessions/<user>/ (the recorded user cannot touch
+# them); ob-record-connect is the unprivileged connector the recorder execs to
+# stream into the socket. See doc/design/tamper-evident-session-recording.md.
+add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
+target_include_directories(ob-record-sink PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+)
+target_compile_options(ob-record-sink PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_libraries(ob-record-sink
+    ${JSON_C_LIBRARIES}
+)
+target_link_options(ob-record-sink PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-record-sink
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+add_executable(ob-record-connect src/ob-record-connect.c)
+target_compile_options(ob-record-connect PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_options(ob-record-connect PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-record-connect
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 # Install SSH certificate tool (user-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -345,6 +378,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-backend-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
     ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
+    ${CMAKE_SOURCE_DIR}/man/ob-record-sink.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 
@@ -362,6 +396,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-scp.1
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
     ${CMAKE_SOURCE_DIR}/man/ob-cert-request.1
+    ${CMAKE_SOURCE_DIR}/man/ob-record-connect.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
@@ -372,6 +407,8 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
         ${CMAKE_SOURCE_DIR}/systemd/ob-cert.socket
         ${CMAKE_SOURCE_DIR}/systemd/ob-cert@.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-record.socket
+        ${CMAKE_SOURCE_DIR}/systemd/ob-record@.service
         DESTINATION lib/systemd/system
     )
     # Desktop-specific systemd service

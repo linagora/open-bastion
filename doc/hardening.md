@@ -19,8 +19,10 @@ configuration** — no setuid binary is added.
 
 ## Threat model
 
-`ob-session-recorder-wrapper` (setgid `root:ob-sessions`, mode `2755`)
-captures the pty via `script(1)`. An authenticated user can still try to:
+`ob-session-recorder` (running as the user under `ForceCommand`) captures the
+pty via `script(1)`, streaming to the root `ob-record-sink` over a Unix socket.
+Recording files are root-owned and the user has no access to alter or delete them.
+An authenticated user can still try to:
 
 1. **Detach a process from the pty** with `setsid nohup … &`. The child
    re-parents to PID 1 and survives logout, running outside the
@@ -235,10 +237,10 @@ ob-bastion-setup --portal https://auth.example.com --enable-hardening
 
 ## What PR1 does **not** cover
 
-- **Primary trace.** If the wrapper crashes or is bypassed (e.g.
-  through a PAM mis-config), nothing else logs `execve()`. PR2 will
-  add an `auditd` ruleset that records every `execve()` system-wide,
-  so even a process that escapes the recorder leaves a syscall trail.
+- **Primary trace.** If the recorder is bypassed (e.g. through a PAM
+  mis-config), nothing else logs `execve()`. PR2 will add an `auditd`
+  ruleset that records every `execve()` system-wide, so even a process
+  that escapes the recorder leaves a syscall trail.
 - **Container escape / kernel exploits.** Out of scope; rely on
   upstream kernel hardening and timely patching.
 - **`systemd-run --user` with a service template.** Covered by
@@ -247,6 +249,6 @@ ob-bastion-setup --portal https://auth.example.com --enable-hardening
 
 ## See also
 
-- [`session-recording.md`](session-recording.md) — wrapper and recorder details
+- [`session-recording.md`](session-recording.md) — recorder and sink details
 - [`security.md`](security.md) — broader security policy
 - [`SECURITY.md`](../SECURITY.md) — disclosure policy

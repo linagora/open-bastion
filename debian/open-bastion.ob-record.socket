@@ -1,0 +1,20 @@
+[Unit]
+Description=Open Bastion session-recording socket
+Documentation=https://github.com/linagora/open-bastion
+
+[Socket]
+# ob-session-recorder (via ob-record-connect, unprivileged) connects here to
+# stream a session recording. Per-connection activation (Accept=yes) spawns one
+# ob-record@.service instance per session.
+ListenStream=/run/open-bastion/rec.sock
+# World-connectable: connecting grants nothing on its own. The sink derives the
+# recorded user from SO_PEERCRED (kernel-verified) and writes root-owned files,
+# so a caller can only ever record under its own name and can never delete or
+# alter what is written.
+SocketMode=0666
+Accept=yes
+# Parent /run/open-bastion is created at 0711 by the package tmpfiles.d entry and
+# by the setup scripts; it exists before sockets.target.
+
+[Install]
+WantedBy=sockets.target

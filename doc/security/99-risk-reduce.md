@@ -23,7 +23,7 @@
 
 - **R-S1** : Supprimé (aucun mot de passe SSH accepté)
 - **R-S2** : Descendu à I=1 (clé SSH inutile sans certificat CA)
-- **R-S18** : Reste à (P=2, I=1). Le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, mais l'utilisateur est propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres recordings. La traçabilité est préservée par syslog `auth.info` (start/end de session, journal indépendant root-only) et, si PR2 (#113) est activée, par le watch auditd `-w /var/lib/open-bastion/sessions/` qui trace l'événement d'effacement même s'il réussit. Pistes pour passer à P=1 (rendre l'effacement techniquement impossible, sans introduire de binaire setuid) : voir [section R-S18 ci-dessous](#r-s18-p2-i1---effacement-des-enregistrements-de-session).
+- **R-S18** : Descendu à (P=1, I=1). Le recording est désormais streamé vers un **puits root activé par socket** (`ob-record-sink`, PR #157) : les fichiers sont root-owned (`root:ob-sessions 0640`) dans une arborescence `0750` où l'utilisateur enregistré n'a aucun accès — la suppression/altération par le non-sudo est **techniquement impossible**. L'enregistreur étant sur le **bastion**, être root sur un backend n'y échappe pas. Le résiduel P=1 couvre seulement root **du bastion** (hôte d'audit, hors périmètre). Le wrapper setgid est supprimé. Voir [section R-S18 ci-dessous](#r-s18-p1-i1---effacement-des-enregistrements-de-session).
 - **R-S19** : Descendu à (P=1, I=1) grâce à `KillUserProcesses=yes` (le cgroup utilisateur est tué à la fin de la session, y compris les processus détachés via `setsid`) et au pre-flight refusant `Linger=yes`.
 - **R-S20** : Descendu à (P=1, I=2) grâce à `at.allow` vide + `atd` masqué + `cron.allow` root-only + pre-flight `Linger=yes`. Limite résiduelle (I=2) : crontab pré-existant non purgé.
 - **R-S21** : Descendu à (P=1, I=2) grâce aux règles auditd `-S execve -S execveat` + watches sur les fichiers sensibles + `connect()`. Limite résiduelle (I=2) : `sendto`/`sendmsg` UDP non-connectés non tracés par défaut.
@@ -172,34 +172,70 @@ Le Mode E bloque l'escalade par conception (réauthentification SSO obligatoire)
 2. **Durée de token réduite** : Limiter la validité du token PAM-access à 5 minutes pour les opérations sudo
 3. **Audit renforcé** : Logger chaque utilisation de sudo avec le token ID pour traçabilité
 
-**Séparation des privilèges déjà implémentée (enregistrement de session) :** Le wrapper setgid `ob-session-recorder-wrapper` et les permissions `1770` sur `/var/lib/open-bastion/sessions` **empêchent l'accès et la suppression croisés entre utilisateurs** (isolation latérale). L'utilisateur reste cependant propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut donc supprimer ses propres enregistrements — voir R-S18 ci-dessous pour le détail et les protections complémentaires (syslog `auth.info`, watch auditd via PR2 #113).
+**Séparation des privilèges implémentée (enregistrement de session) :** le recording est streamé vers le puits root `ob-record-sink` (socket-activé, utilisateur dérivé de `SO_PEERCRED`), qui écrit des fichiers **root-owned** (`root:ob-sessions 0640`) dans une arborescence `root:ob-sessions 0750`. L'utilisateur enregistré n'a **aucun** accès (lister/lire/supprimer/tronquer), y compris sur ses propres enregistrements. L'enregistreur vivant sur le **bastion** (point de passage), être root sur un backend n'y échappe pas. Voir R-S18 ci-dessous.
 
-### R-S18 _(P=2, I=1)_ - Effacement des enregistrements de session
+### R-S18 _(P=1, I=1)_ - Effacement des enregistrements de session
 
-**Score initial :** P=2, I=3 (zone jaune). Le wrapper setgid empêche déjà l'accès aux recordings d'**autres** utilisateurs ; en revanche, l'utilisateur reste propriétaire de son propre sous-répertoire `2770 user:ob-sessions` et peut supprimer ses propres recordings via `rm`.
+**Score initial :** P=2, I=3 (zone jaune). Dans l'ancien modèle, le recorder
+tournait sous l'uid de l'utilisateur et écrivait dans son propre sous-répertoire
+`2770 user:ob-sessions` : il en était propriétaire et pouvait donc supprimer ou
+tronquer ses propres enregistrements via `rm` / `: > fichier`.
 
-**Remédiation implémentée :**
+**Cadre (important) — où se fait l'enregistrement :** l'enregistreur vit sur le
+**bastion**, le point de passage obligé. Une session vers un backend transite
+par le pty du bastion, donc **être root sur un backend ne permet pas d'échapper
+à l'enregistrement ni d'atteindre les fichiers** : ils sont sur le bastion,
+root-owned, et un root de backend n'a aucun accès au système de fichiers du
+bastion. Le seul acteur capable d'altérer les traces est **root sur le bastion
+lui-même** (l'hôte d'audit), un ensemble réduit et de confiance — voir le modèle
+de menace ci-dessous.
 
-- Wrapper setgid `ob-session-recorder-wrapper` (groupe `ob-sessions`, mode `2755`) : isolation latérale entre utilisateurs (un utilisateur ne peut pas lire ni supprimer les recordings d'un autre)
-- Répertoire sessions `/var/lib/open-bastion/sessions` en mode `1770 root:ob-sessions` (sticky bit) : protège uniquement le sous-répertoire utilisateur lui-même contre la suppression, pas les fichiers à l'intérieur
-- Sous-répertoires utilisateur en mode `2770 user:ob-sessions` (bit setgid pour héritage du groupe)
-- Le wrapper drop explicitement le gid élevé via `setregid()` après création du sous-répertoire et avant exec du script (`exec` ne supprime pas un gid effectif/sauvé déjà acquis)
-- Sanitisation de l'environnement (LD_PRELOAD, BASH_ENV, PATH durci) avant exec
-- Syslog (`auth.info`) comme journal d'audit indépendant et inaltérable : préserve start/end de session même si l'utilisateur supprime ses recordings
-- Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa` (PR2 #113, opt-in via `--enable-audit-trace`) : trace `unlink`, `truncate`, `rename` même si l'effacement réussit
+**Remédiation implémentée (PR #157, `ob-record-sink`) :** le recording est
+désormais **streamé vers un puits root activé par socket** (design retenu
+[doc/design/tamper-evident-session-recording.md](../design/tamper-evident-session-recording.md)),
+qui correspond exactement à l'option « démon collecteur privilégié » listée
+auparavant comme non-retenue :
 
-**Score résiduel :** P=2, I=1. L'utilisateur peut techniquement supprimer ses propres recordings, mais l'imputation tient grâce à syslog (timeline) et à auditd (événement d'effacement).
+- Le recorder (sous l'uid utilisateur) n'écrit plus aucun fichier. Il ouvre une
+  socket Unix via `ob-record-connect` et y streame le typescript ; `ob-record-sink`
+  (root, socket-activé) écrit les fichiers.
+- L'utilisateur enregistré est dérivé de `SO_PEERCRED` (vérifié par le noyau,
+  jamais de l'en-tête) → pas d'usurpation ni de traversée de chemin.
+- Les fichiers sont **root:ob-sessions 0640** dans une arborescence
+  `root:ob-sessions 0750` ; l'utilisateur enregistré n'étant **pas** membre de
+  `ob-sessions`, il n'a **aucun** droit (lister/lire/`unlink`/tronquer) sur ses
+  enregistrements. C'est une frontière d'uid noyau (DAC), la plus robuste.
+- **Fail-closed** : si le puits est indisponible, la session est refusée plutôt
+  que de retomber sur un fichier user-owned (cf. §9 du design).
+- Le wrapper setgid `ob-session-recorder-wrapper` (et son bit setgid) est
+  **supprimé** : devenu inutile, il créait justement le sous-répertoire
+  user-owned à l'origine du risque.
 
-Pistes pour passer à P=1 (sans setuid, contrainte projet) :
+**Défenses complémentaires conservées :**
 
-1. **Démon collecteur de session privilégié** : remplacer le pty recording local par un démon `ob-session-collector` qui reçoit le flux pty via socket Unix (`SO_PEERCRED`) et écrit dans des fichiers root-owned. L'utilisateur n'a aucune permission sur les fichiers résultants. Détecte la fermeture brutale du recorder via RST socket et marque la session comme `killed_prematurely` côté serveur. Architecture la plus robuste mais coûteuse à déployer/maintenir (nouveau service permanent + canal IPC privilégié).
-2. **`chattr +a` (append-only)** : nécessite `CAP_LINUX_IMMUTABLE`, qui n'est pas accordé sans setuid ou file capabilities. Compatible avec la contrainte projet si on accepte les **file capabilities** (`setcap cap_linux_immutable+ep`) plutôt que le setuid root traditionnel.
-3. **Forwarding immédiat vers LLNG** : pousser le recording en streaming vers un endpoint LLNG WORM (Write Once Read Many) côté serveur. Roadmap déjà mentionnée dans [doc/session-recording.md](../session-recording.md).
+- Syslog (`auth.info`) : journal d'audit indépendant (start/end de session).
+- Watch auditd `-w /var/lib/open-bastion/sessions/ -p wa` (PR2 #113, opt-in via
+  `--enable-audit-trace`).
 
-Pistes pour réduire I (déjà à 1, marges d'amélioration limitées) :
+**Score résiduel :** P=1, I=1. La suppression/altération par l'utilisateur
+non-sudo est désormais **techniquement impossible** (il ne possède pas les
+fichiers et ne peut pas traverser l'arborescence). Le résiduel P=1 (et non 0)
+couvre uniquement **root sur le bastion**, hors périmètre du modèle de menace.
 
-1. **Centralisation syslog** : Envoyer les logs vers un serveur distant (SIEM) pour résister à une compromission root du bastion
-2. **Signature des sessions** : Signer cryptographiquement les fichiers de session à la clôture (clé privée hors du bastion) pour détecter toute altération a posteriori
+**Modèle de menace :** root sur le bastion est de confiance ; on ne défend que
+contre l'utilisateur non privilégié (y compris s'il est root sur un backend).
+Se défendre contre root **du bastion** exigerait une expédition distante (WORM),
+une signature, ou un média append-only.
+
+Pistes pour réduire encore I (couvrir root du bastion, déjà hors périmètre) :
+
+1. **Centralisation syslog / streaming WORM** : pousser logs et recordings vers
+   un serveur distant (SIEM / endpoint LLNG WORM) pour résister à une
+   compromission root du bastion. Roadmap dans
+   [doc/session-recording.md](../session-recording.md).
+2. **Signature des sessions** : signer cryptographiquement les fichiers à la
+   clôture (clé privée hors du bastion) pour détecter toute altération a
+   posteriori.
 
 ### R-S17 _(P=1, I=2)_ - Verrouillage total (lockout)
 

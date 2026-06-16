@@ -9,7 +9,7 @@
 # ── locations ────────────────────────────────────────────────────────────────
 LT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$LT_DIR/.." && pwd)"
-VM="$LT_DIR/vm/mkvm.sh"
+VM="$LT_DIR/mkvm.sh"
 SSO_DIR="$LT_DIR/sso"
 APTREPO="$SSO_DIR/aptrepo"
 # shellcheck disable=SC2034  # consumed by the sourcing deploy-*.sh scripts

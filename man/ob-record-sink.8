@@ -1,0 +1,80 @@
+.TH OB-RECORD-SINK 8 "June 2026" "open-bastion" "System Administration"
+.SH NAME
+ob-record-sink \- privileged session-recording sink
+.SH SYNOPSIS
+.B ob-record-sink
+.SH DESCRIPTION
+.B ob-record-sink
+is the privileged half of the tamper-evident session-recording flow. It is
+socket-activated by systemd (one short-lived instance per connection,
+.BR ob-record.socket )
+and is not run by hand. It runs as
+.B root
+so that the recordings it writes cannot be read, deleted or altered by the
+recorded (unprivileged) user.
+.PP
+For each connection it:
+.IP 1. 4
+derives the recorded user from the connection's
+.B SO_PEERCRED
+(kernel-verified). This is the only source of identity \(em never the header \(em
+so a caller can only ever record under its own name, and the
+.RI < user >
+path component is never client-controlled (no cross-user write, no path
+traversal).
+.IP 2. 4
+reads a one-line JSON metadata header followed by the opaque recording stream
+(typescript bytes) until EOF, sent by
+.BR ob-record-connect (1).
+.IP 3. 4
+writes the recording and its metadata under
+.I /var/lib/open-bastion/sessions/<user>/
+\(em directory
+.BR "root:ob-sessions 0750" ,
+files
+.BR 0640 .
+The recording file is created with
+.B O_NOFOLLOW
+and
+.B O_EXCL
+(no symlink, no clobber); the JSON metadata is created with
+.B O_NOFOLLOW
+and rewritten
+.RB ( O_TRUNC )
+when the session is finalized.
+.PP
+The sink records only what it observes: status
+.B active
+then
+.B completed
+(clean EOF),
+.B truncated
+(size cap or timeout) or
+.B aborted
+(abnormal drop). The child command's exit code is deliberately not recorded \(em
+it would be entirely client-reported.
+.SH THREAT MODEL
+Root is trusted; the sink defends only against the unprivileged user tampering
+with its own recordings. Defending against root requires an LSM, append-only
+media or remote log shipping, which are out of scope.
+.SH ENVIRONMENT
+.TP
+.B OB_SESSIONS_DIR
+Override the base sessions directory (default
+.IR /var/lib/open-bastion/sessions ).
+Read from the daemon's own environment, which is set by the systemd unit (never
+by the connecting client); intended for tests.
+.SH FILES
+.TP
+.I /run/open-bastion/rec.sock
+The session-recording socket
+.RB ( ob-record.socket ).
+.TP
+.I /var/lib/open-bastion/sessions/<user>/
+Recordings and metadata (root-owned).
+.SH SEE ALSO
+.BR ob-record-connect (1),
+.BR ob-session-recorder (8),
+.BR ob-cert-daemon (8)
+.SH AUTHOR
+Linagora
