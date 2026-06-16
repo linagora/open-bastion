@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-16
+
+Tamper-evident session recording — a non-root user can no longer delete or alter
+its own session recordings — plus `sudo -i` and backend `sudo` fixes.
+
+> **Upgrade note (session recording).** Recording now streams to a root,
+> socket-activated sink (`ob-record-sink`) instead of being written by the user.
+> After upgrade, **re-run `ob-bastion-setup`** (or `ob-standalone-setup`) so it
+> enables `ob-record.socket`, sets `/var/lib/open-bastion/sessions` to
+> `root:ob-sessions 0750`, and migrates any legacy per-user dirs to root
+> ownership. Recording is **fail-closed** when enabled: if `ob-record.socket` is
+> not active, recorded logins are refused. `ForceCommand` now points directly at
+> `ob-session-recorder` (the setgid `ob-session-recorder-wrapper` is removed).
+
 ### Added
 
 - **Tamper-evident session recording (#151).** Sessions are now streamed to a
@@ -33,6 +47,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `root:ob-sessions 0750` (was `3771` setgid+sticky). `ob-bastion-setup` enables
   `ob-record.socket` and migrates any legacy user-owned per-user dirs to root
   ownership.
+
+### Fixed
+
+- **`sudo -i` is authorized again on bastions (#152).** `sudo -i` runs under the
+  PAM service name `sudo-i`; `pam_openbastion` forwarded it verbatim to LLNG,
+  whose pam-access plugin only knows `ssh`/`sshd`/`sudo` and default-denied the
+  rest — so `sudo -i` failed at PAM account management while `sudo`/`sudo su`
+  worked. The module now canonicalizes `sudo-i` to `sudo` (self-contained in the
+  bastion; no plugin change required).
+- **Backend `sudo` works for SSO users (#154).** `ob-backend-setup` configured
+  the PAM side of sudo but never created the `open-bastion-sudo` group nor the
+  `/etc/sudoers.d/open-bastion` rule, so an LLNG-authorized user still got "not
+  in the sudoers file". It now provisions both (mirroring `ob-bastion-setup`,
+  `visudo`-validated).
+- **Debian package ships the socket-activation template units.** `dh_installsystemd`
+  does not auto-install named `@.service` templates, so `ob-cert@.service` and
+  `ob-record@.service` were missing from the `.deb` — the sockets could not spawn
+  an instance ("Connection refused"). Both templates are now installed. (This was
+  a latent gap for `ob-cert@.service` too.)
+- **RPM GPG signature check (#99).** Release RPMs are signed with the native EL
+  `rpm` so the signature verifies.
 
 ## [0.4.1] - 2026-06-16
 

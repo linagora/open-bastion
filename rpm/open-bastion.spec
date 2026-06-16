@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.4.1
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -223,33 +223,18 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.5.0-1
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.4.1-1
-- Bastion hop-certificate minting no longer goes through sudo: ob-cert-daemon
-  (socket-activated, user from SO_PEERCRED) plus the unprivileged ob-cert-request
-  client replace the ob-bastion-cert-helper + NOPASSWD sudoers bridge, so
-  ob-ssh/ob-scp work in max-security (Mode E, where sudo required an LLNG token).
-  ob-bastion-setup now enables ob-cert.socket. Requires the matching pam-access
-  plugin update. See CHANGELOG.md
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.4.0-1
-- Certificate bastion->backend hop (ob-ssh/ob-scp) works end to end on OpenSSH
-  9.8+: the SSH-fingerprint spool now converges on the outermost sshd-session on
-  both bastion and backend (with an sshd fallback for pre-9.8), and
-  /run/open-bastion is 0711 so the principals helper can write it.
-  ob-session-recorder propagates the recorded command's exit status (script -e).
-  Requires the matching pam-access plugin. See CHANGELOG.md
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.2-1
-- Mode E sudo requires the LLNG token again (authorize_only no longer bypasses
-  it for the sudo PAM service); sudo -i works for SSO users (the separate sudo-i
-  PAM service is now configured); ob-builder Mode E roles always ship the KRL
-  file; ob-standalone-setup symlink. See CHANGELOG.md
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Mon Jun 15 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.1-1
-- ob-heartbeat reports connected users (who-is-connected), client version and
-  node role to the SSO; ob-enroll fails when offline_access yields no refresh
-  token; ob-builder/Ansible Mode E deploy fixes. See CHANGELOG.md
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Sat Jun 13 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.0-1
-- Certificate-based bastion->backend vouching (replaces the broken JWT/SendEnv
-  transport); ob-scp; token-lifecycle/NSS/sshd/recorder fixes; ob-builder
-  artefacts deploy unattended. See CHANGELOG.md
+- See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Sat May 23 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.3-1
 - See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
 * Thu May 21 2026 Xavier Guimard <xguimard@linagora.com> - 0.2.2-1
