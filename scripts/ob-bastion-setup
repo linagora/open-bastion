@@ -312,6 +312,14 @@ PRINCIPALS
     # pam_openbastion additionally refuses to read the spool if this
     # directory is group/world-writable or if a drop file isn't owned by
     # the directory owner with mode 0600 / nlink 1.
+    # The parent /run/open-bastion MUST be traversable by the principals helper
+    # user (nobody) so it can reach the 0700 spool below. Other steps (ob-enroll,
+    # the device-state file) create it 0750 root:root, which blocks nobody and
+    # silently breaks the fingerprint spool (no voucher → onward hop fails).
+    # 0711 = traverse-only: nobody can cd through it but not list it, and the
+    # device-state file is protected by its own mode.
+    mkdir -p /run/open-bastion
+    chmod 0711 /run/open-bastion
     mkdir -p "$spool_dir"
     chown nobody:nogroup "$spool_dir" 2>/dev/null || chown nobody:nobody "$spool_dir"
     chmod 0700 "$spool_dir"
@@ -320,7 +328,9 @@ PRINCIPALS
     cat > "$tmpfiles_conf" << TMPFILES
 # Open Bastion SSH fingerprint spool — recreated at boot so the directory
 # survives /run wipes. See /usr/local/sbin/ob-ssh-principals.
-d /run/open-bastion          0755 root   root   -
+# 0711 on the parent: traversable by the principals helper (nobody) but not
+# listable; the ssh-fp drop dir itself is 0700 nobody.
+d /run/open-bastion          0711 root   root   -
 d /run/open-bastion/ssh-fp   0700 nobody nogroup -
 TMPFILES
     chmod 644 "$tmpfiles_conf"

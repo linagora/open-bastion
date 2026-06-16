@@ -150,7 +150,7 @@ bootstrap_vm(){
     dssh "$ip" "sudo INSTALL_PKG=$install_pkg GW=$GW_IP APT_PORT=$APT_PORT bash -s" <<'BS' >/dev/null 2>&1
 set -e
 grep -q auth.example.com /etc/hosts || echo "$GW auth.example.com" >> /etc/hosts
-mkdir -p /run/open-bastion && chmod 750 /run/open-bastion
+mkdir -p /run/open-bastion && chmod 711 /run/open-bastion
 echo "deb [trusted=yes] http://$GW:$APT_PORT/ ./" > /etc/apt/sources.list.d/oblab.list
 export DEBIAN_FRONTEND=noninteractive
 for t in 1 2 3; do apt-get update -qq && apt-get install -y -qq libsodium23 && break || sleep 5; done
