@@ -82,7 +82,7 @@ sequenceDiagram
     Note over Bastion: 4b. pam_putenv("LLNG_BASTION_VOUCHER=…")
     Note over Client: 5. Sur le bastion :<br/>ob-ssh backend
     Note over Bastion: 6. Génère paire de clés éphémère ed25519<br/>(clé privée ne quitte pas le bastion)
-    Bastion->>LLNG: 7. ob-bastion-cert-helper (sudo NOPASSWD)<br/>POST /pam/bastion-cert<br/>Bearer=jeton_serveur_bastion<br/>body={user, target_host, clé_pub_éphémère, voucher}
+    Bastion->>LLNG: 7. ob-cert-request via socket Unix<br/>→ ob-cert-daemon déduit user via SO_PEERCRED<br/>POST /pam/bastion-cert<br/>Bearer=jeton_serveur_bastion<br/>body={user, target_host, clé_pub_éphémère, voucher}
     Note over LLNG: 8. Vérifie voucher (bastion_id, user)<br/>Vérifie gardes (grant device_code,<br/>server_group ∈ pamAccessBastionGroups)<br/>Signe clé_pub_éphémère avec CA ssh-ca
     LLNG-->>Bastion: 9. Certificat éphémère (~120s)<br/>principal=user, source-address=IP_bastion<br/>key-id=bastion=<id>;user=<u>;target=<h>
     Bastion->>Backend: 10. ssh -i <clé_éph> -o CertificateFile=<cert><br/>(ré-origination : le bastion s'authentifie)
@@ -92,7 +92,7 @@ sequenceDiagram
     Backend-->>Client: 14. Session SSH établie
 ```
 
-> **Pourquoi `ob-ssh` et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité de s'authentifier avec un certificat éphémère en son propre nom. `ob-ssh` résout ce problème : il s'exécute **sur le bastion**, obtient un certificat utilisateur éphémère (~120 s) via `POST /pam/bastion-cert` (délégué à `ob-bastion-cert-helper` par une règle sudoers NOPASSWD étroite), puis ouvre la connexion SSH vers le backend avec cette clé et ce certificat éphémères. Le backend vérifie le certificat nativement (CA, `source-address`, `AuthorizedPrincipalsCommand`) pour s'assurer que la connexion provient bien d'un bastion autorisé et que l'utilisateur y est bien connecté (voucher).
+> **Pourquoi `ob-ssh` et non ProxyJump ?** Le mécanisme SSH natif `ProxyJump` (`ssh -J`) fait transiter la connexion par le bastion, mais c'est le **client** qui négocie directement avec le backend. Le bastion n'a donc aucune opportunité de s'authentifier avec un certificat éphémère en son propre nom. `ob-ssh` résout ce problème : il s'exécute **sur le bastion**, obtient un certificat utilisateur éphémère (~120 s) via `POST /pam/bastion-cert` (invoqué par `ob-cert-request` connecté au socket Unix `/run/open-bastion/cert.sock` servi par `ob-cert-daemon` socket-activé), puis ouvre la connexion SSH vers le backend avec cette clé et ce certificat éphémères. Le backend vérifie le certificat nativement (CA, `source-address`, `AuthorizedPrincipalsCommand`) pour s'assurer que la connexion provient bien d'un bastion autorisé et que l'utilisateur y est bien connecté (voucher).
 
 #### 3. Escalade de privilèges (sudo)
 
@@ -1378,7 +1378,7 @@ Contrairement à R-S19 (recorder tué) et R-S20 (action différée), ici le reco
 - [ ] `AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i` dans sshd_config des backends
 - [ ] `/etc/open-bastion/allowed_bastions` configuré sur les backends (via `ob-backend-setup --allowed-bastions <client_ids>`)
 - [ ] Plugin `ssh-ca` LLNG actif (`sshCaActivation=1`)
-- [ ] `ob-bastion-cert-helper` déployé avec règle sudoers NOPASSWD étroite sur le bastion
+- [ ] Socket Unix `/run/open-bastion/cert.sock` servi par `ob-cert-daemon` systemd socket-activated sur le bastion
 - [ ] Restriction réseau : backends accessibles uniquement depuis le bastion
 - [ ] `pamAccessBastionGroups` configuré côté LLNG (groupes autorisés à voucher, défaut : bastion)
 - [ ] Aucune directive `AcceptEnv LLNG_BASTION_JWT` dans sshd_config des backends (supprimée)

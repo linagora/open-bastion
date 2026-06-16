@@ -81,10 +81,11 @@ DEBUG=false
 .PP
 A normal (non-root) user cannot read the root-only server token; the single
 privileged call is delegated to
-.BR ob-bastion-cert-helper (8)
-through a narrow NOPASSWD sudoers rule installed by
-.BR ob-bastion-setup (8).
-No setuid binary is involved.
+.BR ob-cert-daemon (8),
+a socket-activated service reached through the unprivileged
+.BR ob-cert-request (1)
+client. The daemon derives the certificate's user from the connection's
+SO_PEERCRED, so it always mints for the connecting user. No sudo, no setuid.
 .SH "TTY HANDLING"
 When standard input is a terminal,
 .B ob-ssh
@@ -144,7 +145,8 @@ $ ob-ssh admin@backend-web01 2222
 .fi
 .SH SEE ALSO
 .BR ob-scp (1),
-.BR ob-bastion-cert-helper (8),
+.BR ob-cert-request (1),
+.BR ob-cert-daemon (8),
 .BR ob-bastion-setup (8),
 .BR ob-backend-setup (8),
 .BR ob-enroll (8),

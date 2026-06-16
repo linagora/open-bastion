@@ -99,8 +99,8 @@ flowchart LR
 
     subgraph Bastion["Bastion Server"]
         pam_b["pam_openbastion (authorize)"]
-        proxy["ob-ssh"]
-        helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
+        proxy["ob-ssh -> ob-cert-request\n(unprivileged client)"]
+        helper["ob-cert-daemon\n(root, socket-activated; user from SO_PEERCRED)"]
     end
 
     subgraph LLNG["LLNG Portal"]
@@ -118,7 +118,7 @@ flowchart LR
     pam_b -->|2. POST /pam/authorize| authorize
     authorize -->|3. voucher| pam_b
     pam_b -->|4. pam_putenv LLNG_BASTION_VOUCHER| proxy
-    proxy -->|5. ephemeral pubkey + voucher| helper
+    proxy -->|5. ephemeral pubkey + voucher over unix socket| helper
     helper -->|6. POST /pam/bastion-cert + Bearer server token| bastion_cert
     bastion_cert -->|7. signed ~120s cert| helper
     helper -->|8. cert| proxy
@@ -134,9 +134,12 @@ flowchart LR
    The voucher is exported via `pam_putenv("LLNG_BASTION_VOUCHER=...")` — bastion-local, so the
    `SendEnv`/`pam_getenv` trap does not apply.
 2. `ob-ssh [user@]backend` generates an **ephemeral** ed25519 keypair in tmpfs (private key
-   never leaves the bastion). It invokes `ob-bastion-cert-helper` (reached via a narrow
-   `NOPASSWD` sudoers rule — no setuid binary) which POSTs the voucher and the ephemeral public key
-   to `POST /pam/bastion-cert`, authenticating with the bastion's root-only server token as Bearer.
+   never leaves the bastion). It connects (as the logged-in user, via the unprivileged
+   `ob-cert-request` client) to `ob-cert-daemon`, a socket-activated service running as root.
+   The daemon derives the certificate's user from the connection's `SO_PEERCRED` (kernel-verified,
+   never from the request) — so a caller can only mint a cert for itself — then POSTs the voucher and
+   ephemeral public key to `POST /pam/bastion-cert`, authenticating with the bastion's root-only
+   server token as Bearer. No sudo, no setuid; the server token never leaves the daemon.
 3. LLNG verifies the voucher against the stored `(bastion_id, user)` record, then signs a
    certificate (~120 s validity) with `principal=user`, `key-id` encoding
    `bastion=<bastion_id>;user=<user>;target=<host>`, and a `source-address` critical option pinned

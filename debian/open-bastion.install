@@ -21,7 +21,7 @@ usr/sbin/ob-session-recorder-wrapper
 usr/sbin/ob-bastion-setup
 usr/sbin/ob-standalone-setup
 usr/sbin/ob-backend-setup
-usr/sbin/ob-bastion-cert-helper
+usr/sbin/ob-cert-daemon
 usr/sbin/ob-cache-admin
 
 # Shared cert-vouching library (sourced by ob-ssh / ob-scp)
@@ -32,6 +32,7 @@ usr/bin/ob-ssh-cert
 usr/bin/ob-ssh
 usr/bin/ob-scp
 usr/bin/ob-bastion-id
+usr/bin/ob-cert-request
 
 # Man pages
 usr/share/man/man1/ob-ssh-cert.1

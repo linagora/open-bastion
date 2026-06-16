@@ -199,17 +199,24 @@ request_bastion_cert() {
             return 1
         fi
     else
-        # Normal user path: the server token is root-only BY DESIGN. Delegate the
-        # single privileged call to ob-bastion-cert-helper through the narrow
-        # NOPASSWD sudoers rule installed by ob-bastion-setup. The helper always
-        # mints for the INVOKING user, whatever we send it.
-        debug "Server token not readable; delegating to ob-bastion-cert-helper"
+        # Normal user path: the server token is root-only BY DESIGN. The single
+        # privileged call is performed by ob-cert-daemon (socket-activated, runs
+        # as root), reached through the unprivileged ob-cert-request client. The
+        # daemon derives the certificate's user from the connection's SO_PEERCRED
+        # — so it always mints for the connecting user, whatever we send — and
+        # the server token never leaves it. No sudo, no setuid, and minting is
+        # decoupled from the interactive sudo policy (Mode E).
+        debug "Server token not readable; requesting via ob-cert-daemon socket"
         local rc=0
-        response=$(printf '%s\n%s\n' "$VOUCHER" "$pubkey" \
-            | sudo -n /usr/sbin/ob-bastion-cert-helper "$target_host" "$TARGET_GROUP") || rc=$?
+        local client
+        client=$(command -v ob-cert-request 2>/dev/null) || client="/usr/bin/ob-cert-request"
+        # Protocol (newline-delimited): target_host, target_group, voucher, pubkey.
+        response=$(printf '%s\n%s\n%s\n%s\n' \
+            "$target_host" "$TARGET_GROUP" "$VOUCHER" "$pubkey" \
+            | "$client") || rc=$?
         if [ -z "$response" ]; then
-            error "Failed to request bastion certificate via ob-bastion-cert-helper (rc=$rc)."
-            error "Is the sudoers rule installed? (re-run ob-bastion-setup on this bastion)"
+            error "Failed to request bastion certificate via ob-cert-daemon (rc=$rc)."
+            error "Is ob-cert.socket enabled? (re-run ob-bastion-setup on this bastion)"
             return 1
         fi
     fi
