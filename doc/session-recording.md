@@ -6,17 +6,28 @@ using `ob-session-recorder`.
 ## Overview
 
 The session recorder captures all terminal I/O during SSH sessions, creating
-an audit trail for compliance and incident investigation.
+a tamper-evident audit trail for compliance and incident investigation.
 
 ```
-User SSH → Bastion → [ob-session-recorder] → Backend Server
-                              │
-                              ▼
-                     /var/lib/open-bastion/sessions/
-                              │
-                              ▼
-                    (future: upload to LLNG)
+User SSH → Bastion → ob-session-recorder
+                           │ (spawns)
+                           ▼
+                     ob-record-connect ──────────── Unix socket /run/open-bastion/rec.sock
+                     (unprivileged)                         │
+                                                            ▼
+                                                   ob-record-sink [root]
+                                                   (systemd socket-activated)
+                                                           │
+                                                           ▼
+                                           /var/lib/open-bastion/sessions/<user>/
+                                           (root:ob-sessions 0750, files 0640)
+                                           (future: upload to LLNG)
 ```
+
+The recorded user has **no access** to the session files (cannot list, read,
+delete or truncate them — including their own recordings). See
+[doc/design/tamper-evident-session-recording.md](design/tamper-evident-session-recording.md)
+for the full design.
 
 ## Installation
 
@@ -27,9 +38,11 @@ PAM module package.
 
 - `script` command (from `util-linux`, usually pre-installed)
 - `jq` for JSON metadata generation
-- Optional: `asciinema` for asciinema format support
-- Optional: `ttyrec` for ttyrec format support
-- Optional: `uuidgen` for UUID generation (fallback uses /proc/sys/kernel/random/uuid)
+- `uuidgen` for UUID generation (fallback uses /proc/sys/kernel/random/uuid)
+
+Note: `asciinema` and `ttyrec` are **not yet supported** over the recording
+sink in v1. The sink protocol accepts only `script` (typescript) format for
+now; see Recording Formats below.
 
 ```bash
 # Debian/Ubuntu
@@ -39,6 +52,13 @@ apt-get install uuid-runtime jq
 dnf install util-linux jq
 ```
 
+The `ob-record-sink` and `ob-record.socket` systemd units must be enabled on
+the bastion for recording to work:
+
+```bash
+systemctl enable --now ob-record.socket
+```
+
 ## Configuration
 
 ### Session Recorder Configuration
@@ -46,21 +66,21 @@ dnf install util-linux jq
 Create `/etc/open-bastion/session-recorder.conf`:
 
 ```ini
-# Directory where recordings are stored
-# Structure: sessions_dir/<username>/<timestamp>_<session_id>.<format>
-sessions_dir = /var/lib/open-bastion/sessions
-
 # Recording format:
-#   script    - Plain text typescript (default, always available)
-#   asciinema - JSON format, web-friendly (requires asciinema)
-#   ttyrec    - Binary format, compact (requires ttyrec)
+#   script    - Plain text typescript (default, v1 supported format)
+#   asciinema - JSON format, web-friendly (planned; not yet supported over the sink)
+#   ttyrec    - Binary format, compact (planned; not yet supported over the sink)
+# Any format other than "script" falls back to "script" in v1.
 format = script
 
 # Maximum session duration in seconds
-# Sessions exceeding this limit are terminated
+# Sessions exceeding this limit are terminated by the sink (status: truncated)
 # Set to 0 to disable (not recommended)
 max_duration = 86400
 ```
+
+Note: `sessions_dir` is no longer read by the recorder. The storage path is
+owned and managed entirely by `ob-record-sink` (root).
 
 ### SSH Server Configuration
 
@@ -71,7 +91,7 @@ Edit `/etc/ssh/sshd_config` to force all sessions through the recorder:
 ```sshd_config
 # Record all sessions except for emergency admin access
 Match User *,!root,!admin
-    ForceCommand /usr/sbin/ob-session-recorder-wrapper
+    ForceCommand /usr/sbin/ob-session-recorder
 ```
 
 #### Option B: Record specific group only
@@ -79,14 +99,14 @@ Match User *,!root,!admin
 ```sshd_config
 # Only record sessions for users in the "recorded" group
 Match Group recorded
-    ForceCommand /usr/sbin/ob-session-recorder-wrapper
+    ForceCommand /usr/sbin/ob-session-recorder
 ```
 
 #### Option C: Record all sessions
 
 ```sshd_config
 # Record all sessions (use with caution)
-ForceCommand /usr/sbin/ob-session-recorder-wrapper
+ForceCommand /usr/sbin/ob-session-recorder
 ```
 
 Restart SSH after changes:
@@ -106,35 +126,25 @@ systemctl restart sshd
 
 This is the default format because `script` is available on all systems.
 
-### Asciinema
+### Asciinema (planned — not yet supported over the recording sink)
 
 - **Format**: JSON (asciinema v2)
 - **Extension**: `.cast`
 - **Advantages**: Web-friendly, can be replayed in browser, human-readable
 - **Replay**: `asciinema play recording.cast` or web player
 
-Requires `asciinema` package to be installed.
+Asciinema support over the root sink is planned for a future release. In v1
+any `format = asciinema` setting falls back to `script`.
 
-Example header:
-
-```json
-{
-  "version": 2,
-  "width": 80,
-  "height": 24,
-  "timestamp": 1702742400,
-  "env": { "SHELL": "/bin/bash", "TERM": "xterm-256color" }
-}
-```
-
-### ttyrec
+### ttyrec (planned — not yet supported over the recording sink)
 
 - **Format**: Binary
 - **Extension**: `.ttyrec`
 - **Advantages**: Compact, efficient, standard format
 - **Replay**: `ttyplay recording.ttyrec`
 
-Requires `ttyrec` package to be installed.
+ttyrec support over the root sink is planned for a future release. In v1
+any `format = ttyrec` setting falls back to `script`.
 
 ## Session Metadata
 
@@ -159,20 +169,20 @@ Each recording has an accompanying JSON metadata file (`.json`):
 
 ### Metadata Fields
 
-| Field              | Description                              |
-| ------------------ | ---------------------------------------- |
-| `session_id`       | Unique UUID for the session              |
-| `user`             | Unix username                            |
-| `client_ip`        | Client IP address (from SSH_CLIENT)      |
-| `tty`              | TTY device                               |
-| `start_time`       | Session start (ISO 8601 UTC)             |
-| `end_time`         | Session end (ISO 8601 UTC)               |
-| `status`           | `active`, `completed`, or `error:<code>` |
-| `original_command` | SSH_ORIGINAL_COMMAND if any              |
-| `format`           | Recording format used                    |
-| `recording_file`   | Name of the recording file               |
-| `hostname`         | Bastion hostname                         |
-| `version`          | Recorder version                         |
+| Field              | Description                                                          |
+| ------------------ | -------------------------------------------------------------------- |
+| `session_id`       | Unique UUID for the session                                          |
+| `user`             | Unix username                                                        |
+| `client_ip`        | Client IP address (from SSH_CLIENT)                                  |
+| `tty`              | TTY device                                                           |
+| `start_time`       | Session start (ISO 8601 UTC)                                         |
+| `end_time`         | Session end (ISO 8601 UTC)                                           |
+| `status`           | `active`, `completed`, `truncated`, or `aborted` (all sink-observed) |
+| `original_command` | SSH_ORIGINAL_COMMAND if any                                          |
+| `format`           | Recording format used                                                |
+| `recording_file`   | Name of the recording file                                           |
+| `hostname`         | Bastion hostname                                                     |
+| `version`          | Recorder version                                                     |
 
 ## Directory Structure
 
@@ -189,10 +199,13 @@ Each recording has an accompanying JSON metadata file (`.json`):
     └── ...
 ```
 
-- Sessions root: mode `1770`, owned `root:ob-sessions`
-- Per-user subdirectories: mode `2770` (setgid), owned `user:ob-sessions`, created by the wrapper
-- Recording files: inherit `ob-sessions` group from directory's setgid bit
-- Organization: One subdirectory per user; users cannot access other users' recordings
+- Sessions root: mode `0750`, owned `root:ob-sessions`
+- Per-user subdirectories: mode `0750`, owned `root:ob-sessions`, created by `ob-record-sink`
+- Recording and metadata files: mode `0640`, owned `root:ob-sessions`
+- The recorded user is **not** a member of `ob-sessions`; every path level is
+  `o-rwx`, so a user has **zero** DAC access to any recording — including their
+  own. They cannot list, read, unlink or truncate.
+- Auditors added to the `ob-sessions` group gain read-only access to all recordings.
 
 ## Replaying Sessions
 
@@ -223,34 +236,41 @@ scriptreplay timing.txt recording.typescript
 
 ## Security Considerations
 
-### Privilege Separation via Setgid Wrapper
+### Tamper-Evident Recording via Root Socket Sink
 
-Session recordings are written via `ob-session-recorder-wrapper`, a setgid helper
-owned by `root:ob-sessions`. This design provides tamper-evident recordings:
+Session recordings are written by `ob-record-sink`, a root-privileged
+systemd socket-activated service. This design replaces the previous
+privilege-separation approach and provides genuine tamper-evident recordings.
 
-- The sessions directory `/var/lib/open-bastion/sessions` has mode `1770` and is
-  owned by `root:ob-sessions` (sticky bit set).
-- The wrapper uses its elevated effective gid (`ob-sessions`) **only** to create
-  the per-user session subdirectory with mode `2770` (setgid bit on directory)
-  and ownership `user:ob-sessions`.
-- After directory creation, the wrapper explicitly drops the elevated gid via
-  `setregid()`, restoring the user's original gid. `exec` does **not**
-  automatically strip an already-acquired effective/saved gid — only setgid
-  bits on the exec'd file are ignored. The explicit drop ensures the script
-  and the user's shell run with the user's original gid only.
-- Files created inside the per-user directory inherit the `ob-sessions` group
-  thanks to the directory's setgid bit — no process-level privilege needed.
-- Recorded users are **not** members of `ob-sessions`, so they cannot access
-  other users' session recordings.
+Key security properties:
 
-This means `ForceCommand` should point to `ob-session-recorder-wrapper`, not
-directly to `ob-session-recorder`.
+- `ForceCommand` points directly at `/usr/sbin/ob-session-recorder`. The
+  recorder runs under the user's own uid and streams the session to the root
+  sink over a Unix socket (`/run/open-bastion/rec.sock`).
+- The sink obtains the connecting user's identity via kernel `SO_PEERCRED` —
+  never from anything the client sends. A user cannot spoof another user's
+  identity or cause path traversal.
+- All files are written **root-owned** (`root:ob-sessions 0640`) inside
+  `/var/lib/open-bastion/sessions/<user>/` (`root:ob-sessions 0750`). The
+  recorded user is not a member of `ob-sessions` and every level is `o-rwx`,
+  so the user has **no DAC right** to list, read, unlink, rename or truncate
+  any recording — including their own.
+- Recording is **fail-closed**: if the sink is unreachable, the session is
+  refused. There is no fallback to a user-owned local file, which would
+  re-introduce the deletion risk.
+- A user who is root on a **backend** server cannot reach or alter the
+  recordings: they live on the bastion (the mandatory transit point), root-owned.
+- Root **on the bastion itself** is trusted and out of scope (see
+  [Threat Model](design/tamper-evident-session-recording.md)).
+
+For the full design, protocol, and migration details see
+[`doc/design/tamper-evident-session-recording.md`](design/tamper-evident-session-recording.md).
 
 ### File Permissions
 
-- Sessions directory: mode `1770`, owned `root:ob-sessions`
-- Per-user subdirectories: mode `2770` (setgid), owned `user:ob-sessions`
-- Recording files: inherit `ob-sessions` group from directory setgid bit
+- Sessions directory: mode `0750`, owned `root:ob-sessions`
+- Per-user subdirectories: mode `0750`, owned `root:ob-sessions` (created by sink)
+- Recording and metadata files: mode `0640`, owned `root:ob-sessions`
 - Config file: `/etc/open-bastion/session-recorder.conf`, mode `0644` (root-owned)
 
 ### Storage Security
@@ -263,13 +283,14 @@ directly to `ob-session-recorder`.
 
 Session recording is a faithful pty replay, not an independent audit
 trail: a determined user can attempt to bypass the pty (via `setsid`,
-`at`, `cron`, `nohup`, `systemd --user`) or tamper with their own
-recording on disk. For a kernel-level, tamper-evident syscall log
-covering `execve`, outbound `connect`, and writes to sensitive paths
-(including the recordings directory itself), enable the optional
-auditd-based trace — see [Primary Audit Trace](audit.md). It is
-opt-in (`ob-bastion-setup --enable-audit-trace`) and complementary to
-session recording, not a replacement.
+`at`, `cron`, `nohup`, `systemd --user`). Recording files themselves
+are root-owned and the user has no access to alter or delete them (see
+Security Considerations above). For a kernel-level, tamper-evident
+syscall log covering `execve`, outbound `connect`, and writes to
+sensitive paths (including the recordings directory itself), enable the
+optional auditd-based trace — see [Primary Audit Trace](audit.md). It
+is opt-in (`ob-bastion-setup --enable-audit-trace`) and complementary
+to session recording, not a replacement.
 
 ### Network Security
 
@@ -293,12 +314,12 @@ journalctl -t ob-session-recorder
 
 ### Common Issues
 
-| Issue                | Cause                       | Solution                                            |
-| -------------------- | --------------------------- | --------------------------------------------------- |
-| No recording created | ForceCommand not active     | Check sshd_config Match rules                       |
-| Empty recording      | Session ended immediately   | Check for shell issues                              |
-| Permission denied    | Wrong directory permissions | Check `ob-sessions` group and directory mode `1770` |
-| Format not available | ttyrec not installed        | Install ttyrec or use asciinema                     |
+| Issue                | Cause                                           | Solution                                                                                 |
+| -------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| No recording created | ForceCommand not active                         | Check sshd_config Match rules                                                            |
+| Empty recording      | Session ended immediately                       | Check for shell issues                                                                   |
+| Permission denied    | Wrong directory permissions or sink not running | Check `ob-sessions` group, directory mode `0750`, and that `ob-record.socket` is enabled |
+| Format not available | asciinema/ttyrec not supported yet              | Use `format = script` (only format supported in v1)                                      |
 
 ### Debug mode
 

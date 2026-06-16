@@ -203,23 +203,25 @@ chmod 600 /etc/open-bastion/openbastion.conf
 ```bash
 mkdir -p /etc/open-bastion
 cat > /etc/open-bastion/session-recorder.conf << 'EOF'
-# Session recordings directory
-sessions_dir = /var/lib/open-bastion/sessions
-
-# Recording format (script is default, always available)
-# Use asciinema for web replay if installed
+# Recording format (script is the v1 supported format over the recording sink)
+# asciinema and ttyrec are planned but not yet supported; they fall back to script.
 format = script
 
 # Max session duration (8 hours)
+# The sink enforces this and marks the session status "truncated" if exceeded.
 max_duration = 28800
 EOF
 
-# Sessions directory is created by the package with the correct permissions:
-# mode 1770, owned root:ob-sessions (users cannot delete their recordings)
+# The sessions directory tree is created and owned by ob-record-sink (root).
+# The package sets up the parent with the correct permissions:
+# mode 0750, owned root:ob-sessions (the recorded user cannot delete or read recordings)
 # If you need to recreate it manually:
 # mkdir -p /var/lib/open-bastion/sessions
 # chown root:ob-sessions /var/lib/open-bastion/sessions
-# chmod 1770 /var/lib/open-bastion/sessions
+# chmod 0750 /var/lib/open-bastion/sessions
+
+# Enable the recording socket (must be done before first use):
+systemctl enable --now ob-record.socket
 ```
 
 ### Step 4: Enroll Server
@@ -257,7 +259,7 @@ PubkeyAuthentication yes
 
 # Session recording for all users except emergency admin
 Match User *,!root,!admin
-    ForceCommand /usr/sbin/ob-session-recorder-wrapper
+    ForceCommand /usr/sbin/ob-session-recorder
 
 # Emergency admin access (no recording, direct shell)
 Match User admin
