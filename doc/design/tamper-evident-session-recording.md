@@ -283,8 +283,8 @@ pages exactly like the `ob-cert-*` set (template already merged in #145).
   out. This is strictly weaker (the fallback file is user-deletable) and is for
   non-audit deployments only.
 
-This knob is the operational counterpart to AppArmor's *inherent* fail-open,
-and is the main reason the sink is preferred for an audit control.
+Being able to choose **fail-closed** is the main reason the sink is preferred for
+an audit control: the integrity guarantee never silently disappears.
 
 ## §10. Security considerations
 
@@ -303,7 +303,7 @@ and is the main reason the sink is preferred for an audit control.
   *user-writable*, so a user can pre-plant a symlink (`…/sessions/<me>` →
   `/etc`, say) before the migration step runs as root. A naïve `chown -R` /
   `install` would then have root write or chown *through* the symlink. The
-  migration (§13) must apply the same `O_NOFOLLOW` discipline: refuse any
+  migration (§12) must apply the same `O_NOFOLLOW` discipline: refuse any
   per-user entry that is a symlink or not a directory, and recreate the tree
   root-owned rather than chown-in-place. After migration the parent is `0750`
   `o-rwx`, so the planting vector is closed for steady state.
@@ -330,14 +330,7 @@ sink, keyed on the session's `ssh_tty` (from the header) and the
 setgid-utmp binary. #150 thus folds into this work instead of needing its own
 privileged component.
 
-## §12. Defense-in-depth (optional, later)
-
-AppArmor (Debian/SUSE) / SELinux (RHEL) profiles denying write/unlink on
-`/var/lib/open-bastion/sessions/**` to everything except the sink add a second
-layer. Not required (DAC already fully covers the threat model) and explicitly
-*not* a substitute (LSMs fail-open). Track separately.
-
-## §13. Migration
+## §12. Migration
 
 1. Ship `ob-record-sink` + units + recorder changes behind
    `session_recording_required=false` (fail-open) so existing hosts keep working.
