@@ -19,6 +19,11 @@ SHIMBIN="$WORK/shimbin"; mkdir -p "$SHIMBIN"
 ln -sf "$SSO_DIR/ob-builder-curl-shim.sh" "$SHIMBIN/curl"
 obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --allow-http; }
 
+# Standalone host: only the harness wires it in (lib.sh keeps it out of the
+# shared VM set). Same as deploy-ansible.sh — append it here so it is recreated,
+# bootstrapped and deployed. Set OB_STANDALONE_VM="" to skip it.
+[ -n "$STANDALONE_VM" ] && ALL_VMS+=("$STANDALONE_VM")
+
 # run_installer <vm> <installer> [extra installer args…]
 # Copies the installer and runs it as root with the lab flags. --skip-install
 # (package pre-installed in bootstrap, unsigned repo), --force (postinst already
@@ -36,10 +41,12 @@ preflight; build_deb; ensure_sso; recreate_vms
 phase "Bootstrap VMs (incl. package install — shell path uses --skip-install)"
 for v in "${ALL_VMS[@]}"; do bootstrap_vm "$v" 1; done
 get_cookie
+mint_dwho_cert   # so the connection-phase + standalone assertions actually run
 
 # ── Phase 1: bastion installer — enrol, read bastion_id, then setup ──────────
-phase "Phase 1 — bastion (ob-builder --output-shell)"
-obbuild --config "$CONFIG_DIR/build-bastion.yml" --output-shell "$WORK/boot-bastion.sh" >"$WORK/gen-bastion.log" 2>&1 \
+phase "Phase 1 — bastion (ob-builder --output-shell, scenario=$SCENARIO)"
+sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-bastion.yml" > "$WORK/build-bastion.yml"
+obbuild --config "$WORK/build-bastion.yml" --output-shell "$WORK/boot-bastion.sh" >"$WORK/gen-bastion.log" 2>&1 \
     && ok "generated bastion installer" || { bad "ob-builder bastion failed"; cat "$WORK/gen-bastion.log"; }
 
 info "enrol the bastion (--skip-setup), approving the device code in parallel"
@@ -54,8 +61,9 @@ run_installer "$BASTION_VM" "$WORK/boot-bastion.sh" --skip-enroll >"$WORK/bastio
     && ok "bastion setup complete" || bad "bastion setup failed — see $WORK/bastion-setup.log"
 
 # ── Phase 2: backend installer with allowed_bastions=bastion_id ──────────────
-phase "Phase 2 — backends (ob-builder --output-shell, allowed_bastions=$BID)"
-sed "s/^allowed_bastions:.*/allowed_bastions: $BID/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
+phase "Phase 2 — backends (ob-builder --output-shell, allowed_bastions=$BID, scenario=$SCENARIO)"
+sed -e "s/^allowed_bastions:.*/allowed_bastions: $BID/" \
+    -e "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
 obbuild --config "$WORK/build-backend.yml" --output-shell "$WORK/boot-backend.sh" >"$WORK/gen-backend.log" 2>&1 \
     && ok "generated backend installer" || bad "ob-builder backend failed"
 for v in "${BACKEND_VMS[@]}"; do
@@ -65,5 +73,23 @@ for v in "${BACKEND_VMS[@]}"; do
     grep -q "Setup complete\|5/5\|Role-specific setup" "$WORK/$v.log" && ok "$v deployed" || bad "$v deploy — see $WORK/$v.log"
 done
 
+# ── Phase 3: standalone installer (bastion+backend in one, no bastion in front) ─
+# A standalone does not need a bastion_id, so it is a single installer run like a
+# backend: enrol + setup in one go, approving the device code in parallel. In
+# Mode E this locks port 22 afterwards, which is fine — every assertion goes
+# through the dwho SSO cert (see verify_standalone).
+if [ -n "$STANDALONE_VM" ]; then
+    phase "Phase 3 — standalone (ob-builder --output-shell, scenario=$SCENARIO)"
+    sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-standalone.yml" > "$WORK/build-standalone.yml"
+    obbuild --config "$WORK/build-standalone.yml" --output-shell "$WORK/boot-standalone.sh" >"$WORK/gen-standalone.log" 2>&1 \
+        && ok "generated standalone installer" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
+    ( approve_device "${IP[$STANDALONE_VM]}" ) &
+    run_installer "$STANDALONE_VM" "$WORK/boot-standalone.sh" >"$WORK/$STANDALONE_VM.log" 2>&1
+    wait
+    grep -q "Setup complete\|5/5\|Role-specific setup" "$WORK/$STANDALONE_VM.log" \
+        && ok "$STANDALONE_VM deployed" || bad "$STANDALONE_VM deploy — see $WORK/$STANDALONE_VM.log"
+fi
+
 verify_e2e
+verify_standalone
 summary
