@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-16
+
+Completes the certificate-based bastion→backend hop: `ob-ssh` and `ob-scp` now
+work end to end on OpenSSH 9.8+ (Debian 13, etc.), and the session recorder no
+longer hides command exit codes.
+
+> Requires the matching `pam-access` LemonLDAP::NG plugin: the cert
+> `source-address` pin is now opt-in (`pamAccessBastionCertPinSourceAddress`,
+> off by default), and each ephemeral hop certificate's fingerprint is
+> registered so the backend's `/pam/authorize` fingerprint binding accepts it.
+
+### Fixed
+
+- **`ob-ssh` / `ob-scp` bastion→backend hop works end to end.** The per-session
+  `LLNG_BASTION_VOUCHER` and the onward ephemeral certificate never reached the
+  backend on OpenSSH >= 9.8: each connection runs as **two** processes named
+  `sshd-session` (the privileged monitor and an unprivileged child), and the
+  SSH-fingerprint spool writer (`ob-ssh-principals`) and the `pam_openbastion`
+  reader keyed the spool on different PIDs, so the fingerprint was never
+  recovered and the hop fell back to a no-cert authorize. The bastion helper,
+  the backend helper and `pam_openbastion` now all converge on the **outermost
+  contiguous `sshd-session`** (the monitor), with an `sshd` fallback for pre-9.8
+  OpenSSH (RHEL/Rocky 9). `/run/open-bastion` is created `0711` (traversable by
+  the `nobody` principals helper, not listable) so the spool can actually be
+  written.
+- **`ob-session-recorder` no longer hides command failures.** As the bastion
+  `ForceCommand` it wrapped commands in `script(1)` without `-e`, so any
+  non-interactive command through a bastion (`ob-ssh` / `ob-scp` hops, scripted
+  `ssh`, CI jobs) reported success even when it failed, and the recorded session
+  status was always `completed`. It now uses `script -e` (util-linux >= 2.31:
+  Debian 11+, RHEL/Rocky 8+) so the child's exit status propagates; older
+  `script` falls back to the previous behaviour.
+
+### Security
+
+- The SSH-fingerprint spool parent `/run/open-bastion` is `0711` (traverse-only,
+  not world-listable) on both bastion and backend, and the `ob-enroll`
+  device-state file is `0600` (it now lives in the traversable
+  `/run/open-bastion`, so it is locked down by its own mode).
+
 ## [0.3.2] - 2026-06-16
 
 Bug-fix release: Mode E privilege escalation now behaves as documented —

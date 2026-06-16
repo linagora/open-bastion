@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.3.2
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -208,6 +208,13 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.4.0-1
+- Certificate bastion->backend hop (ob-ssh/ob-scp) works end to end on OpenSSH
+  9.8+: the SSH-fingerprint spool now converges on the outermost sshd-session on
+  both bastion and backend (with an sshd fallback for pre-9.8), and
+  /run/open-bastion is 0711 so the principals helper can write it.
+  ob-session-recorder propagates the recorded command's exit status (script -e).
+  Requires the matching pam-access plugin. See CHANGELOG.md
 * Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.2-1
 - Mode E sudo requires the LLNG token again (authorize_only no longer bypasses
   it for the sudo PAM service); sudo -i works for SSO users (the separate sudo-i

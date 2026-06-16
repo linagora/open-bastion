@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-VERSION="0.3.2"
+VERSION="0.4.0"
 PROG_NAME=$(basename "$0")
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" >/dev/null 2>&1 && pwd)
 
