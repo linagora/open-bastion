@@ -63,7 +63,11 @@ SSHD_CONFIG_DIR="/etc/ssh/sshd_config.d"
 PAM_SSHD="/etc/pam.d/sshd"
 OB_CONFIG="/etc/open-bastion/openbastion.conf"
 OB_TOKEN="/var/lib/open-bastion/token"
-SESSION_RECORDER="/usr/sbin/ob-session-recorder-wrapper"
+# ForceCommand points directly at the recorder. The recording is streamed to the
+# root sink (ob-record-sink) over a socket, so the recorder no longer needs the
+# old setgid ob-session-recorder-wrapper (which created a user-owned per-user
+# dir — exactly what the tamper-evident design removes).
+SESSION_RECORDER="/usr/sbin/ob-session-recorder"
 SESSION_RECORDER_CONF="/etc/open-bastion/session-recorder.conf"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 PAM_SUDO="/etc/pam.d/sudo"
@@ -588,18 +592,53 @@ max_duration = 28800
     track_created "$SESSION_RECORDER_CONF"
     info "Created $SESSION_RECORDER_CONF"
 
-    # Create sessions directory.
-    # Mode 3771 (drwxrws--t root:ob-sessions):
-    #   - setgid (g+s) so per-user subdirs inherit group ob-sessions;
-    #   - sticky  (o+t) so only owners can unlink their own entries;
-    #   - o+x (no o+r) so a connecting user (not in ob-sessions) can traverse
-    #     into its own subdir without being able to list other users' dirs.
-    # The o+x is required: after the setgid wrapper drops its elevated gid,
-    # the recorder script runs with the user's gid and would otherwise fail to
-    # reach its own subdir created by the wrapper.
+    # ob-sessions group (normally created by the package; be defensive for
+    # source installs). Recordings are owned root:ob-sessions so auditors in this
+    # group can read them; the recorded user is NOT a member.
+    getent group ob-sessions >/dev/null 2>&1 || groupadd --system ob-sessions 2>/dev/null || true
+
+    # Sessions tree, NEW tamper-evident layout: root:ob-sessions 0750.
+    #   - o-rwx  → a connecting user (not in ob-sessions) has NO access at all:
+    #     it cannot list, read, unlink or truncate any recording, including its
+    #     own. This is the whole point (#151); the recording is written by the
+    #     root sink, not by the user.
+    #   - g+rx (group ob-sessions) → auditors can read.
+    # NOTE: this replaces the old 3771 setgid+sticky+o+x layout, which left the
+    # tree user-traversable and the per-user dirs user-owned (deletable).
     mkdir -p /var/lib/open-bastion/sessions
-    chgrp ob-sessions /var/lib/open-bastion/sessions
-    chmod 3771 /var/lib/open-bastion/sessions
+    chown root:ob-sessions /var/lib/open-bastion/sessions
+    chmod 0750 /var/lib/open-bastion/sessions
+
+    # Migrate any legacy user-owned per-user dirs to root ownership, safely:
+    # skip symlinks / non-dirs (a user could have planted one while the tree was
+    # still writable), and re-own + lock down the rest. The sink also re-owns on
+    # next use, but doing it here closes the window immediately.
+    local d
+    for d in /var/lib/open-bastion/sessions/*/; do
+        [ -e "$d" ] || continue
+        if [ -L "${d%/}" ] || [ ! -d "$d" ]; then
+            warn "Skipping non-directory/symlink in sessions tree: ${d%/}"
+            continue
+        fi
+        chown -h root:ob-sessions "${d%/}" 2>/dev/null || true
+        chmod 0750 "${d%/}" 2>/dev/null || true
+        # Recording/metadata files: root:ob-sessions 0640.
+        find "$d" -maxdepth 1 -type f -exec chown root:ob-sessions {} + 2>/dev/null || true
+        find "$d" -maxdepth 1 -type f -exec chmod 0640 {} + 2>/dev/null || true
+    done
+
+    # Enable the recording sink socket (mirrors ob-cert.socket). Recording is
+    # mandatory when configured, so the recorder fails closed if this is down.
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable --now ob-record.socket >/dev/null 2>&1; then
+            info "Enabled ob-record.socket (session recording sink)"
+        else
+            warn "Could not enable ob-record.socket — enable it manually:"
+            warn "  systemctl enable --now ob-record.socket"
+        fi
+    else
+        warn "systemctl not available — enable ob-record.socket manually"
+    fi
 }
 
 # Allow bastion users to obtain vouched ephemeral certificates.

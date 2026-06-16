@@ -17,11 +17,11 @@ etc/open-bastion/ssh-proxy.conf.example
 usr/sbin/ob-enroll
 usr/sbin/ob-heartbeat
 usr/sbin/ob-session-recorder
-usr/sbin/ob-session-recorder-wrapper
 usr/sbin/ob-bastion-setup
 usr/sbin/ob-standalone-setup
 usr/sbin/ob-backend-setup
 usr/sbin/ob-cert-daemon
+usr/sbin/ob-record-sink
 usr/sbin/ob-cache-admin
 
 # Shared cert-vouching library (sourced by ob-ssh / ob-scp)
@@ -33,6 +33,7 @@ usr/bin/ob-ssh
 usr/bin/ob-scp
 usr/bin/ob-bastion-id
 usr/bin/ob-cert-request
+usr/bin/ob-record-connect
 
 # Man pages
 usr/share/man/man1/ob-ssh-cert.1
@@ -40,6 +41,7 @@ usr/share/man/man1/ob-ssh.1
 usr/share/man/man1/ob-scp.1
 usr/share/man/man1/ob-bastion-id.1
 usr/share/man/man1/ob-cert-request.1
+usr/share/man/man1/ob-record-connect.1
 usr/share/man/man8/ob-enroll.8
 usr/share/man/man8/ob-heartbeat.8
 usr/share/man/man8/ob-bastion-setup.8
@@ -47,6 +49,7 @@ usr/share/man/man8/ob-standalone-setup.8
 usr/share/man/man8/ob-backend-setup.8
 usr/share/man/man8/ob-session-recorder.8
 usr/share/man/man8/ob-cert-daemon.8
+usr/share/man/man8/ob-record-sink.8
 
 # Audit trace templates (deployed by `ob-bastion-setup --enable-audit-trace`)
 usr/share/open-bastion/audit/rules.d/open-bastion.rules

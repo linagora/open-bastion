@@ -163,22 +163,16 @@ case "$1" in
         # Create open-bastion-sudo group for defense-in-depth sudo authorization (Mode E)
         groupadd --system open-bastion-sudo 2>/dev/null || true
         mkdir -p /var/lib/open-bastion/sessions
-        chgrp ob-sessions /var/lib/open-bastion/sessions
-        # Mode 3771 (drwxrws--t root:ob-sessions): setgid so per-user subdirs
-        # inherit group ob-sessions; sticky so users only unlink their own
-        # entries; o+x (NO o+r) so a connecting user — who is NOT in ob-sessions
-        # and whose elevated gid the recorder wrapper deliberately drops before
-        # exec — can still traverse into its own subdir created by the wrapper.
-        # Without o+x the recorder fails with "User sessions directory ... does
-        # not exist and could not be created" and the session is torn down.
-        # NOTE: the parent /var/lib/open-bastion must also stay traversable
-        # (711, set both above and in the MODE block below) for the same reason.
-        chmod 3771 /var/lib/open-bastion/sessions
-        # Set setgid on the session recorder wrapper so it runs with gid ob-sessions
-        if [ -f /usr/sbin/ob-session-recorder-wrapper ]; then
-            chgrp ob-sessions /usr/sbin/ob-session-recorder-wrapper
-            chmod 2755 /usr/sbin/ob-session-recorder-wrapper
-        fi
+        # Tamper-evident layout: root:ob-sessions 0750. Recordings are written by
+        # the root sink (ob-record-sink) and are unreadable/undeletable by the
+        # recorded user (NOT in ob-sessions); auditors in ob-sessions can read.
+        # Replaces the old 3771 setgid+sticky+o+x layout (user-traversable, with
+        # user-owned per-user dirs). ob-bastion-setup re-asserts this and migrates
+        # any legacy user-owned subdirs.
+        chown root:ob-sessions /var/lib/open-bastion/sessions
+        chmod 0750 /var/lib/open-bastion/sessions
+        # Remove the obsolete setgid recorder wrapper if a prior version left it.
+        rm -f /usr/sbin/ob-session-recorder-wrapper
 
         db_get open-bastion/pam-mode
         MODE="$RET"

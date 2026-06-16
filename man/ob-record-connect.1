@@ -1,0 +1,67 @@
+.TH OB-RECORD-CONNECT 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-record-connect \- unprivileged connector for the session-recording sink
+.SH SYNOPSIS
+.B ob-record-connect
+.I HEADER_JSON
+.I CMD
+.RI [ ARGS ...]
+.SH DESCRIPTION
+.B ob-record-connect
+is the unprivileged half of the tamper-evident session-recording flow. It is
+invoked by
+.BR ob-session-recorder (8)
+(running as the logged-in user); you do not normally run it by hand.
+.PP
+It connects to the local Unix socket served by
+.BR ob-record-sink (8)
+(default \fI/run/open-bastion/rec.sock\fR), moves the connected socket to file
+descriptor 3 (kept open across
+.BR exec ),
+writes the one-line JSON metadata
+.I HEADER_JSON
+to it, then
+.BR exec s
+.I CMD
+\fIARGS\fR \(em typically
+.BR script (1)
+writing its typescript to \fI/dev/fd/3\fR, which streams the recording straight
+into the socket.
+.PP
+A POSIX shell cannot open an
+.B AF_UNIX
+socket (a \fBexec 3<>\fR redirection opens regular files/FIFOs only), which is
+why this small C helper exists. It carries no privilege and holds no secret: the
+sink derives the recorded user from the connection's
+.B SO_PEERCRED
+(kernel-verified), so the header cannot make the sink write under another
+user's name.
+.SH ENVIRONMENT
+.TP
+.B OB_RECORD_SOCKET
+Override the socket path (default \fI/run/open-bastion/rec.sock\fR).
+.SH EXIT STATUS
+.TP
+.B 0
+The command was exec'd (its own exit status then applies).
+.TP
+.B 1
+Could not reach the sink, or an I/O error occurred. The command is
+.B not
+exec'd \(em recording is mandatory, so the caller fails closed.
+.TP
+.B 2
+Usage error.
+.TP
+.B 127
+The command could not be exec'd.
+.SH FILES
+.TP
+.I /run/open-bastion/rec.sock
+The session-recording socket
+.RB ( ob-record.socket ).
+.SH SEE ALSO
+.BR ob-record-sink (8),
+.BR ob-session-recorder (8)
+.SH AUTHOR
+Linagora

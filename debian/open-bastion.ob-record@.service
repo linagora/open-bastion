@@ -1,0 +1,28 @@
+[Unit]
+Description=Open Bastion session recording sink (per-connection)
+Documentation=https://github.com/linagora/open-bastion
+
+[Service]
+# One short-lived instance per connection. systemd passes the connected socket
+# as stdin; the sink reads the JSON header then the recording stream from fd 0.
+ExecStart=/usr/sbin/ob-record-sink
+StandardInput=socket
+StandardError=journal
+# Runs as root to write recordings the recorded user cannot touch
+# (/var/lib/open-bastion/sessions/<user>/, root-owned, group ob-sessions).
+User=root
+
+# Hardening: it resolves the peer uid (NSS, may be networked) and writes only
+# under the sessions tree. AF_INET(6) is required for NSS (getpwuid via
+# libnss_openbastion / SSSD); AF_UNIX for the activation socket itself.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/open-bastion/sessions
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

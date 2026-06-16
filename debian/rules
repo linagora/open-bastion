@@ -38,4 +38,8 @@ override_dh_installsystemd:
 	# debian/open-bastion.ob-cert@.service. Not enabled/started at install time —
 	# ob-bastion-setup activates it (bastion/standalone only).
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-cert ob-cert.socket
+	# Session-recording sink socket: installed from debian/open-bastion.ob-record.socket
+	# and debian/open-bastion.ob-record@.service. Not enabled/started at install
+	# time — ob-bastion-setup activates it (bastion/standalone only).
+	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-record ob-record.socket
 	dh_installsystemd -popen-bastion-desktop --name=ob-session-monitor ob-session-monitor.service
