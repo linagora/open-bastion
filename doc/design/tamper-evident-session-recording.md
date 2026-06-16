@@ -46,12 +46,12 @@ user cannot touch.
   session (uid = user)                       systemd / root domain
   ┌───────────────────────────┐
   │ sshd → ob-session-recorder │
-  │   connect /run/open-bastion/rec.sock ───▶ rec.socket (0666, Accept=yes)
+  │   ob-record-connect: connect rec.sock ──▶ rec.socket (0666, Accept=yes)
   │   ① send header line (JSON)               └─▶ ob-record-sink  (root, per conn)
-  │   ② script -q -e -f /dev/fd/3 -c $shell        - peer uid via SO_PEERCRED  ◀── authority
-  │      (fd 3 = the socket) ─────────────▶        - resolve username from uid
+  │   ② script -q -f -c $shell <FIFO>              - peer uid via SO_PEERCRED  ◀── authority
+  │      script→FIFO→connect→socket ──────▶        - resolve username from uid
   │                                                - mkdir .../sessions/<user> (root:ob-sessions 0750)
-  │   user types … rm, : > file … ✗ no access      - open <id>.cast (root:ob-sessions 0640)
+  │   user types … rm, : > file … ✗ no access      - open <id>.typescript (root:ob-sessions 0640)
   └───────────────────────────┘                    - copy stream → file
                                                     - on EOF: <id>.json status=completed
                                                     - (optionally) utmp/wtmp register
@@ -115,39 +115,44 @@ in `ob-cert-daemon`), to bound a hostile or runaway client. Exceeding the cap
 finalizes the file as `status:"truncated-by-limit"` rather than letting it grow
 unbounded (a DoS, explicitly logged).
 
-## §3. How `script(1)` writes to the socket — the `/dev/fd` trick
+## §3. How `script(1)`'s output reaches the socket — via a FIFO
 
-`script` writes its typescript to a _file path_ argument, not a stream. We give
-it the socket connection as a file descriptor.
+`script` writes its typescript to a _file path_ argument, and it `open()`s that
+path itself. Two consequences shape the design:
 
-> **A POSIX shell cannot open an AF_UNIX socket.** `exec 3<>/path/to.sock` opens
-> a regular file/FIFO, not a connected stream socket — it does **not** work for a
-> Unix-domain socket. The connect therefore lives in a small C helper, not in the
-> recorder shell script.
+> **A path cannot be a socket.** A Unix-domain socket cannot be `open()`ed via a
+> path or `/dev/fd/N` — `open()` returns `ENXIO`. So we cannot point `script` at
+> the socket (directly, or via `/dev/fd`). And a POSIX shell cannot open an
+> AF_UNIX socket either (`exec 3<>/path.sock` opens regular files/FIFOs only). The
+> socket therefore lives in a small C helper, and `script` writes to a **FIFO**.
 
-The canonical path is a tiny **unprivileged** helper **`ob-record-connect`**
-(sibling of `ob-cert-request`): it `connect()`s the socket, writes the header
-line, then `exec`s `script` with the connected fd:
+The unprivileged helper **`ob-record-connect`** (sibling of `ob-cert-request`)
+`connect()`s the socket, writes the header, then forwards a stream to it. The
+recorder wires `script` → FIFO → `ob-record-connect` → socket:
 
 ```sh
-# ob-session-recorder calls the helper, which connects + sends the header and
-# then exec()s script onto the connected fd (passed as /dev/fd/N):
-ob-record-connect "$header_json" -- \
-    script -q -e -f -c "$shell" /dev/fd/3   # script fopen()s the socket fd
+# ob-session-recorder (simplified):
+fifo=$(mktemp -u); mkfifo -m 600 "$fifo"
+ob-record-connect "$header_json" "$fifo" &   # connect + header, then FIFO -> socket
+# (verify the connect succeeded here; if not, refuse the session — fail closed)
+script -q -f -c "$shell" "$fifo"             # script open()s the FIFO (a real inode)
+wait                                          # forwarder drains, half-closes the socket
 ```
 
-Inside `ob-record-connect` (C): `socket(AF_UNIX)` + `connect()` → fd 3,
-`write(3, header)`, then `execvp` the trailing command. `script` `fopen()`s
-`/dev/fd/3`, which on Linux resolves to the already-connected socket — writes go
-straight to the sink. `-f` flushes after each write so the sink (and any live
-monitor) sees output promptly. (`-e`, adopted in commit `5c327f1`, only sets the
-_recorder process's own_ exit code — it does not affect what the sink records;
-the recorded `status` is sink-observed, see §5.)
+`ob-record-connect` `connect()`s **first** (fast for a local listening socket)
+and exits non-zero on failure, so the recorder can refuse the session *before*
+`script` starts. It then writes the header and copies the FIFO to the socket
+until EOF. `script`'s PTY handling (raw mode, window size, **Ctrl-C** delivered
+to the foreground process group) is unchanged — we reuse it rather than
+re-implementing a PTY relay. `-f` flushes after each write so the sink (and any
+live monitor) sees output promptly.
+
+For a metadata-only **transfer** session there is no PTY: the recorder calls
+`ob-record-connect "$header" /dev/null` (immediate EOF → header only).
 
 > Note: timing files. Plain `script` keeps timing in a separate `-t` stream.
-> For v1 we record the typescript only (as today). asciinema/ttyrec, which embed
-> timing in one stream, map cleanly onto "header + stream" and can be added
-> without protocol change.
+> For v1 we record the typescript only. asciinema/ttyrec, which embed timing in
+> one stream, map cleanly onto "header + stream" and can be added later.
 
 ## §4. File-transfer sessions (scp / sftp / rsync — no PTY)
 
@@ -255,8 +260,8 @@ the directory across `/run` wipes (mirrors the cert socket).
 
 | Component                                       | Priv                    | Role                                                                           |
 | ----------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| `ob-session-recorder` (existing, modified)      | user                    | produce the stream, open the socket, send header, stream via `script`          |
-| `ob-record-connect` (new, optional)             | user                    | connect socket + write header, `exec script … /dev/fd/3`                       |
+| `ob-session-recorder` (existing, modified)      | user                    | run `script` onto a FIFO, orchestrate the channel, fail closed if sink is down |
+| `ob-record-connect` (new)                       | user                    | connect socket + write header, then forward FIFO (or /dev/null) → socket       |
 | `ob-record-sink` (new)                          | root (socket-activated) | `SO_PEERCRED` → user, write root-owned files + metadata, enforce caps/timeouts |
 | `ob-record.socket` / `ob-record@.service` (new) | —                       | socket activation                                                              |
 
@@ -343,7 +348,6 @@ recording is never silently weakened and no host is locked out by ordering:
 
 ## Open questions
 
-- `ob-record-connect` helper vs shell `/dev/fd` — measure reliability.
 - utmp line naming for `who` (the script pty vs the sshd `SSH_TTY`).
 - Keep timing data (separate `-t` stream / asciinema) in v1 or v2?
 

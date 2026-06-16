@@ -192,13 +192,16 @@ test_build_header_no_newline_injection() {
     fi
 }
 
-# ── Test 9: the recorder streams to the sink via ob-record-connect /dev/fd/3 ──
+# ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
+# script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
+# and ob-record-connect forwards the FIFO to the sink socket.
 test_streams_via_connect() {
     if grep -q 'ob-record-connect' "$SCRIPT_DIR/ob-session-recorder" && \
-       grep -q '/dev/fd/3' "$SCRIPT_DIR/ob-session-recorder"; then
-        pass "recorder streams to the sink via ob-record-connect /dev/fd/3"
+       grep -q 'mkfifo' "$SCRIPT_DIR/ob-session-recorder" && \
+       grep -qE 'script .*-c .*OB_REC_FIFO' "$SCRIPT_DIR/ob-session-recorder"; then
+        pass "recorder streams via ob-record-connect + FIFO"
     else
-        fail "recorder should stream via ob-record-connect /dev/fd/3"
+        fail "recorder should stream via ob-record-connect + a FIFO"
     fi
 }
 

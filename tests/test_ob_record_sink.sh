@@ -71,13 +71,29 @@ wait_done() { # $1 session_id
     echo "$j"; return 1
 }
 
-# ── Test 1: interactive-style stream is captured, root-owned tree, status completed
-OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr testid01 script)" \
-    sh -c 'printf "HELLO-RECORDING\n" >&3' 2>"$WORK/c1.err"
+# Drive a PTY recording exactly as ob-session-recorder does: script(1) writes the
+# typescript to a FIFO, ob-record-connect forwards FIFO -> socket. This exercises
+# the REAL path (a socket cannot be opened via /dev/fd, so script must target a
+# FIFO) — the gap that an earlier "/dev/fd/3" approach hid.
+record_via_script() { # $1 header  $2 command
+    local fifo; fifo="$WORK/fifo.$$.$RANDOM"
+    mkfifo -m 600 "$fifo" || return 1
+    OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$1" "$fifo" &
+    local cpid=$!
+    sleep 0.2
+    if ! kill -0 "$cpid" 2>/dev/null; then wait "$cpid"; rm -f "$fifo"; return 1; fi
+    script -q -f -c "$2" "$fifo" >/dev/null 2>&1
+    wait "$cpid"; local rc=$?
+    rm -f "$fifo"
+    return $rc
+}
+
+# ── Test 1: interactive PTY stream captured via script→FIFO→sink, root-owned
+record_via_script "$(hdr testid01 script)" 'printf "HELLO-RECORDING\n"' 2>"$WORK/c1.err"
 js=$(wait_done testid01)
 ts="${js%.json}.typescript"
 if [ -f "$ts" ] && grep -q "HELLO-RECORDING" "$ts"; then
-    ok "stream captured into the recording file"
+    ok "PTY stream captured (script -> FIFO -> sink)"
 else
     bad "stream not captured (file=$ts)"; cat "$WORK/c1.err" 2>/dev/null
 fi
@@ -90,10 +106,9 @@ else
 fi
 
 # ── Test 2: the recorded user comes from SO_PEERCRED, NOT the header
-OB_RECORD_SOCKET="$SOCK" "$CONNECT" \
+record_via_script \
     '{"v":1,"session_id":"spoofid1","format":"script","client_ip":"x","ssh_tty":"x","original_command":"","start":"x"}' \
-    sh -c 'printf "x\n" >&3' 2>/dev/null
-# Even if the header had tried another name, the file must land under our user.
+    'printf "x\n"' 2>/dev/null
 sj=$(wait_done spoofid1)
 if [ -n "$sj" ]; then
     ok "path derives from SO_PEERCRED uid (no header-controlled user)"
@@ -101,8 +116,8 @@ else
     bad "spoof session not under the real user dir"
 fi
 
-# ── Test 3: transfer session — header only, empty placeholder, status completed
-OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr xferid01 transfer)" true 2>/dev/null
+# ── Test 3: transfer session — /dev/null stream, empty placeholder, status completed
+OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr xferid01 transfer)" /dev/null 2>/dev/null
 tj=$(wait_done xferid01)
 tt="${tj%.json}.typescript"
 if [ -n "$tj" ] && grep -q '"format": "transfer"' "$tj" && grep -q '"status": "completed"' "$tj" \
@@ -112,12 +127,11 @@ else
     bad "transfer session wrong (json=$tj typescript=$tt)"
 fi
 
-# ── Test 4: fail-closed — unreachable sink → connector exits non-zero, no exec
-if OB_RECORD_SOCKET="$WORK/nope.sock" "$CONNECT" "$(hdr noid script)" \
-       sh -c 'echo SHOULD-NOT-RUN >&3' 2>/dev/null; then
+# ── Test 4: fail-closed — unreachable sink → connector exits non-zero before stream
+if OB_RECORD_SOCKET="$WORK/nope.sock" "$CONNECT" "$(hdr noid script)" /dev/null 2>/dev/null; then
     bad "connector returned 0 against an unreachable sink (should fail closed)"
 else
-    ok "fail-closed: unreachable sink → connector non-zero, command not run"
+    ok "fail-closed: unreachable sink → connector non-zero"
 fi
 
 echo "=== record-sink e2e: $([ $fail -eq 0 ] && echo PASS || echo FAIL) ==="

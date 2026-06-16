@@ -218,11 +218,11 @@ record_transfer() {
     local shell="${SHELL:-/bin/bash}"
     FORMAT="transfer"
     log_info "Session $SESSION_ID: file-transfer (no PTY recording): $ORIGINAL_COMMAND"
-    # Send the header and let the sink finalize the transfer record. exec'ing
-    # 'true' makes ob-record-connect send the header then close → the sink sees
-    # header + immediate EOF and records a transfer session. A connect failure
-    # returns non-zero WITHOUT running 'true', so we fail closed.
-    if ! ob-record-connect "$(build_header)" true; then
+    # Send the header with an EMPTY stream (/dev/null): ob-record-connect connects,
+    # sends the header, reads EOF from /dev/null and half-closes → the sink records
+    # a transfer session (metadata only). A connect failure returns non-zero, so we
+    # fail closed and never run the transfer unrecorded.
+    if ! ob-record-connect "$(build_header)" /dev/null; then
         log_err "recording sink unreachable; refusing file transfer (fail-closed)"
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
@@ -231,28 +231,65 @@ record_transfer() {
     "$shell" -c "$ORIGINAL_COMMAND"
 }
 
-# Record an interactive/PTY session: stream the typescript straight into the
-# recording sink over the socket. ob-record-connect connects, sends the header,
-# and execs script with the connected socket at /dev/fd/3; script writes the
-# typescript there. If the sink is unreachable ob-record-connect returns non-zero
-# WITHOUT exec'ing script, so no shell starts — recording is mandatory when
-# enabled (fail-closed; see the design §9).
+# Recording channel state (PTY sessions). The recorder cannot hand `script` a
+# socket directly: script(1) re-open()s its typescript path, and a Unix socket
+# cannot be opened via a path/`/dev/fd` (ENXIO). So `script` writes the typescript
+# to a FIFO (a real inode it can open) and ob-record-connect forwards FIFO →
+# socket in the background.
+OB_REC_FIFO=""
+OB_REC_PID=""
+
+# Open the recording channel: make a FIFO, start ob-record-connect reading it
+# (it connects + sends the header FIRST, then blocks opening the FIFO), and
+# confirm the connection succeeded BEFORE the caller starts the shell. Returns
+# non-zero (cleaning up) when the sink is unreachable — so we fail closed.
+open_record_channel() {
+    local header="$1"
+    OB_REC_FIFO="$(mktemp -u "${TMPDIR:-/tmp}/ob-rec.$$.XXXXXX")" || { OB_REC_FIFO=""; return 1; }
+    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then OB_REC_FIFO=""; return 1; fi
+    ob-record-connect "$header" "$OB_REC_FIFO" &
+    OB_REC_PID=$!
+    # ob-record-connect connects (fast) then blocks on open(FIFO). If it has
+    # already exited a moment later, the connect failed → the sink is down.
+    sleep 0.2
+    if ! kill -0 "$OB_REC_PID" 2>/dev/null; then
+        wait "$OB_REC_PID" 2>/dev/null || true
+        rm -f "$OB_REC_FIFO"; OB_REC_FIFO=""; OB_REC_PID=""
+        return 1
+    fi
+    return 0
+}
+
+# Wait for the forwarder to drain and tidy up the FIFO.
+close_record_channel() {
+    [ -n "$OB_REC_PID" ] && { wait "$OB_REC_PID" 2>/dev/null || true; }
+    [ -n "$OB_REC_FIFO" ] && rm -f "$OB_REC_FIFO"
+    OB_REC_FIFO=""; OB_REC_PID=""
+}
+
+# Record an interactive/PTY session: script writes the typescript to a FIFO that
+# ob-record-connect streams to the root sink. If the sink is unreachable the
+# channel cannot open and no shell starts — recording is mandatory when enabled
+# (fail-closed; see the design §9). PTY handling (incl. Ctrl-C) is script's,
+# unchanged.
 record_script() {
     local shell="${SHELL:-/bin/bash}"
     local header
     header=$(build_header)
-
-    # script runs the shell (or the original command) and writes the typescript
-    # to /dev/fd/3 — the socket connected by ob-record-connect. -f flushes after
-    # each write so the sink (and any live monitor) sees output promptly. The
-    # `if !` form keeps `set -e` from exiting before we can report the failure.
     local target="$shell"
     [ -n "$ORIGINAL_COMMAND" ] && target="$ORIGINAL_COMMAND"
 
-    if ! ob-record-connect "$header" script -q -f -c "$target" /dev/fd/3; then
+    if ! open_record_channel "$header"; then
         echo "Session recording is required but unavailable; access refused." >&2
         return 1
     fi
+
+    # -f flushes after each write so the sink (and any live monitor) sees output
+    # promptly. `|| rc=$?` keeps `set -e` from exiting before cleanup.
+    local rc=0
+    script -q -f -c "$target" "$OB_REC_FIFO" || rc=$?
+    close_record_channel
+    return $rc
 }
 
 # NOTE: asciinema/ttyrec recording is not yet supported over the sink protocol
