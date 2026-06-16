@@ -67,3 +67,11 @@ usr/share/doc/open-bastion/README.md
 # Heartbeat systemd timer and service (not installed by cmake when INSTALL_SYSTEMD=OFF)
 systemd/ob-heartbeat.timer lib/systemd/system/
 systemd/ob-heartbeat.service lib/systemd/system/
+
+# Socket-activated template units. dh_installsystemd installs the .socket units
+# and their enable blocks (see debian/rules) but does not auto-install the named
+# @.service templates; a template is never "enabled" (the .socket spawns
+# instances), it just needs to be present. Without it the socket cannot start an
+# instance ("Connection refused"). Install them next to the sockets.
+systemd/ob-cert@.service usr/lib/systemd/system/
+systemd/ob-record@.service usr/lib/systemd/system/
