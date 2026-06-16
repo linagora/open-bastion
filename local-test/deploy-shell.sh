@@ -66,6 +66,7 @@ sed -e "s/^allowed_bastions:.*/allowed_bastions: $BID/" \
     -e "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
 obbuild --config "$WORK/build-backend.yml" --output-shell "$WORK/boot-backend.sh" >"$WORK/gen-backend.log" 2>&1 \
     && ok "generated backend installer" || bad "ob-builder backend failed"
+get_cookie   # refresh: the lab SSO uses short TTLs and bastion setup can outlast the initial cookie
 for v in "${BACKEND_VMS[@]}"; do
     ( approve_device "${IP[$v]}" ) &
     run_installer "$v" "$WORK/boot-backend.sh" >"$WORK/$v.log" 2>&1
@@ -83,6 +84,7 @@ if [ -n "$STANDALONE_VM" ]; then
     sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-standalone.yml" > "$WORK/build-standalone.yml"
     obbuild --config "$WORK/build-standalone.yml" --output-shell "$WORK/boot-standalone.sh" >"$WORK/gen-standalone.log" 2>&1 \
         && ok "generated standalone installer" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
+    get_cookie   # refresh before enrolling: the initial cookie may have expired by now (short lab TTLs)
     ( approve_device "${IP[$STANDALONE_VM]}" ) &
     run_installer "$STANDALONE_VM" "$WORK/boot-standalone.sh" >"$WORK/$STANDALONE_VM.log" 2>&1
     wait

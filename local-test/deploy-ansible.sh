@@ -103,6 +103,7 @@ obbuild --config "$WORK/build-backend.yml" --output-ansible "$WORK/role-backend"
   echo "        ${BACKEND_VMS[0]}: { ansible_host: ${IP[${BACKEND_VMS[0]}]}, ob_server_group: backend }"
   echo "        ${BACKEND_VMS[1]}: { ansible_host: ${IP[${BACKEND_VMS[1]}]}, ob_server_group: backend }"
 } > "$WORK/role-backend/inv.yml"
+get_cookie   # refresh: the lab SSO uses short TTLs and the bastion phase can outlast the initial cookie
 ( cd "$WORK/role-backend" && ansible-playbook -i inv.yml playbook.yml \
     --extra-vars "ob_llng_cookie='$COOKIE'" ) >"$WORK/deploy-backends.log" 2>&1
 if grep -q "failed=0" "$WORK/deploy-backends.log" && ! grep -q "failed=[1-9]" "$WORK/deploy-backends.log"; then
@@ -130,6 +131,7 @@ EOF
   become: true
   roles: [open-bastion]
 EOF
+    get_cookie   # refresh before enrolling: the initial cookie may have expired by now (short lab TTLs)
     ( cd "$WORK/role-standalone" && ansible-playbook -i inv.yml deploy.yml \
         --extra-vars "ob_llng_cookie='$COOKIE'" ) >"$WORK/deploy-standalone.log" 2>&1
     if grep -q "failed=0" "$WORK/deploy-standalone.log" && ! grep -q "failed=[1-9]" "$WORK/deploy-standalone.log"; then
