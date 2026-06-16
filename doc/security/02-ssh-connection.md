@@ -77,7 +77,7 @@ sequenceDiagram
 
     Client->>Bastion: 1. ssh dwho@bastion<br/>(présente certificat)
     Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
-    Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion<br/>→ voucher(bastion_id, user) stocké<br/>(émis SSI server_group ∈ pamAccessBastionGroups)
+    Bastion->>LLNG: 3. PAM: /pam/authorize<br/>user=X, host=bastion<br/>→ voucher(bastion_id, user) stocké<br/>(émis uniquement si server_group ∈ pamAccessBastionGroups)
     LLNG-->>Bastion: 4. authorized: true + voucher
     Note over Bastion: 4b. pam_putenv("LLNG_BASTION_VOUCHER=…")
     Note over Client: 5. Sur le bastion :<br/>ob-ssh backend

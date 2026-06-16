@@ -603,11 +603,13 @@ sudo -k && sudo whoami
 
 ## Server Groups Reference
 
-Configure server groups in `/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
+The per-group SSH/sudo access rules (`server_group → rule`) go in
+`pamAccessSshRules` / `pamAccessSudoRules`, in
+`/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
 
 ```ini
 [portal]
-pamAccessServerGroups = { \
+pamAccessSshRules = { \
     bastion     => '$hGroup->{employees}', \
     production  => '$hGroup->{sre} or $hGroup->{oncall}', \
     staging     => '$hGroup->{sre} or $hGroup->{dev}', \
@@ -616,6 +618,11 @@ pamAccessServerGroups = { \
     default     => '0' \
 }
 ```
+
+> `pamAccessServerGroups` is a separate, optional setting — an authority map
+> `client_id → server_group` (not `server_group → rule`). When non-empty it forces
+> a host's server group from its enrolled `client_id`; leave it empty for the
+> default "one `client_id` per project, several server groups inside" model.
 
 Example configuration:
 
