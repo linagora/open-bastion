@@ -94,13 +94,13 @@ deploy fix surfaced while validating the above on a full VM lab.
 - **`sudo -i` works for SSO users.** `sudo` 1.9 uses a separate `sudo-i` PAM
   service that `ob-bastion-setup` / `ob-backend-setup` never configured, so
   `sudo -i` fell back to the distro default (`pam_unix`) and failed for NSS-only
-  SSO users with *"account validation failure, is your account locked?"*. Every
+  SSO users with _"account validation failure, is your account locked?"_. Every
   function that writes `/etc/pam.d/sudo` now also writes `/etc/pam.d/sudo-i`
   with the same stack.
 - **`ob-builder` Mode E roles always ship the KRL file.** A Mode E Ansible role
-  failed to deploy with *"Could not find open-bastion-krl"* whenever the
+  failed to deploy with _"Could not find open-bastion-krl"_ whenever the
   portal's KRL was still empty (a fresh portal with no revocations): the role's
-  mandatory *Deploy KRL* task referenced `files/open-bastion-krl`, but the
+  mandatory _Deploy KRL_ task referenced `files/open-bastion-krl`, but the
   emitter only wrote it when the fetched KRL was non-empty. It now always ships
   the file (an empty KRL is valid; the refresh cron fills it later).
 
