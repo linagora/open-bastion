@@ -34,4 +34,8 @@ override_dh_makeshlibs:
 # Install systemd units for each package
 override_dh_installsystemd:
 	dh_installsystemd -popen-bastion --name=ob-heartbeat ob-heartbeat.timer
+	# Cert minting socket: installed from debian/open-bastion.ob-cert.socket and
+	# debian/open-bastion.ob-cert@.service. Not enabled/started at install time —
+	# ob-bastion-setup activates it (bastion/standalone only).
+	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-cert ob-cert.socket
 	dh_installsystemd -popen-bastion-desktop --name=ob-session-monitor ob-session-monitor.service

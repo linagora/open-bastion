@@ -93,11 +93,12 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup
-%{_sbindir}/ob-bastion-cert-helper
+%{_sbindir}/ob-cert-daemon
 %{_sbindir}/ob-cache-admin
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
+%{_bindir}/ob-cert-request
 %{_bindir}/ob-bastion-id
 %dir %{_prefix}/lib/open-bastion
 %{_prefix}/lib/open-bastion/ob-cert-lib.sh
@@ -111,6 +112,8 @@ ctest --output-on-failure --verbose
 %{_datadir}/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
+%{_unitdir}/ob-cert.socket
+%{_unitdir}/ob-cert@.service
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
@@ -119,8 +122,10 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-standalone-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
+%{_mandir}/man8/ob-cert-daemon.8*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
+%{_mandir}/man1/ob-cert-request.1*
 # Hardening templates (session containment - deployed by ob-bastion-setup)
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/hardening
@@ -186,9 +191,12 @@ done
 
 %preun
 %systemd_preun ob-heartbeat.timer
+# Cert socket is enabled by ob-bastion-setup (not at install); disable on removal.
+%systemd_preun ob-cert.socket
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
+%systemd_postun_with_restart ob-cert.socket
 
 %post desktop
 %systemd_post ob-session-monitor.service

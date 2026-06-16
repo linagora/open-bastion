@@ -1,0 +1,19 @@
+[Unit]
+Description=Open Bastion certificate minting socket
+Documentation=https://github.com/linagora/open-bastion
+
+[Socket]
+# ob-ssh / ob-scp (via ob-cert-request, unprivileged) connect here to obtain a
+# short-lived vouched certificate. Per-connection activation (Accept=yes) spawns
+# one ob-cert@.service instance per connection.
+ListenStream=/run/open-bastion/cert.sock
+# World-connectable: connecting grants nothing on its own. The daemon derives
+# the certificate's user from SO_PEERCRED (kernel-verified) and LLNG binds the
+# voucher to (bastion_id, user), so a caller can only mint a cert for itself.
+SocketMode=0666
+Accept=yes
+# Parent /run/open-bastion is created at 0711 by the package tmpfiles.d entry
+# and by ob-bastion-setup; it exists before sockets.target.
+
+[Install]
+WantedBy=sockets.target

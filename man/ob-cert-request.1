@@ -1,0 +1,56 @@
+.TH OB-CERT-REQUEST 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-cert-request \- unprivileged client for the bastion certificate socket
+.SH SYNOPSIS
+.B ob-cert-request
+.RI [ socket-path ]
+.SH DESCRIPTION
+.B ob-cert-request
+is the unprivileged half of the bastion hop-certificate flow. It is invoked by
+.BR ob-ssh (1)
+and
+.BR ob-scp (1)
+(running as the logged-in bastion user); you do not normally run it by hand.
+.PP
+It connects to the local Unix socket served by
+.BR ob-cert-daemon (8)
+(default \fI/run/open-bastion/cert.sock\fR, or \fIsocket-path\fR if given),
+forwards the request read from standard input, and writes the LLNG
+.I /pam/bastion-cert
+JSON response to standard output.
+.PP
+It carries no privilege and holds no secret: the daemon derives the
+certificate's user from the connection's
+.B SO_PEERCRED
+(kernel-verified), so the request cannot be used to mint a certificate for
+another user.
+.SH PROTOCOL
+Standard input is a newline-delimited request:
+.nf
+    line 1: target_host
+    line 2: target_group   (may be empty)
+    line 3: voucher        (from $LLNG_BASTION_VOUCHER)
+    line 4: ephemeral SSH public key
+.fi
+Standard output is the raw LLNG JSON response.
+.SH EXIT STATUS
+.TP
+.B 0
+The response was relayed.
+.TP
+.B 1
+Could not reach the socket, or an I/O error occurred.
+.TP
+.B 2
+Usage or socket-setup error.
+.SH FILES
+.TP
+.I /run/open-bastion/cert.sock
+The bastion certificate socket
+.RB ( ob-cert.socket ).
+.SH SEE ALSO
+.BR ob-cert-daemon (8),
+.BR ob-ssh (1),
+.BR ob-scp (1)
+.SH AUTHOR
+Linagora

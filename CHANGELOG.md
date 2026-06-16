@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Bastion cert minting no longer goes through `sudo`.** The old
+  `ob-bastion-cert-helper` + NOPASSWD sudoers bridge is replaced by
+  `ob-cert-daemon`, a socket-activated service (runs as root) reached through the
+  new unprivileged `ob-cert-request` client. The daemon derives the
+  certificate's user from the connection's `SO_PEERCRED` (kernel-verified, never
+  from the request), so a caller can still only mint a certificate for itself,
+  and the root-only server token never leaves the daemon. This decouples machine
+  certificate minting from the interactive sudo policy — in Mode E the sudo PAM
+  stack required an LLNG token, which broke `ob-ssh`/`ob-scp` hops. No sudo, no
+  setuid. `ob-bastion-setup` now enables `ob-cert.socket` instead of installing a
+  sudoers drop-in (and removes the obsolete one on upgrade). Request inputs are
+  bounded and a connection timeout prevents a stalled peer from pinning a
+  per-connection process.
+
 ## [0.4.0] - 2026-06-16
 
 Completes the certificate-based bastion→backend hop: `ob-ssh` and `ob-scp` now

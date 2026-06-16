@@ -1,0 +1,78 @@
+.TH OB-CERT-DAEMON 8 "June 2026" "open-bastion" "System Administration"
+.SH NAME
+ob-cert-daemon \- privileged bastion hop-certificate minting service
+.SH SYNOPSIS
+.B ob-cert-daemon
+.PP
+Not run directly. Activated per-connection by
+.BR systemd (1)
+through
+.B ob-cert.socket
+(\fI/run/open-bastion/cert.sock\fR).
+.SH DESCRIPTION
+.B ob-cert-daemon
+mints the short-lived, LLNG-signed certificate that
+.BR ob-ssh (1)
+and
+.BR ob-scp (1)
+use to hop from the bastion to a backend. It replaces the former
+\fBsudo ob-bastion-cert-helper\fR bridge: minting a machine certificate is no
+longer coupled to the interactive \fBsudo\fR policy (which, in Mode E, requires
+an LLNG token and therefore broke non-interactive hops).
+.PP
+It is socket-activated (one short-lived instance per connection, run as root)
+and reached through the unprivileged
+.BR ob-cert-request (1)
+client. For each connection it:
+.IP 1. 4
+derives the calling user from the connection's
+.B SO_PEERCRED
+(kernel-verified, never taken from the request body), so a caller can only mint
+a certificate for itself;
+.IP 2. 4
+reads the bastion's root-only server token (which never leaves the process);
+.IP 3. 4
+POSTs the request to LLNG
+.I /pam/bastion-cert
+with that token as Bearer;
+.IP 4. 4
+relays the LLNG JSON response back over the socket.
+.SH PROTOCOL
+The connected socket carries a newline-delimited request:
+.nf
+    line 1: target_host
+    line 2: target_group   (empty -> "default")
+    line 3: voucher
+    line 4: ephemeral SSH public key
+.fi
+The user is NOT part of the request; it is the SO_PEERCRED identity. The
+response is the raw LLNG JSON (certificate, or a structured error).
+.SH SECURITY
+The certificate's user is the kernel-verified connecting uid, and LLNG binds the
+voucher to the \fI(bastion_id, user)\fR pair, so a stolen voucher is useless and
+a caller cannot mint for another user. The socket is world-connectable
+(\fImode 0666\fR): connecting alone grants nothing without a valid voucher. The
+server token never leaves the daemon. No \fBsudo\fR, no setuid. Request inputs
+are length-bounded and a read/write timeout drops a stalled peer.
+.SH FILES
+.TP
+.I /run/open-bastion/cert.sock
+The activation socket (see
+.BR ob-cert.socket ).
+.TP
+.I /etc/open-bastion/openbastion.conf
+Source of \fIportal_url\fR and \fIverify_ssl\fR.
+.TP
+.I /etc/open-bastion/ssh-proxy.conf
+Optional overrides (\fIPORTAL_URL\fR, \fISERVER_TOKEN_FILE\fR, \fIVERIFY_SSL\fR,
+\fITIMEOUT\fR); honoured only when root-owned and not group/world-writable.
+.TP
+.I /var/lib/open-bastion/token
+The bastion's server token (root-only).
+.SH SEE ALSO
+.BR ob-cert-request (1),
+.BR ob-ssh (1),
+.BR ob-scp (1),
+.BR ob-bastion-setup (8)
+.SH AUTHOR
+Linagora

@@ -1,0 +1,4 @@
+# Open Bastion runtime directory. 0711 = traversable (so users can connect to
+# the 0666 cert socket) but not listable; every secret inside stays 0600 root.
+# Recreated at boot so ob-cert.socket can bind before any login.
+d /run/open-bastion 0711 root root -

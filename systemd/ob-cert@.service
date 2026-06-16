@@ -1,0 +1,30 @@
+[Unit]
+Description=Open Bastion certificate minting (per-connection)
+Documentation=https://github.com/linagora/open-bastion
+
+[Service]
+# One short-lived instance per connection. systemd passes the connected socket
+# as stdin AND stdout; the daemon reads the request from fd 0 and writes the
+# LLNG JSON response to fd 1.
+ExecStart=/usr/sbin/ob-cert-daemon
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+# Runs as root only to read the root-only server token (/var/lib/open-bastion/
+# token, 0600). It owns that file, so no capabilities are needed.
+User=root
+
+# Hardening: it only reads config + the server token and makes one HTTPS call
+# to the portal. AF_INET(6) is required for that call and for NSS lookups
+# (getpwuid via libnss_openbastion); AF_UNIX for the activation socket itself.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/etc/open-bastion /var/lib/open-bastion

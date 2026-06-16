@@ -270,9 +270,9 @@ systemctl restart sshd
 ### Step 7: Configure SSH Proxy for Backend Access
 
 The SSH proxy uses certificate-based vouching to authenticate to backends.
-`ob-bastion-cert-helper` (installed by `ob-bastion-setup`, called via a narrow NOPASSWD
-sudoers rule) contacts LLNG on behalf of the user to obtain a short-lived ephemeral
-certificate. Configure the proxy:
+Certificate requests are handled by `ob-cert-daemon` (socket-activated systemd service
+running as root), which derives the caller's user via kernel `SO_PEERCRED` from the Unix
+socket connection (no sudo or setuid needed). Configure the proxy:
 
 ```bash
 mkdir -p /etc/open-bastion

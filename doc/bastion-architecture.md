@@ -137,7 +137,7 @@ sequenceDiagram
 
     User->>Bastion: ob-ssh user@backend
     Note over Bastion: ob-ssh mints ephemeral ed25519 keypair in tmpfs
-    Bastion->>Bastion: sudo ob-bastion-cert-helper (NOPASSWD, root-only server token)
+    Bastion->>Bastion: ob-cert-request via Unix socket /run/open-bastion/cert.sock
     Bastion->>LLNG: POST /pam/bastion-cert (Bearer=server token,<br/>body={voucher, pubkey, user, target_host, target_group})
     Note over LLNG: Re-checks gates: device-code grant,<br/>pam:server scope, server_group ∈ pamAccessBastionGroups,<br/>per-(bastion_id,user) voucher
     LLNG-->>Bastion: Signed user cert (principal=user, ttl≈120s,<br/>key-id=bastion=<id>;user=<u>;target=<host>,<br/>source-address=bastion IP)
@@ -493,8 +493,9 @@ recording and audit controls. With certificate vouching:
 ```mermaid
 flowchart LR
     subgraph Bastion["Bastion Server"]
-        proxy["ob-ssh"]
-        helper["ob-bastion-cert-helper\n(sudoers NOPASSWD)"]
+        proxy["ob-ssh\n(user process)"]
+        client["ob-cert-request\n(unprivileged client)"]
+        daemon["ob-cert-daemon\n(root, socket-activated)"]
     end
 
     subgraph LLNG["LLNG Portal"]
@@ -507,12 +508,15 @@ flowchart LR
         principals["ob-ssh-principals\n(AuthorizedPrincipalsCommand)"]
     end
 
-    proxy -->|1. sudo call| helper
-    helper -->|2. POST {voucher, pubkey, user, target}| bastion_cert
-    bastion_cert -->|3. Signed cert (~120s)| helper
-    helper -->|4. cert| proxy
-    proxy -->|5. ssh -i eph -o CertificateFile=cert| sshd
-    sshd -->|6. check key-id + allowed_bastions| principals
+    proxy -->|1. Call via Unix socket| client
+    client -->|2. /run/open-bastion/cert.sock| daemon
+    daemon -->|3. SO_PEERCRED: derive user| daemon
+    daemon -->|4. POST {voucher, pubkey, user, target}| bastion_cert
+    bastion_cert -->|5. Signed cert (~120s)| daemon
+    daemon -->|6. cert| client
+    client -->|7. cert| proxy
+    proxy -->|8. ssh -i eph -o CertificateFile=cert| sshd
+    sshd -->|9. check key-id + allowed_bastions| principals
 ```
 
 ### How the Voucher Reaches `ob-ssh`
@@ -530,13 +534,16 @@ voucher). Its validity is `min(now + pamAccessBastionVoucherTtl, userCert.expire
 (default cap: 43200 s / 12 h). On expiry, `POST /pam/bastion-cert` returns
 `voucher_expired`; `ob-ssh` prints a clear reconnect message and exits non-zero.
 
-### Why `ob-bastion-cert-helper` (no setuid)
+### Why `ob-cert-daemon` (socket-activated, no setuid)
 
 The bastion's server token (Bearer for `POST /pam/bastion-cert`) must be root-readable
 only. `ob-ssh` runs as the connecting user, so it cannot read the token directly.
-A narrow `sudoers` `NOPASSWD` rule allows the user to invoke `ob-bastion-cert-helper`,
-which reads the token, calls LLNG, and always mints for `$SUDO_USER` (the invoking user,
-not the sudoers target). No setuid binary is introduced.
+Instead of a `sudoers` rule, an unprivileged `ob-cert-request` client connects to a Unix
+socket `/run/open-bastion/cert.sock` served by `ob-cert-daemon` (root, socket-activated
+systemd service). The daemon uses kernel-verified `SO_PEERCRED` to derive the caller's user
+(never from the request body) — so a caller can only mint a certificate for itself. The daemon
+reads the server token, POSTs to LLNG, and returns the signed certificate. No setuid binary
+and no sudoers rule needed; decoupled from sudo PAM policies.
 
 ### Configuration
 
@@ -553,8 +560,8 @@ TARGET_GROUP=backend
 #### On Backend
 
 Run `ob-backend-setup` with the `--allowed-bastions` option to configure backend
-enforcement. The `bastion_jwt_*` keys and `AcceptEnv LLNG_BASTION_JWT` are no longer
-used and must be removed from existing deployments.
+enforcement. The server token is never exposed over the network; instead, the daemon keeps
+it in memory and POSTs it over HTTPS with the voucher and ephemeral public key.
 
 ```bash
 sudo ob-backend-setup --portal https://auth.example.com \

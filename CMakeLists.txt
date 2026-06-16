@@ -232,11 +232,54 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Privileged half of ob-ssh's certificate request: only root may use it
-# directly; normal users go through the sudoers rule installed by
-# ob-bastion-setup (configure_ssh_proxy_sudoers). No setuid bit involved.
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-cert-helper
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+# Bastion certificate minting: socket-activated daemon + unprivileged client.
+# Replaces the old `sudo ob-bastion-cert-helper` bridge. ob-cert-daemon (root,
+# socket-activated) holds the server token and derives the certificate's user
+# from the connection's SO_PEERCRED; ob-cert-request is the unprivileged client
+# that ob-ssh / ob-scp invoke — no sudo, no setuid.
+add_executable(ob-cert-daemon src/ob-cert-daemon.c src/ob_cert_proto.c)
+target_include_directories(ob-cert-daemon PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+)
+target_compile_options(ob-cert-daemon PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_libraries(ob-cert-daemon
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+)
+target_link_options(ob-cert-daemon PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-cert-daemon
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+add_executable(ob-cert-request src/ob-cert-request.c)
+target_compile_options(ob-cert-request PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_options(ob-cert-request PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-cert-request
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
 # Install SSH certificate tool (user-facing)
@@ -301,6 +344,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-backend-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
+    ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 
@@ -317,6 +361,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
     ${CMAKE_SOURCE_DIR}/man/ob-scp.1
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
+    ${CMAKE_SOURCE_DIR}/man/ob-cert-request.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
@@ -325,6 +370,8 @@ if(INSTALL_SYSTEMD)
     install(FILES
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-cert.socket
+        ${CMAKE_SOURCE_DIR}/systemd/ob-cert@.service
         DESTINATION lib/systemd/system
     )
     # Desktop-specific systemd service

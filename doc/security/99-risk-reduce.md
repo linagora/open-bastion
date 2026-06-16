@@ -110,7 +110,7 @@ Pistes pour réduire P à 1 :
 
 ## Pistes d'Amélioration - Vouching par certificat (Bastion→Backend)
 
-> Le transport `LLNG_BASTION_JWT` via `SendEnv`/`AcceptEnv` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher `(bastion_id, user)` émis par `/pam/authorize`, transporté localement via `pam_putenv`, échangé par `ob-ssh` (via `ob-bastion-cert-helper`) contre un certificat ~120 s signé par la CA `ssh-ca` (`/pam/bastion-cert`), épinglé à l'IP du bastion par `source-address`. Voir [02-ssh-connection.md](02-ssh-connection.md) et [doc/design/bastion-cert-vouching.md](../design/bastion-cert-vouching.md).
+> Le transport `LLNG_BASTION_JWT` via `SendEnv`/`AcceptEnv` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher `(bastion_id, user)` émis par `/pam/authorize`, transporté localement via `pam_putenv`, échangé par `ob-ssh` (via `ob-cert-request`/`ob-cert-daemon` socket-activé, pas de sudoers) contre un certificat ~120 s signé par la CA `ssh-ca` (`/pam/bastion-cert`), épinglé à l'IP du bastion par `source-address`. Voir [02-ssh-connection.md](02-ssh-connection.md) et [doc/design/bastion-cert-vouching.md](../design/bastion-cert-vouching.md).
 
 ### R-S9 _(P=1, I=2)_ - Interception ou vol du certificat éphémère bastion
 

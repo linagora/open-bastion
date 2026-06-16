@@ -128,8 +128,9 @@ Dans les architectures bastion/backend, le mécanisme de vouching par certificat
 ```mermaid
 flowchart LR
     subgraph Bastion["Serveur Bastion"]
-        proxy["ob-ssh"]
-        helper["ob-bastion-cert-helper\n(root, sudoers NOPASSWD)"]
+        proxy["ob-ssh\n(utilisateur)"]
+        client["ob-cert-request\n(non privilégié)"]
+        daemon["ob-cert-daemon\n(root, socket-activé)"]
         voucher["LLNG_BASTION_VOUCHER\n(pam_putenv, tmpfs)"]
     end
 
@@ -145,12 +146,15 @@ flowchart LR
     end
 
     authorize -->|voucher lié à (bastion_id, user)| voucher
-    proxy -->|1. voucher + clé pub éphémère| helper
-    helper -->|2. POST Bearer=server_token| bastion_cert
-    bastion_cert -->|3. signe via| sshca
-    sshca -->|4. cert éphémère ~120s| helper
-    helper -->|5. cert| proxy
-    proxy -->|6. SSH -i eph -o CertificateFile=cert| sshd_be
+    proxy -->|1. voucher + clé pub éphémère| client
+    client -->|2. socket /run/open-bastion/cert.sock| daemon
+    daemon -->|3. SO_PEERCRED: dérive user| daemon
+    daemon -->|4. POST Bearer=server_token| bastion_cert
+    bastion_cert -->|5. signe via| sshca
+    sshca -->|6. cert éphémère ~120s| daemon
+    daemon -->|7. cert| client
+    client -->|8. cert| proxy
+    proxy -->|9. SSH -i eph -o CertificateFile=cert| sshd_be
     sshd_be -->|source-address + CA valide| pam_be
 ```
 
@@ -159,9 +163,10 @@ flowchart LR
 1. L'utilisateur se connecte au bastion avec son certificat SSO. `pam_openbastion` appelle `POST /pam/authorize` → LLNG émet un **voucher réutilisable** lié à `(bastion_id, utilisateur)`, le stocke dans la session persistante de l'utilisateur et le renvoie. Le module PAM l'exporte via `pam_putenv("LLNG_BASTION_VOUCHER=…")` (transport **local au bastion** — contrairement à `SendEnv`, `sshd` fusionne l'environnement PAM dans la session via `pam_getenvlist`).
 2. Sur le bastion, `ob-ssh [user@]backend` :
    a. génère une paire de clés éphémère **ed25519** en tmpfs (clé privée ne quitte jamais le bastion) ;
-   b. via le helper réservé à root `ob-bastion-cert-helper` (règle sudoers NOPASSWD étroite, pas de setuid), `POST /pam/bastion-cert` avec le **jeton serveur** (réservé à root) en Bearer, le voucher, la clé publique, l'utilisateur et l'hôte cible ;
-   c. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA `ssh-ca` : principal = utilisateur, `key-id = bastion=<bastion_id>;user=<user>;target=<hôte>`, validité ~120 s, option critique `source-address` épinglée à l'IP du bastion ;
-   d. `ssh -i <eph> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>` ; les fichiers temporaires sont effacés après connexion.
+   b. appelle `ob-cert-request` (non privilégié), qui se connecte au socket Unix `/run/open-bastion/cert.sock` servi par `ob-cert-daemon` (root, socket-activé). Le daemon dérive l'utilisateur via `SO_PEERCRED` (vérifié par le noyau, jamais depuis le corps de la requête) ;
+   c. le daemon lit le **jeton serveur** (réservé à root, jamais transmis), envoie `POST /pam/bastion-cert` avec le voucher, la clé publique, l'utilisateur et l'hôte cible ;
+   d. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA `ssh-ca` : principal = utilisateur, `key-id = bastion=<bastion_id>;user=<user>;target=<hôte>`, validité ~120 s, option critique `source-address` épinglée à l'IP du bastion ;
+   e. `ssh -i <eph> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>` ; les fichiers temporaires sont effacés après connexion.
 3. Le backend sshd valide nativement : signature CA, fenêtre de validité, `principal == utilisateur`, **`source-address`** (refus si la connexion ne vient pas de l'IP du bastion). **Avant PAM**, `AuthorizedPrincipalsCommand` exécute `ob-ssh-principals` (en tant que `nobody`) qui lit le `key-id` (`%i`), vérifie que `bastion=<id>` figure dans `/etc/open-bastion/allowed_bastions` et que `user=<u>` correspond au login, et n'émet le principal que dans ce cas — un cert SSO direct (sans `bastion=`) est donc **refusé avant PAM**. `pam_openbastion` (`acct_mgmt`) effectue ensuite l'autorisation applicative via `/pam/authorize`.
 
 ### Propriétés de Sécurité du Voucher
