@@ -591,12 +591,17 @@ SSO cert (no `bastion=` key-id prefix) is rejected before PAM runs.
 
 | Parameter                    | Default   | Description                                                                     |
 | ---------------------------- | --------- | ------------------------------------------------------------------------------- |
-| `pamAccessBastionGroups`     | `bastion` | Server groups whose tokens may call `/pam/bastion-cert`                         |
+| `pamAccessBastionGroups`     | `bastion` | Server groups whose servers are entry points (bastions): checked when minting the voucher at `/pam/authorize`, NOT at `/pam/bastion-cert` (which trusts only the voucher) |
 | `pamAccessBastionVoucherTtl` | `43200`   | Max voucher age in seconds (12 h); effective exp also capped by SSO cert expiry |
 | `pamAccessBastionCertTtl`    | `120`     | Ephemeral user-cert validity in seconds                                         |
 
 The `ssh-ca` plugin must be active (`sshCaActivation=1`). `bastion_id` equals the
-enrolling OIDC `client_id`; give each bastion its own OIDC client to distinguish them.
+enrolling OIDC `client_id`, which identifies a **project** (it enrolls all the
+project's machines); PAM server groups provide finer-grained policy *within* a
+project. The cert-minting security rests on the voucher, not on the group — see
+[security/00-architecture.md](security/00-architecture.md). For stronger
+blast-radius isolation you may give each security zone its own OIDC client, each
+becoming a distinct `allowed_bastions` unit.
 
 ### Ephemeral Certificate Fields
 
