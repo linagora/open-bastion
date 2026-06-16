@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.4.0
+Version:        0.4.1
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -216,6 +216,13 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.4.1-1
+- Bastion hop-certificate minting no longer goes through sudo: ob-cert-daemon
+  (socket-activated, user from SO_PEERCRED) plus the unprivileged ob-cert-request
+  client replace the ob-bastion-cert-helper + NOPASSWD sudoers bridge, so
+  ob-ssh/ob-scp work in max-security (Mode E, where sudo required an LLNG token).
+  ob-bastion-setup now enables ob-cert.socket. Requires the matching pam-access
+  plugin update. See CHANGELOG.md
 * Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.4.0-1
 - Certificate bastion->backend hop (ob-ssh/ob-scp) works end to end on OpenSSH
   9.8+: the SSH-fingerprint spool now converges on the outermost sshd-session on

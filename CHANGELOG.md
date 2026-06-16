@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-16
+
+Decouples bastion hop-certificate minting from the interactive `sudo` policy,
+which was breaking `ob-ssh`/`ob-scp` in max-security (Mode E).
+
+> Requires the matching `pam-access` LemonLDAP::NG plugin update: `/pam/bastion-cert`
+> and `/pam/bastion-token` no longer require the caller's server group to be a
+> configured bastion group. The `(bastion_id, user)` voucher is the sole control
+> (it is minted by `/pam/authorize` only for a host in `pamAccessBastionGroups`),
+> so a single project-wide OIDC `client_id` works with finer-grained PAM groups
+> inside the project.
+
 ### Changed
 
 - **Bastion cert minting no longer goes through `sudo`.** The old
