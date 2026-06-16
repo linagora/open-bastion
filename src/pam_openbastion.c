@@ -1605,7 +1605,9 @@ static const char *get_client_ip(pam_handle_t *pamh)
  * EITHER, so stopping at the *first* "sshd-session" makes the writer and reader
  * key the spool on different PIDs and the lookup fails. To converge
  * deterministically we return the OUTERMOST contiguous "sshd-session" (the
- * monitor, whose parent is the "sshd" listener). Returns 0 if none found.
+ * monitor, whose parent is the "sshd" listener). On pre-split OpenSSH (< 9.8,
+ * e.g. RHEL/Rocky 9) there is no "sshd-session" and we fall back to the first
+ * "sshd" ancestor. Returns 0 if none found.
  */
 static pid_t find_sshd_session_ancestor(void)
 {
@@ -1634,6 +1636,11 @@ static pid_t find_sshd_session_ancestor(void)
             /* Left the sshd-session chain; its outermost member is the
              * per-connection privileged monitor — the common ancestor. */
             return outermost_session;
+        } else if (strcmp(buf, "sshd") == 0) {
+            /* Pre-split OpenSSH (< 9.8, e.g. RHEL/Rocky 9's 8.7) has no
+             * "sshd-session": the per-connection process is "sshd" itself, and
+             * its first occurrence is the anchor (its parent is the listener). */
+            return pid;
         }
 
         /* Read PPid from /proc/<pid>/status */

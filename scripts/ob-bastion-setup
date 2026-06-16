@@ -266,6 +266,8 @@ SPOOL_DIR="/run/open-bastion/ssh-fp"
 # may run under either, so both MUST converge on the same one. We anchor on the
 # OUTERMOST contiguous sshd-session (the monitor, whose parent is the "sshd"
 # listener) — pam_openbastion's find_sshd_session_ancestor() does the same.
+# Pre-split OpenSSH (<9.8, e.g. Rocky 9) has no "sshd-session"; fall back to the
+# first "sshd" ancestor there.
 case "$FINGERPRINT" in
     SHA256:[A-Za-z0-9+/]*) : ;;
     *) FINGERPRINT="" ;;
@@ -280,6 +282,8 @@ if [ -n "$FINGERPRINT" ] && [ -d "$SPOOL_DIR" ]; then
             anchor=$pid               # record, keep climbing for an outer one
         elif [ "$anchor" -gt 1 ]; then
             break                     # left the sshd-session chain → monitor found
+        elif [ "$comm" = "sshd" ]; then
+            anchor=$pid; break        # pre-split OpenSSH (<9.8, e.g. Rocky 9): "sshd" is the anchor
         fi
         pid=$(awk '/^PPid:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
         [ -z "$pid" ] && pid=0

@@ -398,16 +398,22 @@ initiate_device_auth() {
     # file itself root-only (0600) — the orchestrator slurps it as root.
     if [ -n "${OB_ENROLL_STATE_FILE:-}" ]; then
         mkdir -p "$(dirname "$OB_ENROLL_STATE_FILE")" 2>/dev/null || true
-        jq -n \
-            --arg user_code "$USER_CODE" \
-            --arg verification_uri "$VERIFICATION_URI" \
-            --arg verification_uri_complete "$VERIFICATION_URI_COMPLETE" \
-            --arg portal_url "$PORTAL_URL" \
-            --arg interval "$INTERVAL" \
-            '{user_code: $user_code, verification_uri: $verification_uri, verification_uri_complete: $verification_uri_complete, portal_url: $portal_url, interval: ($interval | tonumber)}' \
-            > "${OB_ENROLL_STATE_FILE}.tmp" \
-            && mv -f "${OB_ENROLL_STATE_FILE}.tmp" "$OB_ENROLL_STATE_FILE" \
-            || log_warn "Could not write device-grant state to ${OB_ENROLL_STATE_FILE}"
+        # Create under umask 077 (in a subshell) so the temp file is never
+        # group/world-readable, even for the brief window before the chmod —
+        # /run/open-bastion is 0711 (traversable). The final chmod is kept as a
+        # belt-and-suspenders. Subshell so the umask change stays local.
+        (
+            umask 077
+            jq -n \
+                --arg user_code "$USER_CODE" \
+                --arg verification_uri "$VERIFICATION_URI" \
+                --arg verification_uri_complete "$VERIFICATION_URI_COMPLETE" \
+                --arg portal_url "$PORTAL_URL" \
+                --arg interval "$INTERVAL" \
+                '{user_code: $user_code, verification_uri: $verification_uri, verification_uri_complete: $verification_uri_complete, portal_url: $portal_url, interval: ($interval | tonumber)}' \
+                > "${OB_ENROLL_STATE_FILE}.tmp" \
+                && mv -f "${OB_ENROLL_STATE_FILE}.tmp" "$OB_ENROLL_STATE_FILE"
+        ) || log_warn "Could not write device-grant state to ${OB_ENROLL_STATE_FILE}"
         chmod 0600 "$OB_ENROLL_STATE_FILE" 2>/dev/null || true
     fi
 }
