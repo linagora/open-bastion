@@ -91,6 +91,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-session-recorder
 %attr(2755,root,ob-sessions) %{_sbindir}/ob-session-recorder-wrapper
 %{_sbindir}/ob-bastion-setup
+%{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup
 %{_sbindir}/ob-bastion-cert-helper
 %{_sbindir}/ob-cache-admin
@@ -115,6 +116,7 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
 %{_mandir}/man8/ob-bastion-setup.8*
+%{_mandir}/man8/ob-standalone-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
 %{_mandir}/man1/ob-ssh.1*

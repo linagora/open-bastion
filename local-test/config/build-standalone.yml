@@ -1,0 +1,29 @@
+# ob-builder config for the lab STANDALONE host (consumed by deploy-ansible.sh).
+#
+# A standalone host is bastion+backend in one, with no bastion in front: users
+# SSH into it directly. It enrols with the bastion client_id (`ob-bastion`, which
+# the lab LLNG maps to the *bastion* server group — see sso/configure.sh) so dwho
+# is authorised to log in directly, exactly as on the bastion. target_role:
+# standalone makes ob-builder drive ob-bastion-setup --node-role standalone.
+#
+# `scenario` is overridden at run time from $OB_SCENARIO by deploy-ansible.sh so
+# the same config exercises every PAM mode.
+deployment_slug: oblab
+scenario: token-only
+portal_url: http://auth.example.com
+client_id: ob-bastion
+client_id_policy: fixed
+client_secret_mode: embedded
+embedded_client_secret: bastionsecret
+server_group: bastion
+server_group_policy: fixed
+target_role: standalone
+auto_enroll_setup: yes
+ansible_auto_approve: yes
+apt_url: http://192.168.122.1:8088
+apt_suite: ./
+apt_component: ""
+enable_hardening: no
+enable_audit_trace: no
+disable_session_recorder: no
+self_delete: no

@@ -23,7 +23,14 @@ SSH_KEY="${OB_SSH_KEY:-$HOME/.ssh/id_oblab}"
 DEB="open-bastion_0.3.1_amd64.deb"
 BASTION_VM="${OB_BASTION_VM:-lab-a}"
 read -ra BACKEND_VMS <<< "${OB_BACKEND_VMS:-lab-b lab-c}"
+# A standalone host (bastion+backend in one) — deployed with the ob-builder
+# standalone role via ob-standalone-setup. Only the Ansible harness uses it; it
+# appends $STANDALONE_VM to ALL_VMS itself. Set OB_STANDALONE_VM="" to skip it.
+STANDALONE_VM="${OB_STANDALONE_VM-lab-d}"
 ALL_VMS=("$BASTION_VM" "${BACKEND_VMS[@]}")
+# Security scenario fed to ob-builder for every role (token-only|token+unix|
+# keys+llng|mixed|max-security). Lets the harness exercise all PAM modes.
+SCENARIO="${OB_SCENARIO:-token-only}"
 # dwho SSO cert for the connection-phase checks (minted out of band; absent => skip)
 DWHO_KEY="${OB_DWHO_KEY:-/tmp/ob-e2e/id_dwho}"
 DWHO_CERT="${OB_DWHO_CERT:-/tmp/ob-e2e/id_dwho-cert.pub}"
@@ -164,6 +171,34 @@ get_cookie(){
     [ -n "$COOKIE" ] || die "could not obtain LLNG cookie"
 }
 
+# Mint a dwho SSO certificate (server_group=bastion) via the portal's /ssh/sign
+# endpoint using the approval cookie, so the connection-phase and standalone
+# assertions can run instead of being skipped. No-op if a cert already exists or
+# signing fails (the dependent checks then skip, as before). Needs $COOKIE.
+mint_dwho_cert(){
+    [ -n "${COOKIE:-}" ] || return 0
+    mkdir -p "$(dirname "$DWHO_KEY")"
+    rm -f "$DWHO_KEY" "$DWHO_KEY.pub" "$DWHO_CERT"
+    # The SSHCA enforces per-user label uniqueness among non-expired certs, and
+    # the label defaults to the key comment. Repeated lab runs would reuse the
+    # same comment and trip "label already used for another key", so stamp a
+    # unique label/comment on every mint.
+    local label="oblab-dwho-$(date +%s)-$$"
+    ssh-keygen -t ed25519 -f "$DWHO_KEY" -N "" -C "$label" -q
+    local pub resp cert
+    pub=$(cat "$DWHO_KEY.pub")
+    resp=$(curl -s -H "Host: auth.example.com" -b "$COOKIE" -H "Content-Type: application/json" \
+        -d "{\"public_key\":\"$pub\",\"server_group\":\"bastion\",\"label\":\"$label\"}" "http://$GW_IP/ssh/sign" 2>/dev/null)
+    cert=$(printf '%s' "$resp" | jq -r '.certificate // empty' 2>/dev/null)
+    if [ -n "$cert" ] && printf '%s' "$cert" | grep -q "ssh-ed25519-cert"; then
+        printf '%s\n' "$cert" > "$DWHO_CERT"
+        ok "minted dwho SSO cert -> $DWHO_CERT"
+    else
+        rm -f "$DWHO_KEY" "$DWHO_KEY.pub" "$DWHO_CERT"
+        skip "mint dwho cert (sign endpoint said: ${resp:0:100})"
+    fi
+}
+
 # approve_device <vm-ip> — poll the enroll-state file the target's ob-enroll
 # writes (OB_ENROLL_STATE_FILE) and approve the device code via the gateway.
 approve_device(){
@@ -206,4 +241,37 @@ verify_e2e(){
          echo 'cat /tmp/s2.txt' | ob-ssh dwho@$b2 2>/dev/null | grep -q ob-lt-payload" >/dev/null 2>&1; then
         ok "ob-scp bastion->backend and backend->backend (scp -3)"
     else bad "ob-scp transfers"; fi
+}
+
+# ── standalone verification ──────────────────────────────────────────────────
+# A standalone host is bastion+backend in one, with no bastion in front: a user
+# logs into it directly. Assert the NSS + direct-login path, and (Mode E only,
+# where ob-bastion-setup configures sudo) that sudo AND sudo -i require the LLNG
+# token via pam_openbastion — the regression guard for this fix.
+verify_standalone(){
+    [ -n "$STANDALONE_VM" ] || return 0
+    phase "Assertions — standalone ($STANDALONE_VM, scenario=$SCENARIO)"
+    # A standalone is a bastion (ForceCommand session recorder), so the debian
+    # mgmt key cannot run plain commands and Mode E disables it entirely. Every
+    # check therefore goes through the dwho SSO certificate, like verify_e2e.
+    if [ ! -f "$DWHO_KEY" ] || [ ! -f "$DWHO_CERT" ]; then
+        skip "standalone checks — no dwho cert at $DWHO_KEY (set OB_DWHO_KEY/OB_DWHO_CERT)"
+        return 0
+    fi
+    local s="${IP[$STANDALONE_VM]}"
+    local D=(ssh -i "$DWHO_KEY" -o "CertificateFile=$DWHO_CERT" -o IdentitiesOnly=yes
+             -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+             -o NumberOfPasswordPrompts=0 -o ConnectTimeout=15)
+    check "dwho cert logs into standalone directly (no bastion in front)" \
+        "${D[@]}" "dwho@$s" 'true'
+    check "getent passwd dwho on standalone (NSS)" \
+        "${D[@]}" "dwho@$s" 'getent passwd dwho >/dev/null'
+    # Mode E is the only scenario where ob-bastion-setup configures sudo; assert
+    # both sudo and sudo -i require the LLNG token (the fix this PR validates).
+    if [ "$SCENARIO" = "max-security" ]; then
+        check "standalone /etc/pam.d/sudo requires LLNG token (pam_openbastion)" \
+            "${D[@]}" "dwho@$s" 'grep -q pam_openbastion /etc/pam.d/sudo'
+        check "standalone /etc/pam.d/sudo-i requires LLNG token (pam_openbastion)" \
+            "${D[@]}" "dwho@$s" 'grep -q pam_openbastion /etc/pam.d/sudo-i'
+    fi
 }

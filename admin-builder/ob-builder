@@ -1155,7 +1155,14 @@ render_ansible_role() {
     local files_dir="$outpath/roles/open-bastion/files"
     mkdir -p "$files_dir"
     atomic_write_from "$files_dir/open-bastion-ca.pub" "0644" "$WORK_DIR/ca.pub"
-    if [ -s "$WORK_DIR/krl" ]; then
+    if [ "$SCENARIO" = "max-security" ]; then
+        # Mode E always ships a KRL file: the role's mandatory "Deploy KRL" task
+        # references it unconditionally. An empty/unavailable upstream KRL is
+        # valid for a fresh portal with no revocations yet — ship an empty file
+        # (the refresh cron fills it in later), matching ob-bastion-setup's
+        # download_krl. Without this, Mode E deploys fail with "Could not find
+        # open-bastion-krl" whenever the portal KRL is still empty.
+        [ -f "$WORK_DIR/krl" ] || : > "$WORK_DIR/krl"
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
@@ -1209,7 +1216,9 @@ EOF
     atomic_write "$defaults_dir/main.yml" "0644" "$defaults"
 
     atomic_write_from "$files_dir/open-bastion-ca.pub" "0644" "$WORK_DIR/ca.pub"
-    if [ -s "$WORK_DIR/krl" ]; then
+    if [ "$SCENARIO" = "max-security" ]; then
+        # Mode E always ships a KRL file (empty is valid for a fresh portal).
+        [ -f "$WORK_DIR/krl" ] || : > "$WORK_DIR/krl"
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"

@@ -19,6 +19,7 @@ usr/sbin/ob-heartbeat
 usr/sbin/ob-session-recorder
 usr/sbin/ob-session-recorder-wrapper
 usr/sbin/ob-bastion-setup
+usr/sbin/ob-standalone-setup
 usr/sbin/ob-backend-setup
 usr/sbin/ob-bastion-cert-helper
 usr/sbin/ob-cache-admin
@@ -40,6 +41,7 @@ usr/share/man/man1/ob-bastion-id.1
 usr/share/man/man8/ob-enroll.8
 usr/share/man/man8/ob-heartbeat.8
 usr/share/man/man8/ob-bastion-setup.8
+usr/share/man/man8/ob-standalone-setup.8
 usr/share/man/man8/ob-backend-setup.8
 usr/share/man/man8/ob-session-recorder.8
 

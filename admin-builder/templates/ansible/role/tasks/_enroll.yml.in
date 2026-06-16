@@ -82,6 +82,12 @@
   delegate_to: localhost
   become: false
   register: _ob_verify_page
+  # Tolerate transient portal blips (a reload, a brief outage, rate-limiting),
+  # which matter most when enrolling a fleet: a single refused connection should
+  # not abort the play.
+  until: _ob_verify_page is succeeded
+  retries: 10
+  delay: 5
   when: _ob_use_auto_approve
 
 - name: "Extract CSRF token from the verification page"
@@ -120,6 +126,10 @@
     status_code: [200, 302]
   delegate_to: localhost
   become: false
+  register: _ob_approve_result
+  until: _ob_approve_result is succeeded
+  retries: 10
+  delay: 5
   when: _ob_use_auto_approve
 
 - name: "Wait for ob-enroll to complete (polling token endpoint)"
