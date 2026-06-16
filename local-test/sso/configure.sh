@@ -156,6 +156,10 @@ jq --rawfile priv "$PRIVKEY" \
      pamAccessBastionGroups: "bastion",
      pamAccessBastionVoucherTtl: 43200,
      pamAccessBastionCertTtl: 120
+     # NB: pamAccessBastionCertPinSourceAddress is OFF by default, so no override
+     # is needed here. (In this lab the bastion reaches the dockerised SSO via the
+     # libvirt gateway, so LLNG would observe the docker-bridge IP, not the real
+     # bastion IP — enabling the pin would make every backend reject the hop.)
    }' "$CURCONF" > "$NEWCONF"
 
 # Validate
