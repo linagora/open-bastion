@@ -1138,6 +1138,8 @@ sequenceDiagram
 | **CrowdSec**                    | R2               | P=3 → P=2 : Rate-limiting IP sur brute-force `user_code`                      |
 | **`RtActivity`**                | R12              | P=3 → P=1 : Révocation automatique des tokens inactifs                        |
 
+> **Deux axes à ne pas confondre.** Le `server_group` sépare les _politiques_ **à l'intérieur** d'un projet (un même `client_id`) ; il ne borne le rayon d'impact des _credentials_ d'enrôlement que si le **mapping d'autorité `client_id → server_group`** (`pamAccessServerGroups` — à ne pas confondre avec les _règles_ d'accès par groupe `pamAccessSshRules`/`pamAccessSudoRules`) est renseigné. Quand un `client_id` couvre un projet **multi-groupes** (le modèle par défaut), l'isolation des credentials passe par des **`client_id` distincts par zone** (ligne « Clients OIDC distincts »), pas par le `server_group`.
+
 **Détail des améliorations avec clients OIDC distincts (voir section 5.2) :**
 
 | Risque  | Sans clients distincts | Avec clients distincts | Amélioration                                                       |

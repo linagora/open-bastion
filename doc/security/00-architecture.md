@@ -176,6 +176,16 @@ flowchart LR
 - **Renouvellement FAIL-CLOSED** : si le voucher est expiré, `ob-ssh` affiche « Votre autorisation bastion a expiré. Reconnectez-vous au bastion » et sort en erreur. Pas de re-vouching silencieux.
 - **Inutilisable seul** : un voucher volé est sans valeur sans le jeton serveur root requis en Bearer sur `/pam/bastion-cert`.
 
+### Modèle de confiance (granularité projet)
+
+Le `client_id` OIDC identifie un **projet** : il enrôle toutes ses machines (grain grossier, partagé). Les **groupes de serveurs** (`server_group`) sont une dimension de politique **plus fine, à l'intérieur du projet** (qui peut SSH/sudo où, via `pamAccessSshRules`/`pamAccessSudoRules`). Un `client_id` unique couvrant plusieurs groupes est donc le modèle attendu — on ne dédie pas un `client_id` par groupe.
+
+La **seule** propriété de sécurité qui gouverne l'émission d'un certificat de saut est : _un bastion ne peut minter un certificat que pour un utilisateur qui s'y est réellement connecté_. Elle est portée **entièrement par le voucher** :
+
+- le voucher lie `(bastion_id, user)` et est émis par `/pam/authorize` **uniquement** pour un hôte dont le `server_group` est dans `pamAccessBastionGroups` ;
+- son existence prouve donc déjà que l'appelant était un point d'entrée légitime au moment de la connexion ;
+- en conséquence `/pam/bastion-cert` **ne re-vérifie aucun groupe** (ni revendiqué, ni dérivé d'une session) : il valide le voucher, point. Le groupe-bastion n'est pas une frontière de sécurité au minting du cert, c'est une politique appliquée en amont (à l'émission du voucher) et sur les cibles (`pamAccessSshRules[target_group]`).
+
 ### Bénéfices de Sécurité
 
 | Menace                          | Sans vouching cert                  | Avec vouching cert                                                                                                         |
@@ -216,13 +226,13 @@ AuthorizedPrincipalsCommandUser nobody
 
 ### Paramètres LLNG (`pam-access`)
 
-| Paramètre                    | Défaut  | Description                                                                                      |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `pamAccessBastionGroups`     | bastion | Groupes autorisés à obtenir des vouchers / certs bastion                                         |
-| `pamAccessBastionVoucherTtl` | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime                   |
-| `pamAccessBastionCertTtl`    | 120     | Validité du certificat éphémère en secondes                                                      |
-| `pamAccessServerGroups`      | —       | Table `client_id → groupe` ; `/pam/bastion-cert` ne fait jamais confiance à un groupe revendiqué |
-| `sshCaActivation`            | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme                      |
+| Paramètre                    | Défaut  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pamAccessBastionGroups`     | bastion | Groupes dont les serveurs sont des **points d'entrée** (bastions). Vérifié **uniquement à l'émission du voucher** (`/pam/authorize`), **jamais** à `/pam/bastion-cert`                                                                                                                                                                                                                                                                                                                                  |
+| `pamAccessBastionVoucherTtl` | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `pamAccessBastionCertTtl`    | 120     | Validité du certificat éphémère en secondes                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `pamAccessServerGroups`      | —       | (Optionnel) **mapping d'autorité `client_id → server_group`** : quand il est non vide, `/pam/authorize` et `/pam/bastion-token` imposent ce `server_group` au lieu de croire celui de la requête. À **ne pas confondre** avec les _règles_ d'accès par groupe (`pamAccessSshRules` / `pamAccessSudoRules`, `server_group → règle`). Inadapté quand un `client_id` couvre un projet **multi-groupes** → laisser vide. `/pam/bastion-cert` n'utilise **aucun** groupe : il ne s'appuie que sur le voucher |
+| `sshCaActivation`            | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## Sécurité du Cache de Tokens
 

@@ -87,7 +87,7 @@ Pistes pour réduire P à 1 :
 
 Pistes pour réduire I à 2 :
 
-1. **Segmentation fine** : Plusieurs bastions par zone de sécurité, **chacun avec son propre `client_id` (= `bastion_id`)** et un `allowed_bastions` distinct par backend → un bastion compromis ne peut voucher que pour les backends de sa zone
+1. **Segmentation par zone (credentials d'enrôlement)** : par défaut un `client_id` = un **projet** (toutes ses machines partagent l'allowlist, et les groupes PAM séparent les _politiques_ à l'intérieur du projet — pas les _credentials_). Pour réduire le rayon d'impact d'un bastion compromis, **découper en plusieurs `client_id`** (un par zone de sécurité), chacun avec un `allowed_bastions` distinct par backend → un bastion compromis ne peut voucher que pour les backends de sa zone. C'est un arbitrage : plus d'isolation des credentials, mais autant de RP OIDC à gérer.
 2. **Session recording** : Enregistrement de toutes les sessions transitant par le bastion
 3. **Réduire `pamAccessBastionVoucherTtl`** (défaut 43200 s = 12 h) : borne la durée pendant laquelle un bastion compromis peut continuer à obtenir des certificats pour les utilisateurs récemment vouchés sans nouvelle connexion de leur part. Compromis ergonomie (les admins doivent se reconnecter plus souvent) vs exposition.
 

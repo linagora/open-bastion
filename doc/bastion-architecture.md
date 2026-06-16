@@ -132,6 +132,7 @@ sequenceDiagram
     participant Backend
 
     User->>Bastion: SSH (SSO cert) → pam_openbastion calls POST /pam/authorize
+    Note over LLNG: voucher minted only if server_group ∈ pamAccessBastionGroups
     LLNG-->>Bastion: {authorized: true, bastion_voucher: "..."}
     Note over Bastion: pam_putenv("LLNG_BASTION_VOUCHER=...")<br/>merged into session env (UsePAM yes)
 
@@ -139,7 +140,7 @@ sequenceDiagram
     Note over Bastion: ob-ssh mints ephemeral ed25519 keypair in tmpfs
     Bastion->>Bastion: ob-cert-request via Unix socket /run/open-bastion/cert.sock
     Bastion->>LLNG: POST /pam/bastion-cert (Bearer=server token,<br/>body={voucher, pubkey, user, target_host, target_group})
-    Note over LLNG: Re-checks gates: device-code grant,<br/>pam:server scope, server_group ∈ pamAccessBastionGroups,<br/>per-(bastion_id,user) voucher
+    Note over LLNG: Re-checks gates: device-code grant, pam:server scope,<br/>per-(bastion_id,user) voucher (group already enforced at voucher mint)
     LLNG-->>Bastion: Signed user cert (principal=user, ttl≈120s,<br/>key-id=bastion=<id>;user=<u>;target=<host>,<br/>source-address=bastion IP)
 
     Bastion->>Backend: ssh -i <eph> -o CertificateFile=<cert> user@backend
@@ -171,13 +172,14 @@ obtain a fresh voucher (fail-closed; no silent re-vouching).
 
 ## Server Groups
 
-Server groups allow different authorization rules for different environments.
-
-Configure in `/etc/lemonldap-ng/lemonldap-ng.ini`, section `[portal]`:
+Server groups let you apply different access rules per environment. The per-group
+SSH/sudo rules (`server_group → rule`) live in `pamAccessSshRules` /
+`pamAccessSudoRules`, configured in `/etc/lemonldap-ng/lemonldap-ng.ini`, section
+`[portal]`:
 
 ```ini
 [portal]
-pamAccessServerGroups = { \
+pamAccessSshRules = { \
     production  => '$hGroup->{sre} or $hGroup->{oncall}', \
     staging     => '$hGroup->{sre} or $hGroup->{dev}', \
     development => '$hGroup->{dev}', \
@@ -185,6 +187,12 @@ pamAccessServerGroups = { \
     default     => '0' \
 }
 ```
+
+> Do not confuse this with `pamAccessServerGroups`, a different (optional)
+> setting: an **authority map `client_id → server_group`** that, when non-empty,
+> forces a host's server group from its enrolled `client_id` instead of trusting
+> the request. Leave it empty for the default model (one `client_id` = one
+> project, several server groups inside it).
 
 Each server enrolls with its server_group:
 
@@ -589,14 +597,19 @@ SSO cert (no `bastion=` key-id prefix) is rejected before PAM runs.
 
 #### LLNG Portal (`pam-access` plugin)
 
-| Parameter                    | Default   | Description                                                                     |
-| ---------------------------- | --------- | ------------------------------------------------------------------------------- |
-| `pamAccessBastionGroups`     | `bastion` | Server groups whose tokens may call `/pam/bastion-cert`                         |
-| `pamAccessBastionVoucherTtl` | `43200`   | Max voucher age in seconds (12 h); effective exp also capped by SSO cert expiry |
-| `pamAccessBastionCertTtl`    | `120`     | Ephemeral user-cert validity in seconds                                         |
+| Parameter                    | Default   | Description                                                                                                                                                               |
+| ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pamAccessBastionGroups`     | `bastion` | Server groups whose servers are entry points (bastions): checked when minting the voucher at `/pam/authorize`, NOT at `/pam/bastion-cert` (which trusts only the voucher) |
+| `pamAccessBastionVoucherTtl` | `43200`   | Max voucher age in seconds (12 h); effective exp also capped by SSO cert expiry                                                                                           |
+| `pamAccessBastionCertTtl`    | `120`     | Ephemeral user-cert validity in seconds                                                                                                                                   |
 
 The `ssh-ca` plugin must be active (`sshCaActivation=1`). `bastion_id` equals the
-enrolling OIDC `client_id`; give each bastion its own OIDC client to distinguish them.
+enrolling OIDC `client_id`, which identifies a **project** (it enrolls all the
+project's machines); PAM server groups provide finer-grained policy _within_ a
+project. The cert-minting security rests on the voucher, not on the group — see
+[security/00-architecture.md](security/00-architecture.md). For stronger
+blast-radius isolation you may give each security zone its own OIDC client, each
+becoming a distinct `allowed_bastions` unit.
 
 ### Ephemeral Certificate Fields
 
