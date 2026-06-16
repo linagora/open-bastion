@@ -23,8 +23,14 @@ read -ra HARNESSES <<< "${OB_HARNESS:-ansible shell}"
 declare -A RESULT
 overall=0
 for harness in "${HARNESSES[@]}"; do
+    # Whitelist the harness name so it can never inject path components into the
+    # script path below (only these two harnesses exist).
+    case "$harness" in
+        ansible|shell) ;;
+        *) echo "unknown harness: '$harness' (expected: ansible|shell)" >&2; exit 2 ;;
+    esac
     script="$LT_DIR/deploy-$harness.sh"
-    [ -x "$script" ] || { echo "unknown harness: $harness ($script missing)" >&2; exit 2; }
+    [ -x "$script" ] || { echo "harness script missing: $script" >&2; exit 2; }
     for scen in "${SCENARIOS[@]}"; do
         log="$LT_DIR/.work/all-modes-$harness-$scen.log"
         printf '\n############ harness=%s scenario=%s ############\n' "$harness" "$scen"
@@ -44,7 +50,7 @@ printf '\n================ all-modes scoreboard ================\n'
 printf '  %-14s' 'scenario'; for h in "${HARNESSES[@]}"; do printf ' %-8s' "$h"; done; printf '\n'
 for scen in "${SCENARIOS[@]}"; do
     printf '  %-14s' "$scen"
-    for h in "${HARNESSES[@]}"; do printf ' %-8s' "${RESULT[$h/$scen]:-?}"; done
+    for h in "${HARNESSES[@]}"; do printf ' %-8s' "${RESULT["$h/$scen"]:-?}"; done
     printf '\n'
 done
 exit "$overall"
