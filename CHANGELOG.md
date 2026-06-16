@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-16
+
+Bug-fix release: Mode E privilege escalation now behaves as documented —
+`sudo` and `sudo -i` require a fresh LLNG token — plus an `ob-builder` Mode E
+deploy fix surfaced while validating the above on a full VM lab.
+
+### Fixed
+
+- **Mode E `sudo` requires the LLNG token again (no longer passwordless).** On a
+  bastion the PAM module runs in `authorize_only` mode (the SSH certificate has
+  already authenticated the user for sshd), but that setting also applied to the
+  `sudo` PAM stack, where there is no prior certificate auth — so `sudo`
+  silently succeeded without ever asking for a token, defeating the Mode E
+  guarantee. `pam_openbastion` now always enforces the token for the `sudo` /
+  `sudo-i` PAM services regardless of `authorize_only`. Fixed in the module, so
+  it covers bastion, backend and standalone in every mode.
+- **`sudo -i` works for SSO users.** `sudo` 1.9 uses a separate `sudo-i` PAM
+  service that `ob-bastion-setup` / `ob-backend-setup` never configured, so
+  `sudo -i` fell back to the distro default (`pam_unix`) and failed for NSS-only
+  SSO users with *"account validation failure, is your account locked?"*. Every
+  function that writes `/etc/pam.d/sudo` now also writes `/etc/pam.d/sudo-i`
+  with the same stack.
+- **`ob-builder` Mode E roles always ship the KRL file.** A Mode E Ansible role
+  failed to deploy with *"Could not find open-bastion-krl"* whenever the
+  portal's KRL was still empty (a fresh portal with no revocations): the role's
+  mandatory *Deploy KRL* task referenced `files/open-bastion-krl`, but the
+  emitter only wrote it when the fetched KRL was non-empty. It now always ships
+  the file (an empty KRL is valid; the refresh cron fills it later).
+
+### Added
+
+- **`ob-standalone-setup`** — a symlink to `ob-bastion-setup` installed for
+  clarity. Invoked under that name it defaults `--node-role` to `standalone`; an
+  explicit `--node-role` still overrides it.
+
 ### Documentation
 
 - Documented the full **`pam-access` OIDC Relying Party** setup in

@@ -1,5 +1,5 @@
 Name:           open-bastion
-Version:        0.3.1
+Version:        0.3.2
 Release:        1%{?dist}
 Summary:        Open Bastion PAM/NSS module for SSH bastion authentication
 
@@ -208,6 +208,11 @@ if [ "$1" = "0" ]; then
 fi
 
 %changelog
+* Tue Jun 16 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.2-1
+- Mode E sudo requires the LLNG token again (authorize_only no longer bypasses
+  it for the sudo PAM service); sudo -i works for SSO users (the separate sudo-i
+  PAM service is now configured); ob-builder Mode E roles always ship the KRL
+  file; ob-standalone-setup symlink. See CHANGELOG.md
 * Mon Jun 15 2026 Xavier Guimard <xguimard@linagora.com> - 0.3.1-1
 - ob-heartbeat reports connected users (who-is-connected), client version and
   node role to the SSO; ob-enroll fails when offline_access yields no refresh
