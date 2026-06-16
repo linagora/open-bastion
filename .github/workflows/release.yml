@@ -178,11 +178,21 @@ jobs:
           rc=0
           for rpm in packages/*.rpm; do
             [ -f "$rpm" ] || continue
-            if rpm --checksig "$rpm" | grep -qiE 'pgp.*OK|signatures OK'; then
+            out=$(rpm -Kvv "$rpm" 2>&1)
+            echo "$out"
+            # Two independent gates:
+            #  1. `rpm --checksig` exit code: non-zero on a BAD or NOKEY
+            #     signature (don't grep its text -- "OK" is a substring of
+            #     "NOT OK").
+            #  2. an explicit "signature ...: OK" line must be present, so an
+            #     *unsigned* package (which --checksig passes with exit 0,
+            #     "digests OK") is still rejected. `.*` keeps this tolerant of
+            #     the differing verbose layouts across rpm versions.
+            if rpm --checksig "$rpm" >/dev/null 2>&1 \
+               && echo "$out" | grep -iqE 'signature.*:[[:space:]]*OK'; then
               echo "OK: $rpm"
             else
-              echo "BAD SIGNATURE: $rpm"
-              rpm -Kvv "$rpm" || true
+              echo "BAD/UNVERIFIED SIGNATURE: $rpm"
               rc=1
             fi
           done
