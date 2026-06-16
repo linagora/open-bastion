@@ -103,6 +103,24 @@ typedef struct {
 /* Defense-in-depth: group required by sudoers for sudo access */
 #define OB_SUDO_GROUP "open-bastion-sudo"
 
+/*
+ * Canonicalize the PAM service name for authorization purposes.
+ *
+ * `sudo -i` (login shell) runs under the PAM service name "sudo-i", distinct
+ * from "sudo" used by `sudo`, `sudo -s` and `sudo su`. The two are identical
+ * as far as authorization is concerned: both are a sudo elevation. Map
+ * "sudo-i" to "sudo" so /pam/authorize and every sudo-permission check treat
+ * them the same. Without this, the LLNG pam-access plugin — which only knows
+ * "ssh"/"sshd"/"sudo" and default-denies anything else — rejects "sudo-i" at
+ * PAM account management, so `sudo -i` fails while `sudo su` succeeds (#152).
+ */
+static const char *canonical_service(const char *service)
+{
+    if (service && strcmp(service, "sudo-i") == 0)
+        return "sudo";
+    return service;
+}
+
 /* Logging macros - prefixed to avoid conflict with syslog constants */
 #define OB_LOG_ERR(handle, fmt, ...) \
     pam_syslog(handle, LOG_ERR, fmt, ##__VA_ARGS__)
@@ -2195,9 +2213,10 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     /* Get context information for audit and rate limiting */
     client_ip = get_client_ip(pamh);
     tty = get_tty(pamh);
-    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS) {
+    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS || !service) {
         service = "unknown";
     }
+    service = canonical_service(service);
 
     /* Initialize audit event */
     if (data->audit) {
@@ -2988,6 +3007,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS || !service) {
         service = "unknown";
     }
+    service = canonical_service(service);
 
     /*
      * SSH key policy validation (#91)

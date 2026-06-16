@@ -1097,6 +1097,13 @@ test_service_account_sudo() {
 
     # -n: non-interactive. If anything prompts for a password this fails,
     # which is exactly what we want to assert about sudo_nopasswd.
+    #
+    # We exercise BOTH `sudo` and `sudo -i`: the latter runs under the separate
+    # PAM service name "sudo-i", which pam_openbastion canonicalizes to "sudo"
+    # for authorization. Without that canonicalization `sudo -i` is treated as
+    # an unknown service and rejected at PAM account management while plain
+    # `sudo` works — regression guard for #152. The `&&` chain fails the test
+    # if either form is denied.
     local output rc=0
     output=$(ssh -i "${SVC_KEY}" \
                  -o IdentitiesOnly=yes \
@@ -1106,7 +1113,7 @@ test_service_account_sudo() {
                  -o ConnectTimeout=10 \
                  -p 2222 \
                  "${SVC_ACCOUNT}@localhost" \
-                 "sudo -n id -u && sudo -n id -un" 2>&1) || rc=$?
+                 "sudo -n id -u && sudo -n id -un && sudo -n -i id -u && sudo -n -i id -un" 2>&1) || rc=$?
     log_verbose "SSH(svc+sudo) rc=$rc output: $output"
 
     if [[ $rc -ne 0 ]]; then
@@ -1124,7 +1131,7 @@ test_service_account_sudo() {
         return 1
     fi
 
-    pass "sudo -n from ${SVC_ACCOUNT} runs as root (nopasswd path)"
+    pass "sudo -n and sudo -n -i from ${SVC_ACCOUNT} run as root (nopasswd path, #152)"
     return 0
 }
 
