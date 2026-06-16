@@ -140,7 +140,7 @@ wait                                          # forwarder drains, half-closes th
 ```
 
 `ob-record-connect` `connect()`s **first** (fast for a local listening socket)
-and exits non-zero on failure, so the recorder can refuse the session *before*
+and exits non-zero on failure, so the recorder can refuse the session _before_
 `script` starts. It then writes the header and copies the FIFO to the socket
 until EOF. `script`'s PTY handling (raw mode, window size, **Ctrl-C** delivered
 to the foreground process group) is unchanged — we reuse it rather than
