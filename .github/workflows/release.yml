@@ -162,12 +162,26 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          # `rpm --addsign` invokes gpg TWICE per package (header + payload
+          # signatures). A passphrase piped to rpm's stdin is consumed by the
+          # first gpg, leaving fd 0 at EOF -> the second gpg reads an empty
+          # passphrase -> "gpg: signing failed: Bad passphrase". Use a
+          # re-readable passphrase file instead of --passphrase-fd 0.
+          umask 077
+          printf '%s' "$GPG_PASSPHRASE" > /tmp/ob-gpg-pass
+          # Allow loopback pinentry for the agent gpg starts behind rpm.
+          gpgconf --kill gpg-agent || true
+          mkdir -p "${GNUPGHOME:-$HOME/.gnupg}"
+          chmod 700 "${GNUPGHOME:-$HOME/.gnupg}"
+          echo "allow-loopback-pinentry" >> "${GNUPGHOME:-$HOME/.gnupg}/gpg-agent.conf"
+          gpgconf --launch gpg-agent || true
           for rpm in packages/*.rpm; do
             [ -f "$rpm" ] || continue
-            echo "$GPG_PASSPHRASE" | rpm --addsign "$rpm" \
+            rpm --addsign "$rpm" \
               --define "_gpg_name $GPG_KEY_ID" \
-              --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-fd 0"
+              --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-file /tmp/ob-gpg-pass"
           done
+          shred -u /tmp/ob-gpg-pass 2>/dev/null || rm -f /tmp/ob-gpg-pass
 
       - name: Verify RPM signatures
         run: |
