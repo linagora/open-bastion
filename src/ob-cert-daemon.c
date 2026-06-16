@@ -46,6 +46,8 @@
 #include <curl/curl.h>
 #include <json-c/json.h>
 
+#include "ob_cert_proto.h"
+
 #define OB_CONFIG "/etc/open-bastion/openbastion.conf"
 #define PROXY_CONFIG "/etc/open-bastion/ssh-proxy.conf"
 #define DEFAULT_TOKEN_FILE "/var/lib/open-bastion/token"
@@ -69,87 +71,11 @@ static void fail(const char *msg)
     fprintf(stderr, "[ob-cert-daemon] %s\n", msg);
 }
 
-/* ── input validation (mirrors the old shell helper) ──────────────────────── */
+/* Request field validators (ob_valid_*) and the line reader (ob_read_line) live
+ * in ob_cert_proto.c so they can be unit-tested in isolation
+ * (tests/test_ob_cert_proto.c). */
 
-static int valid_username(const char *s)
-{
-    if (!s || !*s || strlen(s) > 32)
-        return 0;
-    if (!(islower((unsigned char)s[0]) || s[0] == '_'))
-        return 0;
-    for (const char *p = s + 1; *p; p++)
-        if (!(islower((unsigned char)*p) || isdigit((unsigned char)*p) ||
-              *p == '.' || *p == '_' || *p == '-'))
-            return 0;
-    return 1;
-}
-
-static int valid_host(const char *s)
-{
-    if (!s || !*s || strlen(s) > 255)
-        return 0;
-    if (s[0] == '-') /* never let it look like an ssh option */
-        return 0;
-    for (const char *p = s; *p; p++)
-        if (!(isalnum((unsigned char)*p) || *p == '.' || *p == ':' ||
-              *p == '_' || *p == '-' || *p == '[' || *p == ']'))
-            return 0;
-    return 1;
-}
-
-static int valid_group(const char *s)
-{
-    if (!s || !*s || strlen(s) > 64)
-        return 0;
-    for (const char *p = s; *p; p++)
-        if (!(isalnum((unsigned char)*p) || *p == '.' || *p == '_' || *p == '-'))
-            return 0;
-    return 1;
-}
-
-static int valid_pubkey(const char *s)
-{
-    if (!s || strlen(s) > 4096)
-        return 0;
-    if (strncmp(s, "ssh-", 4) != 0 && strncmp(s, "ecdsa-sha2-", 11) != 0)
-        return 0;
-    /* one-line, printable; the CA re-parses it server-side. */
-    for (const char *p = s; *p; p++)
-        if (*p == '\r' || *p == '\n' || !isprint((unsigned char)*p))
-            return 0;
-    return 1;
-}
-
-/* ── tiny readers ─────────────────────────────────────────────────────────── */
-
-/* Read one '\n'-terminated line from fd into buf (NUL-terminated, '\r'/'\n'
- * stripped). Returns line length, 0 on clean EOF before any byte, -1 on error
- * or overflow. Byte-at-a-time: requests are tiny and this keeps us from reading
- * past the 4 lines into nothing. */
-static ssize_t read_line(int fd, char *buf, size_t cap)
-{
-    size_t i = 0;
-    while (i < cap - 1) {
-        char c;
-        ssize_t n = read(fd, &c, 1);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1;
-        }
-        if (n == 0)
-            break; /* EOF */
-        if (c == '\n') {
-            buf[i] = '\0';
-            return (ssize_t)i;
-        }
-        buf[i++] = c;
-    }
-    if (i >= cap - 1)
-        return -1; /* line too long */
-    buf[i] = '\0';
-    return (ssize_t)i;
-}
+/* ── config/token helpers ─────────────────────────────────────────────────── */
 
 static char *trim(char *s)
 {
@@ -332,8 +258,11 @@ int main(void)
     int conn_fd = STDIN_FILENO;
     struct stat fdst;
     if (!(fstat(conn_fd, &fdst) == 0 && S_ISSOCK(fdst.st_mode))) {
+        /* sd-daemon protocol: only trust fd 3 when LISTEN_PID names us, so a
+         * manually-invoked daemon can't be tricked into using a stray fd. */
         const char *lf = getenv("LISTEN_FDS");
-        if (lf && atoi(lf) >= 1)
+        const char *lp = getenv("LISTEN_PID");
+        if (lf && atoi(lf) >= 1 && lp && atoi(lp) == (int)getpid())
             conn_fd = 3; /* SD_LISTEN_FDS_START */
     }
 
@@ -359,32 +288,32 @@ int main(void)
         return 1;
     }
     const char *cert_user = pw.pw_name;
-    if (!valid_username(cert_user)) {
+    if (!ob_valid_username(cert_user)) {
         fail("calling user name rejected by policy");
         return 1;
     }
 
     /* 2. Request body (target_host, target_group, voucher, public_key). */
     char host[MAX_HOST], group[MAX_GROUP], voucher[MAX_VOUCHER], pubkey[MAX_PUBKEY];
-    if (read_line(conn_fd, host, sizeof(host)) <= 0 ||
-        read_line(conn_fd, group, sizeof(group)) < 0 ||
-        read_line(conn_fd, voucher, sizeof(voucher)) <= 0 ||
-        read_line(conn_fd, pubkey, sizeof(pubkey)) <= 0) {
+    if (ob_read_line(conn_fd, host, sizeof(host)) <= 0 ||
+        ob_read_line(conn_fd, group, sizeof(group)) < 0 ||
+        ob_read_line(conn_fd, voucher, sizeof(voucher)) <= 0 ||
+        ob_read_line(conn_fd, pubkey, sizeof(pubkey)) <= 0) {
         fail("malformed request (expected host/group/voucher/pubkey lines)");
         return 1;
     }
     if (group[0] == '\0')
         snprintf(group, sizeof(group), "%s", "default");
 
-    if (!valid_host(host)) {
+    if (!ob_valid_host(host)) {
         fail("invalid target host");
         return 1;
     }
-    if (!valid_group(group)) {
+    if (!ob_valid_group(group)) {
         fail("invalid target group");
         return 1;
     }
-    if (!valid_pubkey(pubkey)) {
+    if (!ob_valid_pubkey(pubkey)) {
         fail("invalid SSH public key");
         return 1;
     }
@@ -432,9 +361,11 @@ int main(void)
     char authhdr[MAX_TOKEN + 32];
     snprintf(authhdr, sizeof(authhdr), "Authorization: Bearer %s", token);
 
+    curl_global_init(CURL_GLOBAL_DEFAULT);
     CURL *curl = curl_easy_init();
     if (!curl) {
         fail("curl init failed");
+        curl_global_cleanup();
         free(token);
         json_object_put(body);
         return 1;
@@ -481,6 +412,7 @@ int main(void)
 
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
+    curl_global_cleanup();
     free(rb.data);
     json_object_put(body);
     return ret;

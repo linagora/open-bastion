@@ -122,8 +122,10 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-standalone-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
+%{_mandir}/man8/ob-cert-daemon.8*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
+%{_mandir}/man1/ob-cert-request.1*
 # Hardening templates (session containment - deployed by ob-bastion-setup)
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/hardening

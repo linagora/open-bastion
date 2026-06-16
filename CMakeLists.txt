@@ -237,8 +237,9 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
 # socket-activated) holds the server token and derives the certificate's user
 # from the connection's SO_PEERCRED; ob-cert-request is the unprivileged client
 # that ob-ssh / ob-scp invoke — no sudo, no setuid.
-add_executable(ob-cert-daemon src/ob-cert-daemon.c)
+add_executable(ob-cert-daemon src/ob-cert-daemon.c src/ob_cert_proto.c)
 target_include_directories(ob-cert-daemon PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
 )
@@ -343,6 +344,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-backend-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
+    ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 
@@ -359,6 +361,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
     ${CMAKE_SOURCE_DIR}/man/ob-scp.1
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
+    ${CMAKE_SOURCE_DIR}/man/ob-cert-request.1
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 

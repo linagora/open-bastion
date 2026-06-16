@@ -58,6 +58,11 @@ add_executable(test_username_validator test_username_validator.c)
 target_include_directories(test_username_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_username_validator COMMAND test_username_validator)
 
+# Bastion cert socket protocol: validators + line reader (CRLF, overflow, EOF)
+add_executable(test_ob_cert_proto test_ob_cert_proto.c ../src/ob_cert_proto.c)
+target_include_directories(test_ob_cert_proto PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME test_ob_cert_proto COMMAND test_ob_cert_proto)
+
 # Test ob_client structures and functions
 add_executable(test_ob_client test_ob_client.c ../src/ob_client.c ../src/jwt_utils.c)
 target_include_directories(test_ob_client PRIVATE
