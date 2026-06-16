@@ -2213,7 +2213,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     /* Get context information for audit and rate limiting */
     client_ip = get_client_ip(pamh);
     tty = get_tty(pamh);
-    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS) {
+    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS || !service) {
         service = "unknown";
     }
     service = canonical_service(service);
