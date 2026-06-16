@@ -29,8 +29,6 @@ SESSION_ID=""
 # Derive username from real uid, not $USER (which is user-controllable).
 SESSION_USER="$(id -un 2>/dev/null || echo unknown)"
 SESSION_START=""
-SESSION_FILE=""
-METADATA_FILE=""
 ORIGINAL_COMMAND="${SSH_ORIGINAL_COMMAND:-}"
 CLIENT_IP="${SSH_CLIENT:+${SSH_CLIENT%% *}}"
 CLIENT_IP="${CLIENT_IP:-unknown}"
@@ -120,84 +118,40 @@ load_config() {
     fi
 }
 
-# Ensure session directories exist
-ensure_sessions_dir() {
-    if [ ! -d "$SESSIONS_DIR" ]; then
-        log_err "Sessions directory $SESSIONS_DIR does not exist"
-        return 1
-    fi
-
-    # User subdirectory is created by ob-session-recorder-wrapper (setgid binary)
-    # with mode 2770 (setgid bit) and group ob-sessions. Files created inside
-    # inherit the ob-sessions group. If running without the wrapper (e.g. tests),
-    # create the directory as a fallback.
-    local user_dir="$SESSIONS_DIR/$SESSION_USER"
-    if [ ! -d "$user_dir" ]; then
-        mkdir "$user_dir" 2>/dev/null || true
-        chmod 0770 "$user_dir" 2>/dev/null || true
-    fi
-
-    if [ ! -d "$user_dir" ]; then
-        log_err "User sessions directory $user_dir does not exist and could not be created"
-        return 1
-    fi
-}
-
-# Write session metadata
-write_metadata() {
-    local status="$1"
-    local end_time
-    end_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-    # Escape original command for JSON
-    local escaped_command
+# Build the one-line JSON metadata header sent to the recording sink. The sink
+# (root) writes the actual metadata file and is the authority on user/start/end/
+# status; everything here is informational only (the sink JSON-escapes it). MUST
+# be a single line (no embedded newline) — ob-record-connect rejects newlines.
+build_header() {
     if command -v jq >/dev/null 2>&1; then
-        escaped_command=$(printf '%s' "$ORIGINAL_COMMAND" | jq -Rs .)
+        jq -cn \
+            --arg sid "$SESSION_ID" \
+            --arg fmt "$FORMAT" \
+            --arg ip "$CLIENT_IP" \
+            --arg tty "$TTY_NAME" \
+            --arg cmd "$ORIGINAL_COMMAND" \
+            --arg start "$SESSION_START" \
+            '{v:1,session_id:$sid,format:$fmt,client_ip:$ip,ssh_tty:$tty,original_command:$cmd,start:$start}'
     else
-        # Simple escaping fallback
-        escaped_command="\"${ORIGINAL_COMMAND//\"/\\\"}\""
+        # Minimal fallback (jq is a package dependency; this is best-effort).
+        local c="${ORIGINAL_COMMAND//\\/\\\\}"; c="${c//\"/\\\"}"
+        printf '{"v":1,"session_id":"%s","format":"%s","client_ip":"%s","ssh_tty":"%s","original_command":"%s","start":"%s"}' \
+            "$SESSION_ID" "$FORMAT" "$CLIENT_IP" "$TTY_NAME" "$c" "$SESSION_START"
     fi
-
-    cat > "$METADATA_FILE" <<EOF
-{
-    "session_id": "$SESSION_ID",
-    "user": "$SESSION_USER",
-    "client_ip": "$CLIENT_IP",
-    "tty": "$TTY_NAME",
-    "start_time": "$SESSION_START",
-    "end_time": "$end_time",
-    "status": "$status",
-    "original_command": $escaped_command,
-    "format": "$FORMAT",
-    "recording_file": "$(basename "$SESSION_FILE")",
-    "hostname": "$(hostname -f 2>/dev/null || hostname)",
-    "version": "$VERSION"
-}
-EOF
-    chmod 0600 "$METADATA_FILE"
 }
 
-# Cleanup on exit
+# Cleanup on exit. The sink owns the metadata file (end time + status), so the
+# recorder no longer writes any session file here — it only tears down the
+# timeout watchdog and logs.
 cleanup() {
     local exit_code=$?
-    local status="completed"
 
-    # Kill timeout process if running
     if [ -n "$TIMEOUT_PID" ]; then
         kill "$TIMEOUT_PID" 2>/dev/null || true
         wait "$TIMEOUT_PID" 2>/dev/null || true
     fi
 
-    if [ $exit_code -ne 0 ]; then
-        status="error:$exit_code"
-    fi
-
-    # Update metadata with end time and status
-    if [ -n "$METADATA_FILE" ] && [ -d "$(dirname "$METADATA_FILE")" ]; then
-        write_metadata "$status"
-    fi
-
-    log_info "Session $SESSION_ID ended for user $SESSION_USER (status: $status)"
+    log_info "Session $SESSION_ID ended for user $SESSION_USER (recorder rc: $exit_code)"
 }
 
 # Handle session timeout
@@ -249,77 +203,54 @@ is_file_transfer() {
 }
 
 # Exec a file-transfer command directly, bypassing the PTY recorder.
-# Stdin/stdout/stderr stay raw so the SCP/SFTP/rsync protocol works.
-# We still write metadata (command, start/end, exit status) for audit.
+# Stdin/stdout/stderr stay raw so the SCP/SFTP/rsync protocol works. We still
+# record the session (command, start/end) for audit by sending a metadata-only
+# header to the sink (no stream). Recording is mandatory: if the sink is
+# unreachable we refuse the transfer (fail-closed) rather than running unrecorded.
 record_transfer() {
     local shell="${SHELL:-/bin/bash}"
-    # Mark the session as a non-PTY transfer in metadata. The session file
-    # placeholder is kept (created empty during write_metadata) so audit
-    # tools that grep for *.typescript still find the metadata sibling.
     FORMAT="transfer"
     log_info "Session $SESSION_ID: file-transfer (no PTY recording): $ORIGINAL_COMMAND"
+    # Send the header and let the sink finalize the transfer record. exec'ing
+    # 'true' makes ob-record-connect send the header then close → the sink sees
+    # header + immediate EOF and records a transfer session. A connect failure
+    # returns non-zero WITHOUT running 'true', so we fail closed.
+    if ! ob-record-connect "$(build_header)" true; then
+        log_err "recording sink unreachable; refusing file transfer (fail-closed)"
+        echo "Session recording is required but unavailable; transfer refused." >&2
+        return 1
+    fi
     # Run under the user's login shell so $PATH and aliases behave as usual.
-    # We don't use 'exec' because we want the cleanup trap to run on return.
     "$shell" -c "$ORIGINAL_COMMAND"
 }
 
-# Record session using script command (always available)
+# Record an interactive/PTY session: stream the typescript straight into the
+# recording sink over the socket. ob-record-connect connects, sends the header,
+# and execs script with the connected socket at /dev/fd/3; script writes the
+# typescript there. If the sink is unreachable ob-record-connect returns non-zero
+# WITHOUT exec'ing script, so no shell starts — recording is mandatory when
+# enabled (fail-closed; see the design §9).
 record_script() {
     local shell="${SHELL:-/bin/bash}"
+    local header
+    header=$(build_header)
 
-    # -e (--return) makes script(1) exit with the CHILD's status. Without it
-    # script always exits 0, so any command run non-interactively through the
-    # bastion (ob-ssh / ob-scp hops, scripted ssh, CI jobs) reports success even
-    # when it failed, and the session metadata status is always "completed".
-    # util-linux >= 2.31 (Debian 11+, RHEL/Rocky 8+) supports -e; on anything
-    # older we fall back to the legacy behaviour rather than erroring out.
-    local ret_opt=""
-    script --help 2>/dev/null | grep -q -- '--return' && ret_opt="-e"
+    # script runs the shell (or the original command) and writes the typescript
+    # to /dev/fd/3 — the socket connected by ob-record-connect. -f flushes after
+    # each write so the sink (and any live monitor) sees output promptly. The
+    # `if !` form keeps `set -e` from exiting before we can report the failure.
+    local target="$shell"
+    [ -n "$ORIGINAL_COMMAND" ] && target="$ORIGINAL_COMMAND"
 
-    if [ -n "$ORIGINAL_COMMAND" ]; then
-        script -q $ret_opt -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
-    else
-        script -q $ret_opt -c "$shell" "$SESSION_FILE"
+    if ! ob-record-connect "$header" script -q -f -c "$target" /dev/fd/3; then
+        echo "Session recording is required but unavailable; access refused." >&2
+        return 1
     fi
 }
 
-# Record session using asciinema (if available)
-record_asciinema() {
-    local shell="${SHELL:-/bin/bash}"
-
-    if ! command -v asciinema >/dev/null 2>&1; then
-        log_warn "asciinema not installed, falling back to script"
-        FORMAT="script"
-        SESSION_FILE="${SESSION_FILE%.cast}.typescript"
-        record_script
-        return
-    fi
-
-    if [ -n "$ORIGINAL_COMMAND" ]; then
-        asciinema rec -c "$ORIGINAL_COMMAND" "$SESSION_FILE"
-    else
-        asciinema rec -c "$shell" "$SESSION_FILE"
-    fi
-}
-
-# Record session using ttyrec (if available)
-record_ttyrec() {
-    local shell="${SHELL:-/bin/bash}"
-
-    if ! command -v ttyrec >/dev/null 2>&1; then
-        log_warn "ttyrec not installed, falling back to script"
-        FORMAT="script"
-        SESSION_FILE="${SESSION_FILE%.ttyrec}.typescript"
-        record_script
-        return
-    fi
-
-    if [ -n "$ORIGINAL_COMMAND" ]; then
-        ttyrec -e "$ORIGINAL_COMMAND" "$SESSION_FILE"
-    else
-        ttyrec -e "$shell" "$SESSION_FILE"
-    fi
-}
+# NOTE: asciinema/ttyrec recording is not yet supported over the sink protocol
+# (v1 streams typescript only). The format coercion in main() maps any other
+# configured format to "script".
 
 # Print usage
 usage() {
@@ -415,29 +346,22 @@ main() {
     SESSION_ID=$(generate_session_id)
     SESSION_START=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-    # Setup paths
-    ensure_sessions_dir
-    local user_dir="$SESSIONS_DIR/$SESSION_USER"
-    local date_prefix
-    date_prefix=$(date +%Y%m%d-%H%M%S)
+    # The recording is now streamed to the root sink (ob-record-sink), which owns
+    # the on-disk files under /var/lib/open-bastion/sessions/<user>/ so the user
+    # cannot delete or alter them (#151). The recorder therefore creates no files
+    # and no per-user directory. The recorder must be able to reach the sink.
+    if ! command -v ob-record-connect >/dev/null 2>&1; then
+        log_err "ob-record-connect not found; recording is required — refusing session"
+        echo "Session recording is required but not installed; access refused." >&2
+        exit 1
+    fi
 
-    case "$FORMAT" in
-        asciinema)
-            SESSION_FILE="$user_dir/${date_prefix}_${SESSION_ID}.cast"
-            ;;
-        ttyrec)
-            SESSION_FILE="$user_dir/${date_prefix}_${SESSION_ID}.ttyrec"
-            ;;
-        *)
-            FORMAT="script"
-            SESSION_FILE="$user_dir/${date_prefix}_${SESSION_ID}.typescript"
-            ;;
-    esac
-
-    METADATA_FILE="$user_dir/${date_prefix}_${SESSION_ID}.json"
-
-    # Write initial metadata
-    write_metadata "active"
+    # v1 streams typescript only. asciinema/ttyrec are not yet supported over the
+    # sink protocol; fall back to script rather than silently misbehaving.
+    if [ "$FORMAT" != "script" ]; then
+        [ "$FORMAT" != "transfer" ] && log_warn "format '$FORMAT' not supported by the sink yet; using 'script'"
+        FORMAT="script"
+    fi
 
     log_info "Session $SESSION_ID started for user $SESSION_USER from $CLIENT_IP"
 
@@ -469,23 +393,13 @@ main() {
         TIMEOUT_PID=$!
     fi
 
-    # File-transfer commands (scp, sftp, rsync) need raw stdio: bypass the
-    # PTY recorder, log metadata only. Otherwise wrap the command in the
-    # configured recorder (script/asciinema/ttyrec) which gives a PTY.
+    # File-transfer commands (scp, sftp, rsync) need raw stdio: bypass the PTY
+    # recorder, record metadata only. Otherwise stream the PTY typescript to the
+    # sink. Both paths fail closed when the sink is unreachable.
     if is_file_transfer; then
         record_transfer
     else
-        case "$FORMAT" in
-            asciinema)
-                record_asciinema
-                ;;
-            ttyrec)
-                record_ttyrec
-                ;;
-            *)
-                record_script
-                ;;
-        esac
+        record_script
     fi
 }
 

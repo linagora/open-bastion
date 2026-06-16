@@ -123,12 +123,22 @@ static gid_t sessions_gid(void)
     return 0;
 }
 
-/* Ensure SESSIONS_DIR/<user> exists, root:gid 0750, no symlinks. Returns a dir
+/* Base sessions directory. Hard-coded by default; OB_SESSIONS_DIR overrides it
+ * for tests. This reads the DAEMON's own environment, which is set by the systemd
+ * unit (not by the connecting client), so it is not an attacker-controlled
+ * input. */
+static const char *sessions_base(void)
+{
+    const char *e = getenv("OB_SESSIONS_DIR");
+    return (e && *e) ? e : SESSIONS_DIR;
+}
+
+/* Ensure <base>/<user> exists, root:gid 0750, no symlinks. Returns a dir
  * fd (O_DIRECTORY|O_NOFOLLOW) on success, -1 on error. */
 static int ensure_user_dir(const char *user, gid_t gid)
 {
     char path[512];
-    int n = snprintf(path, sizeof(path), "%s/%s", SESSIONS_DIR, user);
+    int n = snprintf(path, sizeof(path), "%s/%s", sessions_base(), user);
     if (n < 0 || (size_t)n >= sizeof(path)) {
         fail("session dir path too long");
         return -1;
@@ -179,7 +189,8 @@ static int write_metadata(int dirfd, const char *name, const char *session_id,
     json_object_object_add(o, "hostname", json_object_new_string(host));
     json_object_object_add(o, "version", json_object_new_string(OB_RECORD_SINK_VERSION));
 
-    const char *txt = json_object_to_json_string_ext(o, JSON_C_TO_STRING_PRETTY);
+    const char *txt = json_object_to_json_string_ext(
+        o, JSON_C_TO_STRING_PRETTY | JSON_C_TO_STRING_SPACED);
     size_t len = strlen(txt);
 
     int fd = openat(dirfd, name, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0640);
