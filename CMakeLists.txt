@@ -282,6 +282,54 @@ install(TARGETS ob-cert-request
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Tamper-evident session recording: socket-activated root sink + unprivileged
+# connector. ob-record-sink (root, socket-activated) writes recordings root-owned
+# under /var/lib/open-bastion/sessions/<user>/ (the recorded user cannot touch
+# them); ob-record-connect is the unprivileged connector the recorder execs to
+# stream into the socket. See doc/design/tamper-evident-session-recording.md.
+add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
+target_include_directories(ob-record-sink PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+)
+target_compile_options(ob-record-sink PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_libraries(ob-record-sink
+    ${JSON_C_LIBRARIES}
+)
+target_link_options(ob-record-sink PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-record-sink
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+add_executable(ob-record-connect src/ob-record-connect.c)
+target_compile_options(ob-record-connect PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_options(ob-record-connect PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-record-connect
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 # Install SSH certificate tool (user-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -372,6 +420,8 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.service
         ${CMAKE_SOURCE_DIR}/systemd/ob-cert.socket
         ${CMAKE_SOURCE_DIR}/systemd/ob-cert@.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-record.socket
+        ${CMAKE_SOURCE_DIR}/systemd/ob-record@.service
         DESTINATION lib/systemd/system
     )
     # Desktop-specific systemd service
