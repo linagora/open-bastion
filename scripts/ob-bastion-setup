@@ -260,30 +260,41 @@ USERNAME="$1"
 FINGERPRINT="$2"
 SPOOL_DIR="/run/open-bastion/ssh-fp"
 
-# Record the fingerprint keyed by our sshd-session ancestor PID
-# (pam_openbastion converges on the same ancestor by walking /proc).
+# Record the fingerprint keyed by the per-connection sshd anchor PID.
+# OpenSSH >= 9.8 has TWO processes named "sshd-session" per connection (the
+# privileged monitor and an unprivileged child); this helper and pam_openbastion
+# may run under either, so both MUST converge on the same one. We anchor on the
+# OUTERMOST contiguous sshd-session (the monitor, whose parent is the "sshd"
+# listener) — pam_openbastion's find_sshd_session_ancestor() does the same.
+# Pre-split OpenSSH (<9.8, e.g. Rocky 9) has no "sshd-session"; fall back to the
+# first "sshd" ancestor there.
 case "$FINGERPRINT" in
     SHA256:[A-Za-z0-9+/]*) : ;;
     *) FINGERPRINT="" ;;
 esac
 if [ -n "$FINGERPRINT" ] && [ -d "$SPOOL_DIR" ]; then
     pid=$PPID
+    anchor=0   # outermost contiguous sshd-session = the privileged monitor
     i=0
     while [ "$pid" -gt 1 ] && [ $i -lt 16 ]; do
         comm=$(cat /proc/"$pid"/comm 2>/dev/null || echo "")
-        case "$comm" in
-            sshd-session|sshd) break ;;
-        esac
+        if [ "$comm" = "sshd-session" ]; then
+            anchor=$pid               # record, keep climbing for an outer one
+        elif [ "$anchor" -gt 1 ]; then
+            break                     # left the sshd-session chain → monitor found
+        elif [ "$comm" = "sshd" ]; then
+            anchor=$pid; break        # pre-split OpenSSH (<9.8, e.g. Rocky 9): "sshd" is the anchor
+        fi
         pid=$(awk '/^PPid:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
         [ -z "$pid" ] && pid=0
         i=$((i + 1))
     done
-    if [ "$pid" -gt 1 ]; then
+    if [ "$anchor" -gt 1 ]; then
         umask 077
-        tmp=$(mktemp "$SPOOL_DIR/."$pid".XXXXXX" 2>/dev/null) || tmp=""
+        tmp=$(mktemp "$SPOOL_DIR/."$anchor".XXXXXX" 2>/dev/null) || tmp=""
         if [ -n "$tmp" ]; then
             printf '%s\n' "$FINGERPRINT" > "$tmp"
-            mv -f "$tmp" "$SPOOL_DIR/$pid.fp"
+            mv -f "$tmp" "$SPOOL_DIR/$anchor.fp"
         fi
     fi
 fi
@@ -305,6 +316,14 @@ PRINCIPALS
     # pam_openbastion additionally refuses to read the spool if this
     # directory is group/world-writable or if a drop file isn't owned by
     # the directory owner with mode 0600 / nlink 1.
+    # The parent /run/open-bastion MUST be traversable by the principals helper
+    # user (nobody) so it can reach the 0700 spool below. Other steps (ob-enroll,
+    # the device-state file) create it 0750 root:root, which blocks nobody and
+    # silently breaks the fingerprint spool (no voucher → onward hop fails).
+    # 0711 = traverse-only: nobody can cd through it but not list it, and the
+    # device-state file is protected by its own mode.
+    mkdir -p /run/open-bastion
+    chmod 0711 /run/open-bastion
     mkdir -p "$spool_dir"
     chown nobody:nogroup "$spool_dir" 2>/dev/null || chown nobody:nobody "$spool_dir"
     chmod 0700 "$spool_dir"
@@ -313,7 +332,9 @@ PRINCIPALS
     cat > "$tmpfiles_conf" << TMPFILES
 # Open Bastion SSH fingerprint spool — recreated at boot so the directory
 # survives /run wipes. See /usr/local/sbin/ob-ssh-principals.
-d /run/open-bastion          0755 root   root   -
+# 0711 on the parent: traversable by the principals helper (nobody) but not
+# listable; the ssh-fp drop dir itself is 0700 nobody.
+d /run/open-bastion          0711 root   root   -
 d /run/open-bastion/ssh-fp   0700 nobody nogroup -
 TMPFILES
     chmod 644 "$tmpfiles_conf"

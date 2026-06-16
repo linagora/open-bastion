@@ -20,7 +20,11 @@
     state: directory
     owner: root
     group: root
-    mode: '0750'
+    # 0711 (not 0750): the SSH-fingerprint spool lives under here and must be
+    # traversable by the AuthorizedPrincipalsCommand helper user (nobody), or
+    # the bastion voucher is never minted. 0711 is traverse-only (not listable);
+    # the device-state file is protected by its own mode.
+    mode: '0711'
   when: _ob_use_auto_approve
 
 - name: "Start ob-enroll asynchronously (device code published to /run/open-bastion/enroll-state.json)"

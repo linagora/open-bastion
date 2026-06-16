@@ -1595,15 +1595,24 @@ static const char *get_client_ip(pam_handle_t *pamh)
 }
 
 /*
- * Walk up the process tree looking for an ancestor whose /proc/<pid>/comm
- * is "sshd-session" (or "sshd" as a fallback). Returns its PID, or 0 if
- * none found. Used to correlate the PAM module's invocation with the
- * AuthorizedPrincipalsCommand run, since both end up under the same
- * sshd-session[priv] process even when run in separate child processes.
+ * Walk up the process tree to find the per-connection sshd anchor PID, used to
+ * correlate this PAM invocation with the AuthorizedPrincipalsCommand run (which
+ * drops the SSH fingerprint at /run/open-bastion/ssh-fp/<anchor>.fp).
+ *
+ * OpenSSH >= 9.8 splits each connection into TWO processes both named
+ * "sshd-session": the privileged monitor (child of the "sshd" listener) and an
+ * unprivileged child under it. PAM and the principals helper may run under
+ * EITHER, so stopping at the *first* "sshd-session" makes the writer and reader
+ * key the spool on different PIDs and the lookup fails. To converge
+ * deterministically we return the OUTERMOST contiguous "sshd-session" (the
+ * monitor, whose parent is the "sshd" listener). On pre-split OpenSSH (< 9.8,
+ * e.g. RHEL/Rocky 9) there is no "sshd-session" and we fall back to the first
+ * "sshd" ancestor. Returns 0 if none found.
  */
 static pid_t find_sshd_session_ancestor(void)
 {
     pid_t pid = getpid();
+    pid_t outermost_session = 0;  /* outermost contiguous sshd-session seen */
     for (int i = 0; i < 16; i++) {
         char path[64];
         char buf[256];
@@ -1611,22 +1620,33 @@ static pid_t find_sshd_session_ancestor(void)
         /* Read /proc/<pid>/comm */
         snprintf(path, sizeof(path), "/proc/%d/comm", (int)pid);
         FILE *f = fopen(path, "r");
-        if (!f) return 0;
+        if (!f) return outermost_session;
         if (!fgets(buf, sizeof(buf), f)) {
             fclose(f);
-            return 0;
+            return outermost_session;
         }
         fclose(f);
         char *nl = strchr(buf, '\n');
         if (nl) *nl = '\0';
-        if (strcmp(buf, "sshd-session") == 0 || strcmp(buf, "sshd") == 0) {
+        if (strcmp(buf, "sshd-session") == 0) {
+            /* Record and keep climbing: a parent sshd-session (the monitor)
+             * outranks this one. */
+            outermost_session = pid;
+        } else if (outermost_session) {
+            /* Left the sshd-session chain; its outermost member is the
+             * per-connection privileged monitor — the common ancestor. */
+            return outermost_session;
+        } else if (strcmp(buf, "sshd") == 0) {
+            /* Pre-split OpenSSH (< 9.8, e.g. RHEL/Rocky 9's 8.7) has no
+             * "sshd-session": the per-connection process is "sshd" itself, and
+             * its first occurrence is the anchor (its parent is the listener). */
             return pid;
         }
 
         /* Read PPid from /proc/<pid>/status */
         snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
         f = fopen(path, "r");
-        if (!f) return 0;
+        if (!f) return outermost_session;
         pid_t ppid = 0;
         while (fgets(buf, sizeof(buf), f)) {
             if (strncmp(buf, "PPid:", 5) == 0) {
@@ -1635,10 +1655,10 @@ static pid_t find_sshd_session_ancestor(void)
             }
         }
         fclose(f);
-        if (ppid <= 1 || ppid == pid) return 0;
+        if (ppid <= 1 || ppid == pid) return outermost_session;
         pid = ppid;
     }
-    return 0;
+    return outermost_session;
 }
 
 /*

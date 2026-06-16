@@ -117,9 +117,15 @@ build_deb(){
 # ── 2. SSO ───────────────────────────────────────────────────────────────────
 ensure_sso(){
     phase "Test SSO"
+    # An explicit -f disables Compose's automatic override merge, so opt the
+    # gitignored docker-compose.override.yml back in when present (used to mount
+    # unreleased local plugin working copies — see that file's header).
+    local compose_files=(-f "$SSO_DIR/docker-compose.yml")
+    [ -f "$SSO_DIR/docker-compose.override.yml" ] && \
+        compose_files+=(-f "$SSO_DIR/docker-compose.override.yml")
     if ! docker ps --format '{{.Names}}' | grep -qx ob-sso; then
         info "starting + configuring ob-sso…"
-        docker compose -f "$SSO_DIR/docker-compose.yml" up -d >/dev/null 2>&1 || die "docker compose up failed"
+        docker compose "${compose_files[@]}" up -d >/dev/null 2>&1 || die "docker compose up failed"
         sleep 5
         bash "$SSO_DIR/configure.sh" >"$WORK/sso.log" 2>&1 || die "configure.sh failed — see $WORK/sso.log"
     fi
@@ -150,7 +156,7 @@ bootstrap_vm(){
     dssh "$ip" "sudo INSTALL_PKG=$install_pkg GW=$GW_IP APT_PORT=$APT_PORT bash -s" <<'BS' >/dev/null 2>&1
 set -e
 grep -q auth.example.com /etc/hosts || echo "$GW auth.example.com" >> /etc/hosts
-mkdir -p /run/open-bastion && chmod 750 /run/open-bastion
+mkdir -p /run/open-bastion && chmod 711 /run/open-bastion
 echo "deb [trusted=yes] http://$GW:$APT_PORT/ ./" > /etc/apt/sources.list.d/oblab.list
 export DEBIAN_FRONTEND=noninteractive
 for t in 1 2 3; do apt-get update -qq && apt-get install -y -qq libsodium23 && break || sleep 5; done
