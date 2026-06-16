@@ -141,7 +141,7 @@ Inside `ob-record-connect` (C): `socket(AF_UNIX)` + `connect()` → fd 3,
 `/dev/fd/3`, which on Linux resolves to the already-connected socket — writes go
 straight to the sink. `-f` flushes after each write so the sink (and any live
 monitor) sees output promptly. (`-e`, adopted in commit `5c327f1`, only sets the
-*recorder process's own* exit code — it does not affect what the sink records;
+_recorder process's own_ exit code — it does not affect what the sink records;
 the recorded `status` is sink-observed, see §5.)
 
 > Note: timing files. Plain `script` keeps timing in a separate `-t` stream.
