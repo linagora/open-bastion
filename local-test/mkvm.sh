@@ -51,7 +51,12 @@ if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx libvirt; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+# VM artifacts (qcow2 overlays, cloud-init seeds, the golden image, *.port) live
+# in a machine-local, git-ignored subdir (see .gitignore: local-test/vm/) so the
+# multi-hundred-MB images never enter the source archive. Override with OB_VM_DIR.
+VM_DIR="${OB_VM_DIR:-$SCRIPT_DIR/vm}"
+mkdir -p "$VM_DIR"
+cd "$VM_DIR"
 
 # --- configuration (override via env) --------------------------------------
 GUEST_USER="${OB_VM_USER:-debian}"
@@ -80,8 +85,8 @@ resolve_golden() {
     fi
     local g
     g=$(ls -1t debian-*-genericcloud-*.qcow2 2>/dev/null | head -1 || true)
-    [ -n "$g" ] || die "No golden image found. Put debian-*-genericcloud-*.qcow2 here, or set OB_GOLDEN."
-    printf '%s/%s\n' "$SCRIPT_DIR" "$g"
+    [ -n "$g" ] || die "No golden image found. Put debian-*-genericcloud-*.qcow2 in $VM_DIR, or set OB_GOLDEN."
+    printf '%s/%s\n' "$VM_DIR" "$g"
 }
 
 # --- pick a default SSH public key -----------------------------------------
@@ -164,8 +169,8 @@ cmd_create() {
     [ -z "$pubkey" ] && pubkey=$(default_pubkey)
     [ -f "$pubkey" ] || die "Public key not found: $pubkey"
 
-    local overlay="$SCRIPT_DIR/$name.qcow2"
-    local seed="$SCRIPT_DIR/$name-seed.iso"
+    local overlay="$VM_DIR/$name.qcow2"
+    local seed="$VM_DIR/$name-seed.iso"
     [ -e "$overlay" ] && die "$overlay already exists (use: $0 rm $name)."
 
     info "Golden : $golden"
@@ -282,7 +287,7 @@ cmd_rm() {
     local name="${1:-}"; require_name "$name"
     "${VIRSH[@]}" destroy "$name" >/dev/null 2>&1 || true
     "${VIRSH[@]}" undefine "$name" >/dev/null 2>&1 || true
-    rm -f "$SCRIPT_DIR/$name.qcow2" "$SCRIPT_DIR/$name-seed.iso" "$SCRIPT_DIR/$name.port"
+    rm -f "$VM_DIR/$name.qcow2" "$VM_DIR/$name-seed.iso" "$VM_DIR/$name.port"
     info "Removed VM '$name' (domain undefined, overlay + seed deleted)."
 }
 

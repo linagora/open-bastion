@@ -43,3 +43,7 @@ CLAUDE.md
 .PLAN.md
 .omc/
 local/
+
+# Local libvirt lab: VM disk images, seeds and the mkvm helper are
+# machine-local scratch, never part of the source archive.
+local-test/vm/
