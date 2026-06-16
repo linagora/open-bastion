@@ -124,6 +124,20 @@ expect "deny cert-user != login"              DENIED    "$(try "$(mint 'bastion=
 expect "deny off-bastion source-address"      DENIED    "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' dwho 10.0.0.1)")"
 expect "deny principal mismatch"              DENIED    "$(try "$(mint 'bastion=pam-access;user=dwho;target=b1' root '')")"
 
+# Per-device allowlisting (oidc-device-organization device-id model): bastion=
+# now carries a UNIQUE per-bastion device-id, not the shared project client_id.
+# The plugin emits the device-id as a SHA-256 hex digest (sha256_hex of the
+# synthetic session id — the raw id is a replayable credential), so use two
+# realistic 64-hex values here. Setting one in the allowlist must accept ONLY
+# that bastion and deny any other device of the same project.
+DEV_A='ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb' # sha256("a")
+DEV_B='3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d' # sha256("b")
+printf '%s\n' "$DEV_A" > /etc/open-bastion/allowed_bastions
+expect "device-id allowlist: listed device accepted" CONNECTED "$(try "$(mint "bastion=$DEV_A;user=dwho;target=b1" dwho 127.0.0.1)")"
+expect "device-id allowlist: other device denied"    DENIED    "$(try "$(mint "bastion=$DEV_B;user=dwho;target=b1" dwho 127.0.0.1)")"
+# restore the project allowlist for the fail-closed regression below
+printf 'pam-access\n' > /etc/open-bastion/allowed_bastions
+
 # Regression: if nobody cannot read the allowlist (config dir 0700), the helper
 # must FAIL CLOSED — deny even an otherwise-valid vouched cert — instead of
 # falling open and accepting everything (the bug that let a direct SSO cert in
