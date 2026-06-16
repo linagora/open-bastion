@@ -140,8 +140,9 @@ Inside `ob-record-connect` (C): `socket(AF_UNIX)` + `connect()` → fd 3,
 `write(3, header)`, then `execvp` the trailing command. `script` `fopen()`s
 `/dev/fd/3`, which on Linux resolves to the already-connected socket — writes go
 straight to the sink. `-f` flushes after each write so the sink (and any live
-monitor) sees output promptly; `-e` propagates the child exit status (already
-adopted, commit `5c327f1`).
+monitor) sees output promptly. (`-e`, adopted in commit `5c327f1`, only sets the
+*recorder process's own* exit code — it does not affect what the sink records;
+the recorded `status` is sink-observed, see §5.)
 
 > Note: timing files. Plain `script` keeps timing in a separate `-t` stream.
 > For v1 we record the typescript only (as today). asciinema/ttyrec, which embed
@@ -155,7 +156,7 @@ PTY corrupts the binary protocol. They have **no stream to record**, only
 metadata. In the new model the recorder still opens a connection and sends the
 header with `format:"transfer"` and **no payload** (`shutdown(SHUT_WR)`
 immediately after the header). The sink writes the `<id>.json` (command,
-start/end, exit status) and a zero-byte placeholder, exactly like today's
+start/end, sink-observed `status`) and a zero-byte placeholder, like today's
 `record_transfer`. The transfer itself continues to run on the user side with
 raw stdio.
 
