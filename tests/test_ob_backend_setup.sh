@@ -112,6 +112,39 @@ test_no_sudo() {
     fi
 }
 
+# ── Test 7b: sudo config provisions the open-bastion-sudo group + sudoers rule (#154) ──
+# ob-backend-setup used to configure only PAM for sudo, never the sudoers
+# drop-in, so SSO users always got "not in the sudoers file" on backends.
+test_sudo_creates_sudoers_rule() {
+    local out
+    out=$(
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --dry-run
+        configure_pam_sudo 2>&1
+    )
+    if echo "$out" | grep -q "open-bastion-sudo" \
+       && echo "$out" | grep -q "/etc/sudoers.d/open-bastion"; then
+        pass "configure_pam_sudo provisions open-bastion-sudo group + sudoers rule (#154)"
+    else
+        fail "configure_pam_sudo provisions sudoers rule (#154)" "$out"
+    fi
+}
+
+# ── Test 7c: --no-sudo skips the sudoers rule entirely ──
+test_no_sudo_skips_sudoers() {
+    local out
+    out=$(
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --no-sudo --dry-run
+        configure_pam_sudo 2>&1
+    )
+    if echo "$out" | grep -q "sudoers.d/open-bastion"; then
+        fail "--no-sudo must not provision a sudoers rule" "$out"
+    else
+        pass "--no-sudo skips the sudoers rule"
+    fi
+}
+
 # ── Test 8: --no-create-user sets CREATE_USERS=false ──
 test_no_create_user() {
     (
@@ -256,6 +289,8 @@ run_test test_missing_portal
 run_test test_missing_server_group
 run_test test_parse_args_sets_variables
 run_test test_no_sudo
+run_test test_sudo_creates_sudoers_rule
+run_test test_no_sudo_skips_sudoers
 run_test test_no_create_user
 run_test test_dry_run
 run_test test_confirm_noninteractive
