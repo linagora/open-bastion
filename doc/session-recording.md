@@ -269,6 +269,40 @@ Key security properties:
 For the full design, protocol, and migration details see
 [`doc/design/tamper-evident-session-recording.md`](design/tamper-evident-session-recording.md).
 
+### Availability: fail-closed recording requires out-of-band rescue access
+
+Recording is **fail-closed**, and `ob-bastion-setup` forces **every** session
+through the recorder (a global `ForceCommand`, root included — Option C above).
+The consequence is an availability trade-off you must plan for: **anything that
+prevents a session from being recorded prevents the session itself.**
+
+In particular, **a full disk is a lockout risk**. The recordings are written by
+the root sink under `/var/lib/open-bastion/sessions`; when that filesystem fills
+up (including the root-reserved blocks the sink can use), writes fail with
+`ENOSPC`. Depending on timing, a new connection is then either refused
+(fail-closed) or its recording is lost — and this applies to **interactive
+shells *and* `scp`/`sftp` transfers** (file transfers are fail-closed too). You
+can therefore be locked out of SSH exactly when you need to log in to free
+space.
+
+**Always keep an administrative path that does not transit sshd's
+`ForceCommand`** — a serial console, BMC/IPMI, or hypervisor / cloud-provider
+console (e.g. OVH KVM). Open Bastion only wires the recorder into sshd's
+`ForceCommand`, and only reconfigures the `sshd` / `sudo` / `sudo-i` PAM stacks —
+it does **not** touch `/etc/pam.d/login` or `/etc/pam.d/su`. A console login (and
+`su -` from it) therefore bypasses recording and remains usable to free space,
+restart `ob-record.socket`, or otherwise recover. (The in-SSH alternative —
+exempting an admin account with `Match User …,!admin`, Option A — leaves that
+account's sessions **unrecorded**, an audit/trust trade-off, and is not what
+`ob-bastion-setup` configures.)
+
+Operational recommendations:
+
+- **Monitor free space** on the recordings filesystem and alert well before full.
+- Enforce **retention / rotation** of recordings (see Storage Security below).
+- Put `/var/lib/open-bastion/sessions` on a **dedicated partition** so a full
+  recordings store cannot also take down the host's root filesystem.
+
 ### File Permissions
 
 - Sessions directory: mode `0750`, owned `root:ob-sessions`
