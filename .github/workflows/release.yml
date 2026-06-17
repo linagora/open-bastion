@@ -228,7 +228,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
@@ -520,7 +520,7 @@ jobs:
 
     steps:
       - name: Download repository
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: repo
           path: repo
