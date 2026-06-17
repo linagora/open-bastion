@@ -20,7 +20,9 @@ WORK="${OB_LT_WORK:-$LT_DIR/.work}"   # generated roles/installers/cookie (git-i
 GW_IP="${GW_IP:-192.168.122.1}"
 APT_PORT="${APT_PORT:-8088}"
 SSH_KEY="${OB_SSH_KEY:-$HOME/.ssh/id_oblab}"
-DEB="open-bastion_0.4.1_amd64.deb"
+# Derived from debian/changelog (what dpkg-buildpackage names the .deb), so it
+# never goes stale across releases.
+DEB="open-bastion_$(dpkg-parsechangelog -l "$REPO_ROOT/debian/changelog" -S Version)_amd64.deb"
 BASTION_VM="${OB_BASTION_VM:-lab-a}"
 read -ra BACKEND_VMS <<< "${OB_BACKEND_VMS:-lab-b lab-c}"
 # A standalone host (bastion+backend in one) — deployed with the ob-builder

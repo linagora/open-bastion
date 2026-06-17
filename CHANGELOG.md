@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-17
+
+Server-token resilience and session-visibility fixes: bastions no longer silently
+lose their bastion voucher (and sudo) overnight, and SSH sessions are visible to
+`who`/`w`/`loginctl` again.
+
+> **Upgrade note.** After upgrading, **re-run `ob-bastion-setup` /
+> `ob-backend-setup`** (or `ob-standalone-setup`) so the regenerated
+> `/etc/pam.d/sshd` registers sessions with `systemd-logind` and the heartbeat
+> timer is armed. On an already-enrolled host you are not re-running, just arm
+> the timer once: `systemctl enable --now ob-heartbeat.timer`.
+
+### Fixed
+
+- **`ob-heartbeat.timer` is now armed at enrollment.** The timer ships with
+  `ConditionPathExists=/var/lib/open-bastion/token`, but the package's
+  install-time `systemctl start` runs _before_ enrollment writes that token, so
+  the condition was false and the timer was silently skipped — it only armed on
+  the next reboot (an ordering race: hosts enrolled before the package was
+  (re)configured were fine, the usual "install then enroll" order was not).
+  Until then the short-lived server token expired with nothing to refresh it,
+  and `pam_openbastion` fell back to its offline cache: a bastion login still
+  succeeded but minted **no bastion voucher** (`ob-ssh` failed with
+  `LLNG_BASTION_VOUCHER is unset`) and `sudo` locked out (`server token invalid
+or expired`). `ob-enroll`, `ob-bastion-setup` and `ob-backend-setup` now
+  `systemctl enable --now ob-heartbeat.timer` once the token is in place.
+- **Cert-hop SSH sessions are visible to `who` / `w` / `loginctl` again (#150).**
+  The generated `/etc/pam.d/sshd` omitted `pam_systemd`, so sessions were never
+  registered with `systemd-logind` and were invisible to session tooling — and
+  to `ob-heartbeat`'s connected-users report, which reads `loginctl`/`who`.
+  `who am i` was empty and `sudo su` surfaced only `root`. Both setups now add
+  `session optional pam_systemd.so` to the sshd session stack, emitted only when
+  the module is installed (mirroring how distros tie the line to
+  `libpam-systemd`).
+
+### Changed
+
+- **The server access token is now refreshed on demand.** On a `401` from
+  `/pam/verify` or `/pam/authorize` (expired server token), `pam_openbastion`
+  refreshes the token via `/pam/heartbeat` — which preserves the per-device
+  `bastion_id`, unlike the OIDC `/oauth2/token` grant — persists it, and retries
+  once **before** any offline fallback. A fresh login is therefore self-healing
+  even if the heartbeat timer lapsed, instead of silently degrading to an
+  unvouched offline session.
+
 ## [0.5.0] - 2026-06-16
 
 Tamper-evident session recording — a non-root user can no longer delete or alter
