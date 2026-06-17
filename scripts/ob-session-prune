@@ -36,10 +36,13 @@ SESSIONS_DIR="/var/lib/open-bastion/sessions"
 COMPRESS_AFTER_DAYS=1
 RETENTION_DAYS=365
 
-log_info()  { logger -t "$PROG_NAME" -p auth.info    "$*"; }
-log_notice(){ logger -t "$PROG_NAME" -p auth.notice  "$*"; }
-log_warn()  { logger -t "$PROG_NAME" -p auth.warning "$*"; }
-log_err()   { logger -t "$PROG_NAME" -p auth.err     "$*"; }
+# Logging must never abort the run (set -e): logger can fail where there is no
+# syslog socket (minimal containers), and pruning should not hinge on whether a
+# log line landed.
+log_info()  { logger -t "$PROG_NAME" -p auth.info    "$*" 2>/dev/null || true; }
+log_notice(){ logger -t "$PROG_NAME" -p auth.notice  "$*" 2>/dev/null || true; }
+log_warn()  { logger -t "$PROG_NAME" -p auth.warning "$*" 2>/dev/null || true; }
+log_err()   { logger -t "$PROG_NAME" -p auth.err     "$*" 2>/dev/null || true; }
 
 # Parse key=value from the config file. Only reads the keys this tool needs;
 # unknown keys (sessions_dir, format, max_duration, ...) are ignored. Mirrors
@@ -92,11 +95,15 @@ main() {
     is_uint "$COMPRESS_AFTER_DAYS" || { log_warn "recording_compress_after_days not an integer; using 1"; COMPRESS_AFTER_DAYS=1; }
     is_uint "$RETENTION_DAYS"      || { log_warn "recording_retention_days not an integer; using 365"; RETENTION_DAYS=365; }
 
-    # Refuse to operate anywhere but a real recordings tree. This guards against
-    # a malformed sessions_dir turning a find -delete into something dangerous.
+    # Only ever operate on an absolute path that has a parent directory, so a
+    # malformed / empty / "/" sessions_dir can never turn `find -delete` loose at
+    # the filesystem root. The find stages are additionally bounded to two levels
+    # below it (sessions/<user>/<file>). The config is root-owned and trusted, so
+    # this is belt-and-suspenders, not an attacker boundary; the default is
+    # /var/lib/open-bastion/sessions but an admin may relocate it.
     case "$SESSIONS_DIR" in
-        /var/lib/open-bastion/*) ;;
-        *) log_err "sessions_dir is not under /var/lib/open-bastion ($SESSIONS_DIR); refusing to run"; exit 1 ;;
+        /*/*) ;;   # absolute, ≥2 components — rejects "", "/", "/foo", relative paths
+        *) log_err "sessions_dir must be an absolute path with a parent directory ($SESSIONS_DIR); refusing to run"; exit 1 ;;
     esac
     if [ ! -d "$SESSIONS_DIR" ]; then
         # No recordings tree yet (e.g. backend host, or recording never used).

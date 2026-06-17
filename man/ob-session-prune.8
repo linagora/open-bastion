@@ -44,9 +44,8 @@ shared with
 .B sessions_dir
 Recordings tree (default
 .IR /var/lib/open-bastion/sessions ).
-Must be under
-.IR /var/lib/open-bastion ;
-otherwise the tool refuses to run.
+Must be an absolute path with a parent directory (it cannot be the filesystem
+root); otherwise the tool refuses to run.
 .TP
 .B recording_compress_after_days
 Compress payloads older than this many days (default
