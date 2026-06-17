@@ -720,6 +720,39 @@ TIMEOUT=10
     fi
 }
 
+# Arm the heartbeat timer now that the server token exists.
+#
+# The packaged ob-heartbeat.timer is enabled+started at install time by
+# dh_installsystemd, but it carries ConditionPathExists=/var/lib/open-bastion/
+# token. Enrollment runs *after* package install, so at that install-time start
+# the token does not exist yet, the condition fails, and the timer is silently
+# skipped — it never arms in the running system until the next reboot. With no
+# heartbeat, the short-lived enrollment access token expires within hours and is
+# never refreshed: PAM then falls back to the offline cache (SSH login still
+# works but no bastion voucher is minted, so ob-ssh breaks with "voucher unset")
+# and sudo locks out ("server token invalid or expired"). Starting it here, once
+# the token is in place, closes that window. Mirrors ob-cert.socket above.
+enable_heartbeat_timer() {
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would enable --now ob-heartbeat.timer"
+        return 0
+    fi
+
+    # No token (enrollment skipped/declined) -> nothing to heartbeat yet.
+    [ -s "$OB_TOKEN" ] || return 0
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable --now ob-heartbeat.timer >/dev/null 2>&1; then
+            info "Enabled ob-heartbeat.timer (keeps the server token fresh)"
+        else
+            warn "Could not enable ob-heartbeat.timer — enable it manually:"
+            warn "  systemctl enable --now ob-heartbeat.timer"
+        fi
+    else
+        warn "systemctl not available — enable ob-heartbeat.timer manually"
+    fi
+}
+
 # Configure sshd for max security (Mode E)
 configure_max_security_sshd() {
     if [ "$MAX_SECURITY" != "true" ]; then
@@ -2002,6 +2035,11 @@ main() {
         # future re-enrollments via ob-enroll alone keep working.
         refresh_openbastion_conf
     fi
+
+    # Keep the freshly enrolled token alive. Without this the timer only arms on
+    # the next reboot (ConditionPathExists was false at package-install time),
+    # and the token expires overnight -> offline fallback + sudo lockout.
+    enable_heartbeat_timer
 
     # ── Phase 3: SSH / PAM lockdown ──
     # From this point on, a failure may require restoring files from
