@@ -23,6 +23,7 @@ usr/sbin/ob-backend-setup
 usr/sbin/ob-cert-daemon
 usr/sbin/ob-record-sink
 usr/sbin/ob-cache-admin
+usr/sbin/ob-session-prune
 
 # Shared cert-vouching library (sourced by ob-ssh / ob-scp)
 usr/lib/open-bastion/ob-cert-lib.sh
@@ -48,6 +49,7 @@ usr/share/man/man8/ob-bastion-setup.8
 usr/share/man/man8/ob-standalone-setup.8
 usr/share/man/man8/ob-backend-setup.8
 usr/share/man/man8/ob-session-recorder.8
+usr/share/man/man8/ob-session-prune.8
 usr/share/man/man8/ob-cert-daemon.8
 usr/share/man/man8/ob-record-sink.8
 
@@ -67,6 +69,12 @@ usr/share/doc/open-bastion/README.md
 # Heartbeat systemd timer and service (not installed by cmake when INSTALL_SYSTEMD=OFF)
 systemd/ob-heartbeat.timer lib/systemd/system/
 systemd/ob-heartbeat.service lib/systemd/system/
+
+# Session-recording retention timer and service. Enabled at install time by
+# dh_installsystemd (see debian/rules); no ConditionPathExists gate, so it arms
+# immediately and no-ops on hosts without recordings.
+systemd/ob-session-prune.timer lib/systemd/system/
+systemd/ob-session-prune.service lib/systemd/system/
 
 # Socket-activated template units. dh_installsystemd installs the .socket units
 # and their enable blocks (see debian/rules) but does not auto-install the named

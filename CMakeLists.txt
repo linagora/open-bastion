@@ -182,6 +182,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-recorder
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install session-recording retention script (run by ob-session-prune.timer)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-prune
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # NOTE: the old setgid ob-session-recorder-wrapper has been removed. Recordings
 # are now streamed to the root ob-record-sink (socket-activated), which owns the
 # files; the recorder no longer needs an elevated gid or a per-user dir, so the
@@ -377,6 +382,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-backend-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
+    ${CMAKE_SOURCE_DIR}/man/ob-session-prune.8
     ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
     ${CMAKE_SOURCE_DIR}/man/ob-record-sink.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
@@ -409,6 +415,8 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-cert@.service
         ${CMAKE_SOURCE_DIR}/systemd/ob-record.socket
         ${CMAKE_SOURCE_DIR}/systemd/ob-record@.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-session-prune.timer
+        ${CMAKE_SOURCE_DIR}/systemd/ob-session-prune.service
         DESTINATION lib/systemd/system
     )
     # Desktop-specific systemd service

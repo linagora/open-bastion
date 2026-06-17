@@ -20,6 +20,18 @@ format = script
 # Set to 0 to disable timeout
 max_duration = 86400
 
+# Retention of recordings, applied daily by ob-session-prune.timer.
+# Recording is fail-closed: a full disk refuses new logins, so recordings are
+# compressed and eventually expired to bound disk usage.
+#
+# Compress closed recordings (typescripts compress ~10-20x) older than this many
+# days. The paired .json metadata is left uncompressed. Set to 0 to disable.
+recording_compress_after_days = 1
+#
+# Delete recordings (payload + .json) older than this many days. Expiry drops
+# audit evidence and is logged at notice level. Set to 0 to keep forever.
+recording_retention_days = 365
+
 #
 # sshd_config integration example:
 #

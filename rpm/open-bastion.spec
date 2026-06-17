@@ -95,6 +95,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-cert-daemon
 %{_sbindir}/ob-record-sink
 %{_sbindir}/ob-cache-admin
+%{_sbindir}/ob-session-prune
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
@@ -117,6 +118,8 @@ ctest --output-on-failure --verbose
 %{_unitdir}/ob-cert@.service
 %{_unitdir}/ob-record.socket
 %{_unitdir}/ob-record@.service
+%{_unitdir}/ob-session-prune.service
+%{_unitdir}/ob-session-prune.timer
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
@@ -125,6 +128,7 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-standalone-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
+%{_mandir}/man8/ob-session-prune.8*
 %{_mandir}/man8/ob-cert-daemon.8*
 %{_mandir}/man8/ob-record-sink.8*
 %{_mandir}/man1/ob-ssh.1*
@@ -164,6 +168,7 @@ getent group open-bastion-sudo >/dev/null 2>&1 || groupadd --system open-bastion
 
 %post
 %systemd_post ob-heartbeat.timer
+%systemd_post ob-session-prune.timer
 # Create required directories
 mkdir -p /etc/open-bastion
 chmod 755 /etc/open-bastion
@@ -192,9 +197,18 @@ for _cf in /etc/open-bastion/openbastion.conf /etc/open-bastion/nss_openbastion.
     [ -f "$_cf" ] && sed -i 's#^\([[:space:]]*server_token_file[[:space:]]*=[[:space:]]*\)/etc/open-bastion/token#\1/var/lib/open-bastion/token#' "$_cf"
 done
 [ -f /etc/open-bastion/ssh-proxy.conf ] && sed -i 's#^\([[:space:]]*SERVER_TOKEN_FILE=\)"\{0,1\}/etc/open-bastion/token"\{0,1\}#\1"/var/lib/open-bastion/token"#' /etc/open-bastion/ssh-proxy.conf
+# Arm the recording-retention timer on first install (enabled by default; it has
+# no ConditionPathExists gate and no-ops on hosts without recordings). The
+# explicit enable guarantees it regardless of the distro's systemd preset
+# policy; on upgrade ($1 > 1) we respect the admin's choice and leave it alone.
+if [ $1 -eq 1 ]; then
+    systemctl --no-reload enable ob-session-prune.timer >/dev/null 2>&1 || :
+    systemctl start ob-session-prune.timer >/dev/null 2>&1 || :
+fi
 
 %preun
 %systemd_preun ob-heartbeat.timer
+%systemd_preun ob-session-prune.timer
 # Cert/record sockets are enabled by ob-bastion-setup (not at install); disable
 # on removal.
 %systemd_preun ob-cert.socket
@@ -202,6 +216,7 @@ done
 
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
+%systemd_postun_with_restart ob-session-prune.timer
 %systemd_postun_with_restart ob-cert.socket
 %systemd_postun_with_restart ob-record.socket
 

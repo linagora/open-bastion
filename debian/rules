@@ -34,6 +34,10 @@ override_dh_makeshlibs:
 # Install systemd units for each package
 override_dh_installsystemd:
 	dh_installsystemd -popen-bastion --name=ob-heartbeat ob-heartbeat.timer
+	# Session-recording retention timer: enabled and started at install (no
+	# ConditionPathExists gate, unlike ob-heartbeat.timer, so it actually arms).
+	# It bounds recording disk usage and no-ops on hosts without recordings.
+	dh_installsystemd -popen-bastion --name=ob-session-prune ob-session-prune.timer
 	# Cert minting socket. dh_installsystemd installs the .socket (the
 	# package.NAME.socket FILES form, via --name) and generates its enable/cleanup
 	# maintainer-script blocks. The accompanying ob-cert@.service TEMPLATE is
