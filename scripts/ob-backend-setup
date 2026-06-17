@@ -484,6 +484,17 @@ PermitRootLogin no
 }
 
 # Configure PAM for SSH
+# True if a PAM module (e.g. pam_systemd.so) is installed in any of the standard
+# security module directories (covers Debian multiarch and RHEL lib64 layouts).
+pam_module_present() {
+    local m="$1" d
+    for d in /lib/security /lib64/security /usr/lib/security /usr/lib64/security \
+             /lib/*/security /usr/lib/*/security; do
+        [ -e "$d/$m" ] && return 0
+    done
+    return 1
+}
+
 configure_pam_sshd() {
     step "Configuring PAM for SSH..."
 
@@ -510,6 +521,17 @@ account    required     pam_openbastion.so ssh_cert_aware=true
 session    required     pam_openbastion.so $create_user_opt
 session    required     pam_unix.so
 "
+
+    # Register the session with systemd-logind so who/w/loginctl — and the
+    # ob-heartbeat connected-users report, which reads loginctl/who — actually
+    # see it. Append the line only when pam_systemd is installed: with 'optional'
+    # a missing module is normally ignored, but gating on presence avoids a
+    # per-login dlopen error on a non-systemd host (and any PAM-version edge
+    # case). Mirrors how distros tie the line to the libpam-systemd package.
+    if pam_module_present pam_systemd.so; then
+        pam_content="${pam_content}session    optional     pam_systemd.so
+"
+    fi
 
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would configure PAM for SSH"
