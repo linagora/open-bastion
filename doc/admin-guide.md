@@ -7,10 +7,10 @@ and authorize users via LemonLDAP::NG.
 
 There are three typical deployment scenarios:
 
-| Type           | Description                         | Use Case                                   |
-| -------------- | ----------------------------------- | ------------------------------------------ |
-| **Standalone** | Single server with direct LLNG auth | Web servers, databases, isolated systems   |
-| **Bastion**    | Jump host with session recording    | Entry point for all SSH access             |
+| Type           | Description                         | Use Case                                                   |
+| -------------- | ----------------------------------- | ---------------------------------------------------------- |
+| **Standalone** | Single server with direct LLNG auth | Web servers, databases, isolated systems                   |
+| **Bastion**    | Jump host with session recording    | Entry point for all SSH access                             |
 | **Backend**    | Internal server behind bastion      | Production servers, reached through the bastion (`ob-ssh`) |
 
 ## Prerequisites
@@ -327,22 +327,13 @@ Then simply `ssh backend-server`.
 > reject it. `RemoteCommand` (or running `ob-ssh` on the bastion) is the
 > supported path.
 
-### Step 8: Configure Log Rotation
-
-```bash
-cat > /etc/logrotate.d/open-bastion-sessions << 'EOF'
-/var/lib/open-bastion/sessions/*/*.cast
-/var/lib/open-bastion/sessions/*/*.json {
-    monthly
-    rotate 12
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0600 root root
-}
-EOF
-```
+> **Recording retention is automatic.** The package installs and enables
+> `ob-session-prune.timer`, which daily compresses and expires recordings under
+> `/var/lib/open-bastion/sessions`. Tune `recording_compress_after_days` /
+> `recording_retention_days` in `/etc/open-bastion/session-recorder.conf`. Do
+> **not** add a `logrotate` rule for the recordings tree — it would rename
+> root-owned recordings and break the tamper-evident layout. See
+> [Session Recording](session-recording.md) and `ob-session-prune(8)`.
 
 ### Step 8: Test
 
