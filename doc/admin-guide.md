@@ -11,7 +11,7 @@ There are three typical deployment scenarios:
 | -------------- | ----------------------------------- | ------------------------------------------ |
 | **Standalone** | Single server with direct LLNG auth | Web servers, databases, isolated systems   |
 | **Bastion**    | Jump host with session recording    | Entry point for all SSH access             |
-| **Backend**    | Internal server behind bastion      | Production servers, accessed via ProxyJump |
+| **Backend**    | Internal server behind bastion      | Production servers, reached through the bastion (`ob-ssh`) |
 
 ## Prerequisites
 
@@ -294,16 +294,38 @@ EOF
 chmod 644 /etc/open-bastion/ssh-proxy.conf
 ```
 
-Users can then connect to backends using:
+Users can then connect to backends in one command.
+
+On the bastion, run `ob-ssh` directly:
 
 ```bash
-# Direct command
 ob-ssh backend-server
-
-# Or via SSH config on bastion (~/.ssh/config):
-Host backend-*
-    ProxyCommand ob-ssh %h %p
 ```
+
+For a one-command jump straight from your **workstation** — it lands on the
+bastion (where the session is recorded) and hops to the backend — add a host to
+your **local** `~/.ssh/config` using `RemoteCommand`:
+
+```sshconfig
+Host backend-server
+    HostName bastion.example.com
+    User alice
+    IdentityFile ~/.ssh/id_llng    # your LLNG-signed key/cert
+    IdentitiesOnly yes
+    RequestTTY yes
+    RemoteCommand ob-ssh backend-server
+```
+
+Then simply `ssh backend-server`.
+
+> **Why not `ProxyJump` / `ProxyCommand`?** `ob-ssh` re-originates a full
+> interactive SSH session from the bastion using a freshly vouched certificate;
+> it is **not** a `-W` stdio forwarder, so it cannot be used as a `ProxyCommand`.
+> A plain `ProxyJump bastion` from the workstation would also bypass the vouched
+> certificate and the session recording, and the backend — which only accepts a
+> bastion-vouched certificate pinned to the bastion's source address — would
+> reject it. `RemoteCommand` (or running `ob-ssh` on the bastion) is the
+> supported path.
 
 ### Step 8: Configure Log Rotation
 
