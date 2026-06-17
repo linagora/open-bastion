@@ -342,7 +342,10 @@ See [`ob-session-prune(8)`](../man/ob-session-prune.8).
 ### Storage Security
 
 - Store recordings on encrypted filesystem if possible
-- Consider log rotation and retention policies
+- Retention and compression are automatic — see
+  [Retention and disk management](#retention-and-disk-management). Do **not** add
+  a `logrotate` rule for the recordings tree: renaming root-owned recordings
+  conflicts with the tamper-evident layout.
 - Sensitive data may be captured (passwords typed in terminals)
 
 ### Complementary primary audit trace
