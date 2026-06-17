@@ -299,9 +299,38 @@ account's sessions **unrecorded**, an audit/trust trade-off, and is not what
 Operational recommendations:
 
 - **Monitor free space** on the recordings filesystem and alert well before full.
-- Enforce **retention / rotation** of recordings (see Storage Security below).
+- Recordings are compressed and expired automatically — see
+  [Retention and disk management](#retention-and-disk-management) below.
 - Put `/var/lib/open-bastion/sessions` on a **dedicated partition** so a full
   recordings store cannot also take down the host's root filesystem.
+
+### Retention and disk management
+
+Because recording is fail-closed, unbounded recordings are an availability risk.
+`ob-session-prune` bounds the recordings store and runs daily from
+`ob-session-prune.timer` (enabled at install time; it no-ops on hosts without
+recordings). It has two stages, both configured in
+`/etc/open-bastion/session-recorder.conf`:
+
+| Key                             | Default | Effect                                                                                   |
+| ------------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| `recording_compress_after_days` | `1`     | `gzip` closed recording payloads older than N days (typescripts compress ~10–20×). `0` disables. |
+| `recording_retention_days`      | `365`   | Delete recordings (payload + `.json`) older than N days. `0` keeps them forever.         |
+
+Notes:
+
+- The `.json` metadata is left **uncompressed** so the index stays greppable;
+  the recording payload (`.typescript`/`.cast`/`.ttyrec`) is what gets gzipped.
+  `gzip` preserves the file mtime, so expiry still sees the true age.
+- Deletion drops audit evidence, so every run that deletes anything is logged at
+  `notice` level (`journalctl -t ob-session-prune`). The retention default is
+  deliberately long; in a regulated context (e.g. SecNumCloud) set
+  `recording_retention_days` to match your log-retention obligation, or `0` to
+  never auto-delete and rely on capacity planning / archival instead.
+- The job runs as root from a sandboxed oneshot service and only writes under
+  `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout.
+
+See [`ob-session-prune(8)`](../man/ob-session-prune.8).
 
 ### File Permissions
 

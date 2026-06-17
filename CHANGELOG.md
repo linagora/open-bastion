@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Session-recording retention (`ob-session-prune`).** A new daily timer
+  (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
+  which matters because recording is fail-closed — a full disk refuses new
+  logins. It compresses closed recording payloads older than
+  `recording_compress_after_days` (default 1; typescripts compress ~10–20×,
+  the `.json` index is left readable) and deletes recordings older than
+  `recording_retention_days` (default 365; `0` keeps them forever). Expiry is
+  logged at `notice` level since it drops audit evidence. Runs as root from a
+  sandboxed oneshot service and only writes under
+  `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout. See
+  `doc/session-recording.md` and `ob-session-prune(8)`.
+
 ## [0.5.1] - 2026-06-17
 
 Server-token resilience and session-visibility fixes: bastions no longer silently

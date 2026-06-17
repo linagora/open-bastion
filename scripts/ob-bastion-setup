@@ -600,6 +600,13 @@ format = script
 
 # Maximum session duration (8 hours)
 max_duration = 28800
+
+# Retention (applied daily by ob-session-prune.timer). Recording is fail-closed,
+# so recordings are compressed then expired to bound disk usage. Compression
+# keeps the .json index readable; expiry is logged at notice level. Set
+# recording_retention_days = 0 to keep recordings forever.
+recording_compress_after_days = 1
+recording_retention_days = 365
 "
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -660,6 +667,19 @@ max_duration = 28800
         fi
     else
         warn "systemctl not available — enable ob-record.socket manually"
+    fi
+
+    # Arm the daily retention timer. The package enables it at install time too
+    # (dh_installsystemd, no ConditionPathExists gate), but re-assert it here for
+    # source installs and to be idempotent. It bounds recording disk usage; on a
+    # host without recordings it simply no-ops.
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable --now ob-session-prune.timer >/dev/null 2>&1; then
+            info "Enabled ob-session-prune.timer (compresses + expires recordings)"
+        else
+            warn "Could not enable ob-session-prune.timer — enable it manually:"
+            warn "  systemctl enable --now ob-session-prune.timer"
+        fi
     fi
 }
 

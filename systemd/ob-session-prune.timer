@@ -1,0 +1,16 @@
+[Unit]
+Description=Open Bastion session-recording retention timer
+Documentation=man:ob-session-prune(8)
+
+[Timer]
+# Run once a day. Unlike ob-heartbeat.timer there is no ConditionPathExists
+# gate: on a host with no recordings (e.g. a backend) the job simply no-ops,
+# so the timer is enabled unconditionally at install time.
+OnCalendar=daily
+# Catch up if the machine was off when the job was due.
+Persistent=true
+# Spread the run across the fleet to avoid a synchronized I/O spike.
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

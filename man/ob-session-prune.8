@@ -1,0 +1,83 @@
+.TH OB-SESSION-PRUNE 8 "June 2026" "open-bastion" "System Administration"
+.SH NAME
+ob-session-prune \- compress and expire recorded SSH sessions
+.SH SYNOPSIS
+.B ob-session-prune
+.SH DESCRIPTION
+.B ob-session-prune
+bounds the disk used by SSH session recordings. It runs daily from
+.BR ob-session-prune.timer (8)
+and performs two stages:
+.IP 1. 4
+Compress closed recording payloads
+.RI ( *.typescript ", " *.cast ", " *.ttyrec )
+older than
+.I recording_compress_after_days
+with
+.BR gzip (1).
+The paired
+.I *.json
+metadata is left uncompressed so the index stays greppable.
+.IP 2. 4
+Delete recordings (payload and
+.IR *.json )
+older than
+.I recording_retention_days "."
+Empty per-user directories are then removed.
+.PP
+Session recording is fail-closed: when recording is enabled, a full disk
+refuses new logins. Unbounded recordings are therefore an availability risk,
+which this tool mitigates. Expiry also drops audit evidence, so each run that
+deletes anything is logged at
+.B notice
+level via
+.BR syslog (3)
+(tag
+.IR ob-session-prune )
+for accountability, and the retention default is deliberately long.
+.SH CONFIGURATION
+Settings are read from the session-recorder configuration file
+.RI ( /etc/open-bastion/session-recorder.conf ","
+shared with
+.BR ob-session-recorder (8)):
+.TP
+.B sessions_dir
+Recordings tree (default
+.IR /var/lib/open-bastion/sessions ).
+Must be under
+.IR /var/lib/open-bastion ;
+otherwise the tool refuses to run.
+.TP
+.B recording_compress_after_days
+Compress payloads older than this many days (default
+.BR 1 ).
+Set to
+.B 0
+to disable compression.
+.TP
+.B recording_retention_days
+Delete recordings older than this many days (default
+.BR 365 ).
+Set to
+.B 0
+to keep recordings forever (compression still applies).
+.SH FILES
+.TP
+.I /etc/open-bastion/session-recorder.conf
+Configuration file.
+.TP
+.I /var/lib/open-bastion/sessions/
+Recordings tree, owned
+.IR root:ob-sessions ", mode " 0750 .
+.SH SECURITY
+Recordings are root-owned
+.RI ( root:ob-sessions " " 0640 )
+under a root-owned tree. This tool runs as root from a sandboxed oneshot
+service, so the tamper-evident layout is preserved: the recorded user never
+has access to its own recordings.
+.SH SEE ALSO
+.BR ob-session-recorder (8),
+.BR ob-record-sink (8),
+.BR gzip (1)
+.SH AUTHOR
+Linagora

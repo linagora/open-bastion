@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# ob-session-prune - compress and expire recorded SSH sessions
+#
+# Run periodically by ob-session-prune.timer (daily). Two stages, both
+# configured in the session-recorder config file:
+#
+#   1. Compress closed recordings older than `recording_compress_after_days`
+#      (gzip; typescripts compress ~10-20x). The paired `.json` metadata is
+#      left uncompressed so the index stays greppable.
+#   2. Delete recordings (and their `.json`) older than `recording_retention_days`.
+#
+# This bounds disk growth: recording is fail-closed (a full disk refuses new
+# logins — see doc/session-recording.md), so unbounded recordings are an
+# availability risk. Deleting recordings also drops audit evidence, so the
+# expiry is logged at notice level for accountability and the retention default
+# is deliberately long (365 days). Set `recording_retention_days = 0` to keep
+# recordings forever (compression still applies).
+#
+# The recordings are root-owned (root:ob-sessions 0640) under a root-owned tree;
+# this runs as root from a sandboxed oneshot service, so the tamper-evident
+# layout is preserved (the recorded user never has access).
+#
+# Copyright (C) 2025 Linagora
+# License: AGPL-3.0
+
+set -euo pipefail
+
+PROG_NAME=$(basename "$0")
+
+# Config file shared with ob-session-recorder.
+CONFIG_FILE="${OB_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
+
+# Defaults (overridable from the config file).
+SESSIONS_DIR="/var/lib/open-bastion/sessions"
+COMPRESS_AFTER_DAYS=1
+RETENTION_DAYS=365
+
+log_info()  { logger -t "$PROG_NAME" -p auth.info    "$*"; }
+log_notice(){ logger -t "$PROG_NAME" -p auth.notice  "$*"; }
+log_warn()  { logger -t "$PROG_NAME" -p auth.warning "$*"; }
+log_err()   { logger -t "$PROG_NAME" -p auth.err     "$*"; }
+
+# Parse key=value from the config file. Only reads the keys this tool needs;
+# unknown keys (sessions_dir, format, max_duration, ...) are ignored. Mirrors
+# the defensive ownership/permission check ob-session-recorder does: a config
+# file not owned by root or group/world-writable is ignored (defaults stand).
+load_config() {
+    [ -f "$CONFIG_FILE" ] || return 0
+
+    local file_stat owner perms
+    file_stat=$(stat -c '%u:%a' "$CONFIG_FILE" 2>/dev/null || true)
+    if [ -n "$file_stat" ]; then
+        owner="${file_stat%%:*}"
+        perms="${file_stat##*:}"
+        if [ "$owner" != "0" ]; then
+            log_warn "Config file not owned by root: $CONFIG_FILE (using defaults)"
+            return 0
+        fi
+        if [ $((perms % 100 / 10 & 2)) -ne 0 ] || [ $((perms % 10 & 2)) -ne 0 ]; then
+            log_warn "Config file is group/world-writable: $CONFIG_FILE (using defaults)"
+            return 0
+        fi
+    fi
+
+    local line key value
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*([a-z_]+)[[:space:]]*=[[:space:]]*(.+)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            value="${value%%#*}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value#[\"\']}"
+            value="${value%[\"\']}"
+            case "$key" in
+                sessions_dir)                  SESSIONS_DIR="$value" ;;
+                recording_compress_after_days) COMPRESS_AFTER_DAYS="$value" ;;
+                recording_retention_days)      RETENTION_DAYS="$value" ;;
+            esac
+        fi
+    done < "$CONFIG_FILE"
+}
+
+# A non-negative integer, or we fall back to a safe value.
+is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
+
+main() {
+    load_config
+
+    is_uint "$COMPRESS_AFTER_DAYS" || { log_warn "recording_compress_after_days not an integer; using 1"; COMPRESS_AFTER_DAYS=1; }
+    is_uint "$RETENTION_DAYS"      || { log_warn "recording_retention_days not an integer; using 365"; RETENTION_DAYS=365; }
+
+    # Refuse to operate anywhere but a real recordings tree. This guards against
+    # a malformed sessions_dir turning a find -delete into something dangerous.
+    case "$SESSIONS_DIR" in
+        /var/lib/open-bastion/*) ;;
+        *) log_err "sessions_dir is not under /var/lib/open-bastion ($SESSIONS_DIR); refusing to run"; exit 1 ;;
+    esac
+    if [ ! -d "$SESSIONS_DIR" ]; then
+        # No recordings tree yet (e.g. backend host, or recording never used).
+        log_info "No recordings directory at $SESSIONS_DIR; nothing to do"
+        exit 0
+    fi
+
+    # Stage 1: compress closed recording payloads (not the .json index).
+    local compressed=0
+    if [ "$COMPRESS_AFTER_DAYS" -gt 0 ]; then
+        local f
+        while IFS= read -r -d '' f; do
+            # gzip preserves the file's mtime on the .gz, so retention below
+            # still sees the original age. Keep mode/owner (root:ob-sessions 0640).
+            if gzip -- "$f" 2>/dev/null; then
+                compressed=$((compressed + 1))
+            else
+                log_warn "Failed to compress $f"
+            fi
+        done < <(find "$SESSIONS_DIR" -mindepth 2 -maxdepth 2 -type f \
+                    \( -name '*.typescript' -o -name '*.cast' -o -name '*.ttyrec' \) \
+                    -mtime +"$COMPRESS_AFTER_DAYS" -print0)
+    fi
+
+    # Stage 2: expire recordings older than the retention window (payload + .json).
+    local deleted=0
+    if [ "$RETENTION_DAYS" -gt 0 ]; then
+        local g
+        while IFS= read -r -d '' g; do
+            if rm -f -- "$g"; then
+                deleted=$((deleted + 1))
+            else
+                log_warn "Failed to delete $g"
+            fi
+        done < <(find "$SESSIONS_DIR" -mindepth 2 -maxdepth 2 -type f \
+                    -mtime +"$RETENTION_DAYS" -print0)
+        # Drop now-empty per-user directories (never the root).
+        find "$SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
+    fi
+
+    # One audit-grade line: deletion removes evidence, so it is always recorded.
+    if [ "$deleted" -gt 0 ]; then
+        log_notice "Pruned recordings: compressed=$compressed deleted=$deleted (retention=${RETENTION_DAYS}d, compress_after=${COMPRESS_AFTER_DAYS}d)"
+    elif [ "$compressed" -gt 0 ]; then
+        log_info "Compressed $compressed recording(s) (compress_after=${COMPRESS_AFTER_DAYS}d, retention=${RETENTION_DAYS}d)"
+    fi
+}
+
+main "$@"
