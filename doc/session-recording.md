@@ -281,7 +281,7 @@ the root sink under `/var/lib/open-bastion/sessions`; when that filesystem fills
 up (including the root-reserved blocks the sink can use), writes fail with
 `ENOSPC`. Depending on timing, a new connection is then either refused
 (fail-closed) or its recording is lost — and this applies to **interactive
-shells *and* `scp`/`sftp` transfers** (file transfers are fail-closed too). You
+shells _and_ `scp`/`sftp` transfers** (file transfers are fail-closed too). You
 can therefore be locked out of SSH exactly when you need to log in to free
 space.
 
