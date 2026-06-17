@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout. See
   `doc/session-recording.md` and `ob-session-prune(8)`.
 
+### Documentation
+
+- **Backend access guidance corrected.** The admin guide showed a
+  `ProxyCommand`/`ProxyJump` snippet for reaching a backend in one command, but
+  `ob-ssh` re-originates a full interactive session (it is not a `-W` stdio
+  forwarder) and cannot be used as a `ProxyCommand`. Replaced with the correct
+  one-command form: `ob-ssh <backend>` on the bastion, or a workstation
+  `RemoteCommand` alias, plus a note on why `ProxyJump`/`ProxyCommand` do not
+  apply.
+- **Retention guidance.** Dropped the stale "consider a `logrotate` rule"
+  advice from the recording and admin docs; retention is now automatic via
+  `ob-session-prune.timer`, and a `logrotate` rule would rename root-owned
+  recordings and break the tamper-evident layout.
+
 ## [0.5.1] - 2026-06-17
 
 Server-token resilience and session-visibility fixes: bastions no longer silently
