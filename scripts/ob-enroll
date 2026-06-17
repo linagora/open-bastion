@@ -708,6 +708,28 @@ show_summary() {
     echo ""
 }
 
+# Arm the heartbeat timer so the freshly minted token keeps getting refreshed.
+#
+# ob-heartbeat.timer ships enabled, but its
+# ConditionPathExists=/var/lib/open-bastion/token is false at package-install
+# time (enrollment runs afterwards), so the install-time start is skipped and
+# the timer only arms on the next reboot. Until then the short-lived access
+# token expires with nothing to refresh it: PAM then falls back to the offline
+# cache (SSH login works but no bastion voucher is minted, so ob-ssh breaks) and
+# sudo locks out ("server token expired"). Start it here, right after the token
+# is in place. Only meaningful when the token sits at the path the timer watches.
+arm_heartbeat_timer() {
+    [ "$TOKEN_FILE" = "/var/lib/open-bastion/token" ] || return 0
+    [ -s "$TOKEN_FILE" ] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 0
+
+    if systemctl enable --now ob-heartbeat.timer >/dev/null 2>&1; then
+        log_success "Heartbeat timer armed (keeps the server token fresh)"
+    else
+        log_warn "Could not arm ob-heartbeat.timer — run: systemctl enable --now ob-heartbeat.timer"
+    fi
+}
+
 # Main function
 main() {
     # Check if running as root
@@ -737,6 +759,7 @@ main() {
     save_token
     update_config
     verify_enrollment
+    arm_heartbeat_timer
     show_summary
 }
 

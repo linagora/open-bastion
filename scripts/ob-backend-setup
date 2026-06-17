@@ -1843,6 +1843,36 @@ parse_args() {
     done
 }
 
+# Arm the heartbeat timer now that the server token exists.
+#
+# The packaged ob-heartbeat.timer is enabled+started at install time, but it
+# carries ConditionPathExists=/var/lib/open-bastion/token and enrollment runs
+# *after* install, so the install-time start is skipped (condition false) and
+# the timer never arms until the next reboot. With no heartbeat the short-lived
+# enrollment token expires within hours and is never refreshed, so the backend's
+# /pam/authorize calls start failing (offline fallback / token expired). Start
+# it here, once the token is in place. Mirrors ob-bastion-setup.
+enable_heartbeat_timer() {
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would enable --now ob-heartbeat.timer"
+        return 0
+    fi
+
+    # No token (enrollment skipped/declined) -> nothing to heartbeat yet.
+    [ -s "$OB_TOKEN" ] || return 0
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl enable --now ob-heartbeat.timer >/dev/null 2>&1; then
+            info "Enabled ob-heartbeat.timer (keeps the server token fresh)"
+        else
+            warn "Could not enable ob-heartbeat.timer — enable it manually:"
+            warn "  systemctl enable --now ob-heartbeat.timer"
+        fi
+    else
+        warn "systemctl not available — enable ob-heartbeat.timer manually"
+    fi
+}
+
 # Main
 main() {
     parse_args "$@"
@@ -1972,6 +2002,10 @@ main() {
         # future re-enrollments via ob-enroll alone keep working.
         refresh_openbastion_conf
     fi
+
+    # Keep the freshly enrolled token alive (timer would otherwise only arm on
+    # the next reboot — see enable_heartbeat_timer).
+    enable_heartbeat_timer
 
     # ── Phase 3: SSH / PAM lockdown ──
     configure_sshd || exit 1

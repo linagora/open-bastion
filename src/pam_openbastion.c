@@ -2167,6 +2167,82 @@ static int user_exists_locally(const char *username)
 }
 
 /*
+ * On a 401 from /pam/verify or /pam/authorize the bastion's own server access
+ * token has expired. Normally the ob-heartbeat timer keeps it fresh, but if the
+ * timer lapsed the module would otherwise fall back to the offline cache (a
+ * bastion login then mints no voucher, so ob-ssh breaks) or deny sudo. Refresh
+ * the token on demand so a fresh login is self-healing.
+ *
+ * Returns 0 if a fresh token was installed on the client (caller should retry
+ * the request once); -1 otherwise (caller proceeds as before, e.g. offline).
+ */
+static int refresh_server_token_on_demand(pam_handle_t *pamh,
+                                          pam_openbastion_data_t *data)
+{
+    if (!data || !data->config.server_token_file || !data->client) {
+        return -1;
+    }
+
+    token_info_t ti = {0};
+    if (token_manager_load_file(data->config.server_token_file, &ti) != 0) {
+        OB_LOG_WARN(pamh, "On-demand refresh: cannot read token file %s",
+                    data->config.server_token_file);
+        return -1;
+    }
+
+    int rc = -1;
+
+    /* If the timer heartbeat already refreshed the on-disk token since this PAM
+     * handle loaded it, just adopt the newer token — no network call needed. */
+    const char *current = ob_client_get_server_token(data->client);
+    if (ti.access_token && (!current || strcmp(ti.access_token, current) != 0)) {
+        ob_client_set_server_token(data->client, ti.access_token);
+        OB_LOG_INFO(pamh, "On-demand refresh: adopted newer server token from %s",
+                    data->config.server_token_file);
+        rc = 0;
+        goto out;
+    }
+
+    /* Otherwise refresh via /pam/heartbeat (keeps the per-device bastion_id). */
+    if (!ti.refresh_token) {
+        OB_LOG_WARN(pamh, "On-demand refresh: no refresh_token in token file");
+        goto out;
+    }
+
+    char hostname[256] = {0};
+    if (gethostname(hostname, sizeof(hostname) - 1) != 0) {
+        hostname[0] = '\0';
+    }
+
+    char *new_at = NULL;
+    int new_ttl = 0;
+    if (ob_client_refresh_via_heartbeat(data->client, ti.refresh_token,
+                                        hostname, &new_at, &new_ttl) != 0) {
+        OB_LOG_WARN(pamh, "On-demand server token refresh failed: %s",
+                    ob_client_error(data->client));
+        goto out;
+    }
+
+    /* Persist only the access token + its expiry, keeping refresh_token and
+     * enrolled_at, exactly like the ob-heartbeat timer. */
+    free(ti.access_token);
+    ti.access_token = new_at;  /* transfer ownership */
+    ti.expires_at = time(NULL) + (new_ttl > 0 ? new_ttl : 3600);
+    if (token_manager_save_file(data->config.server_token_file, &ti) != 0) {
+        OB_LOG_WARN(pamh, "On-demand refresh: refreshed token but could not "
+                          "persist it to %s", data->config.server_token_file);
+        /* Still install it in-memory so this login succeeds. */
+    }
+    ob_client_set_server_token(data->client, ti.access_token);
+    OB_LOG_INFO(pamh, "Refreshed server token on demand via /pam/heartbeat");
+    rc = 0;
+
+out:
+    token_info_free(&ti);
+    return rc;
+}
+
+/*
  * pam_sm_authenticate - Authenticate user with LLNG token
  *
  * The password provided by the user is expected to be an LLNG access token
@@ -2823,6 +2899,15 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
         int verify_rc = ob_verify_token(data->client, password,
                                         ssh_fingerprint, &response);
+
+        /* Server token expired (401)? Refresh on demand and retry once. */
+        if (verify_rc != 0
+            && ob_client_last_http_code(data->client) == 401
+            && refresh_server_token_on_demand(pamh, data) == 0) {
+            verify_rc = ob_verify_token(data->client, password,
+                                        ssh_fingerprint, &response);
+        }
+
         free(ssh_fingerprint);
         ssh_fingerprint = NULL;
 
@@ -3248,9 +3333,26 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         OB_LOG_DEBUG(pamh, "Authorizing with SSH certificate info");
         auth_result = ob_authorize_user_with_cert(data->client, user, hostname,
                                                      service, &ssh_cert_info, &response);
-        ob_ssh_cert_info_free(&ssh_cert_info);
     } else {
         auth_result = ob_authorize_user(data->client, user, hostname, service, &response);
+    }
+
+    /* Server token expired (401)? Refresh on demand and retry once, BEFORE any
+     * offline fallback — otherwise a stale bastion token silently yields a
+     * cached authorization that mints no bastion voucher (ob-ssh then breaks). */
+    if (auth_result != 0
+        && ob_client_last_http_code(data->client) == 401
+        && refresh_server_token_on_demand(pamh, data) == 0) {
+        if (has_ssh_cert) {
+            auth_result = ob_authorize_user_with_cert(data->client, user, hostname,
+                                                         service, &ssh_cert_info, &response);
+        } else {
+            auth_result = ob_authorize_user(data->client, user, hostname, service, &response);
+        }
+    }
+
+    if (has_ssh_cert) {
+        ob_ssh_cert_info_free(&ssh_cert_info);
     }
 
     if (auth_result != 0) {

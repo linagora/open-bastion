@@ -176,4 +176,36 @@ void ob_response_free(ob_response_t *response);
  */
 const char *ob_client_error(ob_client_t *client);
 
+/*
+ * HTTP status of the most recent /pam endpoint request (0 if none, or on a transport
+ * error). Lets callers tell "server token expired" (401) apart from other
+ * failures so they can refresh the server token and retry.
+ */
+long ob_client_last_http_code(ob_client_t *client);
+
+/*
+ * Current server access token (the Bearer used for /pam/verify and
+ * /pam/authorize), or NULL. Borrowed pointer; do not free.
+ */
+const char *ob_client_get_server_token(ob_client_t *client);
+
+/*
+ * Replace the server access token (e.g. after an on-demand refresh).
+ */
+void ob_client_set_server_token(ob_client_t *client, const char *token);
+
+/*
+ * Refresh the server access token via /pam/heartbeat (NOT the OIDC
+ * /oauth2/token grant, which fails for the synthetic device identity and would
+ * drop the per-device bastion_id). Posts {refresh_token, hostname,
+ * server_group}; on success returns 0 and sets *new_access_token (caller frees)
+ * plus *expires_in (seconds). Leaves the refresh_token untouched.
+ * Returns -1 on error.
+ */
+int ob_client_refresh_via_heartbeat(ob_client_t *client,
+                                    const char *refresh_token,
+                                    const char *hostname,
+                                    char **new_access_token,
+                                    int *expires_in);
+
 #endif /* OB_CLIENT_H */

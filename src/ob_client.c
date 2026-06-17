@@ -34,6 +34,9 @@
 /* Use shared JSON strdup utility */
 #define safe_json_strdup str_json_strdup
 
+/* Forward declaration for curl option setup (defined further below) */
+static void setup_curl(ob_client_t *client);
+
 /* Forward declaration for internal authorize function */
 static int ob_authorize_user_internal(ob_client_t *client,
                                          const char *user,
@@ -58,6 +61,7 @@ struct ob_client {
     char *server_token;
     char *server_group;
     char error[256];
+    long last_http_code;   /* HTTP status of the most recent /pam request */
     int timeout;
     bool verify_ssl;
     char *ca_cert;
@@ -469,6 +473,128 @@ void ob_client_destroy(ob_client_t *client)
     free(client);
 }
 
+long ob_client_last_http_code(ob_client_t *client)
+{
+    return client ? client->last_http_code : 0;
+}
+
+const char *ob_client_get_server_token(ob_client_t *client)
+{
+    return client ? client->server_token : NULL;
+}
+
+void ob_client_set_server_token(ob_client_t *client, const char *token)
+{
+    if (!client) return;
+    secure_free(client->server_token);
+    client->server_token = strdup_or_null(token);
+}
+
+/*
+ * Refresh the server access token via /pam/heartbeat, mirroring the
+ * ob-heartbeat timer. We deliberately do NOT use the OIDC /oauth2/token refresh
+ * grant: for the bastion's synthetic device identity that grant fails (it
+ * re-resolves the user in the UserDB) and would drop the per-device bastion_id,
+ * breaking voucher binding. The portal authenticates the call by the
+ * refresh_token in the body (no Bearer) and mints a fresh access token that
+ * keeps the device id. Only the access token changes; the refresh_token is
+ * untouched. Returns 0 and sets *new_access_token (caller frees) on success.
+ */
+int ob_client_refresh_via_heartbeat(ob_client_t *client,
+                                    const char *refresh_token,
+                                    const char *hostname,
+                                    char **new_access_token,
+                                    int *expires_in)
+{
+    if (!client || !refresh_token || !new_access_token) {
+        if (client) snprintf(client->error, sizeof(client->error),
+                             "Invalid parameters");
+        return -1;
+    }
+    *new_access_token = NULL;
+    if (expires_in) *expires_in = 0;
+
+    setup_curl(client);
+
+    char url[1024];
+    snprintf(url, sizeof(url), "%s/pam/heartbeat", client->portal_url);
+
+    struct json_object *req_json = json_object_new_object();
+    json_object_object_add(req_json, "refresh_token",
+                           json_object_new_string(refresh_token));
+    if (hostname && *hostname) {
+        json_object_object_add(req_json, "hostname",
+                               json_object_new_string(hostname));
+    }
+    if (client->server_group) {
+        json_object_object_add(req_json, "server_group",
+                               json_object_new_string(client->server_group));
+    }
+    const char *req_body = json_object_to_json_string(req_json);
+
+    /* /pam/heartbeat authenticates via the refresh_token in the body, like the
+     * shell ob-heartbeat — no Authorization header, no request signing. */
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    response_buffer_t buf;
+    init_buffer(&buf);
+
+    client->last_http_code = 0;
+    curl_easy_setopt(client->curl, CURLOPT_URL, url);
+    curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, req_body);
+    curl_easy_setopt(client->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, &buf);
+
+    CURLcode res = curl_easy_perform(client->curl);
+
+    json_object_put(req_json);
+    curl_slist_free_all(headers);
+
+    if (res != CURLE_OK) {
+        snprintf(client->error, sizeof(client->error),
+                 "Curl error: %s", curl_easy_strerror(res));
+        free_buffer(&buf);
+        return -1;
+    }
+
+    long http_code;
+    curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    client->last_http_code = http_code;
+
+    if (http_code != 200) {
+        snprintf(client->error, sizeof(client->error),
+                 "Heartbeat refresh failed: HTTP %ld", http_code);
+        free_buffer(&buf);
+        return -1;
+    }
+
+    struct json_object *json = json_tokener_parse(buf.data);
+    free_buffer(&buf);
+    if (!json) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid JSON in heartbeat response");
+        return -1;
+    }
+
+    struct json_object *val;
+    if (!json_object_object_get_ex(json, "access_token", &val)
+        || !json_object_is_type(val, json_type_string)) {
+        snprintf(client->error, sizeof(client->error),
+                 "Heartbeat response missing access_token");
+        json_object_put(json);
+        return -1;
+    }
+    *new_access_token = strdup(json_object_get_string(val));
+
+    if (expires_in && json_object_object_get_ex(json, "expires_in", &val)) {
+        *expires_in = json_object_get_int(val);
+    }
+
+    json_object_put(json);
+    return (*new_access_token) ? 0 : -1;
+}
+
 const char *ob_client_error(ob_client_t *client)
 {
     return client ? client->error : "No client";
@@ -552,6 +678,7 @@ int ob_verify_token(ob_client_t *client,
     /* Build URL */
     char url[1024];
     snprintf(url, sizeof(url), "%s/pam/verify", client->portal_url);
+    client->last_http_code = 0;
 
     /* Build JSON request body */
     struct json_object *req_json = json_object_new_object();
@@ -605,6 +732,7 @@ int ob_verify_token(ob_client_t *client,
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    client->last_http_code = http_code;
 
     if (http_code == 401) {
         snprintf(client->error, sizeof(client->error),
@@ -795,6 +923,7 @@ int ob_introspect_token(ob_client_t *client,
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    client->last_http_code = http_code;
 
     if (http_code != 200) {
         snprintf(client->error, sizeof(client->error),
@@ -876,6 +1005,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
     /* Build URL */
     char url[1024];
     snprintf(url, sizeof(url), "%s/pam/authorize", client->portal_url);
+    client->last_http_code = 0;
 
     /* Build JSON request body */
     struct json_object *req_json = json_object_new_object();
@@ -960,6 +1090,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    client->last_http_code = http_code;
 
     if (http_code == 401) {
         snprintf(client->error, sizeof(client->error),
