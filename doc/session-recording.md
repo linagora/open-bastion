@@ -312,10 +312,10 @@ Because recording is fail-closed, unbounded recordings are an availability risk.
 recordings). It has two stages, both configured in
 `/etc/open-bastion/session-recorder.conf`:
 
-| Key                             | Default | Effect                                                                                   |
-| ------------------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| Key                             | Default | Effect                                                                                           |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
 | `recording_compress_after_days` | `1`     | `gzip` closed recording payloads older than N days (typescripts compress ~10–20×). `0` disables. |
-| `recording_retention_days`      | `365`   | Delete recordings (payload + `.json`) older than N days. `0` keeps them forever.         |
+| `recording_retention_days`      | `365`   | Delete recordings (payload + `.json`) older than N days. `0` keeps them forever.                 |
 
 Notes:
 
