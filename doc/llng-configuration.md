@@ -90,8 +90,11 @@ In the LLNG Manager, create a new OIDC Relying Party:
 2. Configure:
    - **Client ID**: `pam-access`
    - **Client secret**: Generate a strong secret
-   - **Allowed grant types**: Enable `device_code` (for server enrollment)
-   - **Allowed scopes**: `openid`, `pam:server`, `offline_access`
+   - **Scopes**: servers enroll with the `pam:server` scope, which is a **custom
+     Open-Bastion scope** (not a built-in one). Grant it with a per-RP **scope
+     rule** — `oidcRPMetaDataScopeRules`, e.g. `pam:server => 1` (the demos also
+     grant `pam`). `offline_access` is **not** a scope you list here; it is
+     enabled by `oidcRPMetaDataOptionsAllowOffline` (see step 3).
 3. Set the per-RP options that let servers enroll with a **renewable** identity
    (see [Per-RP Device Authorization Parameters](#per-rp-device-authorization-parameters)):
    - `oidcRPMetaDataOptionsAllowDeviceAuthorization` = `1`
