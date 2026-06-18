@@ -96,3 +96,7 @@ via OIDC— Open Bastion is feature rich. It provides:
   alerts
 
 * Monitoring: Server heartbeat and statistics reporting to LLNG portal
+
+A good way to complete this overview is to check the `slide deck
+<https://github.com/linagora/open-bastion/tree/main/doc/slides>`__
+written for a meetup talk; a snapshot, not a reference.
