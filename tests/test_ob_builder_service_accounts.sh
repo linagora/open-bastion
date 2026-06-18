@@ -134,9 +134,12 @@ test_render_conf() {
         "$(_sa_pack ansible SHA256:abc123 true true /bin/bash /var/lib/ansible 'Ansible Automation' '' '')"
         "$(_sa_pack backup SHA256:xyz789 false false /bin/sh '' '' '' '')"
     )
-    local out
-    out=$(_render_service_accounts_conf)
+    local out rc
+    out=$(_render_service_accounts_conf); rc=$?
     local ok=true
+    # Must return 0 even when the last account has no uid/gid — otherwise the
+    # `$(...)` assignment trips `set -e` in ob-builder (regression guard).
+    [ "$rc" -eq 0 ] || { ok=false; echo "  non-zero return: $rc"; }
     grep -q '^\[ansible\]$'                      <<<"$out" || ok=false
     grep -q '^key_fingerprint = SHA256:abc123$'  <<<"$out" || ok=false
     grep -q '^sudo_allowed = true$'              <<<"$out" || ok=false

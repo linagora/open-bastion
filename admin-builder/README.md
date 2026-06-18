@@ -58,17 +58,18 @@ apt_component: main
 
 # Optional SSH-key-only local accounts (no OIDC), rendered into
 # /etc/open-bastion/service-accounts.conf (0600) on every target.
+# Use a dedicated name (not a system user), a home under /home or /var/home, and
+# a fixed uid+gid (required so NSS can resolve the account for sshd pre-auth).
 # service_accounts:
-#   - name: ansible
+#   - name: ci-ansible
 #     key_fingerprint: "SHA256:..."   # ssh-keygen -lf key.pub
 #     sudo_allowed: true
 #     sudo_nopasswd: true
 #     shell: /bin/bash
-#     home: /var/lib/ansible
+#     home: /home/ci-ansible
 #     gecos: Ansible Automation
-#   - name: backup
-#     key_fingerprint: "SHA256:..."
-#     sudo_allowed: false
+#     uid: 6001
+#     gid: 6001
 ```
 
 See [`doc/service-accounts.md`](../doc/service-accounts.md) for the full schema

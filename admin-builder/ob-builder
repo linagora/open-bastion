@@ -104,6 +104,13 @@ DISABLE_SESSION_RECORDER=""
 # rendered into /etc/open-bastion/service-accounts.conf on the target.
 SERVICE_ACCOUNTS_RECORDS=()
 _OB_SA_US=$'\x1f'
+# Module defaults from include/config.h (DEFAULT_APPROVED_HOME_PREFIXES /
+# DEFAULT_APPROVED_SHELLS). A service account whose home/shell falls outside
+# these is SILENTLY DROPPED at load by pam_openbastion unless the target's
+# openbastion.conf widens approved_home_prefixes / approved_shells — so we warn
+# about it at build time. Keep in sync with config.h.
+_OB_SA_DEFAULT_HOME_PREFIXES="/home /var/home"
+_OB_SA_DEFAULT_SHELLS="/bin/bash /bin/sh /usr/bin/bash /usr/bin/sh /bin/zsh /usr/bin/zsh /bin/dash /usr/bin/dash /bin/fish /usr/bin/fish"
 
 # Derived values populated after the questionnaire.
 PAM_MODE=""
@@ -164,16 +171,17 @@ SERVICE ACCOUNTS (--config YAML):
   rendered into /etc/open-bastion/service-accounts.conf (0600) on the target and
   apply to every role. Example:
     service_accounts:
-      - name: ansible
-        key_fingerprint: "SHA256:…"   # from: ssh-keygen -lf key.pub
+      - name: ci-ansible            # dedicated name (not an existing system user)
+        key_fingerprint: "SHA256:…" # from: ssh-keygen -lf key.pub
         sudo_allowed: true
         sudo_nopasswd: true
         shell: /bin/bash
-        home: /var/lib/ansible
+        home: /home/ci-ansible      # under an approved prefix (/home, /var/home)
         gecos: Ansible Automation
-      - name: backup
-        key_fingerprint: "SHA256:…"
-        sudo_allowed: false
+        uid: 6001                   # fixed uid+gid → NSS-resolvable → reachable over SSH
+        gid: 6001
+  Notes: use a dedicated (non-system) name, a home under /home or /var/home, and
+  a fixed uid+gid, or the account is dropped / unreachable. See doc/service-accounts.md.
 
 EXAMPLES:
   # Fully interactive bastion bootstrap (default Linagora APT keyring)
@@ -441,6 +449,45 @@ validate_service_account_record() {
     return 0
 }
 
+# Warn (non-fatal) when a service account's home/shell falls outside the module
+# defaults: pam_openbastion silently DROPS such an account at load unless the
+# target widens approved_home_prefixes / approved_shells in openbastion.conf.
+warn_service_account_unapproved() {
+    local rec="$1"
+    local name home shell uid gid pfx ok
+    name=$(_sa_field 1 "$rec"); shell=$(_sa_field 5 "$rec"); home=$(_sa_field 6 "$rec")
+    uid=$(_sa_field 8 "$rec"); gid=$(_sa_field 9 "$rec")
+    # NSS (libnss_openbastion) only synthesizes a service account when it has a
+    # FIXED uid AND gid; sshd's pre-auth getpwnam then succeeds. Without them the
+    # account is unreachable over SSH unless it already exists as a local user.
+    if [ -z "$uid" ] || [ "$uid" = 0 ] || [ -z "$gid" ] || [ "$gid" = 0 ]; then
+        log_warn "service account '$name': no fixed uid/gid. NSS cannot resolve it pre-auth, so"
+        log_warn "  it is reachable over SSH only if the account already exists locally on the target."
+        log_warn "  Set both 'uid' and 'gid' for a self-contained, fleet-consistent service account."
+    fi
+    if [ -n "$home" ]; then
+        ok=0
+        for pfx in $_OB_SA_DEFAULT_HOME_PREFIXES; do
+            case "$home" in "$pfx"/*) ok=1; break ;; esac
+        done
+        if [ "$ok" -ne 1 ]; then
+            log_warn "service account '$name': home '$home' is outside the default approved prefixes ($_OB_SA_DEFAULT_HOME_PREFIXES)."
+            log_warn "  pam_openbastion will DROP this account unless the target's openbastion.conf sets e.g.:"
+            log_warn "    approved_home_prefixes = /home:/var/home:${home%/*}"
+        fi
+    fi
+    if [ -n "$shell" ]; then
+        ok=0
+        for pfx in $_OB_SA_DEFAULT_SHELLS; do
+            [ "$shell" = "$pfx" ] && { ok=1; break; }
+        done
+        if [ "$ok" -ne 1 ]; then
+            log_warn "service account '$name': shell '$shell' is not in the default approved shells."
+            log_warn "  Set 'approved_shells' in the target's openbastion.conf or the account will be dropped."
+        fi
+    fi
+}
+
 # Parse the `service_accounts:` block of a YAML config file into
 # SERVICE_ACCOUNTS_RECORDS. Independent of yq (the flat parsers can't read a
 # list). Recognises the documented block-list form:
@@ -560,6 +607,10 @@ _render_service_accounts_conf() {
         [ -n "$uid" ] && [ "$uid" != 0 ] && printf 'uid = %s\n' "$uid"
         [ -n "$gid" ] && [ "$gid" != 0 ] && printf 'gid = %s\n' "$gid"
     done
+    # Explicit success: the loop's last command is a `&&` chain that is false
+    # whenever the final account has no gid (the common case), which would make
+    # this function return non-zero and trip `set -e` in the caller.
+    return 0
 }
 
 # Interactively collect service accounts into SERVICE_ACCOUNTS_RECORDS. Loops
@@ -597,8 +648,9 @@ collect_service_accounts_interactive() {
             is_valid_abs_path "$home" && break
             log_warn "Home must be an absolute path (e.g. /var/lib/$name) or empty."
         done
-        uid=$(ask "  Fixed UID (optional, 0/empty = auto)" "")
-        gid=$(ask "  Fixed GID (optional, 0/empty = auto)" "")
+        explain "Set a fixed uid+gid for an SSH-reachable account: NSS resolves it only when both are set (sshd checks the user before auth). Leave empty only if the account already exists locally on the target."
+        uid=$(ask "  Fixed UID (recommended; empty = auto)" "")
+        gid=$(ask "  Fixed GID (recommended; empty = auto)" "")
 
         rec=$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid")
         if validate_service_account_record "$rec"; then
@@ -893,6 +945,7 @@ validate_inputs() {
         local -A _seen_sa=()
         for _rec in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
             validate_service_account_record "$_rec" || die "Invalid service account in config"
+            warn_service_account_unapproved "$_rec"
             _name=$(_sa_field 1 "$_rec")
             [ -n "${_seen_sa[$_name]:-}" ] && die "Duplicate service account name: $_name"
             _seen_sa[$_name]=1

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host/group). `service_accounts_file` is set in the generated
   `openbastion.conf`. No PAM-module change — `src/service_account.c` already
   parses that file. See `doc/service-accounts.md` and `ob-builder(1)`.
+  Validated end-to-end on a Mode E VM (`local-test/deploy-shell.sh`). ob-builder
+  warns when an account would be unusable on the target: a `home`/`shell` outside
+  the approved lists (silently dropped by the PAM module) or a missing fixed
+  `uid`/`gid` (NSS cannot resolve it for sshd's pre-auth lookup, so it is
+  unreachable over SSH unless it already exists locally). `doc/service-accounts.md`
+  documents these requirements (including not reusing a system username).
 - **Session-recording retention (`ob-session-prune`).** A new daily timer
   (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
   which matters because recording is fail-closed — a full disk refuses new

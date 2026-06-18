@@ -83,20 +83,23 @@ done
 if [ -n "$STANDALONE_VM" ]; then
     phase "Phase 3 — standalone (ob-builder --output-shell, scenario=$SCENARIO)"
     sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-standalone.yml" > "$WORK/build-standalone.yml"
-    # Exercise the ob-builder service-keys feature: declare a 'backup' service
-    # account whose fingerprint is the lab key's, so the generated installer
-    # deposits a matching service-accounts.conf. (verify_service_accounts then
-    # logs in as backup with that key.)
+    # Exercise the ob-builder service-keys feature: declare a service account
+    # ($SVC_NAME, a non-system name) whose fingerprint is the lab key's, so the
+    # generated installer deposits a matching service-accounts.conf.
+    # verify_service_accounts then logs in as $SVC_NAME with that key. home is
+    # under /home (an approved prefix) so pam_openbastion does not drop it.
     if [ -n "$SVC_FP" ]; then
         cat >> "$WORK/build-standalone.yml" <<EOF
 
 service_accounts:
-  - name: backup
+  - name: $SVC_NAME
     key_fingerprint: "$SVC_FP"
     sudo_allowed: false
     shell: /bin/bash
-    home: /var/lib/backup
-    gecos: Lab Backup Service Account
+    home: /home/$SVC_NAME
+    gecos: Lab Deploy Service Account
+    uid: 6100
+    gid: 6100
 EOF
     fi
     obbuild --config "$WORK/build-standalone.yml" --output-shell "$WORK/boot-standalone.sh" >"$WORK/gen-standalone.log" 2>&1 \

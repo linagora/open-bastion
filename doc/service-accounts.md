@@ -42,6 +42,23 @@ shell = /bin/sh
 home = /var/lib/backup
 ```
 
+> **⚠️ `home` and `shell` must be within the approved lists, or the account is
+> silently dropped.** `pam_openbastion` validates each account at load and
+> **discards** any whose `home` is not under `approved_home_prefixes` (default
+> `/home:/var/home`) or whose `shell` is not in `approved_shells` (default:
+> `/bin/bash`, `/bin/sh`, `/bin/zsh`, `/bin/dash`, `/bin/fish` and their
+> `/usr/bin` variants). A dropped account is not recognized as a service account,
+> so its login falls through to LLNG and is refused with "user not found". The
+> `/var/lib/...` homes above therefore require widening the prefix list:
+>
+> ```ini
+> # /etc/open-bastion/openbastion.conf
+> approved_home_prefixes = /home:/var/home:/var/lib
+> ```
+>
+> Either keep service-account homes under `/home` (works out of the box) or set
+> `approved_home_prefixes` accordingly.
+
 **Security requirements for this file:**
 
 - Owned by root (uid 0)
@@ -82,10 +99,10 @@ ssh-keygen -lf /path/to/key.pub
 | `sudo_allowed`    | No       | Allow sudo access (default: false)                 |
 | `sudo_nopasswd`   | No       | Sudo without password (default: false)             |
 | `gecos`           | No       | User description                                   |
-| `shell`           | No       | Login shell (must be in approved_shells)           |
-| `home`            | No       | Home directory (must match approved_home_prefixes) |
-| `uid`             | No       | Fixed UID (0 = auto-assign)                        |
-| `gid`             | No       | Fixed GID (0 = auto-assign)                        |
+| `shell`           | No       | Login shell — must be in `approved_shells` (default: common shells) or the account is dropped |
+| `home`            | No       | Home directory — must be under `approved_home_prefixes` (default `/home:/var/home`) or the account is dropped |
+| `uid`             | See note | Fixed UID. **Required (with `gid`) for SSH-reachable accounts** — NSS resolves them only when both are set; `0` = auto-assign (works only if the account already exists locally) |
+| `gid`             | See note | Fixed GID. See `uid` |
 
 ## How It Works
 
@@ -96,6 +113,13 @@ ssh-keygen -lf /path/to/key.pub
 5. If fingerprint matches, account is authorized locally (no LLNG call needed)
 6. Account is created automatically if it doesn't exist
 7. sudo permissions are enforced based on configuration
+
+> **Do not reuse an existing system username.** `shell`, `home`, `uid` and `gid`
+> are applied only when the account is **created**. If the name already exists
+> (e.g. the Debian system users `backup`, `www-data`, `nobody`), the existing
+> account is used as-is — typically with `/usr/sbin/nologin`, which breaks the
+> login ("This account is currently not available."). Pick a dedicated name such
+> as `obdeploy`, `obbackup` or `ci-runner`.
 
 ## Generating with ob-builder
 
@@ -110,21 +134,28 @@ loops over name / fingerprint / sudo / shell / home for each.
 
 ```yaml
 service_accounts:
-  - name: ansible
+  - name: ci-ansible          # avoid system names like 'ansible' only if they exist; use a dedicated name
     key_fingerprint: "SHA256:abc123def456..."
     sudo_allowed: true
     sudo_nopasswd: true
     shell: /bin/bash
-    home: /var/lib/ansible
+    home: /home/ci-ansible    # under an approved prefix (/home, /var/home)
     gecos: Ansible Automation
-  - name: backup
+    uid: 6001                 # fixed uid+gid → NSS-resolvable → reachable over SSH
+    gid: 6001
+  - name: obbackup
     key_fingerprint: "SHA256:xyz789..."
     sudo_allowed: false
     shell: /bin/sh
+    home: /home/obbackup
+    uid: 6002
+    gid: 6002
 ```
 
 ob-builder validates each entry (name, fingerprint format, absolute shell/home
-paths) at build time, then:
+paths) at build time — and **warns** when a `home`/`shell` falls outside the
+module defaults (it would otherwise be silently dropped on the target; see the
+warning above) — then:
 
 - the **shell installer** writes `/etc/open-bastion/service-accounts.conf`
   (`0600 root:root`) and sets `service_accounts_file` in `openbastion.conf`;
@@ -173,6 +204,24 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
 
 `ExposeAuthInfo yes` must be set (the setups do this) so the fingerprint reaches
 the PAM module.
+
+### The account must be resolvable (fixed `uid`/`gid`)
+
+`sshd` runs `getpwnam(<user>)` **before** authentication and refuses unknown
+users ("Invalid user"). A brand-new service account therefore has to be
+resolvable up front, which `nss_openbastion` does — **but only when the account
+has a fixed `uid` *and* `gid`** (`nss/libnss_openbastion.c`); otherwise NSS skips
+it and the login is refused before PAM ever runs. So, for an SSH-reachable
+service account that does not already exist as a local user:
+
+- set both `uid` and `gid` (also gives stable, fleet-consistent ownership), **or**
+- pre-create the account locally (`useradd`), in which case the `files` NSS
+  source resolves it.
+
+`ob-builder` warns at build time when a service account lacks `uid`/`gid`. The
+auto-create-on-first-login behaviour fills in the home directory etc. during the
+session phase, but it cannot help sshd's pre-auth lookup — hence this
+requirement.
 
 ## Reaching servers through a bastion (no ProxyJump recording)
 
