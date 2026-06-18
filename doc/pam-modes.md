@@ -369,6 +369,7 @@ sudo systemctl restart sshd
 
 ## See Also
 
+- [Access & Permissions](permissions.md) - Which controls live SSO-side vs server-side
 - [LemonLDAP::NG Configuration](llng-configuration.md) - Server-side setup
 - [Configuration Reference](configuration.md) - All configuration options
 - [Service Accounts](service-accounts.md) - SSH key authentication for automation
