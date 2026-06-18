@@ -25,6 +25,7 @@ How users reach servers, and how the bastion→backend hop is secured.
 | [Bastion architecture](bastion-architecture.md)                 | Bastion→backend certificate vouching; `ob-ssh`/`ob-scp`/`ob-sftp` |
 | [PAM authentication modes](pam-modes.md)                        | The A–E matrix (token / key / password / cert)                    |
 | [LemonLDAP::NG configuration](llng-configuration.md)            | Server-side: OIDC RP, plugins, SSH CA, server groups              |
+| [LemonLDAP::NG plugin parameters](llng-plugin-parameters.md)    | Reference: optional `[portal]` parameters (indicative)            |
 | [Design: certificate vouching](design/bastion-cert-vouching.md) | Why and how the ephemeral-cert hop works                          |
 
 ## Access & permissions

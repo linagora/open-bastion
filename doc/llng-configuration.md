@@ -93,7 +93,7 @@ In the LLNG Manager, create a new OIDC Relying Party:
    - No scope configuration is needed (the requested `pam:server` scope is issued
      as-is); offline sessions are authorized in step 3.
 3. Set the per-RP options that let servers enroll with a **renewable** identity
-   (see [Per-RP Device Authorization Parameters](#per-rp-device-authorization-parameters)):
+   (see [Per-RP Device Authorization Parameters](llng-plugin-parameters.md#per-rp-device-authorization-parameters)):
    - `oidcRPMetaDataOptionsAllowDeviceAuthorization` = `1`
    - `oidcRPMetaDataOptionsDeviceOwnership` = `organization`
    - `oidcRPMetaDataOptionsAllowOffline` = `1`
@@ -140,79 +140,14 @@ plugin's README (linked above) for its full list of parameters.
 > `customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess, ::Plugins::SSHCA`
 > (drop `PamAccess` or `SSHCA` per your mode).
 
-## Step 4: Plugin Parameters
+## Plugin parameters
 
-Additional and optional parameters that can be inserted into `lemonldap-ng.ini`, section `[portal]`:
+The optional `[portal]` parameters for these plugins — PamAccess token settings,
+device-authorization tuning, and SSH CA — are listed in a separate reference
+page: **[LemonLDAP::NG Plugin Parameters](llng-plugin-parameters.md)**. The
+defaults are fine for a standard setup.
 
-### General Parameters
-
-| Parameter                                       | Default      | Description                                                                                        |
-| ----------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
-| `oidcServiceDeviceAuthorizationExpiration`      | `600` (10mn) | Device authorization expiration time                                                               |
-| `oidcServiceDeviceAuthorizationPollingInterval` | `5`          | Polling interval in seconds (clients polling faster get `slow_down` errors)                        |
-| `oidcServiceDeviceAuthorizationUserCodeLength`  | `8`          | Length of user code (base-20 charset, collision-safe)                                              |
-| `portalDisplayPamAccess`                        | `0`          | Set to 1 (or a rule) to display PAM tab                                                            |
-| `pamAccessRp`                                   | `pam-access` | OIDC Relying Party name                                                                            |
-| `pamAccessTokenDuration`                        | `600` (10mn) | Token duration                                                                                     |
-| `pamAccessMaxDuration`                          | `3600` (1h)  | Maximum token duration                                                                             |
-| `pamAccessExportedVars`                         | `{}`         | Exported variables                                                                                 |
-| `pamAccessOfflineTtl`                           | `86400` (1d) | Offline cache TTL                                                                                  |
-| `pamAccessSshRules`                             | `{}`         | SSH access rules                                                                                   |
-| `pamAccessServerGroups`                         | `{}`         | Server groups configuration                                                                        |
-| `pamAccessSudoRules`                            | `{}`         | Sudo rules                                                                                         |
-| `pamAccessOfflineEnabled`                       | `0`          | Enable offline mode                                                                                |
-| `pamAccessHeartbeatInterval`                    | `300` (5mn)  | Heartbeat interval                                                                                 |
-| `pamAccessManagedGroups`                        | `{}`         | Unix groups managed by LLNG per server group (see [Group Synchronization](#group-synchronization)) |
-
-### Per-RP Device Authorization Parameters
-
-These are set in the LLNG Manager on each OIDC Relying Party:
-
-| Parameter                                       | Default | Description                                                                                                                                                                                                           |
-| ----------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `oidcRPMetaDataOptionsAllowDeviceAuthorization` | `0`     | Enable device grant. Can be a rule expression to restrict who can approve                                                                                                                                             |
-| `oidcRPMetaDataOptionsDeviceOwnership`          | (empty) | Set to `organization` for organizational device mode (see below)                                                                                                                                                      |
-| `oidcRPMetaDataOptionsAllowOffline`             | `0`     | Set to `1` to issue an **offline refresh token** so `ob-heartbeat` can renew the server's access token. **Required** for server enrollment (with the `offline_access` scope and `oidc-device-organization` >= 0.3.3). |
-
-### Organizational Device Enrollment
-
-When `oidcRPMetaDataOptionsDeviceOwnership` is set to `organization` on an RP, the **OIDCDeviceOrganization** plugin changes the device authorization behavior:
-
-- An administrator approves the device normally through the `/device` page
-- The resulting tokens identify the **client application** (client_id) instead of the approving admin
-- The device token survives the admin's session expiration or account removal
-- Refresh tokens remain valid independently of the admin's session
-
-This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
-
-For the device to get a **durable** (offline) refresh token, also set
-`oidcRPMetaDataOptionsAllowOffline = 1` and deploy `oidc-device-organization`
-**>= 0.3.3** (earlier versions stripped `offline_access`, leaving the server
-with a non-renewable token). See the critical note under
-[Step 2](#step-2-create-the-oidc-relying-party).
-
-### Device Authorization Security Features
-
-- **CSRF protection**: the `/device` verification form uses a one-time token
-- **Rate limiting**: clients polling faster than the configured interval receive `slow_down` errors with incremental backoff
-- **User code collision detection**: codes are regenerated on collision (up to 10 retries)
-- **Per-RP access rules**: `AllowDeviceAuthorization` accepts boolean expressions to restrict which users can approve devices
-- **CrowdSec integration**: invalid user_code attempts are reported to CrowdSec (scenario `llng/device-auth-bruteforce`)
-
-When offline mode is enabled, the server-side cache is protected by
-[Cache Brute-Force Protection](security.md#cache-brute-force-protection).
-
-### SSH CA Parameters (optional)
-
-| Parameter               | Default    | Description                               |
-| ----------------------- | ---------- | ----------------------------------------- |
-| `portalDisplaySshCa`    | `0`        | Set to 1 (or a rule) to display SSHCA tab |
-| `sshCaCertMaxValidity`  | `365` (1y) | Maximum certificate validity              |
-| `sshCaSerialPath`       | `""`       | Path for certificate serial storage       |
-| `sshCaPrincipalSources` | `$uid`     | Principal sources                         |
-| `sshCaKrlPath`          | `""`       | Path for Key Revocation List              |
-
-## Step 4.1: Generate and Import the SSH CA Key (optional)
+## Step 4: Generate and Import the SSH CA Key (optional)
 
 If you're using the SSH CA plugin for key-based authentication, you need to generate a CA key pair and import it into LemonLDAP::NG.
 
