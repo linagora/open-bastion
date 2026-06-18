@@ -285,6 +285,7 @@ service_accounts_file = /etc/open-bastion/service-accounts.conf
 
 ## See Also
 
+- [Access & Permissions](permissions.md) - Which controls live SSO-side vs server-side
 - [Configuration Reference](configuration.md) - All configuration options
 - [PAM Authentication Modes](pam-modes.md) - PAM configurations
 - [Security Features](security.md) - SSH key policies

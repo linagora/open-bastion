@@ -352,6 +352,7 @@ When a user moves from staging to production access, their docker and developers
 
 ## See Also
 
+- [Access & Permissions](permissions.md) - Which controls live SSO-side vs server-side
 - [PAM Authentication Modes](pam-modes.md) - Configure PAM on servers
 - [Configuration Reference](configuration.md) - All configuration options
 - [Admin Guide](admin-guide.md) - Complete administration guide

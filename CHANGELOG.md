@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Docs reorganized for progressive discovery.** `README.md` now leads with a
+  value proposition and a "how it works" overview, promotes the three
+  quick-starts, and points to a theme-organized index. `doc/README.md` is grouped
+  by theme (start here · connections & architecture · access & permissions ·
+  recording & audit · offline & resilience · security & hardening · reference ·
+  EBIOS). New `doc/permissions.md` consolidates **which access control lives
+  SSO-side vs Open-Bastion-side** (with a "where do I set X" map) — previously
+  scattered across the PAM, LLNG, configuration and hardening docs. Cross-links
+  added from `pam-modes`, `llng-configuration` and `service-accounts`. The EBIOS
+  study under `doc/security/` is unchanged.
 - **Service-account security model documented.** `doc/service-accounts.md` now
   spells out that ob-builder deposits the fingerprint only, so the public key
   must still be authorized at the SSH layer (`authorized_keys`, or the

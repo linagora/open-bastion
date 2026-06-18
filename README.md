@@ -1,15 +1,68 @@
 # Open Bastion
 
-**Control SSH access and sudo privileges on your Linux servers through a centralized bastion server.**
+**Control SSH access and sudo privileges on your Linux servers from your SSO —
+no more per-server keys or sudoers.**
 
 Open Bastion integrates your servers with [LemonLDAP::NG](https://lemonldap-ng.org) (LLNG)
-to centrally manage who can SSH into which servers and who can use [sudo](https://en.wikipedia.org/wiki/Sudo).
-Administrators define access rules in the portal, and the PAM/NSS modules enforce them on each server.
+so you manage your Linux administrators as easily as you already manage your SSO
+users. Administrators define access rules once in the portal; the PAM/NSS modules
+enforce them on every server.
 
-The module supports two authentication methods:
+## What Open Bastion gives you
 
-- **Token-based authentication**: Users generate temporary access tokens from the portal to use as SSH passwords
-- **Key-based authorization**: When users connect via SSH keys, the module checks if they're authorized to access this server
+- **The SSO decides SSH access** — no SSH keys to install or rotate on each
+  server; group membership grants or revokes access fleet-wide.
+- **The SSO decides `sudo` too** — no `sudoers` to maintain per host (local/dual
+  management stays possible when you want it).
+- **The recorder can't be bypassed** — no escaping the session recorder via
+  port-forwarding, while `~/.ssh/config` keeps access _visually_ direct.
+- **Fleet deployment in one command** — `ob-builder --output-ansible <role>` (or
+  a self-extracting shell installer), then roll it out to every host.
+- **A "backup" account with access everywhere** — with or without `sudo` — via
+  [service accounts](doc/service-accounts.md).
+- **Self-service onboarding** — a new admin signs their SSH key at the portal and
+  instantly has every right their groups grant.
+- **One-click offboarding** — close the SSO account and access is gone.
+- **Instant role changes** — change someone's groups and, within minutes, old
+  rights drop and new ones apply.
+
+Two layers do this: the **SSO (LLNG) decides** policy centrally, the **PAM/NSS
+modules enforce** it on each server. See [Access & Permissions](doc/permissions.md)
+for exactly which control lives where.
+
+## Quick start
+
+Three quick-starts cover the ways to get going:
+
+| Quick-start                                                  | Use it to…                                                                                                                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
+| **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.   |
+| **[Deploy with a shell installer](doc/shell-quickstart.md)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.   |
+
+For the underlying concepts and per-step manual configuration, see
+[PAM Authentication Modes](doc/pam-modes.md), the
+[Configuration Reference](doc/configuration.md), and the
+[Admin Guide](doc/admin-guide.md).
+
+## How it works
+
+1. A user authenticates to a server — with an LLNG **token** (used as the SSH
+   password) or an **SSO-signed SSH certificate** (self-served via `ob-ssh-cert`).
+2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
+   server group, and `sudo` is gated the same way; an encrypted local cache keeps
+   this working during an SSO outage.
+3. The **NSS** module resolves SSO users (and key-only service accounts) so the
+   system sees them as real Unix accounts; provisioning creates the home on first
+   login.
+4. To reach a **backend behind a bastion**, the bastion mints a short-lived,
+   LLNG-signed certificate and re-originates the connection with `ob-ssh` /
+   `ob-scp` / `ob-sftp` — no user key or agent on the bastion. Backends accept
+   only vouched bastions.
+5. Sessions are **recorded** to a tamper-evident, root-owned store for audit.
+
+See [Bastion Architecture](doc/bastion-architecture.md) and the
+[documentation index](doc/README.md) for the details.
 
 ## Features
 
@@ -19,7 +72,7 @@ The module supports two authentication methods:
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
-- **[Offline mode](doc/security.md#cache-brute-force-protection)**:
+- **[Offline mode](doc/offline-mode.md)**:
   - Encrypted authorization cache (AES-256-GCM)
   - Continue SSH key authentication when LLNG server is unavailable
   - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
@@ -109,36 +162,18 @@ make
 sudo make install
 ```
 
-## Quick Start
-
-Three quick-starts cover the ways to get going:
-
-| Quick-start                                                  | Use it to…                                                                                                                                           |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
-| **[Deploy a fleet with Ansible](doc/ansible-quickstart.md)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.   |
-| **[Deploy with a shell installer](doc/shell-quickstart.md)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.   |
-
-For the underlying concepts and per-step manual configuration, see [PAM Authentication Modes](doc/pam-modes.md) and the [Configuration Reference](doc/configuration.md).
-
 ## Documentation
 
-See the full [documentation index](doc/README.md) or jump directly to:
+The full, theme-organized index is in **[doc/README.md](doc/README.md)**. Highlights:
 
-| Document                                                 | Description                                |
-| -------------------------------------------------------- | ------------------------------------------ |
-| [LemonLDAP::NG Configuration](doc/llng-configuration.md) | Server-side LLNG setup and plugins         |
-| [PAM Authentication Modes](doc/pam-modes.md)             | All 4 PAM configurations with examples     |
-| [Configuration Reference](doc/configuration.md)          | All configuration options                  |
-| [Service Accounts](doc/service-accounts.md)              | Ansible, backup, CI/CD accounts            |
-| [Bastion Architecture](doc/bastion-architecture.md)      | Bastion-to-backend certificate vouching    |
-| [Session Recording](doc/session-recording.md)            | SSH session recording for audit            |
-| [CrowdSec Integration](doc/crowdsec.md)                  | IP blocking and alert reporting            |
-| [Security Features](doc/security.md)                     | Key policies, rate limiting, audit         |
-| [Admin Guide](doc/admin-guide.md)                        | Complete administration guide              |
-| [Deployment Builder](admin-builder/README.md)            | Generate shell / Ansible deploy artefacts  |
-| [Ansible Quick-start](doc/ansible-quickstart.md)         | Generate + apply roles, fleet deployment   |
-| [Shell Installer Quick-start](doc/shell-quickstart.md)   | Generate + run a self-extracting installer |
+- **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/shell-quickstart.md) / [Ansible](doc/ansible-quickstart.md) quick-starts · [Admin guide](doc/admin-guide.md)
+- **Connections & architecture** — [Bastion architecture](doc/bastion-architecture.md) · [PAM modes](doc/pam-modes.md) · [LLNG configuration](doc/llng-configuration.md)
+- **Access & permissions** — [Access & Permissions](doc/permissions.md) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.md)
+- **Recording & audit** — [Session recording](doc/session-recording.md) · [Audit trace](doc/audit.md)
+- **Offline & resilience** — [Offline mode](doc/offline-mode.md) · [Cache administration](doc/offline-cache-admin.md)
+- **Security & hardening** — [Security features](doc/security.md) · [Hardening](doc/hardening.md) · [CrowdSec](doc/crowdsec.md)
+- **Reference** — [Configuration](doc/configuration.md) · [Desktop SSO](doc/desktop-sso.md) · [Competitors](doc/competitors.md)
+- **Security analysis (EBIOS)** — [threat model & risk study](doc/security/00-architecture.md)
 
 ## Troubleshooting
 
