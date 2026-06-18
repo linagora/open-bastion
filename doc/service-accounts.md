@@ -93,16 +93,16 @@ ssh-keygen -lf /path/to/key.pub
 
 ## Configuration Options
 
-| Option            | Required | Description                                        |
-| ----------------- | -------- | -------------------------------------------------- |
-| `key_fingerprint` | Yes      | SSH key fingerprint (SHA256:... or MD5:...)        |
-| `sudo_allowed`    | No       | Allow sudo access (default: false)                 |
-| `sudo_nopasswd`   | No       | Sudo without password (default: false)             |
-| `gecos`           | No       | User description                                   |
-| `shell`           | No       | Login shell — must be in `approved_shells` (default: common shells) or the account is dropped |
-| `home`            | No       | Home directory — must be under `approved_home_prefixes` (default `/home:/var/home`) or the account is dropped |
+| Option            | Required | Description                                                                                                                                                                      |
+| ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key_fingerprint` | Yes      | SSH key fingerprint (SHA256:... or MD5:...)                                                                                                                                      |
+| `sudo_allowed`    | No       | Allow sudo access (default: false)                                                                                                                                               |
+| `sudo_nopasswd`   | No       | Sudo without password (default: false)                                                                                                                                           |
+| `gecos`           | No       | User description                                                                                                                                                                 |
+| `shell`           | No       | Login shell — must be in `approved_shells` (default: common shells) or the account is dropped                                                                                    |
+| `home`            | No       | Home directory — must be under `approved_home_prefixes` (default `/home:/var/home`) or the account is dropped                                                                    |
 | `uid`             | See note | Fixed UID. **Required (with `gid`) for SSH-reachable accounts** — NSS resolves them only when both are set; `0` = auto-assign (works only if the account already exists locally) |
-| `gid`             | See note | Fixed GID. See `uid` |
+| `gid`             | See note | Fixed GID. See `uid`                                                                                                                                                             |
 
 ## How It Works
 
@@ -127,7 +127,7 @@ ssh-keygen -lf /path/to/key.pub
 >   users (`backup`, `www-data`, `nobody`, …) ship with `/usr/sbin/nologin`, so a
 >   login is refused ("This account is currently not available."). To use such a
 >   name, give the account a real shell yourself (e.g. `usermod -s /bin/sh
->   backup`) — Open Bastion will not modify an existing system account for you.
+backup`) — Open Bastion will not modify an existing system account for you.
 >   `ob-builder` warns when a name matches a well-known system account.
 
 ## Generating with ob-builder
@@ -143,14 +143,14 @@ loops over name / fingerprint / sudo / shell / home for each.
 
 ```yaml
 service_accounts:
-  - name: ci-ansible          # avoid system names like 'ansible' only if they exist; use a dedicated name
+  - name: ci-ansible # avoid system names like 'ansible' only if they exist; use a dedicated name
     key_fingerprint: "SHA256:abc123def456..."
     sudo_allowed: true
     sudo_nopasswd: true
     shell: /bin/bash
-    home: /home/ci-ansible    # under an approved prefix (/home, /var/home)
+    home: /home/ci-ansible # under an approved prefix (/home, /var/home)
     gecos: Ansible Automation
-    uid: 6001                 # fixed uid+gid → NSS-resolvable → reachable over SSH
+    uid: 6001 # fixed uid+gid → NSS-resolvable → reachable over SSH
     gid: 6001
   - name: obbackup
     key_fingerprint: "SHA256:xyz789..."
@@ -219,7 +219,7 @@ the PAM module.
 `sshd` runs `getpwnam(<user>)` **before** authentication and refuses unknown
 users ("Invalid user"). A brand-new service account therefore has to be
 resolvable up front, which `nss_openbastion` does — **but only when the account
-has a fixed `uid` *and* `gid`** (`nss/libnss_openbastion.c`); otherwise NSS skips
+has a fixed `uid` _and_ `gid`** (`nss/libnss_openbastion.c`); otherwise NSS skips
 it and the login is refused before PAM ever runs. So, for an SSH-reachable
 service account that does not already exist as a local user:
 
