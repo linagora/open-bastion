@@ -1,18 +1,26 @@
 ---
-title: PAM Module for LemonLDAP::NG
+title: Open Bastion
 author: Linagora
 ---
 
-# PAM Module for LemonLDAP::NG
+<!-- column_layout: [1, 2, 1] -->
 
-## Secure Linux Authentication with SSO
+<!-- column: 1 -->
 
-![](linagora.png)
+![](../linagora.png)
 
-Authenticate and authorize Linux users via **LemonLDAP::NG** for:
+<!-- reset_layout -->
 
-- SSH connections
-- Other PAM services
+# Open Bastion
+
+## Centralized SSH & sudo for your Linux fleet — decided by your SSO
+
+Manage your Linux administrators as easily as your SSO users, with
+**LemonLDAP::NG**:
+
+- the SSO decides **SSH access** — no per-server keys
+- the SSO decides **sudo** — no per-server sudoers
+- **session recording** on the bastion that cannot be bypassed
 
 <!-- end_slide -->
 
@@ -490,7 +498,13 @@ sudo ob-enroll
 
 # Thank You!
 
-![](linagora.png)
+<!-- column_layout: [1, 2, 1] -->
+
+<!-- column: 1 -->
+
+![](../linagora.png)
+
+<!-- reset_layout -->
 
 ## References
 
