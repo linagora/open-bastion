@@ -90,11 +90,13 @@ In the LLNG Manager, create a new OIDC Relying Party:
 2. Configure:
    - **Client ID**: `pam-access`
    - **Client secret**: Generate a strong secret
-   - **Scopes**: servers enroll with the `pam:server` scope, which is a **custom
-     Open-Bastion scope** (not a built-in one). Grant it with a per-RP **scope
-     rule** — `oidcRPMetaDataScopeRules`, e.g. `pam:server => 1` (the demos also
-     grant `pam`). `offline_access` is **not** a scope you list here; it is
-     enabled by `oidcRPMetaDataOptionsAllowOffline` (see step 3).
+   - **Scopes**: usually nothing to configure. `ob-enroll` requests the
+     `pam:server` scope and a default LLNG portal issues it as-is (e.g.
+     `sso.linagora.com` runs with no scope rule for it). Only if your portal
+     restricts OIDC scopes do you need to grant `pam:server` via a per-RP scope
+     rule (`oidcRPMetaDataScopeRules`, e.g. `pam:server => 1`). `offline_access`
+     is enabled by `oidcRPMetaDataOptionsAllowOffline` (step 3), not by a scope
+     entry.
 3. Set the per-RP options that let servers enroll with a **renewable** identity
    (see [Per-RP Device Authorization Parameters](#per-rp-device-authorization-parameters)):
    - `oidcRPMetaDataOptionsAllowDeviceAuthorization` = `1`
