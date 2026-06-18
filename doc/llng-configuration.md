@@ -55,11 +55,12 @@ sudo systemctl restart lemonldap-ng-fastcgi-server
 
 ### Option C: Docker
 
-All `yadd/lemonldap-ng-*` application images tagged **2.23.0-1 or later** already bundle
-the Open Bastion plugins — e.g. `lemonldap-ng-portal`,
-`lemonldap-ng-portal-hiperf`, `lemonldap-ng-manager`, `lemonldap-ng-full`,
-`lemonldap-ng-ssoaas-fastcgi-server`. No extra installation is needed — just
-enable them via `customPlugins` (see Step 3). See the full image set at
+The LemonLDAP::NG portal/manager images tagged **2.23.0-1 or later** already
+bundle the Open Bastion plugins — `yadd/lemonldap-ng-portal`,
+`yadd/lemonldap-ng-manager` and `yadd/lemonldap-ng-full` (the high-performance
+uWSGI portal is a tag variant of the portal image, e.g.
+`yadd/lemonldap-ng-portal:2.23.0-1-hiperf`). No extra installation is needed —
+just enable them via `customPlugins` (see Step 3). See the full image set at
 <https://github.com/guimard/llng-docker/>.
 
 ### Plugins used by Open Bastion
