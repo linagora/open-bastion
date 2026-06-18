@@ -29,10 +29,14 @@ sudo apt-get install \
 # pam-access = token-based auth; ssh-ca = certificate-based auth
 ```
 
-### Option B: RPM and other distributions (plugin-store CLI)
+### Option B: Plugin-store CLI (`lemonldap-ng-store`)
 
-There is no plugin RPM repository. On RHEL / Rocky / Fedora (and on Debian too)
-use the generic `lemonldap-ng-store` CLI bundled with LemonLDAP::NG >= 2.23.0:
+The `lemonldap-ng-store` CLI installs and activates plugins from the store
+regardless of the OS package manager. It will be \*\*bundled with LemonLDAP::NG
+
+> = 2.24.0\*\*; for now it is provided by the lemonldap-ng-plugins store itself —
+> install the `linagora-lemonldap-ng-store` package first (from the Linagora
+> repository set up in Option A).
 
 ```bash
 sudo lemonldap-ng-store add-store https://linagora.github.io/lemonldap-ng-plugins/
@@ -43,9 +47,12 @@ sudo lemonldap-ng-store install ssh-ca     --activate   # certificate-based auth
 sudo systemctl restart lemonldap-ng-fastcgi-server
 ```
 
-`--activate` registers each plugin in `customPlugins` automatically. (On LLNG
-< 2.23.0 the CLI ships separately as the `linagora-lemonldap-ng-store` Debian
-package.)
+`--activate` registers each plugin in `customPlugins` automatically.
+
+> **RPM / non-Debian systems:** the `linagora-lemonldap-ng-store` package is
+> currently Debian-only, so until LemonLDAP::NG **2.24.0** bundles the CLI there
+> is no packaged plugin-install path on RHEL / Rocky / Fedora. Use a Docker image
+> (Option C) or run the portal on Debian in the meantime.
 
 ### Option C: Docker
 
