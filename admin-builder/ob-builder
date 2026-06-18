@@ -111,6 +111,12 @@ _OB_SA_US=$'\x1f'
 # about it at build time. Keep in sync with config.h.
 _OB_SA_DEFAULT_HOME_PREFIXES="/home /var/home"
 _OB_SA_DEFAULT_SHELLS="/bin/bash /bin/sh /usr/bin/bash /usr/bin/sh /bin/zsh /usr/bin/zsh /bin/dash /usr/bin/dash /bin/fish /usr/bin/fish"
+# Common Debian/Linux system users. A service account that reuses one of these is
+# still ACCEPTED (NSS `files` resolves it, PAM authorizes it by name), but the
+# existing account is used as-is — its shell/home/uid are NOT overridden by the
+# config (pam_openbastion only applies those when it CREATES the account). Most
+# of these ship with /usr/sbin/nologin, which breaks the login. We warn, not block.
+_OB_SA_SYSTEM_NAMES="root daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody ftp sshd messagebus systemd-network systemd-resolve systemd-timesync _apt tss tcpdump"
 
 # Derived values populated after the questionnaire.
 PAM_MODE=""
@@ -457,6 +463,18 @@ warn_service_account_unapproved() {
     local name home shell uid gid pfx ok
     name=$(_sa_field 1 "$rec"); shell=$(_sa_field 5 "$rec"); home=$(_sa_field 6 "$rec")
     uid=$(_sa_field 8 "$rec"); gid=$(_sa_field 9 "$rec")
+    # Reserved system name: still accepted, but the existing account is used as-is
+    # (the config's shell/home/uid apply only to accounts ob-bastion creates).
+    for pfx in $_OB_SA_SYSTEM_NAMES; do
+        if [ "$name" = "$pfx" ]; then
+            log_warn "service account '$name' is a well-known system account. It is still accepted"
+            log_warn "  (matched by key fingerprint), but the EXISTING local account is used as-is —"
+            log_warn "  its shell/home/uid are NOT overridden by this config. Many system accounts use"
+            log_warn "  /usr/sbin/nologin, which breaks the login. Prefer a dedicated name (e.g. ob$name),"
+            log_warn "  or ensure '$name' already has a usable login shell on the target."
+            break
+        fi
+    done
     # NSS (libnss_openbastion) only synthesizes a service account when it has a
     # FIXED uid AND gid; sshd's pre-auth getpwnam then succeeds. Without them the
     # account is unreachable over SSH unless it already exists as a local user.

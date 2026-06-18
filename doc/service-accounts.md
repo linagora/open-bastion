@@ -114,12 +114,21 @@ ssh-keygen -lf /path/to/key.pub
 6. Account is created automatically if it doesn't exist
 7. sudo permissions are enforced based on configuration
 
-> **Do not reuse an existing system username.** `shell`, `home`, `uid` and `gid`
-> are applied only when the account is **created**. If the name already exists
-> (e.g. the Debian system users `backup`, `www-data`, `nobody`), the existing
-> account is used as-is — typically with `/usr/sbin/nologin`, which breaks the
-> login ("This account is currently not available."). Pick a dedicated name such
-> as `obdeploy`, `obbackup` or `ci-runner`.
+> **Reusing an existing account is allowed — but its own shell/home apply.**
+> `shell`, `home`, `uid` and `gid` from `service-accounts.conf` are applied only
+> when `pam_openbastion` **creates** the account. If the name already exists
+> locally, it is matched by fingerprint and authorized, but the **existing**
+> passwd entry is used unchanged. So:
+>
+> - A **dedicated new name** (e.g. `obdeploy`, `obbackup`, `ci-runner`) with a
+>   fixed `uid`/`gid` is the simplest, self-contained choice.
+> - An **existing account** (e.g. attaching a key to a real functional account)
+>   works **only if it already has a usable login shell**. Most Debian system
+>   users (`backup`, `www-data`, `nobody`, …) ship with `/usr/sbin/nologin`, so a
+>   login is refused ("This account is currently not available."). To use such a
+>   name, give the account a real shell yourself (e.g. `usermod -s /bin/sh
+>   backup`) — Open Bastion will not modify an existing system account for you.
+>   `ob-builder` warns when a name matches a well-known system account.
 
 ## Generating with ob-builder
 
