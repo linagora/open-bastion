@@ -46,7 +46,10 @@ sudo lemonldap-ng-store install ssh-ca     --activate   # certificate-based auth
 sudo systemctl restart lemonldap-ng-fastcgi-server
 ```
 
-`--activate` registers each plugin in `customPlugins` automatically.
+With the Autoloader present (see Step 3), `--activate` is a no-op: the store drops
+each plugin's autoload rule into `/etc/lemonldap-ng/autoload.d/` and the plugin
+loads once its activation condition is truthy. (Only on a portal without the
+Autoloader does `--activate` fall back to editing `customPlugins`.)
 
 > **RPM / non-Debian systems:** the `linagora-lemonldap-ng-store` package is
 > currently Debian-only, so until LemonLDAP::NG **2.24.0** bundles the CLI there
@@ -59,8 +62,9 @@ The LemonLDAP::NG portal/manager images tagged **2.23.0-1 or later** already
 bundle the Open Bastion plugins — `yadd/lemonldap-ng-portal`,
 `yadd/lemonldap-ng-manager` and `yadd/lemonldap-ng-full` (the high-performance
 uWSGI portal is a tag variant of the portal image, e.g.
-`yadd/lemonldap-ng-portal:2.23.0-1-hiperf`). No extra installation is needed —
-just enable them via `customPlugins` (see Step 3). See the full image set at
+`yadd/lemonldap-ng-portal:2.23.0-1-hiperf`). They also ship the Autoloader
+enabled, so no extra installation is needed — just activate the plugins (see
+Step 3). See the full image set at
 <https://github.com/guimard/llng-docker/>.
 
 ### Plugins used by Open Bastion
@@ -109,30 +113,31 @@ In the LLNG Manager, create a new OIDC Relying Party:
 > authorization-code flow can still return a refresh token even when this is
 > misconfigured, so test the **device** flow, not auth-code.
 
-## Step 3: Enable the Plugins
+## Step 3: Activate the Plugins
 
-Use `customPlugins` inside `lemonldap-ng.ini`, section `[portal]`:
+These plugins ship **autoload rules**, so you do **not** edit `customPlugins`.
+With LLNG's **Autoloader** — enabled by default in LemonLDAP::NG 2.24.0 and later,
+and added by the `linagora-lemonldap-ng-store` backport on earlier versions — each
+plugin loads automatically as soon as its activation condition is truthy. Set the
+relevant key in `lemonldap-ng.ini`, section `[portal]` (or the matching toggle in
+the Manager):
 
-- Token-based authentication (PamAccess only):
+| Plugin                   | Activates when…                                                              |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| PamAccess (token auth)   | `pamAccessActivation = 1`                                                    |
+| SSHCA (certificate auth) | `sshCaActivation = 1`                                                        |
+| OIDCDeviceAuthorization  | any RP sets `oidcRPMetaDataOptionsAllowDeviceAuthorization` (done in Step 2) |
+| OIDCDeviceOrganization   | any RP sets `oidcRPMetaDataOptionsDeviceOwnership` (done in Step 2)          |
 
-```ini
-[portal]
-customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess
-```
+In practice you only set `pamAccessActivation` and/or `sshCaActivation` for your
+auth mode; the two OIDC device plugins switch on automatically from the per-RP
+options you configured in [Step 2](#step-2-create-the-oidc-relying-party).
 
-- Certificate-based authentication (SSHCA only):
-
-```ini
-[portal]
-customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::SSHCA
-```
-
-- Both:
-
-```ini
-[portal]
-customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess, ::Plugins::SSHCA
-```
+> **Legacy portals without the Autoloader** (LLNG < 2.24.0 and no
+> `linagora-lemonldap-ng-store`): add the modules to `customPlugins` in `[portal]`
+> instead — e.g.
+> `customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess, ::Plugins::SSHCA`
+> (drop `PamAccess` or `SSHCA` per your mode).
 
 ## Step 4: Plugin Parameters
 
