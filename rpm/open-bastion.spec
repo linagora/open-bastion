@@ -99,6 +99,7 @@ ctest --output-on-failure --verbose
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
+%{_bindir}/ob-sftp
 %{_bindir}/ob-cert-request
 %{_bindir}/ob-record-connect
 %{_bindir}/ob-bastion-id
@@ -133,6 +134,7 @@ ctest --output-on-failure --verbose
 %{_mandir}/man8/ob-record-sink.8*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
+%{_mandir}/man1/ob-sftp.1*
 %{_mandir}/man1/ob-cert-request.1*
 %{_mandir}/man1/ob-record-connect.1*
 # Hardening templates (session containment - deployed by ob-bastion-setup)

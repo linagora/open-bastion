@@ -862,6 +862,8 @@ journalctl -u sshd | grep "SSH key policy"
 | `ob-enroll -g GROUP`  | Enroll with specific server group             |
 | `ob-session-recorder` | Record SSH session (ForceCommand)             |
 | `ob-ssh HOST`         | Connect to backend via bastion ephemeral cert |
+| `ob-scp SRC DEST`     | Copy files to/from/between backends via bastion |
+| `ob-sftp HOST`        | SFTP session to a backend via bastion ephemeral cert |
 
 ## CrowdSec Integration
 

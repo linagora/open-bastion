@@ -3,7 +3,7 @@ Description=Open Bastion certificate minting socket
 Documentation=https://github.com/linagora/open-bastion
 
 [Socket]
-# ob-ssh / ob-scp (via ob-cert-request, unprivileged) connect here to obtain a
+# ob-ssh / ob-scp / ob-sftp (via ob-cert-request, unprivileged) connect here to obtain a
 # short-lived vouched certificate. Per-connection activation (Accept=yes) spawns
 # one ob-cert@.service instance per connection.
 ListenStream=/run/open-bastion/cert.sock

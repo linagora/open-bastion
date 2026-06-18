@@ -46,7 +46,7 @@ The module supports two authentication methods:
   - Certificate-based proof of connection origin (LLNG-signed ephemeral SSH cert, ~120 s)
   - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)
   - No agent forwarding or user key on the bastion required
-  - `ob-ssh` / `ob-scp` scripts for seamless bastion connections and file transfers
+  - `ob-ssh` / `ob-scp` / `ob-sftp` scripts for seamless bastion connections and file transfers
 - **[Session recording](doc/session-recording.md)** (optional):
   - Record all terminal I/O for audit compliance
   - Multiple formats: script, asciinema, ttyrec

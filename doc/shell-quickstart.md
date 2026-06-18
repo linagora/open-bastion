@@ -167,7 +167,8 @@ finish.
 ## What you get
 
 After both steps, users connect with their SSO certificate to the bastion, then
-hop to any backend with `ob-ssh <backend>` (or copy files with `ob-scp`); the
+hop to any backend with `ob-ssh <backend>` (or transfer files with `ob-scp` /
+`ob-sftp`); the
 bastion mints a short-lived, CA-signed certificate for each hop. No user key
 ever lands on the bastion or the backends, and each backend rejects any cert not
 vouched by an allowed bastion.
