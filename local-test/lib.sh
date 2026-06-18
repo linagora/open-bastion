@@ -41,6 +41,16 @@ SSO_USER="${OB_SSO_USER:-dwho}"; SSO_PASS="${OB_SSO_PASS:-dwho}"
 
 LLNG="${LLNG:-$(command -v llng || true)}"; [ -n "$LLNG" ] || LLNG="$HOME/bin/llng"
 
+# Service-account lab key. Generated once per run; SVC_FP is its SHA256
+# fingerprint, injected into the standalone ob-builder config so the deployed
+# service-accounts.conf matches this very key (see deploy-shell.sh).
+SVC_KEY="${OB_SVC_KEY:-$WORK/svc_backup}"
+SVC_FP=""
+# Service-account username for the check. Must NOT collide with a system user
+# (e.g. 'backup', 'www-data'): pam_openbastion only sets shell/home when it
+# CREATES the account, so an existing system user (nologin) would break login.
+SVC_NAME="${OB_SVC_NAME:-obdeploy}"
+
 SSH_BASE=(-o IdentityAgent=none -o IdentitiesOnly=yes
           -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
           -o ConnectTimeout=8 -i "$SSH_KEY")
@@ -281,5 +291,72 @@ verify_standalone(){
             "${D[@]}" "dwho@$s" 'grep -q pam_openbastion /etc/pam.d/sudo'
         check "standalone /etc/pam.d/sudo-i requires LLNG token (pam_openbastion)" \
             "${D[@]}" "dwho@$s" 'grep -q pam_openbastion /etc/pam.d/sudo-i'
+    fi
+}
+
+# ── service-account verification ──────────────────────────────────────────────
+# Validates the ob-builder service-keys feature end-to-end: ob-builder deposits
+# service-accounts.conf (fingerprint only), and we perform the documented manual
+# SSH-layer authorization (the ob-service-account-keys AuthorizedKeysCommand
+# helper, which also covers Mode E's `AuthorizedKeysFile none`), then assert the
+# 'backup' service account logs in with its own key — no SSO, no bastion cert.
+
+# Generate the lab service key once and compute its SHA256 fingerprint.
+gen_service_key(){
+    [ -f "$SVC_KEY" ] || ssh-keygen -t ed25519 -f "$SVC_KEY" -N "" -C "oblab-svc-backup" -q
+    SVC_FP=$(ssh-keygen -lf "$SVC_KEY.pub" 2>/dev/null | awk '{print $2}')
+}
+
+# Provision the SSH-layer authorization for the 'backup' service account on <vm>.
+# This is the manual step ob-builder deliberately does NOT do (it only writes the
+# fingerprint to service-accounts.conf): deploy the ob-service-account-keys
+# AuthorizedKeysCommand helper + the account's public key so sshd will present
+# it. Works in all PAM modes, including Mode E (AuthorizedKeysFile none). MUST
+# run while the debian mgmt user can still SSH — i.e. before *-setup locks port 22.
+provision_service_helper(){
+    local v="$1" ip="${IP[$1]}"
+    local helper="$REPO_ROOT/scripts/ob-service-account-keys"
+    [ -f "$helper" ] || { skip "service helper missing ($helper)"; return 0; }
+    [ -n "$SVC_FP" ] || { skip "service key not generated"; return 0; }
+    scp "${SSH_BASE[@]}" "$helper" "debian@$ip:/tmp/ob-service-account-keys" >/dev/null 2>&1 \
+        || { bad "$v: could not copy service helper"; return 0; }
+    local pub; pub=$(cat "$SVC_KEY.pub")
+    if dssh "$ip" "sudo OB_SVC_PUB='$pub' OB_SVC_NAME='$SVC_NAME' bash -s" <<'BS' >/dev/null 2>&1
+set -e
+install -m 0755 -o root -g root /tmp/ob-service-account-keys /usr/local/sbin/ob-service-account-keys
+mkdir -p /etc/open-bastion/service-accounts.d
+printf '%s\n' "$OB_SVC_PUB" > "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
+chown root:root "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
+chmod 0644 "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
+cat > /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf <<'CONF'
+AuthorizedKeysCommand /usr/local/sbin/ob-service-account-keys %u
+AuthorizedKeysCommandUser nobody
+CONF
+BS
+    then ok "$v: provisioned service-account SSH authorization (${SVC_NAME}.pub + AuthorizedKeysCommand)"
+    else bad "$v: failed to provision service-account SSH authorization"; fi
+}
+
+# Assert the 'backup' service account authenticates with its key (direct,
+# no SSO/cert). Run after the target is deployed (service-accounts.conf present).
+verify_service_accounts(){
+    local v="${1:-$STANDALONE_VM}"
+    [ -n "$v" ] || return 0
+    phase "Assertions — service account '$SVC_NAME' on $v (direct key auth)"
+    if [ -z "$SVC_FP" ] || [ ! -f "$SVC_KEY" ]; then
+        skip "service-account check — no lab service key (gen_service_key not run)"
+        return 0
+    fi
+    local ip="${IP[$v]}"
+    local S=(ssh -i "$SVC_KEY" -o IdentityAgent=none -o IdentitiesOnly=yes
+             -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+             -o NumberOfPasswordPrompts=0 -o ConnectTimeout=15)
+    # Exit 0 ⇒ sshd accepted the key (AuthorizedKeysCommand) AND pam_openbastion
+    # matched the fingerprint in service-accounts.conf and authorized the account
+    # (auto-creating it). A wrong/unknown key would fail with 255.
+    if "${S[@]}" "$SVC_NAME@$ip" true >/dev/null 2>&1; then
+        ok "service account '$SVC_NAME' logs in with its key (fingerprint matched, no SSO)"
+    else
+        bad "service account '$SVC_NAME' login failed — see sshd/pam logs on $v"
     fi
 }

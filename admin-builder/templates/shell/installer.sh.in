@@ -456,6 +456,9 @@ step_config() {
         log_info "[DRY-RUN]   client_id    = ${CLIENT_ID}"
         log_info "[DRY-RUN]   server_group = ${SERVER_GROUP}"
         log_info "[DRY-RUN]   client_secret= <$([ -n "${CLIENT_SECRET}" ] && echo 'set' || echo 'empty')>"
+        if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
+            log_info "[DRY-RUN] Would write /etc/open-bastion/service-accounts.conf (0600)"
+        fi
         log_info "[DRY-RUN] Would write /etc/ssh/open-bastion_ca.pub"
         if [ -n "@@KRL_B64@@" ]; then
             log_info "[DRY-RUN] Would write /etc/ssh/revoked_keys (KRL)"
@@ -491,6 +494,19 @@ OB_CONF_EOF
     chown root:root "${_conf_tmp}"
     mv -f "${_conf_tmp}" /etc/open-bastion/openbastion.conf
     log_info "Written: /etc/open-bastion/openbastion.conf (0600 root:root)"
+
+    # Deposit service-accounts.conf (SSH-key-only local accounts), if any were
+    # defined at build time. Embedded base64 to survive any characters; written
+    # 0600 root:root like the main config.
+    if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
+        local _sa_tmp
+        _sa_tmp=$(mktemp /etc/open-bastion/service-accounts.conf.XXXXXX)
+        printf '%s' "@@SERVICE_ACCOUNTS_CONF_B64@@" | base64 -d > "${_sa_tmp}"
+        chmod 0600 "${_sa_tmp}"
+        chown root:root "${_sa_tmp}"
+        mv -f "${_sa_tmp}" /etc/open-bastion/service-accounts.conf
+        log_info "Written: /etc/open-bastion/service-accounts.conf (0600 root:root)"
+    fi
 
     # Deposit SSH CA public key
     base64 -d > /etc/ssh/open-bastion_ca.pub.tmp << 'OB_CA_EOF'

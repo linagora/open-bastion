@@ -2,12 +2,12 @@
 
 ## Matrice des Risques Résiduels (Mode E)
 
-| Impact ↓ / Probabilité → | 1 - Très improbable                                         | 2 - Peu probable | 3 - Probable | 4 - Très probable |
-| ------------------------ | ----------------------------------------------------------- | ---------------- | ------------ | ----------------- |
-| **4 - Critique**         | R-S4, R-SA2                                                 | R-SA1            |              |                   |
-| **3 - Important**        | R5, R-S5, R-S11, R-S23                                      | R-S6             |              |                   |
-| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21, R-S22 | R6, R-S8         |              |                   |
-| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                                | R-S3, R-S18      |              |                   |
+| Impact ↓ / Probabilité → | 1 - Très improbable                                                | 2 - Peu probable | 3 - Probable | 4 - Très probable |
+| ------------------------ | ------------------------------------------------------------------ | ---------------- | ------------ | ----------------- |
+| **4 - Critique**         | R-S4, R-SA2                                                        | R-SA1            |              |                   |
+| **3 - Important**        | R5, R-S5, R-S11, R-S23, R-S24                                      | R-S6             |              |                   |
+| **2 - Limité**           | R-S7, R-S9, R-S10, R-S12, R-S16, R-S17, R-S20, R-S21, R-S22, R-S25 | R6, R-S8         |              |                   |
+| **1 - Négligeable**      | R0, R13, R-S14, R-S15, R-S19                                       | R-S3, R-S18      |              |                   |
 
 > **Note :** R-S3 et R-S15 ont été descendus d'un cran sur l'axe Impact grâce au **binding fingerprint SSH** introduit dans le plugin PamAccess ≥ 0.1.16. La vérification est effectuée côté LLNG à la fois sur `/pam/authorize` (à chaque ouverture de session SSH, phase PAM `account`) et sur `/pam/verify` (à chaque utilisation d'un token PAM pour sudo ou ré-authentification) : tant que l'empreinte de la clef SSH n'est pas présente, active et non révoquée dans la session persistante LLNG, ni la session SSH ni l'escalade sudo ne sont autorisées, indépendamment de la fraîcheur de la KRL locale. Voir [02-ssh-connection.md](02-ssh-connection.md) pour les détails.
 
@@ -284,3 +284,50 @@ Pistes pour réduire I à 1 :
 2. **Étendre les règles auditd** : ajouter `-S sendto -S sendmsg` (volumétrie acceptée pour bastion à faible trafic), `-S io_uring_enter` (rare en pratique), puis activer `-e 2` (locked rules) en production pour empêcher `auditctl -D` à chaud par un attaquant qui aurait obtenu root.
 3. **eBPF-based tracing** (Falco, sysdig) : alternative ou complément à auditd qui couvre des événements moins accessibles via syscalls (par ex. opérations sur file descriptors mémoire, écritures `pwrite` sur sockets). Plus coûteux en CPU mais plus expressif.
 4. **Signature cryptographique du recording à la clôture** : `gpg --detach-sign` ou similaire avec clé privée hors du bastion (HSM ou serveur de signature distant), pour détecter toute altération a posteriori. Complète R-S18 plutôt que R-S21 stricto sensu, mais participe à la même propriété d'intégrité.
+
+## Pistes d'Amélioration - Comptes de service
+
+Les comptes de service (`service-accounts.conf`) s'authentifient par **clé SSH
+directe**, en **local** sur chaque serveur, hors du modèle SSO/vouching. Ce sont
+des dérogations volontaires au contrôle centralisé : utiles pour l'automatisation
+(ansible, sauvegarde, CI/CD), mais ils ouvrent deux écarts à tracer.
+
+### R-S24 _(P=1, I=3)_ - Sudo de compte de service hors token SSO
+
+Le droit sudo d'un compte de service provient **uniquement** de
+`service-accounts.conf` (`sudo_allowed` / `sudo_nopasswd`) : `pam_openbastion`
+l'accorde localement et renvoie un succès **sans aucun appel LLNG**, **y compris
+en Mode E** où un humain doit présenter un token LLNG frais. Une clé de service
+avec `sudo_allowed` (a fortiori `sudo_nopasswd`) est donc un **privilège local
+permanent qui échappe à la porte sudo gouvernée par le SSO**.
+
+Pistes :
+
+1. **Minimiser** : n'accorder `sudo_allowed` qu'aux comptes qui en ont
+   réellement besoin ; préférer `sudo_nopasswd = false` et des règles `sudoers`
+   restreintes à des commandes précises plutôt qu'un sudo total.
+2. **Inventaire et rotation** : traiter chaque clé de service comme un secret de
+   longue durée (coffre-fort, rotation périodique, révocation à la sortie d'un
+   prestataire/outil). Recoupe le compte de secours de [R-S17](#r-s17-_p1-i2_---verrouillage-total-lockout).
+3. **Audit dédié** : journaliser/alerter sur l'usage sudo des comptes de service
+   (auditd `-k` distinct), puisqu'il n'apparaît pas dans les logs d'autorisation
+   LLNG.
+
+### R-S25 _(P=1, I=2)_ - Hop de compte de service via ProxyJump non enregistré
+
+Un compte de service ne peut pas utiliser `ob-ssh` (pas de voucher SSO), mais un
+`ssh -J bastion compte@backend` natif fonctionne s'il est configuré des deux
+côtés et que le bastion autorise le forwarding TCP. Or le `ForceCommand`
+(enregistreur de session) **ne couvre pas le canal `direct-tcpip`** : un tel hop
+**n'est pas enregistré** sur le bastion.
+
+Pistes :
+
+1. **Accès direct** : faire pointer les comptes de service directement sur les
+   serveurs cibles (la traçabilité repose alors sur l'auditd/les logs de la
+   cible) plutôt que de les relayer par le bastion.
+2. **`AllowTcpForwarding no` sur le bastion** : interdire explicitement le
+   forwarding pour fermer le canal de hop non enregistré (à arbitrer selon les
+   usages légitimes de forwarding sur le parc).
+3. **Ne pas configurer les comptes de service sur le bastion** lui-même quand ils
+   n'y ont pas de tâche locale, pour retirer la première marche du ProxyJump.

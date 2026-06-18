@@ -85,5 +85,17 @@
     mode: '0600'
   notify: Restart sshd
 
+# Service accounts (SSH-key-only local accounts). Deployed only when enabled at
+# build time (or overridden via host_vars/group_vars). 0600 root:root, as the
+# PAM module requires.
+- name: Deploy service-accounts.conf
+  ansible.builtin.copy:
+    content: "{{ ob_service_accounts_content }}"
+    dest: /etc/open-bastion/service-accounts.conf
+    owner: root
+    group: root
+    mode: '0600'
+  when: ob_service_accounts_enabled | default(false)
+
 - name: Dispatch role-specific tasks
   ansible.builtin.include_tasks: "{{ ob_role }}.yml"

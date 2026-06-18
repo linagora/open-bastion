@@ -16,7 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bastion and no agent forwarding. Connects to a single endpoint
   (`[user@]backend[:path]`); options after the connector's own flags pass
   straight through to `sftp(1)`. See `ob-sftp(1)`.
-
+- **`ob-builder` can declare service accounts.** The builder now collects
+  SSH-key-only local accounts (ansible, backup, CI/CD, …) — interactively or via
+  a `service_accounts:` list in the `--config` YAML — validates each entry
+  (name, `SHA256:`/`MD5:` fingerprint, absolute shell/home) at build time, and
+  bakes them into both outputs: the shell installer writes
+  `/etc/open-bastion/service-accounts.conf` (`0600 root:root`) and the Ansible
+  role carries them as `ob_service_accounts_content` (overridable per
+  host/group). `service_accounts_file` is set in the generated
+  `openbastion.conf`. No PAM-module change — `src/service_account.c` already
+  parses that file. See `doc/service-accounts.md` and `ob-builder(1)`.
+  Validated end-to-end on a Mode E VM (`local-test/deploy-shell.sh`). ob-builder
+  warns when an account would be unusable on the target: a `home`/`shell` outside
+  the approved lists (silently dropped by the PAM module) or a missing fixed
+  `uid`/`gid` (NSS cannot resolve it for sshd's pre-auth lookup, so it is
+  unreachable over SSH unless it already exists locally). `doc/service-accounts.md`
+  documents these requirements (including not reusing a system username).
 - **Session-recording retention (`ob-session-prune`).** A new daily timer
   (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
   which matters because recording is fail-closed — a full disk refuses new
@@ -31,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Service-account security model documented.** `doc/service-accounts.md` now
+  spells out that ob-builder deposits the fingerprint only, so the public key
+  must still be authorized at the SSH layer (`authorized_keys`, or the
+  `ob-service-account-keys` `AuthorizedKeysCommand` helper for Mode E); that
+  service accounts use direct key auth (no `ob-ssh`), so a native ProxyJump hop
+  through the bastion is **not session-recorded**; and that service-account sudo
+  is granted locally with **no LLNG token, even in Mode E**. New EBIOS risks
+  R-S24 (sudo without token) and R-S25 (unrecorded ProxyJump hop) in
+  `doc/security/99-risk-reduce.md`. `local-test/deploy-shell.sh` gained an
+  end-to-end service-account check on the standalone VM.
 - **Backend access guidance corrected.** The admin guide showed a
   `ProxyCommand`/`ProxyJump` snippet for reaching a backend in one command, but
   `ob-ssh` re-originates a full interactive session (it is not a `-W` stdio

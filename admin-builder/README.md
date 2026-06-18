@@ -30,7 +30,8 @@ This launches an interactive questionnaire:
 5. OIDC client_secret mode (`none`, `prompt`, or `embedded`)
 6. Server group and policy
 7. Target role (`bastion`, `standalone`, or `backend`)
-8. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`)
+8. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
+9. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`)
 
 ## Quick Start (Non-Interactive with Config File)
 
@@ -54,7 +55,25 @@ ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG 
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main
+
+# Optional SSH-key-only local accounts (no OIDC), rendered into
+# /etc/open-bastion/service-accounts.conf (0600) on every target.
+# Use a dedicated name (not a system user), a home under /home or /var/home, and
+# a fixed uid+gid (required so NSS can resolve the account for sshd pre-auth).
+# service_accounts:
+#   - name: ci-ansible
+#     key_fingerprint: "SHA256:..."   # ssh-keygen -lf key.pub
+#     sudo_allowed: true
+#     sudo_nopasswd: true
+#     shell: /bin/bash
+#     home: /home/ci-ansible
+#     gecos: Ansible Automation
+#     uid: 6001
+#     gid: 6001
 ```
+
+See [`doc/service-accounts.md`](../doc/service-accounts.md) for the full schema
+and how service accounts are matched and created on the target.
 
 Generate the artifacts:
 

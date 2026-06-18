@@ -50,6 +50,11 @@ log_level = warn
 audit_enabled = true
 audit_to_syslog = true
 
+# ── Service accounts (SSH-key-only local accounts) ─────────────────────────────
+{% if ob_service_accounts_enabled | default(false) %}
+service_accounts_file = /etc/open-bastion/service-accounts.conf
+{% endif %}
+
 # ── Backend: "accept only this bastion" ───────────────────────────────────────
 # Enforcement is NOT in this file. The old LLNG_BASTION_JWT transport was broken
 # (pam_getenv can't read a SendEnv var). It is replaced by certificate vouching:

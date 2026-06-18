@@ -88,6 +88,16 @@ the cookie land in `local-test/.work/` (git-ignored).
 4. **Verify.** With the dwho SSO cert: log into the bastion, `getent passwd dwho`
    (NSS), `ob-ssh` hop to a backend, `ob-scp` bastion→backend and
    backend→backend (`scp -3`).
+5. **Service account (shell path).** `deploy-shell.sh` also declares a `backup`
+   service account in the standalone `ob-builder` config (fingerprint = a
+   lab-generated key), so the generated installer deposits a matching
+   `service-accounts.conf`. Because `ob-builder` writes only the fingerprint, the
+   harness performs the **documented manual SSH-layer step** before setup locks
+   port 22 — it installs the `ob-service-account-keys` `AuthorizedKeysCommand`
+   helper + `service-accounts.d/backup.pub` (this also covers Mode E's
+   `AuthorizedKeysFile none`). Then it asserts `backup` logs in with its key,
+   with no SSO and no bastion certificate. See
+   [`doc/service-accounts.md`](../doc/service-accounts.md).
 
 ## Lab-only quirks
 

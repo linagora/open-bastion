@@ -45,6 +45,33 @@ is_valid_client_id() {
     [[ "$s" =~ ^[A-Za-z0-9._-]+$ ]]
 }
 
+# is_valid_service_username <s>
+# Mirrors validate_username() in src/service_account.c: first char a lowercase
+# letter or underscore, then lowercase letters, digits, underscore or hyphen.
+is_valid_service_username() {
+    [[ "$1" =~ ^[a-z_][a-z0-9_-]*$ ]]
+}
+
+# is_valid_fingerprint <s>
+# Mirrors validate_fingerprint() in src/service_account.c: must start with
+# SHA256: or MD5:, and contain only base64-ish characters (alnum : + / =).
+is_valid_fingerprint() {
+    local s="$1"
+    [[ "$s" == SHA256:* || "$s" == MD5:* ]] || return 1
+    [[ "$s" =~ ^[A-Za-z0-9:+/=]+$ ]]
+}
+
+# is_valid_abs_path <s>
+# Light sanity check for shell / home values: an absolute path with no
+# whitespace or shell metacharacters (the authoritative approved-list check
+# happens on the target in src/service_account.c). Empty is allowed (means
+# "use the default" on the target).
+is_valid_abs_path() {
+    local s="$1"
+    [ -z "$s" ] && return 0
+    [[ "$s" =~ ^/[A-Za-z0-9._/-]+$ ]]
+}
+
 # is_valid_scenario <s>
 is_valid_scenario() {
     case "$1" in

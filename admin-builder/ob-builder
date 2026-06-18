@@ -96,6 +96,28 @@ ENABLE_HARDENING=""
 ENABLE_AUDIT_TRACE=""
 DISABLE_SESSION_RECORDER=""
 
+# Service accounts (SSH-key-only local accounts: ansible, backup, …). Each entry
+# is one account encoded as a single record whose fields are joined by the ASCII
+# Unit Separator (US, \x1f) in this fixed order:
+#   name, key_fingerprint, sudo_allowed, sudo_nopasswd, shell, home, gecos, uid, gid
+# Populated from the questionnaire or from the YAML `service_accounts:` list, and
+# rendered into /etc/open-bastion/service-accounts.conf on the target.
+SERVICE_ACCOUNTS_RECORDS=()
+_OB_SA_US=$'\x1f'
+# Module defaults from include/config.h (DEFAULT_APPROVED_HOME_PREFIXES /
+# DEFAULT_APPROVED_SHELLS). A service account whose home/shell falls outside
+# these is SILENTLY DROPPED at load by pam_openbastion unless the target's
+# openbastion.conf widens approved_home_prefixes / approved_shells — so we warn
+# about it at build time. Keep in sync with config.h.
+_OB_SA_DEFAULT_HOME_PREFIXES="/home /var/home"
+_OB_SA_DEFAULT_SHELLS="/bin/bash /bin/sh /usr/bin/bash /usr/bin/sh /bin/zsh /usr/bin/zsh /bin/dash /usr/bin/dash /bin/fish /usr/bin/fish"
+# Common Debian/Linux system users. A service account that reuses one of these is
+# still ACCEPTED (NSS `files` resolves it, PAM authorizes it by name), but the
+# existing account is used as-is — its shell/home/uid are NOT overridden by the
+# config (pam_openbastion only applies those when it CREATES the account). Most
+# of these ship with /usr/sbin/nologin, which breaks the login. We warn, not block.
+_OB_SA_SYSTEM_NAMES="root daemon bin sys sync games man lp mail news uucp proxy www-data backup list irc gnats nobody ftp sshd messagebus systemd-network systemd-resolve systemd-timesync _apt tss tcpdump"
+
 # Derived values populated after the questionnaire.
 PAM_MODE=""
 BUILD_DATE=""
@@ -147,7 +169,25 @@ QUESTIONNAIRE (asked when no --config is given):
   5. OIDC client_secret mode (none | prompt)
   6. Server group + policy (fixed | modifiable)
   7. Target role: bastion | standalone | backend
-  8. Auto-launch enroll/setup on the target? (yes | no | prompt)
+  8. Service accounts (SSH-key-only local accounts: ansible, backup, …)
+  9. Auto-launch enroll/setup on the target? (yes | no | prompt)
+
+SERVICE ACCOUNTS (--config YAML):
+  Declare SSH-key-only local accounts under a 'service_accounts:' list. They are
+  rendered into /etc/open-bastion/service-accounts.conf (0600) on the target and
+  apply to every role. Example:
+    service_accounts:
+      - name: ci-ansible            # dedicated name (not an existing system user)
+        key_fingerprint: "SHA256:…" # from: ssh-keygen -lf key.pub
+        sudo_allowed: true
+        sudo_nopasswd: true
+        shell: /bin/bash
+        home: /home/ci-ansible      # under an approved prefix (/home, /var/home)
+        gecos: Ansible Automation
+        uid: 6001                   # fixed uid+gid → NSS-resolvable → reachable over SSH
+        gid: 6001
+  Notes: use a dedicated (non-system) name, a home under /home or /var/home, and
+  a fixed uid+gid, or the account is dropped / unreachable. See doc/service-accounts.md.
 
 EXAMPLES:
   # Fully interactive bastion bootstrap (default Linagora APT keyring)
@@ -251,6 +291,11 @@ load_config() {
         log_info "yq not found, using awk-based parser (flat keys only)"
         _load_config_awk "$f"
     fi
+
+    # Service accounts are a nested list, which neither flat parser handles.
+    # Parse them with a dedicated, yq-independent block scanner so behaviour is
+    # identical whether or not yq is installed.
+    _parse_service_accounts_block "$f"
 
     # When loading config we run non-interactively unless a missing value
     # forces a prompt. The prompts library checks OB_BUILDER_NON_INTERACTIVE.
@@ -361,11 +406,279 @@ _load_config_awk() {
                 apt_url)             [ "$APT_URL"       = "$DEFAULT_APT_URL"       ] && APT_URL="$val" ;;
                 apt_suite)           [ "$APT_SUITE"     = "$DEFAULT_APT_SUITE"     ] && APT_SUITE="$val" ;;
                 apt_component)       [ "$APT_COMPONENT" = "$DEFAULT_APT_COMPONENT" ] && APT_COMPONENT="$val" ;;
+                # Service-account list keys: consumed by _parse_service_accounts_block,
+                # ignored here (they only appear nested under `service_accounts:`).
+                service_accounts|name|key_fingerprint|fingerprint|sudo_allowed|sudo_nopasswd|shell|home|gecos|uid|gid) : ;;
                 *) log_warn "Unknown config key '$key' (ignored)" ;;
             esac
         fi
     done < "$f"
     return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# Service-account helpers.
+# A record packs the 9 fields (in the fixed order documented next to
+# SERVICE_ACCOUNTS_RECORDS) joined by the Unit Separator. _sa_pack builds one;
+# _sa_field N extracts the Nth field (1-based) from a record.
+# ─────────────────────────────────────────────────────────────────────────
+_sa_pack() {
+    local IFS="$_OB_SA_US"
+    printf '%s' "$*"
+}
+_sa_field() {
+    local n="$1" rec="$2"
+    local -a _parts
+    IFS="$_OB_SA_US" read -r -a _parts <<< "$rec"
+    printf '%s' "${_parts[$((n - 1))]:-}"
+}
+
+# Validate one packed record. Mirrors the authoritative checks in
+# src/service_account.c so a bad value is caught at build time rather than
+# failing the PAM module load on the target.
+validate_service_account_record() {
+    local rec="$1"
+    local name fp sudo_allowed sudo_nopasswd shell home uid gid
+    name=$(_sa_field 1 "$rec");          fp=$(_sa_field 2 "$rec")
+    sudo_allowed=$(_sa_field 3 "$rec");   sudo_nopasswd=$(_sa_field 4 "$rec")
+    shell=$(_sa_field 5 "$rec");          home=$(_sa_field 6 "$rec")
+    uid=$(_sa_field 8 "$rec");            gid=$(_sa_field 9 "$rec")
+
+    is_valid_service_username "$name" || { log_error "Invalid service-account name: '$name'"; return 1; }
+    is_valid_fingerprint "$fp"        || { log_error "Invalid key_fingerprint for '$name' (must be SHA256:… or MD5:…): '$fp'"; return 1; }
+    case "$sudo_allowed"  in true|false) ;; *) log_error "service account '$name': sudo_allowed must be true/false"; return 1 ;; esac
+    case "$sudo_nopasswd" in true|false) ;; *) log_error "service account '$name': sudo_nopasswd must be true/false"; return 1 ;; esac
+    is_valid_abs_path "$shell" || { log_error "service account '$name': shell must be an absolute path: '$shell'"; return 1; }
+    is_valid_abs_path "$home"  || { log_error "service account '$name': home must be an absolute path: '$home'"; return 1; }
+    if [ -n "$uid" ] && ! [[ "$uid" =~ ^[0-9]+$ ]]; then log_error "service account '$name': uid must be numeric: '$uid'"; return 1; fi
+    if [ -n "$gid" ] && ! [[ "$gid" =~ ^[0-9]+$ ]]; then log_error "service account '$name': gid must be numeric: '$gid'"; return 1; fi
+    return 0
+}
+
+# Warn (non-fatal) when a service account's home/shell falls outside the module
+# defaults: pam_openbastion silently DROPS such an account at load unless the
+# target widens approved_home_prefixes / approved_shells in openbastion.conf.
+warn_service_account_unapproved() {
+    local rec="$1"
+    local name home shell uid gid pfx ok
+    name=$(_sa_field 1 "$rec"); shell=$(_sa_field 5 "$rec"); home=$(_sa_field 6 "$rec")
+    uid=$(_sa_field 8 "$rec"); gid=$(_sa_field 9 "$rec")
+    # Reserved system name: still accepted, but the existing account is used as-is
+    # (the config's shell/home/uid apply only to accounts ob-bastion creates).
+    for pfx in $_OB_SA_SYSTEM_NAMES; do
+        if [ "$name" = "$pfx" ]; then
+            log_warn "service account '$name' is a well-known system account. It is still accepted"
+            log_warn "  (matched by key fingerprint), but the EXISTING local account is used as-is —"
+            log_warn "  its shell/home/uid are NOT overridden by this config. Many system accounts use"
+            log_warn "  /usr/sbin/nologin, which breaks the login. Prefer a dedicated name (e.g. ob$name),"
+            log_warn "  or ensure '$name' already has a usable login shell on the target."
+            break
+        fi
+    done
+    # NSS (libnss_openbastion) only synthesizes a service account when it has a
+    # FIXED uid AND gid; sshd's pre-auth getpwnam then succeeds. Without them the
+    # account is unreachable over SSH unless it already exists as a local user.
+    if [ -z "$uid" ] || [ "$uid" = 0 ] || [ -z "$gid" ] || [ "$gid" = 0 ]; then
+        log_warn "service account '$name': no fixed uid/gid. NSS cannot resolve it pre-auth, so"
+        log_warn "  it is reachable over SSH only if the account already exists locally on the target."
+        log_warn "  Set both 'uid' and 'gid' for a self-contained, fleet-consistent service account."
+    fi
+    if [ -n "$home" ]; then
+        ok=0
+        for pfx in $_OB_SA_DEFAULT_HOME_PREFIXES; do
+            case "$home" in "$pfx"/*) ok=1; break ;; esac
+        done
+        if [ "$ok" -ne 1 ]; then
+            log_warn "service account '$name': home '$home' is outside the default approved prefixes ($_OB_SA_DEFAULT_HOME_PREFIXES)."
+            log_warn "  pam_openbastion will DROP this account unless the target's openbastion.conf sets e.g.:"
+            log_warn "    approved_home_prefixes = /home:/var/home:${home%/*}"
+        fi
+    fi
+    if [ -n "$shell" ]; then
+        ok=0
+        for pfx in $_OB_SA_DEFAULT_SHELLS; do
+            [ "$shell" = "$pfx" ] && { ok=1; break; }
+        done
+        if [ "$ok" -ne 1 ]; then
+            log_warn "service account '$name': shell '$shell' is not in the default approved shells."
+            log_warn "  Set 'approved_shells' in the target's openbastion.conf or the account will be dropped."
+        fi
+    fi
+}
+
+# Parse the `service_accounts:` block of a YAML config file into
+# SERVICE_ACCOUNTS_RECORDS. Independent of yq (the flat parsers can't read a
+# list). Recognises the documented block-list form:
+#
+#   service_accounts:
+#     - name: ansible
+#       key_fingerprint: "SHA256:…"
+#       sudo_allowed: true
+#       shell: /bin/bash
+#       home: /var/lib/ansible
+#       gecos: Ansible Automation
+#
+# A `- name:` line opens a new account; subsequent more-indented `key: value`
+# lines add fields; a line at the block's indent or shallower (or another
+# top-level key) ends the block.
+_parse_service_accounts_block() {
+    local f="$1"
+    local in_block=0 line key val
+    local name fp sudo_allowed sudo_nopasswd shell home gecos uid gid
+    _sa_reset_fields() { name=""; fp=""; sudo_allowed="false"; sudo_nopasswd="false"; shell=""; home=""; gecos=""; uid=""; gid=""; }
+    local have_acct=0
+    _sa_flush() {
+        [ "$have_acct" = 1 ] || return 0
+        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid")")
+        have_acct=0
+    }
+    _sa_reset_fields
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in
+            ''|\#*) continue ;;
+        esac
+        if [ "$in_block" = 0 ]; then
+            [[ "$line" =~ ^service_accounts[[:space:]]*:[[:space:]]*$ ]] && in_block=1
+            continue
+        fi
+        # In block. A non-indented line ends it.
+        if [[ "$line" =~ ^[^[:space:]] ]]; then
+            _sa_flush
+            in_block=0
+            continue
+        fi
+        # New list item: "- name: value"
+        if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name[[:space:]]*:[[:space:]]*(.*)$ ]]; then
+            _sa_flush
+            _sa_reset_fields
+            have_acct=1
+            val="${BASH_REMATCH[1]}"
+            val=$(_sa_unquote "$val")
+            name="$val"
+            continue
+        fi
+        # Field line: "  key: value"
+        if [[ "$line" =~ ^[[:space:]]+([a-zA-Z_]+)[[:space:]]*:[[:space:]]*(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            val=$(_sa_unquote "${BASH_REMATCH[2]}")
+            case "$key" in
+                name)            name="$val" ;;
+                key_fingerprint|fingerprint) fp="$val" ;;
+                sudo_allowed)    sudo_allowed=$(_sa_normbool "$val") ;;
+                sudo_nopasswd)   sudo_nopasswd=$(_sa_normbool "$val") ;;
+                shell)           shell="$val" ;;
+                home)            home="$val" ;;
+                gecos)           gecos="$val" ;;
+                uid)             uid="$val" ;;
+                gid)             gid="$val" ;;
+            esac
+        fi
+    done < "$f"
+    _sa_flush
+    return 0
+}
+
+# Strip a YAML inline comment (" #…"), surrounding whitespace and matching quotes.
+_sa_unquote() {
+    local v="$1"
+    v="${v%% #*}"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    case "$v" in
+        \"*\") v="${v#\"}"; v="${v%\"}" ;;
+        \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    esac
+    printf '%s' "$v"
+}
+
+# Normalise a YAML boolean-ish value to true/false.
+_sa_normbool() {
+    case "$1" in
+        true|True|TRUE|yes|Yes|YES|1)  printf 'true' ;;
+        *)                              printf 'false' ;;
+    esac
+}
+
+# Render SERVICE_ACCOUNTS_RECORDS into service-accounts.conf INI text on stdout.
+# key_fingerprint, sudo_allowed and sudo_nopasswd are always emitted; gecos /
+# shell / home / uid / gid only when set (uid/gid only when non-zero).
+_render_service_accounts_conf() {
+    local rec name fp sudo_allowed sudo_nopasswd shell home gecos uid gid
+    printf '# Open Bastion service accounts\n'
+    printf '# Generated by ob-builder %s on %s\n' "$VERSION" "$BUILD_DATE"
+    printf '# SSH-key-only local accounts (no OIDC). See ob-builder(1) and doc/service-accounts.md.\n'
+    for rec in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
+        name=$(_sa_field 1 "$rec");          fp=$(_sa_field 2 "$rec")
+        sudo_allowed=$(_sa_field 3 "$rec");   sudo_nopasswd=$(_sa_field 4 "$rec")
+        shell=$(_sa_field 5 "$rec");          home=$(_sa_field 6 "$rec")
+        gecos=$(_sa_field 7 "$rec")
+        uid=$(_sa_field 8 "$rec");            gid=$(_sa_field 9 "$rec")
+        printf '\n[%s]\n' "$name"
+        printf 'key_fingerprint = %s\n' "$fp"
+        printf 'sudo_allowed = %s\n' "$sudo_allowed"
+        printf 'sudo_nopasswd = %s\n' "$sudo_nopasswd"
+        [ -n "$gecos" ] && printf 'gecos = %s\n' "$gecos"
+        [ -n "$shell" ] && printf 'shell = %s\n' "$shell"
+        [ -n "$home" ]  && printf 'home = %s\n' "$home"
+        [ -n "$uid" ] && [ "$uid" != 0 ] && printf 'uid = %s\n' "$uid"
+        [ -n "$gid" ] && [ "$gid" != 0 ] && printf 'gid = %s\n' "$gid"
+    done
+    # Explicit success: the loop's last command is a `&&` chain that is false
+    # whenever the final account has no gid (the common case), which would make
+    # this function return non-zero and trip `set -e` in the caller.
+    return 0
+}
+
+# Interactively collect service accounts into SERVICE_ACCOUNTS_RECORDS. Loops
+# until the admin declines to add another. Each field is validated on entry.
+collect_service_accounts_interactive() {
+    explain "Service accounts are SSH-key-only local accounts (no SSO), e.g. 'ansible' or 'backup'. They are matched by the SSH key fingerprint and created automatically on the target. Leave this off if you don't need any."
+    ask_yesno "Define service accounts on this target?" "n" || return 0
+
+    while :; do
+        local name fp sudo_allowed="false" sudo_nopasswd="false" shell home gecos uid gid rec
+        while :; do
+            name=$(ask "  Account name (lowercase; empty to finish)" "")
+            [ -z "$name" ] && return 0
+            is_valid_service_username "$name" && break
+            log_warn "Invalid name. Start with a lowercase letter or '_', then [a-z0-9_-]."
+        done
+        while :; do
+            explain "Get it with: ssh-keygen -lf key.pub  → use the 'SHA256:…' field."
+            fp=$(ask "  SSH key fingerprint (SHA256:… or MD5:…)" "")
+            is_valid_fingerprint "$fp" && break
+            log_warn "Invalid fingerprint. Must start with SHA256: or MD5: and be base64-ish."
+        done
+        ask_yesno "  Allow sudo for '$name'?" "n" && sudo_allowed="true"
+        if [ "$sudo_allowed" = "true" ]; then
+            ask_yesno "  Sudo without password (NOPASSWD)?" "n" && sudo_nopasswd="true"
+        fi
+        gecos=$(ask "  Description / GECOS (optional)" "")
+        while :; do
+            shell=$(ask "  Login shell (optional, absolute path)" "")
+            is_valid_abs_path "$shell" && break
+            log_warn "Shell must be an absolute path (e.g. /bin/bash) or empty."
+        done
+        while :; do
+            home=$(ask "  Home directory (optional, absolute path)" "")
+            is_valid_abs_path "$home" && break
+            log_warn "Home must be an absolute path (e.g. /var/lib/$name) or empty."
+        done
+        explain "Set a fixed uid+gid for an SSH-reachable account: NSS resolves it only when both are set (sshd checks the user before auth). Leave empty only if the account already exists locally on the target."
+        uid=$(ask "  Fixed UID (recommended; empty = auto)" "")
+        gid=$(ask "  Fixed GID (recommended; empty = auto)" "")
+
+        rec=$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid")
+        if validate_service_account_record "$rec"; then
+            SERVICE_ACCOUNTS_RECORDS+=("$rec")
+            log_info "Added service account '$name' (${#SERVICE_ACCOUNTS_RECORDS[@]} total)."
+        else
+            log_warn "Service account '$name' rejected; not added."
+        fi
+        ask_yesno "Add another service account?" "n" || break
+    done
 }
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -530,6 +843,13 @@ EOF
         DISABLE_SESSION_RECORDER=$(ask_choice "Disable session recording on this bastion/standalone (--disable-session-recorder)?" "yes|no" "no")
     fi
 
+    # q7d. Service accounts (SSH-key-only local accounts). Applies to every role.
+    # Only prompt when none were supplied (e.g. via a partial config); a config
+    # that already defined service_accounts skips the interactive loop.
+    if [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -eq 0 ]; then
+        collect_service_accounts_interactive
+    fi
+
     # q8. Auto-launch enroll/setup
     if [ -z "$AUTO_ENROLL_SETUP" ]; then
         explain "Once the configs are deposited and the open-bastion package is installed, the target still needs to run ob-enroll then ob-*-setup. Choose whether the installer runs them automatically, skips them entirely, or asks the admin before each step."
@@ -636,6 +956,20 @@ validate_inputs() {
     : "${ANSIBLE_AUTO_APPROVE:=no}"
     case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
 
+    # Validate every service-account record (covers the YAML config path; the
+    # interactive loop validates as it goes). Reject duplicate account names.
+    if [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ]; then
+        local _rec _name
+        local -A _seen_sa=()
+        for _rec in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
+            validate_service_account_record "$_rec" || die "Invalid service account in config"
+            warn_service_account_unapproved "$_rec"
+            _name=$(_sa_field 1 "$_rec")
+            [ -n "${_seen_sa[$_name]:-}" ] && die "Duplicate service account name: $_name"
+            _seen_sa[$_name]=1
+        done
+    fi
+
     if [ -z "$REPO_KEYRING" ]; then
         if [ -f "$DEFAULT_REPO_KEYRING" ]; then
             REPO_KEYRING="$DEFAULT_REPO_KEYRING"
@@ -665,6 +999,7 @@ print_recap() {
   Audit trace:         $ENABLE_AUDIT_TRACE
   Session recording:   $([ "$TARGET_ROLE" = "backend" ] && echo "n/a (backend role)" || { [ "$DISABLE_SESSION_RECORDER" = "yes" ] && echo "disabled (opt-out)" || echo "enabled"; })
   Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
+  Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
@@ -971,6 +1306,29 @@ build_placeholder_map() {
     ph_set ENABLE_HARDENING_BOOL         "$_harden_bool"
     ph_set ENABLE_AUDIT_TRACE_BOOL       "$_audit_bool"
     ph_set DISABLE_SESSION_RECORDER_BOOL "$_norec_bool"
+
+    # Service accounts. Applies to every role. The shell installer embeds the
+    # rendered service-accounts.conf base64-encoded and writes it at 0600; the
+    # Ansible role carries it as a YAML block scalar in defaults. The
+    # openbastion.conf gets an explicit service_accounts_file directive (the C
+    # default is already that path, so the line is documentation/clarity).
+    local _sa_enabled_bool="false" _sa_conf="" _sa_conf_b64="" _sa_file_line="" _sa_defaults_yaml
+    if [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ]; then
+        _sa_enabled_bool="true"
+        _sa_conf=$(_render_service_accounts_conf)
+        _sa_conf_b64=$(base64_string "$_sa_conf")
+        _sa_file_line=$'# Service accounts (SSH-key-only local accounts)\nservice_accounts_file = /etc/open-bastion/service-accounts.conf'
+        # YAML block scalar: indent every conf line by two spaces under `|`.
+        local _indented
+        _indented=$(printf '%s\n' "$_sa_conf" | sed 's/^/  /')
+        _sa_defaults_yaml=$'ob_service_accounts_enabled: true\nob_service_accounts_content: |\n'"$_indented"
+    else
+        _sa_defaults_yaml='ob_service_accounts_enabled: false'$'\n''ob_service_accounts_content: ""'
+    fi
+    ph_set SERVICE_ACCOUNTS_ENABLED_BOOL  "$_sa_enabled_bool"
+    ph_set SERVICE_ACCOUNTS_CONF_B64      "$_sa_conf_b64"
+    ph_set SERVICE_ACCOUNTS_FILE_LINE     "$_sa_file_line"
+    ph_set SERVICE_ACCOUNTS_DEFAULTS_YAML "$_sa_defaults_yaml"
 
     # Ansible-only: device-code auto-approval via LLNG session cookie.
     local _auto_approve_bool="false" _vars_prompt_block=""

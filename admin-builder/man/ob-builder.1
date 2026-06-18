@@ -13,7 +13,8 @@ Open Bastion against a LemonLDAP::NG SSO.
 .PP
 The builder asks a short questionnaire (security scenario, SSO URL,
 OIDC client_id and client_secret handling, target role, server group,
-auto-launch policy, optional bastion whitelist for backends) and then
+auto-launch policy, optional bastion whitelist for backends, and optional
+service accounts) and then
 fetches the SSH CA public key and JWKS from the chosen SSO. The generated
 artefacts deposit
 .IR /etc/open-bastion/openbastion.conf ,
@@ -72,6 +73,26 @@ Show help.
 .TP
 .B \-V ", " \-\-version
 Print the builder version.
+.SH SERVICE ACCOUNTS
+The builder can declare SSH-key-only local accounts (ansible, backup, CI/CD,
+\&...) that authenticate by SSH key fingerprint without OIDC. The questionnaire
+prompts for them interactively; a
+.B \-\-config
+YAML provides them under a
+.B service_accounts:
+list (keys:
+.IR name ", " key_fingerprint ", " sudo_allowed ", " sudo_nopasswd ", "
+.IR shell ", " home ", " gecos ", " uid ", " gid ).
+Each entry is validated at build time and rendered into
+.I /etc/open-bastion/service-accounts.conf
+(\fB0600 root:root\fR) on the target, with
+.B service_accounts_file
+set in
+.IR openbastion.conf .
+They apply to every role. See
+.BR open-bastion (7)
+and the project's
+.I doc/service-accounts.md .
 .SH FILES
 .TP
 .I /usr/share/open-bastion-builder/templates/
