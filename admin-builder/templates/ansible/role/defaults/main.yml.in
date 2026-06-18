@@ -52,6 +52,13 @@ ob_enable_hardening: @@ENABLE_HARDENING_BOOL@@
 ob_enable_audit_trace: @@ENABLE_AUDIT_TRACE_BOOL@@
 ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
 
+# ── Service accounts (SSH-key-only local accounts) ────────────────────────────
+# Baked in at build time. ob_service_accounts_content is the full INI body of
+# /etc/open-bastion/service-accounts.conf (see doc/service-accounts.md). Override
+# per host/group via host_vars/group_vars to vary which accounts reach which
+# servers. Empty content + enabled:false means no service accounts are deployed.
+@@SERVICE_ACCOUNTS_DEFAULTS_YAML@@
+
 # ── Device-code auto-approval (Ansible-only, opt-in at build time) ───────────
 # When ob_ansible_auto_approve is true AND ob_llng_cookie is non-empty, the
 # enrollment task auto-approves the user_code via the LLNG /device endpoint

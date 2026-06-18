@@ -20,4 +20,6 @@ server_group = ##SERVER_GROUP##
 log_level = warn
 audit_enabled = true
 
+@@SERVICE_ACCOUNTS_FILE_LINE@@
+
 @@BASTION_BACKEND_BLOCK@@

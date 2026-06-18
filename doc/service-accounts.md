@@ -97,6 +97,44 @@ ssh-keygen -lf /path/to/key.pub
 6. Account is created automatically if it doesn't exist
 7. sudo permissions are enforced based on configuration
 
+## Generating with ob-builder
+
+Instead of hand-writing `service-accounts.conf` on each server, you can declare
+service accounts once in [`ob-builder`](../admin-builder/README.md) and have them
+baked into the generated shell installer and/or Ansible role.
+
+**Interactive:** the questionnaire asks whether to define service accounts and
+loops over name / fingerprint / sudo / shell / home for each.
+
+**Non-interactive (`--config`):** add a `service_accounts:` list to the YAML:
+
+```yaml
+service_accounts:
+  - name: ansible
+    key_fingerprint: "SHA256:abc123def456..."
+    sudo_allowed: true
+    sudo_nopasswd: true
+    shell: /bin/bash
+    home: /var/lib/ansible
+    gecos: Ansible Automation
+  - name: backup
+    key_fingerprint: "SHA256:xyz789..."
+    sudo_allowed: false
+    shell: /bin/sh
+```
+
+ob-builder validates each entry (name, fingerprint format, absolute shell/home
+paths) at build time, then:
+
+- the **shell installer** writes `/etc/open-bastion/service-accounts.conf`
+  (`0600 root:root`) and sets `service_accounts_file` in `openbastion.conf`;
+- the **Ansible role** carries the accounts as `ob_service_accounts_content`
+  (overridable per host/group via `host_vars` / `group_vars` to vary which
+  accounts reach which servers) and deploys the file when
+  `ob_service_accounts_enabled` is true.
+
+Service accounts apply to every role (bastion, backend, standalone).
+
 ## Per-Server Control
 
 Since the configuration file is local to each server, you control which service accounts

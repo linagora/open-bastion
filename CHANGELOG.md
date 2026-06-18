@@ -16,7 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bastion and no agent forwarding. Connects to a single endpoint
   (`[user@]backend[:path]`); options after the connector's own flags pass
   straight through to `sftp(1)`. See `ob-sftp(1)`.
-
+- **`ob-builder` can declare service accounts.** The builder now collects
+  SSH-key-only local accounts (ansible, backup, CI/CD, …) — interactively or via
+  a `service_accounts:` list in the `--config` YAML — validates each entry
+  (name, `SHA256:`/`MD5:` fingerprint, absolute shell/home) at build time, and
+  bakes them into both outputs: the shell installer writes
+  `/etc/open-bastion/service-accounts.conf` (`0600 root:root`) and the Ansible
+  role carries them as `ob_service_accounts_content` (overridable per
+  host/group). `service_accounts_file` is set in the generated
+  `openbastion.conf`. No PAM-module change — `src/service_account.c` already
+  parses that file. See `doc/service-accounts.md` and `ob-builder(1)`.
 - **Session-recording retention (`ob-session-prune`).** A new daily timer
   (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
   which matters because recording is fail-closed — a full disk refuses new
