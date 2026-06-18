@@ -1,5 +1,7 @@
 # Open Bastion
 
+[![Linagora](linagora.png)](https://linagora.com)
+
 **Control SSH access and sudo privileges on your Linux servers from your SSO —
 no more per-server keys or sudoers.**
 
@@ -254,8 +256,6 @@ AGPL-3.0
 Xavier Guimard <xguimard@linagora.com>
 
 Copyright (C) [Linagora](https://linagora.com)
-
-[![Linagora](linagora.png)](https://linagora.com)
 
 ---
 
