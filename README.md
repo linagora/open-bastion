@@ -1,6 +1,8 @@
-# Open Bastion
+<p align="center">
+  <a href="https://linagora.com"><img src="linagora.png" alt="Linagora"></a>
+</p>
 
-[![Linagora](linagora.png)](https://linagora.com)
+# Open Bastion
 
 **Control SSH access and sudo privileges on your Linux servers from your SSO —
 no more per-server keys or sudoers.**
