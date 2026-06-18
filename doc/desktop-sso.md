@@ -1,5 +1,11 @@
 # Desktop SSO with Open Bastion
 
+> **⚠️ Experimental (alpha) — not production-ready.** Unlike Open Bastion's
+> server-side SSH/sudo features, this LightDM workstation-login greeter is an
+> early prototype: its authentication path has **not** been security-reviewed and
+> has **no test environment** yet. Do not rely on it to protect workstation
+> access. Documented here for experimentation only.
+
 This document describes how to configure desktop workstations to use Open Bastion
 for Single Sign-On (SSO) via LightDM.
 

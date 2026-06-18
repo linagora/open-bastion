@@ -12,8 +12,8 @@ enforce them on every server.
 
 - **The SSO decides SSH access** — no SSH keys to install or rotate on each
   server; group membership grants or revokes access fleet-wide.
-- **The SSO decides `sudo` too** — no `sudoers` to maintain per host (local/dual
-  management stays possible when you want it).
+- **The SSO decides `sudo` too** — no `sudoers` to maintain per host
+  _(local/dual management stays possible when you want it)_.
 - **The recorder can't be bypassed** — no escaping the session recorder via
   port-forwarding, while `~/.ssh/config` keeps access _visually_ direct.
 - **Fleet deployment in one command** — `ob-builder --output-ansible <role>` (or
@@ -47,19 +47,20 @@ For the underlying concepts and per-step manual configuration, see
 
 ## How it works
 
-1. A user authenticates to a server — with an LLNG **token** (used as the SSH
-   password) or an **SSO-signed SSH certificate** (self-served via `ob-ssh-cert`).
+1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
+   password)_ or an **SSO-signed SSH certificate** _(self-served via `ob-ssh-cert`)_.
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
    server group, and `sudo` is gated the same way; an encrypted local cache keeps
    this working during an SSO outage.
-3. The **NSS** module resolves SSO users (and key-only service accounts) so the
+3. The **NSS** module resolves SSO users _(and key-only service accounts)_ so the
    system sees them as real Unix accounts; provisioning creates the home on first
    login.
 4. To reach a **backend behind a bastion**, the bastion mints a short-lived,
    LLNG-signed certificate and re-originates the connection with `ob-ssh` /
    `ob-scp` / `ob-sftp` — no user key or agent on the bastion. Backends accept
-   only vouched bastions.
-5. Sessions are **recorded** to a tamper-evident, root-owned store for audit.
+   only vouched bastions.[^1]
+5. Sessions are **recorded** inside the bastion to a tamper-evident, root-owned
+   store for audit.
 
 See [Bastion Architecture](doc/bastion-architecture.md) and the
 [documentation index](doc/README.md) for the details.
@@ -73,7 +74,7 @@ See [Bastion Architecture](doc/bastion-architecture.md) and the
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
 - **[Offline mode](doc/offline-mode.md)**:
-  - Encrypted authorization cache (AES-256-GCM)
+  - Encrypted authorization cache _(AES-256-GCM)_
   - Continue SSH key authentication when LLNG server is unavailable
   - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
   - Cache brute-force protection with rate limiting
@@ -88,19 +89,19 @@ See [Bastion Architecture](doc/bastion-architecture.md) and the
 - **[Group synchronization](doc/llng-configuration.md#group-synchronization)**:
   - Sync Unix supplementary groups from LLNG on each login
   - Automatic group creation if needed
-  - Local whitelist for defense-in-depth (`allowed_managed_groups`)
+  - Local whitelist for defense-in-depth _(`allowed_managed_groups`)_
   - Groups outside managed pool are never modified
-- **[Service accounts](doc/service-accounts.md)** (ansible, backup, etc.):
+- **[Service accounts](doc/service-accounts.md)** _(ansible, backup, etc.)_:
   - SSH key authentication without OIDC
   - Per-server configuration file
   - Fine-grained sudo permissions
   - Automatic account creation
 - **[Bastion-to-backend authentication](doc/bastion-architecture.md)**:
-  - Certificate-based proof of connection origin (LLNG-signed ephemeral SSH cert, ~120 s)
+  - Certificate-based proof of connection origin _(LLNG-signed ephemeral SSH cert, ~120 s)_
   - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)
   - No agent forwarding or user key on the bastion required
   - `ob-ssh` / `ob-scp` / `ob-sftp` scripts for seamless bastion connections and file transfers
-- **[Session recording](doc/session-recording.md)** (optional):
+- **[Session recording](doc/session-recording.md)** _(optional)_:
   - Record all terminal I/O for audit compliance
   - Multiple formats: script, asciinema, ttyrec
   - Session metadata with unique IDs
@@ -110,7 +111,7 @@ See [Bastion Architecture](doc/bastion-architecture.md) and the
   - AES-256-GCM encrypted secret storage
   - Webhook notifications for security events
   - Token binding (IP, fingerprint)
-  - [SSH key policy](doc/security.md#ssh-key-policy) enforcement (allowed types, minimum sizes)
+  - [SSH key policy](doc/security.md#ssh-key-policy) enforcement _(allowed types, minimum sizes)_
 - **[CrowdSec integration](doc/crowdsec.md)** (optional):
   - Pre-authentication IP blocking via CrowdSec bouncer
   - Post-authentication failure reporting via CrowdSec watcher
@@ -119,12 +120,10 @@ See [Bastion Architecture](doc/bastion-architecture.md) and the
 - **Monitoring**:
   - Server heartbeat via `ob-heartbeat`
   - Statistics reporting to portal
-- **Desktop SSO** (LightDM integration):
-  - Authenticate workstations via LLNG Single Sign-On
-  - LightDM webkit2-greeter theme with embedded LLNG portal
-  - Offline mode with cached credentials (Argon2id + AES-256-GCM)
-  - Multi-factor authentication support (TOTP, WebAuthn, etc.)
-  - Automatic session and desktop environment selection
+
+Desktop SSO (LightDM workstation login) also exists but is **experimental
+(alpha)** and is deliberately **not** listed among the features above — see the
+clearly-separated **Desktop SSO** section near the end of this README.
 
 ## Installation
 
@@ -172,7 +171,7 @@ The full, theme-organized index is in **[doc/README.md](doc/README.md)**. Highli
 - **Recording & audit** — [Session recording](doc/session-recording.md) · [Audit trace](doc/audit.md)
 - **Offline & resilience** — [Offline mode](doc/offline-mode.md) · [Cache administration](doc/offline-cache-admin.md)
 - **Security & hardening** — [Security features](doc/security.md) · [Hardening](doc/hardening.md) · [CrowdSec](doc/crowdsec.md)
-- **Reference** — [Configuration](doc/configuration.md) · [Desktop SSO](doc/desktop-sso.md) · [Competitors](doc/competitors.md)
+- **Reference** — [Configuration](doc/configuration.md) · [Desktop SSO](doc/desktop-sso.md) _(experimental/alpha)_ · [Competitors](doc/competitors.md)
 - **Security analysis (EBIOS)** — [threat model & risk study](doc/security/00-architecture.md)
 
 ## Troubleshooting
@@ -233,11 +232,19 @@ sudo ob-enroll
 
 ## Requirements
 
-- A LemonLDAP::NG system >= 2.21.0 _(LTS)_ with [additional plugins](https://linagora.github.io/lemonldap-ng-plugins/) installed and enabled
+- A LemonLDAP::NG system >= 2.23.0 with some [additional plugins](https://linagora.github.io/lemonldap-ng-plugins/) installed and enabled
 - libcurl, json-c, OpenSSL, libkeyutils, PAM development headers
 - curl and jq (for enrollment script)
 
-## Desktop SSO (LightDM Integration)
+## Desktop SSO (LightDM) — experimental, alpha
+
+> **⚠️ Experimental — not production-ready.** Unlike the server-side SSH/sudo
+> features above (the validated, supported core of Open Bastion), the LightDM
+> workstation-login greeter is an early **alpha** prototype. Its authentication
+> path has **not** had a security review and there is **no test environment**
+> for it yet. Do **not** rely on it to protect access to a workstation. It is
+> documented here for experimentation only and is intentionally kept separate
+> from the features list.
 
 Open Bastion can authenticate desktop workstations via LemonLDAP::NG Single Sign-On
 using LightDM.
@@ -289,4 +296,8 @@ AGPL-3.0
 
 Xavier Guimard <xguimard@linagora.com>
 
-Copyright (C) 2025 [Linagora](https://linagora.com)
+Copyright (C) [Linagora](https://linagora.com)
+
+---
+
+[^1]: This is optional, of course: you can keep non-Open-Bastion backends and manage them the old way, with SSH keys.

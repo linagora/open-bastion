@@ -60,11 +60,11 @@ Who can do what, where — and which knob lives on the SSO vs the server.
 
 ## Reference
 
-| Document                                    | Description                     |
-| ------------------------------------------- | ------------------------------- |
-| [Configuration reference](configuration.md) | Every `openbastion.conf` key    |
-| [Desktop SSO](desktop-sso.md)               | LightDM greeter + LLNG login    |
-| [Competitors](competitors.md)               | Comparison with other solutions |
+| Document                                    | Description                                             |
+| ------------------------------------------- | ------------------------------------------------------- |
+| [Configuration reference](configuration.md) | Every `openbastion.conf` key                            |
+| [Desktop SSO](desktop-sso.md)               | LightDM greeter + LLNG login **(experimental / alpha)** |
+| [Competitors](competitors.md)               | Comparison with other solutions                         |
 
 ## Security analysis (EBIOS)
 
