@@ -6,7 +6,7 @@ Before deploying the PAM module on your servers, you need to configure LemonLDAP
 
 The Open Bastion plugins are available from the [Linagora plugin store](https://linagora.github.io/lemonldap-ng-plugins/).
 
-### Option A: Debian/Ubuntu (recommended)
+### Option A: Debian/Ubuntu (APT)
 
 Add the Linagora plugin repository and install:
 
@@ -21,15 +21,40 @@ echo "deb [signed-by=/usr/share/keyrings/linagora-llng-plugins.gpg] https://lina
 
 # Install (pick pam-access and/or ssh-ca depending on your auth mode)
 sudo apt-get update
-sudo apt-get install lemonldap-ng-plugin-oidc-device-authorization \
-                     lemonldap-ng-plugin-oidc-device-organization \
-                     lemonldap-ng-plugin-pam-access \  # token-based auth
-                     lemonldap-ng-plugin-ssh-ca         # certificate-based auth
+sudo apt-get install \
+  lemonldap-ng-plugin-oidc-device-authorization \
+  lemonldap-ng-plugin-oidc-device-organization \
+  lemonldap-ng-plugin-pam-access \
+  lemonldap-ng-plugin-ssh-ca
+# pam-access = token-based auth; ssh-ca = certificate-based auth
 ```
 
-### Option B: Docker
+### Option B: RPM and other distributions (plugin-store CLI)
 
-The `yadd/lemonldap-ng-portal` images already include all plugins. No extra installation needed — just enable them via `customPlugins` (see Step 3).
+There is no plugin RPM repository. On RHEL / Rocky / Fedora (and on Debian too)
+use the generic `lemonldap-ng-store` CLI bundled with LemonLDAP::NG >= 2.23.0:
+
+```bash
+sudo lemonldap-ng-store add-store https://linagora.github.io/lemonldap-ng-plugins/
+sudo lemonldap-ng-store install oidc-device-authorization --activate
+sudo lemonldap-ng-store install oidc-device-organization --activate
+sudo lemonldap-ng-store install pam-access --activate   # token-based auth
+sudo lemonldap-ng-store install ssh-ca     --activate   # certificate-based auth
+sudo systemctl restart lemonldap-ng-fastcgi-server
+```
+
+`--activate` registers each plugin in `customPlugins` automatically. (On LLNG
+< 2.23.0 the CLI ships separately as the `linagora-lemonldap-ng-store` Debian
+package.)
+
+### Option C: Docker
+
+All `yadd/lemonldap-ng-*` application images tagged **>= 2.23.0-1** already bundle
+the Open Bastion plugins — e.g. `lemonldap-ng-portal`,
+`lemonldap-ng-portal-hiperf`, `lemonldap-ng-manager`, `lemonldap-ng-full`,
+`lemonldap-ng-ssoaas-fastcgi-server`. No extra installation is needed — just
+enable them via `customPlugins` (see Step 3). See the full image set at
+<https://github.com/guimard/llng-docker/>.
 
 ### Plugins used by Open Bastion
 
