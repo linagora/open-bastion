@@ -42,6 +42,7 @@ phase "Bootstrap VMs (incl. package install — shell path uses --skip-install)"
 for v in "${ALL_VMS[@]}"; do bootstrap_vm "$v" 1; done
 get_cookie
 mint_dwho_cert   # so the connection-phase + standalone assertions actually run
+[ -n "$STANDALONE_VM" ] && gen_service_key   # lab key for the service-account check
 
 # ── Phase 1: bastion installer — enrol, read bastion_id, then setup ──────────
 phase "Phase 1 — bastion (ob-builder --output-shell, scenario=$SCENARIO)"
@@ -82,8 +83,27 @@ done
 if [ -n "$STANDALONE_VM" ]; then
     phase "Phase 3 — standalone (ob-builder --output-shell, scenario=$SCENARIO)"
     sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-standalone.yml" > "$WORK/build-standalone.yml"
+    # Exercise the ob-builder service-keys feature: declare a 'backup' service
+    # account whose fingerprint is the lab key's, so the generated installer
+    # deposits a matching service-accounts.conf. (verify_service_accounts then
+    # logs in as backup with that key.)
+    if [ -n "$SVC_FP" ]; then
+        cat >> "$WORK/build-standalone.yml" <<EOF
+
+service_accounts:
+  - name: backup
+    key_fingerprint: "$SVC_FP"
+    sudo_allowed: false
+    shell: /bin/bash
+    home: /var/lib/backup
+    gecos: Lab Backup Service Account
+EOF
+    fi
     obbuild --config "$WORK/build-standalone.yml" --output-shell "$WORK/boot-standalone.sh" >"$WORK/gen-standalone.log" 2>&1 \
-        && ok "generated standalone installer" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
+        && ok "generated standalone installer (incl. service account)" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
+    # SSH-layer authorization for the service account — the documented manual step
+    # ob-builder does not do. Must run before setup locks port 22.
+    provision_service_helper "$STANDALONE_VM"
     get_cookie   # refresh before enrolling: the initial cookie may have expired by now (short lab TTLs)
     ( approve_device "${IP[$STANDALONE_VM]}" ) &
     run_installer "$STANDALONE_VM" "$WORK/boot-standalone.sh" >"$WORK/$STANDALONE_VM.log" 2>&1
@@ -94,4 +114,5 @@ fi
 
 verify_e2e
 verify_standalone
+verify_service_accounts
 summary

@@ -135,6 +135,76 @@ paths) at build time, then:
 
 Service accounts apply to every role (bastion, backend, standalone).
 
+> **ob-builder deposits the fingerprint, not the public key.** The generated
+> `service-accounts.conf` carries `key_fingerprint` only. That is what
+> `pam_openbastion` checks, but it is **not** enough for `sshd` to accept the
+> connection — you must also authorize the public key at the SSH layer (next
+> section). This is an explicit, documented manual step.
+
+## Authorizing the public key at the SSH layer
+
+`pam_openbastion` validates the fingerprint **after** `sshd` has already accepted
+the public key. So `sshd` must be told the key is acceptable, by one of:
+
+- **`authorized_keys` (PAM modes A–D).** Put the public key in
+  `~<name>/.ssh/authorized_keys` (mode `0600`, owned by the account). Because the
+  service account is auto-created only on first login, you must **pre-create the
+  account and its `~/.ssh/authorized_keys`** (e.g. `useradd -m`, then drop the
+  key) — there is no home directory to read the file from otherwise.
+
+- **`AuthorizedKeysCommand` (required for Mode E, works in all modes).** Mode E
+  sets `AuthorizedKeysFile none`, so `authorized_keys` is ignored. Use the
+  `ob-service-account-keys` helper, which serves a public key from
+  `/etc/open-bastion/service-accounts.d/<name>.pub` (`root:root 0644`) and does
+  **not** depend on the account already existing:
+
+  ```
+  # /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf
+  AuthorizedKeysCommand /usr/local/sbin/ob-service-account-keys %u
+  AuthorizedKeysCommandUser nobody
+  ```
+
+  Drop each account's public key at `/etc/open-bastion/service-accounts.d/<name>.pub`
+  and reload `sshd`. The mere presence of the `.pub` lets `sshd` present the key;
+  `pam_openbastion` still re-validates the SHA256 fingerprint against
+  `service-accounts.conf` (which is `0600` and unreadable by the
+  `AuthorizedKeysCommandUser`), so an orphan `.pub` is accepted by `sshd` but
+  still rejected by PAM.
+
+`ExposeAuthInfo yes` must be set (the setups do this) so the fingerprint reaches
+the PAM module.
+
+## Reaching servers through a bastion (no ProxyJump recording)
+
+Service accounts authenticate by **direct SSH key**, independently of the bastion
+certificate-vouching used by human users. Consequences:
+
+- A service account does **not** use `ob-ssh`: that path needs an SSO-issued
+  bastion voucher, which a key-only account never obtains. So the seamless,
+  recorded bastion→backend hop is **not** available to service accounts.
+- The intended pattern is therefore to point service accounts **directly at the
+  servers they automate** (where their account is configured), not to relay
+  through the bastion.
+- A native `ssh -J bastion backup@backend` (ProxyJump) _can_ work if `backup` is
+  a configured service account on **both** the bastion and the backend and the
+  bastion permits TCP forwarding. **But the bastion's session recorder
+  (`ForceCommand`) does not cover the forwarded `direct-tcpip` channel**, so such
+  a hop is **not recorded**. Treat this as a deliberate audit bypass: if you need
+  service-account activity audited, run it against the target directly (the
+  target's own logs/auditd apply) rather than tunnelling through the bastion.
+
+## Sudo bypasses the SSO token (including in Mode E)
+
+A service account's sudo rights come **entirely** from `service-accounts.conf`
+(`sudo_allowed` / `sudo_nopasswd`): `pam_openbastion` grants them locally and
+returns success **without any LLNG call** — even in Mode E, where human users
+must present a fresh LLNG token to use sudo. A service key with `sudo_allowed`
+(especially `sudo_nopasswd`) is therefore a **standing local privilege that
+escapes the SSO-gated sudo model**. Grant it sparingly, prefer no sudo or
+tightly-scoped `sudoers` rules, and rotate/inventory these keys like any other
+long-lived credential. (You still need a `sudoers` entry permitting the account;
+PAM authorizes the _attempt_, `sudoers` authorizes _which commands_.)
+
 ## Per-Server Control
 
 Since the configuration file is local to each server, you control which service accounts

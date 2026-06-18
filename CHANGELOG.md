@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Service-account security model documented.** `doc/service-accounts.md` now
+  spells out that ob-builder deposits the fingerprint only, so the public key
+  must still be authorized at the SSH layer (`authorized_keys`, or the
+  `ob-service-account-keys` `AuthorizedKeysCommand` helper for Mode E); that
+  service accounts use direct key auth (no `ob-ssh`), so a native ProxyJump hop
+  through the bastion is **not session-recorded**; and that service-account sudo
+  is granted locally with **no LLNG token, even in Mode E**. New EBIOS risks
+  R-S24 (sudo without token) and R-S25 (unrecorded ProxyJump hop) in
+  `doc/security/99-risk-reduce.md`. `local-test/deploy-shell.sh` gained an
+  end-to-end service-account check on the standalone VM.
 - **Backend access guidance corrected.** The admin guide showed a
   `ProxyCommand`/`ProxyJump` snippet for reaching a backend in one command, but
   `ob-ssh` re-originates a full interactive session (it is not a `-W` stdio
