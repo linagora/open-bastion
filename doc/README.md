@@ -10,6 +10,7 @@ and [Access & Permissions](permissions.md).
 | Document                                           | Description                                          |
 | -------------------------------------------------- | ---------------------------------------------------- |
 | [Docker demo](../quick-start/README.md)            | LLNG portal + a self-enrolling SSH server in ~2 min  |
+| [Configure your SSO](llng-configuration.md)        | Install the plugins + create the OIDC client(s)      |
 | [Shell installer quick-start](shell-quickstart.md) | Generate + run a self-extracting installer per host  |
 | [Ansible quick-start](ansible-quickstart.md)       | Generate + apply bastion/backend roles to a fleet    |
 | [Deployment builder](../admin-builder/README.md)   | `ob-builder` — produce the shell / Ansible artefacts |

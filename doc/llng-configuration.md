@@ -42,6 +42,12 @@ The `yadd/lemonldap-ng-portal` images already include all plugins. No extra inst
 
 ## Step 2: Create the OIDC Relying Party
 
+The OIDC Relying Party (a.k.a. OIDC client) is what your servers enroll against —
+one RP can carry a whole fleet, or you can use several (one per project/zone).
+For **general** OIDC RP configuration, refer to the upstream
+[LemonLDAP::NG OpenID Connect documentation](https://lemonldap-ng.org/documentation/latest/idpopenidconnect.html);
+the options below are the Open-Bastion-specific ones.
+
 In the LLNG Manager, create a new OIDC Relying Party:
 
 1. Go to **OpenID Connect Relying Parties** → **Add**
