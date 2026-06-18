@@ -68,6 +68,7 @@ Who can do what, where — and which knob lives on the SSO vs the server.
 | [Troubleshooting](troubleshooting.md)       | Logs, debug mode, endpoint tests, common issues         |
 | [Desktop SSO](desktop-sso.md)               | LightDM greeter + LLNG login **(experimental / alpha)** |
 | [Competitors](competitors.md)               | Comparison with other solutions                         |
+| [Slide deck](slides/README.md)              | HTML meetup presentation (intro talk)                   |
 
 ## Security analysis (EBIOS)
 
