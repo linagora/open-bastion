@@ -114,6 +114,8 @@ user cert with:
 
 - `scripts/ob-ssh`: ephemeral keypair → `/pam/bastion-cert` → `CertificateFile`
   connect; drop `SendEnv=LLNG_BASTION_JWT`.
+- `scripts/ob-scp`, `scripts/ob-sftp`: same minting flow (via the shared
+  `ob-cert-lib.sh`) for `scp`/`sftp` file transfers through the bastion.
 - `src/pam_openbastion.c`: read `bastion_id` from the presented cert (extend existing
   `ob_ssh_cert_info` parsing) and enforce `allowed_bastions`; remove the
   `bastion_jwt` env path. `src/bastion_jwt.c` becomes cert-extension reading (or is

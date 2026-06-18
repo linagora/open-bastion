@@ -25,13 +25,14 @@ usr/sbin/ob-record-sink
 usr/sbin/ob-cache-admin
 usr/sbin/ob-session-prune
 
-# Shared cert-vouching library (sourced by ob-ssh / ob-scp)
+# Shared cert-vouching library (sourced by ob-ssh / ob-scp / ob-sftp)
 usr/lib/open-bastion/ob-cert-lib.sh
 
 # User scripts
 usr/bin/ob-ssh-cert
 usr/bin/ob-ssh
 usr/bin/ob-scp
+usr/bin/ob-sftp
 usr/bin/ob-bastion-id
 usr/bin/ob-cert-request
 usr/bin/ob-record-connect
@@ -40,6 +41,7 @@ usr/bin/ob-record-connect
 usr/share/man/man1/ob-ssh-cert.1
 usr/share/man/man1/ob-ssh.1
 usr/share/man/man1/ob-scp.1
+usr/share/man/man1/ob-sftp.1
 usr/share/man/man1/ob-bastion-id.1
 usr/share/man/man1/ob-cert-request.1
 usr/share/man/man1/ob-record-connect.1

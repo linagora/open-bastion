@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ob-sftp` bastion file-transfer connector.** The `sftp` counterpart of
+  `ob-ssh` / `ob-scp`: run on a bastion, it mints a short-lived,
+  LLNG-signed certificate (via the shared `ob-cert-lib.sh`) and opens an
+  interactive or batch SFTP session to a backend — no user SSH key on the
+  bastion and no agent forwarding. Connects to a single endpoint
+  (`[user@]backend[:path]`); options after the connector's own flags pass
+  straight through to `sftp(1)`. See `ob-sftp(1)`.
+
 - **Session-recording retention (`ob-session-prune`).** A new daily timer
   (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
   which matters because recording is fail-closed — a full disk refuses new

@@ -198,17 +198,20 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Shared cert-vouching library, sourced by ob-ssh / ob-scp. Installed to a
-# fixed (non-multiarch) /usr/lib/open-bastion path that the scripts look up.
+# Shared cert-vouching library, sourced by ob-ssh / ob-scp / ob-sftp. Installed
+# to a fixed (non-multiarch) /usr/lib/open-bastion path that the scripts look up.
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-cert-lib.sh
     DESTINATION lib/open-bastion
 )
 
-# Bastion-to-backend SSH / SCP connectors (cert vouching).
+# Bastion-to-backend SSH / SCP / SFTP connectors (cert vouching).
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-scp
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-sftp
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -226,7 +229,7 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
 # Replaces the old `sudo ob-bastion-cert-helper` bridge. ob-cert-daemon (root,
 # socket-activated) holds the server token and derives the certificate's user
 # from the connection's SO_PEERCRED; ob-cert-request is the unprivileged client
-# that ob-ssh / ob-scp invoke — no sudo, no setuid.
+# that ob-ssh / ob-scp / ob-sftp invoke — no sudo, no setuid.
 add_executable(ob-cert-daemon src/ob-cert-daemon.c src/ob_cert_proto.c)
 target_include_directories(ob-cert-daemon PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -400,6 +403,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
     ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
     ${CMAKE_SOURCE_DIR}/man/ob-scp.1
+    ${CMAKE_SOURCE_DIR}/man/ob-sftp.1
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
     ${CMAKE_SOURCE_DIR}/man/ob-cert-request.1
     ${CMAKE_SOURCE_DIR}/man/ob-record-connect.1

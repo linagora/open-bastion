@@ -1,0 +1,93 @@
+.TH OB-SFTP 1 "June 2026" "open-bastion" "User Commands"
+.SH NAME
+ob-sftp \- bastion SFTP to a backend with LLNG certificate vouching
+.SH SYNOPSIS
+.B ob-sftp
+[\fIOPTIONS\fR] [\fIsftp-options\fR] [\fIuser@\fR]\fIbackend\fR[:\fIpath\fR]
+.SH DESCRIPTION
+.B ob-sftp
+is the
+.BR sftp (1)
+counterpart of
+.BR ob-ssh (1)
+and
+.BR ob-scp (1).
+Run on a bastion by a user already authenticated to it, it mints a short-lived,
+LemonLDAP::NG-signed certificate for this user and runs
+.B sftp
+with it, so an interactive or batch SFTP session can be opened to a backend:
+.IP \(bu 2
+interactive:  \fBob-sftp\fR user@backend
+.IP \(bu 2
+with a path:  \fBob-sftp\fR user@backend:/remote/dir
+.IP \(bu 2
+batch mode:   \fBob-sftp\fR \-b script.sftp user@backend
+.PP
+The destination is a single [\fIuser@\fR]\fIbackend\fR[:\fIpath\fR] endpoint.
+Unlike
+.BR ob-scp (1)
+there is no backend-to-backend case: SFTP connects to one remote endpoint, and
+a single vouched certificate authenticates as exactly one principal.
+.PP
+No SSH key of the user's own on the bastion and no agent forwarding are needed:
+the ephemeral private key lives in tmpfs and is wiped when
+.B ob-sftp
+exits.
+.SH OPTIONS
+Options consumed by ob-sftp itself must come first:
+.TP
+.BR \-c ", " \-\-config " " \fIFILE\fR
+Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
+.TP
+.BR \-d ", " \-\-debug
+Enable debug output to stderr
+.TP
+.BR \-h ", " \-\-help
+Show help message and exit
+.TP
+.BR \-V ", " \-\-version
+Show version and exit
+.PP
+Any further options are passed straight through to
+.BR sftp (1)
+(for example \fB\-r\fR, \fB\-P\fR \fIPORT\fR, \fB\-b\fR \fIFILE\fR, \fB\-C\fR).
+.SH CONFIGURATION
+Shares \fI/etc/open-bastion/ssh-proxy.conf\fR with
+.BR ob-ssh (1);
+see that page for the keys.
+.SH FILES
+.TP
+.I /etc/open-bastion/ssh-proxy.conf
+Configuration file (world-readable; contains no secret)
+.TP
+.I /usr/lib/open-bastion/ob-cert-lib.sh
+Shared cert-vouching library sourced by ob-ssh, ob-scp and ob-sftp
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+Error (configuration, no valid voucher, or no destination endpoint)
+.PP
+Otherwise the exit status of the underlying
+.BR sftp (1).
+.SH EXAMPLES
+.nf
+$ ob-sftp dwho@backend1
+$ ob-sftp dwho@backend1:/var/log
+$ ob-sftp -b commands.sftp dwho@backend1
+.fi
+.SH SEE ALSO
+.BR ob-ssh (1),
+.BR ob-scp (1),
+.BR ob-cert-request (1),
+.BR ob-cert-daemon (8),
+.BR ob-bastion-setup (8),
+.BR sftp (1),
+.BR ssh (1)
+.SH COPYRIGHT
+Copyright (C) 2025 Linagora.
+License: AGPL-3.0
+.SH AUTHORS
+Xavier Guimard <xguimard@linagora.com>

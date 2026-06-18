@@ -198,7 +198,8 @@ ansible-playbook -i inventory.yml playbook.yml --limit web-1
    listed bastion).
 
 After the play, users connect with their SSO certificate to a bastion, then hop
-to any backend with `ob-ssh <backend>` (or copy files with `ob-scp`); the
+to any backend with `ob-ssh <backend>` (or transfer files with `ob-scp` /
+`ob-sftp`); the
 bastion mints a short-lived, CA-signed certificate for each hop. No user key
 ever lands on the bastion or the backends.
 

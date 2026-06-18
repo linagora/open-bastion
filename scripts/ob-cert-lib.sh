@@ -3,7 +3,7 @@
 #
 # ob-cert-lib.sh - shared bastion certificate-vouching helpers
 #
-# Sourced by ob-ssh and ob-scp. Holds the
+# Sourced by ob-ssh, ob-scp and ob-sftp. Holds the
 # common configuration, logging and the LLNG /pam/bastion-cert minting flow so
 # both the SSH and SCP front-ends behave identically.
 #
@@ -279,7 +279,7 @@ mint_ephemeral_cert() {
     fi
     printf '%s\n' "$cert" > "$OB_EPH_DIR/id-cert.pub"
 
-    # Consumed by the sourcing script (ob-ssh / ob-scp), not within this lib.
+    # Consumed by the sourcing script (ob-ssh / ob-scp / ob-sftp), not this lib.
     # shellcheck disable=SC2034
     OB_EPH_KEY="$OB_EPH_DIR/id"
     # shellcheck disable=SC2034
