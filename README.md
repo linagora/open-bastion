@@ -255,6 +255,8 @@ Xavier Guimard <xguimard@linagora.com>
 
 Copyright (C) [Linagora](https://linagora.com)
 
+[![Linagora](linagora.png)](https://linagora.com)
+
 ---
 
 [^1]: This is optional, of course: you can keep non-Open-Bastion backends and manage them the old way, with SSH keys.
