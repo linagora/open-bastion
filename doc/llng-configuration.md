@@ -118,20 +118,21 @@ In the LLNG Manager, create a new OIDC Relying Party:
 These plugins ship **autoload rules**, so you do **not** edit `customPlugins`.
 With LLNG's **Autoloader** — enabled by default in LemonLDAP::NG 2.24.0 and later,
 and added by the `linagora-lemonldap-ng-store` backport on earlier versions — each
-plugin loads automatically as soon as its activation condition is truthy. Set the
-relevant key in `lemonldap-ng.ini`, section `[portal]` (or the matching toggle in
-the Manager):
+plugin loads automatically as soon as its activation condition is truthy. You
+toggle that condition **in the LLNG Manager**; the underlying configuration keys
+are listed here for reference:
 
-| Plugin                   | Activates when…                                                              |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| PamAccess (token auth)   | `pamAccessActivation = 1`                                                    |
-| SSHCA (certificate auth) | `sshCaActivation = 1`                                                        |
-| OIDCDeviceAuthorization  | any RP sets `oidcRPMetaDataOptionsAllowDeviceAuthorization` (done in Step 2) |
-| OIDCDeviceOrganization   | any RP sets `oidcRPMetaDataOptionsDeviceOwnership` (done in Step 2)          |
+| Plugin                   | Configuration key / condition                                                | Reference                                                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| PamAccess (token auth)   | `pamAccessActivation = 1`                                                    | [pam-access](https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/pam-access#readme)                               |
+| SSHCA (certificate auth) | `sshCaActivation = 1`                                                        | [ssh-ca](https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/ssh-ca#readme)                                       |
+| OIDCDeviceAuthorization  | any RP sets `oidcRPMetaDataOptionsAllowDeviceAuthorization` (done in Step 2) | [oidc-device-authorization](https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-authorization#readme) |
+| OIDCDeviceOrganization   | any RP sets `oidcRPMetaDataOptionsDeviceOwnership` (done in Step 2)          | [oidc-device-organization](https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-organization#readme)   |
 
-In practice you only set `pamAccessActivation` and/or `sshCaActivation` for your
-auth mode; the two OIDC device plugins switch on automatically from the per-RP
-options you configured in [Step 2](#step-2-create-the-oidc-relying-party).
+In practice you only enable PamAccess and/or SSHCA in the Manager for your auth
+mode; the two OIDC device plugins switch on automatically from the per-RP options
+you configured in [Step 2](#step-2-create-the-oidc-relying-party). See each
+plugin's README (linked above) for its full list of parameters.
 
 > **Legacy portals without the Autoloader** (LLNG < 2.24.0 and no
 > `linagora-lemonldap-ng-store`): add the modules to `customPlugins` in `[portal]`
