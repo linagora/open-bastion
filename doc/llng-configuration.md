@@ -32,11 +32,10 @@ sudo apt-get install \
 ### Option B: Plugin-store CLI (`lemonldap-ng-store`)
 
 The `lemonldap-ng-store` CLI installs and activates plugins from the store
-regardless of the OS package manager. It will be \*\*bundled with LemonLDAP::NG
-
-> = 2.24.0\*\*; for now it is provided by the lemonldap-ng-plugins store itself —
-> install the `linagora-lemonldap-ng-store` package first (from the Linagora
-> repository set up in Option A).
+regardless of the OS package manager. It is **bundled with LemonLDAP::NG 2.24.0
+and later**; on earlier versions it is provided by the lemonldap-ng-plugins store
+itself — install the `linagora-lemonldap-ng-store` package first (from the
+Linagora repository set up in Option A).
 
 ```bash
 sudo lemonldap-ng-store add-store https://linagora.github.io/lemonldap-ng-plugins/
@@ -56,7 +55,7 @@ sudo systemctl restart lemonldap-ng-fastcgi-server
 
 ### Option C: Docker
 
-All `yadd/lemonldap-ng-*` application images tagged **>= 2.23.0-1** already bundle
+All `yadd/lemonldap-ng-*` application images tagged **2.23.0-1 or later** already bundle
 the Open Bastion plugins — e.g. `lemonldap-ng-portal`,
 `lemonldap-ng-portal-hiperf`, `lemonldap-ng-manager`, `lemonldap-ng-full`,
 `lemonldap-ng-ssoaas-fastcgi-server`. No extra installation is needed — just
