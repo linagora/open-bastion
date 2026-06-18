@@ -47,6 +47,12 @@ For the underlying concepts and per-step manual configuration, see
 
 ## How it works
 
+Each server is first **enrolled** by an administrator — installing the package and
+registering the host with the SSO (`ob-enroll`, or the generated `ob-builder`
+artefacts), which is also what assigns its server group. See the
+[Admin Guide](doc/admin-guide.md) (or the [quick-starts](doc/README.md#start-here))
+for the enrollment step. Once enrolled:
+
 1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
    password)_ or an **SSO-signed SSH certificate** _(self-served via `ob-ssh-cert`)_.
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
@@ -171,64 +177,13 @@ The full, theme-organized index is in **[doc/README.md](doc/README.md)**. Highli
 - **Recording & audit** — [Session recording](doc/session-recording.md) · [Audit trace](doc/audit.md)
 - **Offline & resilience** — [Offline mode](doc/offline-mode.md) · [Cache administration](doc/offline-cache-admin.md)
 - **Security & hardening** — [Security features](doc/security.md) · [Hardening](doc/hardening.md) · [CrowdSec](doc/crowdsec.md)
-- **Reference** — [Configuration](doc/configuration.md) · [Desktop SSO](doc/desktop-sso.md) _(experimental/alpha)_ · [Competitors](doc/competitors.md)
+- **Reference** — [Configuration](doc/configuration.md) · [Troubleshooting](doc/troubleshooting.md) · [Desktop SSO](doc/desktop-sso.md) _(experimental/alpha)_ · [Competitors](doc/competitors.md)
 - **Security analysis (EBIOS)** — [threat model & risk study](doc/security/00-architecture.md)
 
 ## Troubleshooting
 
-### Check Logs
-
-```bash
-# System auth log
-sudo tail -f /var/log/auth.log
-
-# Or journald
-sudo journalctl -u sshd -f
-```
-
-### Enable Debug Mode
-
-In `/etc/open-bastion/openbastion.conf`:
-
-```ini
-log_level = debug
-```
-
-### Test Token Introspection
-
-```bash
-curl -X POST https://auth.example.com/oauth2/introspect \
-  -u "pam-access:secret" \
-  -d "token=<user_token>"
-```
-
-### Test Authorization Endpoint
-
-```bash
-curl -X POST https://auth.example.com/pam/authorize \
-  -H "Authorization: Bearer $(sudo cat /var/lib/open-bastion/token)" \
-  -H "Content-Type: application/json" \
-  -d '{"user": "testuser", "host": "'$(hostname)'", "server_group": "default"}'
-```
-
-### Common Issues
-
-| Issue                        | Cause                 | Solution                                     |
-| ---------------------------- | --------------------- | -------------------------------------------- |
-| `PAM unable to load module`  | Module not in path    | Check `/lib/security/` or `/lib64/security/` |
-| `Token introspection failed` | Wrong credentials     | Verify client_id and client_secret           |
-| `Server not enrolled`        | Missing/invalid token | Run `ob-enroll`                              |
-| `User not authorized`        | Server group rules    | Check LLNG Manager configuration             |
-| `Connection refused`         | Portal unreachable    | Check network and portal_url                 |
-
-### Re-enrollment
-
-If the server token expires or is compromised:
-
-```bash
-sudo rm /var/lib/open-bastion/token
-sudo ob-enroll
-```
+Logs, debug mode, endpoint tests and common issues are collected in
+**[doc/troubleshooting.md](doc/troubleshooting.md)**.
 
 ## Requirements
 
