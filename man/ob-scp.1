@@ -31,9 +31,18 @@ so a direct backend-to-backend transfer would be rejected. Routing every
 connection through the bastion keeps the source address matching the
 certificate.
 .SH OPTIONS
-Options consumed by ob-scp itself must come first:
+Options consumed by ob-scp itself must come first. Any further options are
+passed straight to
+.BR scp (1)
+\(em including
+.BR scp 's
+own
+.BR \-c " " \fICIPHER\fR,
+which is why ob-scp's config option is long-only (a short
+.B \-c
+would shadow it).
 .TP
-.BR \-c ", " \-\-config " " \fIFILE\fR
+.BR \-\-config " " \fIFILE\fR
 Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
 .TP
 .BR \-d ", " \-\-debug

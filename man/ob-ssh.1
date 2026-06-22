@@ -3,7 +3,7 @@
 ob-ssh \- bastion-to-backend SSH connector with LLNG certificate vouching
 .SH SYNOPSIS
 .B ob-ssh
-[\fIOPTIONS\fR] [\fIuser@\fR]\fIbackend\fR [\fIport\fR]
+[\fIOPTIONS\fR] [\fIuser@\fR]\fIbackend\fR [\fIport\fR] [\fIcommand ...\fR]
 .SH DESCRIPTION
 .B ob-ssh
 runs on a bastion server, invoked by a user already authenticated to the
@@ -29,10 +29,16 @@ POSTs the ephemeral public key plus the voucher to LemonLDAP::NG
 user, pinned to the bastion's source address, bastion_id in the key-id).
 .IP 4. 4
 Connects to the backend with that certificate.
+.PP
+With no trailing \fIcommand\fR an interactive shell is opened on the backend.
+When a \fIcommand\fR is given it is run non-interactively (no pty is requested,
+mirroring \fBssh\fR(1) \fIhost command\fR) and its output is returned verbatim,
+so it pipes and captures cleanly.
 .SS Modes
 .TP
 .B Direct mode
-Called with a target host argument (the common case).
+Called with a target host argument (the common case), optionally followed by a
+command to run on the backend.
 .TP
 .B ForceCommand mode
 When \fBSSH_ORIGINAL_COMMAND\fR is set (used as an sshd ForceCommand).
@@ -43,6 +49,22 @@ When neither a target argument nor SSH_ORIGINAL_COMMAND is set, prompts for one.
 .TP
 .BR \-c ", " \-\-config " " \fIFILE\fR
 Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
+.TP
+.BR \-p ", " \-\-port " " \fIPORT\fR
+Backend SSH port; overrides the legacy positional \fIport\fR argument.
+.TP
+.BR \-l ", " \-\-login " " \fIUSER\fR
+Backend login user; overrides \fB$USER\fR for a bare (user-less) host.
+.TP
+.BI \-o " OPTION"
+Pass an
+.BR ssh (1)
+\fB\-o\fR option through to the backend connection (e.g. \fB\-o
+ServerAliveInterval=30\fR). May be repeated; appended after the config's
+\fBSSH_OPTIONS\fR.
+.TP
+.B \-\-
+End option parsing; the host and command follow.
 .TP
 .BR \-d ", " \-\-debug
 Enable debug output to stderr
@@ -142,6 +164,15 @@ $ ob-ssh backend-web01
 
 # Different remote user and port:
 $ ob-ssh admin@backend-web01 2222
+
+# Run a single command on the backend (non-interactive, output captured):
+$ ob-ssh backend-web01 uptime
+$ ob-ssh admin@backend-web01 -p 2222 -- systemctl status nginx
+
+# From a workstation through an ssh_config "RemoteCommand ob-ssh ..." entry,
+# override RemoteCommand to append the backend command (ssh forbids combining a
+# command-line command with a configured RemoteCommand):
+$ ssh -o RemoteCommand="ob-ssh 10.0.0.5 ls -la" backend1
 .fi
 .SH SEE ALSO
 .BR ob-scp (1),

@@ -34,9 +34,18 @@ the ephemeral private key lives in tmpfs and is wiped when
 .B ob-sftp
 exits.
 .SH OPTIONS
-Options consumed by ob-sftp itself must come first:
+Options consumed by ob-sftp itself must come first. Any further options are
+passed straight to
+.BR sftp (1)
+\(em including
+.BR sftp 's
+own
+.BR \-c " " \fICIPHER\fR,
+which is why ob-sftp's config option is long-only (a short
+.B \-c
+would shadow it).
 .TP
-.BR \-c ", " \-\-config " " \fIFILE\fR
+.BR \-\-config " " \fIFILE\fR
 Use alternate configuration file (default: /etc/open-bastion/ssh-proxy.conf)
 .TP
 .BR \-d ", " \-\-debug

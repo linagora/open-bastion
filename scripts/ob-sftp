@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.3"
+VERSION="0.2.4"
 PROG_NAME=$(basename "$0")
 
 # Source the shared cert-vouching library: the installed path first, then
@@ -48,12 +48,14 @@ vouched certificate authenticates as a single principal). No SSH key of your
 own on the bastion and no agent forwarding are needed.
 
 Options (consumed by $PROG_NAME, must come first):
-  -c, --config FILE   Use alternate config file (default: $CONFIG_FILE)
+      --config FILE   Use alternate config file (default: $CONFIG_FILE)
   -d, --debug         Enable debug output
   -h, --help          Show this help
   -V, --version       Show version
 
-Any further options are passed straight to sftp (e.g. -r, -P PORT, -b FILE, -C).
+Any further options are passed straight to sftp (e.g. -r, -P PORT, -b FILE, -C,
+and -c CIPHER — sftp's own -c is no longer shadowed by a config short option).
+Use -- to end $PROG_NAME option parsing explicitly.
 
 Examples:
   $PROG_NAME dwho@backend1
@@ -84,7 +86,9 @@ SFTP_ARGS=()
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            -c|--config) CONFIG_FILE="$2"; shift 2 ;;
+            # --config is long-only on purpose: sftp's own -c selects a cipher, so
+            # a short -c here would shadow it and never reach sftp.
+            --config)    CONFIG_FILE="$2"; shift 2 ;;
             -d|--debug)
                 # DEBUG is consumed by debug() in ob-cert-lib.sh (sourced above).
                 # shellcheck disable=SC2034

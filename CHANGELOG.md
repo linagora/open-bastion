@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ob-ssh` can run a one-shot command on the backend.** A trailing command is
+  now forwarded to the backend (`ob-ssh backend uptime`) and run
+  non-interactively — no pty, output captured verbatim, like `ssh host cmd` —
+  instead of being mis-read as a port (`Bad port '...'`). New `-p`/`--port`,
+  `-l`/`--login` and `-o` (ssh option passthrough) flags, plus `--` to end
+  option parsing; the legacy positional `[port]` still works. Works in both
+  direct and `ForceCommand` modes. From a workstation whose `ssh_config` sets
+  `RemoteCommand ob-ssh ...`, override it to append the command:
+  `ssh -o RemoteCommand="ob-ssh 10.0.0.5 ls -la" backend1` (ssh forbids
+  combining a command-line command with a configured `RemoteCommand`).
 - **`ob-sftp` bastion file-transfer connector.** The `sftp` counterpart of
   `ob-ssh` / `ob-scp`: run on a bastion, it mints a short-lived,
   LLNG-signed certificate (via the shared `ob-cert-lib.sh`) and opens an
@@ -43,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sandboxed oneshot service and only writes under
   `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout. See
   `doc/session-recording.md` and `ob-session-prune(8)`.
+
+### Fixed
+
+- **`ob-scp` / `ob-sftp` no longer shadow `scp`/`sftp`'s own `-c CIPHER`.** Their
+  config option is now long-only (`--config`); a short `-c` used to be consumed
+  as the config path, so `ob-scp -c aes256-gcm@openssh.com …` never reached
+  `scp`. Other options (`-p`, `-P PORT`, `-r`, `-b FILE`, `-l`, …) already passed
+  through and still do; use `--` to end ob-* option parsing explicitly.
 
 ### Documentation
 

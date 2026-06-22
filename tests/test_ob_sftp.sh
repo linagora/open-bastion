@@ -151,6 +151,46 @@ TESTSCRIPT
     fi
 }
 
+# parse_args: own options are consumed, everything else (incl. sftp's own -c
+# CIPHER) reaches SFTP_ARGS. Regression: a short -c used to be ob-sftp's
+# --config and swallowed sftp's cipher option so it never reached sftp.
+test_parse_args_passthrough() {
+    local test_script="$TEST_TMPDIR/test_sftp_passthrough.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+set -u
+source_file="$1"
+
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+check() { # argv... ; last arg is expected "CONFIG|SFTP_ARGS*"
+    local expected="${!#}"
+    local -a argv=("${@:1:$#-1}")
+    CONFIG_FILE="DEFAULT"
+    parse_args "${argv[@]}"
+    local got="${CONFIG_FILE}|${SFTP_ARGS[*]}"
+    [ "$got" = "$expected" ] || { echo "MISMATCH for [${argv[*]}]: got [$got] want [$expected]"; exit 1; }
+}
+#      argv...                                  expected CONFIG|SFTP_ARGS
+check  dwho@h                                   "DEFAULT|dwho@h"
+check  -c aes256-gcm@openssh.com dwho@h         "DEFAULT|-c aes256-gcm@openssh.com dwho@h"
+check  --config /x dwho@h                       "/x|dwho@h"
+check  -P 2222 dwho@h:/var/log                  "DEFAULT|-P 2222 dwho@h:/var/log"
+check  -b /tmp/s dwho@h                         "DEFAULT|-b /tmp/s dwho@h"
+echo "SFTP_PASSTHROUGH_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$SFTP_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "SFTP_PASSTHROUGH_OK"; then
+        test_pass "parse_args: sftp options pass through; -c CIPHER not shadowed"
+    else
+        test_fail "sftp option passthrough matrix" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-sftp (llng bastion SFTP connector)"
@@ -162,6 +202,7 @@ test_version_flag
 test_help_flag
 test_no_args
 test_split_dest_spec
+test_parse_args_passthrough
 
 # Summary
 echo ""
