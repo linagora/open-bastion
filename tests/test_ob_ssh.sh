@@ -751,6 +751,41 @@ TESTSCRIPT
     fi
 }
 
+# Test 23: parse_args must return 0 under `set -e`. Regression: the function
+# used to end on `[ -n "$explicit_port" ] && ...`, which returns 1 when no -p is
+# given, so under the script's `set -euo pipefail` the `parse_args "$@"` call in
+# main() aborted ob-ssh before it ever connected (session opened then closed at
+# once). The other tests strip `set -euo pipefail`, so they could not catch it;
+# this one re-enables `set -e` around the call on purpose.
+test_parse_args_setminus_e() {
+    local test_script="$TEST_TMPDIR/test_parse_set_e.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+source_file="$1"
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+# Replicate the real runtime: set -e active across the parse_args call. If
+# parse_args returns non-zero, set -e aborts here and REACHED is never printed.
+for argv in "backend" "backend ls -la" "user@backend 2222" "-p 2200 backend"; do
+    ( set -euo pipefail
+      # shellcheck disable=SC2086
+      parse_args $argv
+      echo "REACHED:$argv" ) || { echo "ABORTED:$argv"; exit 1; }
+done
+echo "SET_E_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "SET_E_OK"; then
+        test_pass "parse_args returns 0 under set -e (no premature script abort)"
+    else
+        test_fail "parse_args set -e regression" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-ssh (llng bastion SSH connector)"
@@ -779,6 +814,7 @@ test_validate_hostname
 test_force_command_parse
 test_parse_args_command
 test_force_command_with_cmd
+test_parse_args_setminus_e
 
 # Summary
 echo ""

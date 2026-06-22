@@ -317,8 +317,13 @@ parse_args() {
     fi
     REMOTE_CMD=("$@")
 
-    # An explicit -p/--port wins over the positional port.
-    [ -n "$explicit_port" ] && TARGET_PORT="$explicit_port"
+    # An explicit -p/--port wins over the positional port. Use an `if` (not a
+    # `&&` list) so parse_args does NOT return the test's non-zero status as its
+    # own exit code: under `set -e` that would abort the whole script the moment
+    # no -p was given (i.e. almost always).
+    if [ -n "$explicit_port" ]; then
+        TARGET_PORT="$explicit_port"
+    fi
 }
 
 # Main
