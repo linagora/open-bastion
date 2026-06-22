@@ -32,8 +32,17 @@
 
 set -euo pipefail
 
-VERSION="0.2.3"
+VERSION="0.3.0"
 PROG_NAME=$(basename "$0")
+
+# Remote command to run on the backend. Empty => interactive shell (the historic
+# behaviour). Populated by parse_args (direct mode) or force_command_mode, then
+# appended verbatim to the backend ssh invocation as separate argv elements (no
+# shell re-splitting on the bastion). Declared here so `set -u` is satisfied even
+# on code paths that never set it.
+REMOTE_CMD=()
+# Default login user from -l/--login; overrides $USER for a bare (user-less) host.
+OB_LOGIN_USER=""
 
 # Source the shared cert-vouching library: the installed path first, then
 # alongside this script (running from the source tree / tests).
@@ -66,21 +75,29 @@ connect_via_cert() {
     trap "rm -rf '$OB_EPH_DIR'" EXIT
 
     # TTY handling — the crux of correct interactive behaviour through the hop:
-    #   * interactive (stdin is a tty): force a remote pty with -tt. ssh then
+    #   * a remote command was given (`ob-ssh host cmd...`): mirror ssh(1) and do
+    #     NOT allocate a pty (-T). Output stays clean (no \r, no pty echo) so it
+    #     pipes and captures like a normal `ssh host cmd`.
+    #   * interactive shell, stdin is a tty: force a remote pty with -tt. ssh then
     #     puts the bastion-side tty into raw mode, so input is echoed ONCE (by
     #     the backend pty, not also by the bastion tty), and Ctrl-C / a failing
     #     command act on the REMOTE shell instead of tearing down this proxy.
     #     Relying on ssh's tty auto-detection here is fragile and is what
     #     produced the double-echo / shell-killed-on-Ctrl-C reports.
-    #   * non-interactive (piped stdin, e.g. a scripted command): -T, no pty.
+    #   * interactive shell, piped stdin (e.g. a here-doc fed to the shell): -T.
     local -a tty_opt
-    if [ -t 0 ]; then
+    if [ "${#REMOTE_CMD[@]}" -gt 0 ]; then
+        tty_opt=(-T)
+    elif [ -t 0 ]; then
         tty_opt=(-tt)
     else
         tty_opt=(-T)
     fi
 
-    # Re-originate: the BASTION authenticates to the backend with the cert.
+    # Re-originate: the BASTION authenticates to the backend with the cert. Any
+    # REMOTE_CMD is appended AFTER the host as separate argv elements: ssh sends
+    # it to the backend to run, and the array keeps each word intact (no bastion
+    # re-splitting / globbing). Empty array expands to nothing under `set -u`.
     local rc=0
     ssh -i "$OB_EPH_KEY" \
         -o CertificateFile="$OB_EPH_CERT" \
@@ -90,7 +107,7 @@ connect_via_cert() {
         -p "$target_port" \
         "${SSH_OPTIONS_ARRAY[@]}" \
         -l "$target_user" \
-        -- "$target_host" || rc=$?
+        -- "$target_host" "${REMOTE_CMD[@]}" || rc=$?
 
     exit $rc
 }
@@ -112,7 +129,7 @@ parse_target_spec() {
 direct_mode() {
     local spec="$1"
     local port="${2:-22}"
-    local user="${USER:-$(whoami)}"
+    local user="${OB_LOGIN_USER:-${USER:-$(whoami)}}"
     parse_target_spec "$spec" "$user"
     connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
 }
@@ -160,6 +177,11 @@ force_command_mode() {
         exit 1
     fi
 
+    # Anything after the host token is the command to run on the backend, e.g.
+    # `ssh backend ls -la` -> REMOTE_CMD=(ls -la). i points at the host; in both
+    # the `--` and bare-host branches the command therefore starts at i+1.
+    REMOTE_CMD=("${toks[@]:$((i + 1))}")
+
     parse_target_spec "$target" "$user"
     connect_via_cert "$SPEC_HOST" "$SPEC_USER" "$port"
 }
@@ -187,23 +209,31 @@ interactive_mode() {
 # Show usage
 usage() {
     cat <<EOF
-Usage: $PROG_NAME [OPTIONS] [user@]backend [port]
+Usage: $PROG_NAME [OPTIONS] [user@]backend [port] [command...]
 
 Bastion-to-backend SSH connector with LLNG certificate vouching. Run on a
 bastion by a user already authenticated to it; the bastion mints a short-lived,
 LLNG-signed certificate and re-originates the SSH connection to the backend.
 No SSH key of your own on the bastion and no agent forwarding are needed.
 
+With no command, an interactive shell is opened on the backend. With a trailing
+command, it is run non-interactively (like \`ssh host cmd\`) and its output is
+returned verbatim, e.g. \`$PROG_NAME backend uptime\`.
+
 Modes:
-  Direct mode:        $PROG_NAME [user@]backend [port]
+  Direct mode:        $PROG_NAME [user@]backend [port] [command...]
   ForceCommand mode:  $PROG_NAME            (reads SSH_ORIGINAL_COMMAND)
   Interactive mode:   $PROG_NAME            (prompts for target)
 
 Options:
   -c, --config FILE   Use alternate config file (default: $CONFIG_FILE)
+  -p, --port PORT     Backend SSH port (overrides the positional [port])
+  -l, --login USER    Backend login user (overrides \$USER for a bare host)
+  -o OPTION           Pass an ssh -o option through to the backend connection
   -d, --debug         Enable debug output
   -h, --help          Show this help
   -V, --version       Show version
+  --                  End option parsing (host and command follow)
 
 Configuration ($CONFIG_FILE):
     PORTAL_URL="https://auth.example.com"
@@ -220,6 +250,8 @@ EOF
 
 # Parse arguments
 parse_args() {
+    REMOTE_CMD=()
+    local explicit_port=""
     while [ $# -gt 0 ]; do
         case "$1" in
             -c|--config)
@@ -232,6 +264,21 @@ parse_args() {
                 DEBUG=true
                 shift
                 ;;
+            -p|--port)
+                explicit_port="$2"
+                shift 2
+                ;;
+            -l|--login)
+                OB_LOGIN_USER="$2"
+                shift 2
+                ;;
+            -o)
+                # Pass an arbitrary ssh option through to the backend connection,
+                # e.g. `-o ServerAliveInterval=30`. Appended to the array already
+                # seeded from the config's SSH_OPTIONS.
+                SSH_OPTIONS_ARRAY+=("-o" "$2")
+                shift 2
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -239,6 +286,11 @@ parse_args() {
             -V|--version)
                 echo "$PROG_NAME version $VERSION"
                 exit 0
+                ;;
+            --)
+                # Explicit end of options; everything after is host + command.
+                shift
+                break
                 ;;
             -*)
                 error "Unknown option: $1"
@@ -251,9 +303,22 @@ parse_args() {
         esac
     done
 
-    # Remaining arguments: [user@]host [port]
+    # Remaining positional arguments: [user@]host [port] [command...]
     TARGET_SPEC="${1:-}"
-    TARGET_PORT="${2:-22}"
+    [ $# -gt 0 ] && shift
+
+    # A purely-numeric next token is the legacy positional port (kept for
+    # backward compatibility, e.g. `ob-ssh admin@backend 2222`). Otherwise the
+    # rest of the line is the command to run on the backend.
+    TARGET_PORT=22
+    if [ $# -gt 0 ] && [[ "$1" =~ ^[0-9]+$ ]]; then
+        TARGET_PORT="$1"
+        shift
+    fi
+    REMOTE_CMD=("$@")
+
+    # An explicit -p/--port wins over the positional port.
+    [ -n "$explicit_port" ] && TARGET_PORT="$explicit_port"
 }
 
 # Main

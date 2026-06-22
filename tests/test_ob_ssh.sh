@@ -673,6 +673,84 @@ TESTSCRIPT
     fi
 }
 
+# Test 21: parse_args splits a trailing command from the host/port and honours
+# -p/--port and -l/--login. Regression: `ob-ssh host ls` used to read "ls" as a
+# port ("Bad port 'ls'") and `-p`/`-l` were rejected as unknown options.
+test_parse_args_command() {
+    local test_script="$TEST_TMPDIR/test_parse_cmd.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+set -u
+source_file="$1"
+
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+check() { # argv... ; last arg is expected "SPEC|PORT|USER|CMD"
+    local expected="${!#}"
+    local -a argv=("${@:1:$#-1}")
+    OB_LOGIN_USER=""
+    parse_args "${argv[@]}"
+    local got="${TARGET_SPEC}|${TARGET_PORT}|${OB_LOGIN_USER}|${REMOTE_CMD[*]}"
+    [ "$got" = "$expected" ] || { echo "MISMATCH for [${argv[*]}]: got [$got] want [$expected]"; exit 1; }
+}
+#      argv...                              expected SPEC|PORT|USER|CMD
+check  backend                             "backend|22||"
+check  backend 2222                        "backend|2222||"
+check  backend ls -la                      "backend|22||ls -la"
+check  backend 2222 ls -la                 "backend|2222||ls -la"
+check  -p 2200 backend uptime              "backend|2200||uptime"
+check  -l bob backend                      "backend|22|bob|"
+check  admin@backend 22 "echo hi there"    "admin@backend|22||echo hi there"
+check  -- backend ls                       "backend|22||ls"
+echo "PARSE_CMD_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "PARSE_CMD_OK"; then
+        test_pass "parse_args: trailing command, -p/--port and -l/--login"
+    else
+        test_fail "parse_args command/option matrix" "Output: $output"
+    fi
+}
+
+# Test 22: ForceCommand mode forwards the trailing command to the backend, e.g.
+# `ssh backend ls -la` -> REMOTE_CMD=(ls -la), while still resolving host/port.
+test_force_command_with_cmd() {
+    local test_script="$TEST_TMPDIR/test_force_cmd.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+source_file="$1"
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+# Stub the connector: also report the resolved remote command.
+connect_via_cert() { echo "HOST=$1 PORT=$3 CMD=[${REMOTE_CMD[*]}]"; }
+USER=alice
+
+check() { # $1 SSH_ORIGINAL_COMMAND  $2 expected
+    local got; got=$(SSH_ORIGINAL_COMMAND="$1" force_command_mode 2>/dev/null)
+    [ "$got" = "$2" ] || { echo "MISMATCH for [$1]: got [$got] want [$2]"; exit 1; }
+}
+check "ssh backend"                "HOST=backend PORT=22 CMD=[]"
+check "ssh backend ls -la"         "HOST=backend PORT=22 CMD=[ls -la]"
+check "ssh -p 2222 backend uptime" "HOST=backend PORT=2222 CMD=[uptime]"
+check "ssh -- backend whoami"      "HOST=backend PORT=22 CMD=[whoami]"
+echo "FORCE_CMD_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$PROXY_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "FORCE_CMD_OK"; then
+        test_pass "ForceCommand mode: trailing command forwarded to backend"
+    else
+        test_fail "ForceCommand command-forward matrix" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-ssh (llng bastion SSH connector)"
@@ -699,6 +777,8 @@ test_parse_args_debug
 test_missing_portal_url
 test_validate_hostname
 test_force_command_parse
+test_parse_args_command
+test_force_command_with_cmd
 
 # Summary
 echo ""
