@@ -182,6 +182,46 @@ TESTSCRIPT
     fi
 }
 
+# parse_args: own options are consumed, everything else (incl. scp's own -c
+# CIPHER) reaches SCP_ARGS. Regression: a short -c used to be ob-scp's --config
+# and swallowed scp's cipher option so it never reached scp.
+test_parse_args_passthrough() {
+    local test_script="$TEST_TMPDIR/test_scp_passthrough.sh"
+    cat > "$test_script" <<'TESTSCRIPT'
+#!/bin/bash
+set -u
+source_file="$1"
+
+eval "$(sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$source_file")"
+
+check() { # argv... ; last arg is expected "CONFIG|SCP_ARGS*"
+    local expected="${!#}"
+    local -a argv=("${@:1:$#-1}")
+    CONFIG_FILE="DEFAULT"
+    parse_args "${argv[@]}"
+    local got="${CONFIG_FILE}|${SCP_ARGS[*]}"
+    [ "$got" = "$expected" ] || { echo "MISMATCH for [${argv[*]}]: got [$got] want [$expected]"; exit 1; }
+}
+#      argv...                                  expected CONFIG|SCP_ARGS
+check  ./f h:/p                                 "DEFAULT|./f h:/p"
+check  -c aes256-gcm@openssh.com ./f h:/p       "DEFAULT|-c aes256-gcm@openssh.com ./f h:/p"
+check  --config /x ./f h:/p                     "/x|./f h:/p"
+check  -P 2222 -r ./f h:/p                      "DEFAULT|-P 2222 -r ./f h:/p"
+check  -d -- -c aes ./f h:/p                    "DEFAULT|-c aes ./f h:/p"
+echo "SCP_PASSTHROUGH_OK"
+TESTSCRIPT
+
+    chmod +x "$test_script"
+    local output
+    output=$("$test_script" "$SCP_SCRIPT" 2>&1)
+
+    if echo "$output" | grep -q "SCP_PASSTHROUGH_OK"; then
+        test_pass "parse_args: scp options pass through; -c CIPHER not shadowed"
+    else
+        test_fail "scp option passthrough matrix" "Output: $output"
+    fi
+}
+
 # Main test execution
 echo "=========================================="
 echo "Testing ob-scp (llng bastion SCP connector)"
@@ -194,6 +234,7 @@ test_help_flag
 test_too_few_args
 test_is_remote_spec
 test_split_remote_spec
+test_parse_args_passthrough
 
 # Summary
 echo ""

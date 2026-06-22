@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout. See
   `doc/session-recording.md` and `ob-session-prune(8)`.
 
+### Fixed
+
+- **`ob-scp` / `ob-sftp` no longer shadow `scp`/`sftp`'s own `-c CIPHER`.** Their
+  config option is now long-only (`--config`); a short `-c` used to be consumed
+  as the config path, so `ob-scp -c aes256-gcm@openssh.com …` never reached
+  `scp`. Other options (`-p`, `-P PORT`, `-r`, `-b FILE`, `-l`, …) already passed
+  through and still do; use `--` to end ob-* option parsing explicitly.
+
 ### Documentation
 
 - **Docs reorganized for progressive discovery.** `README.md` now leads with a
