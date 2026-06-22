@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-22
+
+New bastion file-transfer and remote-command paths, declarative service accounts,
+and automatic session-recording retention. `ob-ssh` gains one-shot backend
+commands, `ob-sftp` joins `ob-ssh`/`ob-scp`, `ob-builder` can bake in
+SSH-key-only service accounts, and `ob-session-prune` bounds the recordings
+store. Includes a `-c CIPHER` passthrough fix for `ob-scp`/`ob-sftp` and a
+progressive-discovery documentation reorganization.
+
 ### Added
 
 - **`ob-ssh` can run a one-shot command on the backend.** A trailing command is
@@ -60,41 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config option is now long-only (`--config`); a short `-c` used to be consumed
   as the config path, so `ob-scp -c aes256-gcm@openssh.com …` never reached
   `scp`. Other options (`-p`, `-P PORT`, `-r`, `-b FILE`, `-l`, …) already passed
-  through and still do; use `--` to end ob-* option parsing explicitly.
+  through and still do; use `--` to end ob-\* option parsing explicitly.
 
 ### Documentation
 
-- **Docs reorganized for progressive discovery.** `README.md` now leads with a
-  value proposition and a "how it works" overview, promotes the three
-  quick-starts, and points to a theme-organized index. `doc/README.md` is grouped
-  by theme (start here · connections & architecture · access & permissions ·
-  recording & audit · offline & resilience · security & hardening · reference ·
-  EBIOS). New `doc/permissions.md` consolidates **which access control lives
-  SSO-side vs Open-Bastion-side** (with a "where do I set X" map) — previously
-  scattered across the PAM, LLNG, configuration and hardening docs. Cross-links
-  added from `pam-modes`, `llng-configuration` and `service-accounts`. The EBIOS
-  study under `doc/security/` is unchanged.
-- **Service-account security model documented.** `doc/service-accounts.md` now
-  spells out that ob-builder deposits the fingerprint only, so the public key
-  must still be authorized at the SSH layer (`authorized_keys`, or the
-  `ob-service-account-keys` `AuthorizedKeysCommand` helper for Mode E); that
-  service accounts use direct key auth (no `ob-ssh`), so a native ProxyJump hop
-  through the bastion is **not session-recorded**; and that service-account sudo
-  is granted locally with **no LLNG token, even in Mode E**. New EBIOS risks
-  R-S24 (sudo without token) and R-S25 (unrecorded ProxyJump hop) in
-  `doc/security/99-risk-reduce.md`. `local-test/deploy-shell.sh` gained an
-  end-to-end service-account check on the standalone VM.
-- **Backend access guidance corrected.** The admin guide showed a
-  `ProxyCommand`/`ProxyJump` snippet for reaching a backend in one command, but
-  `ob-ssh` re-originates a full interactive session (it is not a `-W` stdio
-  forwarder) and cannot be used as a `ProxyCommand`. Replaced with the correct
-  one-command form: `ob-ssh <backend>` on the bastion, or a workstation
-  `RemoteCommand` alias, plus a note on why `ProxyJump`/`ProxyCommand` do not
-  apply.
-- **Retention guidance.** Dropped the stale "consider a `logrotate` rule"
-  advice from the recording and admin docs; retention is now automatic via
-  `ob-session-prune.timer`, and a `logrotate` rule would rename root-owned
-  recordings and break the tamper-evident layout.
+- Docs reorganized for progressive discovery.
+- Service-account security model documented.
+- Backend access guidance corrected.
+- Retention guidance.
 
 ## [0.5.1] - 2026-06-17
 
