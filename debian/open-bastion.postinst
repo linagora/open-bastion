@@ -264,4 +264,32 @@ esac
 
 #DEBHELPER#
 
+# ── Upgrade safety: re-assert bastion socket activation ──────────────────────
+# ob-cert.socket (hop-certificate minting) and ob-record.socket (the session-
+# recording sink) ship --no-enable/--no-start: the package can't know a host's
+# role, so ob-bastion-setup is what enables them. A plain `apt upgrade` would
+# therefore leave them inactive on an already configured bastion — and since
+# recording is fail-closed, EVERY login is then refused ("recording sink
+# unreachable; access refused"). Re-enable them here, idempotently, but ONLY
+# when this host is already a bastion: the sshd drop-in that ob-bastion-setup
+# writes is the role marker. This never enables them on a backend or an
+# unconfigured host. Runs after #DEBHELPER# so the unit files are registered and
+# daemon-reload has happened. Failures are non-fatal (ob-bastion-setup only
+# warns too); the admin can always re-run ob-bastion-setup.
+if [ "$1" = configure ] \
+    && [ -d /run/systemd/system ] \
+    && command -v systemctl >/dev/null 2>&1; then
+    for _ob_dropin in /etc/ssh/sshd_config.d/*-open-bastion-bastion.conf; do
+        [ -f "$_ob_dropin" ] || continue
+        # Bastion role → hop-certificate minting socket (ob-ssh / ob-scp).
+        systemctl enable --now ob-cert.socket >/dev/null 2>&1 || true
+        # Recording sink, only when recording is enabled (the ForceCommand is
+        # absent under ob-bastion-setup --disable-session-recorder).
+        if grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+.*ob-session-recorder' "$_ob_dropin"; then
+            systemctl enable --now ob-record.socket >/dev/null 2>&1 || true
+        fi
+        break
+    done
+fi
+
 exit 0

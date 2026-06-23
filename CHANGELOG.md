@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`apt upgrade` no longer breaks an already-configured bastion.** The
+  socket-activated bastion helpers — `ob-cert.socket` (hop-certificate minting
+  for `ob-ssh`/`ob-scp`) and `ob-record.socket` (the session-recording sink) —
+  ship `--no-enable`/`--no-start`, since the package can't know a host's role;
+  `ob-bastion-setup` is what enables them. A plain package upgrade therefore left
+  them inactive, and because recording is fail-closed every login was then
+  refused (`recording sink unreachable; access refused`). The `postinst` now
+  re-asserts both sockets on `configure`, idempotently, **only** when the host is
+  already a bastion (the `ob-bastion-setup` sshd drop-in is present) and only
+  enables `ob-record.socket` when session recording is on. Backends and
+  unconfigured hosts are untouched. Re-running `ob-bastion-setup` remains the
+  documented recovery and is no longer required merely to survive an upgrade.
+
 ## [0.6.0] - 2026-06-22
 
 New bastion file-transfer and remote-command paths, declarative service accounts,
