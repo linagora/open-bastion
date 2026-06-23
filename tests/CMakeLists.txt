@@ -45,6 +45,7 @@ add_test(NAME test_secret_store COMMAND test_secret_store)
 
 # Test NSS module helper functions
 add_executable(test_nss_openbastion test_nss_openbastion.c)
+target_compile_definitions(test_nss_openbastion PRIVATE _GNU_SOURCE)
 target_include_directories(test_nss_openbastion PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_nss_openbastion COMMAND test_nss_openbastion)
 
