@@ -133,7 +133,7 @@ static const char *canonical_service(const char *service)
 
 /* Forward declarations */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
-static void invalidate_nscd_cache(void);
+static void invalidate_user_cache(const char *username, uid_t uid, int have_uid);
 static int validate_username(const char *user);
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
@@ -967,51 +967,66 @@ static int sync_user_groups(pam_handle_t *pamh,
         }
     }
 
-    /* Invalidate nscd cache only if changes were made */
+    /* Invalidate the user's NSS file cache only if changes were made, so the
+     * new group membership is visible to subsequent lookups immediately. */
     if (changes_made) {
-        invalidate_nscd_cache();
+        invalidate_user_cache(username, 0, 0);
     }
 
     return ret;
 }
 
 /*
- * Invalidate nscd cache for passwd and group databases.
- * This ensures that subsequent NSS lookups see the newly created user.
+ * Invalidate the NSS module's own passwd file cache for a single user.
+ *
+ * Historically this forked `nscd --invalidate`, but nscd has been dropped
+ * (it loaded our multithreaded curl/TLS NSS module and crashed with SIGABRT
+ * in the NSS path). The NSS module (libnss_openbastion) now maintains its own
+ * cross-process file cache under /var/cache/nss_llng:
+ *   - per-name entries: /var/cache/nss_llng/byname/<name>
+ *   - per-uid  entries: /var/cache/nss_llng/<uid>
+ * Removing the relevant entries here makes a freshly created user or a changed
+ * group membership visible to subsequent getpwnam/getpwuid lookups
+ * immediately, instead of waiting for the file-cache TTL to expire.
+ *
+ * The module serves passwd only (getpwnam/getpwuid); it does not implement the
+ * group database, so there are no group-cache files to invalidate.
+ *
+ * Security: this runs as root and the cache dir is root-owned 0755. The
+ * username is validated (same rules as validate_username) before being used as
+ * a path component, and every path is built with a bounds-checked snprintf.
+ * unlink()/unlinkat() do not follow a symlink on the final path component, so
+ * removal is confined to the cache directory. Operating purely by path means
+ * this is a harmless no-op when the cache files (or the directory) are absent,
+ * so it introduces no hard dependency on the NSS module being installed.
+ *
+ * When have_uid is non-zero, the per-uid entry for `uid` is also removed.
  */
-static void invalidate_nscd_cache(void)
+#define OB_NSS_CACHE_DIR "/var/cache/nss_llng"
+
+static void invalidate_user_cache(const char *username, uid_t uid, int have_uid)
 {
-    pid_t pid1 = -1, pid2 = -1;
+    char path[PATH_MAX];
+    int n;
 
-    /* Fork both children first for parallel execution */
-    pid1 = fork();
-    if (pid1 == 0) {
-        int null_fd = open("/dev/null", O_WRONLY);
-        if (null_fd >= 0) {
-            dup2(null_fd, STDOUT_FILENO);
-            dup2(null_fd, STDERR_FILENO);
-            close(null_fd);
+    /* Remove the per-name entry, if a valid username is in scope. */
+    if (username && validate_username(username)) {
+        n = snprintf(path, sizeof(path),
+                     OB_NSS_CACHE_DIR "/byname/%s", username);
+        if (n > 0 && (size_t)n < sizeof(path)) {
+            /* No-op (with ENOENT) if the file or cache dir is absent. */
+            unlink(path);
         }
-        execl("/usr/sbin/nscd", "nscd", "--invalidate", "passwd", NULL);
-        _exit(0);
     }
 
-    pid2 = fork();
-    if (pid2 == 0) {
-        int null_fd = open("/dev/null", O_WRONLY);
-        if (null_fd >= 0) {
-            dup2(null_fd, STDOUT_FILENO);
-            dup2(null_fd, STDERR_FILENO);
-            close(null_fd);
+    /* Remove the per-uid entry when the uid is known. */
+    if (have_uid) {
+        n = snprintf(path, sizeof(path),
+                     OB_NSS_CACHE_DIR "/%lu", (unsigned long)uid);
+        if (n > 0 && (size_t)n < sizeof(path)) {
+            unlink(path);
         }
-        execl("/usr/sbin/nscd", "nscd", "--invalidate", "group", NULL);
-        _exit(0);
     }
-
-    /* Wait for both children */
-    int status;
-    if (pid1 > 0) waitpid(pid1, &status, 0);
-    if (pid2 > 0) waitpid(pid2, &status, 0);
 }
 
 /*
@@ -3930,8 +3945,9 @@ static int create_unix_user(pam_handle_t *pamh,
 
     OB_LOG_INFO(pamh, "Successfully created Unix user: %s", user);
 
-    /* Invalidate nscd cache so the new user is visible immediately */
-    invalidate_nscd_cache();
+    /* Invalidate the NSS file cache (by name and uid) so the new user is
+     * visible to subsequent getpwnam/getpwuid lookups immediately. */
+    invalidate_user_cache(user, uid, 1);
 
 cleanup:
     /* Free sanitized GECOS */
@@ -4029,9 +4045,13 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         }
     }
 
-    /* Invalidate nscd group cache so sudo sees the change immediately */
+    /* Invalidate the user's NSS passwd file cache so the membership change is
+     * picked up immediately. Note: the NSS module serves passwd only (it does
+     * not implement the group database), so there is no group cache to flush;
+     * dropping the stale passwd entry forces a fresh lookup, and group
+     * membership itself lives in /etc/group, read live by NSS files. */
     if (sudo_group_changed) {
-        invalidate_nscd_cache();
+        invalidate_user_cache(user, 0, 0);
     }
 
     /* Check if user creation is enabled */

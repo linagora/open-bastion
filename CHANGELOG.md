@@ -22,6 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unconfigured hosts are untouched. Re-running `ob-bastion-setup` remains the
   documented recovery and is no longer required merely to survive an upgrade.
 
+### Removed
+
+- **`nscd` is no longer used.** It loaded the multithreaded `libnss_openbastion`
+  NSS module (which does `curl`/TLS/JSON) and crashed with `SIGABRT` every few
+  hours in the NSS path, raising Wazuh `ANOM_ABEND` alerts; it is also an
+  upstream-deprecated anti-pattern for network-backed NSS modules. The module
+  keeps its own in-memory and on-disk cache (`/var/cache/nss_llng`), so `nscd`
+  was redundant. The package dependency is dropped, the demo/quick-start
+  Docker environments no longer install or start it, and the documentation no
+  longer instructs restarting it. On `apt upgrade` the `postinst` now
+  `systemctl disable --now nscd` on hosts where it exists (stop + disable, not
+  mask — reversible) and explains why. The PAM module no longer forks
+  `nscd --invalidate`; instead it invalidates the NSS module's own file-cache
+  entries directly (by name, and by uid for newly created users) so user and
+  group-membership changes remain visible immediately.
+
 ## [0.6.0] - 2026-06-22
 
 New bastion file-transfer and remote-command paths, declarative service accounts,

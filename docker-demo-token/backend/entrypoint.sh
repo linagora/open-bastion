@@ -243,14 +243,6 @@ sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
 sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 echo "NSS configured to use Open Bastion"
 
-# Start nscd for caching NSS lookups (runs as root, can read server token)
-if command -v nscd >/dev/null 2>&1; then
-    mkdir -p /var/run/nscd
-    nscd -i passwd 2>/dev/null || true
-    nscd 2>/dev/null &
-    echo "nscd started for NSS caching"
-fi
-
 # Configure PAM for token-based authentication
 # pam_openbastion.so in auth validates the LLNG token as password
 cat > /etc/pam.d/sshd << EOF

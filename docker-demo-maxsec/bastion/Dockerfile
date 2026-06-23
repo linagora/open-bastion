@@ -12,7 +12,6 @@ FROM debian:13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
     sudo \
-    nscd \
     cron \
     libcurl4-gnutls-dev \
     libjson-c-dev \

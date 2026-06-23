@@ -245,7 +245,7 @@ Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation 
 - Procédure de recouvrement console documentée et testée — **accès root via ttyS0 pré-configuré** dans `/etc/securetty` par le paquet bootstrap (`PermitRootLogin no` bloque SSH, console OVH reste le filet de sécurité)
 - LLNG en haute disponibilité
 
-> **Note nscd :** Après toute modification de la configuration NSS (`/etc/nsswitch.conf`), redémarrer `nscd` (`systemctl restart nscd`) est obligatoire pour vider le cache négatif. Un cache négatif résiduel peut bloquer temporairement la résolution des utilisateurs du bastion même après configuration correcte.
+> **Note cache NSS :** Aucun démon de cache NSS externe n'est utilisé. Le module NSS gère son propre cache (mémoire + fichiers sous `/var/cache/nss_llng`) et PAM invalide directement les entrées concernées lors de la création d'un utilisateur ou d'un changement de groupe, rendant la résolution immédiate. `nscd` a été retiré car il chargeait ce module NSS multithreadé et plantait (SIGABRT) dans le chemin NSS ; il est désactivé automatiquement à la mise à jour du paquet.
 
 Pistes pour réduire davantage :
 

@@ -159,12 +159,6 @@ chmod 644 /etc/open-bastion/nss_openbastion.conf
 sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
 sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 
-if command -v nscd >/dev/null 2>&1; then
-    mkdir -p /var/run/nscd
-    nscd -i passwd 2>/dev/null || true
-    nscd 2>/dev/null &
-fi
-
 cat > /etc/pam.d/sshd << 'EOF'
 # Open Bastion - token authentication
 auth       sufficient   pam_openbastion.so
