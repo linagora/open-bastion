@@ -33,9 +33,15 @@ Open http://localhost and login with one of:
 | rtyler | rtyler   | yes | yes  |
 | msmith | msmith   | yes | no   |
 
-Then open http://localhost/pam and copy the displayed access token.
+Then open http://localhost/pam and copy the displayed token — or fetch the same
+token from the [`llng` client](https://github.com/linagora/simple-oidc-client)
+(`--pam-duration` sets its TTL, default `600` s):
 
-Alternatively, with the `llng` CLI:
+```bash
+llng --llng-url http://localhost --login dwho --password dwho pam_token
+```
+
+You can also grab a generic OIDC access token with the [`llng` client](https://github.com/linagora/simple-oidc-client):
 
 ```bash
 llng --llng-url http://localhost --login dwho --password dwho access_token

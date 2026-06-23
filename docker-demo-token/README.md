@@ -44,7 +44,7 @@ docker compose ps
 
 ### 2. Get an access token
 
-Using the `llng` CLI tool:
+Using the [`llng` client](https://github.com/linagora/simple-oidc-client):
 
 ```bash
 llng --llng-url http://localhost:80 --login dwho --password dwho access_token
@@ -57,7 +57,14 @@ Or via browser at http://localhost:80 with credentials:
 - Username: `dwho`, `rtyler`, or `msmith`
 - Password: same as username
 
-Then open http://localhost:80/pam to see your access token.
+Then open http://localhost:80/pam to see your token. The
+[`llng` client](https://github.com/linagora/simple-oidc-client) can fetch the
+same `/pam` token directly (use `--pam-duration` to change its TTL, default
+`600` s):
+
+```bash
+llng --llng-url http://localhost:80 --login dwho --password dwho pam_token
+```
 
 ### 3. Connect to the bastion
 
