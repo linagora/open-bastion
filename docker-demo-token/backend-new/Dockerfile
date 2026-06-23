@@ -8,7 +8,6 @@ FROM debian:13-slim
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
-    nscd \
     sudo \
     libcurl4-gnutls-dev \
     libjson-c-dev \

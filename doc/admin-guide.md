@@ -450,8 +450,11 @@ chmod 644 /etc/open-bastion/nss_openbastion.conf
 
 sed -i 's/^passwd:.*/passwd: files openbastion/' /etc/nsswitch.conf
 
-# Restart nscd so the new NSS module is picked up immediately
-systemctl restart nscd
+# No name-service cache daemon is required. The NSS module maintains its own
+# in-memory and on-disk cache, so the new resolver takes effect immediately.
+# (nscd is intentionally NOT used: it loaded this multithreaded NSS module
+# and crashed in the NSS path; PAM invalidates the module's file cache
+# directly when users or group memberships change.)
 ```
 
 ### Step 5: Enroll Server
@@ -593,16 +596,7 @@ It performs all of the following automatically:
 - Downloads the initial KRL to `/etc/ssh/revoked_keys`
 - Creates `/etc/sudoers.d/open-bastion` for sudo authorization
 
-### Step 4: Restart nscd
-
-After NSS configuration, restart the name service cache daemon so the new resolver
-is picked up immediately:
-
-```bash
-systemctl restart nscd
-```
-
-### Step 5: Verify
+### Step 4: Verify
 
 ```bash
 # Check NSS resolves LLNG users

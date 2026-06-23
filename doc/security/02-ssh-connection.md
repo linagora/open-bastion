@@ -1029,7 +1029,7 @@ L'enregistrement de session est streamé vers le puits root `ob-record-sink` (so
 - LLNG en haute disponibilité (réduit la probabilité de panne prolongée)
 - Plusieurs portails LLNG en failover
 - Monitoring avec alerte quand le cache offline approche de l'expiration
-- Redémarrer `nscd` après toute modification de la configuration NSS (`/etc/nsswitch.conf`) pour éviter les entrées négatives en cache qui bloqueraient la résolution des utilisateurs du bastion
+- Aucun démon de cache NSS externe n'est requis. Le module NSS gère son propre cache (mémoire + fichiers) et PAM invalide directement les entrées concernées lors d'un changement d'utilisateur ou de groupe, donc la résolution est immédiate. `nscd` n'est volontairement pas utilisé : il chargeait ce module NSS multithreadé et plantait (SIGABRT) dans le chemin NSS.
 
 **Procédure de recouvrement via console :**
 

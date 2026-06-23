@@ -264,14 +264,6 @@ sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
 sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 echo "NSS configured"
 
-# Start nscd
-if command -v nscd >/dev/null 2>&1; then
-    mkdir -p /var/run/nscd
-    nscd -i passwd 2>/dev/null || true
-    nscd 2>/dev/null &
-    echo "nscd started"
-fi
-
 # Configure PAM for SSH (Mode E)
 cat > /etc/pam.d/sshd << EOF
 # PAM configuration for SSH with Open Bastion (Mode E - Maximum Security)

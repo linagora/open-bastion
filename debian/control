@@ -20,7 +20,6 @@ Depends: ${misc:Depends},
  ${shlibs:Depends},
  curl,
  jq,
- nscd,
  locales,
  debconf | debconf-2.0,
 Recommends: auditd

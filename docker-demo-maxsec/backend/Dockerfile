@@ -13,7 +13,6 @@ FROM debian:13-slim
 # Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
-    nscd \
     sudo \
     cron \
     libcurl4-gnutls-dev \

@@ -390,14 +390,6 @@ sed -i 's/^passwd:.*/passwd:         files openbastion/' /etc/nsswitch.conf
 sed -i 's/^group:.*/group:          files openbastion/' /etc/nsswitch.conf
 echo "NSS configured"
 
-# Start nscd
-if command -v nscd >/dev/null 2>&1; then
-    mkdir -p /var/run/nscd
-    nscd -i passwd 2>/dev/null || true
-    nscd 2>/dev/null &
-    echo "nscd started"
-fi
-
 # Configure PAM for SSH (Mode E)
 # The "auth" phase runs pam_openbastion with authorize_only=yes so that:
 #   - for service accounts: the SSH key fingerprint is re-validated against
