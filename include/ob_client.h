@@ -122,6 +122,19 @@ int ob_verify_token(ob_client_t *client,
                     const char *fingerprint,
                     ob_response_t *response);
 
+/*
+ * Parse a /pam/verify response body into *response.
+ *
+ * Exposed (non-static) for unit testing the response contract; not part of the
+ * stable client API. *response is reset on entry. Returns 0 for a well-formed
+ * response — response->active reflects the verdict, and response->user is set
+ * only when active is true (a valid:false verdict legitimately omits 'user' and
+ * yields response->reason from the 'error'/'reason' field). Returns -1 on a
+ * malformed response, writing a message into err[0..errlen).
+ */
+int ob_parse_verify_response(const char *body, ob_response_t *response,
+                             char *err, size_t errlen);
+
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /*
  * Introspect an access token via /oauth2/introspect

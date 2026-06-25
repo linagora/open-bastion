@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A rejected `/pam/verify` token now fails cleanly instead of looking like a
+  server outage.** On any negative verdict — expired or invalid one-time token,
+  wrong token type, or an SSH fingerprint the portal refuses — the pam-access
+  plugin answers `{"valid":false,"error":"<reason>"}` with no `user` field
+  (`user` is only present on a positive verdict). The client required `user`
+  unconditionally and bailed out with `Missing required 'user' field in
+  response`, returning `PAM_AUTHINFO_UNAVAIL` — which reads as a server problem
+  and, with `auth sufficient`, fell through to `pam_unix` then `pam_deny`. It
+  now treats a `valid:false` verdict as a normal negative result: the reason is
+  surfaced, authentication fails with `PAM_AUTH_ERR`, and rate-limiting/CrowdSec
+  reporting run as intended. The verify-response parser was extracted
+  (`ob_parse_verify_response`) and is now covered by unit tests.
+
 ## [0.6.2] - 2026-06-25
 
 Hotfix for 0.6.1: the Debian package failed to install/upgrade.
