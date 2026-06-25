@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-06-25
+
+Hotfix for 0.6.1: the Debian package failed to install/upgrade.
+
+### Fixed
+
+- **0.6.1 package configuration no longer aborts in `postinst`.** A comment in
+  the `open-bastion` postinst contained the literal debhelper substitution
+  token. debhelper substitutes that token wherever it appears — including inside
+  the comment — so the trailing words of the comment ended up on their own line
+  and were executed as a command (`so: not found`, exit 127). Every 0.6.1
+  install/upgrade therefore failed at `configure`, leaving the package
+  half-configured. The comment no longer contains the token; the assembled
+  postinst is syntax-checked. Upgrading to 0.6.2 completes configuration and
+  repairs a host left half-configured by 0.6.1 (`apt -f install` /
+  `dpkg --configure -a` also recover once 0.6.2 is available).
+
 ## [0.6.1] - 2026-06-25
 
 Maintenance release: fixes a long-running-process crash in the NSS module and

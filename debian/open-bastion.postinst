@@ -273,9 +273,14 @@ esac
 # unreachable; access refused"). Re-enable them here, idempotently, but ONLY
 # when this host is already a bastion: the sshd drop-in that ob-bastion-setup
 # writes is the role marker. This never enables them on a backend or an
-# unconfigured host. Runs after #DEBHELPER# so the unit files are registered and
-# daemon-reload has happened. Failures are non-fatal (ob-bastion-setup only
-# warns too); the admin can always re-run ob-bastion-setup.
+# unconfigured host. Runs after the debhelper-generated section so the unit
+# files are registered and daemon-reload has happened. Failures are non-fatal
+# (ob-bastion-setup only warns too); the admin can always re-run it.
+#
+# NOTE: never write the literal debhelper substitution token in a comment here.
+# debhelper replaces that token wherever it appears, including inside comments,
+# which splits the comment across the expansion and leaves the trailing words as
+# a stray command (the "so: not found" / exit 127 regression in 0.6.1).
 if [ "$1" = configure ] \
     && [ -d /run/systemd/system ] \
     && command -v systemctl >/dev/null 2>&1; then
