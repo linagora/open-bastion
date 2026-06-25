@@ -1,3 +1,9 @@
+open-bastion (0.6.1) unstable; urgency=medium
+
+  * See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md
+
+ -- Xavier Guimard <yadd@debian.org>  Thu, 25 Jun 2026 10:00:00 +0200
+
 open-bastion (0.6.0) unstable; urgency=medium
 
   * See https://github.com/linagora/open-bastion/blob/main/CHANGELOG.md

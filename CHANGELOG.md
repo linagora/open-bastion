@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.1] - 2026-06-25
+
+Maintenance release: fixes a long-running-process crash in the NSS module and
+keeps already-configured bastions working across plain package upgrades.
 
 ### Fixed
+
+- **The NSS module no longer crashes a long-lived caching consumer (e.g.
+  `nscd`).** `cache_find()` / `cache_find_by_uid()` freed an expired in-memory
+  cache entry's password buffer but left the pointer dangling; once the cache
+  reached capacity, the LRU eviction in `cache_add()` freed it a second time,
+  aborting the host process with a glibc `double free or corruption` (SIGABRT).
 
 - **`apt upgrade` no longer breaks an already-configured bastion.** The
   socket-activated bastion helpers — `ob-cert.socket` (hop-certificate minting
