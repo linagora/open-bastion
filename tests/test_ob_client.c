@@ -360,6 +360,99 @@ static void test_introspect_token_no_server(void)
 }
 #endif /* ENABLE_DESKTOP_SSO */
 
+/*
+ * /pam/verify response-contract tests.
+ *
+ * Regression for the "sudo after a long wait fails" bug: when the user's
+ * one-time PAM token (OTP) has expired, the pam-access plugin answers
+ * {"valid":false,"error":"Token expired"} with NO 'user' field. The parser
+ * used to require 'user' unconditionally and reported a hard
+ * "Missing required 'user' field" error (PAM_AUTHINFO_UNAVAIL), masking the
+ * expiry. It must instead return success with active=false and the reason.
+ */
+static void test_verify_expired_token_no_user(void)
+{
+    TEST("verify response: valid:false without user (expired OTP)");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response(
+        "{\"valid\":false,\"error\":\"Token expired\"}", &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL("expired-token response should parse successfully (rc=0)");
+        return;
+    }
+    if (r.active) {
+        FAIL("expired token must yield active=false");
+        ob_response_free(&r);
+        return;
+    }
+    if (r.user != NULL) {
+        FAIL("expired token must not set user");
+        ob_response_free(&r);
+        return;
+    }
+    if (!r.reason || strcmp(r.reason, "Token expired") != 0) {
+        FAIL("reason should carry the plugin's error message");
+        ob_response_free(&r);
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+static void test_verify_active_requires_user(void)
+{
+    TEST("verify response: valid:true still requires user");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response("{\"valid\":true}", &r, err, sizeof(err));
+
+    if (rc == 0) {
+        FAIL("active response without user must fail");
+        ob_response_free(&r);
+        return;
+    }
+    PASS();
+}
+
+static void test_verify_active_with_user(void)
+{
+    TEST("verify response: valid:true with user");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response(
+        "{\"valid\":true,\"user\":\"xguimard\"}", &r, err, sizeof(err));
+
+    if (rc != 0 || !r.active || !r.user || strcmp(r.user, "xguimard") != 0) {
+        FAIL("valid active response should parse user");
+        ob_response_free(&r);
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+static void test_verify_missing_valid(void)
+{
+    TEST("verify response: missing 'valid' field is rejected");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response(
+        "{\"user\":\"xguimard\"}", &r, err, sizeof(err));
+
+    if (rc == 0) {
+        FAIL("response without 'valid' must fail");
+        ob_response_free(&r);
+        return;
+    }
+    PASS();
+}
+
 int main(void)
 {
     printf("Running ob_client tests...\n\n");
@@ -380,6 +473,12 @@ int main(void)
     test_client_init_no_portal();
     test_client_init_valid();
     test_client_error_null();
+
+    /* /pam/verify response contract (expired-OTP regression) */
+    test_verify_expired_token_no_user();
+    test_verify_active_requires_user();
+    test_verify_active_with_user();
+    test_verify_missing_valid();
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Introspection tests (JWT client assertion) */

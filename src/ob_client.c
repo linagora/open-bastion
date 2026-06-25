@@ -755,12 +755,25 @@ int ob_verify_token(ob_client_t *client,
         return -1;
     }
 
-    /* Parse JSON response */
-    struct json_object *json = json_tokener_parse(buf.data);
+    /* Parse JSON response (extracted for unit testing the response contract) */
+    int prc = ob_parse_verify_response(buf.data, response,
+                                       client->error, sizeof(client->error));
     free_buffer(&buf);
+    return prc;
+}
 
+int ob_parse_verify_response(const char *body, ob_response_t *response,
+                             char *err, size_t errlen)
+{
+    if (!body || !response) {
+        if (err && errlen) snprintf(err, errlen, "Invalid parameters");
+        return -1;
+    }
+    memset(response, 0, sizeof(*response));
+
+    struct json_object *json = json_tokener_parse(body);
     if (!json) {
-        snprintf(client->error, sizeof(client->error), "Invalid JSON response");
+        snprintf(err, errlen, "Invalid JSON response");
         return -1;
     }
 
@@ -768,36 +781,51 @@ int ob_verify_token(ob_client_t *client,
 
     /* Security: Validate required fields are present and have correct type */
     if (!json_object_object_get_ex(json, "valid", &val)) {
-        snprintf(client->error, sizeof(client->error),
-                 "Missing required 'valid' field in response");
+        snprintf(err, errlen, "Missing required 'valid' field in response");
         json_object_put(json);
         return -1;
     }
     if (!json_object_is_type(val, json_type_boolean)) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Invalid 'valid' field type in response (expected boolean)");
         json_object_put(json);
         return -1;
     }
     response->active = json_object_get_boolean(val);
 
+    /*
+     * A negative verdict (valid:false) legitimately carries no 'user' field:
+     * the pam-access plugin answers {"valid":false,"error":"..."} for an
+     * expired/invalid/wrong-type token (and revoked-fingerprint rejections).
+     * Treat that as a successful call with an inactive token — surface the
+     * reason and let the caller report a clean auth failure. Requiring 'user'
+     * here turned an expired OTP into a hard "Missing required 'user' field"
+     * error (PAM_AUTHINFO_UNAVAIL), masking the real cause and skipping the
+     * proper not-active handling (rate limiting, CrowdSec, clear logging).
+     */
+    if (!response->active) {
+        if (json_object_object_get_ex(json, "error", &val) ||
+            json_object_object_get_ex(json, "reason", &val)) {
+            response->reason = safe_json_strdup(val);
+        }
+        json_object_put(json);
+        return 0;
+    }
+
     if (!json_object_object_get_ex(json, "user", &val)) {
-        snprintf(client->error, sizeof(client->error),
-                 "Missing required 'user' field in response");
+        snprintf(err, errlen, "Missing required 'user' field in response");
         json_object_put(json);
         return -1;
     }
     const char *user_str = json_object_get_string(val);
     if (!user_str) {
-        snprintf(client->error, sizeof(client->error),
-                 "Invalid 'user' field type in response");
+        snprintf(err, errlen, "Invalid 'user' field type in response");
         json_object_put(json);
         return -1;
     }
     response->user = strdup(user_str);
     if (!response->user) {
-        snprintf(client->error, sizeof(client->error),
-                 "Out of memory copying 'user' field");
+        snprintf(err, errlen, "Out of memory copying 'user' field");
         json_object_put(json);
         return -1;
     }
