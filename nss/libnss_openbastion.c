@@ -611,10 +611,18 @@ static cache_entry_t *cache_find(const char *username)
                 return &g_cache.entries[i];
             }
 
-            /* Expired - remove */
+            /* Expired - remove.
+             * Null BOTH pointers (not just username): the slot stays within
+             * [0, count) as a hole with its old timestamp, and cache_add may
+             * later evict it as the "oldest" entry, freeing username and
+             * pw_buffer again. Leaving pw_buffer dangling => double free.
+             * Only ever reached in a long-lived consumer whose cache fills to
+             * capacity (e.g. nscd); short-lived callers exit first. */
             free(g_cache.entries[i].username);
             free(g_cache.entries[i].pw_buffer);
             g_cache.entries[i].username = NULL;
+            g_cache.entries[i].pw_buffer = NULL;
+            g_cache.entries[i].valid = 0;
             return NULL;
         }
     }
@@ -640,10 +648,13 @@ static cache_entry_t *cache_find_by_uid(uid_t uid)
                 return &g_cache.entries[i];
             }
 
-            /* Expired - remove */
+            /* Expired - remove. Null pw_buffer too (see cache_find): a hole
+             * left with a dangling pw_buffer is double-freed on eviction. */
             free(g_cache.entries[i].username);
             free(g_cache.entries[i].pw_buffer);
             g_cache.entries[i].username = NULL;
+            g_cache.entries[i].pw_buffer = NULL;
+            g_cache.entries[i].valid = 0;
             return NULL;
         }
     }
