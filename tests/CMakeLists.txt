@@ -48,6 +48,22 @@ add_executable(test_nss_openbastion test_nss_openbastion.c)
 target_include_directories(test_nss_openbastion PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_nss_openbastion COMMAND test_nss_openbastion)
 
+# Regression test for the NSS in-memory LRU cache (expire-then-evict double free).
+# Includes libnss_openbastion.c directly to drive the static cache helpers, so it
+# needs the same libs as the module itself (curl/json-c/pthread).
+add_executable(test_nss_cache test_nss_cache.c)
+target_include_directories(test_nss_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+)
+target_link_libraries(test_nss_cache
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    pthread
+)
+add_test(NAME test_nss_cache COMMAND test_nss_cache)
+
 # Test path validation
 add_executable(test_path_validator test_path_validator.c ../src/config.c ../src/str_utils.c)
 target_include_directories(test_path_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
