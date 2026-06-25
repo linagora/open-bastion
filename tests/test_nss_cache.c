@@ -24,6 +24,23 @@
 
 #include <assert.h>
 
+/* Release everything init_cache()/cache_add() allocated, so the test leaves
+ * no leaks under LeakSanitizer (free() is NULL-safe for expired holes). */
+static void cache_teardown(void)
+{
+    if (!g_cache.entries) {
+        return;
+    }
+    for (size_t i = 0; i < g_cache.count; i++) {
+        free(g_cache.entries[i].username);
+        free(g_cache.entries[i].pw_buffer);
+    }
+    free(g_cache.entries);
+    g_cache.entries = NULL;
+    g_cache.count = 0;
+    g_cache.capacity = 0;
+}
+
 static struct passwd make_pw(const char *name, uid_t uid)
 {
     struct passwd pw;
@@ -73,6 +90,7 @@ static int test_expire_then_evict_no_double_free(void)
     cache_add("newcomer", &extra, 1);
 
     /* If we reach this line, no double free occurred. */
+    cache_teardown();
     return 1;
 }
 
@@ -101,6 +119,7 @@ static int test_expire_by_uid_then_evict_no_double_free(void)
     struct passwd extra = make_pw("uidnewcomer", 400000);
     cache_add("uidnewcomer", &extra, 1);
 
+    cache_teardown();
     return 1;
 }
 
