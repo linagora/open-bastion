@@ -506,6 +506,58 @@ jobs:
           path: repo/
           retention-days: 7
 
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-deb, build-rpm]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          pattern: '{deb,rpm}-*'
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Pull the section for this version out of CHANGELOG.md. If the tag
+          # has no matching section, fall back to a minimal note so the release
+          # is still created rather than failing the job.
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" {grab=1; next}
+            grab && /^## \[/ {exit}
+            grab {print}
+          ' CHANGELOG.md | sed '1{/^$/d}' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Release $VERSION" > RELEASE_NOTES.md
+          fi
+
+      - name: Collect package files
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \) \
+            -exec cp {} release-assets/ \;
+          ls -l release-assets/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag \
+            release-assets/*
+
   deploy:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
