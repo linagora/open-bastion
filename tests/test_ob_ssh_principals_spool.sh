@@ -238,6 +238,37 @@ test_backend_wrong_bastion_denied() {
     fi
 }
 
+# ── Test 9b: an empty allowlist still accepts, but says so on every hop ──
+#
+# Empty means "any vouched bastion" (#182). That semantic is kept -- inverting
+# it would deny every hop on a fleet that upgrades -- but it must no longer be
+# invisible: the helper logs a warning to authpriv for each accepted hop.
+test_backend_empty_allowlist_warns() {
+    reset_spool
+    : > "$CONF_DIR/allowed_bastions"
+
+    # Capture what the helper would send to syslog by shadowing logger(1).
+    local bindir="$TMP/bin" logged="$TMP/logged"
+    mkdir -p "$bindir"
+    rm -f "$logged"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n' "$logged" > "$bindir/logger"
+    chmod 755 "$bindir/logger"
+
+    local out
+    out=$(PATH="$bindir:$PATH" run_helper "$BACKEND_HELPER" "$USER_NAME" "$FP" \
+            "bastion=whatever;user=$USER_NAME;target=host" "ssh-ed25519" "$BLOB")
+
+    if [ "$out" != "$USER_NAME" ]; then
+        fail "Empty allowlist still accepts a vouched cert" "got '$out'"
+        return
+    fi
+    if [ -s "$logged" ] && grep -q 'allowed_bastions is empty' "$logged"; then
+        pass "Empty allowlist accepts but logs a warning naming the bastion"
+    else
+        fail "Empty allowlist logs a warning" "logged: $(cat "$logged" 2>/dev/null)"
+    fi
+}
+
 # ── Test 10: both sshd_config templates pass %t and %k ──
 test_sshd_config_tokens() {
     local bastion_line backend_line
@@ -275,6 +306,7 @@ run_test test_legacy_invocation
 run_test test_backend_vouched
 run_test test_backend_unvouched_denied
 run_test test_backend_wrong_bastion_denied
+run_test test_backend_empty_allowlist_warns
 run_test test_sshd_config_tokens
 run_test test_spool_format_marker
 

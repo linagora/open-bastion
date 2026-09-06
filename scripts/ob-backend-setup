@@ -297,6 +297,15 @@ if [ "$enforce" = 1 ]; then
             [ "$a" = "$bid" ] && { ok=1; break; }
         done
         [ "$ok" = 1 ] || exit 0
+    else
+        # An empty allowlist accepts a voucher from ANY enrolled bastion in the
+        # project, which is the residual defence behind the SSO-side gap where
+        # a compromised host can self-declare server_group: bastion. Say so on
+        # every hop rather than only at setup time, so it shows up in the logs
+        # of a running fleet (#182).
+        logger -t ob-ssh-principals -p authpriv.warning \
+            "allowed_bastions is empty: accepting a voucher from bastion '$bid' for user '$USERNAME' without checking which bastion it is" \
+            2>/dev/null || :
     fi
 fi
 
@@ -391,7 +400,13 @@ PRINCIPALS
     if [ -n "$BASTION_ALLOWED_IDS" ]; then
         info "Backend accepts bastions: $BASTION_ALLOWED_IDS"
     else
-        info "Backend accepts any vouched bastion (no bastion_id allowlist set)"
+        warn "allowed_bastions is EMPTY: this backend accepts a vouched"
+        warn "certificate from ANY bastion enrolled in the project, not only"
+        warn "from the ones you operate. That allowlist is the residual defence"
+        warn "behind the SSO-side gap where any enrolled host in the project can"
+        warn "declare itself a bastion and mint a hop voucher for a user."
+        warn "Fix it with:  ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]"
+        warn "(the bastion_id of a bastion is printed by ob-bastion-id on it)"
     fi
 
     # Parent /run/open-bastion must be traversable by the principals helper user
@@ -1155,6 +1170,60 @@ prompt_required_settings() {
         IFS= read -r input
         CLIENT_ID="${input:-pam-access}"
     fi
+
+    prompt_allowed_bastions
+    normalize_allowed_bastions
+}
+
+# Validate and normalise the bastion_id allowlist.
+#
+# Entries must match the charset LLNG guarantees for a bastion_id
+# ([A-Za-z0-9._-]) -- the same one the principals helper enforces on the id it
+# reads out of a certificate key-id. Without this, a typo would sit in the
+# allowlist matching nothing (every hop denied, with no explanation), and a
+# whitespace-only value would silently mean "any bastion" while looking set.
+normalize_allowed_bastions() {
+    local raw normalized entry
+    raw=$(printf '%s' "$BASTION_ALLOWED_IDS" | tr ',;' '  ')
+    normalized=""
+    for entry in $raw; do
+        case "$entry" in
+            *[!A-Za-z0-9._-]*)
+                error "Invalid bastion id in the allowed-bastions list: '$entry'"
+                error "Ids are what 'ob-bastion-id' prints on a bastion ([A-Za-z0-9._-])."
+                exit 1
+                ;;
+        esac
+        normalized="${normalized:+$normalized }$entry"
+    done
+    BASTION_ALLOWED_IDS="$normalized"
+}
+
+# Ask which bastions this backend should accept hops from (#182).
+#
+# An empty allowlist means "any vouched bastion": the backend accepts a hop
+# voucher minted by any host enrolled in the project, which is exactly the
+# residual defence behind the SSO-side gap where a compromised enrolled host can
+# declare itself a bastion. Defaulting to that silently is what the issue is
+# about, so ask -- but do not make it mandatory: a single-bastion lab, and a
+# fleet whose bastions are not enrolled yet, both legitimately start empty.
+#
+# Non-interactive runs keep the empty default (an upgrade must not start
+# refusing hops that worked yesterday); they get the warning at the end of
+# install_principals_helper, and the helper logs one on every hop.
+prompt_allowed_bastions() {
+    [ -n "$BASTION_ALLOWED_IDS" ] && return 0
+    [ "$NON_INTERACTIVE" = "true" ] && return 0
+
+    local input
+    printf "\n" >&2
+    warn "Which bastions may hop to this backend?"
+    warn "Leave empty to accept ANY bastion enrolled in the project (the"
+    warn "current default, and a standing risk if any other host in the project"
+    warn "is compromised). Run 'ob-bastion-id' on each bastion to get its id."
+    printf "Allowed bastion ids (comma-separated, empty = any): " >&2
+    IFS= read -r input
+    BASTION_ALLOWED_IDS="$input"
 }
 
 # Interactive prompt after an enrollment failure (typically invalid_client).
@@ -1995,6 +2064,7 @@ main() {
     echo "Server Group:  $SERVER_GROUP"
     echo "Client ID:     $CLIENT_ID"
     echo "Create Users:  $CREATE_USERS"
+    echo "Allowed bastions: ${BASTION_ALLOWED_IDS:-<any vouched bastion>}"
     echo "Sudo via LLNG: $ENABLE_SUDO"
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "Max Security: true (Mode E)"

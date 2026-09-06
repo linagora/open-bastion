@@ -413,7 +413,10 @@ create_user_skel = /etc/skel
 # Comma, semicolon or whitespace-separated list of bastion_id values (the
 # per-device ids the portal assigns at enrolment — read one with ob-bastion-id;
 # NOT the OIDC client_id).
-# Leave empty to allow any vouched bastion; remove the file entirely for legacy mode.
+# Leave empty to allow any vouched bastion -- i.e. a hop voucher minted by ANY
+# host enrolled in the project, which is exactly what this list defends against;
+# ob-ssh-principals logs an authpriv.warning on every such hop.
+# Remove the file entirely for legacy mode.
 # Managed by ob-backend-setup --allowed-bastions <ids>  (Ansible: ob_bastion_allowed_bastions)
 # The file /etc/open-bastion/allowed_bastions is NOT read by pam_openbastion. It
 # is enforced by the ob-ssh-principals helper that sshd runs as

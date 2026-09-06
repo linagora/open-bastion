@@ -283,6 +283,42 @@ test_node_role_override() {
     fi
 }
 
+# ── The allowed-bastions list is validated and normalised (#182) ──
+#
+# The list is written to a world-readable file consumed by the principals
+# helper, which compares each entry against a bastion_id it has already
+# restricted to [A-Za-z0-9._-]. A typo outside that charset would sit there
+# matching nothing (every hop denied, unexplained), and a whitespace-only value
+# would silently mean "any bastion" while looking configured.
+test_allowed_bastions_normalised() {
+    local rc1 rc2 rc3
+    (
+        source_script "ob-backend-setup"
+        BASTION_ALLOWED_IDS="b1, b2 ;b3"
+        normalize_allowed_bastions
+        [ "$BASTION_ALLOWED_IDS" = "b1 b2 b3" ] && exit 0 || exit 1
+    )
+    rc1=$?
+    (
+        source_script "ob-backend-setup"
+        BASTION_ALLOWED_IDS="   "
+        normalize_allowed_bastions
+        [ -z "$BASTION_ALLOWED_IDS" ] && exit 0 || exit 1
+    )
+    rc2=$?
+    (
+        source_script "ob-backend-setup"
+        BASTION_ALLOWED_IDS="ok,bad id!"
+        normalize_allowed_bastions 2>/dev/null
+    )
+    rc3=$?
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -ne 0 ]; then
+        pass "allowed-bastions list normalised, blank collapses, junk rejected"
+    else
+        fail "allowed-bastions validation" "rc=$rc1/$rc2/$rc3"
+    fi
+}
+
 # ── Test 18: the generated sshd PAM auth stack is fail-closed (#180) ──
 # A bare "auth required pam_permit.so" made pam_authenticate() succeed for any
 # password if sshd ever ran the stack (PasswordAuthentication /
@@ -331,6 +367,7 @@ run_test test_trailing_slash
 run_test test_max_security
 run_test test_node_role_default
 run_test test_node_role_override
+run_test test_allowed_bastions_normalised
 
 run_test test_pam_sshd_fail_closed
 run_test test_pam_sudo_fail_closed
