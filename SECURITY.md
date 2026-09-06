@@ -201,6 +201,22 @@ This writes `/etc/open-bastion/allowed_bastions` (0644 inside a 0711 directory) 
 If the file is present but empty, any vouched bastion is accepted. If the file is unreadable,
 `ob-ssh-principals` fails closed (denies the connection).
 
+> **Set this list.** An empty allowlist accepts a hop voucher from **any** host
+> enrolled in the project, and that allowlist is the residual defence behind a
+> real gap on the SSO side: the pam-access plugin performs no RP/audience
+> binding on `/pam/*` tokens, and when `pamAccessServerGroups` is empty — the
+> configuration recommended for multi-group projects — it takes `server_group`
+> straight from the request body. Any compromised enrolled host in the project
+> can therefore declare itself a bastion and mint a 12-hour hop voucher for a
+> user. The second defence,
+> `pamAccessBastionCertPinSourceAddress`, is also off by default.
+>
+> `ob-backend-setup` now asks for the list when run interactively, warns loudly
+> when it is left empty, and `ob-ssh-principals` logs an `authpriv.warning` on
+> every hop it accepts without checking which bastion it came from. The empty
+> semantic itself is unchanged: inverting it would deny every hop on an existing
+> fleet the moment it upgrades.
+
 Required sshd settings (no `AcceptEnv` needed):
 
 ```bash
