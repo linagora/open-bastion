@@ -54,6 +54,12 @@ session    required     pam_unix.so
 
 ## Mode C: SSH Key with LLNG Authorization
 
+> **Offline behaviour differs from the certificate modes.** Because Mode C does
+> not set `AuthorizedKeysFile none`, `sshd` still honours `~/.ssh/authorized_keys`
+> — which makes a personal key an _opt-in_ fallback during a portal outage, with
+> trade-offs worth knowing before relying on it. See
+> [what works offline](offline-mode.md#what-works-offline-and-what-needs-the-portal).
+
 **SSH key authentication only, but LLNG checks if user is authorized.**
 
 Users authenticate with SSH keys. PAM doesn't handle password authentication,
