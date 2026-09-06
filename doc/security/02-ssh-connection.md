@@ -1059,6 +1059,30 @@ L'enregistrement de session est streamé vers le puits root `ob-record-sink` (so
 
 > **Automatisation bootstrap :** Le paquet `open-bastion-linagora` prend en charge la configuration initiale de `securetty`, du compte de service `linagora` et de `PermitRootLogin no`. Ces éléments n'ont pas besoin d'être configurés manuellement sur les déploiements utilisant ce paquet.
 
+> **Écarter la « clé SSH personnelle sur le bastion » comme filet.** Une réponse
+> souvent proposée à ce risque est de laisser chaque administrateur déposer une
+> clé SSH personnelle dans son `~/.ssh` sur le bastion, pour continuer à
+> rebondir vers les backends pendant une panne du portail. **En Mode E, c'est
+> impossible par construction** : les backends posent `AuthorizedKeysFile none`
+> et n'acceptent qu'un certificat signé par la CA dont le key-id porte
+> `bastion=<id>;user=<u>` — `sshd` refuse une clé nue avant même que PAM ne soit
+> consulté, et `ob-ssh` ne peut pas aider puisque l'émission du certificat
+> éphémère exige le portail.
+>
+> Hors Mode E (modes « clé »), c'est techniquement possible et cela déplace le
+> risque plutôt qu'il ne le réduit : une clé privée de longue durée réside alors
+> sur le bastion, non bornée par un TTL de certificat et non révocable par le
+> portail, et le rebond cesse d'être vouché (`allowed_bastions`, épinglage
+> d'adresse source et TTL de voucher ne s'y appliquent plus). La traçabilité,
+> elle, survit : un `ssh` lancé **depuis une session de bastion enregistrée** est
+> capturé par l'enregistreur de pty — ce qui ne l'est pas, c'est un
+> `ssh -J bastion` depuis le poste de travail (canal `direct-tcpip`, cf. R-S25).
+>
+> Les deux mesures conçues pour cette panne restent le **compte de service de
+> secours** et l'**accès console hors-bande** ci-dessus. Voir
+> [doc/offline-mode.md](../offline-mode.md) pour la matrice complète de ce qui
+> fonctionne hors ligne.
+
 **Remédiation infrastructure :**
 
 - LLNG en haute disponibilité (réduit la probabilité de panne prolongée)

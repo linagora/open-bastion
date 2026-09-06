@@ -53,6 +53,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`doc/offline-mode.md` now states what actually works during a portal outage
+  (#165).** A ten-row matrix derived from the code and the generated `sshd`
+  configurations: what keeps working (user resolution, certificate logins,
+  service-account `sudo`), what does not (`sudo` for SSO users — the cache is an
+  *authorization* cache, not an authentication one — `ob-ssh`/`ob-scp`/`ob-sftp`,
+  enrolment, revocation), and the two cache TTLs that must be sized together.
+
+  It also answers a question that comes up on every deployment: can a user keep a
+  **personal SSH key on the bastion** as an outage fallback? In Mode E, no — the
+  backends set `AuthorizedKeysFile none` and `sshd` refuses a plain key before
+  PAM is consulted. In the key modes, yes, under four stated conditions — and the
+  documentation says what it costs: a long-lived private key on the bastion, not
+  bounded by a certificate TTL and not revocable through the portal, and a hop
+  that is no longer vouched. One assumption is corrected: the audit trail
+  **survives**, because a plain `ssh` run from inside a recorded bastion session
+  is captured by the pty recorder; what is not recorded is a `ssh -J bastion`
+  ProxyJump from a workstation.
+
+  The EBIOS risk R-S17 (total lockout) gains the same note in French, and
+  `doc/pam-modes.md` points Mode C at the matrix. The key-mode path is labelled
+  as analysis, not as a tested procedure: the end-to-end lab validation the issue
+  asks for has not been done.
+
 - **A world- or group-readable `/etc/open-bastion/cache.key` is now rejected
   instead of used with a warning** (offline auth cache, desktop SSO). Versions
   up to 0.6.2 accepted such a key and merely logged a warning. `SECURITY.md`

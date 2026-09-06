@@ -28,6 +28,96 @@ flowchart TB
     end
 ```
 
+## What works offline, and what needs the portal
+
+Before the configuration details: this is the honest matrix of what an operator
+can and cannot do while the LLNG portal is unreachable. It is derived from the
+code, not from intent.
+
+| Operation                                                 | Portal down                                 | Why                                                                                                                                     |
+| --------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Resolve a user** (`getent passwd`)                      | ✅ while the NSS cache holds                | `libnss_openbastion` caches lookups; `cache_ttl` in `nss_openbastion.conf`                                                              |
+| **SSH login with a valid certificate**                    | ✅ while the auth cache holds               | sshd validates the certificate against `TrustedUserCAKeys` locally; PAM `account` falls back to the authorization cache                 |
+| **SSH login with a plain key** (`~/.ssh/authorized_keys`) | ✅ **only in key modes** — never in Mode E  | Mode E sets `AuthorizedKeysFile none`; sshd rejects a plain key before PAM runs                                                         |
+| **`sudo` for an SSO user**                                | ❌                                          | The `auth` phase needs a fresh one-time token from `/pam/verify`. The cache is an _authorization_ cache, not an authentication one      |
+| **`sudo` for a service account**                          | ✅                                          | Rights come from `service-accounts.conf`, read locally, with no portal call                                                             |
+| **`ob-ssh` / `ob-scp` / `ob-sftp` to a backend**          | ❌                                          | Each mints an ephemeral certificate through `/pam/bastion-cert`. There is no offline path, and the per-session voucher is not cacheable |
+| **Plain `ssh user@backend` from the bastion**             | ✅ **only in key modes** — never in Mode E  | See the row above; the backend's own PAM `account` then falls back to its authorization cache                                           |
+| **Enrolling a new server**                                | ❌                                          | The RFC 8628 device flow needs the portal and a human approval                                                                          |
+| **Refreshing the KRL**                                    | ❌ (the last downloaded KRL stays in force) | `RevokedKeys` is a local file; it simply stops being updated                                                                            |
+| **Revoking a user**                                       | ❌ — and this is the point that matters     | Revocation is a portal-side action. While the portal is down, a cached authorization keeps working until its TTL expires                |
+
+Two caches are involved and they must be sized together:
+
+- the **NSS** cache (`cache_ttl` in `nss_openbastion.conf`) — without it the user
+  does not resolve at all, and nothing else matters;
+- the **PAM authorization** cache (`auth_cache = true` in `openbastion.conf`) —
+  its TTL is not a local setting: the portal supplies it in the `/pam/authorize`
+  response from LLNG's `pamAccessOfflineTtl`, with a built-in 24 h fallback.
+
+> **Build note.** The authorization cache is _looked up_ in every build, but only
+> _written_ in builds with `INSTALL_DESKTOP=ON`. The Debian package is built that
+> way, so this concerns you only if you compile the module yourself with
+> `INSTALL_DESKTOP=OFF`: there the cache is never populated and every row marked
+> ✅ above becomes ❌.
+
+### A personal SSH key on the bastion as an outage fallback
+
+A question that comes up on every deployment: can a user keep a **personal SSH
+key** in their home directory on the bastion, so that bastion→backend hops keep
+working when the portal is down?
+
+**In Mode E (cert-vouching, maximum security): no, by design.** The backends set
+`AuthorizedKeysFile none` and accept only certificates signed by the LLNG CA,
+whose key-id must carry `bastion=<id>;user=<u>` — a plain user key is refused by
+`sshd` before PAM is ever consulted. `ob-ssh` cannot help either: minting its
+ephemeral certificate requires the portal. This is not an oversight to work
+around; it is the property that makes the bastion the only way in.
+
+**In the key modes (a certificate mode _without_ `--max-security`, or PAM mode
+C): yes, with conditions.** Those setups do not write `AuthorizedKeysFile none`,
+so `sshd` still honours `~/.ssh/authorized_keys` on the backend. The user's own
+key authenticates them, and the backend's PAM `account` phase falls back to its
+authorization cache. Conditions:
+
+1. The backend must **not** have been set up with `--max-security`.
+2. The user must already be in the backend's authorization cache — the cache is
+   populated by a successful _online_ login, so this only helps someone who
+   connected recently, not someone who has never logged in.
+3. NSS must still resolve the user on the backend (its own cache TTL).
+4. The public key must have been placed in `~/.ssh/authorized_keys` on the
+   backend beforehand, by an out-of-band mechanism.
+
+**What it costs you.** This is a deliberate trade-off, not a free resilience
+feature:
+
+- a **long-lived private key** now lives on the bastion, where the ephemeral-key
+  design specifically avoided one. Its compromise is not bounded by a
+  certificate TTL, and it is not revocable through the portal — removing it means
+  editing `authorized_keys` on every backend;
+- the hop is no longer **vouched**: the backend cannot tell that the user
+  authenticated to the bastion, so `allowed_bastions`, the source-address pinning
+  and the voucher TTL all stop applying to it;
+- **the audit trail survives, contrary to what one might assume**: a plain `ssh`
+  run _from inside a bastion session_ is captured by the session recorder like
+  any other command, because the recorder captures the pty. What is **not**
+  recorded is a `ssh -J bastion …` ProxyJump from a workstation, which uses a
+  `direct-tcpip` channel the `ForceCommand` never sees — the same gap as R-S25 in
+  [the risk study](security/99-risk-reduce.md).
+
+**Recommendation.** Treat it as a degraded-but-available posture chosen
+deliberately, per deployment, and prefer the two mechanisms designed for the
+outage case: a **break-glass service account** (`service-accounts.conf`, resolved
+locally with no portal call) and **out-of-band console access**. Both are the
+remediation the risk study already prescribes for a total lockout — see R-S17 in
+[doc/security/99-risk-reduce.md](security/99-risk-reduce.md).
+
+> **Validation status.** The matrix above and the Mode E answer are derived from
+> the code and the generated `sshd` configurations. The key-mode path has **not
+> yet been validated end to end in a lab** (portal up, then portal down, cached
+> authorization still admitting the key). Until it has, treat the key-mode rows
+> as analysis rather than as a tested procedure — see issue #165.
+
 ## Use Cases
 
 | Scenario               | Description                                         |
