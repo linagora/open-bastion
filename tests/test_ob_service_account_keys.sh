@@ -163,11 +163,37 @@ test_helper_refusals() {
     fi
 }
 
+# ── 6. The directory the helper reads is shipped too ────────────────────────
+#
+# A helper without its directory is inert: it exits 0 with no output for every
+# account, which is indistinguishable from "this user is not a service
+# account". Nothing in the shipped tree created it -- only the lab and the two
+# demo entrypoints did, by hand, which is again why the gap survived.
+#
+# 0755: it holds public keys, and the AuthorizedKeysCommandUser (nobody) has to
+# traverse and read it. tests/test_integration_token_svc.sh asserts exactly
+# that mode on a running bastion.
+test_keys_dir_is_shipped() {
+    local missing=""
+    grep -q 'service-accounts.d' "$ROOT_DIR/debian/open-bastion.dirs" \
+        || missing="$missing debian/.dirs"
+    grep -q 'service-accounts.d' "$ROOT_DIR/CMakeLists.txt" \
+        || missing="$missing CMakeLists.txt"
+    grep -q 'service-accounts.d' "$ROOT_DIR/rpm/open-bastion.spec" \
+        || missing="$missing rpm/.spec"
+    if [ -z "$missing" ]; then
+        pass "service-accounts.d is created by all three packaging paths"
+    else
+        fail "service-accounts.d is created by all three packaging paths" "absent from:$missing"
+    fi
+}
+
 run_test test_helper_is_packaged
 run_test test_one_path_everywhere
 run_test test_doc_does_not_claim_pam_is_enough
 run_test test_exposeauthinfo_is_mode_e_only
 run_test test_helper_refusals
+run_test test_keys_dir_is_shipped
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

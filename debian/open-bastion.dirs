@@ -1,2 +1,3 @@
 var/lib/open-bastion
 var/cache/open-bastion
+etc/open-bastion/service-accounts.d

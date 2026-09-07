@@ -86,6 +86,7 @@ ctest --output-on-failure --verbose
 %config(noreplace) %{_sysconfdir}/open-bastion/openbastion.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/nss_openbastion.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/service-accounts.conf.example
+%dir %attr(0755,root,root) %{_sysconfdir}/open-bastion/service-accounts.d
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder

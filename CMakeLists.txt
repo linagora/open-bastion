@@ -234,6 +234,25 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-service-account-keys
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# ...and the directory it reads. Empty, 0755 root:root -- it holds public keys,
+# and the AuthorizedKeysCommandUser (nobody) has to traverse and read it.
+# Shipping the helper without its directory would leave it inert: it exits 0
+# with no output for every account, which is indistinguishable from "this user
+# is not a service account".
+#
+# Absolute, not ${CMAKE_INSTALL_SYSCONFDIR}: with CMAKE_INSTALL_PREFIX=/usr --
+# which every demo image uses -- GNUInstallDirs leaves SYSCONFDIR as the
+# relative "etc", so that form lands in /usr/etc/open-bastion/. The five
+# existing SYSCONFDIR rules above have the same behaviour, but they install
+# .example files nothing reads at runtime; this directory IS read, by the
+# helper, at the absolute path below.
+install(DIRECTORY
+    DESTINATION /etc/open-bastion/service-accounts.d
+    DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                          GROUP_READ GROUP_EXECUTE
+                          WORLD_READ WORLD_EXECUTE
+)
+
 # Install SSH proxy config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
