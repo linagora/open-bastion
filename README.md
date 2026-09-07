@@ -168,10 +168,15 @@ sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev 
 
 # Build
 mkdir build && cd build
-cmake ..
+cmake -DCMAKE_INSTALL_PREFIX=/usr ..
 make
 sudo make install
 ```
+
+Set `CMAKE_INSTALL_PREFIX=/usr` rather than taking CMake's `/usr/local` default:
+the paths written into the generated sshd and PAM configuration are absolute
+(`/usr/sbin/ob-service-account-keys`, for one), so a `/usr/local` install leaves
+them pointing at files that are not there.
 
 ## Documentation
 

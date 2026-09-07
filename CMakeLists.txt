@@ -220,32 +220,21 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-id
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# sshd AuthorizedKeysCommand helper for service accounts. It serves a public key
-# from /etc/open-bastion/service-accounts.d/<name>.pub without needing the Unix
-# account to exist yet, which is what makes a service account usable in Mode E
-# (AuthorizedKeysFile none) and on any host where the account is NSS-resolved.
-#
-# It was in the tree but in none of the three packaging paths (#263), so there
-# was no copy on a host to point AuthorizedKeysCommand at -- and everyone who
-# needed it installed their own: /usr/local/bin/ in two demos,
-# /usr/local/sbin/ in the lab and in the documentation. /usr/sbin/ is the
-# packaged home: a package must not write under /usr/local (Debian policy 9.1.2).
+# sshd AuthorizedKeysCommand helper for service accounts: serves the account's
+# public key from /etc/open-bastion/service-accounts.d/<name>.pub without the
+# Unix account having to exist yet. Not packaged until #263.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-service-account-keys
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# ...and the directory it reads. Empty, 0755 root:root -- it holds public keys,
-# and the AuthorizedKeysCommandUser (nobody) has to traverse and read it.
-# Shipping the helper without its directory would leave it inert: it exits 0
-# with no output for every account, which is indistinguishable from "this user
-# is not a service account".
+# ...and the directory it reads: 0755 root:root, traversable and readable by the
+# AuthorizedKeysCommandUser (nobody). Without it the helper is inert.
 #
-# Absolute, not ${CMAKE_INSTALL_SYSCONFDIR}: with CMAKE_INSTALL_PREFIX=/usr --
-# which every demo image uses -- GNUInstallDirs leaves SYSCONFDIR as the
-# relative "etc", so that form lands in /usr/etc/open-bastion/. The five
-# existing SYSCONFDIR rules above have the same behaviour, but they install
-# .example files nothing reads at runtime; this directory IS read, by the
-# helper, at the absolute path below.
+# Absolute, not ${CMAKE_INSTALL_SYSCONFDIR}: under CMAKE_INSTALL_PREFIX=/usr
+# GNUInstallDirs leaves SYSCONFDIR relative, so that form lands in /usr/etc/.
+# The cost of an absolute DESTINATION is that `cmake --install --prefix <dir>`
+# ignores it and would touch the real /etc; DESTDIR staging (what the .deb and
+# .rpm use) is unaffected.
 install(DIRECTORY
     DESTINATION /etc/open-bastion/service-accounts.d
     DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE

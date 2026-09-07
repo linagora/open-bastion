@@ -211,16 +211,38 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
   ```
 
   Drop each account's public key at `/etc/open-bastion/service-accounts.d/<name>.pub`
-  and reload `sshd`. The mere presence of the `.pub` lets `sshd` present the key;
-  `pam_openbastion` still re-validates the SHA256 fingerprint against
-  `service-accounts.conf` (which is `0600` and unreadable by the
-  `AuthorizedKeysCommandUser`), so an orphan `.pub` is accepted by `sshd` but
-  still rejected by PAM.
+  and reload `sshd`.
 
-`ExposeAuthInfo yes` must be set so the fingerprint reaches the PAM module. The setup
-scripts write it **only in Mode E** — it lives in `configure_max_security_sshd()`, which
-returns immediately without `--max-security`. On any other host, add it yourself in the
-drop-in above (#263).
+### What actually enforces the fingerprint, and when it does not
+
+Read this before relying on `key_fingerprint`.
+
+The `.pub` file is what lets `sshd` accept the key. `pam_openbastion` is meant to
+re-validate its SHA256 fingerprint against `service-accounts.conf` (`0600`, and so
+unreadable by the `AuthorizedKeysCommandUser`) — but for a **plain public key** on a
+current OpenSSH, that second check often does not run at all:
+
+- `sshd` does not call `pam_authenticate()` for a public-key login, so the
+  authentication-phase check never fires there (`pam_openbastion.c:3766`);
+- the account-phase check resolves the fingerprint from `SSH_USER_AUTH` **or** the
+  principals spool. Without `ExposeAuthInfo yes` there is no `SSH_USER_AUTH`, and the
+  spool is empty too — `sshd` runs `AuthorizedPrincipalsCommand` only for
+  certificate sessions (`pam_openbastion.c:2458`);
+- with no fingerprint from either source, the check is skipped rather than failed:
+  absence is not fatal by default (`pam_openbastion.c:3774`).
+
+So on such a host an orphan `.pub` is accepted by `sshd` and **not** rejected by PAM,
+and `key_fingerprint` is decorative. Two settings turn it back into a control, and you
+want both:
+
+| setting                       | where                  | effect                                                    |
+| ----------------------------- | ---------------------- | --------------------------------------------------------- |
+| `ExposeAuthInfo yes`          | the sshd drop-in above | gives PAM a fingerprint to check                          |
+| `fingerprint_required = true` | `openbastion.conf`     | refuses the login when there is none, instead of skipping |
+
+The setup scripts write `ExposeAuthInfo yes` **only in Mode E** — it lives in
+`configure_max_security_sshd()`, which returns immediately without `--max-security`. On
+any other host, add it yourself in the drop-in above (#263).
 
 ### The account must be resolvable (fixed `uid`/`gid`)
 

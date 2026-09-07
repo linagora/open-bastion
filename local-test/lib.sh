@@ -323,13 +323,17 @@ provision_service_helper(){
     local pub; pub=$(cat "$SVC_KEY.pub")
     if dssh "$ip" "sudo OB_SVC_PUB='$pub' OB_SVC_NAME='$SVC_NAME' bash -s" <<'BS' >/dev/null 2>&1
 set -e
-install -m 0755 -o root -g root /tmp/ob-service-account-keys /usr/local/sbin/ob-service-account-keys
+# /usr/sbin, the packaged path (#263): this runs before the installer puts the
+# package on the VM, so the helper still has to be copied -- but to the path
+# the package owns, so apt later refreshes this very file instead of leaving a
+# second, diverging copy under /usr/local.
+install -m 0755 -o root -g root /tmp/ob-service-account-keys /usr/sbin/ob-service-account-keys
 mkdir -p /etc/open-bastion/service-accounts.d
 printf '%s\n' "$OB_SVC_PUB" > "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
 chown root:root "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
 chmod 0644 "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
 cat > /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf <<'CONF'
-AuthorizedKeysCommand /usr/local/sbin/ob-service-account-keys %u
+AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
 AuthorizedKeysCommandUser nobody
 CONF
 BS
