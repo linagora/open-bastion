@@ -260,7 +260,7 @@ test_service_account_provision() {
 
     local helper_out
     helper_out=$(docker exec ob-token-svc-bastion \
-        /usr/local/bin/ob-service-account-keys "${SVC_ACCOUNT}" 2>/dev/null || true)
+        /usr/sbin/ob-service-account-keys "${SVC_ACCOUNT}" 2>/dev/null || true)
     if ! grep -q "ssh-ed25519" <<< "$helper_out"; then
         fail "ob-service-account-keys returned no ed25519 key" "$helper_out"
         return 1

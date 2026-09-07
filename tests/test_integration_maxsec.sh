@@ -976,7 +976,7 @@ test_service_account_provision() {
     # The AuthorizedKeysCommand must now return our public key for this user.
     local cmd_output
     cmd_output=$(docker exec ob-maxsec-bastion \
-        /usr/local/bin/ob-service-account-keys "${SVC_ACCOUNT}" 2>/dev/null || true)
+        /usr/sbin/ob-service-account-keys "${SVC_ACCOUNT}" 2>/dev/null || true)
     if [[ -z "$cmd_output" ]]; then
         fail "ob-service-account-keys returned no key for ${SVC_ACCOUNT}"
         return 1

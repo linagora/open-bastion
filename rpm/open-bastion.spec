@@ -93,6 +93,7 @@ ctest --output-on-failure --verbose
 %{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup
 %{_sbindir}/ob-cert-daemon
+%{_sbindir}/ob-service-account-keys
 %{_sbindir}/ob-record-sink
 %{_sbindir}/ob-cache-admin
 %{_sbindir}/ob-session-prune

@@ -38,7 +38,7 @@ cat > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf << EOF
 # which is scoped to registered service accounts.
 PubkeyAuthentication yes
 AuthorizedKeysFile none
-AuthorizedKeysCommand /usr/local/bin/ob-service-account-keys %u
+AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
 AuthorizedKeysCommandUser nobody
 
 # Expose SSH auth details to PAM so pam_openbastion can re-verify the

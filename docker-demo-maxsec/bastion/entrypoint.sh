@@ -155,7 +155,7 @@ AuthorizedKeysFile none
 # usernames registered in /etc/open-bastion/service-accounts.conf. Regular
 # human users continue to authenticate with an LLNG-signed certificate via
 # TrustedUserCAKeys above.
-AuthorizedKeysCommand /usr/local/bin/ob-service-account-keys %u
+AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
 AuthorizedKeysCommandUser nobody
 
 # MAXIMUM SECURITY: Key Revocation List (mandatory)

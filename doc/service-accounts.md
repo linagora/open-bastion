@@ -77,11 +77,16 @@ ExposeAuthInfo yes
 ```
 
 **Mode E compatibility:**
-In Mode E deployments (`AuthorizedKeysFile none`), service accounts still work correctly.
-Although there is no `authorized_keys` file lookup, authentication succeeds via a different
-path: the SSH client presents its key, sshd exposes the key fingerprint through
-`SSH_USER_AUTH` (enabled by `ExposeAuthInfo yes`), and the PAM module validates that
-fingerprint against `service-accounts.conf`. No `authorized_keys` file is required.
+In Mode E deployments (`AuthorizedKeysFile none`) an `authorized_keys` file is never
+consulted, so the key has to reach sshd some other way — through the
+`AuthorizedKeysCommand` helper described below. Set that up first; the rest of this
+section assumes it.
+
+Once sshd has accepted the key, the PAM module **re-validates** its SHA256 fingerprint
+against `service-accounts.conf`, using `SSH_USER_AUTH` (which needs `ExposeAuthInfo yes`).
+That check is a second gate, not the first one: it can refuse a key sshd accepted, but it
+cannot make sshd accept a key it has no record of. Without the helper, sshd rejects at the
+protocol layer and `pam_openbastion` is never reached (#263).
 
 Get the SSH key fingerprint:
 
@@ -194,13 +199,14 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
 
 - **`AuthorizedKeysCommand` (required for Mode E, works in all modes).** Mode E
   sets `AuthorizedKeysFile none`, so `authorized_keys` is ignored. Use the
-  `ob-service-account-keys` helper, which serves a public key from
+  `ob-service-account-keys` helper — shipped at `/usr/sbin/ob-service-account-keys`
+  since #263 — which serves a public key from
   `/etc/open-bastion/service-accounts.d/<name>.pub` (`root:root 0644`) and does
   **not** depend on the account already existing:
 
   ```
   # /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf
-  AuthorizedKeysCommand /usr/local/sbin/ob-service-account-keys %u
+  AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
   AuthorizedKeysCommandUser nobody
   ```
 
@@ -211,8 +217,10 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
   `AuthorizedKeysCommandUser`), so an orphan `.pub` is accepted by `sshd` but
   still rejected by PAM.
 
-`ExposeAuthInfo yes` must be set (the setups do this) so the fingerprint reaches
-the PAM module.
+`ExposeAuthInfo yes` must be set so the fingerprint reaches the PAM module. The setup
+scripts write it **only in Mode E** — it lives in `configure_max_security_sshd()`, which
+returns immediately without `--max-security`. On any other host, add it yourself in the
+drop-in above (#263).
 
 ### The account must be resolvable (fixed `uid`/`gid`)
 
