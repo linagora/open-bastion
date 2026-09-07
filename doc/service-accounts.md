@@ -101,6 +101,8 @@ ssh-keygen -lf /path/to/key.pub
 | Option            | Required | Description                                                                                                                                                                      |
 | ----------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `key_fingerprint` | Yes      | SSH key fingerprint (SHA256:... or MD5:...)                                                                                                                                      |
+| `public_key`      | No†      | The account's SSH public key. Deployed to `service-accounts.d/<name>.pub`; `key_fingerprint` is derived from it                                                                  |
+| `public_key_file` | No†      | Path to that key, resolved against the config file's directory and read at build time. Mutually exclusive with `public_key`                                                      |
 | `sudo_allowed`    | No       | Allow sudo access (default: false)                                                                                                                                               |
 | `sudo_nopasswd`   | No       | Sudo without password (default: false)                                                                                                                                           |
 | `gecos`           | No       | User description                                                                                                                                                                 |
@@ -108,6 +110,9 @@ ssh-keygen -lf /path/to/key.pub
 | `home`            | No       | Home directory — must be under `approved_home_prefixes` (default `/home:/var/home`) or the account is dropped                                                                    |
 | `uid`             | See note | Fixed UID. **Required (with `gid`) for SSH-reachable accounts** — NSS resolves them only when both are set; `0` = auto-assign (works only if the account already exists locally) |
 | `gid`             | See note | Fixed GID. See `uid`                                                                                                                                                             |
+
+† Not required by the file format, but one of the two is what makes the account
+usable: without a key the bundle deploys no `.pub` and `sshd` has nothing to offer.
 
 ## How It Works
 
@@ -142,14 +147,16 @@ service accounts once in [`ob-builder`](../admin-builder/README.md) and have the
 baked into the generated shell installer and/or Ansible role.
 
 **Interactive:** the questionnaire asks whether to define service accounts and
-loops over name / fingerprint / sudo / shell / home for each.
+loops over name / fingerprint / sudo / shell / home for each. It does not ask for
+a public key, so a bundle built this way deploys no `.pub` and warns about it;
+use `--config` when you want the SSH layer handled for you.
 
 **Non-interactive (`--config`):** add a `service_accounts:` list to the YAML:
 
 ```yaml
 service_accounts:
   - name: ci-ansible # avoid system names like 'ansible' only if they exist; use a dedicated name
-    key_fingerprint: "SHA256:abc123def456..."
+    public_key_file: keys/ci-ansible.pub # key_fingerprint is derived from it
     sudo_allowed: true
     sudo_nopasswd: true
     shell: /bin/bash
@@ -158,7 +165,7 @@ service_accounts:
     uid: 6001 # fixed uid+gid → NSS-resolvable → reachable over SSH
     gid: 6001
   - name: obbackup
-    key_fingerprint: "SHA256:xyz789..."
+    public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… backup@ops"
     sudo_allowed: false
     shell: /bin/sh
     home: /home/obbackup
@@ -180,11 +187,14 @@ warning above) — then:
 
 Service accounts apply to every role (bastion, backend, standalone).
 
-> **ob-builder deposits the fingerprint, not the public key.** The generated
-> `service-accounts.conf` carries `key_fingerprint` only. That is what
-> `pam_openbastion` checks, but it is **not** enough for `sshd` to accept the
-> connection — you must also authorize the public key at the SSH layer (next
-> section). This is an explicit, documented manual step.
+> **Give each account its `public_key`, or the SSH layer is left to you.** With a
+> key, `ob-builder` derives the fingerprint, writes `service-accounts.conf` **and**
+> deploys `/etc/open-bastion/service-accounts.d/<name>.pub` — see
+> [Letting ob-builder deploy the key](#letting-ob-builder-deploy-the-key) below.
+> With `key_fingerprint` alone the bundle carries no key, `sshd` has nothing to
+> accept, and the account cannot log in until you deploy one by hand: that is
+> what `pam_openbastion` checks, and it is **not** what lets the connection in.
+> The build warns when an account is in that state.
 
 ## Authorizing the public key at the SSH layer
 

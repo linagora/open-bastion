@@ -467,7 +467,12 @@ step_config() {
     fi
 
     mkdir -p /etc/open-bastion
-    chmod 0700 /etc/open-bastion
+    # 0711, not 0700: the AuthorizedKeysCommandUser (nobody) has to traverse
+    # this directory to read service-accounts.d/<name>.pub. Every secret inside
+    # is individually 0600 root, so traverse-only is safe -- the directory stays
+    # unlistable. At 0700 the helper's stat fails with EACCES, it exits 0 with
+    # no output, and sshd refuses the login with everything looking deployed.
+    chmod 0711 /etc/open-bastion
 
     # Write openbastion.conf — substitute runtime-resolved values in the
     # embedded template. ##VAR## are runtime placeholders; @@VAR@@ were
@@ -511,24 +516,60 @@ OB_CONF_EOF
     # Deposit each service account's authorized public key. service-accounts.conf
     # tells pam_openbastion what fingerprint to expect; it gives sshd nothing to
     # accept, so without these files the account cannot log in at all and the
-    # deployment looks complete (#263). 0644 root:root under a 0755 directory:
-    # the AuthorizedKeysCommandUser (nobody) has to read them.
+    # deployment looks complete (#263). 0644 root:root under a 0711 parent: the
+    # AuthorizedKeysCommandUser (nobody) has to read them.
+    install -d -m 0755 -o root -g root /etc/open-bastion/service-accounts.d
     if [ -n "@@SERVICE_ACCOUNT_KEYS_B64@@" ]; then
-        install -d -m 0755 -o root -g root /etc/open-bastion/service-accounts.d
-        printf '%s' "@@SERVICE_ACCOUNT_KEYS_B64@@" | base64 -d | while read -r _sa_name _sa_key; do
+        _sa_keep=""
+        # temp+mv per account, like the conf and CA writes above. A bare `>`
+        # under this installer's `set -euo pipefail` aborted the WHOLE run on
+        # the first failed write -- with service-accounts.conf already committed,
+        # so some accounts had keys and the rest never would, and the error named
+        # no account.
+        printf '%s' "@@SERVICE_ACCOUNT_KEYS_B64@@" | base64 -d > /tmp/.ob-sa-keys.$$
+        while read -r _sa_name _sa_key; do
             [ -n "${_sa_name}" ] || continue
-            printf '%s\n' "${_sa_key}" > "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
-            chmod 0644 "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
-            chown root:root "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
-            log_info "Written: /etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+            _sa_dst="/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+            _sa_tmpk=$(mktemp "${_sa_dst}.XXXXXX") || die "cannot create a temp file for ${_sa_name}.pub"
+            printf '%s\n' "${_sa_key}" > "${_sa_tmpk}" || die "cannot write the key for ${_sa_name}"
+            chmod 0644 "${_sa_tmpk}"
+            chown root:root "${_sa_tmpk}"
+            mv -f "${_sa_tmpk}" "${_sa_dst}" || die "cannot install ${_sa_dst}"
+            _sa_keep="${_sa_keep} ${_sa_name}.pub"
+            log_info "Written: ${_sa_dst}"
+        done < /tmp/.ob-sa-keys.$$
+        rm -f /tmp/.ob-sa-keys.$$
+
+        # Remove keys for accounts no longer declared. Without this the directory
+        # is write-only: dropping an account from the config converges the .conf
+        # but leaves its .pub served, and ob-service-account-keys offers ANY
+        # present file without consulting the .conf.
+        for _sa_old in /etc/open-bastion/service-accounts.d/*.pub; do
+            [ -e "${_sa_old}" ] || continue
+            case " ${_sa_keep} " in
+                *" $(basename "${_sa_old}") "*) ;;
+                *) rm -f "${_sa_old}"; log_info "Removed stale ${_sa_old}" ;;
+            esac
         done
-        # The key is only half of it: sshd still needs the AuthorizedKeysCommand
-        # that serves these files. That is a host-wide sshd change, so it stays
-        # opt-in rather than being made here.
-        if ! grep -rqs 'ob-service-account-keys' /etc/ssh/sshd_config.d/ /etc/ssh/sshd_config; then
-            log_warn "sshd has no AuthorizedKeysCommand for service accounts."
-            log_warn "These keys will not be offered until you run:"
-            log_warn "  ob-bastion-setup --enable-service-keys   (or ob-backend-setup)"
+    fi
+
+    # sshd must actually serve them, and with ExposeAuthInfo or the fingerprint
+    # is never checked. Anchored and over *.conf only: a plain `grep -r` matched
+    # a commented-out line or a .bak beside a drop-in and stayed silent while
+    # nothing was served. Reported whenever service accounts are configured, not
+    # only when this bundle carried keys -- a fingerprint-only bundle has the
+    # same problem and used to say nothing.
+    if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
+        _sa_served=1
+        for _sa_f in /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config; do
+            [ -f "${_sa_f}" ] || continue
+            grep -qiE '^[[:space:]]*AuthorizedKeysCommand[[:space:]].*ob-service-account-keys' "${_sa_f}" || continue
+            grep -qiE '^[[:space:]]*ExposeAuthInfo[[:space:]]+yes' "${_sa_f}" && _sa_served=0
+        done
+        if [ "${_sa_served}" -ne 0 ]; then
+            log_warn "sshd does not serve service-account keys (or does so without ExposeAuthInfo)."
+            log_warn "Without both, the account cannot log in, or its fingerprint is never checked."
+            log_warn "Run:  ob-bastion-setup --enable-service-keys   (or ob-backend-setup)"
         fi
     fi
 
@@ -714,6 +755,10 @@ step_setup() {
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
             [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
+            # Without this the setup run below REMOVES the drop-in we just
+            # deployed: a run without the flag cleans up its own generated file
+            # (#265), so the bundle would tear down its own work and end green.
+            [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             [ "${DISABLE_SESSION_RECORDER}" = "yes" ] && _setup_opts+=("--disable-session-recorder")
             if [ "${OPT_DRY_RUN}" = "true" ]; then
@@ -740,6 +785,10 @@ step_setup() {
             [ "${PAM_MODE}" = "E" ] && _setup_opts+=("--max-security")
             [ "${OPT_INSECURE}" = "true" ] && _setup_opts+=("-k")
             [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
+            # Without this the setup run below REMOVES the drop-in we just
+            # deployed: a run without the flag cleans up its own generated file
+            # (#265), so the bundle would tear down its own work and end green.
+            [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             if [ "${OPT_DRY_RUN}" = "true" ]; then
                 log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-backend-setup ${_setup_opts[*]}"

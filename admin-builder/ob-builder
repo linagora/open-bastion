@@ -86,6 +86,17 @@ SERVER_GROUP=""
 SERVER_GROUP_POLICY=""
 TARGET_ROLE=""
 AUTO_ENROLL_SETUP=""
+# Pass --enable-service-keys through to the setup script the bundle runs.
+#
+# Without it the bundle deploys the keys and then the setup run it launches
+# REMOVES the drop-in that serves them: a setup run without the flag cleans up
+# its own generated file (#265), and the installer's setup argv had no way to
+# carry one. The two features together were self-defeating.
+#
+# Defaults to on when any service account carries a key, since deploying a key
+# nothing serves is the exact state #263 was reported for; an explicit
+# `service_keys: false` overrides.
+SERVICE_KEYS_SETUP=""
 SELF_DELETE=""
 ALLOWED_BASTIONS=""
 ANSIBLE_AUTO_APPROVE=""
@@ -191,13 +202,15 @@ SERVICE ACCOUNTS (--config YAML):
   (#263). With it, the bundle also writes
   /etc/open-bastion/service-accounts.d/<name>.pub.
 
-  sshd still needs the AuthorizedKeysCommand that serves those files, which is
-  a host-wide change: run "ob-bastion-setup --enable-service-keys" (or
-  ob-backend-setup) on the target. The generated installer says so when it
-  cannot find one. Example:
+  sshd still needs the AuthorizedKeysCommand that serves those files. When any
+  account carries a key the bundle passes --enable-service-keys to the setup it
+  runs, so this is handled; set service_keys: false to opt out, or true to
+  force it. If setup is skipped, run it by hand on the target -- the installer
+  says so when it finds sshd not serving them. Example:
     service_accounts:
       - name: ci-ansible            # dedicated name (not an existing system user)
         public_key_file: keys/ci.pub  # or public_key: "ssh-ed25519 AAAA… ci@host"
+                                      # (relative to THIS file; the two are exclusive)
         # key_fingerprint is DERIVED from the key. Give it too only if you want
         # it cross-checked: a mismatch stops the build rather than shipping a
         # bundle that installs cleanly and refuses the login.
@@ -365,6 +378,7 @@ _load_config_yq() {
     v=$(_yq_get server_group_policy); [ -n "$v" ] && SERVER_GROUP_POLICY="$v"
     v=$(_yq_get target_role);         [ -n "$v" ] && TARGET_ROLE="$v"
     v=$(_yq_get auto_enroll_setup);   [ -n "$v" ] && AUTO_ENROLL_SETUP="$v"
+    v=$(_yq_get service_keys);        [ -n "$v" ] && SERVICE_KEYS_SETUP="$v"
     v=$(_yq_get self_delete);         [ -n "$v" ] && SELF_DELETE="$v"
     v=$(_yq_get allowed_bastions);    [ -n "$v" ] && ALLOWED_BASTIONS="$v"
     v=$(_yq_get ansible_auto_approve); [ -n "$v" ] && ANSIBLE_AUTO_APPROVE="$v"
@@ -418,6 +432,7 @@ _load_config_awk() {
                 server_group_policy) SERVER_GROUP_POLICY="$val" ;;
                 target_role)         TARGET_ROLE="$val" ;;
                 auto_enroll_setup)   AUTO_ENROLL_SETUP="$val" ;;
+                service_keys)        SERVICE_KEYS_SETUP="$val" ;;
                 self_delete)         SELF_DELETE="$val" ;;
                 allowed_bastions)    ALLOWED_BASTIONS="$val" ;;
                 ansible_auto_approve) ANSIBLE_AUTO_APPROVE="$val" ;;
@@ -461,24 +476,51 @@ _sa_field() {
 # nothing, and the login fails at the fingerprint check with the key looking
 # perfectly correct on both ends.
 _sa_fingerprint_of() {
-    local pub="$1" tmp out
+    local pub="$1" alg="${2:-sha256}" tmp out got
     command -v ssh-keygen >/dev/null 2>&1 || return 1
     tmp=$(mktemp) || return 1
     printf '%s\n' "$pub" > "$tmp"
-    out=$(ssh-keygen -lf "$tmp" 2>/dev/null) || { rm -f "$tmp"; return 1; }
+    out=$(ssh-keygen -E "$alg" -lf "$tmp" 2>/dev/null) || { rm -f "$tmp"; return 1; }
     rm -f "$tmp"
-    printf '%s' "$out" | awk '{print $2}' | grep -q '^SHA256:' || return 1
-    printf '%s' "$out" | awk '{print $2}'
+    got=$(printf '%s' "$out" | awk '{print $2}')
+    case "$alg:$got" in
+        sha256:SHA256:*|md5:MD5:*) printf '%s' "$got" ;;
+        *) return 1 ;;
+    esac
 }
 
 # An SSH public key is one line: "<type> <base64> [comment]".
+# Normalise an authorized_keys line to the bare "<type> <base64> [comment]" the
+# helper serves, dropping any options prefix. A public_key_file pointed at a copy
+# of someone's authorized_keys is the obvious way to get one, and silently
+# refusing it produced the #263 shape: no .pub deployed, everything else fine.
+_sa_strip_key_options() {
+    local line="$1"
+    case "$line" in
+        ssh-*|ecdsa-*|sk-*) printf '%s' "$line"; return 0 ;;
+    esac
+    # Options come first, then the key type. Find the first field that looks
+    # like one and keep from there.
+    printf '%s' "$line" | grep -oE '(ssh-(rsa|ed25519|dss)|ecdsa-sha2-[a-z0-9]+|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)[[:space:]].*$' \
+        || printf '%s' "$line"
+}
+
+# One line, a supported plain key type, and not a certificate.
+#
+# Certificates are rejected on purpose: the helper serves the file to sshd as an
+# authorized key, and a cert is not one. The previous globs let
+# ecdsa-sha2-*-cert-v01@openssh.com through while rejecting the ed25519 and rsa
+# cert forms -- an accident of glob order, not a policy.
 _sa_is_valid_pubkey() {
     local pub="$1"
+    case "$pub" in *$'\n'*) return 1 ;; esac
+    case "$pub" in *-cert-v01@openssh.com\ *) return 1 ;; esac
     case "$pub" in
-        ssh-rsa\ *|ssh-ed25519\ *|ecdsa-sha2-*\ *|sk-ssh-ed25519@*\ *|sk-ecdsa-sha2-*\ *) ;;
+        ssh-rsa\ *|ssh-ed25519\ *|ssh-dss\ *) ;;
+        ecdsa-sha2-nistp256\ *|ecdsa-sha2-nistp384\ *|ecdsa-sha2-nistp521\ *) ;;
+        sk-ssh-ed25519@openssh.com\ *|sk-ecdsa-sha2-nistp256@openssh.com\ *) ;;
         *) return 1 ;;
     esac
-    case "$pub" in *$'\n'*) return 1 ;; esac
     return 0
 }
 
@@ -492,22 +534,52 @@ _sa_is_valid_pubkey() {
 #                        and on the target it shows up as a login refused with a
 #                        key that looks right in every listing.
 _sa_reconcile_key() {
-    local derived
-    if [ -n "$pubkey" ]; then
-        if ! _sa_is_valid_pubkey "$pubkey"; then
-            log_warn "service account '$name': public_key is not a single-line SSH public key; ignoring it."
-            pubkey=""
-        fi
+    local derived want_alg="sha256"
+
+    # A key that is present but unusable is an ERROR, not a warning.
+    #
+    # Warning and continuing produced the asymmetry the review caught: a stale
+    # but parseable fingerprint killed the build, while a corrupt key shipped
+    # and refused the login on the target. The second is the failure #263 is
+    # about, so it gets the louder treatment, not the quieter one.
+    if [ -n "$pubkey" ] && ! _sa_is_valid_pubkey "$pubkey"; then
+        log_error "service account '$name': public_key is not a usable SSH public key."
+        log_error "  got: ${pubkey:0:60}..."
+        log_error "  Expected one line: '<type> <base64> [comment]'. Options prefixes"
+        log_error "  (restrict,from=...) are stripped automatically; certificates are not"
+        log_error "  supported here -- deploy the plain public key."
+        return 1
     fi
+
     if [ -z "$pubkey" ]; then
-        [ -n "$fp" ] || return 0
+        # Fingerprint-only. Promised a message here and never emitted one; the
+        # branch was dead code. It matters: this is the pre-#263 shape, and the
+        # bundle cannot make the account work on its own.
+        if [ -n "$fp" ]; then
+            log_warn "service account '$name': key_fingerprint without public_key."
+            log_warn "  The bundle will deploy service-accounts.conf but no"
+            log_warn "  /etc/open-bastion/service-accounts.d/$name.pub, so sshd has no key to"
+            log_warn "  offer and the account cannot log in until you deploy one by hand."
+            log_warn "  Add public_key or public_key_file to have this handled for you."
+        fi
         return 0
     fi
 
-    if ! derived=$(_sa_fingerprint_of "$pubkey"); then
-        log_warn "service account '$name': could not compute the fingerprint of public_key"
-        log_warn "  (is ssh-keygen installed on this build host?). The key is still deployed."
-        return 0
+    # Derive in the same algorithm the operator used, so an existing MD5 entry
+    # can gain a public_key without the cross-check declaring both values stale.
+    # is_valid_fingerprint, the questionnaire and src/service_account.c all still
+    # accept MD5; refusing it here would have made this PR's own remediation
+    # ("add the key") impossible for those entries.
+    case "$fp" in
+        MD5:*) want_alg="md5" ;;
+    esac
+
+    if ! derived=$(_sa_fingerprint_of "$pubkey" "$want_alg"); then
+        log_error "service account '$name': could not compute the fingerprint of public_key."
+        log_error "  ssh-keygen rejected it, or is not installed on this build host."
+        log_error "  Refusing rather than shipping a key nothing has validated: on the"
+        log_error "  target that is a login refused with everything looking deployed."
+        return 1
     fi
 
     if [ -z "$fp" ]; then
@@ -524,7 +596,6 @@ _sa_reconcile_key() {
         return 1
     fi
 }
-
 # Validate one packed record. Mirrors the authoritative checks in
 # src/service_account.c so a bad value is caught at build time rather than
 # failing the PAM module load on the target.
@@ -555,6 +626,16 @@ warn_service_account_unapproved() {
     local name home shell uid gid pfx ok
     name=$(_sa_field 1 "$rec"); shell=$(_sa_field 5 "$rec"); home=$(_sa_field 6 "$rec")
     uid=$(_sa_field 8 "$rec"); gid=$(_sa_field 9 "$rec")
+    # Field 10 too. This function's contract is "a bad value is caught at build
+    # time rather than failing on the target", and a record built anywhere other
+    # than _sa_flush -- the interactive loop, a future caller -- would otherwise
+    # reach the deployment with a key nothing had looked at.
+    local pub
+    pub=$(_sa_field 10 "$rec")
+    if [ -n "$pub" ] && ! _sa_is_valid_pubkey "$pub"; then
+        log_error "service account '$name': public_key is not a usable SSH public key."
+        return 1
+    fi
     # Reserved system name: still accepted, but the existing account is used as-is
     # (the config's shell/home/uid apply only to accounts ob-bastion creates).
     for pfx in $_OB_SA_SYSTEM_NAMES; do
@@ -617,10 +698,22 @@ _parse_service_accounts_block() {
     local f="$1"
     local in_block=0 line key val
     local name fp sudo_allowed sudo_nopasswd shell home gecos uid gid pubkey
-    _sa_reset_fields() { name=""; fp=""; sudo_allowed="false"; sudo_nopasswd="false"; shell=""; home=""; gecos=""; uid=""; gid=""; pubkey=""; }
+    local _sa_key_conflict=0
+    _sa_reset_fields() { name=""; fp=""; sudo_allowed="false"; sudo_nopasswd="false"; shell=""; home=""; gecos=""; uid=""; gid=""; pubkey=""; _sa_key_conflict=0; }
     local have_acct=0
     _sa_flush() {
         [ "$have_acct" = 1 ] || return 0
+        # Both public_key and public_key_file: which one wins was decided by
+        # line order, silently. An operator rotating a key by adding the new
+        # form above the old one would have shipped the OLD key -- and, with a
+        # fingerprint matching the intended one, been told the value that was
+        # actually shipped is the "stale" one.
+        if [ "$_sa_key_conflict" = 1 ]; then
+            log_error "service account '$name': both public_key and public_key_file are set."
+            log_error "  Which one wins would depend on their order in the file. Keep one."
+            exit 1
+        fi
+
         # A key/fingerprint mismatch stops the build. Not a warning: the bundle
         # would install cleanly and refuse the login on the target, which is the
         # most expensive place to discover it. Explicit rather than relying on
@@ -670,15 +763,34 @@ _parse_service_accounts_block() {
                 gecos)           gecos="$val" ;;
                 uid)             uid="$val" ;;
                 gid)             gid="$val" ;;
-                public_key)      pubkey="$val" ;;
+                public_key)
+                    [ -z "$pubkey" ] || { _sa_key_conflict=1; }
+                    pubkey=$(_sa_strip_key_options "$val")
+                    ;;
                 public_key_file)
                     # Read at BUILD time: the target has no access to the
                     # builder's filesystem, and shipping a path would be a
                     # promise the installer cannot keep.
-                    if [ -r "$val" ]; then
-                        pubkey=$(head -n1 "$val")
+                    #
+                    # Resolved against the CONFIG FILE's directory, not the
+                    # builder's cwd. The documented example is relative
+                    # ("keys/ci.pub"), and resolving it from wherever the build
+                    # was launched made a correct config fail depending on the
+                    # caller's directory.
+                    [ -z "$pubkey" ] || { _sa_key_conflict=1; }
+                    local _kf="$val"
+                    case "$_kf" in
+                        /*) ;;
+                        *) _kf="$(dirname "$f")/$val" ;;
+                    esac
+                    if [ -r "$_kf" ]; then
+                        pubkey=$(_sa_strip_key_options "$(head -n1 "$_kf")")
                     else
-                        log_warn "service account '$name': public_key_file '$val' is not readable; ignoring."
+                        log_error "service account '$name': public_key_file '$val' is not readable."
+                        log_error "  looked for: $_kf (relative paths resolve against the config file)"
+                        log_error "  Refusing: continuing would ship the account without its key, which"
+                        log_error "  is the state #263 was reported for."
+                        exit 1
                     fi
                     ;;
             esac
@@ -793,7 +905,16 @@ collect_service_accounts_interactive() {
         uid=$(ask "  Fixed UID (recommended; empty = auto)" "")
         gid=$(ask "  Fixed GID (recommended; empty = auto)" "")
 
-        rec=$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid")
+        # Ten fields, like the YAML path: a 9-field record leaves field 10
+        # undefined rather than empty, and every consumer would have to know it.
+        # The questionnaire does not ask for a key yet, so it is empty here --
+        # and that is exactly the shape worth warning about.
+        rec=$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid" "")
+        log_warn "service account '$name': no public key given."
+        log_warn "  The bundle will deploy service-accounts.conf but no"
+        log_warn "  /etc/open-bastion/service-accounts.d/$name.pub, so sshd has no key to"
+        log_warn "  offer and the account cannot log in until you deploy one by hand."
+        log_warn "  Use --config with public_key_file to have this handled for you."
         if validate_service_account_record "$rec"; then
             SERVICE_ACCOUNTS_RECORDS+=("$rec")
             log_info "Added service account '$name' (${#SERVICE_ACCOUNTS_RECORDS[@]} total)."
@@ -1459,6 +1580,18 @@ build_placeholder_map() {
         _sa_defaults_yaml='ob_service_accounts_enabled: false'$'\n''ob_service_accounts_content: ""'$'\n''ob_service_account_keys: ""'
     fi
     _sa_keys_b64="${_sa_keys_b64:-}"
+
+    # Default on when any account carries a key: shipping a key that nothing
+    # serves is the state #263 was reported for. An explicit `service_keys:`
+    # in the config wins either way.
+    local _svc_keys_bool="false"
+    case "$(printf '%s' "${SERVICE_KEYS_SETUP:-}" | tr 'A-Z' 'a-z')" in
+        true|yes|1|on)   _svc_keys_bool="true" ;;
+        false|no|0|off)  _svc_keys_bool="false" ;;
+        "") [ -n "${_sa_keys:-}" ] && _svc_keys_bool="true" ;;
+        *)  log_warn "service_keys: unrecognised value '${SERVICE_KEYS_SETUP}', treating as false" ;;
+    esac
+    ph_set SERVICE_KEYS_SETUP_BOOL        "$_svc_keys_bool"
     ph_set SERVICE_ACCOUNTS_ENABLED_BOOL  "$_sa_enabled_bool"
     ph_set SERVICE_ACCOUNTS_CONF_B64      "$_sa_conf_b64"
     ph_set SERVICE_ACCOUNT_KEYS_B64       "$_sa_keys_b64"

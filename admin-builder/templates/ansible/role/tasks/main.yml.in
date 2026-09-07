@@ -55,7 +55,10 @@
     state: directory
     owner: root
     group: root
-    mode: '0700'
+    # 0711, not 0700: the AuthorizedKeysCommandUser (nobody) must traverse this
+    # directory to read service-accounts.d/<name>.pub. Secrets inside are each
+    # 0600 root, so traverse-only is safe and the directory stays unlistable.
+    mode: '0711'
 
 - name: Deploy SSH CA public key
   ansible.builtin.copy:
@@ -123,13 +126,42 @@
 
 # The keys are only half of it: sshd needs the AuthorizedKeysCommand that serves
 # them, which is a host-wide change and therefore opt-in.
+# Remove keys for accounts no longer declared. Without this the directory is
+# write-only: dropping an account from service_accounts: converges the .conf but
+# leaves its .pub served, and ob-service-account-keys offers ANY present file
+# without consulting the .conf -- so the account keeps being offered at the SSH
+# layer indefinitely, and re-adding it fingerprint-only makes sshd offer the
+# stale key while PAM denies it.
+- name: Remove service-account keys that are no longer declared
+  ansible.builtin.shell: |
+    set -eu
+    keep=$(printf '%s\n' "{{ ob_service_account_keys | default('') }}" \
+           | awk 'NF {print $1 ".pub"}')
+    cd /etc/open-bastion/service-accounts.d 2>/dev/null || exit 0
+    for f in *.pub; do
+      [ -e "$f" ] || continue
+      printf '%s\n' "$keep" | grep -qxF "$f" || { rm -f -- "$f"; echo "removed $f"; }
+    done
+  register: ob_svc_keys_pruned
+  changed_when: "'removed ' in ob_svc_keys_pruned.stdout"
+
+# Anchored, and over *.conf only: `grep -r ob-service-account-keys` matched a
+# commented-out line, a .bak left beside a drop-in, or a pre-#265 two-directive
+# file with no ExposeAuthInfo -- all of which silence the warning while nothing
+# is actually served or verified.
 - name: Check sshd serves the service-account keys
-  ansible.builtin.command:
-    cmd: grep -rqs ob-service-account-keys /etc/ssh/sshd_config.d/ /etc/ssh/sshd_config
+  ansible.builtin.shell: |
+    set -eu
+    ok=1
+    for f in /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config; do
+      [ -f "$f" ] || continue
+      grep -qiE '^[[:space:]]*AuthorizedKeysCommand[[:space:]].*ob-service-account-keys' "$f" || continue
+      grep -qiE '^[[:space:]]*ExposeAuthInfo[[:space:]]+yes' "$f" && ok=0
+    done
+    exit $ok
   register: ob_svc_keys_sshd
   changed_when: false
   failed_when: false
-  when: (ob_service_account_keys | default('')) | length > 0
 
 - name: Warn when sshd has no AuthorizedKeysCommand for service accounts
   ansible.builtin.debug:
@@ -138,7 +170,7 @@
       to serve them. Run "ob-bastion-setup --enable-service-keys" (or
       ob-backend-setup) on this host, or the accounts cannot log in.
   when:
-    - (ob_service_account_keys | default('')) | length > 0
+    - ob_service_accounts_enabled | default(false)
     - ob_svc_keys_sshd.rc | default(1) != 0
 
 - name: Dispatch role-specific tasks
