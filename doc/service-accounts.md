@@ -240,9 +240,23 @@ want both:
 | `ExposeAuthInfo yes`          | the sshd drop-in above | gives PAM a fingerprint to check                          |
 | `fingerprint_required = true` | `openbastion.conf`     | refuses the login when there is none, instead of skipping |
 
-The setup scripts write `ExposeAuthInfo yes` **only in Mode E** — it lives in
-`configure_max_security_sshd()`, which returns immediately without `--max-security`. On
-any other host, add it yourself in the drop-in above (#263).
+The setup scripts write both of the sshd settings above, but only when asked:
+
+- `ob-bastion-setup --enable-service-keys` (same flag on `ob-backend-setup`) writes the
+  whole drop-in — `AuthorizedKeysCommand`, `AuthorizedKeysCommandUser` and
+  `ExposeAuthInfo yes` — and creates `service-accounts.d`. This is the flag to use;
+  it exists because #263 showed the manual assembly is easy to get half-right.
+- `--max-security` (Mode E) writes `ExposeAuthInfo yes` on its own, but **not** the
+  `AuthorizedKeysCommand`. Mode E alone therefore still leaves a service account unable
+  to log in.
+
+Neither is on by default: both change sshd for every session on the host, and this
+project's convention is that such changes are opted into. On a host set up without
+either, write the drop-in above by hand.
+
+`fingerprint_required = true` is a separate decision and applies to **every** SSH login
+on the host, not only to service accounts. `--enable-service-keys` reports whether it is
+set rather than setting it.
 
 ### The account must be resolvable (fixed `uid`/`gid`)
 

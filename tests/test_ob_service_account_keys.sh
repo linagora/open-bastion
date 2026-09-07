@@ -141,31 +141,44 @@ test_doc_does_not_claim_pam_is_enough() {
 # ── 4. ExposeAuthInfo really is Mode-E only, as the doc now says ────────────
 # Pinned because the doc's correction rests on it: if a setup script starts
 # writing it unconditionally, the new paragraph becomes the wrong one.
-test_exposeauthinfo_is_mode_e_only() {
-    local bad="" f fn
+test_exposeauthinfo_is_always_guarded() {
+    local bad="" f n line fun
+    # The property is not "it lives in Mode E" any more -- --enable-service-keys
+    # writes it too, because an AuthorizedKeysCommand without it means sshd
+    # accepts the key and the fingerprint is never checked. What must hold is
+    # that EVERY write sits behind an opt-in guard: an unconditional one would
+    # turn SSH_USER_AUTH on for every session on every host, and would make
+    # doc/service-accounts.md wrong again.
     for f in ob-bastion-setup ob-backend-setup; do
-        # Skip comment lines: the first *mention* of the directive is not
-        # necessarily the line that writes it, and anchoring on it would make
-        # this fail the day someone documents the directive higher up.
-        fn=$(awk '!/^[[:space:]]*#/ && /ExposeAuthInfo yes/{print NR; exit}' \
-             "$ROOT_DIR/scripts/$f")
-        [ -n "$fn" ] || { bad="$bad $f(absent)"; continue; }
-        awk -v n="$fn" 'NR<=n{if(/^[a-z_]+\(\) \{/) fun=$0} END{print fun}' \
-            "$ROOT_DIR/scripts/$f" | grep -q 'configure_max_security_sshd' \
-            || bad="$bad $f(moved-out-of-max-security)"
+        local src="$ROOT_DIR/scripts/$f" found=0
+        # Non-comment writes only: a mention in prose is not a write.
+        while IFS= read -r n; do
+            [ -n "$n" ] || continue
+            found=$((found + 1))
+            fun=$(awk -v n="$n" 'NR<=n{if(/^[a-z_]+\(\) \{/) x=$0} END{print x}' "$src")
+            case "$fun" in
+                configure_max_security_sshd*|configure_service_account_keys*) ;;
+                # --help text describes the directive; it writes nothing.
+                usage*|show_help*) found=$((found - 1)) ;;
+                *) bad="$bad $f:$n(in ${fun%%(*}, unguarded)" ;;
+            esac
+        done < <(awk '!/^[[:space:]]*#/ && /ExposeAuthInfo yes/{print NR}' "$src")
 
-        # Being inside that function is not the property the documentation
-        # rests on -- the EARLY RETURN is. Remove the guard and ExposeAuthInfo
-        # would be written on every host, with the enclosing function unchanged
-        # and this test none the wiser.
-        awk '/^configure_max_security_sshd\(\) \{/{f=1} f&&/MAX_SECURITY.*!=.*true/{g=1} f&&/^\}/{exit} END{exit !g}' \
-            "$ROOT_DIR/scripts/$f" || bad="$bad $f(no-early-return-guard)"
+        [ "$found" -gt 0 ] || bad="$bad $f(no-write-at-all)"
+
+        # Each of those two functions must early-return when its flag is off.
+        for fun in configure_max_security_sshd configure_service_account_keys; do
+            sed -n "/^$fun() {/,/^}/p" "$src" | head -4 \
+                | grep -qE '(MAX_SECURITY|ENABLE_SERVICE_KEYS)" != "true"' \
+                || bad="$bad $f:$fun(no-early-return)"
+        done
     done
+
     if [ -z "$bad" ]; then
-        pass "ExposeAuthInfo is written only inside configure_max_security_sshd, behind its guard"
+        pass "every ExposeAuthInfo write is behind an opt-in guard"
     else
-        fail "ExposeAuthInfo is written only inside configure_max_security_sshd, behind its guard" \
-             "$bad — doc/service-accounts.md says so and would now be wrong"
+        fail "every ExposeAuthInfo write is behind an opt-in guard" \
+             "$bad — doc/service-accounts.md describes these two paths and would now be wrong"
     fi
 }
 
@@ -289,12 +302,56 @@ test_keys_dir_is_shipped() {
     fi
 }
 
+# ── 7. --enable-service-keys, and the silence without it ────────────────────
+#
+# Batch 2 of #263: the setup scripts can now write the sshd drop-in. Opt-in,
+# because it changes sshd for every session on the host, not only for service
+# accounts.
+#
+# The half that matters most is the default one: without the flag, nothing must
+# change. An opt-in that leaks is worse than no flag, because the operator
+# believes the host is untouched.
+test_service_keys_flag() {
+    local bad="" f
+    for f in ob-bastion-setup ob-backend-setup; do
+        local src="$ROOT_DIR/scripts/$f"
+        grep -q 'ENABLE_SERVICE_KEYS=false' "$src" || bad="$bad $f(not-default-off)"
+        grep -q -- '--enable-service-keys)' "$src" || bad="$bad $f(no-flag)"
+        grep -q -- '--enable-service-keys ' "$src" || bad="$bad $f(not-in-usage)"
+        grep -q 'configure_service_account_keys || exit 1' "$src" || bad="$bad $f(never-called)"
+
+        # The guard: the function must return before doing anything when the
+        # flag is off. Checked on the first lines of the function, not merely
+        # "the variable appears somewhere".
+        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
+            | head -4 | grep -q 'ENABLE_SERVICE_KEYS" != "true"' \
+            || bad="$bad $f(no-early-return)"
+
+        # It must write ExposeAuthInfo itself. Leaving it to Mode E would ship
+        # an AuthorizedKeysCommand whose fingerprint check silently never runs
+        # -- the exact half-configuration doc/service-accounts.md warns about.
+        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
+            | grep -q 'ExposeAuthInfo yes' || bad="$bad $f(no-ExposeAuthInfo)"
+
+        # And the canonical helper path, not a rediscovered one.
+        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
+            | grep -q "$CANONICAL" || bad="$bad $f(wrong-helper-path)"
+    done
+
+    if [ -z "$bad" ]; then
+        pass "--enable-service-keys is opt-in, guarded, and writes ExposeAuthInfo with the drop-in"
+    else
+        fail "--enable-service-keys is opt-in, guarded, and writes ExposeAuthInfo with the drop-in" "$bad"
+    fi
+}
+
 run_test test_helper_is_packaged
 run_test test_one_path_everywhere
 run_test test_doc_does_not_claim_pam_is_enough
-run_test test_exposeauthinfo_is_mode_e_only
+run_test test_exposeauthinfo_is_always_guarded
 run_test test_helper_refusals
 run_test test_keys_dir_is_shipped
+run_test test_service_keys_flag
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"
