@@ -99,7 +99,15 @@ DISABLE_SESSION_RECORDER=""
 # Service accounts (SSH-key-only local accounts: ansible, backup, …). Each entry
 # is one account encoded as a single record whose fields are joined by the ASCII
 # Unit Separator (US, \x1f) in this fixed order:
-#   name, key_fingerprint, sudo_allowed, sudo_nopasswd, shell, home, gecos, uid, gid
+#   name, key_fingerprint, sudo_allowed, sudo_nopasswd, shell, home, gecos,
+#   uid, gid, public_key
+#
+# public_key is the account's authorized SSH public key. It is what
+# service-accounts.conf could never carry (#263): the fingerprint alone tells
+# pam_openbastion what to expect but gives sshd nothing to accept, so the
+# operator had to deploy the key by hand and the deployment looked complete
+# when it was not. With the key here, ob-builder writes
+# /etc/open-bastion/service-accounts.d/<name>.pub itself.
 # Populated from the questionnaire or from the YAML `service_accounts:` list, and
 # rendered into /etc/open-bastion/service-accounts.conf on the target.
 SERVICE_ACCOUNTS_RECORDS=()
@@ -175,10 +183,24 @@ QUESTIONNAIRE (asked when no --config is given):
 SERVICE ACCOUNTS (--config YAML):
   Declare SSH-key-only local accounts under a 'service_accounts:' list. They are
   rendered into /etc/open-bastion/service-accounts.conf (0600) on the target and
-  apply to every role. Example:
+  apply to every role.
+
+  Give each account its public_key (or public_key_file): the fingerprint alone
+  tells pam_openbastion what to expect but gives sshd nothing to accept, so
+  without the key the account cannot log in and the deployment looks complete
+  (#263). With it, the bundle also writes
+  /etc/open-bastion/service-accounts.d/<name>.pub.
+
+  sshd still needs the AuthorizedKeysCommand that serves those files, which is
+  a host-wide change: run "ob-bastion-setup --enable-service-keys" (or
+  ob-backend-setup) on the target. The generated installer says so when it
+  cannot find one. Example:
     service_accounts:
       - name: ci-ansible            # dedicated name (not an existing system user)
-        key_fingerprint: "SHA256:…" # from: ssh-keygen -lf key.pub
+        public_key_file: keys/ci.pub  # or public_key: "ssh-ed25519 AAAA… ci@host"
+        # key_fingerprint is DERIVED from the key. Give it too only if you want
+        # it cross-checked: a mismatch stops the build rather than shipping a
+        # bundle that installs cleanly and refuses the login.
         sudo_allowed: true
         sudo_nopasswd: true
         shell: /bin/bash
@@ -408,7 +430,7 @@ _load_config_awk() {
                 apt_component)       [ "$APT_COMPONENT" = "$DEFAULT_APT_COMPONENT" ] && APT_COMPONENT="$val" ;;
                 # Service-account list keys: consumed by _parse_service_accounts_block,
                 # ignored here (they only appear nested under `service_accounts:`).
-                service_accounts|name|key_fingerprint|fingerprint|sudo_allowed|sudo_nopasswd|shell|home|gecos|uid|gid) : ;;
+                service_accounts|name|key_fingerprint|fingerprint|sudo_allowed|sudo_nopasswd|shell|home|gecos|uid|gid|public_key|public_key_file) : ;;
                 *) log_warn "Unknown config key '$key' (ignored)" ;;
             esac
         fi
@@ -418,7 +440,7 @@ _load_config_awk() {
 
 # ─────────────────────────────────────────────────────────────────────────
 # Service-account helpers.
-# A record packs the 9 fields (in the fixed order documented next to
+# A record packs the 10 fields (in the fixed order documented next to
 # SERVICE_ACCOUNTS_RECORDS) joined by the Unit Separator. _sa_pack builds one;
 # _sa_field N extracts the Nth field (1-based) from a record.
 # ─────────────────────────────────────────────────────────────────────────
@@ -431,6 +453,76 @@ _sa_field() {
     local -a _parts
     IFS="$_OB_SA_US" read -r -a _parts <<< "$rec"
     printf '%s' "${_parts[$((n - 1))]:-}"
+}
+
+# Compute the SHA256 fingerprint of an SSH public key, the way ssh-keygen -lf
+# prints it. Deriving it removes a whole class of failure: a fingerprint typed
+# or pasted separately from the key it is supposed to describe silently matches
+# nothing, and the login fails at the fingerprint check with the key looking
+# perfectly correct on both ends.
+_sa_fingerprint_of() {
+    local pub="$1" tmp out
+    command -v ssh-keygen >/dev/null 2>&1 || return 1
+    tmp=$(mktemp) || return 1
+    printf '%s\n' "$pub" > "$tmp"
+    out=$(ssh-keygen -lf "$tmp" 2>/dev/null) || { rm -f "$tmp"; return 1; }
+    rm -f "$tmp"
+    printf '%s' "$out" | awk '{print $2}' | grep -q '^SHA256:' || return 1
+    printf '%s' "$out" | awk '{print $2}'
+}
+
+# An SSH public key is one line: "<type> <base64> [comment]".
+_sa_is_valid_pubkey() {
+    local pub="$1"
+    case "$pub" in
+        ssh-rsa\ *|ssh-ed25519\ *|ecdsa-sha2-*\ *|sk-ssh-ed25519@*\ *|sk-ecdsa-sha2-*\ *) ;;
+        *) return 1 ;;
+    esac
+    case "$pub" in *$'\n'*) return 1 ;; esac
+    return 0
+}
+
+# Reconcile the public key and the fingerprint of the account being parsed.
+#
+# Three cases, and only the third can go wrong silently today:
+#   - key only        -> derive the fingerprint from it;
+#   - fingerprint only -> keep it, and say the key is still needed on the target;
+#   - both            -> derive and COMPARE. A mismatch is a build-time error,
+#                        not a warning: it means the two were maintained apart,
+#                        and on the target it shows up as a login refused with a
+#                        key that looks right in every listing.
+_sa_reconcile_key() {
+    local derived
+    if [ -n "$pubkey" ]; then
+        if ! _sa_is_valid_pubkey "$pubkey"; then
+            log_warn "service account '$name': public_key is not a single-line SSH public key; ignoring it."
+            pubkey=""
+        fi
+    fi
+    if [ -z "$pubkey" ]; then
+        [ -n "$fp" ] || return 0
+        return 0
+    fi
+
+    if ! derived=$(_sa_fingerprint_of "$pubkey"); then
+        log_warn "service account '$name': could not compute the fingerprint of public_key"
+        log_warn "  (is ssh-keygen installed on this build host?). The key is still deployed."
+        return 0
+    fi
+
+    if [ -z "$fp" ]; then
+        fp="$derived"
+        log_info "service account '$name': fingerprint derived from public_key ($fp)."
+        return 0
+    fi
+    if [ "$fp" != "$derived" ]; then
+        log_error "service account '$name': key_fingerprint does not match public_key."
+        log_error "  configured: $fp"
+        log_error "  actual:     $derived"
+        log_error "  One of the two is stale. On the target this is a login refused by PAM"
+        log_error "  with a key that looks correct everywhere you would think to check."
+        return 1
+    fi
 }
 
 # Validate one packed record. Mirrors the authoritative checks in
@@ -524,12 +616,17 @@ warn_service_account_unapproved() {
 _parse_service_accounts_block() {
     local f="$1"
     local in_block=0 line key val
-    local name fp sudo_allowed sudo_nopasswd shell home gecos uid gid
-    _sa_reset_fields() { name=""; fp=""; sudo_allowed="false"; sudo_nopasswd="false"; shell=""; home=""; gecos=""; uid=""; gid=""; }
+    local name fp sudo_allowed sudo_nopasswd shell home gecos uid gid pubkey
+    _sa_reset_fields() { name=""; fp=""; sudo_allowed="false"; sudo_nopasswd="false"; shell=""; home=""; gecos=""; uid=""; gid=""; pubkey=""; }
     local have_acct=0
     _sa_flush() {
         [ "$have_acct" = 1 ] || return 0
-        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid")")
+        # A key/fingerprint mismatch stops the build. Not a warning: the bundle
+        # would install cleanly and refuse the login on the target, which is the
+        # most expensive place to discover it. Explicit rather than relying on
+        # errexit, whose behaviour here depends on the calling context.
+        _sa_reconcile_key || exit 1
+        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid" "$pubkey")")
         have_acct=0
     }
     _sa_reset_fields
@@ -573,6 +670,17 @@ _parse_service_accounts_block() {
                 gecos)           gecos="$val" ;;
                 uid)             uid="$val" ;;
                 gid)             gid="$val" ;;
+                public_key)      pubkey="$val" ;;
+                public_key_file)
+                    # Read at BUILD time: the target has no access to the
+                    # builder's filesystem, and shipping a path would be a
+                    # promise the installer cannot keep.
+                    if [ -r "$val" ]; then
+                        pubkey=$(head -n1 "$val")
+                    else
+                        log_warn "service account '$name': public_key_file '$val' is not readable; ignoring."
+                    fi
+                    ;;
             esac
         fi
     done < "$f"
@@ -628,6 +736,21 @@ _render_service_accounts_conf() {
     # Explicit success: the loop's last command is a `&&` chain that is false
     # whenever the final account has no gid (the common case), which would make
     # this function return non-zero and trip `set -e` in the caller.
+    return 0
+}
+
+# Render the service-account public keys as "<name> <key>" lines, one per
+# account that has one. The installer writes each to
+# /etc/open-bastion/service-accounts.d/<name>.pub, which is what lets sshd
+# accept the key at all -- service-accounts.conf only says what to expect.
+_render_service_account_keys() {
+    local rec name pub
+    for rec in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
+        name=$(_sa_field 1 "$rec")
+        pub=$(_sa_field 10 "$rec")
+        [ -n "$pub" ] || continue
+        printf '%s %s\n' "$name" "$pub"
+    done
     return 0
 }
 
@@ -1315,6 +1438,7 @@ build_placeholder_map() {
     local _sa_enabled_bool="false" _sa_conf="" _sa_conf_b64="" _sa_file_line="" _sa_defaults_yaml
     if [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ]; then
         _sa_enabled_bool="true"
+        local _sa_keys _sa_keys_b64
         _sa_conf=$(_render_service_accounts_conf)
         _sa_conf_b64=$(base64_string "$_sa_conf")
         _sa_file_line=$'# Service accounts (SSH-key-only local accounts)\nservice_accounts_file = /etc/open-bastion/service-accounts.conf'
@@ -1322,11 +1446,22 @@ build_placeholder_map() {
         local _indented
         _indented=$(printf '%s\n' "$_sa_conf" | sed 's/^/  /')
         _sa_defaults_yaml=$'ob_service_accounts_enabled: true\nob_service_accounts_content: |\n'"$_indented"
+        _sa_keys=$(_render_service_account_keys)
+        _sa_keys_b64=$(base64_string "$_sa_keys")
+        if [ -n "$_sa_keys" ]; then
+            local _kindent
+            _kindent=$(printf '%s\n' "$_sa_keys" | sed 's/^/  /')
+            _sa_defaults_yaml="$_sa_defaults_yaml"$'\nob_service_account_keys: |\n'"$_kindent"
+        else
+            _sa_defaults_yaml="$_sa_defaults_yaml"$'\nob_service_account_keys: ""'
+        fi
     else
-        _sa_defaults_yaml='ob_service_accounts_enabled: false'$'\n''ob_service_accounts_content: ""'
+        _sa_defaults_yaml='ob_service_accounts_enabled: false'$'\n''ob_service_accounts_content: ""'$'\n''ob_service_account_keys: ""'
     fi
+    _sa_keys_b64="${_sa_keys_b64:-}"
     ph_set SERVICE_ACCOUNTS_ENABLED_BOOL  "$_sa_enabled_bool"
     ph_set SERVICE_ACCOUNTS_CONF_B64      "$_sa_conf_b64"
+    ph_set SERVICE_ACCOUNT_KEYS_B64       "$_sa_keys_b64"
     ph_set SERVICE_ACCOUNTS_FILE_LINE     "$_sa_file_line"
     ph_set SERVICE_ACCOUNTS_DEFAULTS_YAML "$_sa_defaults_yaml"
 

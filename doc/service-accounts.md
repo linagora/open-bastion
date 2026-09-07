@@ -218,6 +218,28 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
   Drop each account's public key at `/etc/open-bastion/service-accounts.d/<name>.pub`
   and reload `sshd`.
 
+### Letting ob-builder deploy the key
+
+Since #263 a `service_accounts:` entry can carry the key itself, and then the
+generated bundle writes `/etc/open-bastion/service-accounts.d/<name>.pub` for you:
+
+```yaml
+service_accounts:
+  - name: ci-ansible
+    public_key_file: keys/ci.pub # or public_key: "ssh-ed25519 AAAA… ci@host"
+    uid: 6001
+    gid: 6001
+```
+
+`key_fingerprint` is **derived** from the key. Supply it as well only if you want it
+cross-checked — a value that does not describe the key stops the build, rather than
+producing a bundle that installs cleanly and refuses the login with a key that looks
+correct in every listing.
+
+The bundle still cannot turn on the `AuthorizedKeysCommand`: that is a host-wide sshd
+change, so it stays with `--enable-service-keys`. The generated installer and the
+Ansible role both say so when they find no such command configured.
+
 ### What actually enforces the fingerprint, and when it does not
 
 Read this before relying on `key_fingerprint`.

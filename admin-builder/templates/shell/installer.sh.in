@@ -508,6 +508,30 @@ OB_CONF_EOF
         log_info "Written: /etc/open-bastion/service-accounts.conf (0600 root:root)"
     fi
 
+    # Deposit each service account's authorized public key. service-accounts.conf
+    # tells pam_openbastion what fingerprint to expect; it gives sshd nothing to
+    # accept, so without these files the account cannot log in at all and the
+    # deployment looks complete (#263). 0644 root:root under a 0755 directory:
+    # the AuthorizedKeysCommandUser (nobody) has to read them.
+    if [ -n "@@SERVICE_ACCOUNT_KEYS_B64@@" ]; then
+        install -d -m 0755 -o root -g root /etc/open-bastion/service-accounts.d
+        printf '%s' "@@SERVICE_ACCOUNT_KEYS_B64@@" | base64 -d | while read -r _sa_name _sa_key; do
+            [ -n "${_sa_name}" ] || continue
+            printf '%s\n' "${_sa_key}" > "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+            chmod 0644 "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+            chown root:root "/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+            log_info "Written: /etc/open-bastion/service-accounts.d/${_sa_name}.pub"
+        done
+        # The key is only half of it: sshd still needs the AuthorizedKeysCommand
+        # that serves these files. That is a host-wide sshd change, so it stays
+        # opt-in rather than being made here.
+        if ! grep -rqs 'ob-service-account-keys' /etc/ssh/sshd_config.d/ /etc/ssh/sshd_config; then
+            log_warn "sshd has no AuthorizedKeysCommand for service accounts."
+            log_warn "These keys will not be offered until you run:"
+            log_warn "  ob-bastion-setup --enable-service-keys   (or ob-backend-setup)"
+        fi
+    fi
+
     # Deposit SSH CA public key
     base64 -d > /etc/ssh/open-bastion_ca.pub.tmp << 'OB_CA_EOF'
 @@CA_SSH_PUB_B64@@

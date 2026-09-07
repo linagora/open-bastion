@@ -97,5 +97,49 @@
     mode: '0600'
   when: ob_service_accounts_enabled | default(false)
 
+# service-accounts.conf says what fingerprint to expect; it gives sshd nothing
+# to accept. Without these files the account cannot log in and the deployment
+# looks complete (#263). 0644 under a 0755 directory: the
+# AuthorizedKeysCommandUser (nobody) reads them.
+- name: Create the service-account key directory
+  ansible.builtin.file:
+    path: /etc/open-bastion/service-accounts.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: (ob_service_account_keys | default('')) | length > 0
+
+- name: Deploy service-account public keys
+  ansible.builtin.copy:
+    content: "{{ item.split(' ', 1)[1] }}\n"
+    dest: "/etc/open-bastion/service-accounts.d/{{ item.split(' ', 1)[0] }}.pub"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ (ob_service_account_keys | default('')).splitlines() | select('search', ' ') | list }}"
+  loop_control:
+    label: "{{ item.split(' ', 1)[0] }}"
+
+# The keys are only half of it: sshd needs the AuthorizedKeysCommand that serves
+# them, which is a host-wide change and therefore opt-in.
+- name: Check sshd serves the service-account keys
+  ansible.builtin.command:
+    cmd: grep -rqs ob-service-account-keys /etc/ssh/sshd_config.d/ /etc/ssh/sshd_config
+  register: ob_svc_keys_sshd
+  changed_when: false
+  failed_when: false
+  when: (ob_service_account_keys | default('')) | length > 0
+
+- name: Warn when sshd has no AuthorizedKeysCommand for service accounts
+  ansible.builtin.debug:
+    msg: >-
+      Service-account keys were deployed, but sshd has no AuthorizedKeysCommand
+      to serve them. Run "ob-bastion-setup --enable-service-keys" (or
+      ob-backend-setup) on this host, or the accounts cannot log in.
+  when:
+    - (ob_service_account_keys | default('')) | length > 0
+    - ob_svc_keys_sshd.rc | default(1) != 0
+
 - name: Dispatch role-specific tasks
   ansible.builtin.include_tasks: "{{ ob_role }}.yml"
