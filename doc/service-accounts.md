@@ -208,7 +208,12 @@ the public key. So `sshd` must be told the key is acceptable, by one of:
   # /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf
   AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
   AuthorizedKeysCommandUser nobody
+  ExposeAuthInfo yes
   ```
+
+  All three lines. Without `ExposeAuthInfo yes` sshd accepts the key and the
+  fingerprint check below never runs — the half-configuration this section exists
+  to prevent.
 
   Drop each account's public key at `/etc/open-bastion/service-accounts.d/<name>.pub`
   and reload `sshd`.
@@ -256,7 +261,11 @@ either, write the drop-in above by hand.
 
 `fingerprint_required = true` is a separate decision and applies to **every** SSH login
 on the host, not only to service accounts. `--enable-service-keys` reports whether it is
-set rather than setting it.
+set, in its output and in the end-of-run summary, rather than setting it.
+
+Set it in `openbastion.conf` by hand. The setup scripts rewrite that file wholesale on
+every run, so until this release the setting was silently dropped by the next run; it is
+now carried over.
 
 ### The account must be resolvable (fixed `uid`/`gid`)
 

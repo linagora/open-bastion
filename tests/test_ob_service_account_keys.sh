@@ -142,43 +142,73 @@ test_doc_does_not_claim_pam_is_enough() {
 # Pinned because the doc's correction rests on it: if a setup script starts
 # writing it unconditionally, the new paragraph becomes the wrong one.
 test_exposeauthinfo_is_always_guarded() {
-    local bad="" f n line fun
-    # The property is not "it lives in Mode E" any more -- --enable-service-keys
-    # writes it too, because an AuthorizedKeysCommand without it means sshd
-    # accepts the key and the fingerprint is never checked. What must hold is
-    # that EVERY write sits behind an opt-in guard: an unconditional one would
-    # turn SSH_USER_AUTH on for every session on every host, and would make
-    # doc/service-accounts.md wrong again.
+    local bad="" f
+    # Attribution by CONTAINMENT, not "the last function definition at or above
+    # the line". The previous version accepted a top-level write that merely sat
+    # after an allowed function's definition -- mutation-proven by the review --
+    # and it matched function names by prefix glob, so usage_anything() slipped
+    # through too.
+    #
+    # And per-function: the old check asked only "does each of the two functions
+    # early-return" and "is there at least one write somewhere". Deleting the
+    # ExposeAuthInfo line from the Mode E heredoc left the suite green while
+    # doc/service-accounts.md's claim about Mode E became false.
     for f in ob-bastion-setup ob-backend-setup; do
-        local src="$ROOT_DIR/scripts/$f" found=0
-        # Non-comment writes only: a mention in prose is not a write.
-        while IFS= read -r n; do
-            [ -n "$n" ] || continue
-            found=$((found + 1))
-            fun=$(awk -v n="$n" 'NR<=n{if(/^[a-z_]+\(\) \{/) x=$0} END{print x}' "$src")
-            case "$fun" in
-                configure_max_security_sshd*|configure_service_account_keys*) ;;
-                # --help text describes the directive; it writes nothing.
-                usage*|show_help*) found=$((found - 1)) ;;
-                *) bad="$bad $f:$n(in ${fun%%(*}, unguarded)" ;;
-            esac
-        done < <(awk '!/^[[:space:]]*#/ && /ExposeAuthInfo yes/{print NR}' "$src")
+        local src="$ROOT_DIR/scripts/$f"
+        local fn flag
+        for fn in configure_max_security_sshd:MAX_SECURITY \
+                  configure_service_account_keys:ENABLE_SERVICE_KEYS; do
+            local name="${fn%%:*}"; flag="${fn##*:}"
+            # The function's own line range.
+            local start end body
+            start=$(awk -v n="$name" '$0 ~ "^"n"\\(\\) \\{" {print NR; exit}' "$src")
+            [ -n "$start" ] || { bad="$bad $f:$name(absent)"; continue; }
+            end=$(awk -v s="$start" 'NR>s && /^}$/{print NR; exit}' "$src")
+            body=$(sed -n "${start},${end}p" "$src")
 
-        [ "$found" -gt 0 ] || bad="$bad $f(no-write-at-all)"
+            # It writes the directive itself (comments excluded).
+            printf '%s\n' "$body" | grep -v '^[[:space:]]*#' \
+                | grep -q 'ExposeAuthInfo yes' || bad="$bad $f:$name(no-write)"
 
-        # Each of those two functions must early-return when its flag is off.
-        for fun in configure_max_security_sshd configure_service_account_keys; do
-            sed -n "/^$fun() {/,/^}/p" "$src" | head -4 \
-                | grep -qE '(MAX_SECURITY|ENABLE_SERVICE_KEYS)" != "true"' \
-                || bad="$bad $f:$fun(no-early-return)"
+            # Behind its OWN flag, not just "one of the two flags".
+            local guardline
+            guardline=$(printf '%s\n' "$body" | grep -n "\"\$$flag\" != \"true\"" | head -1 | cut -d: -f1)
+            [ -n "$guardline" ] || { bad="$bad $f:$name(no-guard-on-$flag)"; continue; }
+
+            # And every write must come AFTER the guard, not before it.
+            local w
+            for w in $(printf '%s\n' "$body" | grep -vn '^[[:space:]]*#' \
+                       | grep 'ExposeAuthInfo yes' | cut -d: -f1); do
+                [ "$w" -gt "$guardline" ] || bad="$bad $f:$name(write-before-guard)"
+            done
+        done
+
+        # No write anywhere else in the file: containment, checked by walking
+        # every non-comment write and requiring it to fall inside one of the two
+        # ranges above.
+        local n
+        for n in $(awk '!/^[[:space:]]*#/ && /ExposeAuthInfo yes/{print NR}' "$src"); do
+            local inside=0 fn2
+            for fn2 in configure_max_security_sshd configure_service_account_keys; do
+                local s2 e2
+                s2=$(awk -v x="$fn2" '$0 ~ "^"x"\\(\\) \\{" {print NR; exit}' "$src")
+                [ -n "$s2" ] || continue
+                e2=$(awk -v s="$s2" 'NR>s && /^}$/{print NR; exit}' "$src")
+                [ "$n" -ge "$s2" ] && [ "$n" -le "$e2" ] && inside=1
+            done
+            # The --help text describes the directive without writing it.
+            if [ "$inside" -eq 0 ]; then
+                sed -n "${n}p" "$src" | grep -q '^  ' && continue
+                bad="$bad $f:$n(write-outside-both-functions)"
+            fi
         done
     done
 
     if [ -z "$bad" ]; then
-        pass "every ExposeAuthInfo write is behind an opt-in guard"
+        pass "each of the two functions writes ExposeAuthInfo behind its own flag, and nothing else does"
     else
-        fail "every ExposeAuthInfo write is behind an opt-in guard" \
-             "$bad — doc/service-accounts.md describes these two paths and would now be wrong"
+        fail "each of the two functions writes ExposeAuthInfo behind its own flag, and nothing else does" \
+             "$bad"
     fi
 }
 
@@ -320,22 +350,52 @@ test_service_keys_flag() {
         grep -q -- '--enable-service-keys ' "$src" || bad="$bad $f(not-in-usage)"
         grep -q 'configure_service_account_keys || exit 1' "$src" || bad="$bad $f(never-called)"
 
+        # Capture once, then match. Piping a long `sed` into `head -4` or
+        # `grep -q` gives sed SIGPIPE the moment the consumer exits, and
+        # `set -o pipefail` at the top turns that 141 into a failed pipeline --
+        # so the assertion reports a miss on a body that does contain the line.
+        # It only started failing when the function grew; the bug was already
+        # there.
+        local body
+        body=$(sed -n '/^configure_service_account_keys() {/,/^}/p' "$src")
+
         # The guard: the function must return before doing anything when the
-        # flag is off. Checked on the first lines of the function, not merely
-        # "the variable appears somewhere".
-        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
-            | head -4 | grep -q 'ENABLE_SERVICE_KEYS" != "true"' \
+        # flag is off, not merely mention the variable somewhere.
+        printf '%s\n' "$body" | head -4 | grep -q 'ENABLE_SERVICE_KEYS" != "true"' \
             || bad="$bad $f(no-early-return)"
 
         # It must write ExposeAuthInfo itself. Leaving it to Mode E would ship
         # an AuthorizedKeysCommand whose fingerprint check silently never runs
         # -- the exact half-configuration doc/service-accounts.md warns about.
-        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
-            | grep -q 'ExposeAuthInfo yes' || bad="$bad $f(no-ExposeAuthInfo)"
+        printf '%s\n' "$body" | grep -q 'ExposeAuthInfo yes' \
+            || bad="$bad $f(no-ExposeAuthInfo)"
 
         # And the canonical helper path, not a rediscovered one.
-        sed -n '/^configure_service_account_keys() {/,/^}/p' "$src" \
-            | grep -q "$CANONICAL" || bad="$bad $f(wrong-helper-path)"
+        printf '%s\n' "$body" | grep -q "$CANONICAL" || bad="$bad $f(wrong-helper-path)"
+
+        # The drop-in it writes must carry the user and the %u argument. Nothing
+        # pinned these: AuthorizedKeysCommandUser root, or a dropped %u (the
+        # helper gets no username and serves nothing), both shipped green.
+        # The path is written through $helper, whose value is asserted above;
+        # what this pins is the directive and its %u argument.
+        printf '%s\n' "$body" | grep -qE '^AuthorizedKeysCommand .*%u$' \
+            || bad="$bad $f(no-command-line-or-%u)"
+        printf '%s\n' "$body" | grep -q 'AuthorizedKeysCommandUser nobody' \
+            || bad="$bad $f(no-command-user)"
+
+        # It refuses rather than overriding a foreign AuthorizedKeysCommand, and
+        # cleans up its own drop-in when the flag is off. Both checked as CALLS
+        # inside the function body -- grepping the file only proved the helper
+        # was still defined, and replacing the call with `if false` left the
+        # suite green.
+        printf '%s\n' "$body" | grep -q '_ob_foreign_authorized_keys_command' \
+            || bad="$bad $f(no-foreign-command-check)"
+        printf '%s\n' "$body" | grep -q '_ob_drop_service_keys_dropin' \
+            || bad="$bad $f(one-way-flag)"
+
+        # And it validates sshd with the file in place: configure_sshd's own
+        # `sshd -t` runs BEFORE this function, so nothing else checks it.
+        printf '%s\n' "$body" | grep -q 'sshd -t' || bad="$bad $f(no-sshd-t)"
     done
 
     if [ -z "$bad" ]; then

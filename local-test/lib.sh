@@ -335,6 +335,9 @@ chmod 0644 "/etc/open-bastion/service-accounts.d/${OB_SVC_NAME}.pub"
 cat > /etc/ssh/sshd_config.d/09-open-bastion-service-keys.conf <<'CONF'
 AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u
 AuthorizedKeysCommandUser nobody
+# Without this the fingerprint check never runs on a plain-key login and the
+# lab would green-light the very half-configuration #263 was reported for.
+ExposeAuthInfo yes
 CONF
 BS
     then ok "$v: provisioned service-account SSH authorization (${SVC_NAME}.pub + AuthorizedKeysCommand)"
