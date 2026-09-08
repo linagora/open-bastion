@@ -430,6 +430,29 @@ the `auth` line of certificate-mode PAM stacks, and the accepted permissions of
 
 ### Security
 
+- **R-P1 is now a release prerequisite, not an assumption** (#268). With
+  `pamAccessServerGroups` empty — the shipped default, and the multi-group model
+  `doc/bastion-architecture.md` used to recommend — `server_group` is read from
+  the request body, so any enrolled host of the project that is compromised can
+  declare itself a bastion on `/pam/authorize` and obtain a hop voucher for a
+  user. Two positions were tenable: make the configuration a prerequisite, or
+  accept it as a signed residual risk. The first was taken. `pamAccessServerGroups`,
+  `pamAccessAllowedRps`, published plugins and a non-empty `allowed_bastions`
+  are **blocking** conditions (CE03, CE21, CE16, CE06), and the docs that told
+  operators to leave the first one empty now say the opposite, including what it
+  costs: one `client_id` per server group, because an unmapped one is refused.
+
+  The product can neither set nor verify the portal-side half — those are LLNG
+  Manager settings, and reading them back would need an API that publishes the
+  project's bastions, server groups and RPs. So the enforcement is declarative
+  and it is everywhere an operator passes: `ob-bastion-setup`,
+  `ob-backend-setup`, `ob-desktop-setup` and `ob-post-upgrade` print the
+  requirement on every run, and `ob-builder` writes a `PORTAL-CHECKLIST.md` next
+  to each artefact, pre-filled with that deployment's `client_id` and
+  `server_group` — which matters most for the Ansible role, whose setup task
+  nobody reads the output of. One shared text
+  (`/usr/lib/open-bastion/ob-portal-prerequisites.txt`), because four heredocs
+  is how the units of #254 drifted apart.
 - **`ob-enroll` no longer puts the OIDC client secret on a command line**
   (#256). It signed its `client_secret_jwt` assertion with
   `openssl dgst -sha256 -hmac "$client_secret"`, and OpenSSL has no form that

@@ -1944,6 +1944,35 @@ _pair_path() {
     esac
 }
 
+# The portal side of R-P1, written next to the artefact.
+#
+# `pamAccessServerGroups` and `pamAccessAllowedRps` are Manager settings: no
+# installer and no Ansible task can set them, and probing the portal for their
+# state would need an API that publishes the project's bastions, server groups
+# and RPs -- which is not something an SSO should offer. So the artefact carries
+# the requirement instead, pre-filled with the client_id and server_group THIS
+# bundle enrols with, rather than leaving the admin to map a generic warning
+# onto their own deployment.
+#
+# It is written for both output kinds. The shell installer runs the setup
+# script, which prints the same requirement; the Ansible role runs it through a
+# task whose stdout nobody reads.
+render_portal_checklist() {
+    local dest="$1" role="$2"
+    local tpl="$TEMPLATES_DIR/PORTAL-CHECKLIST.md.in"
+
+    [ -f "$tpl" ] || { log_warn "Portal checklist template not found: $tpl"; return 0; }
+    if [ "$DRY_RUN" = "1" ]; then
+        log_info "[DRY-RUN] Would write $dest"
+        return 0
+    fi
+
+    build_placeholder_map "$role"
+    mkdir -p -- "$(dirname -- "$dest")"
+    render_template "$tpl" "$dest" "0644"
+    log_info "Portal checklist written to $dest"
+}
+
 run_outputs_for_role() {
     local role="$1"
     local shell_out="$2"
@@ -1951,6 +1980,13 @@ run_outputs_for_role() {
 
     [ -n "$shell_out" ]   && render_shell_installer "$shell_out" "$role"
     [ -n "$ansible_out" ] && render_ansible_role    "$ansible_out" "$role"
+    # Next to the installer, and inside the role tree. Named per role so a
+    # --bundle run does not have its bastion checklist overwritten by its
+    # backend one.
+    [ -n "$shell_out" ]   && render_portal_checklist \
+        "$(dirname -- "$shell_out")/PORTAL-CHECKLIST-${role}.md" "$role"
+    [ -n "$ansible_out" ] && render_portal_checklist \
+        "$ansible_out/PORTAL-CHECKLIST.md" "$role"
     # When one of the outputs is empty the corresponding `cmd && X` is
     # false; the function would otherwise return non-zero and trip set -e
     # in main(). Explicit success keeps execution flowing.

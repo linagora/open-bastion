@@ -12,8 +12,10 @@ move independently, so each part below says when it applies.
 
 **Part A — on every bastion and backend. Required, whatever your portal runs.**
 
-**Part B — only if you are also moving the portal to plugins 0.6.0.** On
-plugins < 0.6.0 there is nothing to do there.
+**Part B — the portal. Required for a production deployment of 0.7.0.** It used
+to be "only if you are also moving the portal"; from 0.7.0 the two portal
+settings in [B0](#b0-required-before-070-goes-to-production) are a release
+prerequisite, and they exist only on plugins 0.6.0.
 
 If you are doing both: Part A first, on every host, then Part B.
 
@@ -84,6 +86,39 @@ clean up. The rejection is logged to syslog with that same command.
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0
+
+### B0. Required before 0.7.0 goes to production
+
+Two settings in the LLNG Manager. Until both are set, **any host enrolled in
+this project that is compromised can declare itself a bastion** on
+`/pam/authorize` and obtain a hop voucher (12 h by default) for a user — a test
+machine, a workstation, any backend. That is risk R-P1, and it is the shipped
+default: `pamAccessServerGroups` empty makes `server_group` a value read from
+the request body, and `pamAccessAllowedRps` empty means "no change", so the
+plugin's audience binding does nothing.
+
+1. **`pamAccessServerGroups`** — the authoritative `client_id → server_group`
+   mapping. Once set, `server_group` stops being something a caller can
+   declare.
+2. **`pamAccessAllowedRps`** — the RPs allowed on `/pam/*`. This requires your
+   bastions to be enrolled under a `client_id` of their own, not the
+   project-wide one, so plan that first.
+
+And on the hosts, the residual defence if the two above are ever undone:
+
+3. **`allowed_bastions` non-empty on every backend** —
+   `ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]`. An empty file
+   accepts a voucher from any bastion the SSO vouched for.
+
+No command on a host can check 1 or 2: they are portal state, and reading it
+back would need an API that publishes your bastions, server groups and RPs. So
+the setup scripts and `ob-post-upgrade` print this list on every run, and
+`ob-builder` writes a `PORTAL-CHECKLIST.md` next to each artefact, pre-filled
+with that deployment's `client_id` and `server_group`. Those are reminders, not
+checks — verifying it is yours.
+
+Background: `doc/security/09-portail-llng.md` (R-P1) and
+`doc/security/08-dossier-homologation.md` (CE03, CE06, CE16, CE21).
 
 ### B1. Upgrade Open Bastion everywhere first
 
@@ -165,12 +200,10 @@ Set it **alongside** your vhost `locationRules`, not instead of them; the two
 regimes are in
 [doc/llng-configuration.md](doc/llng-configuration.md), step 3b.
 
-### B6. Optional, and worth doing
+### B6. Everything else
 
-**`pamAccessAllowedRps`** binds `/pam/*` to your PAM relying parties, so an
-ordinary enrolled host cannot declare itself a bastion. Empty by default.
-Turning it on requires your bastions to be enrolled under their own
-`client_id`, not the project-wide one.
+Nothing here is optional any more: what used to be listed here,
+`pamAccessAllowedRps`, is [B0](#b0-required-before-070-goes-to-production).
 
 ---
 

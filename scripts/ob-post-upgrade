@@ -336,4 +336,18 @@ else
     info "To verify, log in with a public key from elsewhere, then:"
     info "  sudo find $SPOOL_DIR -name '*.fp' -newermt '-2 min'"
 fi
+
+# 0.7.0 makes the portal side of R-P1 a release prerequisite rather than a
+# condition of employment left to the deployment. This command is what an
+# operator upgrading to 0.7.0 runs, so it is where they have to be told; the
+# text is shared with the three setup scripts (share/ -> /usr/lib/open-bastion),
+# because four heredocs is how the units of #254 drifted apart.
+if [ -r "$DATA_DIR/ob-portal-prerequisites.txt" ]; then
+    echo
+    cat "$DATA_DIR/ob-portal-prerequisites.txt"
+else
+    warn "PORTAL-SIDE PREREQUISITE (R-P1): set pamAccessServerGroups and"
+    warn "pamAccessAllowedRps in the LLNG Manager, or any enrolled host can"
+    warn "declare itself a bastion. See doc/security/09-portail-llng.md."
+fi
 exit 0
