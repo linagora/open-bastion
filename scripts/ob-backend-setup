@@ -1852,6 +1852,33 @@ setup_audit_trace() {
 }
 
 # Print summary
+# The portal-side prerequisite for R-P1, printed at the end of every run.
+#
+# `pamAccessServerGroups` and `pamAccessAllowedRps` live in the LemonLDAP::NG
+# Manager, not here, and nothing on this host can read them back -- asking the
+# portal whether they are set would mean an API that publishes the project's
+# bastions and server groups, which is not something an SSO should offer. So
+# the only honest thing a setup script can do is state the requirement, every
+# time, rather than let a host come up looking finished while the gap is open.
+#
+# The text is shipped as data (share/ -> /usr/lib/open-bastion) because it is
+# printed by three setup scripts and ob-post-upgrade; a heredoc in each is how
+# the units of #254 drifted apart.
+print_portal_prerequisites() {
+    local f
+    f="$(_ob_data_dir)/ob-portal-prerequisites.txt"
+    if [ -r "$f" ]; then
+        echo ""
+        cat "$f"
+    else
+        echo ""
+        echo "PORTAL-SIDE PREREQUISITE (R-P1): set pamAccessServerGroups and"
+        echo "pamAccessAllowedRps in the LLNG Manager, or any enrolled host can"
+        echo "declare itself a bastion. See doc/security/09-portail-llng.md."
+        echo "($f is missing — reinstall the open-bastion package)"
+    fi
+}
+
 print_summary() {
     echo ""
     if [ "$ENROLL_RESULT" = "failed" ]; then
@@ -1980,6 +2007,7 @@ print_summary() {
         fi
         echo ""
     fi
+    print_portal_prerequisites
 }
 
 # Usage

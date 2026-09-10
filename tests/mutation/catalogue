@@ -146,3 +146,31 @@ replace || } else if (0) {
 suite   || tests/test_ob_sshd_anchor.sh
 why     || #268: only the outermost of the CONTIGUOUS run is the anchor. Climbing
 why     || past a break picks up an sshd-session belonging to another connection.
+
+id      || portal-prereq-bastion-setup
+file    || scripts/ob-bastion-setup
+search  || \n    print_portal_prerequisites\n}
+replace || \n}
+suite   || tests/test_ob_portal_prerequisites.sh
+why     || #268: R-P1 is the one risk the product can neither fix nor verify --
+why     || pamAccessServerGroups lives in the LLNG Manager. The only enforcement
+why     || available is that every setup run says so, so the summary must reach
+why     || it.
+
+id      || portal-prereq-post-upgrade
+file    || scripts/ob-post-upgrade
+search  ||     cat "$DATA_DIR/ob-portal-prerequisites.txt"
+replace ||     :
+suite   || tests/test_ob_portal_prerequisites.sh
+why     || #268: ob-post-upgrade is the path an existing host takes to 0.7.0 --
+why     || the only one that reaches hosts set up before the prerequisite
+why     || existed.
+
+id      || portal-prereq-builder-ansible
+file    || admin-builder/ob-builder
+search  || "$ansible_out/PORTAL-CHECKLIST.md" "$role"
+replace || /dev/null "$role"
+suite   || tests/test_ob_portal_prerequisites.sh
+why     || #268: the Ansible role runs the setup script through a task whose
+why     || stdout nobody reads, so for that artefact the checklist file IS the
+why     || notification.
