@@ -513,11 +513,14 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
 # ob-standalone-setup is a symlink to ob-bastion-setup: invoked under that name
 # the script defaults --node-role to "standalone", giving admins a clearer,
 # self-documenting command for combined bastion+backend hosts.
-install(CODE "
-    set(_sbindir \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_SBINDIR}\")
-    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-        ob-bastion-setup \"\${_sbindir}/ob-standalone-setup\")
-")
+# The link is made in the build tree and installed like any other file, so it
+# follows the install-time prefix: cpack installs under /usr, not the
+# configure-time /usr/local a CMAKE_INSTALL_FULL_* path would bake in.
+execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    ob-bastion-setup "${CMAKE_BINARY_DIR}/ob-standalone-setup")
+install(FILES ${CMAKE_BINARY_DIR}/ob-standalone-setup
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
 
 # Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
 # Read-only templates under /usr/share/open-bastion/audit/. The setup function
@@ -565,11 +568,11 @@ install(FILES
 )
 
 # Man page for the ob-standalone-setup symlink (points at ob-bastion-setup.8).
-install(CODE "
-    set(_man8dir \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_MANDIR}/man8\")
-    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-        ob-bastion-setup.8 \"\${_man8dir}/ob-standalone-setup.8\")
-")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    ob-bastion-setup.8 "${CMAKE_BINARY_DIR}/ob-standalone-setup.8")
+install(FILES ${CMAKE_BINARY_DIR}/ob-standalone-setup.8
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
+)
 
 # Install man pages (section 1 - user commands)
 install(FILES

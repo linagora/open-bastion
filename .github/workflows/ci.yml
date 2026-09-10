@@ -208,10 +208,16 @@ jobs:
         cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON
         cmake --build build --parallel
 
+    # cpack reports a failed install step as "CMake Error" and still exits 0
+    # with a package missing the files that step should have put there.
     - name: Create Debian package
       run: |
         cd build
-        cpack -G DEB
+        cpack -G DEB 2>&1 | tee cpack.log
+        if grep -q 'CMake Error' cpack.log; then
+          echo "::error::cpack reported install errors; the package is incomplete"
+          exit 1
+        fi
 
     # Upgrades a host staged from the v0.6.2 tag and checks it converges.
     # It needs docker and a package, which only this job has; on the build jobs
