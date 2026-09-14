@@ -97,7 +97,27 @@ directement cette fiche, sans changer le score :
   au lieu de silencieusement inopérante.
 
 Aucun de ces correctifs n'est publié à ce jour : le score résiduel ci-dessous
-suppose toujours la configuration côté exploitant (CE03 + CE06).
+suppose toujours la configuration côté exploitant (CE03 + CE06 + CE21).
+
+**Depuis `0.7.0`, cette configuration n'est plus une hypothèse : c'est un
+prérequis de publication.** Le comportement par défaut du produit — `allowed_bastions`
+vide vaut « accepter n'importe lequel », `pamAccessServerGroups` vide fait lire
+le `server_group` dans la requête — contredit la configuration multi-groupes que
+[00-architecture.md](00-architecture.md) recommande. Un défaut livré qui
+contredit l'architecture recommandée n'est pas un risque résiduel acceptable :
+c'est une condition de mise en service. CE03, CE06, CE16 et CE21 sont donc
+déclarées **bloquantes** en
+[08, §2](08-dossier-homologation.md#2-conditions-demploi).
+
+Le produit ne peut ni poser ni vérifier les trois premières : ce sont des
+réglages du Manager LLNG, et les lire depuis un hôte supposerait une API qui
+publierait les bastions, les groupes de serveurs et les RP du projet. La seule
+application possible est déclarative — `ob-bastion-setup`, `ob-backend-setup`,
+`ob-desktop-setup` et `ob-post-upgrade` impriment la consigne à chaque
+exécution, et `ob-builder` écrit à côté de chaque artefact une
+`PORTAL-CHECKLIST.md` pré-remplie avec le `client_id` et le `server_group` du
+déploiement. C'est une notification, pas un contrôle, et la fiche ne prétend
+pas l'inverse.
 
 |                 |                                   Score résiduel                                   |
 | --------------- | :--------------------------------------------------------------------------------: |

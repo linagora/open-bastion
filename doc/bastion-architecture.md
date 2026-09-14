@@ -188,11 +188,17 @@ pamAccessSshRules = { \
 }
 ```
 
-> Do not confuse this with `pamAccessServerGroups`, a different (optional)
-> setting: an **authority map `client_id → server_group`** that, when non-empty,
-> forces a host's server group from its enrolled `client_id` instead of trusting
-> the request. Leave it empty for the default model (one `client_id` = one
-> project, several server groups inside it).
+> Do not confuse this with `pamAccessServerGroups`, a different setting: an
+> **authority map `client_id → server_group`** that, when non-empty, forces a
+> host's server group from its enrolled `client_id` instead of trusting the
+> request.
+>
+> **From 0.7.0 it is required**, not optional. Left empty, `server_group` is
+> read from the request body, and any enrolled host that is compromised can
+> claim to be a bastion (risk R-P1). The price is that the "one `client_id` per
+> project, several server groups inside it" model no longer works as such: each
+> server group needs its own `client_id`, because an unmapped one is refused.
+> See [UPGRADE-NOTES.md](../UPGRADE-NOTES.md), B0.
 
 Each server enrolls with its server_group:
 

@@ -217,6 +217,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/share/ob-ssh-principals.bastion
     ${CMAKE_SOURCE_DIR}/share/ob-ssh-principals.backend
     ${CMAKE_SOURCE_DIR}/share/ob-fp-spool.tmpfiles
+    ${CMAKE_SOURCE_DIR}/share/ob-portal-prerequisites.txt
     DESTINATION lib/open-bastion
 )
 

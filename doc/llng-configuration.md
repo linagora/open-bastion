@@ -353,11 +353,27 @@ pamAccessSudoRules = { \
 > When it is non-empty, `/pam/authorize` derives the host's server group from
 > its enrolled `client_id` instead of trusting the group sent in the request,
 > and `/pam/whoami` reports that mapped group (and only that one — a server
-> asking who it is is never told back what it claimed about itself). Leave it
-> **empty** for the usual model of one
-> `client_id` per project covering several server groups — an unmapped
-> `client_id` is refused. `/pam/bastion-cert` uses no group at all; it relies
-> solely on the voucher.
+> asking who it is is never told back what it claimed about itself).
+> `/pam/bastion-cert` uses no group at all; it relies solely on the voucher.
+>
+> **From 0.7.0 this map is required, and so is `pamAccessAllowedRps`.** Left
+> empty, `server_group` is whatever the caller puts in the request body, so any
+> enrolled host of the project that is compromised can declare itself a bastion
+> and obtain a hop voucher for a user — risk R-P1, and the shipped default.
+>
+> This document used to say "leave it empty for the usual model of one
+> `client_id` per project covering several server groups". That model is
+> precisely the configuration in which the gap is exploitable, so it is no
+> longer the recommendation: **give each server group its own `client_id`**, and
+> map them here. An unmapped `client_id` is refused, so plan the enrolment
+> before you set this.
+>
+> `pamAccessAllowedRps` is the second half: it lists the RPs allowed on
+> `/pam/*`, and an empty list means "no change" for upgrade compatibility — so
+> the plugin's audience binding does nothing at all until you fill it in.
+>
+> Full list, and the residual defence on the hosts (`allowed_bastions`), in
+> [UPGRADE-NOTES.md](../UPGRADE-NOTES.md), B0.
 
 ### Configure on Each Server
 

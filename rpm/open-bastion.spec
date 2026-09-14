@@ -120,6 +120,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_prefix}/lib/open-bastion/ob-ssh-principals.bastion
 %{_prefix}/lib/open-bastion/ob-ssh-principals.backend
 %{_prefix}/lib/open-bastion/ob-fp-spool.tmpfiles
+%{_prefix}/lib/open-bastion/ob-portal-prerequisites.txt
 # 0711 = traversable but NOT listable. Entries under these directories are 0644
 # so an unprivileged getpwnam()/getpwuid() can read its own record (an NSS
 # module runs inside the calling process), but no local account can readdir()
