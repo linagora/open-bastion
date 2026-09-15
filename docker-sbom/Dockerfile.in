@@ -1,0 +1,9 @@
+FROM @BASE_IMAGE@ AS base
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install --no-install-recommends -y debtree
+
+FROM base AS with-package
+ARG PACKAGE
+COPY ${PACKAGE} /tmp/
+RUN apt-get install --no-install-recommends -y /tmp/${PACKAGE} && \
+    rm /tmp/${PACKAGE}
