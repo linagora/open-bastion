@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Open-Bastion — Linagora</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="brand.css">
+<script src="deck-stage.js"></script>
+<script type="application/json" id="speaker-notes">
+[
+  "Welcome. I'm going to talk about Open-Bastion — our attempt to bring SSO-grade access control to the Linux shell. Token, SSH keys, sudo, on bastions and backends. 30 minutes, questions at the end.",
+  "Quick plug. Linagora, French open-source vendor. We maintain LemonLDAP::NG, Twake, LinShare, and a bunch of other things you may have run into. Open-Bastion is a newer piece of that puzzle. AGPL, upstream-first.",
+  "Raise of hands — who here has at least one server whose /etc/passwd still has an ex-colleague in it? Right. That's the problem. SSH access tends to drift. It accumulates. Nobody cleans it up because nobody owns it.",
+  "And then sudo. Sudo has the same problem, on harder mode. Ten sudoers files, five Ansible roles, a wiki page from 2019, and a NOPASSWD ALL that everyone swears is temporary.",
+  "What we usually do: push keys with Ansible. Sync with LDAP. Write scripts. It mostly works, but it's fragile, it's slow to revoke, and the audit trail is whatever grep on a log file tells you.",
+  "Meanwhile, for web apps, we solved this ten years ago. SSO. One identity, one place to grant and revoke, MFA for free, audit built in. Shell access somehow got left behind.",
+  "So here's the thesis of this talk. The same SSO you already run for your web apps can drive SSH and sudo. Not as an afterthought, not through a side-car — as the actual authorization decision.",
+  "That's Open-Bastion. PAM and NSS modules that talk to LemonLDAP::NG. Two auth modes, token or SSH key. Works for ssh. Works for sudo. Works on the bastion. Works on backends. AGPL. Packages for Debian, Ubuntu, Rocky.",
+  "Here's the picture. User hits the bastion. The bastion asks LLNG 'can this person access this server, with this group?'. LLNG answers. Same question gets asked for sudo. Same endpoint. Backends ask too.",
+  "Underneath, it's two standard Linux pieces. PAM for the authentication and authorization decision. NSS to resolve the user — so accounts don't need to pre-exist in /etc/passwd.",
+  "Mode one — token. User goes to the portal, clicks 'give me a token', pastes it as the SSH password. Bastion introspects it with OIDC. No key rotation, no shared secrets. Token expires on its own.",
+  "Mode two — SSH keys. Keep the UX your users already know. The twist: when the key matches, we still ask LLNG 'is this person allowed on this host, in this group?'. Key possession is necessary, not sufficient.",
+  "Now sudo. Same PAM module, same endpoint, different question. 'Can user X run sudo on host Y?'. Policy lives where your web app policy lives. One place to grant, one place to revoke. Short cache TTL because sudo is the blast radius.",
+  "People ask 'what if LLNG is down?'. Fair question. We cache authorization decisions, AES-256-GCM encrypted on disk, with a TTL. SSH keys still authenticate. Brute-force rate-limited. Sudo gets a shorter TTL because, again, blast radius.",
+  "The bastion also proves itself to the backend — it mints a short-lived SSH certificate, signed by LLNG, for each hop. Backends trust the LLNG SSH CA and verify the cert offline, pinned to the bastion address. Backends refuse SSH from anywhere that isn't a blessed bastion. No user key on the bastion to steal.",
+  "Session recording, optional. Script, asciinema or ttyrec format. Correlation IDs so one SSH session ties to one audit entry. Your compliance team will like this. You don't have to like it.",
+  "Defense in depth. Structured JSON audit logs. Rate limiting. Token binding to IP and fingerprint. SSH key policy — no DSA, no 1024-bit RSA. Optional CrowdSec integration for pre-auth IP blocking and post-auth failure reporting.",
+  "Service accounts — ansible, backup, CI. SSH key auth, no OIDC. Per-server config. Fine-grained sudo. Auto-provisioned. The robots get the simple path, humans get the SSO path.",
+  "Briefly, the neighbours. Teleport — powerful, SaaS-ish, Go, BSL. The Bastion from OVH — great, Perl, its own user model. Boundary — HashiCorp, BSL. We're the one where your existing SSO is the brain, C and shell, AGPL, and the bastion isn't the only enforcement point.",
+  "In practice. apt install or dnf install. Copy a config. Run ob-enroll, get a code, approve it in the portal. Edit /etc/pam.d/sshd. Test from a second terminal. That's it.",
+  "Config and PAM stack, the whole shape. Four lines in openbastion.conf, four lines in pam.d/sshd. You can read it. You can audit it. No YAML DSL.",
+  "What's next. Desktop SSO via LightDM — so your workstations login with the same LLNG identity, with MFA and offline mode. Same story: one SSO, everywhere a human types a password.",
+  "Try it. There's a Docker demo — three modes, token, cert, maxsec. Star the repo if you like it. File issues if you don't. Linagora will happily help you deploy, and we ship this under AGPL so your sysadmins can read every line.",
+  "That's the talk. Thank you. Questions — and if the first one is 'why not Teleport', I have a slide for that, I just didn't show it."
+]
+</script>
+<style>
+  /* Title variant switcher — toggled via Tweaks */
+  body[data-title-variant="A"] .title-variant { display: none; }
+  body[data-title-variant="A"] .title-variant--A { display: flex; }
+  body[data-title-variant="B"] .title-variant { display: none; }
+  body[data-title-variant="B"] .title-variant--B { display: flex; }
+  body[data-title-variant="C"] .title-variant { display: none; }
+  body[data-title-variant="C"] .title-variant--C { display: flex; }
+
+  /* Tweak panel */
+  #tweaks {
+    position: fixed;
+    right: 20px;
+    bottom: 70px;
+    z-index: 2147483647;
+    background: #0a1628;
+    color: #fff;
+    border-radius: 12px;
+    padding: 16px 18px;
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    display: none;
+    min-width: 220px;
+  }
+  #tweaks.visible { display: block; }
+  #tweaks h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.55); font-weight: 500; }
+  #tweaks .row { display: flex; gap: 6px; margin-bottom: 6px; }
+  #tweaks button {
+    background: rgba(255,255,255,0.08);
+    color: #fff; border: 0;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font: inherit;
+    cursor: pointer;
+    flex: 1;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+  }
+  #tweaks button.active { background: #c8304a; }
+  #tweaks button:hover { background: rgba(255,255,255,0.18); }
+  #tweaks .hint { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px; }
+</style>
+</head>
+<body>
+<script>
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "titleVariant": "A"
+  }/*EDITMODE-END*/;
+  document.body.dataset.titleVariant = TWEAK_DEFAULTS.titleVariant || "A";
+</script>
+
+<deck-stage width="1920" height="1080">
+
+  <!-- ════════════════════ 01 · TITLE (3 VARIANTS) ════════════════════ -->
+  <section data-label="Title" class="slide slide--dark" style="padding:0;">
+
+    <!-- Variant A — Editorial / warm -->
+    <div class="title-variant title-variant--A" style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:100px 120px 80px;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <img src="linagora.png" alt="Linagora" width="254" height="52" style="width:254px;height:52px;display:block;">
+        <span style="font-family:var(--font-mono);font-size:24px;color:rgba(255,255,255,0.6);letter-spacing:0.1em;text-transform:uppercase;">Meetup · 2026</span>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:44px;font-size:26px;">Centralized access control for Linux</div>
+        <h1 class="title" style="font-size:196px;line-height:0.94;margin:0;">Open<span style="color:var(--ob-accent);">-</span>Bastion</h1>
+        <div style="margin-top:40px;font-family:var(--font-serif);font-size:56px;font-style:italic;color:rgba(255,255,255,0.78);line-height:1.2;max-width:1400px;">
+          SSH &amp; sudo, governed by the SSO<br>you already run.
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--font-mono);font-size:24px;color:rgba(255,255,255,0.6);">
+        <span>github.com/linagora/open-bastion</span>
+        <span>AGPL-3.0</span>
+      </div>
+    </div>
+
+    <!-- Variant B — Terminal-forward -->
+    <div class="title-variant title-variant--B" style="position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;padding:70px 120px 60px;box-sizing:border-box;background:#0a1628;">
+      <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+        <img src="linagora.png" alt="Linagora" width="234" height="48" style="width:234px;height:48px;display:block;">
+        <span style="font-family:var(--font-mono);font-size:24px;color:rgba(255,255,255,0.6);letter-spacing:0.1em;">AGPL-3.0 · v0.5.1</span>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:30px;color:var(--ob-accent);margin-bottom:24px;letter-spacing:0.05em;">$ ssh user@bastion</div>
+        <h1 class="title" style="font-size:172px;line-height:0.94;margin:0 0 28px;">Open-Bastion</h1>
+        <div style="font-family:var(--font-mono);font-size:34px;color:rgba(255,255,255,0.72);line-height:1.4;max-width:1500px;">
+          <span style="color:#8fd3a3;">&gt;</span> One SSO.  <span style="color:rgba(255,255,255,0.35);">·</span>  Every server.  <span style="color:rgba(255,255,255,0.35);">·</span>  SSH and sudo.
+        </div>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:24px;color:rgba(255,255,255,0.5);">Linagora meetup · 2026 · github.com/linagora/open-bastion</div>
+    </div>
+
+    <!-- Variant C — Big figure / question -->
+    <div class="title-variant title-variant--C" style="position:absolute;inset:0;display:grid;grid-template-columns:1fr 1fr;padding:0;box-sizing:border-box;background:var(--ob-paper-warm);">
+      <div style="background:var(--ob-blue-deep);color:#fff;padding:100px;display:flex;flex-direction:column;justify-content:space-between;">
+        <img src="linagora.png" alt="Linagora" width="234" height="48" style="width:234px;height:48px;display:block;">
+        <div>
+          <div class="kicker" style="color:var(--ob-accent-soft);margin-bottom:32px;font-size:26px;">A question.</div>
+          <div style="font-family:var(--font-serif);font-style:italic;font-size:64px;line-height:1.15;letter-spacing:-0.01em;">Who, exactly, has a shell on that server?</div>
+        </div>
+        <span style="font-family:var(--font-mono);font-size:24px;color:rgba(255,255,255,0.55);">meetup · 2026</span>
+      </div>
+      <div style="padding:100px;display:flex;flex-direction:column;justify-content:space-between;">
+        <div style="font-family:var(--font-mono);font-size:24px;color:var(--ob-muted);letter-spacing:0.1em;text-transform:uppercase;">A proposition.</div>
+        <div>
+          <h1 class="title" style="font-size:160px;line-height:0.92;margin:0;color:var(--ob-ink);">Open<span style="color:var(--ob-accent);">-</span>Bastion</h1>
+          <div style="margin-top:24px;font-size:40px;color:var(--ob-muted);line-height:1.3;max-width:700px;">SSH &amp; sudo, governed by your SSO.</div>
+        </div>
+        <span style="font-family:var(--font-mono);font-size:24px;color:var(--ob-muted);">github.com/linagora/open-bastion</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════ 02 · WHO ════════════════════ -->
+  <section data-label="Who" class="slide slide--warm">
+    <div class="kicker">About us</div>
+    <h2 class="title" style="max-width:1400px;">Linagora. French. Open source. <span class="accent">Pragmatic.</span></h2>
+    <div class="grid-3" style="margin-top:40px;">
+      <div class="card">
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.06em;">IDENTITY</div>
+        <div style="font-size:34px;font-weight:600;margin-top:10px;">LemonLDAP::NG</div>
+        <div class="small muted" style="margin-top:12px;">SSO &amp; WebSSO, 18+ years, LTS.</div>
+      </div>
+      <div class="card">
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.06em;">COLLAB</div>
+        <div style="font-size:34px;font-weight:600;margin-top:10px;">Twake Workplace</div>
+        <div class="small muted" style="margin-top:12px;">Mail, chat, drive, meet.</div>
+      </div>
+      <div class="card">
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.06em;">SHELL</div>
+        <div style="font-size:34px;font-weight:600;margin-top:10px;">Open-Bastion</div>
+        <div class="small muted" style="margin-top:12px;">Today's talk. AGPL-3.0.</div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Linagora</span></div><span>01 / who</span></div>
+  </section>
+
+  <!-- ════════════════════ 03 · SSH PROBLEM ════════════════════ -->
+  <section data-label="The SSH access problem" class="slide">
+    <div class="kicker">Problem I</div>
+    <h2 class="title">SSH access, unsupervised, <span class="accent">ages like milk.</span></h2>
+    <div class="grid-2" style="margin-top:20px;">
+      <div class="col">
+        <div class="lead" style="max-width:780px;">
+          Keys get pushed. People leave. Contractors finish.<br>
+          Nothing removes them.
+        </div>
+        <ul class="clean" style="margin-top:32px;">
+          <li data-mark="—"><span><b>authorized_keys</b> files that nobody audits</span></li>
+          <li data-mark="—"><span>Ansible roles that only add, never remove</span></li>
+          <li data-mark="—"><span>An LDAP sync nobody fully trusts</span></li>
+          <li data-mark="—"><span>Revocation measured in <i>days</i>, not seconds</span></li>
+        </ul>
+      </div>
+      <div class="terminal">
+<span class="terminal__header">root@prod-db-07 ~/.ssh</span>
+<span class="term-prompt">#</span> <span class="term-dim">cat authorized_keys | wc -l</span>
+<span class="term-ok">47</span>
+
+<span class="term-prompt">#</span> <span class="term-dim">who is still at the company?</span>
+<span class="term-fail">¯\_(ツ)_/¯</span>
+
+<span class="term-prompt">#</span> <span class="term-dim">last login by sophie (left 2023-04):</span>
+<span class="term-key">last month</span>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>02 / ssh problem</span></div>
+  </section>
+
+  <!-- ════════════════════ 04 · SUDO ════════════════════ -->
+  <section data-label="Where sudo fits in" class="slide slide--warm">
+    <div class="kicker">Problem II</div>
+    <h2 class="title">And then there's <span class="accent">sudo.</span></h2>
+    <div class="grid-2" style="margin-top:20px;align-items:center;">
+      <div>
+        <div class="lead" style="max-width:800px;">
+          SSH is who's in the building.<br>
+          Sudo is who's got the keys to the safe.
+        </div>
+        <div class="small muted" style="margin-top:32px;max-width:800px;">
+          Same drift, harder consequences. <b>sudoers</b> spread across machines, Ansible roles and a wiki page from 2019.
+          <b>NOPASSWD ALL</b> that everyone swears is temporary.
+        </div>
+      </div>
+      <div class="code">
+<span class="tok-c"># /etc/sudoers.d/legacy         — last edit: 2021</span>
+<span class="tok-n">%devs</span>   ALL=(ALL:ALL) <span class="tok-p">NOPASSWD: ALL</span>
+<span class="tok-n">alice</span>   ALL=(ALL:ALL) ALL
+<span class="tok-n">bob</span>     ALL=(ALL:ALL) ALL  <span class="tok-c"># left 2022-07</span>
+<span class="tok-n">ci-bot</span>  ALL=(ALL:ALL) <span class="tok-p">NOPASSWD: ALL</span>
+<span class="tok-n">#tempo</span>  ALL=(ALL) NOPASSWD: /bin/systemctl
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>03 / sudo</span></div>
+  </section>
+
+  <!-- ════════════════════ 05 · STATUS QUO ════════════════════ -->
+  <section data-label="Status quo" class="slide">
+    <div class="kicker">What we do about it</div>
+    <h2 class="title">The status quo, honestly.</h2>
+    <div class="grid-3" style="margin-top:40px;gap:32px;">
+      <div class="card">
+        <div style="font-size:64px;font-weight:700;color:var(--ob-accent);line-height:1;">01</div>
+        <div style="font-size:34px;font-weight:600;margin-top:20px;">Push keys with Ansible</div>
+        <div class="small muted" style="margin-top:12px;">Works. Until it doesn't. Rollback? See you in 20 minutes.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:64px;font-weight:700;color:var(--ob-accent);line-height:1;">02</div>
+        <div style="font-size:34px;font-weight:600;margin-top:20px;">LDAP + sssd</div>
+        <div class="small muted" style="margin-top:12px;">Great for users. Sudo? Group schema. Revocation? Propagation.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:64px;font-weight:700;color:var(--ob-accent);line-height:1;">03</div>
+        <div style="font-size:34px;font-weight:600;margin-top:20px;">A script from Jérôme</div>
+        <div class="small muted" style="margin-top:12px;">Jérôme left in 2022. The script remains.</div>
+      </div>
+    </div>
+    <div style="margin-top:60px;font-family:var(--font-serif);font-style:italic;font-size:40px;color:var(--ob-muted);max-width:1500px;">
+      Audit trail: whatever <span style="font-family:var(--font-mono);color:var(--ob-ink);font-style:normal;">grep</span> on a log file happens to tell you.
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>04 / status quo</span></div>
+  </section>
+
+  <!-- ════════════════════ 06 · WEB SOLVED THIS ════════════════════ -->
+  <section data-label="Web solved this" class="slide slide--blue">
+    <div class="kicker">Meanwhile</div>
+    <h2 class="title">For web apps, <span class="accent">we solved this a decade ago.</span></h2>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px;gap:60px;">
+      <div style="flex:1;">
+        <ul class="clean" style="color:#fff;">
+          <li data-mark="✓"><span>One identity, one place to grant &amp; revoke</span></li>
+          <li data-mark="✓"><span>MFA, session lifetime, device posture — included</span></li>
+          <li data-mark="✓"><span>Audit trail is a table, not a grep</span></li>
+          <li data-mark="✓"><span>Off-board in seconds, not days</span></li>
+        </ul>
+      </div>
+      <div style="flex:1;text-align:right;">
+        <div class="figure" style="color:var(--ob-accent);font-size:340px;">SSO</div>
+        <div style="font-family:var(--font-serif);font-style:italic;font-size:44px;color:rgba(255,255,255,0.72);margin-top:-10px;">…but not your shell.</div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>05 / web solved this</span></div>
+  </section>
+
+  <!-- ════════════════════ 07 · THE BET ════════════════════ -->
+  <section data-label="The bet" class="slide slide--warm">
+    <div class="kicker">Our bet</div>
+    <blockquote class="quote" style="margin-top:60px;">
+      The SSO you already run<br>
+      can drive <span class="accent">ssh</span> and <span class="accent">sudo</span>.
+    </blockquote>
+    <div class="small muted" style="margin-top:80px;max-width:1200px;font-size:30px;">
+      Not as a side-car. Not as a custom PAM hack. <br>
+      As the actual authorization decision — for every shell, on every host.
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>06 / bet</span></div>
+  </section>
+
+  <!-- ════════════════════ 08 · MEET ════════════════════ -->
+  <section data-label="Meet Open-Bastion" class="slide">
+    <div class="kicker">Introducing</div>
+    <h2 class="title" style="font-size:88px;max-width:1700px;">
+      PAM &amp; NSS modules for Linux, wired into <span class="accent">LemonLDAP::NG.</span>
+    </h2>
+    <div class="grid-3" style="margin-top:60px;gap:32px;">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">TWO AUTH MODES</div>
+        <div style="font-size:36px;font-weight:600;margin-top:12px;line-height:1.2;">Token<br><span class="muted" style="font-weight:400;">or</span><br>SSH key</div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">TWO DECISIONS</div>
+        <div style="font-size:36px;font-weight:600;margin-top:12px;line-height:1.2;">SSH access<br><span class="muted" style="font-weight:400;">and</span><br>sudo privilege</div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">EVERYWHERE</div>
+        <div style="font-size:36px;font-weight:600;margin-top:12px;line-height:1.2;">Bastion<br><span class="muted" style="font-weight:400;">and</span><br>backends</div>
+      </div>
+    </div>
+    <div style="position:absolute;bottom:100px;left:120px;right:120px;display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:22px;color:var(--ob-muted);">
+      <span>C &amp; shell · ~68 % / 25 %</span>
+      <span>Debian · Ubuntu · Rocky</span>
+      <span>AGPL-3.0</span>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>07 / meet</span></div>
+  </section>
+
+  <!-- ════════════════════ 09 · ARCHITECTURE ════════════════════ -->
+  <section data-label="Architecture" class="slide slide--cool">
+    <div class="kicker">Architecture</div>
+    <h2 class="title">One brain. <span class="accent">Many shells.</span></h2>
+
+    <svg viewBox="0 0 1680 620" style="width:100%;max-width:1680px;height:auto;margin-top:20px;font-family:var(--font-mono);">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0a1628"/>
+        </marker>
+        <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#c8304a"/>
+        </marker>
+      </defs>
+
+      <!-- User -->
+      <g transform="translate(40,260)">
+        <circle cx="40" cy="40" r="40" fill="#0a1628"/>
+        <text x="40" y="46" text-anchor="middle" fill="#fff" font-size="22" font-weight="500">user</text>
+        <text x="40" y="110" text-anchor="middle" fill="#5a6b82" font-size="18">SSH client</text>
+      </g>
+
+      <!-- Bastion -->
+      <g transform="translate(260,240)">
+        <rect width="260" height="140" rx="14" fill="#fff" stroke="#0a1628" stroke-width="2"/>
+        <text x="130" y="44" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">Bastion</text>
+        <text x="130" y="76" text-anchor="middle" fill="#5a6b82" font-size="18">sshd + PAM + NSS</text>
+        <rect x="20" y="94" width="100" height="30" rx="15" fill="#f5f2ec" stroke="#d9dfe7"/>
+        <text x="70" y="114" text-anchor="middle" fill="#0a1628" font-size="15">pam_ob</text>
+        <rect x="140" y="94" width="100" height="30" rx="15" fill="#f5f2ec" stroke="#d9dfe7"/>
+        <text x="190" y="114" text-anchor="middle" fill="#0a1628" font-size="15">nss_ob</text>
+      </g>
+
+      <!-- Backend servers -->
+      <g transform="translate(660,80)">
+        <rect width="240" height="120" rx="14" fill="#fff" stroke="#0a1628" stroke-width="2"/>
+        <text x="120" y="44" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">backend db-01</text>
+        <text x="120" y="76" text-anchor="middle" fill="#5a6b82" font-size="18">sshd + PAM</text>
+        <text x="120" y="102" text-anchor="middle" fill="#5a6b82" font-size="16">group: db-prod</text>
+      </g>
+      <g transform="translate(660,250)">
+        <rect width="240" height="120" rx="14" fill="#fff" stroke="#0a1628" stroke-width="2"/>
+        <text x="120" y="44" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">backend app-03</text>
+        <text x="120" y="76" text-anchor="middle" fill="#5a6b82" font-size="18">sshd + PAM</text>
+        <text x="120" y="102" text-anchor="middle" fill="#5a6b82" font-size="16">group: app-prod</text>
+      </g>
+      <g transform="translate(660,420)">
+        <rect width="240" height="120" rx="14" fill="#fff" stroke="#0a1628" stroke-width="2"/>
+        <text x="120" y="44" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">backend ci-09</text>
+        <text x="120" y="76" text-anchor="middle" fill="#5a6b82" font-size="18">sshd + PAM</text>
+        <text x="120" y="102" text-anchor="middle" fill="#5a6b82" font-size="16">group: ci</text>
+      </g>
+
+      <!-- LLNG -->
+      <g transform="translate(1180,220)">
+        <rect width="440" height="180" rx="14" fill="#7f1525" stroke="#7f1525"/>
+        <text x="220" y="54" text-anchor="middle" fill="#fff" font-size="26" font-weight="700">LemonLDAP::NG</text>
+        <text x="220" y="84" text-anchor="middle" fill="#f1a0ac" font-size="18">the brain</text>
+        <rect x="30" y="110" width="180" height="44" rx="22" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)"/>
+        <text x="120" y="138" text-anchor="middle" fill="#fff" font-size="16">/oauth2/introspect</text>
+        <rect x="230" y="110" width="180" height="44" rx="22" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)"/>
+        <text x="320" y="138" text-anchor="middle" fill="#fff" font-size="16">/pam/authorize</text>
+      </g>
+
+      <!-- Arrows: user ↔ bastion -->
+      <path d="M 120 300 L 260 310" stroke="#0a1628" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+      <text x="175" y="290" fill="#5a6b82" font-size="16">ssh</text>
+
+      <!-- Bastion ↔ backends -->
+      <path d="M 520 300 L 660 140" stroke="#0a1628" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 520 310 L 660 310" stroke="#0a1628" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+      <path d="M 520 320 L 660 480" stroke="#0a1628" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+      <text x="560" y="230" fill="#5a6b82" font-size="16">Cert-vouched SSH</text>
+
+      <!-- Everyone asks LLNG -->
+      <path d="M 520 270 Q 850 60 1180 240" stroke="#c8304a" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrow-accent)"/>
+      <path d="M 900 140 Q 1040 170 1180 270" stroke="#c8304a" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrow-accent)"/>
+      <path d="M 900 310 L 1180 310" stroke="#c8304a" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrow-accent)"/>
+      <path d="M 900 480 Q 1040 450 1180 350" stroke="#c8304a" stroke-width="2" stroke-dasharray="6 6" fill="none" marker-end="url(#arrow-accent)"/>
+
+      <text x="1020" y="100" fill="#c8304a" font-size="18" font-weight="600">may I?</text>
+    </svg>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>08 / architecture</span></div>
+  </section>
+
+  <!-- ════════════════════ 10 · PAM / NSS ════════════════════ -->
+  <section data-label="PAM & NSS" class="slide">
+    <div class="kicker">Linux plumbing</div>
+    <h2 class="title">Two modules, <span class="accent">zero magic.</span></h2>
+    <div class="grid-2" style="margin-top:20px;">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">PAM</div>
+        <div class="lead" style="margin-top:12px;font-size:38px;">pam_openbastion.so</div>
+        <div class="small muted" style="margin-top:16px;max-width:700px;">
+          The <i>decision</i>. auth + account stack asks LLNG: is this person real, is this server in-scope, is sudo allowed?
+        </div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">NSS</div>
+        <div class="lead" style="margin-top:12px;font-size:38px;">libnss_openbastion.so.2</div>
+        <div class="small muted" style="margin-top:16px;max-width:700px;">
+          The <i>resolution</i>. Accounts don't need to pre-exist in <span style="font-family:var(--font-mono);">/etc/passwd</span>. Auto-provision on first login.
+        </div>
+      </div>
+    </div>
+    <div class="code" style="margin-top:50px;">
+<span class="tok-c"># /etc/pam.d/sshd                — recommended mode</span>
+<span class="tok-k">auth</span>       <span class="tok-n">sufficient</span>    pam_openbastion.so
+<span class="tok-k">auth</span>       <span class="tok-n">required</span>      pam_deny.so
+<span class="tok-k">account</span>    <span class="tok-n">required</span>      pam_openbastion.so
+<span class="tok-k">account</span>    <span class="tok-n">required</span>      pam_unix.so
+<span class="tok-k">session</span>    <span class="tok-n">required</span>      pam_unix.so
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>09 / pam &amp; nss</span></div>
+  </section>
+
+  <!-- ════════════════════ 11 · TOKEN AUTH ════════════════════ -->
+  <section data-label="Auth mode 1 — token" class="slide slide--warm">
+    <div class="kicker">Auth mode · 1 / 2</div>
+    <h2 class="title">Token. <span class="muted" style="font-weight:400;">Copy-paste. Done.</span></h2>
+    <div class="grid-2" style="margin-top:30px;align-items:start;">
+      <ul class="clean">
+        <li data-mark="1"><span>User opens the LLNG portal</span></li>
+        <li data-mark="2"><span>Portal issues a <b>short-lived token</b></span></li>
+        <li data-mark="3"><span>User pastes it as the SSH password</span></li>
+        <li data-mark="4"><span>Bastion introspects via OIDC</span></li>
+        <li data-mark="5"><span>No password. No key. No rotation.</span></li>
+      </ul>
+      <div class="terminal">
+<span class="terminal__header">alice@laptop ~</span>
+<span class="term-prompt">$</span> <span class="term-dim">ssh alice@bastion.example.com</span>
+<span class="term-dim">Password:</span> <span class="term-key">••••••••••••••••••••••</span>
+<span class="term-dim">        (paste LLNG token)</span>
+
+<span class="term-ok">Welcome to prod-bastion-01.</span>
+alice@bastion:~<span class="term-prompt">$</span> <span class="term-dim">_</span>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>10 / token auth</span></div>
+  </section>
+
+  <!-- ════════════════════ 12 · SSH KEY AUTH ════════════════════ -->
+  <section data-label="Auth mode 2 — SSH key" class="slide">
+    <div class="kicker">Auth mode · 2 / 2</div>
+    <h2 class="title">SSH key. <span class="accent">Plus a check.</span></h2>
+    <div class="grid-2" style="margin-top:30px;">
+      <div>
+        <div class="lead" style="font-size:40px;max-width:780px;">
+          Users keep the flow they already know.
+        </div>
+        <div class="small muted" style="margin-top:24px;max-width:780px;">
+          The twist: possession of the key is <b>necessary</b>, not sufficient.
+          After the key matches, the module asks LLNG:
+        </div>
+        <div class="card" style="margin-top:32px;background:var(--ob-paper-warm);">
+          <div style="font-family:var(--font-serif);font-style:italic;font-size:36px;line-height:1.3;">
+            Is <span class="accent">alice</span> allowed on <span class="accent">db-07</span>,<br>
+            in group <span class="accent">db-prod</span>, right now?
+          </div>
+        </div>
+      </div>
+      <div class="code">
+<span class="tok-c"># POST /pam/authorize</span>
+<span class="tok-k">Authorization</span>: Bearer <span class="tok-s">&lt;server-token&gt;</span>
+<span class="tok-k">Content-Type</span>: application/json
+
+{
+  <span class="tok-s">"user"</span>:         <span class="tok-n">"alice"</span>,
+  <span class="tok-s">"host"</span>:         <span class="tok-n">"db-07"</span>,
+  <span class="tok-s">"server_group"</span>: <span class="tok-n">"db-prod"</span>,
+  <span class="tok-s">"action"</span>:       <span class="tok-n">"ssh"</span>
+}
+
+<span class="tok-c"># 200 OK</span>
+{ <span class="tok-s">"allowed"</span>: <span class="tok-p">true</span>, <span class="tok-s">"ttl"</span>: <span class="tok-n">300</span> }
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>11 / ssh key auth</span></div>
+  </section>
+
+  <!-- ════════════════════ 13 · SUDO ════════════════════ -->
+  <section data-label="Sudo on the same rails" class="slide slide--blue">
+    <div class="kicker">Sudo</div>
+    <h2 class="title" style="max-width:1600px;">
+      Same PAM. Same endpoint. <span class="accent">Different question.</span>
+    </h2>
+    <div class="grid-2" style="margin-top:40px;align-items:center;gap:80px;">
+      <div>
+        <ul class="clean" style="color:#fff;">
+          <li data-mark="→"><span><b>sudoers</b> on disk is the static whitelist</span></li>
+          <li data-mark="→"><span>PAM asks LLNG: <i>may this user sudo, here, now?</i></span></li>
+          <li data-mark="→"><span>One place to grant. One place to revoke.</span></li>
+          <li data-mark="→"><span>Short cache TTL — because sudo is the blast radius.</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">SUDO DECISION</div>
+        <div style="font-size:34px;font-weight:500;margin-top:20px;line-height:1.3;color:#fff;">
+          { <span class="accent">"action"</span>: <span style="color:#b8e0b4;">"sudo"</span>, <br>
+          &nbsp;&nbsp;<span class="accent">"command"</span>: <span style="color:#b8e0b4;">"/usr/bin/systemctl"</span> }
+        </div>
+        <div style="margin-top:24px;padding-top:24px;border-top:1px solid rgba(255,255,255,0.12);font-family:var(--font-mono);font-size:22px;color:rgba(255,255,255,0.7);">
+          TTL: 60s (default)
+        </div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>12 / sudo</span></div>
+  </section>
+
+  <!-- ════════════════════ 14 · OFFLINE MODE ════════════════════ -->
+  <section data-label="Offline mode" class="slide">
+    <div class="kicker">Resilience</div>
+    <h2 class="title">LLNG down? <span class="accent">Ops carries on.</span></h2>
+    <div class="grid-2" style="margin-top:30px;align-items:start;">
+      <div>
+        <div class="lead" style="max-width:780px;font-size:40px;">
+          Encrypted authorization cache. <br>
+          SSH keys still authenticate.
+        </div>
+        <ul class="clean" style="margin-top:30px;">
+          <li data-mark="✓"><span><b>AES-256-GCM</b> encrypted cache on disk</span></li>
+          <li data-mark="✓"><span>Configurable TTL per decision type</span></li>
+          <li data-mark="✓"><span>Brute-force protection with rate limits</span></li>
+          <li data-mark="✓"><span>Sudo TTL shorter than SSH TTL, by policy</span></li>
+        </ul>
+      </div>
+      <div>
+        <svg viewBox="0 0 700 480" style="width:100%;max-width:700px;height:auto;font-family:var(--font-mono);">
+          <!-- LLNG down -->
+          <g>
+            <rect x="400" y="20" width="260" height="100" rx="12" fill="#fff" stroke="#b23a3a" stroke-width="2" stroke-dasharray="6 6"/>
+            <text x="530" y="54" text-anchor="middle" fill="#b23a3a" font-size="22" font-weight="700">LemonLDAP::NG</text>
+            <text x="530" y="86" text-anchor="middle" fill="#b23a3a" font-size="18">unreachable</text>
+          </g>
+          <!-- Bastion -->
+          <rect x="40" y="180" width="260" height="120" rx="12" fill="#fff" stroke="#0a1628" stroke-width="2"/>
+          <text x="170" y="216" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">Bastion</text>
+          <text x="170" y="246" text-anchor="middle" fill="#5a6b82" font-size="18">still authenticating</text>
+          <circle cx="170" cy="278" r="8" fill="#2d7a4f"/>
+          <!-- Cache -->
+          <g>
+            <rect x="400" y="200" width="260" height="220" rx="12" fill="#f5f2ec" stroke="#c8304a" stroke-width="2"/>
+            <text x="530" y="238" text-anchor="middle" fill="#0a1628" font-size="22" font-weight="700">Auth cache</text>
+            <text x="530" y="266" text-anchor="middle" fill="#c8304a" font-size="16">AES-256-GCM · on disk</text>
+            <line x1="420" y1="284" x2="640" y2="284" stroke="#d9dfe7"/>
+            <text x="420" y="314" fill="#0a1628" font-size="16">alice @ db-07 → ok</text>
+            <text x="420" y="338" fill="#0a1628" font-size="16">alice @ app-03 → ok</text>
+            <text x="420" y="362" fill="#0a1628" font-size="16">bob @ * → denied</text>
+            <text x="420" y="396" fill="#5a6b82" font-size="14">ttl: ssh 300s · sudo 60s</text>
+          </g>
+          <!-- arrow -->
+          <path d="M 300 240 L 400 300" stroke="#c8304a" stroke-width="2" marker-end="url(#arrow-accent)"/>
+        </svg>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>13 / offline</span></div>
+  </section>
+
+  <!-- ════════════════════ 15 · BASTION→BACKEND CERT VOUCHING ════════════════════ -->
+  <section data-label="Bastion → backend (cert vouching)" class="slide slide--dark">
+    <div class="kicker">Chain of custody</div>
+    <h2 class="title" style="max-width:1600px;">
+      Backends trust bastions <span class="accent">cryptographically</span> — not by IP.
+    </h2>
+    <div class="grid-2" style="margin-top:40px;gap:80px;align-items:center;">
+      <div>
+        <ul class="clean" style="color:#fff;">
+          <li data-mark="→"><span>Bastion mints a short-lived, LLNG-signed <b>SSH certificate</b> per hop</span></li>
+          <li data-mark="→"><span>Backend trusts the LLNG <b>SSH CA</b> — verifies the cert offline</span></li>
+          <li data-mark="→"><span>Pinned to the bastion: <b>source-address</b> + <b>allowed_bastions</b></span></li>
+          <li data-mark="→"><span>No user key on the bastion. Direct SSH to a backend? Refused.</span></li>
+        </ul>
+      </div>
+      <div class="code" style="background:#000;">
+<span class="tok-c"># ob-ssh: seamless bastion → backend hop</span>
+ob-ssh user@backend  <span class="tok-c"># also ob-scp / ob-sftp</span>
+
+<span class="tok-c"># On backend: trust the LLNG SSH CA</span>
+<span class="tok-k">TrustedUserCAKeys</span> /etc/ssh/open-bastion_ca.pub
+<span class="tok-k">AuthorizedPrincipalsCommand</span> <span class="tok-p">ob-ssh-principals</span>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>14 / bastion→backend</span></div>
+  </section>
+
+  <!-- ════════════════════ 16 · SESSION RECORDING ════════════════════ -->
+  <section data-label="Session recording" class="slide">
+    <div class="kicker">For the auditors</div>
+    <h2 class="title">Every keystroke, <span class="accent">receipts included.</span></h2>
+    <div class="grid-2" style="margin-top:40px;">
+      <div>
+        <div class="lead" style="max-width:780px;font-size:40px;">
+          Optional. Opt-in per server group.
+        </div>
+        <ul class="clean" style="margin-top:30px;">
+          <li data-mark="·"><span>Formats: <b>script</b>, <b>asciinema</b>, <b>ttyrec</b></span></li>
+          <li data-mark="·"><span>Unique session ID + correlation tag</span></li>
+          <li data-mark="·"><span>One SSH session → one audit record</span></li>
+          <li data-mark="·"><span>Plugs into your existing log pipeline</span></li>
+        </ul>
+      </div>
+      <div class="terminal">
+<span class="terminal__header">/var/log/openbastion/sessions/</span>
+<span class="term-prompt">$</span> <span class="term-dim">ls -la</span>
+<span class="term-dim">-rw-------</span>  <span class="term-key">alice_db-07_2026-04-17T13:42.cast</span>
+<span class="term-dim">-rw-------</span>  <span class="term-key">alice_db-07_2026-04-17T13:42.json</span>
+<span class="term-dim">-rw-------</span>  <span class="term-key">bob_app-03_2026-04-17T14:08.cast</span>
+
+<span class="term-prompt">$</span> <span class="term-dim">asciinema play alice_db-07_*.cast</span>
+<span class="term-ok">▶ replaying 00:04:12 — correlation:a4f1…</span>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>15 / recording</span></div>
+  </section>
+
+  <!-- ════════════════════ 17 · DEFENSE IN DEPTH ════════════════════ -->
+  <section data-label="Defense in depth" class="slide slide--warm">
+    <div class="kicker">Defense in depth</div>
+    <h2 class="title">The paranoid's <span class="accent">toolbox.</span></h2>
+    <div class="grid-3" style="margin-top:40px;gap:28px;">
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">Audit</div>
+        <div class="small muted" style="margin-top:12px;">Structured JSON logs with correlation IDs. Grep still works; so does your SIEM.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">Rate limits</div>
+        <div class="small muted" style="margin-top:12px;">Exponential backoff on failure. Per-user, per-IP, per-token.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">Secrets</div>
+        <div class="small muted" style="margin-top:12px;">AES-256-GCM encrypted secret storage. Webhook notifications for security events.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">Token binding</div>
+        <div class="small muted" style="margin-top:12px;">Tokens bound to source IP and client fingerprint. Stolen tokens don't travel.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">Key policy</div>
+        <div class="small muted" style="margin-top:12px;">Refuse DSA. Refuse 1024-bit RSA. Configurable per group.</div>
+      </div>
+      <div class="card">
+        <div style="font-size:34px;font-weight:600;">CrowdSec</div>
+        <div class="small muted" style="margin-top:12px;">Optional pre-auth IP blocking, post-auth failure reporting. Compatible with Crowdsieve.</div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>16 / depth</span></div>
+  </section>
+
+  <!-- ════════════════════ 18 · SERVICE ACCOUNTS ════════════════════ -->
+  <section data-label="Service accounts" class="slide">
+    <div class="kicker">Robots</div>
+    <h2 class="title">Ansible, backup, CI — <span class="accent">the robot lane.</span></h2>
+    <div class="grid-2" style="margin-top:30px;align-items:start;">
+      <div>
+        <div class="lead" style="max-width:780px;font-size:40px;">
+          SSH key auth, no OIDC dance.
+        </div>
+        <ul class="clean" style="margin-top:30px;">
+          <li data-mark="·"><span>Per-server config file</span></li>
+          <li data-mark="·"><span>Fine-grained sudo permissions</span></li>
+          <li data-mark="·"><span>Automatic account provisioning</span></li>
+          <li data-mark="·"><span>Humans go through SSO. Robots don't need to.</span></li>
+        </ul>
+      </div>
+      <div class="code">
+<span class="tok-c"># /etc/open-bastion/service-accounts.d/ansible.conf</span>
+<span class="tok-k">[ansible]</span>
+public_key    = ssh-ed25519 AAAA… ansible@ci
+home          = /var/lib/ansible
+shell         = /bin/bash
+sudo          = <span class="tok-p">/usr/bin/apt update</span>
+sudo          = <span class="tok-p">/usr/bin/systemctl restart *</span>
+sudo_nopasswd = <span class="tok-n">true</span>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>17 / service accounts</span></div>
+  </section>
+
+  <!-- ════════════════════ 19 · COMPARISON ════════════════════ -->
+  <section data-label="Compared to neighbours" class="slide slide--cool">
+    <div class="kicker">The neighbours</div>
+    <h2 class="title">Briefly, <span class="accent">who's on this street.</span></h2>
+    <div style="margin-top:30px;background:#fff;border:1px solid var(--ob-rule);border-radius:16px;overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;font-family:var(--font-sans);font-size:24px;">
+        <thead>
+          <tr style="background:var(--ob-ink);color:#fff;">
+            <th style="padding:22px 28px;text-align:left;font-weight:500;letter-spacing:0.03em;font-family:var(--font-mono);font-size:20px;">Project</th>
+            <th style="padding:22px 20px;text-align:left;font-weight:500;letter-spacing:0.03em;font-family:var(--font-mono);font-size:20px;">Language</th>
+            <th style="padding:22px 20px;text-align:left;font-weight:500;letter-spacing:0.03em;font-family:var(--font-mono);font-size:20px;">Licence</th>
+            <th style="padding:22px 20px;text-align:left;font-weight:500;letter-spacing:0.03em;font-family:var(--font-mono);font-size:20px;">Identity model</th>
+            <th style="padding:22px 20px;text-align:left;font-weight:500;letter-spacing:0.03em;font-family:var(--font-mono);font-size:20px;">Enforces on backends</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--ob-rule);background:var(--ob-paper-warm);">
+            <td style="padding:22px 28px;font-weight:700;">Open-Bastion</td>
+            <td style="padding:22px 20px;">C + shell</td>
+            <td style="padding:22px 20px;">AGPL-3.0</td>
+            <td style="padding:22px 20px;"><b>Your SSO</b> (LLNG / OIDC)</td>
+            <td style="padding:22px 20px;color:var(--ob-green);font-weight:600;">Yes — PAM everywhere</td>
+          </tr>
+          <tr style="border-top:1px solid var(--ob-rule);">
+            <td style="padding:22px 28px;font-weight:600;">Teleport</td>
+            <td style="padding:22px 20px;">Go</td>
+            <td style="padding:22px 20px;">Ent. / BSL</td>
+            <td style="padding:22px 20px;">Own user model (+ SSO)</td>
+            <td style="padding:22px 20px;">Yes — its own agent</td>
+          </tr>
+          <tr style="border-top:1px solid var(--ob-rule);">
+            <td style="padding:22px 28px;font-weight:600;">The Bastion (OVH)</td>
+            <td style="padding:22px 20px;">Perl</td>
+            <td style="padding:22px 20px;">Apache-2.0</td>
+            <td style="padding:22px 20px;">Own user DB</td>
+            <td style="padding:22px 20px;color:var(--ob-muted);">Bastion-side only</td>
+          </tr>
+          <tr style="border-top:1px solid var(--ob-rule);">
+            <td style="padding:22px 28px;font-weight:600;">Boundary</td>
+            <td style="padding:22px 20px;">Go</td>
+            <td style="padding:22px 20px;">MPL / BSL</td>
+            <td style="padding:22px 20px;">Own user model (+ SSO)</td>
+            <td style="padding:22px 20px;">Yes — broker model</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="small muted" style="margin-top:28px;font-size:24px;">
+      We're the one where your <b>existing SSO is the brain</b>, the code fits in <span style="font-family:var(--font-mono);">less than a weekend to read</span>, and backends enforce too.
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>18 / neighbours</span></div>
+  </section>
+
+  <!-- ════════════════════ 20 · DEPLOY ════════════════════ -->
+  <section data-label="Deployment in practice" class="slide">
+    <div class="kicker">Install</div>
+    <h2 class="title">Five steps. <span class="accent">No YAML DSL.</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:28px;margin-top:40px;">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--font-mono);font-size:32px;color:var(--ob-accent);font-weight:600;">01</div>
+        <div style="font-size:26px;font-weight:600;">Install package</div>
+        <div class="small muted" style="font-size:22px;">apt · dnf · from source</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--font-mono);font-size:32px;color:var(--ob-accent);font-weight:600;">02</div>
+        <div style="font-size:26px;font-weight:600;">Write config</div>
+        <div class="small muted" style="font-size:22px;">portal_url, client, group</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--font-mono);font-size:32px;color:var(--ob-accent);font-weight:600;">03</div>
+        <div style="font-size:26px;font-weight:600;">ob-enroll</div>
+        <div class="small muted" style="font-size:22px;">code → admin approves</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--font-mono);font-size:32px;color:var(--ob-accent);font-weight:600;">04</div>
+        <div style="font-size:26px;font-weight:600;">Edit pam.d/sshd</div>
+        <div class="small muted" style="font-size:22px;">4 lines</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:var(--font-mono);font-size:32px;color:var(--ob-accent);font-weight:600;">05</div>
+        <div style="font-size:26px;font-weight:600;">Test — 2nd terminal</div>
+        <div class="small muted" style="font-size:22px;">(keep the first open!)</div>
+      </div>
+    </div>
+    <div class="terminal" style="margin-top:50px;">
+<span class="terminal__header">admin@prod-bastion-01</span>
+<span class="term-prompt">#</span> <span class="term-dim">apt install open-bastion</span>
+<span class="term-prompt">#</span> <span class="term-dim">vi /etc/open-bastion/openbastion.conf</span>
+<span class="term-prompt">#</span> <span class="term-dim">ob-enroll</span>
+<span class="term-key">User code: GXPR-7K2M</span>  <span class="term-dim">  ← admin approves in LLNG portal</span>
+<span class="term-ok">✓ enrolled</span>
+<span class="term-prompt">#</span> <span class="term-dim">systemctl restart sshd</span>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>19 / deploy</span></div>
+  </section>
+
+  <!-- ════════════════════ 21 · CONFIG ════════════════════ -->
+  <section data-label="Config snippets" class="slide slide--warm">
+    <div class="kicker">The whole shape</div>
+    <h2 class="title">Config, <span class="accent">front to back.</span></h2>
+    <div class="grid-2" style="margin-top:20px;">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-muted);letter-spacing:0.08em;margin-bottom:14px;">/etc/open-bastion/openbastion.conf</div>
+        <div class="code">
+<span class="tok-k">portal_url</span>     = <span class="tok-s">https://auth.example.com</span>
+<span class="tok-k">client_id</span>      = <span class="tok-s">pam-access</span>
+<span class="tok-k">client_secret</span>  = <span class="tok-s">&lt;redacted&gt;</span>
+<span class="tok-k">server_group</span>   = <span class="tok-s">db-prod</span>
+<span class="tok-k">log_level</span>      = <span class="tok-s">info</span>
+<span class="tok-k">cache_ttl_ssh</span>  = <span class="tok-n">300</span>
+<span class="tok-k">cache_ttl_sudo</span> = <span class="tok-n">60</span>
+        </div>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-muted);letter-spacing:0.08em;margin-bottom:14px;">/etc/pam.d/sudo</div>
+        <div class="code">
+<span class="tok-c"># sudo through LLNG</span>
+<span class="tok-k">auth</span>     <span class="tok-n">sufficient</span>   pam_openbastion.so
+<span class="tok-k">auth</span>     <span class="tok-n">required</span>     pam_deny.so
+<span class="tok-k">account</span>  <span class="tok-n">required</span>     pam_openbastion.so
+<span class="tok-k">session</span>  <span class="tok-n">required</span>     pam_unix.so
+        </div>
+        <div class="small muted" style="margin-top:20px;">
+          Same module, same endpoint. <br>Different <span style="font-family:var(--font-mono);">action</span>.
+        </div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>20 / config</span></div>
+  </section>
+
+  <!-- ════════════════════ 22 · WHAT'S NEXT ════════════════════ -->
+  <section data-label="What's next" class="slide slide--dark">
+    <div class="kicker">Roadmap · early alpha today</div>
+    <h2 class="title">Next: the <span class="accent">desktop</span> too.</h2>
+    <div class="grid-2" style="margin-top:40px;gap:80px;align-items:center;">
+      <div>
+        <div class="lead" style="font-size:42px;color:#fff;max-width:780px;">
+          Workstations login with the same LLNG identity.
+        </div>
+        <ul class="clean" style="color:#fff;margin-top:30px;">
+          <li data-mark="→"><span>LightDM greeter with embedded portal</span></li>
+          <li data-mark="→"><span>MFA — TOTP, WebAuthn, SMS</span></li>
+          <li data-mark="→"><span>Offline mode: Argon2id + AES-256-GCM</span></li>
+          <li data-mark="→"><span>One SSO. Shell, sudo, desktop.</span></li>
+        </ul>
+      </div>
+      <div class="figure" style="color:var(--ob-accent);font-size:260px;line-height:0.9;text-align:right;">
+        +<br>desktop
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>21 / next</span></div>
+  </section>
+
+  <!-- ════════════════════ 23 · CTA ════════════════════ -->
+  <section data-label="Try it" class="slide">
+    <div class="kicker">Your move</div>
+    <h2 class="title">Try it. <span class="accent">Read it. Break it.</span></h2>
+    <div class="grid-2" style="margin-top:40px;gap:60px;">
+      <div class="col">
+        <div class="card" style="padding:32px 36px;">
+          <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">DOCKER DEMO</div>
+          <div style="font-family:var(--font-mono);font-size:26px;margin-top:14px;">docker-demo-token/</div>
+          <div style="font-family:var(--font-mono);font-size:26px;">docker-demo-cert/</div>
+          <div style="font-family:var(--font-mono);font-size:26px;">docker-demo-maxsec/</div>
+          <div class="small muted" style="margin-top:16px;font-size:22px;">Three flavours. Pick one. 10 minutes end-to-end.</div>
+        </div>
+        <div class="card" style="padding:32px 36px;">
+          <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">REPO</div>
+          <div style="font-family:var(--font-mono);font-size:30px;margin-top:14px;">github.com/linagora/open-bastion</div>
+          <div class="small muted" style="margin-top:12px;font-size:22px;">⭐ if it's useful · 🐛 if it isn't</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card" style="padding:32px 36px;">
+          <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent);letter-spacing:0.08em;">CONTRIBUTE</div>
+          <div style="font-size:30px;font-weight:500;margin-top:14px;line-height:1.3;">Issues, PRs, docs,<br>packaging, translations.</div>
+          <div class="small muted" style="margin-top:16px;font-size:22px;">AGPL-3.0. Upstream-first.</div>
+        </div>
+        <div class="card" style="padding:32px 36px;background:var(--ob-ink);color:#fff;">
+          <div style="font-family:var(--font-mono);font-size:22px;color:var(--ob-accent-soft);letter-spacing:0.08em;">NEED HELP DEPLOYING?</div>
+          <div style="font-size:30px;font-weight:500;margin-top:14px;line-height:1.3;">Linagora offers support,<br>training, custom integrations.</div>
+          <div style="font-family:var(--font-mono);font-size:24px;margin-top:16px;color:var(--ob-accent-soft);">linagora.com</div>
+        </div>
+      </div>
+    </div>
+    <div class="chrome"><div class="chrome__left"><span class="chrome__dot"></span><span>Open-Bastion</span></div><span>22 / try it</span></div>
+  </section>
+
+  <!-- ════════════════════ 24 · THANKS ════════════════════ -->
+  <section data-label="Thank you" class="slide slide--blue">
+    <div style="height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+      <img src="linagora.png" alt="Linagora" width="264" height="54" style="width:264px;height:54px;display:block;">
+      <div>
+        <div class="kicker" style="color:var(--ob-accent-soft);margin-bottom:32px;">Questions?</div>
+        <h1 class="title" style="font-size:220px;line-height:0.94;">Thank you.</h1>
+        <div style="margin-top:32px;font-family:var(--font-serif);font-style:italic;font-size:44px;color:rgba(255,255,255,0.7);max-width:1400px;">
+          If the first question is <span style="color:var(--ob-accent-soft);">"why not Teleport"</span>,<br>
+          I have a slide for that — I just didn't show it.
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--font-mono);font-size:22px;color:rgba(255,255,255,0.55);">
+        <span>github.com/linagora/open-bastion</span>
+        <span>xguimard@linagora.com</span>
+        <span>AGPL-3.0</span>
+      </div>
+    </div>
+  </section>
+
+</deck-stage>
+
+<!-- Tweak panel — pick title variant -->
+<div id="tweaks">
+  <h4>Title variant</h4>
+  <div class="row">
+    <button data-variant="A" title="Editorial / warm">A · Editorial</button>
+    <button data-variant="B" title="Terminal-forward">B · Terminal</button>
+    <button data-variant="C" title="Question / split">C · Question</button>
+  </div>
+  <div class="hint">Navigate to slide 1 to see the change.</div>
+</div>
+
+<script>
+(function(){
+  const panel = document.getElementById('tweaks');
+  const buttons = panel.querySelectorAll('button[data-variant]');
+  function setActive(v) {
+    document.body.dataset.titleVariant = v;
+    buttons.forEach(b => b.classList.toggle('active', b.dataset.variant === v));
+  }
+  setActive(document.body.dataset.titleVariant || 'A');
+  buttons.forEach(b => {
+    b.addEventListener('click', () => {
+      const v = b.dataset.variant;
+      setActive(v);
+      try {
+        window.parent.postMessage({type:'__edit_mode_set_keys', edits:{titleVariant: v}}, '*');
+      } catch(e) {}
+    });
+  });
+
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === '__activate_edit_mode') panel.classList.add('visible');
+    else if (d.type === '__deactivate_edit_mode') panel.classList.remove('visible');
+  });
+  try { window.parent.postMessage({type:'__edit_mode_available'}, '*'); } catch(e) {}
+})();
+</script>
+
+<script>
+(async () => {
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch(e) {}
+  await new Promise(r => setTimeout(r, 800));
+  window.print();
+})();
+</script>
+</body>
+</html>
