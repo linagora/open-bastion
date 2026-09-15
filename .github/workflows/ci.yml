@@ -226,7 +226,7 @@ jobs:
       run: |
         # cpack emits two packages here; the builder one carries no
         # ob-post-upgrade, so name the main one rather than take the newest.
-        deb=$(ls -t build/open-bastion-*-Linux.deb | head -1)
+        deb=$(ls -t build/open-bastion_*_amd64.deb | head -1)
         out=$(OB_DEB="$deb" bash tests/test_ob_upgrade.sh 2>&1); echo "$out"
         case "$out" in
           *SKIP*)
