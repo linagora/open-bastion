@@ -1,0 +1,35 @@
+──────────────────────────────────────────────────────────────────────────
+PORTAL-SIDE PREREQUISITE (R-P1) — this host cannot check it for you
+──────────────────────────────────────────────────────────────────────────
+Until the LemonLDAP::NG portal is configured as below, ANY host enrolled in
+this project can declare itself a bastion on /pam/authorize and obtain a hop
+voucher (12 h by default) for a user. These are portal settings: nothing on
+this host can read them back, and no command here will tell you they are
+missing.
+
+In the LLNG Manager:
+
+  1. pamAccessServerGroups — the authoritative client_id -> server_group
+     mapping. Until it is set, server_group is read from the REQUEST BODY,
+     which is what lets a caller declare its own role.
+
+  2. pamAccessAllowedRps — the RPs allowed on /pam/*. An empty list means
+     "no change" for upgrade compatibility, so the upstream audience binding
+     does nothing at all until you fill it in. This assumes the bastions are
+     enrolled under a client_id of their own, distinct from the project's.
+
+  3. Plugins at a published version that contains both. v0.5.2 has neither.
+
+  4. pamAccessBastionCertPinSourceAddress — pins the source address of the
+     hop certificate. Off by default.
+
+On every backend (this one is ours, and it is the residual defence if the
+four above are not in place):
+
+  5. /etc/open-bastion/allowed_bastions non-empty:
+       ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]
+     An empty file accepts a voucher from any bastion the SSO vouched for.
+
+References: doc/security/09-portail-llng.md (R-P1),
+doc/security/08-dossier-homologation.md (CE03, CE06, CE16, CE21).
+──────────────────────────────────────────────────────────────────────────

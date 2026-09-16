@@ -37,6 +37,7 @@ usr/lib/open-bastion/ob-sign-lib.sh
 usr/lib/open-bastion/ob-ssh-principals.bastion
 usr/lib/open-bastion/ob-ssh-principals.backend
 usr/lib/open-bastion/ob-fp-spool.tmpfiles
+usr/lib/open-bastion/ob-portal-prerequisites.txt
 
 # User scripts
 usr/bin/ob-ssh-cert

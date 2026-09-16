@@ -915,10 +915,15 @@ pamAccessSshRules = { \
 }
 ```
 
-> `pamAccessServerGroups` is a separate, optional setting — an authority map
+> `pamAccessServerGroups` is a separate setting — an authority map
 > `client_id → server_group` (not `server_group → rule`). When non-empty it forces
-> a host's server group from its enrolled `client_id`; leave it empty for the
-> default "one `client_id` per project, several server groups inside" model.
+> a host's server group from its enrolled `client_id`.
+>
+> **From 0.7.0 it is required.** Left empty, `server_group` comes from the
+> request body and any compromised enrolled host can claim to be a bastion
+> (R-P1). It costs the "one `client_id` per project, several server groups
+> inside" model: give each server group its own `client_id`, since an unmapped
+> one is refused. See [UPGRADE-NOTES.md](../UPGRADE-NOTES.md), B0.
 
 Example configuration:
 
