@@ -114,6 +114,20 @@ target_compile_definitions(test_ob_sign PRIVATE _GNU_SOURCE)
 target_link_libraries(test_ob_sign ${OPENSSL_LIBRARIES})
 add_test(NAME test_ob_sign COMMAND test_ob_sign)
 
+# What src/cache_key.c refuses as a key file (#268). Includes the .c to reach
+# key_file_rejected(), the same way test_nss_cache.c reaches the NSS cache
+# helpers; the six refusals 4cbe85c added shipped with no test at all.
+add_executable(test_cache_key test_cache_key.c)
+target_include_directories(test_cache_key PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_cache_key ${OPENSSL_LIBRARIES})
+add_test(NAME test_cache_key COMMAND test_cache_key)
+# A fifo that read_key_file() opens blocking would hang rather than fail, so the
+# suite must not be allowed to wait forever for it.
+set_tests_properties(test_cache_key PROPERTIES TIMEOUT 60)
+
 # Test authorization cache
 add_executable(test_auth_cache test_auth_cache.c ../src/auth_cache.c ../src/cache_key.c)
 target_include_directories(test_auth_cache PRIVATE

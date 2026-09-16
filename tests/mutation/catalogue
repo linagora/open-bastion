@@ -174,3 +174,44 @@ suite   || tests/test_ob_portal_prerequisites.sh
 why     || #268: the Ansible role runs the setup script through a task whose
 why     || stdout nobody reads, so for that artefact the checklist file IS the
 why     || notification.
+
+id      || cache-key-regular-file
+file    || src/cache_key.c
+search  || if (!S_ISREG(st->st_mode)) {
+replace || if (0 && !S_ISREG(st->st_mode)) {
+suite   || tests/test_ob_cache_key.sh
+why     || #268: the offline cache key file must be a regular file, not a fifo
+why     || or a device that feeds the derivation attacker-chosen bytes.
+
+id      || cache-key-nonblocking-open
+file    || src/cache_key.c
+search  || int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+replace || int fd = open(path, O_RDONLY | O_NOFOLLOW);
+suite   || tests/test_ob_cache_key.sh
+why     || #268: without O_NONBLOCK the S_ISREG refusal above is unreachable --
+why     || opening a fifo read-only waits for a writer, so the check is never
+why     || reached and the PAM path hangs instead of refusing.
+
+id      || cache-key-root-owner
+file    || src/cache_key.c
+search  || if (st->st_uid != owner) {
+replace || if (0 && st->st_uid != owner) {
+suite   || tests/test_ob_cache_key.sh
+why     || #268: a key file owned by another uid is that uid's choice of key.
+why     || The check used to sit inside the loose-permissions branch, so a 0600
+why     || file owned by anyone slipped through; 4cbe85c fixed that with no test.
+
+id      || cache-key-setid-bits
+file    || src/cache_key.c
+search  || if ((st->st_mode & (S_ISUID | S_ISGID)) != 0) {
+replace || if (0 && (st->st_mode & (S_ISUID | S_ISGID)) != 0) {
+suite   || tests/test_ob_cache_key.sh
+why     || #268: setuid or setgid on data is the marker of a planted file.
+
+id      || cache-key-group-other-bits
+file    || src/cache_key.c
+search  || if ((st->st_mode & 0077) != 0) {
+replace || if (0 && (st->st_mode & 0077) != 0) {
+suite   || tests/test_ob_cache_key.sh
+why     || #268: fail-closed on any group or other bit. SECURITY.md documented a
+why     || `dd` recipe with no chmod, which under umask 022 yields 0644.

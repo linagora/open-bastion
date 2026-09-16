@@ -453,6 +453,16 @@ the `auth` line of certificate-mode PAM stacks, and the accepted permissions of
   nobody reads the output of. One shared text
   (`/usr/lib/open-bastion/ob-portal-prerequisites.txt`), because four heredocs
   is how the units of #254 drifted apart.
+- **The offline cache key file is opened non-blocking** (#268). The six refusals
+  that `cache.key` must pass (regular file, root-owned, no setuid/setgid, no
+  group or other bit) are checked after the `open()`, and opening a fifo
+  read-only waits for a writer — so a fifo left at that path made the
+  "not a regular file" refusal unreachable and parked the caller instead, which
+  on the PAM path is a login that never finishes. `O_NONBLOCK` makes the check
+  reachable; it changes nothing for a regular file. Found while writing
+  `tests/test_cache_key.c`, which covers all six refusals — they had shipped
+  with no test — and five entries in `tests/mutation/catalogue` now fail if any
+  one is removed.
 - **`ob-enroll` no longer puts the OIDC client secret on a command line**
   (#256). It signed its `client_secret_jwt` assertion with
   `openssl dgst -sha256 -hmac "$client_secret"`, and OpenSSL has no form that
