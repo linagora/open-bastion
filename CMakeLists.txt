@@ -656,6 +656,7 @@ set(CPACK_PACKAGE_CONTACT "Open Bastion team <open-bastion@linagora.com>")
 # Debian package
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5 | libjson-c5t64, libssl3 | libssl3t64, libkeyutils1, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # RPM package
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
