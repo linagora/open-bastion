@@ -8,8 +8,8 @@ BEGIN {
 }
 
 # Match a node declaration like "	alt1 [" and remember its id
-/^[[:space:]]*alt[0-9]+[[:space:]]*\[/ {
-    match($0, /alt[0-9]+/)
+/^[[:space:]]*(alt|virt)[0-9]+[[:space:]]*\[/ {
+    match($0, /(alt|virt)[0-9]+/)
     current = substr($0, RSTART, RLENGTH)
     next
 }

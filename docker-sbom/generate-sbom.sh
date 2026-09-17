@@ -184,6 +184,7 @@ generate_sbom() {
     local dependencies_resolved
     local deps_graph
     local alternatives
+    local virtuals
 
     step "SBOM Generation…"
 
@@ -199,6 +200,19 @@ generate_sbom() {
 
     alternatives="${WORKDIR}/alternatives.json"
     awk -f docker-sbom/build_alternatives_map "${deps_graph}" > "${alternatives}"
+
+    # identify virtual packages and the corresponding installed package
+    virtuals="${WORKDIR}/virtuals.json"
+    echo "{" > "${virtuals}"
+    awk '
+        /^[[:space:]]*.+\[dir=back,arrowtail=inv,color=green];$/ {
+ 	  gsub(/"/, "", $1); gsub(/"/, "", $3);
+ 	  line = "\"" $1 "\": \"" $3 "\"";
+          if (prev != "") print prev ",";
+          prev = line
+        }
+        END { if (prev != "") print prev }' "${deps_graph}" >> "${virtuals}"
+    echo "}" >> "${virtuals}"
 
     # remove dependencies to uninstalled alternative packages
     grep -v -e 'color="\?red"\?' \
@@ -221,11 +235,15 @@ generate_sbom() {
         >> "${dependencies}"
     echo "]" >> "${dependencies}"
 
-    # resolve dependencies according to alternatives map
+    # resolve dependencies according to virtual package map then
+    # alternative maps (somewhat fragile since not recursive)
     dependencies_resolved="${WORKDIR}/dependencies_resolved.json"
-    jq --slurpfile alt_map "${alternatives}"  -r '
+    jq --slurpfile alt_map "${alternatives}" \
+       --slurpfile virt_map "${virtuals}" -r '
   [ .[] | { ref: .ref,
-            dependsOn: ( .dependsOn | map($alt_map[0][.] // .))
+            dependsOn: ( .dependsOn
+	    	         | map($virt_map[0][.] // .)
+			 | map($alt_map[0][.] // .))
   } ]' "${dependencies}" > "${dependencies_resolved}"
 
     # build SBOM
@@ -284,6 +302,7 @@ quality_check() {
   | ([.ref] + .dependsOn)[]
   | select(startswith("pkg:") | not)' "${SBOM}" | sort -u)
 
+    unresolved=${unresolved/${PACKAGE_NAME}@${PACKAGE_VERSION}/}
     if [[ -n "${unresolved}" ]]; then
 	warn "Found unresolved references: "
 	warn "${unresolved}"
