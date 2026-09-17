@@ -164,14 +164,9 @@ build_docker_image() {
 
 collect_installed_components() {
     local components
-    local installed
     local sbom_with_package
 
     step "Collecting installed packages…"
-
-    installed="${WORKDIR}/installed.txt"
-    docker run --rm "${IMAGE_WITH_PACKAGE}" \
-	   dpkg-query -W -f '${Package}\n' > "${installed}"
 
     sbom_with_package="${WORKDIR}/sbom-with-package.json"
     components="${WORKDIR}/components.json"
@@ -185,14 +180,14 @@ collect_installed_components() {
 
 generate_sbom() {
     local components
-    local installed
     local dependencies
+    local dependencies_resolved
     local deps_graph
+    local alternatives
 
     step "SBOM Generation…"
 
     components="${WORKDIR}/components.json"
-    installed="${WORKDIR}/installed.txt"
 
     deps_graph="${WORKDIR}/deps_graph.dot"
     docker run --rm "${IMAGE_WITH_PACKAGE}" \
@@ -202,8 +197,13 @@ generate_sbom() {
            > "${deps_graph}" \
            2> /dev/null
 
-    # remove dependencies to uninstalled alternative or virtual packages
-    grep -v -e 'color="\?red"\?' -e 'color="\?green"\?' "${deps_graph}" \
+    alternatives="${WORKDIR}/alternatives.json"
+    awk -f docker-sbom/build_alternatives_map "${deps_graph}" > "${alternatives}"
+
+    # remove dependencies to uninstalled alternative packages
+    grep -v -e 'color="\?red"\?' \
+	 -e 'color="\?green"\?' \
+	 "${deps_graph}" \
          > "${deps_graph}.filtered"
 
     # edges of the dependency graph as JSON array
@@ -221,10 +221,18 @@ generate_sbom() {
         >> "${dependencies}"
     echo "]" >> "${dependencies}"
 
+    # resolve dependencies according to alternatives map
+    dependencies_resolved="${WORKDIR}/dependencies_resolved.json"
+    jq --slurpfile alt_map "${alternatives}"  -r '
+  [ .[] | { ref: .ref,
+            dependsOn: ( .dependsOn | map($alt_map[0][.] // .))
+  } ]' "${dependencies}" > "${dependencies_resolved}"
+
     # build SBOM
     jq -n \
        --slurpfile comp "${components}" \
-       --slurpfile deps "${dependencies}" \
+       --slurpfile deps "${dependencies_resolved}" \
+       --arg alt_map "${alternatives}" \
        --arg root_name "${PACKAGE_NAME}" \
        --arg root "${PACKAGE_NAME}@${PACKAGE_VERSION}" \
        --arg name "${PACKAGE_NAME}" \
@@ -291,8 +299,7 @@ fi
 build_docker_image
 collect_installed_components
 generate_sbom
-#quality_check
-# Alternatives aren't properly resolved in this version
+quality_check
 
 if [ -f "${SBOM}" ]; then
     info "SBOM succesfully generated! See ${SBOM} file."
