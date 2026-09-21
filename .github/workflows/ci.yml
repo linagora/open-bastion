@@ -318,6 +318,64 @@ jobs:
         scandir: './scripts'
         severity: warning
 
+  docs:
+    name: Documentation (Sphinx)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libcurl4-openssl-dev \
+          libjson-c-dev \
+          libpam0g-dev \
+          libsodium-dev \
+          python3-sphinx \
+          python3-sphinx-rtd-theme
+
+    # doc/ is a Sphinx project now. A .md file dropped back in there would not
+    # be in any toctree, would not be built, and would not be packaged -- it
+    # would just quietly not be documentation any more.
+    - name: The documentation tree is reST
+      run: |
+        stray=$(find doc -name '*.md' -print)
+        if [ -n "$stray" ]; then
+          echo "::error::Markdown left under doc/: $stray"
+          exit 1
+        fi
+
+    # -W: a broken :doc:/:ref: target, a document missing from every toctree
+    # and an unparsable table are all warnings in Sphinx, and each of them is a
+    # link a reader follows to nothing. The packaging build does not use -W, so
+    # this job is where they have to fail.
+    - name: Build the HTML documentation (warnings are errors)
+      run: |
+        sphinx-build -W --keep-going -b html doc build/doc/html
+
+    # The same doc the open-bastion-doc package ships, through the path that
+    # fills it: debian/rules configures with -DBUILD_DOC=ON and installs what
+    # this target produces.
+    - name: Build it through CMake, as the package does
+      run: |
+        cmake -B build-doc -DBUILD_DOC=ON -DBUILD_TESTING=OFF
+        cmake --build build-doc --target doc
+        test -f build-doc/doc/html/index.html
+
+    - name: Upload the HTML documentation
+      uses: actions/upload-artifact@v7
+      with:
+        name: documentation-html
+        path: build/doc/html
+        retention-days: 7
+
   mutation:
     name: Mutation (every control must be able to fail)
     runs-on: ubuntu-latest

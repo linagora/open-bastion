@@ -84,6 +84,18 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   asks: the channel (security@linagora.com, never an issue or a PR), what to
   send, what happens next and by when, a safe harbour, supported versions and
   disclosure. The rest moved unchanged to **`doc/security-reference.md`**.
+- **The documentation is a Sphinx project** and ships as HTML. The two document
+  sets under `doc/` — the English technical documentation and the French EBIOS
+  Risk Manager study under `doc/security/` — are now reStructuredText and build
+  into one site with two parts. Cross-document links became `:doc:`/`:ref:`
+  roles, so a link to a page or a section that no longer exists is a build
+  failure rather than a 404 a reader finds first: the `docs` CI job builds with
+  `-W`, which also catches an orphan document and a table Sphinx cannot parse.
+  The HTML is built by CMake behind `-DBUILD_DOC=ON` (off by default, so the
+  ordinary build still needs no Python) and shipped in a new **`open-bastion-doc`**
+  binary package, installable on its own — a workstation can hold the
+  documentation without the PAM/NSS runtime. References to `doc/*.md` across
+  the tree, scripts and man pages included, now name the `.rst` files.
 - **The sshd anchor walk lives in one place** (#268). `ob-fp-daemon` and
   `pam_openbastion` each carried a copy, kept in step by a comment; a divergence
   would break the SSH fingerprint binding silently. Both now call
