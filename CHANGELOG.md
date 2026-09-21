@@ -187,6 +187,19 @@ the `auth` line of certificate-mode PAM stacks, and the accepted permissions of
 
 ### Changed
 
+- **`SECURITY.md` is a reporting policy again** (#276). It had grown into 986
+  lines describing the product — transport security, cache internals, a
+  `/pam/verify` sequence diagram sitting under "Reporting a Vulnerability" —
+  with the policy itself a few lines at the top. Someone arriving with a
+  vulnerability to report had to find it. The file now holds what the
+  [OpenSSF finder guide](https://github.com/ossf/oss-vulnerability-guide/blob/main/finder-guide.md)
+  asks of one: the channel (email to security@linagora.com, never an issue or
+  a pull request), what to put in the report, how to send something that must
+  not travel in plain email, what happens next and by when, an explicit safe
+  harbour, the supported versions and how disclosure works. Everything it used
+  to describe moved, unchanged, to **`doc/security-reference.md`**, which the
+  documentation index and the offline-mode and cache documents now point at.
+
 - **The sshd anchor walk lives in one place** (#268). `ob-fp-daemon` and
   `pam_openbastion` each carried their own copy of the walk that derives the
   per-connection sshd pid the fingerprint spool is keyed on, kept in step by a

@@ -246,7 +246,7 @@ sudo ob-desktop-setup -p https://auth.example.com --offline
 
 - [Desktop SSO Guide](doc/desktop-sso.md) - Complete setup and configuration
 - [Offline Mode](doc/offline-mode.md) - Cached credential authentication
-- [Security Architecture](SECURITY.md#offline-credential-cache-security) - Security details
+- [Security reference](doc/security-reference.md#offline-credential-cache-security) - Security details
 
 ### Cache Management
 

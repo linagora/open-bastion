@@ -129,7 +129,8 @@ int main(void)
 
     /*
      * Every group and other bit, one at a time. `dd if=/dev/urandom of=... `
-     * under root's umask 022 yields 0644, which SECURITY.md documented for a
+     * under root's umask 022 yields 0644, which the security reference
+     * (doc/security-reference.md) documented for a
      * while, so 0640 and 0604 are the modes actually found in the field.
      */
     printf("group and other permission bits:\n");

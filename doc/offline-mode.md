@@ -580,7 +580,7 @@ journalctl -u ob-session-monitor
 
 ## Related Documentation
 
-- [Security Architecture](../SECURITY.md#offline-credential-cache-security)
+- [Security reference](security-reference.md#offline-credential-cache-security)
 - [Cache Administration](offline-cache-admin.md)
 - [LightDM Desktop SSO](desktop-sso.md)
 - [Administrator Guide](admin-guide.md)

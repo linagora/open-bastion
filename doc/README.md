@@ -57,6 +57,7 @@ Who can do what, where — and which knob lives on the SSO vs the server.
 | Document                                      | Description                                        |
 | --------------------------------------------- | -------------------------------------------------- |
 | [Security features](security.md)              | Key policy, rate limiting, cache protection, audit |
+| [Security reference](security-reference.md)   | Every control, its configuration, and its limits   |
 | [Session containment hardening](hardening.md) | logind kill, process limits, at/cron allow-lists   |
 | [CrowdSec integration](crowdsec.md)           | Pre-auth IP blocking + post-auth reporting         |
 
