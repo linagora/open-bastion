@@ -7,71 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.3] - 2026-09-21
 
-Maintenance release on the 0.6.x line. It backports the fix for #263 — a
-service account could not log in — and nothing else: the branch is cut from
-0.6.2, so none of the breaking changes queued for 0.7.0 (fingerprint-spool
-ownership, the `auth` line of certificate-mode PAM stacks, `cache.key`
-permissions) are in it.
+Maintenance release on the 0.6.x line: the fix for #263 — a service account
+could not log in — and nothing else. Cut from 0.6.2, so none of the breaking
+changes queued for 0.7.0 are in it.
+
+**Upgrading:** the SSH layer is opt-in. On a host with service accounts, re-run
+`ob-bastion-setup` or `ob-backend-setup` with `--enable-service-keys` and deploy
+each account's public key; a bundle built by `ob-builder` does both.
 
 ### Added
 
-- **`--enable-service-keys`** on `ob-bastion-setup` and `ob-backend-setup`
-  (#263). Writes the sshd drop-in that makes a service account able to log in —
-  `AuthorizedKeysCommand` pointing at `ob-service-account-keys`,
-  `AuthorizedKeysCommandUser nobody`, and `ExposeAuthInfo yes` — and creates
-  `service-accounts.d`. `service-accounts.conf` alone never sufficed: without an
-  authorized key sshd refuses at the protocol layer and PAM never runs.
-
-  `ExposeAuthInfo` is written by the flag rather than left to Mode E on purpose.
-  It is what puts `SSH_USER_AUTH` in the PAM environment, and without it the
-  fingerprint check has nothing to read for a plain public key. Mode E writes
-  `ExposeAuthInfo` but _not_ the `AuthorizedKeysCommand`, so it alone still
-  leaves a service account unable to log in.
-
-  Opt-in, per this project's rule for changes to system-wide behaviour. It
-  **refuses** rather than overriding an `AuthorizedKeysCommand` that is already
-  configured, validates the result with `sshd -t` and rolls back if sshd rejects
-  it. Running without the flag removes the drop-in again, but only one carrying
-  our own header; a hand-written file is left alone and reported.
+- **`--enable-service-keys`** on `ob-bastion-setup` and `ob-backend-setup`.
+  Writes the sshd drop-in — `AuthorizedKeysCommand` pointing at
+  `ob-service-account-keys`, `AuthorizedKeysCommandUser nobody`,
+  `ExposeAuthInfo yes` — and creates `service-accounts.d`. It refuses rather
+  than overriding an `AuthorizedKeysCommand` that is already configured,
+  validates the result with `sshd -t` and rolls back if sshd rejects it.
   `fingerprint_required` stays a separate decision — it applies to every SSH
   login — so the flag reports whether it is set rather than setting it, and
-  `render_openbastion_conf` now preserves the key instead of dropping it on the
-  next run.
-- **`ob-builder` deploys the service-account key** (#263). A `service_accounts:`
-  entry takes `public_key` or `public_key_file`, and the generated bundle —
-  shell installer and Ansible role alike — writes
-  `/etc/open-bastion/service-accounts.d/<name>.pub`. `key_fingerprint` is
-  **derived** from the key; supplying both cross-checks them and a mismatch
-  stops the build. When any account carries a key the bundle passes
-  `--enable-service-keys` to the setup it runs and leaves `/etc/open-bastion`
-  traversable. Keys are removed when an account is dropped from the
-  configuration, because `ob-service-account-keys` serves any `.pub` present
-  without consulting `service-accounts.conf` — a write-only deployment meant
-  revocation did not revoke.
+  `render_openbastion_conf` no longer drops the key on the next run.
+- **`ob-builder` deploys the service-account key.** A `service_accounts:` entry
+  takes `public_key` or `public_key_file`; the bundle — shell installer and
+  Ansible role alike — writes `/etc/open-bastion/service-accounts.d/<name>.pub`,
+  derives `key_fingerprint` from the key (supplying both cross-checks them, and
+  a mismatch stops the build), passes `--enable-service-keys` to the setup it
+  runs, and removes the key when the account leaves the configuration.
 
 ### Fixed
 
-- **`ob-service-account-keys` is now shipped** (#263). The
-  `AuthorizedKeysCommand` helper that makes a service account usable existed in
-  the tree and was installed by **none** of the three packaging paths — not
-  CMake, not the `.deb`, not the RPM. So there was no copy on a host to point
-  `AuthorizedKeysCommand` at, and everyone who needed one installed their own at
-  a path of their choosing. It now installs to
-  `/usr/sbin/ob-service-account-keys` (a package must not write under
-  `/usr/local`), and every shipped reference uses that path. The directory it
-  reads, `/etc/open-bastion/service-accounts.d`, is shipped with it — nothing
-  created it before, and a helper without its directory is inert.
-- **`doc/service-accounts.md` no longer denies that the SSH layer is needed.**
-  Of Mode E it said _"No `authorized_keys` file is required"_ — read as "nothing
-  else is needed", when in fact sshd rejects at the protocol layer and
-  `pam_openbastion` never runs; the fingerprint check it describes is a
-  re-validation, not an authorisation. It also said `ExposeAuthInfo yes` is
-  written by "the setups", which happened only inside
-  `configure_max_security_sshd()`. What `key_fingerprint` is actually worth is
-  now written down: for a plain public key on a current OpenSSH the PAM
-  re-validation usually does not run at all, so an orphan `.pub` is accepted by
-  sshd and **not** rejected by PAM unless `ExposeAuthInfo yes` and
-  `fingerprint_required = true` are both set.
+- **`ob-service-account-keys` is now shipped**, at
+  `/usr/sbin/ob-service-account-keys` and with the `service-accounts.d`
+  directory it reads. The helper was installed by none of the three packaging
+  paths — not CMake, not the `.deb`, not the RPM — so there was no copy on a
+  host to point `AuthorizedKeysCommand` at, and everyone who needed one
+  installed their own under `/usr/local`.
+- **`doc/service-accounts.md` no longer implies the SSH layer is optional.**
+  `service-accounts.conf` alone never sufficed: without an authorized key sshd
+  refuses at the protocol layer and `pam_openbastion` never runs, so the
+  fingerprint check it describes is a re-validation, not an authorisation — and
+  for a plain public key it usually does not run at all, leaving an orphan
+  `.pub` accepted, unless `ExposeAuthInfo yes` and `fingerprint_required = true`
+  are both set.
 
 ## [0.6.2] - 2026-06-25
 
