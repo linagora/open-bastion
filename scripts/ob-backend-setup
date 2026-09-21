@@ -2032,7 +2032,7 @@ Options:
                           'ob-bastion-id' on the bastion. Prompted interactively
                           if omitted. An EMPTY list accepts a hop from any host
                           enrolled in the project that can declare itself a
-                          bastion to the SSO -- see SECURITY.md.
+                          bastion to the SSO -- see doc/security-reference.md.
       --allow-any-bastion Answer the prompt above with "any bastion", without
                           being asked. Same (weaker) result as an empty list;
                           the point is that it is written down. Non-interactive
