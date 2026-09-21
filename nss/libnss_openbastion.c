@@ -2385,7 +2385,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
      * as a fallback. The module never answers with stale data, so an LLNG
      * outage stops resolving users roughly cache_ttl after the last successful
      * lookup. Sites that need a longer buffer raise cache_ttl; see
-     * "NSS cache and LLNG outages" in doc/admin-guide.md. */
+     * "NSS cache and LLNG outages" in doc/admin-guide.rst. */
     g_in_nss_lookup = 0;
     *errnop = EAGAIN;
     return NSS_STATUS_UNAVAIL;

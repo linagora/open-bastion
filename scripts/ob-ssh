@@ -24,7 +24,7 @@
 #
 # This replaces the old (broken) JWT-over-SendEnv transport: SendEnv/AcceptEnv
 # never populate the PAM environment pam_getenv reads, so the backend rejected
-# every session. See doc/design/bastion-cert-vouching.md.
+# every session. See doc/design/bastion-cert-vouching.rst.
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>

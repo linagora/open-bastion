@@ -54,7 +54,7 @@ ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
 
 # ── Service accounts (SSH-key-only local accounts) ────────────────────────────
 # Baked in at build time. ob_service_accounts_content is the full INI body of
-# /etc/open-bastion/service-accounts.conf (see doc/service-accounts.md). Override
+# /etc/open-bastion/service-accounts.conf (see doc/service-accounts.rst). Override
 # per host/group via host_vars/group_vars to vary which accounts reach which
 # servers. Empty content + enabled:false means no service accounts are deployed.
 @@SERVICE_ACCOUNTS_DEFAULTS_YAML@@

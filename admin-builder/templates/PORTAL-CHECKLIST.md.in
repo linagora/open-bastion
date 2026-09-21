@@ -60,5 +60,5 @@ SSO vouched for — which, until 1 to 3 are done, is any enrolled host.
 
 ---
 
-References: `doc/security/09-portail-llng.md` (R-P1) and
-`doc/security/08-dossier-homologation.md` (CE03, CE06, CE16, CE21).
+References: `doc/security/09-portail-llng.rst` (R-P1) and
+`doc/security/08-dossier-homologation.rst` (CE03, CE06, CE16, CE21).

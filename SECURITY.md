@@ -87,12 +87,12 @@ on its own, ahead of anything else in progress.
 This file is the reporting policy. What the product actually does is documented
 separately:
 
-- [Security reference](doc/security-reference.md) — every control, how it is
+- [Security reference](doc/security-reference.rst) — every control, how it is
   configured, and what it does not cover
-- [Security features](doc/security.md) — key policy, rate limiting, cache
+- [Security features](doc/security.rst) — key policy, rate limiting, cache
   protection, audit
-- [Session containment hardening](doc/hardening.md) — logind kill, process
+- [Session containment hardening](doc/hardening.rst) — logind kill, process
   limits, at/cron allow-lists
-- [Security study (EBIOS RM)](doc/security/README.md) — the full risk study,
-  including the [conditions of use](doc/security/08-dossier-homologation.md#2-conditions-demploi)
+- [Security study (EBIOS RM)](doc/security/index.rst) — the full risk study,
+  including the [conditions of use](doc/security/08-dossier-homologation.rst#2-conditions-demploi)
   the residual risk ratings depend on

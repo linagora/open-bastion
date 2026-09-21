@@ -156,7 +156,7 @@ Once the plugins are installed, configure them through the LLNG Manager:
 > For server enrollment to yield a **renewable** token you need _Allow offline
 > access_ **and** `oidc-device-organization` >= 0.3.3. See the full required
 > RP option set and the offline-refresh-token gotcha in
-> [LemonLDAP::NG Configuration](../doc/llng-configuration.md#step-2-create-the-oidc-relying-party).
+> [LemonLDAP::NG Configuration](../doc/llng-configuration.rst#step-2-create-the-oidc-relying-party).
 
 The `lmConf-1.json` shipped with this quick-start is a minimal working
 example you can use as a reference (the bundled demo portal already has

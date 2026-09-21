@@ -10,7 +10,7 @@
  * under it. Writer and reader must compute the SAME pid from the SAME process
  * tree, or the module looks for a drop under a key the daemon never wrote --
  * and that failure is silent: no error at login, simply no fingerprint, so the
- * binding doc/security/99-risk-reduce.md credits with reducing R-S3 and R-S15
+ * binding doc/security/99-risk-reduce.rst credits with reducing R-S3 and R-S15
  * is gone while everything still appears to work.
  *
  * That is why this is one function rather than a rule two files are asked to

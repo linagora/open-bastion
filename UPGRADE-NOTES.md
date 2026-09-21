@@ -117,8 +117,8 @@ the setup scripts and `ob-post-upgrade` print this list on every run, and
 with that deployment's `client_id` and `server_group`. Those are reminders, not
 checks — verifying it is yours.
 
-Background: `doc/security/09-portail-llng.md` (R-P1) and
-`doc/security/08-dossier-homologation.md` (CE03, CE06, CE16, CE21).
+Background: `doc/security/09-portail-llng.rst` (R-P1) and
+`doc/security/08-dossier-homologation.rst` (CE03, CE06, CE16, CE21).
 
 ### B1. Upgrade Open Bastion everywhere first
 
@@ -198,7 +198,7 @@ portal.
 
 Set it **alongside** your vhost `locationRules`, not instead of them; the two
 regimes are in
-[doc/llng-configuration.md](doc/llng-configuration.md), step 3b.
+[doc/llng-configuration.rst](doc/llng-configuration.rst), step 3b.
 
 ### B6. Everything else
 

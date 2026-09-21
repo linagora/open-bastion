@@ -76,7 +76,7 @@ OB_TOKEN="/var/lib/open-bastion/token"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
-# Hardening (session containment) — see doc/hardening.md
+# Hardening (session containment) — see doc/hardening.rst
 HARDENING_TEMPLATE_DIR="/usr/share/open-bastion/hardening"
 HARDENING_LOGIND_DST="/etc/systemd/logind.conf.d/open-bastion.conf"
 HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
@@ -700,7 +700,7 @@ _ob_drop_service_keys_dropin() {
 # AuthorizedPrincipalsCommand only for certificate sessions. Shipping the
 # AuthorizedKeysCommand without ExposeAuthInfo would mean sshd accepts the key
 # and key_fingerprint is never enforced: the silent half-configuration that
-# doc/service-accounts.md now warns about.
+# doc/service-accounts.rst now warns about.
 configure_service_account_keys() {
     if [ "$ENABLE_SERVICE_KEYS" != "true" ]; then
         _ob_drop_service_keys_dropin
@@ -766,7 +766,7 @@ ${_OB_SVC_KEYS_MARK}
 #
 # Serves /etc/open-bastion/service-accounts.d/<user>.pub to sshd, so a service
 # account can authenticate with its key without a ~/.ssh/authorized_keys and
-# without the Unix account existing yet. See doc/service-accounts.md.
+# without the Unix account existing yet. See doc/service-accounts.rst.
 AuthorizedKeysCommand $helper %u
 AuthorizedKeysCommandUser nobody
 
@@ -819,7 +819,7 @@ SVCKEYS
         warn "fingerprint_required is not set in $OB_CONFIG."
         warn "Without it, a login whose fingerprint cannot be determined is"
         warn "allowed rather than refused -- key_fingerprint is then advisory."
-        warn "See doc/service-accounts.md before enabling it: it applies to"
+        warn "See doc/service-accounts.rst before enabling it: it applies to"
         warn "every SSH login on this host, not only service accounts."
     fi
     return 0
@@ -1570,7 +1570,7 @@ detect_lingering_users() {
 }
 
 # Configure host-level session containment. All steps are pure system
-# config — no setuid binary is added. See doc/hardening.md for rationale.
+# config — no setuid binary is added. See doc/hardening.rst for rationale.
 setup_hardening() {
     step "Applying session containment hardening..."
 
@@ -1819,9 +1819,9 @@ setup_audit_trace() {
     # /etc/audit/auditd.conf is intentionally NOT modified. It is a single
     # admin-tunable file owned by the audit distro package. Drop-in mechanisms
     # (rules.d/, cron.daily/) are used where they exist; auditd.conf is left
-    # for the administrator to tune manually (see doc/audit.md).
+    # for the administrator to tune manually (see doc/audit.rst).
     info "Audit trace deployed. /etc/audit/auditd.conf is intentionally NOT modified."
-    info "For ~1 week retention, set num_logs=7 max_log_file=50 max_log_file_action=ROTATE in /etc/audit/auditd.conf manually (see doc/audit.md)."
+    info "For ~1 week retention, set num_logs=7 max_log_file=50 max_log_file_action=ROTATE in /etc/audit/auditd.conf manually (see doc/audit.rst)."
 
     # 6. Compile + load rules. augenrules merges everything under
     #    /etc/audit/rules.d/*.rules into /etc/audit/audit.rules and tells
@@ -1874,7 +1874,7 @@ print_portal_prerequisites() {
         echo ""
         echo "PORTAL-SIDE PREREQUISITE (R-P1): set pamAccessServerGroups and"
         echo "pamAccessAllowedRps in the LLNG Manager, or any enrolled host can"
-        echo "declare itself a bastion. See doc/security/09-portail-llng.md."
+        echo "declare itself a bastion. See doc/security/09-portail-llng.rst."
         echo "($f is missing — reinstall the open-bastion package)"
     fi
 }
@@ -2032,7 +2032,7 @@ Options:
                           'ob-bastion-id' on the bastion. Prompted interactively
                           if omitted. An EMPTY list accepts a hop from any host
                           enrolled in the project that can declare itself a
-                          bastion to the SSO -- see doc/security-reference.md.
+                          bastion to the SSO -- see doc/security-reference.rst.
       --allow-any-bastion Answer the prompt above with "any bastion", without
                           being asked. Same (weaker) result as an empty list;
                           the point is that it is written down. Non-interactive
@@ -2072,7 +2072,7 @@ Options:
                           Installs audit rules (rules.d/open-bastion.rules)
                           and a daily rotation cron, then restarts auditd.
                           /etc/audit/auditd.conf is NOT modified; tune
-                          retention manually (see doc/audit.md).
+                          retention manually (see doc/audit.rst).
                           Requires auditd package (apt install auditd /
                           dnf install audit).
   -n, --dry-run           Show what would be done without making changes

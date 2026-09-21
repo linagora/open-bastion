@@ -11,7 +11,7 @@ ob-builder → bastion → deploy → ob-bastion-id → ob-builder → backends 
 
 | Script                                   | Path it validates                                                                                            |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/ansible-quickstart.md)) |
+| [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/ansible-quickstart.rst)) |
 | [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer                                                        |
 
 Both use [`lib.sh`](lib.sh) for the shared steps (build the `.deb`, serve the
@@ -97,7 +97,7 @@ the cookie land in `local-test/.work/` (git-ignored).
    helper + `service-accounts.d/backup.pub` (this also covers Mode E's
    `AuthorizedKeysFile none`). Then it asserts `backup` logs in with its key,
    with no SSO and no bastion certificate. See
-   [`doc/service-accounts.md`](../doc/service-accounts.md).
+   [`doc/service-accounts.rst`](../doc/service-accounts.rst).
 
 ## Lab-only quirks
 

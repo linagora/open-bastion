@@ -192,7 +192,7 @@ static void test_pam_args_no_comment_stripping(void)
 /*
  * ---- unknown keys are reported, not silently swallowed (#229) ----
  *
- * doc/security/02-ssh-connection.md told operators to set
+ * doc/security/02-ssh-connection.rst told operators to set
  * `auth_cache_offline_ttl`, a key the parser never knew; the setting was
  * dropped without a word and the 7-day default silently applied. parse_line()
  * now says so, and config_load() turns that into a syslog warning.

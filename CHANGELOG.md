@@ -52,7 +52,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   homologation dossier are added, plus eight workshop-4 sheets for the LLNG
   portal and its four plugins — a trusted boundary that had none. Owner names,
   dates and acceptance decisions are left `À COMPLÉTER`: they belong to the
-  homologation authority. Start at [doc/security/README.md](doc/security/README.md).
+  homologation authority. Start at [doc/security/index.rst](doc/security/index.rst).
 - **Mutation testing runs in CI** (`tests/test_ob_mutation.sh`, catalogue in
   `tests/mutation/`). Each entry removes one security control and requires the
   suite guarding it to fail; a surviving mutant means a green suite that checks
@@ -125,7 +125,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   documentation. Still ignored, so no host is locked out; the key alone is
   logged, never the value. `tests/test_ob_config_keys.sh` fails if a generator
   emits a key the parser does not know. The authorization cache has **no** local
-  TTL setting; see [doc/configuration.md](doc/configuration.md).
+  TTL setting; see [doc/configuration.rst](doc/configuration.rst).
 - **`SECURITY.md` documents the cache that actually exists** — the `LLNGCACHE04`
   authorization cache — instead of the deleted token cache, whose documented
   layout did not match its code either. Same correction in
@@ -309,7 +309,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   without it any SSO account can revoke anyone's certificate; from `0.6.0`
   `sshCaAdminRule` is fail-closed, so a portal configured with the vhost rule
   alone loses its admin UI on upgrade. Both are in
-  [doc/llng-configuration.md](doc/llng-configuration.md).
+  [doc/llng-configuration.rst](doc/llng-configuration.rst).
 - **An empty `allowed_bastions` no longer passes unnoticed** (#182). It means
   "accept a hop from any vouched bastion" and is the residual defence behind a
   real gap on the SSO side. `ob-backend-setup` now asks for the list

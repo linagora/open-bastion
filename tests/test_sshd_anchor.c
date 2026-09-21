@@ -8,7 +8,7 @@
  * tree and must still land on the same pid. Until #268 each had its own copy of
  * the walk and nothing checked they agreed; a divergence breaks the binding
  * silently -- no error at login, simply no drop found, and the reduction that
- * doc/security/99-risk-reduce.md credits to R-S3 and R-S15 is gone.
+ * doc/security/99-risk-reduce.rst credits to R-S3 and R-S15 is gone.
  *
  * There is now one implementation (src/sshd_anchor.c) and these tests drive it
  * from both starting points over the same tree, plus the edge cases the walk

@@ -452,7 +452,7 @@ print_portal_prerequisites() {
         echo ""
         echo "PORTAL-SIDE PREREQUISITE (R-P1): set pamAccessServerGroups and"
         echo "pamAccessAllowedRps in the LLNG Manager, or any enrolled host can"
-        echo "declare itself a bastion. See doc/security/09-portail-llng.md."
+        echo "declare itself a bastion. See doc/security/09-portail-llng.rst."
         echo "($f is missing — reinstall the open-bastion package)"
     fi
 }

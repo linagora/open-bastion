@@ -1,0 +1,466 @@
+Offboarding d'un Administrateur SSH
+===================================
+
+Ce document décrit la procédure de révocation des accès lorsqu'un administrateur SSH quitte l'entreprise ou change de service. Il s'applique à l'architecture Mode E (sécurité maximale).
+
+Contexte
+--------
+
+Un administrateur SSH (appelé "A" dans ce document) dispose de :
+
++-------------------+---------------------------------------------------------+
+| Accès             | Description                                             |
++===================+=========================================================+
+| Compte LLNG       | Compte LDAP/AD avec appartenance aux groupes autorisés  |
++-------------------+---------------------------------------------------------+
+| ``client_secret`` | Secret du client OIDC utilisé pour les enrôlements      |
++-------------------+---------------------------------------------------------+
+| Certificat SSH    | Certificat signé par la CA LLNG (durée de vie : 1 an)   |
++-------------------+---------------------------------------------------------+
+| Accès réseau      | VPN ou accès réseau interne vers le bastion             |
++-------------------+---------------------------------------------------------+
+| Tokens machines   | Connaissance des ``refresh_token`` des serveurs enrôlés |
++-------------------+---------------------------------------------------------+
+
+.. _principe--défense-en-profondeur:
+
+Principe : Défense en Profondeur
+--------------------------------
+
+La sécurité repose sur plusieurs couches indépendantes. La compromission d'une couche ne suffit pas à obtenir un accès :
+
+::
+
+   ┌─────────────────────────────────────────────────────────────┐
+   │                    Accès SSH réussi                         │
+   └─────────────────────────────────────────────────────────────┘
+                               ▲
+                               │ Toutes les couches doivent être OK
+           ┌───────────────────┼──────────────────────┐
+           │                   │                      │
+      ┌────┴────┐        ┌─────┴─────┐         ┌──────┴──────┐
+      │ Réseau  │        │   LLNG    │         │   SSH CA    │
+      │  (VPN)  │        │  (authent │         │  (certificat│
+      └─────────┘        │ + autori) │         │  signé+KRL) │
+                         └─────┬─────┘         └─────────────┘
+                               │
+                          ┌────┴────┐
+                          │  sudo   │
+                          │ (token  │
+                          │  LLNG)  │
+                          └─────────┘
+
+**Avantage** : La révocation d'une seule couche bloque l'accès, évitant les actions d'urgence sur toutes les couches simultanément.
+
+--------------
+
+Procédure d'Offboarding
+-----------------------
+
+.. _phase-1--actions-immédiates-jour-j:
+
+Phase 1 : Actions Immédiates (Jour J)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ces actions bloquent immédiatement tout nouvel accès de A.
+
+.. _11-révocation-llng-priorité-haute:
+
+1.1 Révocation LLNG (PRIORITÉ HAUTE)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Action** : Désactiver le compte de A dans l'annuaire (LDAP/AD)
+
+.. code:: bash
+
+   # Exemple LDAP
+   ldapmodify -x -D "cn=admin,dc=example,dc=com" -W <<EOF
+   dn: uid=admin-a,ou=people,dc=example,dc=com
+   changetype: modify
+   replace: nsAccountLock
+   nsAccountLock: true
+   EOF
+
+**OU** retirer A des groupes autorisés :
+
+.. code:: bash
+
+   ldapmodify -x -D "cn=admin,dc=example,dc=com" -W <<EOF
+   dn: cn=ssh-admins-prod,ou=groups,dc=example,dc=com
+   changetype: modify
+   delete: member
+   member: uid=admin-a,ou=people,dc=example,dc=com
+   EOF
+
+**Effet** :
+
+- A ne peut plus s'authentifier sur le portail LLNG
+- A ne peut plus approuver de nouveaux enrôlements
+- ``/pam/authorize`` refusera A pour toute connexion SSH
+- A ne peut plus obtenir un nouveau certificat SSH
+- Les commandes ``sudo`` nécessitant un token LLNG seront bloquées
+
+.. _security-03-offboarding-12-invalidation-des-sessions-llng-actives:
+
+1.2 Invalidation des Sessions LLNG Actives
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code:: bash
+
+   # Supprimer toutes les sessions de A
+   lemonldap-ng-sessions search --uid admin-a | \
+     xargs -I {} lemonldap-ng-sessions delete {}
+
+.. _13-révocation-accès-réseauvpn:
+
+1.3 Révocation Accès Réseau/VPN
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Retirer les droits VPN de A auprès de l'équipe réseau.
+
+**Effet** : Même avec des credentials valides, A ne peut plus atteindre le bastion SSH.
+
+--------------
+
+.. _phase-2--révocation-des-certificats-ssh:
+
+Phase 2 : Révocation des Certificats SSH
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+En Mode E, les certificats SSH ont une durée de vie d'un an. **L'attente de l'expiration naturelle n'est pas une option** : la révocation via KRL est obligatoire.
+
+**Option 1 : Révocation via l'interface d'administration LLNG (recommandée)**
+
+Le plugin SSH CA de LLNG fournit une interface d'administration pour révoquer les certificats :
+
+1. **Accéder à l'interface d'administration** :
+
+   ::
+
+      https://auth.example.com/ssh/admin
+
+2. **Rechercher les certificats de A** :
+
+   - L'endpoint ``/ssh/certs`` permet de lister/rechercher les certificats émis
+   - Filtrer par utilisateur pour trouver les certificats de A
+
+3. **Révoquer les certificats** :
+
+   - Utiliser ``/ssh/revoke`` pour ajouter les certificats à la KRL
+   - La révocation est immédiate côté LLNG
+
+..
+
+   **Note** : L'accès à l'interface d'administration est contrôlé par la règle ``sshCaAdminRule`` dans la configuration LLNG.
+
+**Option 2 : Révocation manuelle via KRL**
+
+Pour une révocation en ligne de commande :
+
+.. code:: bash
+
+   # Récupérer le serial du dernier certificat de A (depuis les logs LLNG ou /ssh/certs)
+   # Puis ajouter à la KRL
+   ssh-keygen -k -f /var/lib/lemonldap-ng/ssh/krl -s /path/to/ca_key -z <serial> /dev/null
+
+**Propagation de la KRL aux serveurs** :
+
+La KRL est automatiquement distribuée si le cron est configuré :
+
+.. code:: bash
+
+   # /etc/cron.hourly/update-ssh-krl (déjà en place sur les serveurs)
+   #!/bin/bash
+   curl -s https://auth.example.com/ssh/revoked > /etc/ssh/revoked_keys.new
+   mv /etc/ssh/revoked_keys.new /etc/ssh/revoked_keys
+
+Pour une propagation immédiate :
+
+.. code:: bash
+
+   # Sur chaque serveur ou via Ansible
+   curl -s https://auth.example.com/ssh/revoked > /etc/ssh/revoked_keys
+
+**Configuration sshd requise** (normalement déjà en place) :
+
+.. code:: bash
+
+   # /etc/ssh/sshd_config
+   TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
+   RevokedKeys /etc/ssh/revoked_keys
+
+--------------
+
+.. _phase-3--actions-planifiées-j7-à-j30:
+
+Phase 3 : Actions Planifiées (J+7 à J+30)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ces actions ne sont pas urgentes mais doivent être planifiées.
+
+.. _security-03-offboarding-31-rotation-du-client_secret:
+
+3.1 Rotation du ``client_secret``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A connaissait le ``client_secret`` du client OIDC. Bien que la révocation LLNG empêche son utilisation malveillante, une rotation est recommandée :
+
+1. **Générer un nouveau secret dans le Manager LLNG** :
+
+   ::
+
+      OIDC → Relying Parties → pam-prod → Options → Client secret → Générer
+
+2. **Mettre à jour la configuration sur tous les serveurs de la zone** :
+
+   .. code:: bash
+
+      # /etc/open-bastion/openbastion.conf
+      client_secret = <nouveau_secret>
+
+3. **Redémarrer le service PAM** (si applicable) ou tester une connexion.
+
+**Note** : Cette rotation peut être faite lors de la prochaine fenêtre de maintenance. Elle n'est pas urgente car :
+
+- A ne peut plus s'authentifier sur LLNG (compte désactivé)
+- A ne peut plus atteindre les serveurs (VPN révoqué)
+
+.. _32-rotation-périodique-recommandée:
+
+3.2 Rotation Périodique Recommandée
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Indépendamment des offboardings, planifier une rotation régulière :
+
+================= ===========================================
+Élément           Fréquence recommandée
+================= ===========================================
+``client_secret`` Tous les 6 mois
+Clé CA SSH        Tous les 2 ans (avec période de transition)
+Tokens machines   Rotation automatique via ``refresh_token``
+================= ===========================================
+
+--------------
+
+Tableau Récapitulatif
+---------------------
+
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+| Phase | Action                                  | Délai      | Effet                                                   |
++=======+=========================================+============+=========================================================+
+| 1     | Désactiver compte LLNG                  | Immédiat   | Bloque ``/pam/authorize`` + nouveaux certificats + sudo |
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+| 1     | Révoquer VPN                            | Immédiat   | Bloque accès bastion                                    |
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+| 2     | Révoquer certificats via ``/ssh/admin`` | Immédiat   | Ajoute à la KRL                                         |
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+| 2     | Propager KRL aux serveurs               | < 30 min   | Bloque certificats révoqués                             |
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+| 3     | Rotation ``client_secret``              | < 30 jours | Limite exposition                                       |
++-------+-----------------------------------------+------------+---------------------------------------------------------+
+
+--------------
+
+Checklist Offboarding Administrateur SSH
+----------------------------------------
+
+Jour J (Immédiat)
+~~~~~~~~~~~~~~~~~
+
+- ☐ Compte A désactivé dans l'annuaire LDAP/AD
+- ☐ Sessions LLNG de A supprimées
+- ☐ Accès VPN de A révoqué
+- ☐ Certificats SSH de A révoqués via ``/ssh/admin``
+- ☐ Équipe informée de ne pas réactiver le compte
+
+J+1 à J+7
+~~~~~~~~~
+
+- ☐ KRL propagée manuellement sur tous les serveurs de la zone
+- ☐ Vérification que la KRL est à jour sur chaque serveur (``ssh-keygen -Q -f /etc/ssh/revoked_keys <cert>``)
+- ☐ Audit des accès récents de A (logs SSH, logs LLNG)
+- ☐ Vérification qu'aucune session persistante n'existe
+
+J+7 à J+30
+~~~~~~~~~~
+
+- ☐ Rotation du ``client_secret`` de la zone concernée
+- ☐ Documentation mise à jour (liste des administrateurs)
+- ☐ Revue des accès des autres administrateurs (principe du moindre privilège)
+
+--------------
+
+Cas Particuliers
+----------------
+
+A avait accès à plusieurs zones
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Répéter la procédure pour chaque zone (chaque ``client_secret`` distinct).
+
+Suspicion de compromission active
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+En cas de suspicion que A a exfiltré des tokens ou tente activement d'accéder :
+
+1. **Urgence réseau** : Bloquer l'IP de A au niveau firewall
+2. **Révocation KRL immédiate** : Propager manuellement la KRL sur tous les serveurs
+3. **Rotation immédiate** : ``client_secret`` de toutes les zones accessibles par A
+4. **Invalidation tokens** : Utiliser ``/admintokenrevoke`` pour révoquer les ``refresh_token`` des machines
+
+.. code:: bash
+
+   # Révocation d'un refresh_token via l'API admin LLNG
+   curl -X POST https://auth.example.com/admintokenrevoke \
+     -H "Authorization: Bearer <admin_secret>" \
+     -d "token=<refresh_token>" \
+     -d "token_hint=refresh_token"
+
+A était le seul administrateur d'une zone
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+S'assurer qu'un autre administrateur a les accès nécessaires AVANT de révoquer A :
+
+- Accès au Manager LLNG
+- Accès au ``client_secret`` (ou capacité à en générer un nouveau)
+- Certificat SSH valide ou capacité à en obtenir un
+
+--------------
+
+Comptes de Service
+------------------
+
+Particularité
+~~~~~~~~~~~~~
+
+Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG** pour l'autorisation. Ils sont définis localement dans ``/etc/open-bastion/service-accounts.conf``.
+
+**Conséquence importante :** La révocation du compte LLNG (Phase 1.1) ne bloque **pas** les comptes de service.
+
+.. mermaid::
+
+   flowchart TB
+       subgraph Revocation["Révocation compte LLNG"]
+           R1[Désactiver compte<br/>dans annuaire]
+       end
+
+       subgraph OIDC["Utilisateurs OIDC"]
+           O1[/pam/authorize/]
+           O2[❌ Accès bloqué]
+           R1 --> O1 --> O2
+       end
+
+       subgraph Service["Comptes de Service"]
+           S1[service-accounts.conf]
+           S2[✅ Accès maintenu]
+           R1 -.->|Pas d'effet| S1 --> S2
+       end
+
+       style O2 fill:#f44336,color:#fff
+       style S2 fill:#4caf50,color:#fff
+
+Flux de révocation complet
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. mermaid::
+
+   flowchart LR
+       subgraph J0["Jour J - Immédiat"]
+           A1[Désactiver compte LLNG]
+           A2[Révoquer VPN]
+           A3{A avait accès<br/>aux clés service ?}
+           A4[Rotation clés service]
+       end
+
+       subgraph J1["J+1 à J+7"]
+           B1[Vérifier nouvelles clés]
+           B2[Supprimer anciennes clés]
+           B3[Audit des logs]
+       end
+
+       A1 --> A2 --> A3
+       A3 -->|Oui| A4
+       A3 -->|Non| B3
+       A4 --> B1 --> B2 --> B3
+
+Actions requises pour les comptes de service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Si la personne partante avait connaissance d'une clé de service ou pouvait la régénérer :
+
+.. _phase-1--actions-immédiates-jour-j-1:
+
+Phase 1 : Actions Immédiates (Jour J)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. **Identifier les comptes de service concernés** :
+
+   .. code:: bash
+
+      # Sur chaque serveur
+      cat /etc/open-bastion/service-accounts.conf
+
+2. **Rotation des clés de service** (si A avait accès aux clés privées) :
+
+   .. code:: bash
+
+      # Générer une nouvelle clé
+      ssh-keygen -t ed25519 -f /secure/ansible_new_key -C "ansible@$(hostname)"
+
+      # Obtenir le fingerprint
+      ssh-keygen -lf /secure/ansible_new_key.pub
+      # Exemple: 256 SHA256:NEW_FINGERPRINT ansible@server (ED25519)
+
+3. **Mettre à jour le fichier de configuration** :
+
+   .. code:: bash
+
+      sudo vim /etc/open-bastion/service-accounts.conf
+      # Remplacer key_fingerprint par le nouveau fingerprint
+
+4. **Déployer la nouvelle clé** :
+
+   .. code:: bash
+
+      # Mettre à jour Ansible Vault / HashiCorp Vault
+      # Ou déployer via le système de gestion de configuration
+
+.. _phase-2--vérification-j1:
+
+Phase 2 : Vérification (J+1)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- ☐ Tester que les comptes de service fonctionnent avec les nouvelles clés
+- ☐ Supprimer les anciennes clés de tous les systèmes de stockage (Vault, etc.)
+- ☐ Vérifier que l'ancienne clé ne permet plus l'accès
+
+Tableau récapitulatif - Comptes de Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+======================= ======== =========================
+Action                  Délai    Condition
+======================= ======== =========================
+Rotation clé ansible    Immédiat Si A avait accès à la clé
+Rotation clé backup     Immédiat Si A avait accès à la clé
+Rotation clé deploy     Immédiat Si A avait accès à la clé
+Rotation clé monitoring Immédiat Si A avait accès à la clé
+======================= ======== =========================
+
+Checklist Comptes de Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Jour J (si clés compromises)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- ☐ Identifier les comptes de service sur chaque serveur
+- ☐ Générer de nouvelles clés pour les comptes concernés
+- ☐ Mettre à jour les fingerprints dans service-accounts.conf
+- ☐ Déployer les nouvelles clés dans le système de stockage sécurisé
+- ☐ Tester le fonctionnement des automatisations
+
+J+7
+^^^
+
+- ☐ Supprimer définitivement les anciennes clés
+- ☐ Documenter les nouvelles clés (sans exposer le matériel privé)
+- ☐ Auditer les logs pour détecter toute utilisation des anciennes clés

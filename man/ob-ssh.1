@@ -14,7 +14,7 @@ backend with it.
 .PP
 This replaces the former JWT-over-SendEnv transport (which never worked, because
 SendEnv/AcceptEnv do not populate the PAM environment the backend reads). See
-.IR doc/design/bastion-cert-vouching.md .
+.IR doc/design/bastion-cert-vouching.rst .
 .SS Flow
 .IP 1. 4
 Reads the per-session bastion voucher from \fB$LLNG_BASTION_VOUCHER\fR (set by

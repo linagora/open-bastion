@@ -2,7 +2,7 @@
  * ob-record-connect - unprivileged connector for the session-recording sink
  *
  * Part of the tamper-evident session recording design
- * (doc/design/tamper-evident-session-recording.md, #151). ob-session-recorder
+ * (doc/design/tamper-evident-session-recording.rst, #151). ob-session-recorder
  * runs this as the logged-in user. It:
  *
  *   1. connect()s the local Unix socket served by ob-record-sink (socket-

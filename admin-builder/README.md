@@ -72,7 +72,7 @@ apt_component: main
 #     gid: 6001
 ```
 
-See [`doc/service-accounts.md`](../doc/service-accounts.md) for the full schema
+See [`doc/service-accounts.rst`](../doc/service-accounts.rst) for the full schema
 and how service accounts are matched and created on the target.
 
 Generate the artifacts:
@@ -210,6 +210,6 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 
 ## See Also
 
-- [`doc/admin-guide.md`](../doc/admin-guide.md) — General administrative procedures for Open Bastion
-- [`doc/pam-modes.md`](../doc/pam-modes.md) — Detailed explanation of security scenarios (modes A–E)
+- [`doc/admin-guide.rst`](../doc/admin-guide.rst) — General administrative procedures for Open Bastion
+- [`doc/pam-modes.rst`](../doc/pam-modes.rst) — Detailed explanation of security scenarios (modes A–E)
 - [`templates/ansible/role/README.md`](templates/ansible/role/README.md) — Ansible role variables and usage

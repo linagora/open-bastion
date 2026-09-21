@@ -23,19 +23,78 @@ from pathlib import Path
 
 DOC = Path(__file__).resolve().parent.parent / "doc" / "security"
 
-ENROLLMENT = DOC / "01-enrollment.md"
-SSH = DOC / "02-ssh-connection.md"
-PORTAL = DOC / "09-portail-llng.md"
-CONSOLIDATED = DOC / "99-risk-reduce.md"
-WORKSHOP1 = DOC / "04-atelier1-cadrage-socle.md"
+ENROLLMENT = DOC / "01-enrollment.rst"
+SSH = DOC / "02-ssh-connection.rst"
+PORTAL = DOC / "09-portail-llng.rst"
+CONSOLIDATED = DOC / "99-risk-reduce.rst"
+WORKSHOP1 = DOC / "04-atelier1-cadrage-socle.rst"
 
 RISK_ID = r"R-?(?:SA|S|P)?\d+"
-HEADING = re.compile(rf"^#{{3,4}}\s+({RISK_ID})\s*[-–—]\s", re.M)
-ANY_HEADING = re.compile(r"^#{1,6}\s", re.M)
 
-# A score table row: "| **Probabilite** | 1 (because ...) |"
-PROB_ROW = re.compile(r"^\|\s*\*\*Probabilit[ée]\*\*\s*\|\s*([0-9])", re.M)
-IMPACT_ROW = re.compile(r"^\|\s*\*\*Impact\*\*\s*\|\s*([0-9])", re.M)
+# The study is reStructuredText: a heading is a title line underlined with a
+# run of one punctuation character, and its level is the position of that
+# character in the order the file first uses them (docutils' own rule).
+UNDERLINE = set("=-~^\"'`:.+*#_")
+
+# A score row, in either shape pandoc emits: the simple table
+# "**Probabilite**  2" and the grid table "| **Probabilite** | 2 (...) |".
+PROB_ROW = re.compile(r"^\|?\s*\*\*Probabilit[ée]\*\*\s*\|?\s*([0-9])", re.M)
+IMPACT_ROW = re.compile(r"^\|?\s*\*\*Impact\*\*\s*\|?\s*([0-9])", re.M)
+
+SEPARATOR = re.compile(r"^\s*\+[-=+]+\+\s*$")
+
+
+def headings(lines):
+    """[(line index, level, title)] for every reST section in `lines`."""
+    order, found = [], []
+    for i in range(len(lines) - 1):
+        title, under = lines[i].rstrip(), lines[i + 1].rstrip()
+        if not title.strip() or title[0].isspace() or not under:
+            continue
+        if len(set(under)) != 1 or under[0] not in UNDERLINE:
+            continue
+        if len(under) < len(title):
+            continue
+        if under[0] not in order:
+            order.append(under[0])
+        found.append((i, order.index(under[0]) + 1, title.strip()))
+    return found
+
+
+def grid_rows(lines, start=0, stop_after_first=True):
+    """Logical rows of the grid tables in `lines`, from `start`.
+
+    A grid cell can span several physical lines, and the separator lines that
+    delimit the rows do not start with "|" -- reading the table line by line
+    drops every continuation and stops at the first separator, which is how a
+    matrix cell listing six risks would come back holding two.
+    """
+    rows, current, seen = [], None, False
+
+    def flush():
+        nonlocal current
+        if current:
+            rows.append([" ".join(c.split()) for c in current])
+            current = None
+
+    for line in lines[start:]:
+        if SEPARATOR.match(line):
+            flush()
+            seen = True
+            continue
+        if line.lstrip().startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if current is None:
+                current = cells
+            else:
+                for n, cell in enumerate(cells[:len(current)]):
+                    current[n] = (current[n] + " " + cell).strip()
+            continue
+        flush()
+        if seen and stop_after_first:
+            break                       # the table has ended
+    flush()
+    return rows
 
 
 def sheets(path):
@@ -46,36 +105,18 @@ def sheets(path):
     sheet in a file swallow the matrices that follow it.
     """
     lines = path.read_text(encoding="utf-8").split("\n")
+    found = headings(lines)
+    level_of = {i: level for i, level, _ in found}
 
-    # Heading levels per line, with fenced code blocks blanked out: a shell
-    # comment inside a ``` block ("# FORTEMENT RECOMMANDE ...") is not a
-    # Markdown heading, and treating it as one truncates the sheet before its
-    # residual-score table.
-    level_of = [0] * len(lines)
-    fenced = False
-    for i, line in enumerate(lines):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            continue
-        if fenced:
-            continue
-        h = re.match(r"^(#{1,6})\s", line)
-        if h:
-            level_of[i] = len(h.group(1))
+    starts = [(i, level, m.group(1))
+              for i, level, title in found if 3 <= level <= 4
+              for m in [re.match(rf"^({RISK_ID})\s*[-\u2013\u2014]\s", title)] if m]
 
-    starts = []
-    for i, line in enumerate(lines):
-        if not 3 <= level_of[i] <= 4:
-            continue
-        m = re.match(rf"^#+\s+({RISK_ID})\s*[-\u2013\u2014]\s", line)
-        if m:
-            starts.append((i, level_of[i], m.group(1)))
-
-    found = {}
-    for n, (i, level, rid) in enumerate(starts):
+    result = {}
+    for i, level, rid in starts:
         end = len(lines)
         for j in range(i + 1, len(lines)):
-            if level_of[j] and level_of[j] <= level:
+            if level_of.get(j, 0) and level_of[j] <= level:
                 end = j
                 break
         body = "\n".join(lines[i:end])
@@ -83,40 +124,44 @@ def sheets(path):
         impacts = IMPACT_ROW.findall(body)
         if len(probs) < 2 or len(impacts) < 2:
             continue  # not a scored sheet (or an unscored backlog heading)
-        found[rid] = {
+        result[rid] = {
             "initial": (int(probs[0]), int(impacts[0])),
             "residual": (int(probs[-1]), int(impacts[-1])),
             "level": level,
             "line": i + 1,
         }
-    return found
+    return result
 
 
-def matrix(path, after_heading):
-    """Parse the 4x4 matrix that follows `after_heading`.
+def matrix(path, heading_path):
+    """Parse the risk matrix under the headings named by `heading_path`.
 
+    `heading_path` is read outside-in ("4. Matrice des Risques", then
+    "Avant remediation"): the same sub-heading appears under several parents.
     Returns {risk_id: (P, I)} and the line the matrix starts on.
     """
-    text = path.read_text(encoding="utf-8")
-    start = text.index(after_heading) + len(after_heading)
-    table = text[start:]
+    lines = path.read_text(encoding="utf-8").split("\n")
+    found = headings(lines)
+
+    start, depth = 0, 0
+    for name in heading_path:
+        for i, level, title in found:
+            if i >= start and title == name and level > depth:
+                start, depth = i + 2, level
+                break
+        else:
+            raise ValueError(name)
+
     placed = {}
-    line0 = text[:start].count("\n") + 1
-    for row in table.split("\n"):
-        row = row.strip()
-        if not row.startswith("|"):
-            if placed:
-                break  # table finished
-            continue
-        m = re.match(r"^\|\s*\*\*([0-9])\s*-", row)
+    for cells in grid_rows(lines, start):
+        m = re.match(r"^\*\*([0-9])\s*[-\u2013\u2014]", cells[0])
         if not m:
-            continue
+            continue                    # header row, or a row of another shape
         impact = int(m.group(1))
-        cells = [c.strip() for c in row.strip("|").split("|")][1:]
-        for col, cell in enumerate(cells, start=1):
+        for col, cell in enumerate(cells[1:], start=1):
             for rid in re.findall(rf"\b{RISK_ID}\b", cell):
                 placed[rid] = (col, impact)
-    return placed, line0
+    return placed, start
 
 
 def compare(label, expected, placed, kind, errors):
@@ -154,22 +199,22 @@ def main():
     # never fires AND the slice below drops the portal comparisons -- a third of
     # the study stops being checked and the run still prints OK and exits 0.
     if PORTAL.exists() and len(portal) < 8:
-        errors.append(f"09-portail-llng.md: only {len(portal)} scored sheets parsed, "
+        errors.append(f"09-portail-llng.rst: only {len(portal)} scored sheets parsed, "
                       f"expected 8+ (the file is there, so this is a parser failure, "
                       f"not an absent study)")
 
     checks = [
-        ("01-enrollment avant", ENROLLMENT, "## 3. Matrice des Risques\n\n### Avant remédiation\n",
+        ("01-enrollment avant", ENROLLMENT, ("3. Matrice des Risques", "Avant remédiation"),
          {k: v["initial"] for k, v in enrol.items()}, "initial"),
-        ("01-enrollment après", ENROLLMENT, "### Après remédiation\n",
+        ("01-enrollment après", ENROLLMENT, ("3. Matrice des Risques", "Après remédiation"),
          {k: v["residual"] for k, v in enrol.items()}, "residual"),
-        ("02-ssh avant", SSH, "## 4. Matrice des Risques\n\n### Avant remédiation\n",
+        ("02-ssh avant", SSH, ("4. Matrice des Risques", "Avant remédiation"),
          {k: v["initial"] for k, v in ssh.items()}, "initial"),
-        ("02-ssh après", SSH, "### Après remédiation complète\n",
+        ("02-ssh après", SSH, ("4. Matrice des Risques", "Après remédiation complète"),
          {k: v["residual"] for k, v in ssh.items()}, "residual"),
-        ("09-portail avant", PORTAL, "## Matrice des risques du portail\n\n### Avant remédiation\n",
+        ("09-portail avant", PORTAL, ("Matrice des risques du portail", "Avant remédiation"),
          {k: v["initial"] for k, v in portal.items()}, "initial"),
-        ("09-portail après", PORTAL, "### Après remédiation\n",
+        ("09-portail après", PORTAL, ("Matrice des risques du portail", "Après remédiation"),
          {k: v["residual"] for k, v in portal.items()}, "residual"),
     ]
     # Drop the portal comparisons only when the study itself is absent. When the
@@ -181,8 +226,8 @@ def main():
     for label, path, heading, expected, kind in checks:
         try:
             placed, _ = matrix(path, heading)
-        except ValueError:
-            errors.append(f"{label}: matrix heading not found ({heading.strip()!r})")
+        except ValueError as exc:
+            errors.append(f"{label}: matrix heading not found ({exc})")
             continue
         compare(label, expected, placed, kind, errors)
 
@@ -192,10 +237,10 @@ def main():
     all_residual.update({k: v["residual"] for k, v in ssh.items()})
     all_residual.update({k: v["residual"] for k, v in portal.items()})
     try:
-        placed, _ = matrix(CONSOLIDATED, "## Matrice des Risques Résiduels (Mode E)\n")
+        placed, _ = matrix(CONSOLIDATED, ("Matrice des Risques Résiduels (Mode E)",))
     except ValueError:
         placed = None
-        errors.append("99-risk-reduce.md: consolidated matrix heading not found")
+        errors.append("99-risk-reduce.rst: consolidated matrix heading not found")
     if placed is not None:
         compare("99-risk-reduce consolidée", all_residual, placed, "residual", errors)
 
@@ -217,11 +262,14 @@ def main():
     # is the bridge between the workshops and the sheets: if a sheet is added and
     # not attached, the study silently stops covering it.
     if WORKSHOP1.exists():
-        w1 = WORKSHOP1.read_text(encoding="utf-8")
+        w1 = WORKSHOP1.read_text(encoding="utf-8").split("\n")
         attached = {}
-        for m in re.finditer(r"^\|\s*(ER[0-9]+)\s*\|([^|]*)\|", w1, re.M):
+        for cells in grid_rows(w1, stop_after_first=False):
+            m = re.match(r"^\*{0,2}(ER[0-9]+)\*{0,2}$", cells[0])
+            if not m or len(cells) < 2:
+                continue
             er = m.group(1)
-            for rid in re.findall(rf"\b{RISK_ID}\b", m.group(2)):
+            for rid in re.findall(rf"\b{RISK_ID}\b", cells[1]):
                 if rid in attached:
                     errors.append(f"04-atelier1: {rid} is attached to both "
                                   f"{attached[rid]} and {er}")
