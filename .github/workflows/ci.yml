@@ -2,9 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    # `backport/**` so a maintenance line gets the same gate as main: its
+    # commits never pass through main again, so nothing else would test them.
+    branches: [ main, develop, 'backport/**' ]
+    # And on the tag itself. release.yml triggers on `v*` and runs no tests at
+    # all -- it builds, signs and republishes the APT/YUM repo. Testing the
+    # tagged tree here is what stops an untested commit becoming a published
+    # package. It does not *block* release.yml (separate workflows, no
+    # dependency between them); it makes the failure visible on the same ref.
+    tags: [ 'v*' ]
   pull_request:
-    branches: [ main, desktop-sso ]
+    branches: [ main, desktop-sso, 'backport/**' ]
 
 # Restrict GITHUB_TOKEN permissions to read-only by default
 permissions:
