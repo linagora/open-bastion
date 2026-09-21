@@ -19,6 +19,7 @@ services:
       dockerfile: Dockerfile
     image: ob-cert-sso
     container_name: ob-cert-sso
+    hostname: ob-cert-sso
     ports:
       - "80:8080"
     volumes:
@@ -43,6 +44,7 @@ services:
       dockerfile: docker-demo-cert/bastion/Dockerfile
     image: ob-cert-bastion
     container_name: ob-cert-bastion
+    hostname: ob-cert-bastion
     ports:
       - "2222:22"
     depends_on:
@@ -68,6 +70,7 @@ services:
       dockerfile: docker-demo-cert/backend/Dockerfile
     image: ob-cert-backend
     container_name: ob-cert-backend
+    hostname: ob-cert-backend
     # No external port - only accessible via bastion
     expose:
       - "22"
@@ -94,6 +97,7 @@ services:
       dockerfile: docker-demo-cert/backend-new/Dockerfile
     image: ob-cert-backend-new
     container_name: ob-cert-backend-new
+    hostname: ob-cert-backend-new
     expose:
       - "22"
     depends_on:

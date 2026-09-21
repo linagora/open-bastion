@@ -186,3 +186,4 @@ docker compose up -d
 - Enable audit logging for compliance
 - **Bastion-only origin** (production): wire `ob-backend-setup --allowed-bastions` so the backend's `AuthorizedPrincipalsCommand` rejects direct user certs — not configured in this hand-rolled demo
 - **sudo tokens**: Each sudo operation requires a fresh LLNG authentication
+- **Certificate minting socket**: a real bastion gets `/run/open-bastion/cert.sock` from `ob-cert.socket`, a systemd unit. These containers have no systemd, so the entrypoint starts `docker-demo-common/ob-demo-socket-activate` instead: one `ob-cert-daemon` per connection, on the accepted socket, exactly as `Accept=yes` does — the daemon still identifies the caller through `SO_PEERCRED`. Demo scaffolding only; the package never installs it.

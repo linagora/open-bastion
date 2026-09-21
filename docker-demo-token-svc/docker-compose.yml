@@ -26,6 +26,7 @@ services:
       dockerfile: Dockerfile
     image: ob-token-svc-sso
     container_name: ob-token-svc-sso
+    hostname: ob-token-svc-sso
     ports:
       - "80:8080"
     volumes:
@@ -50,6 +51,7 @@ services:
       dockerfile: docker-demo-token-svc/bastion/Dockerfile
     image: ob-token-svc-bastion
     container_name: ob-token-svc-bastion
+    hostname: ob-token-svc-bastion
     ports:
       - "2222:22"
     depends_on:
@@ -71,6 +73,7 @@ services:
       dockerfile: docker-demo-token-svc/backend/Dockerfile
     image: ob-token-svc-backend
     container_name: ob-token-svc-backend
+    hostname: ob-token-svc-backend
     expose:
       - "22"
     depends_on:

@@ -607,3 +607,4 @@ docker exec ob-cert-bastion ls -la /var/cache/open-bastion/auth/
 - Enable `verify_ssl = true` in production
 - Consider enabling audit logging
 - **Bastion certificate vouching**: Backends require a valid bastion-vouched SSH certificate, preventing direct access even with valid user SSH certificates
+- **Certificate minting socket**: a real bastion gets `/run/open-bastion/cert.sock` from `ob-cert.socket`, a systemd unit. These containers have no systemd, so the entrypoint starts `docker-demo-common/ob-demo-socket-activate` instead: one `ob-cert-daemon` per connection, on the accepted socket, exactly as `Accept=yes` does — the daemon still identifies the caller through `SO_PEERCRED`. Demo scaffolding only; the package never installs it.

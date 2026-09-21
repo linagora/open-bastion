@@ -408,5 +408,18 @@ echo "To connect to backend via bastion:"
 echo "  From bastion: ob-ssh backend"
 echo "  Or: ssh -o ProxyCommand='ob-ssh %h %p' backend"
 
+# systemd is not PID 1 in a container, so ob-cert.socket never exists and
+# `ob-ssh backend` dies on a missing /run/open-bastion/cert.sock (#282). This
+# stand-in gives the demo the same socket, with the same per-connection
+# contract -- see docker-demo-common/ob-demo-socket-activate.
+/usr/local/sbin/ob-demo-socket-activate &
+for _ in $(seq 1 50); do
+    [ -S /run/open-bastion/cert.sock ] && break
+    sleep 0.1
+done
+if [ ! -S /run/open-bastion/cert.sock ]; then
+    echo "WARNING: /run/open-bastion/cert.sock did not appear; 'ob-ssh backend' will fail"
+fi
+
 # Execute the command (sshd)
 exec "$@"

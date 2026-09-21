@@ -23,6 +23,7 @@ services:
       dockerfile: Dockerfile
     image: ob-maxsec-sso
     container_name: ob-maxsec-sso
+    hostname: ob-maxsec-sso
     ports:
       - "80:8080"
     volumes:
@@ -47,6 +48,7 @@ services:
       dockerfile: docker-demo-maxsec/bastion/Dockerfile
     image: ob-maxsec-bastion
     container_name: ob-maxsec-bastion
+    hostname: ob-maxsec-bastion
     ports:
       - "2222:22"
     depends_on:
@@ -68,6 +70,7 @@ services:
       dockerfile: docker-demo-maxsec/backend/Dockerfile
     image: ob-maxsec-backend
     container_name: ob-maxsec-backend
+    hostname: ob-maxsec-backend
     expose:
       - "22"
     depends_on:

@@ -639,6 +639,76 @@ test_ssh_connection_bastion() {
     fi
 }
 
+
+# The demo advertises `ob-ssh backend` as its point: a hop certificate minted
+# on the bastion, for the connecting user, and accepted by the backend. Every
+# other test here reads configuration, which is why #282 went unnoticed --
+# /run/open-bastion/cert.sock did not exist in the container (no systemd, so
+# no ob-cert.socket) and the hop had been broken for releases while this suite
+# stayed green.
+#
+# It also pins the security property the socket carries. The daemon takes the
+# certificate's user from the connection's SO_PEERCRED and ignores anything
+# the caller sends, so a stand-in that relayed the connection through a pipe
+# of its own would hand it root's credentials instead. Landing on the backend
+# as $TEST_USER is what proves the identity survived the hop.
+test_bastion_to_backend_hop() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing ob-ssh hop from bastion to backend..."
+
+    if [[ ! -f "${TEST_KEY}-cert.pub" ]]; then
+        log_warn "No certificate available, skipping hop test"
+        pass "bastion->backend hop test skipped (no certificate)"
+        return 0
+    fi
+
+    local output
+    output=$(ssh -i "${TEST_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${TEST_USER}@localhost" \
+                 'ob-ssh backend "echo HOP_OK=\$(hostname) AS=\$(whoami)"' 2>&1) || true
+
+    log_verbose "hop output: $output"
+
+    if ! echo "$output" | grep -q "HOP_OK="; then
+        fail "ob-ssh backend did not reach the backend" "$output"
+        return 1
+    fi
+    if ! echo "$output" | grep -q "AS=${TEST_USER}"; then
+        fail "the hop landed as the wrong user (SO_PEERCRED identity lost)" "$output"
+        return 1
+    fi
+
+    pass "ob-ssh minted a hop certificate and reached the backend as ${TEST_USER}"
+    return 0
+}
+
+# The stand-in for ob-cert.socket must expose the same socket the package's
+# systemd unit does: same path, and a mode that lets an unprivileged user
+# connect. Checked separately from the hop so a missing socket is reported as
+# a missing socket rather than as a failed SSH.
+test_cert_socket_present() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing the bastion cert socket exists..."
+
+    local mode
+    mode=$(docker exec ob-cert-bastion stat -c '%A' /run/open-bastion/cert.sock 2>&1) || true
+
+    if [[ "$mode" != s* ]]; then
+        fail "/run/open-bastion/cert.sock is not a socket on the bastion" "$mode"
+        return 1
+    fi
+    case "$mode" in
+        *rw*rw*rw*) pass "cert.sock is present and world-connectable (SocketMode=0666)" ;;
+        *) fail "cert.sock is not connectable by an unprivileged user" "$mode" ; return 1 ;;
+    esac
+    return 0
+}
+
 test_builder_deployed_backend() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing artefact produced by admin-builder on backend-new..."
@@ -1229,6 +1299,8 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+    test_cert_socket_present
+    test_bastion_to_backend_hop
     test_builder_scenarios_matrix
     test_builder_ansible_syntax
     test_ob_bastion_id

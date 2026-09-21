@@ -1,0 +1,55 @@
+#!/bin/bash
+# Socket activation for the Docker demos, where systemd is not PID 1.
+#
+# On a real bastion, ob-cert.socket listens on /run/open-bastion/cert.sock and
+# systemd spawns one ob-cert@.service instance per connection (Accept=yes),
+# handing it the ACCEPTED socket as stdin and stdout. The demos run a bare
+# container: `systemctl` answers "System has not been booted with systemd",
+# the socket is never created, and `ob-ssh backend` fails with
+#
+#   [ob-cert-request] cannot reach the bastion cert service at
+#   /run/open-bastion/cert.sock: No such file or directory
+#
+# which is issue #282.
+#
+# socat reproduces exactly that contract:
+#   fork    -- one child per connection, like Accept=yes;
+#   nofork  -- the child EXECs the daemon in place, with the accepted socket
+#              on fd 0 and fd 1, like StandardInput/Output=socket.
+#
+# `nofork` is the load-bearing option. Without it socat would relay through a
+# pipe of its own, and the daemon's getsockopt(SO_PEERCRED) would report
+# socat's own credentials -- root -- instead of the caller's. The daemon mints
+# a certificate for the identity SO_PEERCRED reports and ignores anything the
+# caller sends, so a relayed socket would not just break the demo: it would
+# quietly demonstrate the wrong security model.
+#
+# This file is demo scaffolding. It is not installed by the package, and no
+# production host should run it: there, systemd owns the socket.
+set -euo pipefail
+
+SOCKET_DIR="${OB_SOCKET_DIR:-/run/open-bastion}"
+CERT_SOCK="${OB_CERT_SOCK:-$SOCKET_DIR/cert.sock}"
+CERT_DAEMON="${OB_CERT_DAEMON:-/usr/sbin/ob-cert-daemon}"
+
+if [ ! -x "$CERT_DAEMON" ]; then
+    echo "[ob-demo-socket-activate] $CERT_DAEMON is missing; the bastion cannot mint hop certificates" >&2
+    exit 1
+fi
+
+# 0711: ob-cert.socket's own comment, and the mode the package tmpfiles.d
+# entry and ob-bastion-setup give /run/open-bastion. Callers connect to the
+# socket by name; they never list the directory.
+install -d -m 0711 "$SOCKET_DIR"
+
+echo "[ob-demo-socket-activate] serving $CERT_SOCK with $CERT_DAEMON"
+
+# SocketMode=0666, as in ob-cert.socket: connecting grants nothing by itself.
+# The respawn loop stands in for systemd restarting the socket unit; socat
+# only returns here if the listener itself fails.
+while :; do
+    socat UNIX-LISTEN:"$CERT_SOCK",fork,mode=0666,unlink-early \
+          EXEC:"$CERT_DAEMON",nofork \
+        || echo "[ob-demo-socket-activate] listener exited ($?), restarting" >&2
+    sleep 1
+done
