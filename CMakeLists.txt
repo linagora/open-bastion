@@ -161,6 +161,38 @@ install(FILES ${CMAKE_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
+# ── HTML documentation (Sphinx) ──────────────────────────────────────────────
+# doc/ is a Sphinx project: the English technical documentation plus the French
+# EBIOS study under doc/security/. Off by default so the ordinary build needs
+# no Python; debian/rules turns it on to fill the open-bastion-doc package.
+# CI builds it with -W separately -- a warning must fail review, not a release.
+option(BUILD_DOC "Build the HTML documentation with Sphinx" OFF)
+
+if(BUILD_DOC)
+    find_program(SPHINX_BUILD NAMES sphinx-build sphinx-build-3)
+    if(NOT SPHINX_BUILD)
+        message(FATAL_ERROR "BUILD_DOC=ON but sphinx-build was not found")
+    endif()
+
+    set(DOC_HTML_DIR ${CMAKE_BINARY_DIR}/doc/html)
+    add_custom_target(doc ALL
+        COMMAND ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1
+                ${SPHINX_BUILD} -q -b html
+                -d ${CMAKE_BINARY_DIR}/doc/doctrees
+                ${CMAKE_SOURCE_DIR}/doc ${DOC_HTML_DIR}
+        COMMENT "Building HTML documentation with Sphinx"
+        VERBATIM
+    )
+
+    # -d keeps the doctree cache out of the tree being installed; .buildinfo
+    # is a build-time artefact of no use to a reader.
+    install(DIRECTORY ${DOC_HTML_DIR}/
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}/html
+        PATTERN ".buildinfo" EXCLUDE
+        PATTERN "_sources" EXCLUDE
+    )
+endif()
+
 # Install enrollment script
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-enroll
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
@@ -185,7 +217,7 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-prune
 # are now streamed to the root ob-record-sink (socket-activated), which owns the
 # files; the recorder no longer needs an elevated gid or a per-user dir, so the
 # wrapper (and its setgid bit) is gone. See
-# doc/design/tamper-evident-session-recording.md.
+# doc/design/tamper-evident-session-recording.rst.
 
 # Install session recorder config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
@@ -443,7 +475,7 @@ install(TARGETS ob-client-jwt
 # connector. ob-record-sink (root, socket-activated) writes recordings root-owned
 # under /var/lib/open-bastion/sessions/<user>/ (the recorded user cannot touch
 # them); ob-record-connect is the unprivileged connector the recorder execs to
-# stream into the socket. See doc/design/tamper-evident-session-recording.md.
+# stream into the socket. See doc/design/tamper-evident-session-recording.rst.
 add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
 target_include_directories(ob-record-sink PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -494,7 +526,7 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
 
 # Install hardening templates (session containment - PR1)
 # These are deployed by ob-bastion-setup into /etc/{systemd/logind.conf.d,security/limits.d,at.allow,cron.allow}
-# See doc/hardening.md for rationale.
+# See doc/hardening.rst for rationale.
 install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/logind.conf.d/open-bastion.conf
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening/logind.conf.d
 )
@@ -528,7 +560,7 @@ install(FILES ${CMAKE_BINARY_DIR}/ob-standalone-setup
 # Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
 # Read-only templates under /usr/share/open-bastion/audit/. The setup function
 # copies them into /etc/audit/rules.d/ and /etc/cron.daily/ at deployment time.
-# These are NOT dpkg conffiles / rpm config(noreplace) — see doc/audit.md.
+# These are NOT dpkg conffiles / rpm config(noreplace) — see doc/audit.rst.
 install(FILES ${CMAKE_SOURCE_DIR}/config/audit/rules.d/open-bastion.rules
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/rules.d
 )

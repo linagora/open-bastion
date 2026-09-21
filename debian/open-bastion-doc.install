@@ -1,0 +1,3 @@
+# The HTML tree CMake builds with -DBUILD_DOC=ON (see debian/rules), moved
+# from the main package's doc directory into this one's.
+usr/share/doc/open-bastion/html usr/share/doc/open-bastion-doc/
