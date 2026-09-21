@@ -579,6 +579,8 @@ Note: In this demo, session recording is disabled to allow ProxyJump. To enable 
 ForceCommand /usr/sbin/ob-session-recorder
 ```
 
+The socket the recorder needs, `/run/open-bastion/rec.sock`, is now provided by the demo stand-in, so that opt-in works — previously it would have refused every session, because the recorder fails closed when the sink is unreachable.
+
 ### PAM Authorization Cache
 
 Each SSH server caches authorization responses for offline mode:
@@ -608,3 +610,5 @@ docker exec ob-cert-bastion ls -la /var/cache/open-bastion/auth/
 - Consider enabling audit logging
 - **Bastion certificate vouching**: Backends require a valid bastion-vouched SSH certificate, preventing direct access even with valid user SSH certificates
 - **Certificate minting socket**: a real bastion gets `/run/open-bastion/cert.sock` from `ob-cert.socket`, a systemd unit. These containers have no systemd, so the entrypoint starts `docker-demo-common/ob-demo-socket-activate` instead: one `ob-cert-daemon` per connection, on the accepted socket, exactly as `Accept=yes` does — the daemon still identifies the caller through `SO_PEERCRED`. Demo scaffolding only; the package never installs it.
+- **Session-recording socket**: a real bastion gets `/run/open-bastion/rec.sock` from `ob-record.socket`; the demo stand-in serves it the same way, one `ob-record-sink` per connection on the accepted socket. It matters because `ob-session-recorder` is fail-closed — with recording enabled and no sink, every session is refused.
+- **Heartbeat**: a real host refreshes its enrolment token from `ob-heartbeat.timer`; with no systemd the demos run `docker-demo-common/ob-demo-heartbeat` instead, `ob-heartbeat` every five minutes. Without it the token written at enrolment expires and NSS stops resolving LLNG users, so the container quietly stops accepting logins. Demo scaffolding; the package never installs it.

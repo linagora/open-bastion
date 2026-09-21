@@ -421,5 +421,11 @@ if [ ! -S /run/open-bastion/cert.sock ]; then
     echo "WARNING: /run/open-bastion/cert.sock did not appear; 'ob-ssh backend' will fail"
 fi
 
+# Same story for ob-heartbeat.timer: without systemd nothing ever refreshes the
+# token this entrypoint just enrolled, and NSS -- unlike PAM since #159 -- cannot
+# renew it on its own, so LLNG user resolution dies when the token expires and
+# every new login with it. See docker-demo-common/ob-demo-heartbeat.
+/usr/local/sbin/ob-demo-heartbeat &
+
 # Execute the command (sshd)
 exec "$@"

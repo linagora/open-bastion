@@ -108,6 +108,11 @@ RUN ssh-keygen -A
 COPY --chmod=755 docker-demo-common/ob-demo-socket-activate \
      /usr/local/sbin/ob-demo-socket-activate
 
+# Heartbeat timer stand-in for ob-heartbeat.timer: without it the enrolment
+# token is never refreshed and NSS stops resolving LLNG users once it expires.
+COPY --chmod=755 docker-demo-common/ob-demo-heartbeat \
+     /usr/local/sbin/ob-demo-heartbeat
+
 # Startup script
 COPY docker-demo-token-svc/bastion/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

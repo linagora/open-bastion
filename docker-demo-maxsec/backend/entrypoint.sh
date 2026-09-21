@@ -308,4 +308,10 @@ echo "NOTE: this hand-rolled demo trusts any LLNG-CA-signed cert; per-bastion"
 echo "      origin enforcement (AuthorizedPrincipalsCommand + allowed_bastions)"
 echo "      is applied by ob-backend-setup in a real deployment, not here."
 
+# systemd is not PID 1 in a container, so ob-heartbeat.timer never fires and
+# nothing ever refreshes the token enrolled above. NSS -- unlike PAM since #159
+# -- cannot renew it on its own, so LLNG user resolution dies when the token
+# expires, and every new login with it. See docker-demo-common/ob-demo-heartbeat.
+/usr/local/sbin/ob-demo-heartbeat &
+
 exec "$@"
