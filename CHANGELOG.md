@@ -94,8 +94,10 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   The HTML is built by CMake behind `-DBUILD_DOC=ON` (off by default, so the
   ordinary build still needs no Python) and shipped in a new **`open-bastion-doc`**
   binary package, installable on its own — a workstation can hold the
-  documentation without the PAM/NSS runtime. References to `doc/*.md` across
-  the tree, scripts and man pages included, now name the `.rst` files.
+  documentation without the PAM/NSS runtime. Each tag publishes it like every
+  other package: in the APT repository under `bookworm`, `trixie` and `noble`,
+  and attached to the GitHub release. References to `doc/*.md` across the
+  tree, scripts and man pages included, now name the `.rst` files.
 - **The sshd anchor walk lives in one place** (#268). `ob-fp-daemon` and
   `pam_openbastion` each carried a copy, kept in step by a comment; a divergence
   would break the SSH fingerprint binding silently. Both now call

@@ -369,11 +369,44 @@ jobs:
         cmake --build build-doc --target doc
         test -f build-doc/doc/html/index.html
 
+    # The release builds the .deb with dpkg-buildpackage, and nothing else in
+    # CI goes through debian/rules -- the package-deb job uses cpack. So this
+    # is the only place that proves the documentation package is produced at
+    # all. The build-dependencies come from debian/control itself, through
+    # mk-build-deps, so a missing one fails here rather than at the tag: that
+    # is exactly how the release job would have broken on python3-sphinx.
+    - name: Build the Debian packages and check the doc one
+      run: |
+        sudo apt-get install -y devscripts equivs
+        sudo mk-build-deps -ir -t "apt-get -y --no-install-recommends" debian/control
+        dpkg-buildpackage -us -uc -b
+        mkdir -p debs && mv ../*.deb debs/
+        deb=$(ls debs/open-bastion-doc_*_all.deb)
+        echo "built: $deb"
+        dpkg -c "$deb" | grep -q 'usr/share/doc/open-bastion-doc/html/index.html' || {
+          echo "::error::$deb carries no html/index.html"
+          exit 1
+        }
+        # A doc package whose pages never built would still be a valid .deb.
+        pages=$(dpkg -c "$deb" | grep -c '\.html$')
+        echo "$pages HTML pages"
+        [ "$pages" -ge 30 ] || {
+          echo "::error::only $pages HTML pages in $deb; the build produced next to nothing"
+          exit 1
+        }
+
     - name: Upload the HTML documentation
       uses: actions/upload-artifact@v7
       with:
         name: documentation-html
         path: build/doc/html
+        retention-days: 7
+
+    - name: Upload the documentation package
+      uses: actions/upload-artifact@v7
+      with:
+        name: documentation-deb
+        path: debs/open-bastion-doc_*_all.deb
         retention-days: 7
 
   mutation:
