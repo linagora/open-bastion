@@ -4,6 +4,7 @@
 # the top level, and the French EBIOS Risk Manager security study under
 # security/. Build it with `sphinx-build -W -b html doc <outdir>`, or through
 # CMake with -DBUILD_DOC=ON.
+import importlib.util
 import os
 import re
 
@@ -35,36 +36,35 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # speaks for itself.
 language = "en"
 
-extensions = []
-try:
-    import sphinxcontrib.mermaid  # noqa: F401
 
-    extensions.append("sphinxcontrib.mermaid")
-    _mermaid = True
-except ImportError:
-    # The extension is not in every supported distribution, so it is not a
-    # build-dependency. Without it the diagrams stay readable as their source
-    # -- what every renderer but GitHub showed of the Markdown originals --
-    # and setup() below keeps the directive defined, so no document has to
-    # know which of the two is installed.
-    _mermaid = False
+def _installed(module):
+    """True when `module` can be imported, without importing it."""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# sphinxcontrib-mermaid is not in every distribution we build on, so it is not
+# a build-dependency. Without it the diagrams stay readable as their source --
+# what every renderer but GitHub showed of the Markdown originals -- and
+# setup() below keeps the directive defined, so no document has to know which
+# of the two is installed.
+_mermaid = _installed("sphinxcontrib.mermaid")
+extensions = ["sphinxcontrib.mermaid"] if _mermaid else []
 
 # Shared with the repository README, which needs it at the root; Sphinx
 # resolves html_logo relative to this directory and copies it into the build.
 html_logo = "../linagora.png"
 
-try:
-    import sphinx_rtd_theme  # noqa: F401
-
-    html_theme = "sphinx_rtd_theme"
-    html_theme_options = {
-        "collapse_navigation": False,
-        "navigation_depth": 3,
-    }
-except ImportError:
-    # python3-sphinx-rtd-theme is a build-dependency of the Debian packages,
-    # but a checkout with Sphinx alone still builds.
-    html_theme = "alabaster"
+# python3-sphinx-rtd-theme is a build-dependency of the Debian packages, but a
+# checkout with Sphinx alone still builds, on the stock theme.
+_rtd = _installed("sphinx_rtd_theme")
+html_theme = "sphinx_rtd_theme" if _rtd else "alabaster"
+html_theme_options = {
+    "collapse_navigation": False,
+    "navigation_depth": 3,
+} if _rtd else {}
 
 html_title = "Open Bastion %s" % version if version else "Open Bastion"
 # The reST sources live in the repository; a copy inside the HTML build only
