@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     make \
     bsdutils \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directories
@@ -100,6 +101,17 @@ RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid
 
 # Generate SSH host keys
 RUN ssh-keygen -A
+
+# Socket activation stand-in for ob-cert.socket: the demos have no
+# systemd, and without the socket `ob-ssh backend` cannot mint its hop
+# certificate (#282). Shared by all four demos.
+COPY --chmod=755 docker-demo-common/ob-demo-socket-activate \
+     /usr/local/sbin/ob-demo-socket-activate
+
+# Heartbeat timer stand-in for ob-heartbeat.timer: without it the enrolment
+# token is never refreshed and NSS stops resolving LLNG users once it expires.
+COPY --chmod=755 docker-demo-common/ob-demo-heartbeat \
+     /usr/local/sbin/ob-demo-heartbeat
 
 # Startup script
 COPY docker-demo-token-svc/bastion/entrypoint.sh /entrypoint.sh

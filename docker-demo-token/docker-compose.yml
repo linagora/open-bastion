@@ -19,6 +19,7 @@ services:
       dockerfile: Dockerfile
     image: ob-token-sso
     container_name: ob-token-sso
+    hostname: ob-token-sso
     ports:
       - "80:8080"
     volumes:
@@ -43,6 +44,7 @@ services:
       dockerfile: docker-demo-token/bastion/Dockerfile
     image: ob-token-bastion
     container_name: ob-token-bastion
+    hostname: ob-token-bastion
     ports:
       - "2222:22"
     depends_on:
@@ -68,6 +70,7 @@ services:
       dockerfile: docker-demo-token/backend/Dockerfile
     image: ob-token-backend
     container_name: ob-token-backend
+    hostname: ob-token-backend
     # No external port - only accessible via bastion
     expose:
       - "22"
@@ -94,6 +97,7 @@ services:
       dockerfile: docker-demo-token/backend-new/Dockerfile
     image: ob-token-backend-new
     container_name: ob-token-backend-new
+    hostname: ob-token-backend-new
     expose:
       - "22"
     depends_on:

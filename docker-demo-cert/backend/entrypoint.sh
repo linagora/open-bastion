@@ -291,5 +291,11 @@ echo ""
 echo "Bastion certificate vouching ENABLED"
 echo "Direct SSH connections without a valid bastion-vouched certificate will be DENIED"
 
+# systemd is not PID 1 in a container, so ob-heartbeat.timer never fires and
+# nothing ever refreshes the token enrolled above. NSS -- unlike PAM since #159
+# -- cannot renew it on its own, so LLNG user resolution dies when the token
+# expires, and every new login with it. See docker-demo-common/ob-demo-heartbeat.
+/usr/local/sbin/ob-demo-heartbeat &
+
 # Execute the command (sshd)
 exec "$@"

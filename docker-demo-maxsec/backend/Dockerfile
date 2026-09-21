@@ -104,6 +104,11 @@ RUN sed -i 's/session\s*required\s*pam_loginuid.so/session optional pam_loginuid
 # Generate SSH host keys
 RUN ssh-keygen -A
 
+# Heartbeat timer stand-in for ob-heartbeat.timer: without it the enrolment
+# token is never refreshed and NSS stops resolving LLNG users once it expires.
+COPY --chmod=755 docker-demo-common/ob-demo-heartbeat \
+     /usr/local/sbin/ob-demo-heartbeat
+
 # Startup script
 COPY docker-demo-maxsec/backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -1,0 +1,70 @@
+#!/bin/bash
+# Heartbeat timer for the Docker demos, where systemd is not PID 1.
+#
+# On a real host, ob-heartbeat.timer fires 1 minute after boot and every 5
+# minutes after that (OnBootSec=1min / OnUnitActiveSec=5min), and each run
+# refreshes the server's access token as a side effect of reporting in. In a
+# bare container the timer never exists: the entrypoint enrols once via the
+# OAuth 2.0 device grant, writes server_token.json with
+# expires_at = now + expires_in, and then NOTHING ever touches that file again.
+#
+# PAM survives that: refresh_server_token_on_demand() in src/pam_openbastion.c
+# (~line 2598, added by #159) notices the expired token at login time and
+# refreshes it itself, precisely so a lapsed timer is self-healing.
+#
+# NSS does not. nss/libnss_openbastion.c only re-reads the token file to "pick
+# up a token rotated by ob-heartbeat" (see maybe_reload_server_token(), called
+# near line 2342) -- it never mints a new one. So once expires_at passes, every
+# LLNG lookup 401s: `getent passwd dwho` comes back empty, sshd cannot resolve
+# the account, and every NEW login fails before PAM is ever reached, so PAM's
+# self-healing never gets a turn. A demo container left running past the token's
+# lifetime -- 24h on this demo's LLNG, an hour on a default portal -- simply
+# stops working, with no obvious cause.
+#
+# Hence this stand-in: same cadence as the timer, same binary, nothing else.
+# Demo scaffolding only -- it is not installed by the package, and a real host
+# gets ob-heartbeat.timer instead.
+set -euo pipefail
+
+INTERVAL="${OB_DEMO_HEARTBEAT_INTERVAL:-300}"
+CONF="${OB_DEMO_CONF:-/etc/open-bastion/openbastion.conf}"
+
+# Resolve the token file the way scripts/ob-heartbeat does: server_token_file
+# from the config, defaulting to /var/lib/open-bastion/token. (The demos point
+# it at /etc/open-bastion/server_token.json.) The real parser is quote-aware;
+# here the value is written by our own entrypoints, so `key = value` is enough.
+read_conf() {
+    local key="$1"
+    [ -f "$CONF" ] || return 0
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$CONF" \
+        | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' \
+        | tail -n 1
+}
+
+TOKEN_FILE="$(read_conf server_token_file)"
+[ -n "$TOKEN_FILE" ] || TOKEN_FILE="/var/lib/open-bastion/token"
+
+# ob-heartbeat refreshes the access token with the refresh_token the device
+# grant returned. LLNG does return one here (verified against the running demo),
+# so a missing one means the enrolment did not go as expected -- and then
+# nothing at all can keep the token alive. Say so once, loudly: the symptom
+# (users stop resolving a day later) points nowhere near the cause.
+if [ ! -s "$TOKEN_FILE" ]; then
+    echo "[ob-demo-heartbeat] WARNING: $TOKEN_FILE is missing or empty; the demo enrolment did not complete" >&2
+elif [ -z "$(jq -r '.refresh_token // empty' "$TOKEN_FILE" 2>/dev/null)" ]; then
+    echo "[ob-demo-heartbeat] WARNING: no refresh_token in $TOKEN_FILE; the demo enrolment returned none," >&2
+    echo "[ob-demo-heartbeat] WARNING: so the access token cannot be refreshed and LLNG user resolution" >&2
+    echo "[ob-demo-heartbeat] WARNING: (getent passwd dwho, hence every new login) will stop once it expires." >&2
+fi
+
+echo "[ob-demo-heartbeat] heartbeat every ${INTERVAL}s, token file $TOKEN_FILE"
+
+# First beat immediately rather than after OnBootSec: the entrypoint has just
+# enrolled, and an early failure should be visible in `docker logs` now, not in
+# five minutes. A failing heartbeat is transient by nature (portal not up yet,
+# network hiccup) and must never take down the loop or the container.
+while :; do
+    ob-heartbeat \
+        || echo "[ob-demo-heartbeat] heartbeat failed, retrying in ${INTERVAL}s" >&2
+    sleep "$INTERVAL"
+done

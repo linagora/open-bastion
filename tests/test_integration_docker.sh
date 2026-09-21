@@ -639,6 +639,150 @@ test_ssh_connection_bastion() {
     fi
 }
 
+
+# The demo advertises `ob-ssh backend` as its point: a hop certificate minted
+# on the bastion, for the connecting user, and accepted by the backend. Every
+# other test here reads configuration, which is why #282 went unnoticed --
+# /run/open-bastion/cert.sock did not exist in the container (no systemd, so
+# no ob-cert.socket) and the hop had been broken for releases while this suite
+# stayed green.
+#
+# It also pins the security property the socket carries. The daemon takes the
+# certificate's user from the connection's SO_PEERCRED and ignores anything
+# the caller sends, so a stand-in that relayed the connection through a pipe
+# of its own would hand it root's credentials instead. Landing on the backend
+# as $TEST_USER is what proves the identity survived the hop.
+test_bastion_to_backend_hop() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing ob-ssh hop from bastion to backend..."
+
+    if [[ ! -f "${TEST_KEY}-cert.pub" ]]; then
+        log_warn "No certificate available, skipping hop test"
+        pass "bastion->backend hop test skipped (no certificate)"
+        return 0
+    fi
+
+    local output
+    output=$(ssh -i "${TEST_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${TEST_USER}@localhost" \
+                 'ob-ssh backend "echo HOP_OK=\$(hostname) AS=\$(whoami)"' 2>&1) || true
+
+    log_verbose "hop output: $output"
+
+    if ! echo "$output" | grep -q "HOP_OK="; then
+        fail "ob-ssh backend did not reach the backend" "$output"
+        return 1
+    fi
+    if ! echo "$output" | grep -q "AS=${TEST_USER}"; then
+        fail "the hop landed as the wrong user (SO_PEERCRED identity lost)" "$output"
+        return 1
+    fi
+
+    pass "ob-ssh minted a hop certificate and reached the backend as ${TEST_USER}"
+    return 0
+}
+
+# The stand-in for ob-cert.socket must expose the same socket the package's
+# systemd unit does: same path, and a mode that lets an unprivileged user
+# connect. Checked separately from the hop so a missing socket is reported as
+# a missing socket rather than as a failed SSH.
+test_cert_socket_present() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing the bastion cert socket exists..."
+
+    local mode
+    mode=$(docker exec ob-cert-bastion stat -c '%A' /run/open-bastion/cert.sock 2>&1) || true
+
+    if [[ "$mode" != s* ]]; then
+        fail "/run/open-bastion/cert.sock is not a socket on the bastion" "$mode"
+        return 1
+    fi
+    case "$mode" in
+        *rw*rw*rw*) pass "cert.sock is present and world-connectable (SocketMode=0666)" ;;
+        *) fail "cert.sock is not connectable by an unprivileged user" "$mode" ; return 1 ;;
+    esac
+    return 0
+}
+
+# The stand-in also serves /run/open-bastion/rec.sock, mirroring
+# systemd/ob-record.socket (SocketMode=0666, Accept=yes,
+# /usr/sbin/ob-record-sink). These demos ship with recording off, but
+# docker-demo-cert/README.md documents turning it on via
+# ForceCommand /usr/sbin/ob-session-recorder, and ob-session-recorder is
+# fail-closed when the sink is unreachable: with no socket, "enable
+# recording" silently becomes "no one can log in". Checked the same way as
+# cert.sock, independently of whether recording is actually enabled here.
+test_rec_socket_present() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing the bastion recording socket exists..."
+
+    local mode
+    mode=$(docker exec ob-cert-bastion stat -c '%A' /run/open-bastion/rec.sock 2>&1) || true
+
+    if [[ "$mode" != s* ]]; then
+        fail "/run/open-bastion/rec.sock is not a socket on the bastion" "$mode"
+        return 1
+    fi
+    case "$mode" in
+        *rw*rw*rw*) pass "rec.sock is present and world-connectable (SocketMode=0666)" ;;
+        *) fail "rec.sock is not connectable by an unprivileged user" "$mode" ; return 1 ;;
+    esac
+    return 0
+}
+
+# ob-heartbeat.timer refreshes a real host's enrolment token; these
+# containers have no systemd, so docker-demo-common/ob-demo-heartbeat stands
+# in with a loop calling ob-heartbeat every 300s. Without it the access
+# token written at enrolment is never refreshed, and NSS
+# (nss/libnss_openbastion.c) only re-reads a token ob-heartbeat has rotated
+# -- so a long-running demo silently stops resolving LLNG users once that
+# token expires and every login fails. First assertion pins the loop is
+# actually running; second calls ob-heartbeat once and requires the access
+# token to actually change, so a stand-in that started but never refreshed
+# anything wouldn't pass.
+test_heartbeat_stand_in() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing the ob-heartbeat stand-in refreshes the enrolment token..."
+
+    if ! docker exec ob-cert-bastion pgrep -f ob-demo-heartbeat >/dev/null 2>&1; then
+        fail "ob-demo-heartbeat loop is not running on the bastion"
+        return 1
+    fi
+
+    local refresh_token
+    refresh_token=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.refresh_token // empty') || true
+
+    if [[ -z "$refresh_token" ]]; then
+        fail "demo enrolment returned no refresh_token, nothing can keep NSS alive"
+        return 1
+    fi
+
+    local token_before token_after
+    token_before=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
+    docker exec ob-cert-bastion ob-heartbeat >/dev/null 2>&1 || true
+    token_after=$(docker exec ob-cert-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
+
+    log_verbose "access_token before=$token_before after=$token_after"
+
+    if [[ -z "$token_after" ]]; then
+        fail "ob-heartbeat left the access token empty" "before=$token_before after=$token_after"
+        return 1
+    fi
+
+    if [[ "$token_before" == "$token_after" ]]; then
+        fail "ob-heartbeat did not rotate the access token" "before=$token_before after=$token_after"
+        return 1
+    fi
+
+    pass "ob-demo-heartbeat loop is running and ob-heartbeat rotates the access token"
+    return 0
+}
+
 test_builder_deployed_backend() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing artefact produced by admin-builder on backend-new..."
@@ -1229,6 +1373,10 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+    test_cert_socket_present
+    test_rec_socket_present
+    test_heartbeat_stand_in
+    test_bastion_to_backend_hop
     test_builder_scenarios_matrix
     test_builder_ansible_syntax
     test_ob_bastion_id

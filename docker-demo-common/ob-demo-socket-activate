@@ -1,0 +1,99 @@
+#!/bin/bash
+# Socket activation for the Docker demos, where systemd is not PID 1.
+#
+# On a real bastion, ob-cert.socket listens on /run/open-bastion/cert.sock and
+# systemd spawns one ob-cert@.service instance per connection (Accept=yes),
+# handing it the ACCEPTED socket as stdin and stdout. The demos run a bare
+# container: `systemctl` answers "System has not been booted with systemd",
+# the socket is never created, and `ob-ssh backend` fails with
+#
+#   [ob-cert-request] cannot reach the bastion cert service at
+#   /run/open-bastion/cert.sock: No such file or directory
+#
+# which is issue #282.
+#
+# socat reproduces exactly that contract:
+#   fork    -- one child per connection, like Accept=yes;
+#   nofork  -- the child EXECs the daemon in place, with the accepted socket
+#              on fd 0 and fd 1, like StandardInput/Output=socket.
+#
+# `nofork` is the load-bearing option. Without it socat would relay through a
+# pipe of its own, and the daemon's getsockopt(SO_PEERCRED) would report
+# socat's own credentials -- root -- instead of the caller's. The daemon mints
+# a certificate for the identity SO_PEERCRED reports and ignores anything the
+# caller sends, so a relayed socket would not just break the demo: it would
+# quietly demonstrate the wrong security model.
+#
+# ob-record.socket has the same shape and the same problem, so we serve it too:
+# /run/open-bastion/rec.sock, SocketMode=0666, Accept=yes, and ob-record@.service
+# takes the accepted socket on StandardInput=socket. None of the four demos turns
+# recording on today -- none of them sets `ForceCommand /usr/sbin/ob-session-recorder`
+# -- but docker-demo-cert/README.md documents that one-line opt-in, and
+# scripts/ob-session-recorder is deliberately fail-closed when the sink is
+# unreachable ("recording sink unreachable" at line 226, "Session recording is
+# required but unavailable" at line 283, "recording is required — refusing
+# session" at line 402). Following the README on a demo with no rec.sock would
+# therefore refuse EVERY login with a bare "Connection closed", the real reason
+# visible only in the container's auth log. Serving the socket up front keeps
+# that opt-in as cheap as the README claims it is.
+#
+# `nofork` matters just as much on this socket: src/ob-record-sink.c:290 derives
+# the recorded user from the connection's SO_PEERCRED (that is what makes a
+# recording unforgeable, and what lets the sink own the files the recorded user
+# must not be able to touch). Relaying through a pipe of socat's own would file
+# every session under root -- one directory, the wrong owner, no per-user audit
+# trail -- i.e. the same "wrong security model, quietly" failure as above.
+#
+# cert.sock is mandatory (the hop certificate is the demo's whole point), rec.sock
+# is best-effort: a missing sink must not keep the container from starting.
+#
+# This file is demo scaffolding. It is not installed by the package, and no
+# production host should run it: there, systemd owns the sockets.
+set -euo pipefail
+
+SOCKET_DIR="${OB_SOCKET_DIR:-/run/open-bastion}"
+CERT_SOCK="${OB_CERT_SOCK:-$SOCKET_DIR/cert.sock}"
+CERT_DAEMON="${OB_CERT_DAEMON:-/usr/sbin/ob-cert-daemon}"
+REC_SOCK="${OB_REC_SOCK:-$SOCKET_DIR/rec.sock}"
+RECORD_SINK="${OB_RECORD_SINK:-/usr/sbin/ob-record-sink}"
+
+if [ ! -x "$CERT_DAEMON" ]; then
+    echo "[ob-demo-socket-activate] $CERT_DAEMON is missing; the bastion cannot mint hop certificates" >&2
+    exit 1
+fi
+
+# 0711: ob-cert.socket's own comment, and the mode the package tmpfiles.d
+# entry and ob-bastion-setup give /run/open-bastion. Callers connect to the
+# socket by name; they never list the directory.
+install -d -m 0711 "$SOCKET_DIR"
+
+# One listener. mode=0666 is SocketMode=0666 in both units: connecting grants
+# nothing by itself, the daemon behind the socket decides everything from
+# SO_PEERCRED. The respawn loop stands in for systemd restarting the socket
+# unit; socat only returns here if the listener itself fails.
+serve() {
+    local sock="$1" daemon="$2" label="$3"
+
+    echo "[ob-demo-socket-activate] serving $sock with $daemon"
+    while :; do
+        socat UNIX-LISTEN:"$sock",fork,mode=0666,unlink-early \
+              EXEC:"$daemon",nofork \
+            || echo "[ob-demo-socket-activate] $label listener exited ($?), restarting" >&2
+        sleep 1
+    done
+}
+
+serve "$CERT_SOCK" "$CERT_DAEMON" cert &
+
+if [ -x "$RECORD_SINK" ]; then
+    serve "$REC_SOCK" "$RECORD_SINK" rec &
+else
+    echo "[ob-demo-socket-activate] $RECORD_SINK is missing; not serving $REC_SOCK." >&2
+    echo "[ob-demo-socket-activate] Enabling 'ForceCommand /usr/sbin/ob-session-recorder' in this container would then refuse every login (recording is fail-closed)." >&2
+fi
+
+# The entrypoints background this script with `&` and expect one long-lived
+# foreground process, so block here instead of returning after the last `&`.
+# Argument-less `wait` returns 0 once every child is reaped, which keeps
+# `set -e` out of the way; the loops above never return on their own.
+wait
