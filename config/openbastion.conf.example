@@ -235,7 +235,7 @@ log_level = warn
 # (written by `ob-backend-setup --allowed-bastions <client_ids>`).
 # The legacy `bastion_jwt_*` keys (LLNG_BASTION_JWT over SendEnv) have been
 # removed — that transport was structurally broken. See
-# doc/bastion-architecture.md and doc/design/bastion-cert-vouching.md.
+# doc/bastion-architecture.rst and doc/design/bastion-cert-vouching.rst.
 
 # ==============================================================================
 # CrowdSec Integration (optional)
@@ -331,7 +331,7 @@ log_level = warn
 # identified, the login is denied. Leave this off until the host's setup script
 # has been re-run:
 #   grep -q 'spool-format: v1' /usr/local/sbin/ob-ssh-principals && echo OK
-# See doc/security.md.
+# See doc/security.rst.
 # ssh_key_policy_enabled = false
 
 # Allowed key types (comma-separated)

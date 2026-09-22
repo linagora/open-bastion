@@ -143,7 +143,7 @@ test_relative_links_resolve() {
     while read -r target; do
         [ -n "$target" ] || continue
         [ -e "$ROOT_DIR/${target%%#*}" ] || broken="$broken $target"
-    done < <(grep -oE '\]\([A-Za-z0-9_./-]+\.md[^)]*\)' "$CHANGELOG" \
+    done < <(grep -oE '\]\([A-Za-z0-9_./-]+\.(md|rst)[^)]*\)' "$CHANGELOG" \
              | sed 's/^](//; s/)$//' | sort -u)
 
     if [ -z "$broken" ]; then

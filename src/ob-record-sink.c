@@ -3,7 +3,7 @@
  *
  * Socket-activated (systemd, Accept=yes): one short-lived instance per
  * connection. Implements the tamper-evident recording design
- * (doc/design/tamper-evident-session-recording.md, #151).
+ * (doc/design/tamper-evident-session-recording.rst, #151).
  *
  * The unprivileged ob-session-recorder (running as the logged-in user) connects
  * via ob-record-connect and sends:

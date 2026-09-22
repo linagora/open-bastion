@@ -52,7 +52,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   homologation dossier are added, plus eight workshop-4 sheets for the LLNG
   portal and its four plugins — a trusted boundary that had none. Owner names,
   dates and acceptance decisions are left `À COMPLÉTER`: they belong to the
-  homologation authority. Start at [doc/security/README.md](doc/security/README.md).
+  homologation authority. Start at [doc/security/index.rst](doc/security/index.rst).
 - **Mutation testing runs in CI** (`tests/test_ob_mutation.sh`, catalogue in
   `tests/mutation/`). Each entry removes one security control and requires the
   suite guarding it to fail; a surviving mutant means a green suite that checks
@@ -84,6 +84,20 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   asks: the channel (security@linagora.com, never an issue or a PR), what to
   send, what happens next and by when, a safe harbour, supported versions and
   disclosure. The rest moved unchanged to **`doc/security-reference.md`**.
+- **The documentation is a Sphinx project** and ships as HTML. The two document
+  sets under `doc/` — the English technical documentation and the French EBIOS
+  Risk Manager study under `doc/security/` — are now reStructuredText and build
+  into one site with two parts. Cross-document links became `:doc:`/`:ref:`
+  roles, so a link to a page or a section that no longer exists is a build
+  failure rather than a 404 a reader finds first: the `docs` CI job builds with
+  `-W`, which also catches an orphan document and a table Sphinx cannot parse.
+  The HTML is built by CMake behind `-DBUILD_DOC=ON` (off by default, so the
+  ordinary build still needs no Python) and shipped in a new **`open-bastion-doc`**
+  binary package, installable on its own — a workstation can hold the
+  documentation without the PAM/NSS runtime. Each tag publishes it like every
+  other package: in the APT repository under `bookworm`, `trixie` and `noble`,
+  and attached to the GitHub release. References to `doc/*.md` across the
+  tree, scripts and man pages included, now name the `.rst` files.
 - **The sshd anchor walk lives in one place** (#268). `ob-fp-daemon` and
   `pam_openbastion` each carried a copy, kept in step by a comment; a divergence
   would break the SSH fingerprint binding silently. Both now call
@@ -125,7 +139,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   documentation. Still ignored, so no host is locked out; the key alone is
   logged, never the value. `tests/test_ob_config_keys.sh` fails if a generator
   emits a key the parser does not know. The authorization cache has **no** local
-  TTL setting; see [doc/configuration.md](doc/configuration.md).
+  TTL setting; see [doc/configuration.rst](doc/configuration.rst).
 - **`SECURITY.md` documents the cache that actually exists** — the `LLNGCACHE04`
   authorization cache — instead of the deleted token cache, whose documented
   layout did not match its code either. Same correction in
@@ -309,7 +323,7 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   without it any SSO account can revoke anyone's certificate; from `0.6.0`
   `sshCaAdminRule` is fail-closed, so a portal configured with the vhost rule
   alone loses its admin UI on upgrade. Both are in
-  [doc/llng-configuration.md](doc/llng-configuration.md).
+  [doc/llng-configuration.rst](doc/llng-configuration.rst).
 - **An empty `allowed_bastions` no longer passes unnoticed** (#182). It means
   "accept a hop from any vouched bastion" and is the residual defence behind a
   real gap on the SSO side. `ob-backend-setup` now asks for the list

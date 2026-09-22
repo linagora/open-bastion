@@ -92,4 +92,4 @@ rejection of non-registered keys.
 
 - `docker-demo-token/` — token auth for humans only (no service accounts)
 - `docker-demo-maxsec/` — Mode E (SSH certificates) + service accounts
-- `doc/service-accounts.md` — canonical documentation
+- `doc/service-accounts.rst` — canonical documentation

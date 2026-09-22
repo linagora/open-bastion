@@ -30,6 +30,6 @@ four above are not in place):
        ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]
      An empty file accepts a voucher from any bastion the SSO vouched for.
 
-References: doc/security/09-portail-llng.md (R-P1),
-doc/security/08-dossier-homologation.md (CE03, CE06, CE16, CE21).
+References: doc/security/09-portail-llng.rst (R-P1),
+doc/security/08-dossier-homologation.rst (CE03, CE06, CE16, CE21).
 ──────────────────────────────────────────────────────────────────────────

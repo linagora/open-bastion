@@ -129,7 +129,7 @@ validate_config() {
 #
 #   SSH_OPTIONS="-o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/etc/ssh/ssh_known_hosts"
 #
-# See doc/security/02-ssh-connection.md.
+# See doc/security/02-ssh-connection.rst.
 build_host_key_opts() {
     # Consumed by the sourcing script (ob-ssh / ob-scp / ob-sftp), not this lib.
     # shellcheck disable=SC2034

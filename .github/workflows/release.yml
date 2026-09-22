@@ -47,7 +47,9 @@ jobs:
             libsodium-dev \
             pkgconf \
             devscripts \
-            fakeroot
+            fakeroot \
+            python3-sphinx \
+            python3-sphinx-rtd-theme
 
       - name: Build Debian package
         run: |
@@ -391,6 +393,14 @@ jobs:
               <h3>3. Install</h3>
               <pre>sudo apt update
           sudo apt install open-bastion</pre>
+
+              <p>Optional packages:</p>
+              <ul>
+                <li><code>open-bastion-doc</code> &mdash; the full documentation as HTML,
+                    in <code>/usr/share/doc/open-bastion-doc/html/</code></li>
+                <li><code>open-bastion-builder</code> &mdash; the admin-side deployment
+                    artefact generator (<code>ob-builder</code>)</li>
+              </ul>
             </div>
 
             <h2>Rocky Linux / RHEL (DNF)</h2>

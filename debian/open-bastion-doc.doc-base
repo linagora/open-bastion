@@ -1,0 +1,12 @@
+Document: open-bastion
+Title: Open Bastion documentation
+Author: Linagora
+Abstract: Deployment, operation and security documentation for Open Bastion:
+ the English technical guides (quick-starts, admin guide, PAM authentication
+ modes, session recording, offline mode, hardening, configuration reference)
+ and the French EBIOS Risk Manager security study.
+Section: System/Security
+
+Format: HTML
+Index: /usr/share/doc/open-bastion-doc/html/index.html
+Files: /usr/share/doc/open-bastion-doc/html/*.html

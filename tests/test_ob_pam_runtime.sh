@@ -225,9 +225,9 @@ for f in docker-demo-cert/bastion/Dockerfile \
          docker-demo-maxsec/bastion/Dockerfile \
          docker-demo-maxsec/backend/Dockerfile \
          docker-demo-maxsec/backend/entrypoint.sh \
-         doc/pam-modes.md \
-         doc/admin-guide.md \
-         doc/presentation.md \
+         doc/pam-modes.rst \
+         doc/admin-guide.rst \
+         doc/presentation.rst \
          docker-demo-cert/README.md; do
     if [ ! -f "$REPO_ROOT/$f" ]; then
         fail "$f certificate-mode stacks deny" "file not found"

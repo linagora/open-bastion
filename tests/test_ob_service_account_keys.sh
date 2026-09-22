@@ -119,13 +119,13 @@ EOF
 }
 
 # ── 3. The documentation does not claim the SSH layer is optional ───────────
-# doc/service-accounts.md used to say, of Mode E, "No `authorized_keys` file is
+# doc/service-accounts.rst used to say, of Mode E, "No `authorized_keys` file is
 # required" -- true in the literal sense and badly misleading in practice: it
 # reads as "nothing else is needed", and the PAM fingerprint check it describes
 # is a re-validation, not an authorisation. That sentence is what cost the
 # reporter a debugging session.
 test_doc_does_not_claim_pam_is_enough() {
-    local doc="$ROOT_DIR/doc/service-accounts.md" bad=""
+    local doc="$ROOT_DIR/doc/service-accounts.rst" bad=""
     grep -q 'No `authorized_keys` file is required' "$doc" \
         && bad="$bad still-says-nothing-is-required"
     grep -q 'ExposeAuthInfo yes` must be set (the setups do this)' "$doc" \
@@ -152,7 +152,7 @@ test_exposeauthinfo_is_always_guarded() {
     # And per-function: the old check asked only "does each of the two functions
     # early-return" and "is there at least one write somewhere". Deleting the
     # ExposeAuthInfo line from the Mode E heredoc left the suite green while
-    # doc/service-accounts.md's claim about Mode E became false.
+    # doc/service-accounts.rst's claim about Mode E became false.
     for f in ob-bastion-setup ob-backend-setup; do
         local src="$ROOT_DIR/scripts/$f"
         local fn flag
@@ -366,7 +366,7 @@ test_service_keys_flag() {
 
         # It must write ExposeAuthInfo itself. Leaving it to Mode E would ship
         # an AuthorizedKeysCommand whose fingerprint check silently never runs
-        # -- the exact half-configuration doc/service-accounts.md warns about.
+        # -- the exact half-configuration doc/service-accounts.rst warns about.
         printf '%s\n' "$body" | grep -q 'ExposeAuthInfo yes' \
             || bad="$bad $f(no-ExposeAuthInfo)"
 

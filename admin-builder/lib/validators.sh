@@ -109,7 +109,7 @@ is_valid_target_role() {
 }
 
 # scenario_to_pam_mode <scenario>
-# Maps the user-facing scenario name to the PAM mode letter (see doc/pam-modes.md).
+# Maps the user-facing scenario name to the PAM mode letter (see doc/pam-modes.rst).
 scenario_to_pam_mode() {
     case "$1" in
         token-only)    printf 'A\n' ;;

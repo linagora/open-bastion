@@ -36,7 +36,7 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 | `ob_client_secret`         | OIDC client secret — use ansible-vault                                                           |
 | `ob_server_group`          | Server group name (set per-host for fleet deployments)                                           |
 | `ob_role`                  | `bastion`, `backend`, or `standalone`                                                            |
-| `ob_pam_mode`              | PAM mode A–E (see doc/pam-modes.md)                                                              |
+| `ob_pam_mode`              | PAM mode A–E (see doc/pam-modes.rst)                                                              |
 | `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                      |
 | `ob_auto_enroll`           | Run ob-enroll during the play                                                                    |
 | `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                          |

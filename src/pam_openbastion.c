@@ -1868,7 +1868,7 @@ static char *read_spool_drop(pam_handle_t *pamh, const char *suffix,
          * The pre-#249 layout. Everything below still holds, but the trust
          * root is an account other daemons also run as, so a fingerprint
          * binding read from here is worth less than one read from a root-owned
-         * spool. doc/security/99-risk-reduce.md counts on the strong version
+         * spool. doc/security/99-risk-reduce.rst counts on the strong version
          * for R-S3 and R-S15; an admin needs to know which one is deployed.
          */
         OB_LOG_WARN(pamh,
@@ -1890,7 +1890,7 @@ static char *read_spool_drop(pam_handle_t *pamh, const char *suffix,
          * The spool directory exists, so this host DOES run the principals
          * helper -- yet the drop for our sshd anchor is absent. That is the
          * realistic provisioning-drift case (#192): the fingerprint binding
-         * that doc/security/99-risk-reduce.md credits for R-S3 and R-S15 has
+         * that doc/security/99-risk-reduce.rst credits for R-S3 and R-S15 has
          * silently disappeared, and until now it said so only at DEBUG.
          * A password/keyboard-interactive login on a cert-aware host lands
          * here too, which is equally worth knowing.
@@ -3816,7 +3816,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      * it with pam_getenv — which can NEVER work: SendEnv/AcceptEnv only populate
      * the child process environment, never the PAM environment pam_getenv reads,
      * so a bastion_jwt_required backend rejected every session. That dead block
-     * has been removed (see doc/design/bastion-cert-vouching.md).
+     * has been removed (see doc/design/bastion-cert-vouching.rst).
      *
      * Instead, the bastion presents a short-lived, LLNG-signed certificate whose:
      *   - `source-address` critical option makes sshd itself refuse the cert off
@@ -3859,7 +3859,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      * post-upgrade drift, a missing tmpfiles.d entry -- makes
      * extract_ssh_cert_info() return 0, /pam/authorize is called with no
      * `fingerprint` field, and the SSO side treats the field as optional. The
-     * control that doc/security/99-risk-reduce.md credits for R-S3 and R-S15 is
+     * control that doc/security/99-risk-reduce.rst credits for R-S3 and R-S15 is
      * then gone with no operational signal, and the bastion voucher TTL is no
      * longer capped by the SSO certificate expiry either.
      *

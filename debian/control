@@ -10,6 +10,8 @@ Build-Depends: debhelper-compat (= 13),
  libssl-dev,
  libsodium-dev,
  pkgconf,
+ python3-sphinx,
+ python3-sphinx-rtd-theme,
 Homepage: https://github.com/linagora/open-bastion
 
 Package: open-bastion
@@ -64,3 +66,23 @@ Description: Open Bastion LightDM greeter for Desktop SSO
   - Multi-factor authentication support (TOTP, WebAuthn, etc.)
   - Session selection for multiple desktop environments
   - Modern, responsive design
+
+Package: open-bastion-doc
+Architecture: all
+Multi-Arch: foreign
+Section: doc
+Depends: ${misc:Depends},
+ ${sphinxdoc:Depends},
+Built-Using: ${sphinxdoc:Built-Using}
+Description: Open Bastion documentation (HTML)
+ The Open Bastion documentation, rendered to HTML with Sphinx and browsable
+ offline from /usr/share/doc/open-bastion-doc/html.
+ .
+ It gathers the English technical documentation -- deployment quick-starts,
+ the admin guide, the PAM authentication modes, session recording, offline
+ mode, hardening and the configuration reference -- and the French EBIOS Risk
+ Manager security study, including the homologation dossier and its conditions
+ of use.
+ .
+ The package is independent of the runtime: it can be installed on a
+ workstation, and the servers running the PAM/NSS module do not need it.

@@ -11,7 +11,7 @@
 #   2. Delete recordings (and their `.json`) older than `recording_retention_days`.
 #
 # This bounds disk growth: recording is fail-closed (a full disk refuses new
-# logins — see doc/session-recording.md), so unbounded recordings are an
+# logins — see doc/session-recording.rst), so unbounded recordings are an
 # availability risk. Deleting recordings also drops audit evidence, so the
 # expiry is logged at notice level for accountability and the retention default
 # is deliberately long (365 days). Set `recording_retention_days = 0` to keep
