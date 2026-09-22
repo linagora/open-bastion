@@ -524,10 +524,3 @@ Log Files
 - PAM/Open Bastion: ``journalctl | grep pam_openbastion``
 - Audit log: ``/var/log/open-bastion/audit.json``
 
-See Also
---------
-
-- :doc:`Open Bastion Admin Guide </admin-guide>`
-- :doc:`PAM Module Configuration </configuration>`
-- :doc:`Offline Mode </offline-mode>`
-- `LemonLDAP::NG Documentation <https://lemonldap-ng.org/documentation>`__

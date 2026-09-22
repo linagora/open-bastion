@@ -1,5 +1,5 @@
-Bastion Architecture with LemonLDAP::NG
-=======================================
+Bastion architecture with LLNG
+==============================
 
 This document describes the overall architecture for SSH access control using LemonLDAP::NG as the central identity provider.
 
@@ -281,7 +281,7 @@ NSS Configuration
    default_shell = /bin/bash
    force_shell = /usr/sbin/ob-login-shell
 
-``force_shell`` exists because sshd runs the ``ForceCommand`` through the login shell, and bash or zsh read the user's own startup files before the recorder starts. ``ob-login-shell`` reads none and execs the recorder; see :ref:`the login shell <session-recording-login-shell>`. A backend records nothing and does not set it.
+``force_shell`` exists because sshd runs the ``ForceCommand`` through the login shell, and bash or zsh read the user's own startup files before the recorder starts. ``ob-login-shell`` reads none and execs the recorder; see :ref:`the login shell <ssh-session-recording-login-shell>`. A backend records nothing and does not set it.
 
 Automatic Account Creation
 --------------------------
@@ -335,7 +335,7 @@ sshd_config
    Match Group *,!admin
        ForceCommand /usr/sbin/ob-session-recorder
 
-See :doc:`/session-recording` for details.
+See :doc:`/ssh-session-recording` for details.
 
 Security Model
 --------------
@@ -649,10 +649,3 @@ Ephemeral Certificate Fields
 | Extension          | ``bastion-id@open-bastion = <bastion_id>`` (optional, for tooling) |
 +--------------------+--------------------------------------------------------------------+
 
-See Also
---------
-
-- `README.md <https://github.com/linagora/open-bastion/blob/main/README.md>`__ - Installation and configuration
-- :doc:`Security Architecture </security/00-architecture>` - Security implementation details
-- `SECURITY.md <https://github.com/linagora/open-bastion/blob/main/SECURITY.md>`__ - Security policy and reporting
-- :doc:`/session-recording` - Session recording details

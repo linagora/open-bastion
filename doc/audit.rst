@@ -1,7 +1,7 @@
-Primary Audit Trace (auditd)
-============================
+Primary audit trace
+===================
 
-This document describes Open Bastion's optional **primary audit trace** based on the Linux kernel ``auditd`` subsystem. It is the second pillar of session traceability, complementary to the session recording covered in :doc:`Session Recording </session-recording>`.
+This document describes Open Bastion's optional **primary audit trace** based on the Linux kernel ``auditd`` subsystem. It is the second pillar of session traceability, complementary to the session recording covered in :doc:`/ssh-session-recording`.
 
 Rationale
 ---------
@@ -225,6 +225,6 @@ If saturation becomes an issue:
 See also
 --------
 
-- :doc:`Session Recording </session-recording>` — pty-level recording, the other half of the traceability story.
+- :doc:`/ssh-session-recording` — pty-level recording, the other half of the traceability story.
 - ``auditd.conf(5)``, ``auditctl(8)``, ``ausearch(8)``, ``aureport(8)``.
 - The shipped template: ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``.

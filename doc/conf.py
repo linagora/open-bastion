@@ -72,7 +72,10 @@ html_title = "Open Bastion %s" % version if version else "Open Bastion"
 html_copy_source = False
 html_show_sourcelink = False
 htmlhelp_basename = "open-bastion-doc"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 
+manpages_url = "https://manpages.debian.org/{path}"
 
 def setup(app):
     if _mermaid:

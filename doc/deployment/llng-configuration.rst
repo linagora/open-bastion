@@ -1,136 +1,71 @@
-LemonLDAP::NG Configuration
-===========================
+LLNG configuration
+==================
 
-Before deploying the PAM module on your servers, you need to configure LemonLDAP::NG.
 
-Step 1: Install the Plugins
----------------------------
+.. _llng-configuration-creation-of-the-oidc-relying-party:
 
-The Open Bastion plugins are available from the `Linagora plugin store <https://linagora.github.io/lemonldap-ng-plugins/>`__.
+Step1: Creation of the OIDC Relying Party
+-----------------------------------------
 
-Option A: Debian/Ubuntu (APT)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The *OIDC Relying Party* (OIDC RP) is what the servers (bastion or
+backends) enroll against. One OIDC RP can carry a whole fleet, or
+multiple OIDC RPs can be used (eg one RP per protected zone).
 
-Add the Linagora plugin repository and install:
-
-.. code:: bash
-
-   # Add repository key
-   curl -fsSL https://linagora.github.io/lemonldap-ng-plugins/store-key.asc \
-     | sudo gpg --dearmor -o /usr/share/keyrings/linagora-llng-plugins.gpg
-
-   # Add repository
-   echo "deb [signed-by=/usr/share/keyrings/linagora-llng-plugins.gpg] https://linagora.github.io/lemonldap-ng-plugins/debian stable main" \
-     | sudo tee /etc/apt/sources.list.d/llng-plugins.list
-
-   # Install (pick pam-access and/or ssh-ca depending on your auth mode)
-   sudo apt-get update
-   sudo apt-get install \
-     lemonldap-ng-plugin-oidc-device-authorization \
-     lemonldap-ng-plugin-oidc-device-organization \
-     lemonldap-ng-plugin-pam-access \
-     lemonldap-ng-plugin-ssh-ca
-   # pam-access = token-based auth; ssh-ca = certificate-based auth
-
-Option B: Plugin-store CLI (``lemonldap-ng-store``)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``lemonldap-ng-store`` CLI installs and activates plugins from the store regardless of the OS package manager. It is **bundled with LemonLDAP::NG 2.24.0 and later**; on earlier versions it is provided by the lemonldap-ng-plugins store itself — install the ``linagora-lemonldap-ng-store`` package first (from the Linagora repository set up in Option A).
-
-.. code:: bash
-
-   sudo lemonldap-ng-store add-store https://linagora.github.io/lemonldap-ng-plugins/
-   sudo lemonldap-ng-store install oidc-device-authorization --activate
-   sudo lemonldap-ng-store install oidc-device-organization --activate
-   sudo lemonldap-ng-store install pam-access --activate   # token-based auth
-   sudo lemonldap-ng-store install ssh-ca     --activate   # certificate-based auth
-   sudo systemctl restart lemonldap-ng-fastcgi-server
-
-With the Autoloader present (see Step 3), ``--activate`` is a no-op: the store drops each plugin's autoload rule into ``/etc/lemonldap-ng/autoload.d/`` and the plugin loads once its activation condition is truthy. (Only on a portal without the Autoloader does ``--activate`` fall back to editing ``customPlugins``.)
-
-   **RPM / non-Debian systems:** the ``linagora-lemonldap-ng-store`` package is currently Debian-only, so until LemonLDAP::NG **2.24.0** bundles the CLI there is no packaged plugin-install path on RHEL / Rocky / Fedora. Use a Docker image (Option C) or run the portal on Debian in the meantime.
-
-Option C: Docker
-~~~~~~~~~~~~~~~~
-
-The LemonLDAP::NG portal/manager images tagged **2.23.0-1 or later** already bundle the Open Bastion plugins — ``yadd/lemonldap-ng-portal``, ``yadd/lemonldap-ng-manager`` and ``yadd/lemonldap-ng-full`` (the high-performance uWSGI portal is a tag variant of the portal image, e.g. ``yadd/lemonldap-ng-portal:2.23.0-1-hiperf``). They also ship the Autoloader enabled, so no extra installation is needed — just activate the plugins (see Step 3). See the full image set at https://github.com/guimard/llng-docker/.
-
-Plugins used by Open Bastion
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-- **OIDCDeviceAuthorization** - Server enrollment via OAuth 2.0 Device Authorization Grant (RFC 8628)
-- **OIDCDeviceOrganization** - Extension for organizational device enrollment (tokens identify the device, not the approving admin)
-- **PamAccess** *(optional)* - Token-based authentication and bastion vouching: authorization endpoints (``/pam/authorize``, ``/pam/bastion-cert``)
-- **SSHCA** *(optional)* - Certificate-based authentication: SSH Certificate Authority
-
-..
-
-   You need at least one of **PamAccess** or **SSHCA** depending on your authentication mode. See :doc:`PAM Authentication Modes </pam-modes>`.
-
-.. _llng-configuration-step-2-create-the-oidc-relying-party:
-
-Step 2: Create the OIDC Relying Party
--------------------------------------
-
-The OIDC Relying Party (a.k.a. OIDC client) is what your servers enroll against — one RP can carry a whole fleet, or you can use several (one per project/zone). For **general** OIDC RP configuration, refer to the upstream `LemonLDAP::NG OpenID Connect documentation <https://lemonldap-ng.org/documentation/latest/idpopenidconnect.html>`__; the options below are the Open-Bastion-specific ones.
+For general OIDC RP configuration, refer to the plugin documentation,
+`LemonLDAP::NG OpenID Connect
+<https://lemonldap-ng.org/documentation/latest/idpopenidconnect.html>`__;
+This documentation focuses on the options used in an Open Bastion
+deployment.
 
 In the LLNG Manager, create a new OIDC Relying Party:
 
-1. Go to **OpenID Connect Relying Parties** → **Add**
+1. Go to OpenID Connect Relying Parties → Add
 2. Configure:
 
-   - **Client ID**: ``pam-access``
-   - **Client secret**: Generate a strong secret
-   - No scope configuration is needed (the requested ``pam:server`` scope is issued as-is); offline sessions are authorized in step 3.
+   - Client ID: ``pam-access``
+   - Client secret: Generate a strong secret
+   - No scope configuration is needed (the requested ``pam:server``
+     scope is issued as-is).
 
-3. Set the per-RP options that let servers enroll with a **renewable** identity (see :ref:`Per-RP Device Authorization Parameters <llng-plugin-parameters-per-rp-device-authorization-parameters>`):
+3. Set the options that let servers enroll with a renewable identity
+   (see :ref:`Per-RP Device Authorization Parameters
+   <llng-plugin-parameters-per-rp-device-authorization-parameters>`):
 
    - ``oidcRPMetaDataOptionsAllowDeviceAuthorization`` = ``1``
    - ``oidcRPMetaDataOptionsDeviceOwnership`` = ``organization``
-   - ``oidcRPMetaDataOptionsAllowOffline`` = ``1``
+   - ``oidcRPMetaDataOptionsAllowOffline`` = ``1``.
 
-..
+Step 2: Plugins activation
+--------------------------
 
-   **Critical — the offline refresh token.** A server's access token lasts ~1 h and is renewed by ``ob-heartbeat`` from an **offline refresh token**. That refresh token is issued only when **all** of the following hold:
+Each plugin loads automatically as soon as its activation condition is
+truthy, thanks to LLNG's Autoloader.
 
-   - the enrollment requests the ``offline_access`` scope (``ob-enroll`` always does),
-   - ``oidcRPMetaDataOptionsAllowOffline = 1`` on the RP, **and**
-   - the deployed **``oidc-device-organization`` plugin is >= 0.3.3** — older versions strip ``offline_access`` from the device scope, so the portal returns **no refresh token**.
+For the plugins ``OIDCDeviceAuthorization`` and
+``OIDCDeviceOrganization`` the activation condition have been set
+while `creating the OIDC Relying Party
+<#llng-configuration-creation-of-the-oidc-relying-party>`_.
 
-   Without a refresh token, ``ob-enroll`` fails and ``ob-bastion-setup`` refuses the Mode E lockdown (NSS/SSO would break ~1 h after enrollment). The authorization-code flow can still return a refresh token even when this is misconfigured, so test the **device** flow, not auth-code.
-
-Step 3: Activate the Plugins
-----------------------------
-
-These plugins ship **autoload rules**, so you do **not** edit ``customPlugins``. With LLNG's **Autoloader** — enabled by default in LemonLDAP::NG 2.24.0 and later, and added by the ``linagora-lemonldap-ng-store`` backport on earlier versions — each plugin loads automatically as soon as its activation condition is truthy. You toggle that condition **in the LLNG Manager**; the underlying configuration keys are listed here for reference:
-
-+--------------------------+--------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------+
-| Plugin                   | Configuration key / condition                                                  | Reference                                                                                                                           |
-+==========================+================================================================================+=====================================================================================================================================+
-| PamAccess (token auth)   | ``pamAccessActivation = 1``                                                    | `pam-access <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/pam-access#readme>`__                               |
-+--------------------------+--------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------+
-| SSHCA (certificate auth) | ``sshCaActivation = 1``                                                        | `ssh-ca <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/ssh-ca#readme>`__                                       |
-+--------------------------+--------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------+
-| OIDCDeviceAuthorization  | any RP sets ``oidcRPMetaDataOptionsAllowDeviceAuthorization`` (done in Step 2) | `oidc-device-authorization <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-authorization#readme>`__ |
-+--------------------------+--------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------+
-| OIDCDeviceOrganization   | any RP sets ``oidcRPMetaDataOptionsDeviceOwnership`` (done in Step 2)          | `oidc-device-organization <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-organization#readme>`__   |
-+--------------------------+--------------------------------------------------------------------------------+-------------------------------------------------------------------------------------------------------------------------------------+
-
-In practice you only enable PamAccess and/or SSHCA in the Manager for your auth mode; the two OIDC device plugins switch on automatically from the per-RP options you configured in :ref:`Step 2 <llng-configuration-step-2-create-the-oidc-relying-party>`. See each plugin's README (linked above) for its full list of parameters.
-
-   **Legacy portals without the Autoloader** (LLNG < 2.24.0 and no ``linagora-lemonldap-ng-store``): add the modules to ``customPlugins`` in ``[portal]`` instead — e.g. ``customPlugins = ::Plugins::OIDCDeviceAuthorization, ::Plugins::OIDCDeviceOrganization, ::Plugins::PamAccess, ::Plugins::SSHCA`` (drop ``PamAccess`` or ``SSHCA`` per your mode).
+For the other two plugins, use LLNG Manager to set
+``pamAccessActivation = 1`` and ``sshCaActivation = 1`` as activation
+conditions.
 
 Plugin parameters
------------------
+~~~~~~~~~~~~~~~~~
 
-The optional ``[portal]`` parameters for these plugins — PamAccess token settings, device-authorization tuning, and SSH CA — are listed in a separate reference page: **:doc:`LemonLDAP::NG Plugin Parameters </llng-plugin-parameters>`**. The defaults are fine for a standard setup.
+The optional parameters for these plugins are listed in a separate
+reference page, see :doc:`LLNG Plugins Parameters
+</references/llng-plugins-parameters>`. The defaults are fine for a standard
+setup.
 
-.. _llng-configuration-step-3b-restrict-device-and-the-ssh-ca-admin-routes-required:
+.. _llng-configuration-restrict-device-and-the-ssh-ca-admin-routes-required:
 
-Step 3b: Restrict ``/device`` and the SSH CA admin routes (required)
---------------------------------------------------------------------
+Step 3: Restrict ``/device`` and the SSH CA admin routes
+--------------------------------------------------------
 
-Two sets of portal routes decide who may approve a host enrolment and who may revoke certificates. Where the authorization for them lives **depends on the plugin version**, and the two regimes fail in opposite directions:
+Two sets of portal routes decide who may approve a host enrolment and
+who may revoke certificates. Depending on the plugin version, the
+configuration differs.
 
 +------------------+---------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------+
 | Plugin version   | ``/ssh/admin``, ``/ssh/certs``, ``/ssh/revoke``                                       | If you configure nothing                                                                                     |
@@ -437,11 +372,3 @@ Example: Per-Environment Groups
    }
 
 When a user moves from staging to production access, their docker and developers group memberships are automatically removed on production servers.
-
-See Also
---------
-
-- :doc:`Access & Permissions </permissions>` - Which controls live SSO-side vs server-side
-- :doc:`PAM Authentication Modes </pam-modes>` - Configure PAM on servers
-- :doc:`Configuration Reference </configuration>` - All configuration options
-- :doc:`Admin Guide </admin-guide>` - Complete administration guide

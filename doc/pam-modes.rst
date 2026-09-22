@@ -496,12 +496,3 @@ Restart SSH after changes:
 
    sudo systemctl restart sshd
 
-See Also
---------
-
-- :doc:`Access & Permissions </permissions>` - Which controls live SSO-side vs server-side
-- :doc:`LemonLDAP::NG Configuration </llng-configuration>` - Server-side setup
-- :doc:`Configuration Reference </configuration>` - All configuration options
-- :doc:`Service Accounts </service-accounts>` - SSH key authentication for automation
-- :doc:`Security Features </security>` - Key policies and rate limiting
-- :doc:`Security Analysis - SSH Connection </security/02-ssh-connection>` - Risk analysis including Mode E

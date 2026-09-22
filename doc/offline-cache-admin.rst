@@ -1,12 +1,13 @@
-Offline Credential Cache Administration
-=======================================
+Cache administration
+====================
 
-This document describes the configuration and administration of the Open Bastion offline credential cache, which enables authentication when the central LLNG server is unavailable.
+This document describes the configuration and administration of the
+Open Bastion *offline credential cache*, which enables authentication
+when the central LLNG server is unavailable.
 
-Overview
---------
-
-The offline credential cache stores encrypted user credentials locally, allowing users to authenticate even when network connectivity to the authentication server is lost. This is particularly useful for:
+The cache stores encrypted user credentials locally, allowing users to
+authenticate even when network connectivity to the authentication
+server is lost. This is particularly useful for:
 
 - Laptop users who need to login while traveling
 - Desktop systems in locations with unreliable network connectivity
@@ -27,17 +28,18 @@ The cache uses industry-standard cryptographic primitives:
 
   - Key read from a root-only key file (``/etc/open-bastion/cache.key``)
   - Falls back to machine-id derivation if no key file is present (less secure)
-  - Unique IV per encryption
+  - Unique, random IV (nonce) generated for every encryption
 
 - **Lockout Protection**: 5 failed attempts triggers a 5-minute lockout
 
 Configuration
 -------------
 
-Configuration File
-~~~~~~~~~~~~~~~~~~
+Open Bastion configuration file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Add the following options to ``/etc/open-bastion/openbastion.conf``:
+The following options in ``/etc/open-bastion/openbastion.conf`` govern
+offline credential caching:
 
 .. code:: ini
 
@@ -50,7 +52,7 @@ Add the following options to ``/etc/open-bastion/openbastion.conf``:
    # Credential TTL in seconds (default: 604800 = 7 days, range: 3600–2592000)
    offline_cache_ttl = 604800
 
-PAM Configuration
+PAM configuration
 ~~~~~~~~~~~~~~~~~
 
 The offline cache can be enabled/disabled per PAM service via module arguments:

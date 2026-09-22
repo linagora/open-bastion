@@ -1,4 +1,4 @@
-Configuration Reference
+Configuration reference
 =======================
 
 Boolean values
@@ -254,11 +254,3 @@ An administrator visits ``https://auth.example.com/device``, logs in, and enters
    echo "<access_token>" | sudo tee /var/lib/open-bastion/token
    sudo chmod 600 /var/lib/open-bastion/token
 
-See Also
---------
-
-- :doc:`LemonLDAP::NG Configuration </llng-configuration>` - Server-side LLNG setup
-- :doc:`PAM Authentication Modes </pam-modes>` - PAM configurations
-- :doc:`Service Accounts </service-accounts>` - Service account configuration
-- :doc:`CrowdSec Integration </crowdsec>` - CrowdSec configuration
-- :doc:`Security Features </security>` - Security options

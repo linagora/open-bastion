@@ -1,4 +1,4 @@
-Session Containment Hardening
+Session containment hardening
 =============================
 
    **Status: shipped in v0.2.0.** Both halves of the hardening series are implemented and opt-in: session containment via ``ob-bastion-setup --enable-hardening`` (this document) and the primary audit trace via ``ob-bastion-setup --enable-audit-trace``, documented in :doc:`Primary audit trace </audit>`.

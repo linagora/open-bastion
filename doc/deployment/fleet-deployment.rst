@@ -1,5 +1,5 @@
-Quick-start: deploy Open Bastion with a shell installer
-=======================================================
+Fleet deployment
+================
 
 This guide takes you from nothing to a working bastion + backends fleet using ``ob-builder --output-shell`` to generate a **self-extracting installer** per role, then running it on each target with ``sudo``. No Ansible, no control node — just ``scp`` + ``ssh``.
 
@@ -20,7 +20,7 @@ Prerequisites
 - The Open Bastion ``.deb``/``.rpm`` reachable by the targets from an APT/YUM repo (the default is the Linagora repo; override with ``--apt-url``).
 - SSO reachable from your workstation (for the build-time OIDC discovery) **and** from the targets (at run time, for enrolment).
 - SSH access from your workstation to each target as a user that can ``sudo``.
-- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG Configuration → Create the OIDC Relying Party <llng-configuration-step-2-create-the-oidc-relying-party>`.
+- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG Configuration → Create the OIDC Relying Party <llng-configuration-creation-of-the-oidc-relying-party>`.
 
 .. _shell-quickstart-step-1--generate-the-installers:
 
@@ -149,4 +149,6 @@ Re-running the installer is idempotent for the package/repo/config; bump the pac
 
 --------------
 
-Prefer fleet-wide, declarative deployments? Use the :doc:`Ansible quick-start </ansible-quickstart>` instead — same ``ob-builder``, same two-phase logic, driven from one inventory.
+Looking for prefer fleet-wide, declarative deployments? Use the
+:doc:`Ansible quick-start </deployment/ansible-deployment>` instead —
+same ``ob-builder``, same two-phase logic, driven from one inventory.
