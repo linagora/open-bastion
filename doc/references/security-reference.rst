@@ -1,4 +1,4 @@
-Security Reference
+Security reference
 ==================
 
 Every security control Open Bastion implements: what it defends against, how it is configured, and what it does not cover. This is reference material for operators and auditors.

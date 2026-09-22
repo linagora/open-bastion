@@ -1,4 +1,4 @@
-Offline Mode
+Offline mode
 ============
 
 This guide explains how offline authentication works and how to configure it for environments where network connectivity to the LLNG portal may be intermittent or unavailable.
@@ -570,8 +570,8 @@ Configuration
    # Max SSO unreachable time before terminating sessions (default: 1 hour)
    offline_max_sso_unreachable = 3600
 
-ob-session-monitor Service
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+``ob-session-monitor`` Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
 
@@ -584,11 +584,3 @@ ob-session-monitor Service
 
    # View logs
    journalctl -u ob-session-monitor
-
-Related Documentation
----------------------
-
-- :ref:`Security reference <security-reference-offline-credential-cache-security>`
-- :doc:`Cache Administration </offline-cache-admin>`
-- :doc:`LightDM Desktop SSO </desktop-sso>`
-- :doc:`Administrator Guide </admin-guide>`

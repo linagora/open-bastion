@@ -1,7 +1,7 @@
 Design: certificate-based bastion→backend vouching
 ==================================================
 
-Status: **implemented and shipped in v0.3.0** (it replaced the broken ``LLNG_BASTION_JWT`` / ``SendEnv`` transport, whose remains were purged in v0.3.x). Kept as a design record: it explains *why* the ephemeral-cert hop works the way it does. For what is deployed today, read :doc:`/bastion-architecture` and :doc:`/security/02-ssh-connection` — those describe the shipped behaviour and win over this document wherever they differ. Spans two repos: ``open-bastion`` and ``lemonldap-ng-plugins`` (``pam-access``, reusing ``ssh-ca``).
+Status: **implemented and shipped in v0.3.0** (it replaced the broken ``LLNG_BASTION_JWT`` / ``SendEnv`` transport, whose remains were purged in v0.3.x). Kept as a design record: it explains *why* the ephemeral-cert hop works the way it does. For what is deployed today, read :doc:`/references/bastion-architecture` and :doc:`/security/02-ssh-connection` — those describe the shipped behaviour and win over this document wherever they differ. Spans two repos: ``open-bastion`` and ``lemonldap-ng-plugins`` (``pam-access``, reusing ``ssh-ca``).
 
 Why the current mechanism is dead
 ---------------------------------

@@ -1,5 +1,5 @@
-Quick-start: deploy Open Bastion with Ansible
-=============================================
+Deploy with Ansible
+===================
 
 This guide takes you from nothing to a working bastion + backends fleet using ``ob-builder`` to generate the Ansible artefacts and a single ``ansible-playbook`` run to apply them.
 

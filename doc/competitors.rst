@@ -1,4 +1,4 @@
-Competitors and Alternatives
+Competitors and alternatives
 ============================
 
 This document compares LLNG-PAM-MODULE with alternative solutions for SSH authentication, authorization, and session management.
@@ -173,9 +173,3 @@ LLNG-PAM-MODULE with LemonLDAP::NG provides a unique combination:
 
 For organizations primarily using Linux/SSH infrastructure and needing web SSO, LemonLDAP::NG offers the most comprehensive and cost-effective solution.
 
-See Also
---------
-
-- :doc:`Bastion Architecture </bastion-architecture>` - certificate-vouching bastion authentication
-- :doc:`Session Recording </session-recording>` - SSH session recording
-- :doc:`Admin Guide </admin-guide>` - Complete administration guide

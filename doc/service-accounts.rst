@@ -1,4 +1,4 @@
-Service Accounts
+Service accounts
 ================
 
 Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, without OIDC authentication. They are defined in a local configuration file on each server.
@@ -291,10 +291,3 @@ In ``/etc/open-bastion/openbastion.conf``:
 
    service_accounts_file = /etc/open-bastion/service-accounts.conf
 
-See Also
---------
-
-- :doc:`Access & Permissions </permissions>` - Which controls live SSO-side vs server-side
-- :doc:`Configuration Reference </configuration>` - All configuration options
-- :doc:`PAM Authentication Modes </pam-modes>` - PAM configurations
-- :doc:`Security Features </security>` - SSH key policies

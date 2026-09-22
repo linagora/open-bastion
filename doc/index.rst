@@ -11,10 +11,10 @@ SSO integration.
 
    overview
    deployment/index
-   shell-quickstart
    Admin guide<admin-guide>
    PAM authentication modes <pam-modes>
    Permissions <permissions>
+   service-accounts
    offline-mode
    offline-cache-admin
    hardening
@@ -33,6 +33,7 @@ SSO integration.
 
    references/configuration
    references/llng-plugins-parameters
+   references/security-reference
    references/reference-paths
    references/bastion-architecture
    references/bastion-cert-vouching

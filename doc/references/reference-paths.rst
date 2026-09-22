@@ -167,9 +167,10 @@ Commands
 | ``ob-record-connect``               | ``/usr/bin``  | recorder→sink connector                                                                                    |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 
-See also
---------
+Recordings File Permissions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- :doc:`Administrator Guide </admin-guide>`
-- :doc:`PAM Authentication Modes </pam-modes>`
-- :doc:`Permissions map </permissions>`
+- Sessions directory: mode ``0750``, owned ``root:ob-sessions``
+- Per-user subdirectories: mode ``0750``, owned ``root:ob-sessions`` (created by sink)
+- Recording and metadata files: mode ``0640``, owned ``root:ob-sessions``
+- Config file: ``/etc/open-bastion/session-recorder.conf``, mode ``0644`` (root-owned)

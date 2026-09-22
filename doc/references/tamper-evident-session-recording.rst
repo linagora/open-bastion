@@ -1,7 +1,7 @@
-Design: tamper-evident session recording (root socket sink)
-===========================================================
+Tamper-evident session recording (root socket sink)
+===================================================
 
-Status: **implemented and shipped in v0.5.0** (``ob-record-sink``, ``ob-record.socket``, ``ob-record-connect``). Issues: `#151 <https://github.com/linagora/open-bastion/issues/151>`__ (a user can delete/alter their own recordings) — solved as described here. `#150 <https://github.com/linagora/open-bastion/issues/150>`__ (``who`` does not show bastion sessions) — solved **differently**; see §11. Kept as a design record: for the shipped behaviour read :doc:`/session-recording`, which wins over this document wherever they differ. Repo: ``open-bastion`` only (no LLNG change).
+Status: **implemented and shipped in v0.5.0** (``ob-record-sink``, ``ob-record.socket``, ``ob-record-connect``). Issues: `#151 <https://github.com/linagora/open-bastion/issues/151>`__ (a user can delete/alter their own recordings) — solved as described here. `#150 <https://github.com/linagora/open-bastion/issues/150>`__ (``who`` does not show bastion sessions) — solved **differently**; see §11. Kept as a design record: for the shipped behaviour read :doc:`/ssh-session-recording`, which wins over this document wherever they differ. Repo: ``open-bastion`` only (no LLNG change).
 
 Threat model (agreed)
 ---------------------

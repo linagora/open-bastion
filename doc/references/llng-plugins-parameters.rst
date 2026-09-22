@@ -1,7 +1,7 @@
-LemonLDAP::NG Plugin Parameters
+LLNG plugins parameters
 ===============================
 
-Optional parameters for the Open Bastion LLNG plugins, inserted into ``lemonldap-ng.ini``, section ``[portal]`` (or set via the Manager). This is a reference companion to :doc:`LemonLDAP::NG Configuration </llng-configuration>` — none of these are required to get started.
+Optional parameters for the Open Bastion LLNG plugins, inserted into ``lemonldap-ng.ini``, section ``[portal]`` (or set via the Manager). This is a reference companion to :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>` — none of these are required to get started.
 
    **Indicative only.** Names and defaults below are provided for convenience and may lag behind the plugins. The **authoritative** reference is each plugin's own documentation in the `lemonldap-ng-plugins <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins>`__ repository (see the per-plugin links at the bottom) — defer to it in case of any doubt or discrepancy.
 
@@ -71,7 +71,7 @@ When ``oidcRPMetaDataOptionsDeviceOwnership`` is set to ``organization`` on an R
 
 This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
 
-For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the critical note under :ref:`Step 2 <llng-configuration-step-2-create-the-oidc-relying-party>`.
+For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the critical note under :ref:`Step 2 <llng-configuration-creation-of-the-oidc-relying-party>`.
 
 Device Authorization Security Features
 --------------------------------------
@@ -101,8 +101,3 @@ SSH CA Parameters (optional)
 | ``sshCaKrlPath``          | ``""``       | Path for Key Revocation List              |
 +---------------------------+--------------+-------------------------------------------+
 
-See Also
---------
-
-- :doc:`LemonLDAP::NG Configuration </llng-configuration>` — the setup walkthrough
-- Per-plugin READMEs: `pam-access <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/pam-access#readme>`__, `ssh-ca <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/ssh-ca#readme>`__, `oidc-device-authorization <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-authorization#readme>`__, `oidc-device-organization <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins/oidc-device-organization#readme>`__
