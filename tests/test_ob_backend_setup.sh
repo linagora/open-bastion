@@ -183,6 +183,26 @@ test_no_sudo_conflicts_with_max_security() {
     fi
 }
 
+# ── Test 7f: NSS is configured with the lockdown, not before enrollment ──
+# Phase 1 is for files nothing reads until sshd/PAM are switched over, because
+# those are what rollback_on_failure takes back when enrollment fails.
+# nsswitch.conf is live the moment it is written and was never restored, so a
+# rolled-back backend kept "openbastion" in it with its config file deleted.
+test_nss_not_in_rollback_phase() {
+    local body enroll nss
+    body=$(sed -n '/^main() {/,/^}/p' "$SCRIPT_DIR/ob-backend-setup")
+    enroll=$(grep -n 'while ! enroll_server' <<<"$body" | cut -d: -f1)
+    nss=$(grep -n '^[[:space:]]*configure_nss ' <<<"$body" | cut -d: -f1)
+    if [ -n "$enroll" ] && [ -n "$nss" ] && [ "$(wc -l <<<"$nss")" -eq 1 ] \
+       && [ "$nss" -gt "$enroll" ] \
+       && ! grep -q 'configure_nss.*rollback_on_failure' <<<"$body"; then
+        pass "NSS is configured after enrollment, outside the rollback phase"
+    else
+        fail "NSS is configured after enrollment, outside the rollback phase" \
+             "enroll@${enroll:-?} nss@${nss:-?}"
+    fi
+}
+
 # ── Test 8: --no-create-user sets CREATE_USERS=false ──
 test_no_create_user() {
     (
@@ -590,6 +610,7 @@ run_test test_sudo_creates_sudoers_rule
 run_test test_no_sudo_skips_sudoers
 run_test test_max_security_sudo_provisions_sudoers
 run_test test_no_sudo_conflicts_with_max_security
+run_test test_nss_not_in_rollback_phase
 run_test test_no_create_user
 run_test test_dry_run
 run_test test_confirm_noninteractive

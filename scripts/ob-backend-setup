@@ -1069,7 +1069,6 @@ home_base = /home
     backup_file "$NSS_OB_CONF"
     echo "$nss_content" > "$NSS_OB_CONF"
     chmod 644 "$NSS_OB_CONF"
-    track_created "$NSS_OB_CONF"
     info "Created $NSS_OB_CONF"
 }
 
@@ -2395,7 +2394,6 @@ main() {
     download_ca_key || { rollback_on_failure; exit 1; }
     install_principals_helper || { rollback_on_failure; exit 1; }
     configure_pam_openbastion || { rollback_on_failure; exit 1; }
-    configure_nss || { rollback_on_failure; exit 1; }
 
     # ── Phase 2: portal connectivity + enrollment ──
     # Must succeed before we lock down SSH/PAM, otherwise the backend would
@@ -2460,6 +2458,10 @@ main() {
     configure_pam_sudo || true
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
+    # NSS belongs here, not in phase 1: nsswitch.conf is live for every
+    # process on the host as soon as it is written, so it is not one of the
+    # inert files rollback_on_failure can take back.
+    configure_nss || exit 1
     if [ "$ENABLE_HARDENING" = "true" ]; then
         setup_hardening || warn "Hardening step reported errors"
     else
