@@ -84,6 +84,10 @@ e2e_driver() {
 # session of its own (it is then the leader of its process group, as under
 # sshd). Extra environment as VAR=value after the command. Stdin/stdout are the
 # caller's. Returns the recorder's exit status.
+#
+# script(1) copies the command line into the typescript's first line, so a
+# marker the tests look for is split with "" in the command (echo A-""B): only
+# the command's OUTPUT then contains it whole.
 e2e_run() { # $1 original command, [VAR=value ...]
     local cmd="$1"; shift
     env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" SSH_CLIENT="203.0.113.7 50000 22" \
@@ -474,6 +478,48 @@ test_transfer_classification() {
     rm -rf "$CT_DIR"
 }
 
+# ── Test 8e: a malformed max_duration does not switch the watchdog off ──
+# `[ "abc" -gt 0 ]` fails inside an `if`, which `set -e` ignores: any typo in
+# max_duration used to disable the watchdog silently.
+test_max_duration_validation() {
+    local v got bad=0 tmpconf
+    for v in abc "" -5 1e3 12abc 1234567890 " 60" "60 "; do
+        got=$(
+            source_script "ob-session-recorder"
+            logger() { :; }
+            MAX_SESSION_DURATION="$v"
+            validate_max_duration
+            printf '%s' "$MAX_SESSION_DURATION"
+        )
+        [ "$got" = "86400" ] || { fail "max_duration '$v' should fall back to 86400" "got '$got'"; bad=1; }
+    done
+    for v in 0:0 007:7 3600:3600; do
+        got=$(
+            source_script "ob-session-recorder"
+            logger() { :; }
+            MAX_SESSION_DURATION="${v%%:*}"
+            validate_max_duration
+            printf '%s' "$MAX_SESSION_DURATION"
+        )
+        [ "$got" = "${v##*:}" ] || { fail "max_duration '${v%%:*}' should read as ${v##*:}" "got '$got'"; bad=1; }
+    done
+    # Through the config file, as an administrator's typo would arrive.
+    tmpconf=$(mktemp)
+    printf 'max_duration = 8h\n' > "$tmpconf"
+    got=$(
+        source_script "ob-session-recorder"
+        stat() { echo "0:644"; }
+        logger() { :; }
+        CONFIG_FILE="$tmpconf"
+        load_config
+        validate_max_duration
+        printf '%s' "$MAX_SESSION_DURATION"
+    )
+    rm -f "$tmpconf"
+    [ "$got" = "86400" ] || { fail "max_duration = 8h in the config should fall back to 86400" "got '$got'"; bad=1; }
+    [ "$bad" = 0 ] && pass "max_duration: non-numeric values fall back to the default, numbers are kept"
+}
+
 # ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
 # script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
 # and ob-record-connect forwards the FIFO to the sink socket.
@@ -638,7 +684,7 @@ test_e2e_command_recorded() {
     printf '#!/bin/sh\ntouch %s/fake-script-ran\nexec /bin/sh -c "$4"\n' "$E2E_WORK" > "$fake/script"
     chmod +x "$fake/script"
     e2e_driver
-    e2e_run 'echo OB-E2E-HELLO' OB_RECORD_SOCKET="$E2E_WORK/nowhere.sock" \
+    e2e_run 'echo OB-E2E-""HELLO' OB_RECORD_SOCKET="$E2E_WORK/nowhere.sock" \
         PATH="$fake:$PATH" </dev/null >/dev/null 2>&1
     j=$(e2e_last_json); ts="${j%.json}.typescript"
     if [ -e "$E2E_WORK/fake-script-ran" ]; then
@@ -657,7 +703,7 @@ test_e2e_command_recorded() {
 test_e2e_bypass_recorded() {
     local j
     e2e_driver
-    e2e_run 'scp -t /nonexistent-ob-287; echo OB-287-NOW-RECORDED' </dev/null >/dev/null 2>&1
+    e2e_run 'scp -t /nonexistent-ob-287; echo OB-287-NOW-""RECORDED' </dev/null >/dev/null 2>&1
     j=$(e2e_last_json)
     if [ -n "$j" ] && grep -q '"format": "script"' "$j" \
        && grep -q OB-287-NOW-RECORDED "${j%.json}.typescript" 2>/dev/null; then
@@ -783,6 +829,74 @@ test_e2e_transfers() {
     [ "$ok" = 1 ] && pass "E2E: rsync push/pull, scp -O push/pull, scp and sftp work, each recorded as a transfer"
 }
 
+# ── E2E 4: the recording channel lives in a private directory, removed after ──
+# The FIFO used to be `mktemp -u` + `mkfifo` in /tmp: a predicted name in a
+# shared directory. It is now inside a `mktemp -d` directory (0700). The
+# session itself looks at it, so the answer lands in its own typescript.
+test_e2e_private_channel_dir() {
+    local j tmp="$E2E_WORK/tmp"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    e2e_driver "REC_TMP_BASE=$(printf '%q' "$tmp")"
+    e2e_run "stat -c 'OB-CHAN %a %F' $tmp/ob-rec.* $tmp/ob-rec.*/stream" </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json)
+    if grep -q 'OB-CHAN 700 directory' "${j%.json}.typescript" 2>/dev/null \
+       && grep -q 'OB-CHAN 600 fifo' "${j%.json}.typescript" 2>/dev/null \
+       && [ -z "$(ls -A "$tmp")" ]; then
+        pass "E2E: FIFO in a private 0700 directory, removed when the session ends"
+    else
+        fail "E2E: recording channel not private, or left behind" \
+            "$(grep -a OB-CHAN "${j%.json}.typescript" 2>/dev/null | tr -d '\r' | tr '\n' ' ') left: $(ls -A "$tmp")"
+    fi
+}
+
+# ── E2E 5: max_duration really ends the session (#287) ──
+# The old watchdog was an ALRM trap, which bash defers until the foreground
+# command -- script, i.e. the whole session -- returns: it never fired in
+# time. Here a session that would run for 30 s has a 2 s limit.
+test_e2e_max_duration() {
+    local j tmp="$E2E_WORK/tmp" start elapsed rc=0 ok=1
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    e2e_driver "MAX_SESSION_DURATION=2" "WATCHDOG_GRACE=2" "REC_TMP_BASE=$(printf '%q' "$tmp")"
+    start=$SECONDS
+    e2e_run 'echo WD-""START; sleep 30; echo WD-""END' </dev/null >/dev/null 2>&1 || rc=$?
+    elapsed=$((SECONDS - start))
+    j=$(e2e_last_json)
+    if [ "$elapsed" -ge 15 ]; then
+        fail "E2E: max_duration=2 did not end the session (${elapsed}s)"; ok=0
+    fi
+    if ! grep -q WD-START "${j%.json}.typescript" 2>/dev/null \
+       || grep -q WD-END "${j%.json}.typescript" 2>/dev/null; then
+        fail "E2E: the timed-out session's recording is wrong" "json=$j elapsed=$elapsed $(tr -d "\r" < "${j%.json}.typescript" 2>/dev/null | tr "\n" " ")"; ok=0
+    fi
+    # The forwarder survives the hang-up and delivers the end of the stream.
+    grep -q '"status": "completed"' "$j" 2>/dev/null \
+        || { fail "E2E: the timed-out session's recording is not complete" "$(cat "$j" 2>/dev/null)"; ok=0; }
+    [ "$rc" -ne 0 ] || { fail "E2E: a timed-out session exited 0"; ok=0; }
+    [ -z "$(ls -A "$tmp")" ] || { fail "E2E: the timed-out session left its FIFO behind" "$(ls -A "$tmp")"; ok=0; }
+
+    # A transfer is bounded too: an sftp-server whose client never speaks.
+    local s have_sftp=0
+    for s in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server \
+             /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; do
+        [ -x "$s" ] && have_sftp=1
+    done
+    if [ "$have_sftp" = 1 ]; then
+        local quiet="$E2E_WORK/quiet-client" qpid
+        mkfifo "$quiet"
+        sleep 30 > "$quiet" 2>/dev/null &     # holds the transfer's stdin open, says nothing
+        qpid=$!
+        start=$SECONDS
+        e2e_run internal-sftp < "$quiet" >/dev/null 2>&1
+        elapsed=$((SECONDS - start))
+        kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
+        rm -f "$quiet"
+        [ "$elapsed" -lt 15 ] || { fail "E2E: max_duration=2 did not end an idle sftp transfer (${elapsed}s)"; ok=0; }
+    else
+        echo "SKIP: E2E max_duration on a transfer needs sftp-server"
+    fi
+    [ "$ok" = 1 ] && pass "E2E: max_duration ends the session (and a transfer), recording complete, FIFO removed"
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -797,6 +911,7 @@ run_test test_build_header_no_newline_injection
 run_test test_build_header_fallback_escapes_all_fields
 run_test test_log_lines_sanitized
 run_test test_transfer_classification
+run_test test_max_duration_validation
 run_test test_streams_via_connect
 run_test test_fail_closed_no_connect
 run_test test_env_ignored
@@ -811,6 +926,8 @@ if e2e_setup; then
     run_test test_e2e_command_recorded
     run_test test_e2e_bypass_recorded
     run_test test_e2e_transfers
+    run_test test_e2e_private_channel_dir
+    run_test test_e2e_max_duration
 fi
 
 echo ""

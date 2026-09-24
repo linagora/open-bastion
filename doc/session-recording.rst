@@ -71,15 +71,18 @@ Create ``/etc/open-bastion/session-recorder.conf``:
    # Any format other than "script" falls back to "script" in v1.
    format = script
 
-   # Maximum session duration in seconds
-   # Enforced by ob-session-recorder itself (it terminates the session at the
-   # limit). The sink then records the end like any torn-down session (status:
-   # aborted). The sink's separate "truncated" status marks recordings that hit
-   # the byte cap, not the time limit.
+   # Maximum session duration in seconds (default 86400).
+   # Enforced by ob-session-recorder: at the limit it hangs the session up, as
+   # a client disconnect would, and kills what is left 5 s later. The stream
+   # is fully delivered, so the recording is "completed"; the timeout itself
+   # is logged (journalctl -t ob-session-recorder). A value that is not a
+   # number of seconds falls back to the default, with an error in the log.
    # Set to 0 to disable (not recommended)
    max_duration = 86400
 
 Note: ``sessions_dir`` is no longer read by the recorder. The storage path is owned and managed entirely by ``ob-record-sink`` (root).
+
+The ``max_duration`` watchdog runs as the recorded user, like the rest of the recorder, and that user can kill it. The bound they cannot lift is the sink's own: ``ob-record-sink`` finalizes any recording as ``truncated`` after seven days (``OB_RECORD_MAX_SEC`` in the unit's environment, see ``ob-record-sink(8)``), and a session whose recording has ended is cut at its next output. Keep ``max_duration`` below that cap. Before 0.7.0 the watchdog did not work at all: it was a signal trap that bash deferred until the session itself had ended (`#287 <https://github.com/linagora/open-bastion/issues/287>`__).
 
 SSH Server Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~

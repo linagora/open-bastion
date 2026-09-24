@@ -33,7 +33,12 @@ PROG_NAME=$(basename "$0")
 CONFIG_FILE="/etc/open-bastion/session-recorder.conf"
 SESSIONS_DIR="/var/lib/open-bastion/sessions"
 FORMAT="script"
-MAX_SESSION_DURATION="86400"  # 24 hours default
+DEFAULT_MAX_SESSION_DURATION=86400  # 24 hours
+MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
+# Seconds between the watchdog's hang-up and its SIGKILL.
+WATCHDOG_GRACE=5
+# Where the recording channel's private directory is created (mktemp -d).
+REC_TMP_BASE="/tmp"
 
 # The connector that streams to the sink, and the sink's socket. The connector
 # is looked up only among these root-owned paths (see resolve_system_bin), and
@@ -64,7 +69,6 @@ fi
 
 # Process management
 TIMEOUT_PID=""
-RECORDING_PID=""
 
 # Logging to syslog. A logging failure (no /dev/log in a container, a stopped
 # journal) must not end the session half-way under `set -e`.
@@ -226,28 +230,122 @@ log_session_start() {
 # Cleanup on exit. The sink owns the metadata file (end time + status), so the
 # recorder no longer writes any session file here — it only tears down the
 # timeout watchdog and logs.
+#
+# Runs on EVERY exit path -- normal end, a signal caught by the traps set in
+# main(), an error under `set -e` -- so the recording channel's private
+# directory never outlives the recorder (the old timeout path exited without
+# removing its FIFO).
 cleanup() {
     local exit_code=$?
-
-    if [ -n "$TIMEOUT_PID" ]; then
-        kill "$TIMEOUT_PID" 2>/dev/null || true
-        wait "$TIMEOUT_PID" 2>/dev/null || true
-    fi
-
+    stop_watchdog
+    close_record_channel
     log_info "Session $SESSION_ID ended for user $SESSION_USER (recorder rc: $exit_code)"
 }
 
-# Handle session timeout
-handle_timeout() {
-    log_warn "Session $SESSION_ID timed out after $MAX_SESSION_DURATION seconds"
-    echo "Session timed out after $MAX_SESSION_DURATION seconds" >&2
+# 0 while process $1 exists and is not a zombie.
+proc_running() {
+    local st
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }
+    [ "${st%% *}" != "Z" ]
+}
 
-    # Kill the recording process if running
-    if [ -n "$RECORDING_PID" ]; then
-        kill -TERM "$RECORDING_PID" 2>/dev/null || true
+# max_duration must be a number of seconds. A typo used to disable the
+# watchdog without a word (`[ "abc" -gt 0 ]` fails inside an `if`, which
+# `set -e` does not catch): it now falls back to the default, loudly.
+validate_max_duration() {
+    if [[ ! "$MAX_SESSION_DURATION" =~ ^[0-9]{1,9}$ ]]; then
+        log_err "invalid max_duration '$(log_safe "$MAX_SESSION_DURATION")' (seconds expected); using the default, ${DEFAULT_MAX_SESSION_DURATION}s"
+        MAX_SESSION_DURATION=$DEFAULT_MAX_SESSION_DURATION
     fi
+    MAX_SESSION_DURATION=$((10#$MAX_SESSION_DURATION))
+}
 
-    exit 124  # Standard timeout exit code
+# ── max_duration watchdog ─────────────────────────────────────────────────────
+#
+# The previous watchdog was `trap handle_timeout ALRM`, the alarm sent by a
+# background sleep. Bash defers a trap until the foreground command returns --
+# here script(1), that is the whole session -- so it never fired in time; the
+# pid it meant to kill was never assigned; and its `exit 124` skipped the FIFO
+# cleanup. This one acts from outside the recorder: when the time is up it
+# hangs the session up, as a client disconnect would (script dies, the shell
+# inside gets SIGHUP; the forwarder ignores SIGHUP, drains what was written and
+# completes the recording), and kills whatever is still there after
+# WATCHDOG_GRACE seconds.
+#
+# It runs as the recorded user, who can kill it like any of their processes.
+# The bound that user cannot lift is the sink's own duration cap
+# (ob-record-sink(8), OB_RECORD_MAX_SEC).
+
+# What the watchdog signals: the session's process group when this recorder
+# leads it or shares the SSH session leader's (the production cases: sshd's
+# child calls setsid(), and the login shell usually execs us), otherwise the
+# recorder and its children only -- never a group that could hold unrelated
+# processes.
+watchdog_scope() {
+    local st pgid sid
+    { read -r st < "/proc/$$/stat"; } 2>/dev/null || { printf 'pid %s\n' "$$"; return 0; }
+    st=${st##*) }
+    read -r _ _ pgid sid _ <<< "$st"
+    if [ "$pgid" = "$$" ] || [ "$pgid" = "$sid" ]; then
+        printf 'group %s\n' "$pgid"
+    else
+        printf 'pid %s\n' "$$"
+    fi
+}
+
+watchdog_signal() { # $1 signal  $2 scope, as printed by watchdog_scope
+    local sig="$1" kind="${2%% *}" id="${2#* }" kids="" c
+    if [ "$kind" = "group" ]; then
+        kill -"$sig" -- "-$id" 2>/dev/null || true
+        return 0
+    fi
+    { read -r kids < "/proc/$id/task/$id/children"; } 2>/dev/null || kids=""
+    kill -"$sig" "$id" 2>/dev/null || true
+    for c in $kids; do
+        [ "$c" = "$BASHPID" ] || kill -"$sig" "$c" 2>/dev/null || true
+    done
+}
+
+start_watchdog() {
+    local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ scope
+    [ "$limit" -gt 0 ] || return 0
+    scope=$(watchdog_scope)
+    (
+        # Stopped early by cleanup(): take the sleep down too.
+        trap 'kill "${sleep_pid:-}" 2>/dev/null; exit 0' TERM
+        sleep "$limit" &
+        sleep_pid=$!
+        wait "$sleep_pid" 2>/dev/null
+        proc_running "$recorder" || exit 0
+        # The hang-up below reaches this subshell too; cleanup()'s TERM is moot
+        # from here on, it exits by itself once the recorder is gone.
+        trap '' HUP TERM
+        log_warn "Session $SESSION_ID reached max_duration (${limit}s); terminating it"
+        if [ -n "${SSH_TTY:-}" ] && [ -c "$SSH_TTY" ]; then
+            printf '\r\nSession terminated: maximum duration (%ss) reached.\r\n' "$limit" \
+                > "$SSH_TTY" 2>/dev/null || true
+        fi
+        watchdog_signal HUP "$scope"
+        for ((i = 0; i < grace * 10; i++)); do
+            proc_running "$recorder" || exit 0
+            sleep 0.1
+        done
+        log_warn "Session $SESSION_ID still running ${grace}s after the hang-up; killing it"
+        [ -n "$OB_REC_DIR" ] && rm -rf -- "$OB_REC_DIR"
+        watchdog_signal KILL "$scope"
+    ) </dev/null >/dev/null 2>&1 &
+    TIMEOUT_PID=$!
+}
+
+# Not waited for: once it has hung the session up it ignores TERM and leaves
+# by itself when the recorder is gone, and waiting here would hold the
+# recorder -- which it is polling -- for the whole grace period.
+stop_watchdog() {
+    if [ -n "$TIMEOUT_PID" ]; then
+        kill "$TIMEOUT_PID" 2>/dev/null || true
+        TIMEOUT_PID=""
+    fi
 }
 
 # ── File transfers ────────────────────────────────────────────────────────────
@@ -588,6 +686,7 @@ record_transfer() {
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
     fi
+    start_watchdog
     # An argv, not a command line: no shell ever sees the client's string.
     "$TRANSFER_BIN" ${TRANSFER_ARGS[@]+"${TRANSFER_ARGS[@]}"}
 }
@@ -597,6 +696,7 @@ record_transfer() {
 # cannot be opened via a path/`/dev/fd` (ENXIO). So `script` writes the typescript
 # to a FIFO (a real inode it can open) and ob-record-connect forwards FIFO →
 # socket in the background.
+OB_REC_DIR=""
 OB_REC_FIFO=""
 OB_REC_PID=""
 
@@ -604,29 +704,58 @@ OB_REC_PID=""
 # (it connects + sends the header FIRST, then blocks opening the FIFO), and
 # confirm the connection succeeded BEFORE the caller starts the shell. Returns
 # non-zero (cleaning up) when the sink is unreachable — so we fail closed.
+#
+# The FIFO lives in a private directory made by `mktemp -d` (mode 0700), not
+# at a name `mktemp -u` merely predicted in the shared /tmp, which another
+# user could take first between the two calls.
 open_record_channel() {
     local header="$1"
-    OB_REC_FIFO="$(mktemp -u "${TMPDIR:-/tmp}/ob-rec.$$.XXXXXX")" || { OB_REC_FIFO=""; return 1; }
-    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then OB_REC_FIFO=""; return 1; fi
+    OB_REC_DIR=$(mktemp -d "$REC_TMP_BASE/ob-rec.XXXXXXXXXX") || { OB_REC_DIR=""; return 1; }
+    OB_REC_FIFO="$OB_REC_DIR/stream"
+    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then
+        close_record_channel
+        return 1
+    fi
     OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
         </dev/null >/dev/null &
     OB_REC_PID=$!
     # ob-record-connect connects (fast) then blocks on open(FIFO). If it has
     # already exited a moment later, the connect failed → the sink is down.
     sleep 0.2
-    if ! kill -0 "$OB_REC_PID" 2>/dev/null; then
+    if ! proc_running "$OB_REC_PID"; then
         wait "$OB_REC_PID" 2>/dev/null || true
-        rm -f "$OB_REC_FIFO"; OB_REC_FIFO=""; OB_REC_PID=""
+        OB_REC_PID=""
+        close_record_channel
         return 1
     fi
     return 0
 }
 
-# Wait for the forwarder to drain and tidy up the FIFO.
+# Let the forwarder finish and remove the channel's directory. Idempotent:
+# record_script() calls it, and cleanup() on every exit path.
+#
+# Once script has closed the FIFO the forwarder has only the pipe buffer left
+# to send, then the end-of-stream frame. One still running after a few seconds
+# is stuck -- script never opened the FIFO, or the sink stopped reading -- and
+# is stopped with SIGTERM (it ignores SIGHUP), which leaves the recording
+# "aborted": what it is.
 close_record_channel() {
-    [ -n "$OB_REC_PID" ] && { wait "$OB_REC_PID" 2>/dev/null || true; }
-    [ -n "$OB_REC_FIFO" ] && rm -f "$OB_REC_FIFO"
-    OB_REC_FIFO=""; OB_REC_PID=""
+    local i
+    if [ -n "$OB_REC_PID" ]; then
+        for ((i = 0; i < 50; i++)); do
+            proc_running "$OB_REC_PID" || break
+            sleep 0.1
+        done
+        if proc_running "$OB_REC_PID"; then
+            log_warn "Session $SESSION_ID: recording forwarder still running at the end of the session; stopping it"
+            kill -TERM "$OB_REC_PID" 2>/dev/null || true
+        fi
+        wait "$OB_REC_PID" 2>/dev/null || true
+    fi
+    if [ -n "$OB_REC_DIR" ]; then
+        rm -rf -- "$OB_REC_DIR"
+    fi
+    OB_REC_DIR="" OB_REC_FIFO="" OB_REC_PID=""
 }
 
 # Record an interactive/PTY session: script writes the typescript to a FIFO that
@@ -645,6 +774,7 @@ record_script() {
         echo "Session recording is required but unavailable; access refused." >&2
         return 1
     fi
+    start_watchdog
 
     # -f flushes after each write so the sink (and any live monitor) sees output
     # promptly. `|| rc=$?` keeps `set -e` from exiting before cleanup.
@@ -750,6 +880,7 @@ main() {
     fi
 
     load_config
+    validate_max_duration
 
     # Generate session ID and timestamps
     SESSION_ID=$(generate_session_id)
@@ -777,33 +908,20 @@ main() {
 
     log_session_start
 
-    # Setup cleanup trap
+    # cleanup() runs on every way out. A hang-up (client gone, or the
+    # max_duration watchdog) or a TERM becomes an ordinary exit, so it runs
+    # then too; bash defers these traps while script(1) is in the foreground,
+    # but script dies of the same hang-up, so they run right after.
     trap cleanup EXIT
-    trap handle_timeout ALRM
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
-    # Set session timeout (in background).
-    #
-    # CRITICAL: redirect stdin/stdout/stderr to /dev/null. Without this, the
-    # background subshell inherits the SSH channel's FDs from sshd; sshd then
-    # waits for ALL processes holding those FDs to release them before closing
-    # the channel. For interactive sessions this is masked because the user's
-    # shell holds the channel anyway, but for scp/sftp/rsync the transfer
-    # finishes cleanly yet "the command hangs" because sshd is waiting on the
-    # leaked sleep child. See: https://serverfault.com/q/342436
-    #
-    # We also trap TERM in the subshell to kill the sleep grandchild on
-    # cleanup, so we don't leak a sleep process for MAX_SESSION_DURATION.
-    if [ "$MAX_SESSION_DURATION" -gt 0 ]; then
-        local parent_pid=$$
-        (
-            trap 'kill "${sleep_pid:-0}" 2>/dev/null; exit 0' TERM HUP
-            sleep "$MAX_SESSION_DURATION" &
-            sleep_pid=$!
-            wait "$sleep_pid" 2>/dev/null
-            kill -ALRM "$parent_pid" 2>/dev/null || true
-        ) </dev/null >/dev/null 2>&1 &
-        TIMEOUT_PID=$!
-    fi
+    # The max_duration watchdog is started by record_script/record_transfer,
+    # once there is a session to stop (see start_watchdog). Its stdio goes to
+    # /dev/null: a background process holding the SSH channel's descriptors
+    # makes sshd wait for it before closing the channel, and a finished scp
+    # then "hangs" (https://serverfault.com/q/342436).
 
     # A genuine file transfer (scp, sftp, rsync; see classify_transfer) needs
     # raw stdio: it bypasses the PTY recorder, metadata only. Everything else
