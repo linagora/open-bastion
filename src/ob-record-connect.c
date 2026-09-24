@@ -47,6 +47,10 @@
  * header here cannot make the sink write under another user's name.
  *
  * Usage:  ob-record-connect HEADER_JSON STREAM_PATH
+ *         STREAM_PATH may be "-" for a metadata-only session (no payload): the
+ *         connector sends the header, waits for the ACK, and sends only the
+ *         end-of-stream frame. A transfer uses "-" so it never opens a path,
+ *         which also means it can never read back a file it also writes to.
  * Env:    OB_RECORD_SOCKET   override socket path (default /run/open-bastion/rec.sock)
  *
  * Copyright (C) 2026 Linagora
@@ -61,6 +65,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -69,6 +74,10 @@
 /* The sink writes this one byte once the session's metadata and recording file
  * exist. Must match OB_RECORD_ACK in ob-record-sink.c. */
 #define OB_RECORD_ACK 0x06 /* ASCII ACK */
+/* Bound the wait for that ACK: a sink that accepts the connection but never
+ * answers must not hang the caller forever (the transfer path runs this
+ * synchronously). Matches the recorder's CONNECT_TIMEOUT for the PTY path. */
+#define ACK_TIMEOUT_SEC 15
 
 static int write_all(int fd, const char *buf, size_t len)
 {
@@ -160,9 +169,13 @@ int main(int argc, char **argv)
 
     /* Wait for the sink's ACK: one byte, sent only after it has created this
      * session's metadata and recording file. Anything else -- EOF (the sink
-     * rejected the header and closed), a read error, or a wrong byte -- means
-     * the session is NOT being recorded, so we exit non-zero WITHOUT opening
-     * the FIFO. The recorder then refuses the session. */
+     * rejected the header and closed), a read error, a wrong byte, or no answer
+     * within ACK_TIMEOUT_SEC -- means the session is NOT being recorded, so we
+     * exit non-zero WITHOUT opening the stream. The recorder then refuses the
+     * session. The timeout matters on the transfer path, which runs this
+     * synchronously: a sink that accepts but never answers must not hang it. */
+    struct timeval atv = {.tv_sec = ACK_TIMEOUT_SEC, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &atv, sizeof(atv));
     unsigned char ack = 0;
     ssize_t an = read(fd, &ack, 1);
     while (an < 0 && errno == EINTR)
@@ -170,10 +183,15 @@ int main(int argc, char **argv)
     if (an != 1 || ack != OB_RECORD_ACK) {
         fprintf(stderr,
                 "[ob-record-connect] the recording sink did not acknowledge the session "
-                "(it refused the header or could not create the recording); refusing\n");
+                "(it refused the header, could not create the recording, or did not "
+                "answer in time); refusing\n");
         close(fd);
         return 1;
     }
+    /* Clear the receive timeout: the stream that follows has none (an idle
+     * interactive session is normal; the sink bounds it by liveness). */
+    struct timeval zero = {.tv_sec = 0, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &zero, sizeof(zero));
 
     /* Tell the recorder the sink accepted, so it can start the session only
      * now. A short, fixed token on stdout; the recorder reads one line. */
@@ -184,33 +202,38 @@ int main(int argc, char **argv)
     }
 
     /* Open the stream source. For a PTY session this is a FIFO that `script`
-     * opens for writing once it starts (so this open blocks until then). For a
-     * transfer session it is /dev/null (immediate EOF, metadata only). */
-    int in = open(stream_path, O_RDONLY);
-    if (in < 0) {
-        fprintf(stderr, "[ob-record-connect] open(%s): %s\n", stream_path, strerror(errno));
-        close(fd);
-        return 1;
-    }
-
-    /* Forward stream -> socket, one frame per read. BUF_SZ must not exceed
-     * the sink's frame cap (its COPY_BUF, also 64 KiB). */
-    char buf[BUF_SZ];
-    ssize_t n;
+     * opens for writing once it starts (so this open blocks until then). A
+     * metadata-only session passes "-": there is no stream, so we do not open
+     * any path (which is what keeps a transfer from ever reading back a file
+     * it also writes to) and send only the end-of-stream frame. */
+    int in = -1;
     int rc = 0;
-    while ((n = read(in, buf, sizeof(buf))) != 0) {
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            fprintf(stderr, "[ob-record-connect] read(stream): %s\n", strerror(errno));
-            rc = 1;
-            break;
+    if (strcmp(stream_path, "-") != 0) {
+        in = open(stream_path, O_RDONLY);
+        if (in < 0) {
+            fprintf(stderr, "[ob-record-connect] open(%s): %s\n", stream_path, strerror(errno));
+            close(fd);
+            return 1;
         }
-        if (write_frame(fd, buf, (size_t)n) < 0) {
-            fprintf(stderr, "[ob-record-connect] write(socket): %s\n", strerror(errno));
-            rc = 1;
-            break;
+        /* Forward stream -> socket, one frame per read. BUF_SZ must not exceed
+         * the sink's frame cap (its COPY_BUF, also 64 KiB). */
+        char buf[BUF_SZ];
+        ssize_t n;
+        while ((n = read(in, buf, sizeof(buf))) != 0) {
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                fprintf(stderr, "[ob-record-connect] read(stream): %s\n", strerror(errno));
+                rc = 1;
+                break;
+            }
+            if (write_frame(fd, buf, (size_t)n) < 0) {
+                fprintf(stderr, "[ob-record-connect] write(socket): %s\n", strerror(errno));
+                rc = 1;
+                break;
+            }
         }
+        close(in);
     }
     /* Clean EOF only: vouch that the stream is complete. */
     if (rc == 0 && write_frame(fd, NULL, 0) < 0) {
@@ -218,7 +241,6 @@ int main(int argc, char **argv)
         rc = 1;
     }
 
-    close(in);
     shutdown(fd, SHUT_WR);
     close(fd);
     return rc;

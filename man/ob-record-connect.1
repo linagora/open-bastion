@@ -57,7 +57,9 @@ For a PTY session,
 is a FIFO that
 .BR script (1)
 writes the typescript to; for a metadata-only transfer session it is
-\fI/dev/null\fR (immediate EOF, so only the end-of-stream frame). A FIFO is used rather than handing
+.B \-
+(no stream: the connector opens no path and sends only the end-of-stream
+frame, so it can never read back a file it also writes to). A FIFO is used rather than handing
 .BR script
 the socket directly because
 .BR script
