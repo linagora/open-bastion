@@ -209,25 +209,38 @@ build_header() {
 }
 
 # JSON string escaping (RFC 8259 §7): backslash, quote, and every control
-# character, the common ones by name and the rest as \u00XX. That includes the
-# C1 range 0x80-0x9f: LC_ALL=C keeps this working byte by byte, but its
-# [[:cntrl:]] covers only C0 and DEL, so the C1 controls (0x9b is CSI, an escape
-# sequence introducer) would otherwise pass through raw and be invalid JSON.
+# character, the common ones by name and the rest as \u00XX.
+#
+# The control set is C0 (0x00-0x1f) + DEL (0x7f), each a single byte, and the
+# C1 controls U+0080-U+009F (0x9b is CSI, an escape-sequence introducer). In
+# UTF-8 those C1 code points are the TWO bytes 0xc2 0x80 .. 0xc2 0x9f, not the
+# raw bytes 0x80-0x9f -- those are ordinary continuation bytes of accented
+# letters, emoji and the like, and escaping them byte-wise corrupts valid
+# UTF-8. So we escape the 0xc2 0x8x/0x9x sequence, and leave every other high
+# byte untouched. (jq, the normal path, does all this itself; this fallback is
+# best-effort but must not mangle UTF-8.)
 json_escape() {
-    local s="$1" out="" c code i LC_ALL=C
+    local s="$1" out="" c nx code i LC_ALL=C
     s=${s//\\/\\\\}
     s=${s//\"/\\\"}
     s=${s//$'\n'/\\n}
     s=${s//$'\r'/\\r}
     s=${s//$'\t'/\\t}
-    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f'-$'\x9f']* ]]; then
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f']* || "$s" == *$'\xc2'[$'\x80'-$'\x9f']* ]]; then
         for ((i = 0; i < ${#s}; i++)); do
             c=${s:i:1}
             printf -v code '%d' "'$c"
             [ "$code" -lt 0 ] && code=$((code + 256))
-            if { [ "$code" -ge 1 ] && [ "$code" -le 31 ]; } || [ "$code" -eq 127 ] \
-               || { [ "$code" -ge 128 ] && [ "$code" -le 159 ]; }; then
+            if { [ "$code" -ge 1 ] && [ "$code" -le 31 ]; } || [ "$code" -eq 127 ]; then
                 printf -v c '\\u%04x' "$code"
+            elif [ "$code" -eq 194 ]; then   # 0xc2: maybe a C1 control
+                nx=${s:i+1:1}
+                printf -v code '%d' "'$nx"
+                [ "$code" -lt 0 ] && code=$((code + 256))
+                if [ "$code" -ge 128 ] && [ "$code" -le 159 ]; then
+                    printf -v c '\\u%04x' "$code"
+                    i=$((i + 1))   # consumed the second byte too
+                fi
             fi
             out+=$c
         done
@@ -238,9 +251,10 @@ json_escape() {
 
 # A client-supplied string made safe for one syslog line: at most 1024 bytes,
 # and quoted with printf %q -- one line, every control character visible --
-# when it holds any C0, DEL or C1 (0x80-0x9f) control. A truncated string keeps
-# its true length and a hash, so an attacker cannot pad the interesting part out
-# of the logged window. Plain commands are logged as they are, readable.
+# when it holds a C0/DEL control or a real C1 control (U+0080-U+009F, i.e. the
+# UTF-8 bytes 0xc2 0x80..0xc2 0x9f). Raw high bytes that are ordinary UTF-8 are
+# left readable. A truncated string keeps its true length and a hash, so an
+# attacker cannot pad the interesting part out of the logged window.
 log_safe() {
     local s="$1" LC_ALL=C
     if [ "${#s}" -gt 1024 ]; then
@@ -250,7 +264,7 @@ log_safe() {
         [ -n "$hash" ] || hash="?"
         s="${s:0:1024}[...+$((len - 1024)) bytes, ${len} total, sha256:${hash}]"
     fi
-    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f'-$'\x9f']* ]]; then
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f']* || "$s" == *$'\xc2'[$'\x80'-$'\x9f']* ]]; then
         printf '%q' "$s"
     else
         printf '%s' "$s"
@@ -265,13 +279,15 @@ log_session_start() {
 # (OB_HEADER_MAX). The header carries the client's command, and the sink
 # rejects an oversized line -- so without this the connection would be made and
 # only then refused, the window #287 is about. We measure the built header, so
-# JSON escaping (which can expand a byte up to sixfold) is counted exactly; the
-# check covers the transfer path too (its header is 2 bytes shorter). A refused
-# command is logged with its length and a hash, never in full. Fail closed.
+# JSON escaping (which can expand a byte up to sixfold) is counted exactly.
+# FORMAT is "script" here; the transfer header uses "transfer", 2 bytes LONGER,
+# so we leave a 4-byte margin (the newline the connector adds, plus those 2) to
+# be sure the transfer form fits the sink's cap too. A refused command is
+# logged with its length and a hash, never in full. Fail closed.
 check_header_size() {
     local h LC_ALL=C
     h=$(build_header)
-    if [ "${#h}" -ge "$((OB_HEADER_MAX - 2))" ]; then
+    if [ "${#h}" -ge "$((OB_HEADER_MAX - 4))" ]; then
         local len hash
         len=$(printf '%s' "$ORIGINAL_COMMAND" | LC_ALL=C wc -c | tr -d ' ')
         hash=$(printf '%s' "$ORIGINAL_COMMAND" | sha256sum 2>/dev/null | cut -c1-16)
@@ -380,8 +396,11 @@ watchdog_targets() { # $1 recorder pid  $2 forwarder pid (may be empty)  $3 watc
 start_watchdog() {
     local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ fwd="$OB_REC_PID"
     local rstart
-    rstart=$(proc_starttime "$recorder") || return 0
     [ "$limit" -gt 0 ] || return 0
+    if ! rstart=$(proc_starttime "$recorder"); then
+        log_warn "Session $SESSION_ID: cannot read /proc/$recorder/stat; max_duration watchdog not armed"
+        return 0
+    fi
     (
         self=$BASHPID
         # Stopped early by cleanup(): take the sleep down too.
@@ -755,13 +774,16 @@ classify_transfer() {
 record_transfer() {
     FORMAT="transfer"
     log_info "Session $SESSION_ID: file-transfer (no PTY recording): $(log_safe "$ORIGINAL_COMMAND")"
-    # Send the header with an EMPTY stream (/dev/null): ob-record-connect connects,
-    # sends the header, reads EOF from /dev/null and half-closes → the sink records
-    # a transfer session (metadata only). A connect failure returns non-zero, so we
-    # fail closed and never run the transfer unrecorded.
-    if ! OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$(build_header)" /dev/null \
+    # Send the header with NO stream ("-"): ob-record-connect connects, sends
+    # the header, waits for the sink's ACK, and sends only the end-of-stream
+    # frame → the sink records a transfer session (metadata only). "-", not
+    # /dev/null: the connector must not read back a path, and its own stdout
+    # here goes to /dev/null. A connect failure, or no ACK, returns non-zero,
+    # so we fail closed and never run the transfer unrecorded. Its stderr is
+    # left visible (it explains an unreachable sink to the user).
+    if ! OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$(build_header)" - \
             </dev/null >/dev/null; then
-        log_err "recording sink unreachable; refusing file transfer (fail-closed)"
+        log_err "recording sink unavailable; refusing file transfer (fail-closed)"
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
     fi
@@ -805,8 +827,11 @@ open_record_channel() {
         close_record_channel
         return 1
     fi
+    # The connector's stdout is the ready FIFO (its OB_READY token); its stderr
+    # is left on the recorder's stderr so a "cannot reach the sink" message
+    # reaches the user and the journal instead of being swallowed.
     OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
-        </dev/null >"$ready_fifo" 2>/dev/null &
+        </dev/null >"$ready_fifo" &
     OB_REC_PID=$!
     # Blocks until the connector opens its stdout (at once) and either writes
     # the token or exits. The timeout guards against a sink that took the
@@ -864,6 +889,7 @@ record_script() {
     [ -n "$ORIGINAL_COMMAND" ] && target="$ORIGINAL_COMMAND"
 
     if ! open_record_channel "$header"; then
+        log_err "Session $SESSION_ID: recording sink did not acknowledge the session; refusing (fail-closed)"
         echo "Session recording is required but unavailable; access refused." >&2
         return 1
     fi
