@@ -353,29 +353,35 @@ test_log_safe_truncation() {
     fi
 }
 
-# ── Test 8c3: C1 control bytes (0x80-0x9f) are escaped, not passed raw ──
-# LC_ALL=C [[:cntrl:]] covers only C0 and DEL; 0x9b is CSI, an escape sequence
-# introducer, and must not reach the JSON header or a log line raw.
+# ── Test 8c3: real C1 controls (U+0080-U+009F) are escaped, valid UTF-8 kept ──
+# U+009B is CSI; in UTF-8 it is the two bytes 0xc2 0x9b and must not reach the
+# JSON header or a syslog line intact. But 0x80-0x9f as raw bytes are ordinary
+# UTF-8 continuation bytes (é, emoji, Cyrillic), and escaping them byte-wise
+# would corrupt valid text -- so those must pass through untouched.
 test_c1_bytes_escaped() {
     local h logline
     h=$(
         source_script "ob-session-recorder"
         command() { [ "${1:-}" = "-v" ] && [ "${2:-}" = "jq" ] && return 1; builtin command "$@"; }
         SESSION_ID="id"; FORMAT="script"; CLIENT_IP="x"; TTY_NAME="x"; SESSION_START="x"
-        ORIGINAL_COMMAND=$'ls\x9b2J\x80end'
+        # U+009B (CSI, 0xc2 0x9b) then a valid UTF-8 word "Élève café".
+        ORIGINAL_COMMAND=$'ls\xc2\x9b2J \xc3\x89l\xc3\xa8ve caf\xc3\xa9'
         build_header
     )
     logline=$(
         source_script "ob-session-recorder"
-        log_safe $'ls\x9b2J'
+        log_safe $'ls\xc2\x9b2J'
     )
-    # The raw C1 byte must be gone from both, and the header must name it \u009b.
-    if ! printf '%s' "$h" | grep -q $'\x9b' && printf '%s' "$h" | grep -q '\\u009b' \
-       && printf '%s' "$h" | grep -q '\\u0080' \
-       && ! printf '%s' "$logline" | grep -q $'\x9b'; then
-        pass "C1 control bytes escaped in the header and the log"
+    # The C1 control must be escaped to \u009b, the raw sequence gone; and the
+    # valid UTF-8 must survive byte for byte (still parseable, accents intact).
+    if printf '%s' "$h" | grep -q '\\u009b' \
+       && ! printf '%s' "$h" | grep -q $'\xc2\x9b' \
+       && printf '%s' "$h" | grep -q $'caf\xc3\xa9' \
+       && printf '%s' "$h" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null \
+       && ! printf '%s' "$logline" | grep -q $'\xc2\x9b'; then
+        pass "real C1 controls escaped, valid UTF-8 preserved, header still parses"
     else
-        fail "a C1 control byte was passed through raw" "hdr=$h log=$logline"
+        fail "C1 escaping wrong or UTF-8 mangled" "hdr=$h log=$logline"
     fi
 }
 
@@ -974,6 +980,85 @@ test_e2e_oversized_command() {
     fi
 }
 
+# A tiny AF_UNIX stub sink at $1, in the background, that accepts one
+# connection, reads the header line, and then behaves per $2:
+#   noack   close without the ACK          (rejection the recorder must obey)
+#   permit  send the ACK, drain, then close (a sink that would accept anything)
+# Echoes nothing; kill it via the returned pid.
+e2e_stub_sink() { # $1 sockpath  $2 mode -> pid
+    python3 - "$1" "$2" >/dev/null 2>&1 <<'PY' &
+import os, socket, sys
+path, mode = sys.argv[1], sys.argv[2]
+try: os.unlink(path)
+except FileNotFoundError: pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); srv.bind(path); srv.listen(4)
+while True:
+    c, _ = srv.accept()
+    f = c.makefile("rb"); f.readline()          # the header line
+    if mode == "permit":
+        c.sendall(b"\x06")                        # OB_RECORD_ACK
+        try:
+            while c.recv(65536): pass
+        except OSError:
+            pass
+    c.close()
+PY
+    echo $!
+}
+
+# ── E2E 7: the recorder refuses a session the sink does not ACK (#287) ──
+# The recorder must not start `script` unless the connector reported OB_READY,
+# which it does only after the sink's ACK. A stub that closes without the ACK
+# stands for any rejection; the session must be refused and nothing recorded.
+test_e2e_no_ack_refused() {
+    local sock="$E2E_WORK/noack.sock" pid n0 rc=0 j
+    pid=$(e2e_stub_sink "$sock" noack)
+    for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
+    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")"
+    n0=$(e2e_session_count)
+    # Refusal must be prompt: a version that ignored the missing ACK and started
+    # `script` would block forever opening the FIFO (no reader), so `timeout`
+    # bounds it and a 124 (killed) counts as "not properly refused".
+    timeout 30 env -u SSH_TTY SSH_ORIGINAL_COMMAND='echo OB-SHOULD-NOT-""RUN' \
+        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
+        setsid -w bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then
+        fail "E2E: a session with no sink ACK was not promptly refused (rc=$rc)"
+    elif [ "$(e2e_session_count)" -ne "$n0" ]; then
+        fail "E2E: a session with no sink ACK still recorded something"
+    else
+        pass "E2E: no sink ACK -> session refused, nothing recorded"
+    fi
+}
+
+# ── E2E 8: check_header_size refuses up front, before any sink is consulted ──
+# Point the recorder at a stub that would ACK anything, and give it an oversized
+# command. If check_header_size is in place, the recorder refuses BEFORE
+# connecting, so the permissive sink never lets it record. Without that check
+# the recorder would connect, get the ACK, and record the oversized session.
+test_e2e_header_cap_early() {
+    local sock="$E2E_WORK/permit.sock" pid n0 rc=0
+    pid=$(e2e_stub_sink "$sock" permit)
+    for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
+    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")"
+    n0=$(e2e_session_count)
+    local pad; pad=$(head -c 9000 /dev/zero | tr '\0' A)
+    timeout 30 env -u SSH_TTY SSH_ORIGINAL_COMMAND="echo hi #$pad" \
+        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
+        setsid -w bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    # The stub is not the real sink, so nothing lands on disk either way; the
+    # observable is the recorder's refusal (non-zero, prompt) before it ever
+    # connected. Without check_header_size it would connect, get the ACK and
+    # record -- exit 0.
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+        pass "E2E: check_header_size refuses an oversized command before connecting"
+    else
+        fail "E2E: an oversized command was accepted when the sink would ACK (rc=$rc)"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -1008,6 +1093,8 @@ if e2e_setup; then
     run_test test_e2e_private_channel_dir
     run_test test_e2e_max_duration
     run_test test_e2e_oversized_command
+    run_test test_e2e_no_ack_refused
+    run_test test_e2e_header_cap_early
 fi
 
 echo ""

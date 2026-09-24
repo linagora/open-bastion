@@ -448,8 +448,8 @@ fi
 # then closes WITHOUT the ACK (as the real sink does for any rejection) must
 # make the connector exit non-zero and, crucially, NEVER print OB_READY -- the
 # token that tells the recorder to start the session. Without the ACK check the
-# connector would proceed and print it, which is the #287 window. /dev/null is
-# the stream, so nothing blocks either way.
+# connector would proceed and print it, which is the #287 window. "-" is the
+# stream, so nothing blocks either way.
 reject_sock="$WORK/reject.sock"
 python3 - "$reject_sock" <<'PY' &
 import os, socket, sys
@@ -464,13 +464,43 @@ c.close(); srv.close()        # close WITHOUT sending the ACK
 PY
 rjpid=$!
 for _ in $(seq 1 50); do [ -S "$reject_sock" ] && break; sleep 0.1; done
-ackout=$(OB_RECORD_SOCKET="$reject_sock" "$CONNECT" "$(hdr ackid001 script)" /dev/null </dev/null 2>/dev/null)
+ackout=$(OB_RECORD_SOCKET="$reject_sock" "$CONNECT" "$(hdr ackid001 script)" - </dev/null 2>/dev/null)
 ackrc=$?
 wait "$rjpid" 2>/dev/null
 if [ "$ackrc" -ne 0 ] && [[ "$ackout" != *OB_READY* ]]; then
     ok "no sink ACK: connector fails closed and never signals readiness"
 else
     bad "the connector proceeded without the sink's ACK (rc=$ackrc, out=$ackout)"
+fi
+
+# ── Test 14: the connector's ACK read has a deadline (transfer path). A stub
+# that accepts and reads the header but NEVER answers must not hang the
+# connector forever -- the transfer path runs it synchronously. The connector's
+# own SO_RCVTIMEO must fire and it must exit non-zero; an outer `timeout` only
+# catches the failure (rc 124), which would mean the connector hung.
+silent_sock="$WORK/silent.sock"
+python3 - "$silent_sock" <<'PY' &
+import os, socket, sys, time
+p = sys.argv[1]
+try: os.unlink(p)
+except FileNotFoundError: pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(p); srv.listen(1)
+c, _ = srv.accept()
+c.makefile("rb").readline()   # read the header, then answer nothing
+time.sleep(60)                # hold the connection open, silent
+PY
+slpid=$!
+for _ in $(seq 1 50); do [ -S "$silent_sock" ] && break; sleep 0.1; done
+sil_start=$SECONDS
+timeout 40 env OB_RECORD_SOCKET="$silent_sock" "$CONNECT" "$(hdr silid001 transfer)" - </dev/null >/dev/null 2>&1
+silrc=$?
+sil_elapsed=$((SECONDS - sil_start))
+kill "$slpid" 2>/dev/null; wait "$slpid" 2>/dev/null
+if [ "$silrc" -ne 0 ] && [ "$silrc" -ne 124 ] && [ "$sil_elapsed" -lt 30 ]; then
+    ok "no ACK answer: the connector's own timeout fires (rc=$silrc, ${sil_elapsed}s)"
+else
+    bad "the connector did not time out its ACK read (rc=$silrc, ${sil_elapsed}s)"
 fi
 
 echo "=== record-sink e2e: $([ $fail -eq 0 ] && echo PASS || echo FAIL) ==="

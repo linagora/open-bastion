@@ -169,11 +169,14 @@ why     || existed.
 id      || portal-prereq-builder-ansible
 file    || admin-builder/ob-builder
 search  || "$ansible_out/PORTAL-CHECKLIST.md" "$role"
-replace || /dev/null "$role"
+replace || "$ansible_out/OB-MUTANT-CHECKLIST.md" "$role"
 suite   || tests/test_ob_portal_prerequisites.sh
 why     || #268: the Ansible role runs the setup script through a task whose
 why     || stdout nobody reads, so for that artefact the checklist file IS the
-why     || notification.
+why     || notification. The mutant writes the checklist to the wrong NAME (not
+why     || /dev/null: as root render_template's atomic mktemp+mv would replace
+why     || the /dev/null device with a regular file for the rest of the run,
+why     || breaking every later test that writes to /dev/null -- #287).
 
 id      || cache-key-regular-file
 file    || src/cache_key.c
@@ -553,3 +556,30 @@ suite   || tests/test_ob_session_recorder.sh
 why     || #287: the recording FIFO must live in a real private directory
 why     || (mktemp -d, 0700), not at a name mktemp -u merely predicts in the
 why     || shared /tmp, which another user could win first.
+
+id      || recorder-ack-required
+file    || scripts/ob-session-recorder
+search  || [ "$ready" = "OB_READY" ]
+replace || true
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the recorder must start the session only when the connector
+why     || reported the sink's ACK (OB_READY). Accepting a session the sink did
+why     || not acknowledge runs the command unrecorded.
+
+id      || recorder-header-cap
+file    || scripts/ob-session-recorder
+search  || check_header_size\n\n    log_session_start
+replace || :\n\n    log_session_start
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: an over-long command must be refused up front; without it the
+why     || recorder would connect and record a session the operator's header cap
+why     || is meant to keep out.
+
+id      || connector-ack-timeout
+file    || src/ob-record-connect.c
+search  || setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &atv, sizeof(atv));
+replace || (void)atv;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: the ACK read must have a deadline; the transfer path runs the
+why     || connector synchronously, so a sink that accepts but never answers
+why     || would hang the transfer forever.
