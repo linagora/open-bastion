@@ -322,6 +322,8 @@ Operational recommendations:
 - Recordings are compressed and expired automatically — see :ref:`Retention and disk management <session-recording-retention-and-disk-management>` below.
 - Put ``/var/lib/open-bastion/sessions`` on a **dedicated partition** so a full recordings store cannot also take down the host's root filesystem.
 
+**Concurrency.** Each recorded session holds one connection on ``ob-record.socket`` for its whole lifetime. ``ob-record.socket`` ships with ``MaxConnections=1024`` and ``MaxConnectionsPerSource=16`` (connections per source uid) so that neither the total nor any single user's share of concurrent sessions can exhaust the socket and, because it is fail-closed, lock logins out. Raise ``MaxConnections`` (``systemctl edit ob-record.socket``) on a host that legitimately runs more than 1024 simultaneous recorded sessions.
+
 .. _session-recording-retention-and-disk-management:
 
 Retention and disk management

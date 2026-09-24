@@ -313,17 +313,33 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
 - **Session recordings no longer end, or lie, on their own** (#287). The sink
   finalized any session silent for 30 s as `aborted`, and the user was then
   disconnected at the next keystroke; it now bounds a connection by the
-  recorder's own liveness and a total duration cap (7 days) instead. A
-  forwarder killed from inside the session left a recording stamped
-  `completed`: the stream is now framed with an end-of-stream marker, and
-  without it the recording is `aborted` (EBIOS MT34). `max_duration` never
-  fired -- bash deferred its signal trap until the session had ended -- and
-  now ends the session, so **sessions are cut after the 8 hours
-  `ob-bastion-setup` configures** (24 without a value). The
-  recorder no longer takes its `PATH`, its sink socket or its tunables
-  (`OB_MAX_SESSION` and the other `OB_*` variables) from the recorded user's
-  environment, escapes every header field and every client string it logs,
-  and keeps its FIFO in a private directory it always removes.
+  liveness of the connecting process (ob-record-connect) and a total duration
+  cap (7 days) instead. A forwarder killed from inside the session left a
+  recording stamped `completed`: the stream is now framed with an end-of-stream
+  marker, and without it the recording is `aborted` (EBIOS MT34).
+  `max_duration` never fired -- bash deferred its signal trap until the session
+  had ended -- and now ends the session, so **sessions are cut after the 8
+  hours `ob-bastion-setup` configures** (24 without a value). The recorder no
+  longer takes its `PATH`, its sink socket or its tunables (`OB_MAX_SESSION`
+  and the other `OB_*` variables) from the recorded user's environment, escapes
+  every header field and every client string it logs, and keeps its FIFO in a
+  private directory it always removes.
+- **A rejected recording header can no longer let the command run unrecorded**
+  (#287). A command long enough to push the metadata header past the sink's
+  8 KiB cap was refused by the sink *after* the connection was made, but the
+  connector was still blocked on the FIFO and looked alive, so the shell ran
+  with no recording. The sink now sends a one-byte ACK once the metadata and
+  recording file exist; the connector waits for it and the recorder refuses the
+  session without it, which also covers a duplicate session id, a wrong
+  protocol version and a failed directory setup. The recorder additionally
+  refuses an over-long command up front, and logs a refused command by length
+  and hash, not in full. C1 control bytes (0x80–0x9f, e.g. the CSI introducer)
+  are now escaped in the header and in logs, not passed through raw.
+- **The recording socket bounds concurrency** (#287). Because a recorded
+  connection now lives for the whole session, `ob-record.socket` raises
+  `MaxConnections` above the systemd default of 64 and adds
+  `MaxConnectionsPerSource`, so a local user cannot hold the world-connectable
+  socket's connection slots open and block every login.
 - **R-P1 is now a release prerequisite, not an assumption** (#268). With
   `pamAccessServerGroups` empty — the shipped default, and what
   `doc/bastion-architecture.md` used to recommend — `server_group` is read from
