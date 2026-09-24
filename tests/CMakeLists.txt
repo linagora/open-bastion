@@ -319,3 +319,25 @@ target_compile_definitions(ob-fp-daemon-strictuid PRIVATE
     OB_FP_SOCKET="${CMAKE_CURRENT_BINARY_DIR}/fp-strict.sock"
 )
 target_compile_options(ob-fp-daemon-strictuid PRIVATE -Wall -Wextra -Werror -D_GNU_SOURCE)
+
+# ob-login-shell (#293), built a second time for tests/test_ob_login_shell.sh.
+# The shipped binary hard-codes the recorder and nss_openbastion.conf; this one
+# takes both paths from OB_TEST_RECORDER / OB_TEST_NSS_CONF so the suite can
+# use a stub recorder in a private directory, and trusts a configuration owned
+# by the uid running the suite. Never installed.
+add_executable(ob-login-shell-testbuild ${CMAKE_SOURCE_DIR}/src/ob-login-shell.c)
+target_include_directories(ob-login-shell-testbuild PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(ob-login-shell-testbuild PRIVATE OB_LOGIN_SHELL_TESTBUILD)
+target_compile_options(ob-login-shell-testbuild PRIVATE -Wall -Wextra -Werror -D_GNU_SOURCE)
+
+# Same, but the configuration must be root's, as in the shipped binary: run
+# unprivileged, the suite's own file is then refused, which is how it proves
+# that check is live.
+add_executable(ob-login-shell-strictuid ${CMAKE_SOURCE_DIR}/src/ob-login-shell.c)
+target_include_directories(ob-login-shell-strictuid PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(ob-login-shell-strictuid PRIVATE
+    OB_LOGIN_SHELL_TESTBUILD
+    OB_LOGIN_SHELL_STRICTUID
+)
+target_compile_options(ob-login-shell-strictuid PRIVATE -Wall -Wextra -Werror -D_GNU_SOURCE)
+

@@ -531,6 +531,26 @@ install(TARGETS ob-record-connect
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Login shell of SSO users on a recording host; see ob-login-shell(8).
+add_executable(ob-login-shell src/ob-login-shell.c)
+target_include_directories(ob-login-shell PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_options(ob-login-shell PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_options(ob-login-shell PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-login-shell
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Install SSH certificate tool (user-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -600,6 +620,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-heartbeat.8
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
+    ${CMAKE_SOURCE_DIR}/man/ob-login-shell.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-prune.8
     ${CMAKE_SOURCE_DIR}/man/ob-krl-refresh.8
     ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
