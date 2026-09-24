@@ -19,7 +19,18 @@ non-zero \fBbefore\fR reading any stream, so the recorder can fail closed (refus
 the session) before a shell starts. On success it writes the one-line JSON
 metadata
 .I HEADER_JSON
-to the socket, then opens
+to the socket and waits for a one-byte acknowledgement the sink sends only
+once it has created the session's metadata and recording file. If the sink
+closes without it \(em because it rejected the header (oversized, wrong
+version, a duplicate session id) or could not create the files \(em the
+connector exits non-zero
+.B without
+opening
+.IR STREAM_PATH ,
+and prints nothing on stdout, so the recorder refuses the session. On the ACK
+it prints
+.B OB_READY
+on stdout (which the recorder waits for), then opens
 .I STREAM_PATH
 and copies it to the socket in length-prefixed frames until EOF. After a clean
 EOF, and only then, it sends an empty end-of-stream frame and half-closes the

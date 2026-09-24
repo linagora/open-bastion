@@ -327,7 +327,13 @@ else
 fi
 
 # ── Test 11: the framing itself — end frame completes, anything else does not
-frame_session() { # $1 session_id  $2 mode: end | noend | garbage | v1
+# $2 modes:
+#   end     header + one frame + end frame, then close  -> completed
+#   noend   header + one frame, then close (no end frame) -> aborted
+#   v1      like end but "v":1 -> refused (no files)
+#   endjunk header + one frame + end frame + a trailing byte -> aborted (nothing
+#           may follow the end-of-stream marker)
+frame_session() { # $1 session_id  $2 mode
     python3 - "$SOCK" "$1" "$2" <<'PY' >/dev/null 2>&1
 import socket, struct, sys
 sock, sid, mode = sys.argv[1:4]
@@ -338,21 +344,56 @@ s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(sock)
 data = b"FRAMED-PAYLOAD\n"
 out = hdr.encode() + b"\n" + struct.pack(">I", len(data)) + data
-if mode == "end" or mode == "v1":
+if mode in ("end", "v1"):
     out += struct.pack(">I", 0)
-elif mode == "garbage":
-    out += struct.pack(">I", 0x7fffffff)      # longer than any frame may be
+elif mode == "endjunk":
+    out += struct.pack(">I", 0) + b"X"      # a byte after the end marker
 s.sendall(out)
 s.shutdown(socket.SHUT_WR)
 s.recv(1)
 PY
 }
+
+# The oversized-frame case must isolate the FRAME_MAX check: it declares a huge
+# frame length and then holds the connection open, sending no payload. With the
+# check the sink refuses the length at once (aborted); without it, the sink
+# would wait for bytes that never come, so the recording never finalizes and
+# wait_done times out -- which is what makes the mutation for FRAME_MAX fail.
+# The holder's stdout/stderr go to /dev/null, not to this function's command
+# substitution: otherwise `$(frame_garbage ...)` would block for the whole
+# 20 s hold (it reads the pipe until EOF, and the backgrounded python keeps the
+# write end open), the peer would already be gone before the status check, and
+# the recording would read "aborted" from the peer's death rather than from the
+# FRAME_MAX refusal -- masking the very control this isolates.
+frame_garbage() { # $1 session_id -> echoes the holder pid
+    python3 - "$SOCK" "$1" >/dev/null 2>&1 <<'PY' &
+import socket, struct, sys, time
+sock, sid = sys.argv[1:3]
+hdr = ('{"v":2,"session_id":"%s","format":"script","client_ip":"x",'
+       '"ssh_tty":"x","original_command":"","start":"x"}' % sid)
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sock)
+s.sendall(hdr.encode() + b"\n" + struct.pack(">I", 0x7fffffff))  # huge, no payload
+time.sleep(20)                                                    # hold it open
+PY
+    echo $!
+}
+
 frame_session frameend01 end
 fe=$(wait_done frameend01)
 frame_session framecut01 noend
 fc=$(wait_done framecut01)
-frame_session framebad01 garbage
-fb=$(wait_done framebad01)
+# Judge the status while the holder is STILL connected: with the FRAME_MAX
+# check the sink aborts at once (holder alive); without it the sink waits for a
+# payload that never comes and never finalizes, so wait_done times out. The
+# status must not be read after the holder dies -- the peer's death aborts the
+# recording on its own, which would mask a missing check.
+gpid=$(frame_garbage framebad01)
+fbstatus=""
+if fbj=$(wait_done framebad01); then fbstatus=$(grep -o '"status": "[a-z]*"' "$fbj"); fi
+kill "$gpid" 2>/dev/null
+frame_session framejunk1 endjunk
+fju=$(wait_done framejunk1)
 frame_session framev101 v1
 sleep 1
 fv=$(ls "$SESS/$USER_NAME"/*_framev101.json 2>/dev/null | head -1)
@@ -367,15 +408,69 @@ if grep -q '"status": "aborted"' "$fc" 2>/dev/null; then
 else
     bad "a stream with no end frame was not finalized as aborted (json=$fc)"
 fi
-if grep -q '"status": "aborted"' "$fb" 2>/dev/null; then
-    ok "oversized frame: aborted"
+if [ "$fbstatus" = '"status": "aborted"' ]; then
+    ok "oversized frame length refused at once: aborted"
 else
-    bad "an oversized frame was not finalized as aborted (json=$fb)"
+    bad "an oversized frame was not refused while its peer was alive (status='$fbstatus')"
+fi
+if grep -q '"status": "aborted"' "$fju" 2>/dev/null; then
+    ok "a byte after the end-of-stream marker: aborted"
+else
+    bad "data after the end marker was not finalized as aborted (json=$fju)"
 fi
 if [ -z "$fv" ]; then
     ok "unframed v1 header refused"
 else
     bad "the sink accepted a v1 (unframed) header ($fv)"
+fi
+
+# ── Test 12: an oversized header is refused before any file is created, and the
+# connector fails closed (#287). The connector waits for the sink's ACK, which
+# the sink sends only after the metadata and recording file exist; a rejected
+# header means EOF instead, so the connector exits non-zero. /dev/null (not a
+# FIFO) is the stream here so the connector never blocks even if a change made
+# it skip the ACK.
+big=$(head -c 9000 /dev/zero | tr '\0' A)
+bighdr=$(printf '{"v":2,"session_id":"bigid001","format":"script","client_ip":"x","ssh_tty":"x","original_command":"%s","start":"x"}' "$big")
+if OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$bighdr" /dev/null </dev/null >/dev/null 2>&1; then
+    bad "the connector returned 0 for an oversized header (should fail closed)"
+else
+    ok "oversized header: connector fails closed"
+fi
+sleep 1
+if ls "$SESS/$USER_NAME"/*_bigid001.json >/dev/null 2>&1; then
+    bad "the sink created metadata for a rejected oversized header"
+else
+    ok "oversized header: no metadata written"
+fi
+
+# ── Test 13: the ACK gate itself. A stub that accepts, reads the header line,
+# then closes WITHOUT the ACK (as the real sink does for any rejection) must
+# make the connector exit non-zero and, crucially, NEVER print OB_READY -- the
+# token that tells the recorder to start the session. Without the ACK check the
+# connector would proceed and print it, which is the #287 window. /dev/null is
+# the stream, so nothing blocks either way.
+reject_sock="$WORK/reject.sock"
+python3 - "$reject_sock" <<'PY' &
+import os, socket, sys
+p = sys.argv[1]
+try: os.unlink(p)
+except FileNotFoundError: pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(p); srv.listen(1)
+c, _ = srv.accept()
+c.makefile("rb").readline()   # read the header line
+c.close(); srv.close()        # close WITHOUT sending the ACK
+PY
+rjpid=$!
+for _ in $(seq 1 50); do [ -S "$reject_sock" ] && break; sleep 0.1; done
+ackout=$(OB_RECORD_SOCKET="$reject_sock" "$CONNECT" "$(hdr ackid001 script)" /dev/null </dev/null 2>/dev/null)
+ackrc=$?
+wait "$rjpid" 2>/dev/null
+if [ "$ackrc" -ne 0 ] && [[ "$ackout" != *OB_READY* ]]; then
+    ok "no sink ACK: connector fails closed and never signals readiness"
+else
+    bad "the connector proceeded without the sink's ACK (rc=$ackrc, out=$ackout)"
 fi
 
 echo "=== record-sink e2e: $([ $fail -eq 0 ] && echo PASS || echo FAIL) ==="

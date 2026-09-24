@@ -10,10 +10,20 @@
  *      reading any stream, so the recorder can fail closed (refuse the session)
  *      before a shell starts.
  *   2. writes the one-line JSON metadata header to the socket,
- *   3. opens STREAM_PATH (a FIFO that `script` writes the typescript to, or
- *      /dev/null for a metadata-only transfer session) and copies it to the
- *      socket in length-prefixed frames until EOF, then sends the empty
- *      END-OF-STREAM frame and half-closes so the sink finalizes the recording.
+ *   3. waits for a one-byte ACK the sink sends only after the session's initial
+ *      metadata and recording file exist. No ACK -- the sink rejected the
+ *      header (oversized, wrong version, duplicate id) or could not create the
+ *      files, and closed -- means the connector exits NON-ZERO before opening
+ *      the FIFO, so nothing is ever streamed and the recorder refuses the
+ *      session. This closes the window where a rejected header still let the
+ *      command run unrecorded (#287): before the ACK, the connector blocked on
+ *      the FIFO and looked alive to the recorder even though the sink was gone.
+ *   4. once the ACK arrives, prints "OB_READY" on stdout so the recorder knows
+ *      the sink accepted, then opens STREAM_PATH (a FIFO that `script` writes
+ *      the typescript to, or /dev/null for a metadata-only transfer session)
+ *      and copies it to the socket in length-prefixed frames until EOF, then
+ *      sends the empty END-OF-STREAM frame and half-closes so the sink
+ *      finalizes the recording.
  *
  * The end-of-stream frame is what lets the sink tell a session that ended from
  * a forwarder that was killed (#287, EBIOS MT34): it is sent only after a clean
@@ -56,6 +66,9 @@
 
 #define DEFAULT_SOCKET "/run/open-bastion/rec.sock"
 #define BUF_SZ 65536
+/* The sink writes this one byte once the session's metadata and recording file
+ * exist. Must match OB_RECORD_ACK in ob-record-sink.c. */
+#define OB_RECORD_ACK 0x06 /* ASCII ACK */
 
 static int write_all(int fd, const char *buf, size_t len)
 {
@@ -141,6 +154,31 @@ int main(int argc, char **argv)
     size_t hlen = strlen(header);
     if (write_all(fd, header, hlen) < 0 || write_all(fd, "\n", 1) < 0) {
         fprintf(stderr, "[ob-record-connect] failed sending header: %s\n", strerror(errno));
+        close(fd);
+        return 1;
+    }
+
+    /* Wait for the sink's ACK: one byte, sent only after it has created this
+     * session's metadata and recording file. Anything else -- EOF (the sink
+     * rejected the header and closed), a read error, or a wrong byte -- means
+     * the session is NOT being recorded, so we exit non-zero WITHOUT opening
+     * the FIFO. The recorder then refuses the session. */
+    unsigned char ack = 0;
+    ssize_t an = read(fd, &ack, 1);
+    while (an < 0 && errno == EINTR)
+        an = read(fd, &ack, 1);
+    if (an != 1 || ack != OB_RECORD_ACK) {
+        fprintf(stderr,
+                "[ob-record-connect] the recording sink did not acknowledge the session "
+                "(it refused the header or could not create the recording); refusing\n");
+        close(fd);
+        return 1;
+    }
+
+    /* Tell the recorder the sink accepted, so it can start the session only
+     * now. A short, fixed token on stdout; the recorder reads one line. */
+    if (write_all(STDOUT_FILENO, "OB_READY\n", 9) < 0) {
+        /* The recorder is gone; nothing to record for. */
         close(fd);
         return 1;
     }

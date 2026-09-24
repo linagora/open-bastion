@@ -42,6 +42,15 @@ and
 and rewritten
 .RB ( O_TRUNC )
 when the session is finalized.
+.IP 4. 4
+sends a one-byte acknowledgement to the connector once that metadata and
+recording file exist, and only then reads the stream. Every rejection before
+this point (oversized or malformed header, unsupported version, duplicate
+session id, a directory it cannot create) closes the connection without the
+ack, so
+.BR ob-record-connect (1)
+fails and the recorder refuses the session \(em recording can never be skipped
+by a header the sink declines.
 .PP
 The sink records only what it observes: status
 .B active

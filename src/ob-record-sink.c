@@ -30,9 +30,15 @@
  *      client-reported; see the design §5).
  *
  * An idle stream is NOT an abnormal end: an interactive session can print
- * nothing for hours. The sink bounds a connection by the recorder's own
- * liveness (the SO_PEERCRED pid), a total duration and a byte cap -- never by
- * silence (#287).
+ * nothing for hours. The sink bounds a connection by the liveness of the
+ * connecting process (ob-record-connect, the SO_PEERCRED pid), a total
+ * duration and a byte cap -- never by silence (#287).
+ *
+ * Once the initial metadata and recording file exist, the sink writes a
+ * one-byte ACK to the connection. ob-record-connect waits for it before it
+ * streams anything, and the recorder refuses the session if it never arrives,
+ * so a header the sink rejects (oversized, wrong version, duplicate id) or a
+ * setup failure can never leave the command running unrecorded (#287).
  *
  * Threat model: root is trusted; we defend only against the unprivileged user.
  *
@@ -66,6 +72,10 @@
 #define OB_RECORD_SINK_VERSION "0.2.0"
 /* Wire protocol version: the header's "v". See feed_frames() for v2. */
 #define OB_RECORD_PROTO 2
+/* Sent to the connector once metadata + recording file exist, so it (and the
+ * recorder) can fail closed on any earlier rejection. Matches OB_RECORD_ACK in
+ * ob-record-connect.c. */
+#define OB_RECORD_ACK 0x06 /* ASCII ACK */
 
 #define SESSIONS_DIR "/var/lib/open-bastion/sessions"
 #define SESSIONS_GROUP "ob-sessions"
@@ -178,20 +188,33 @@ static long mono_now(void)
  * window; pidfd_open() on the SO_PEERCRED pid is the next best thing. Returns
  * -1 when neither is available -- an older kernel, or a SystemCallFilter
  * without pidfd_open -- and the caller then falls back to kill(pid, 0) at
- * each idle wake-up. */
-static int peer_pidfd(int conn_fd, pid_t pid)
+ * each idle wake-up. Sets *gone to 1 when SO_PEERPIDFD reports the peer has
+ * already exited (ESRCH): the pid may have been reused, so we must NOT fall
+ * back to pidfd_open/kill on it -- the caller treats the connection as dead. */
+static int peer_pidfd(int conn_fd, pid_t pid, int *gone)
 {
+    *gone = 0;
 #ifdef SO_PEERPIDFD
     int pfd = -1;
     socklen_t plen = sizeof(pfd);
     if (getsockopt(conn_fd, SOL_SOCKET, SO_PEERPIDFD, &pfd, &plen) == 0 && pfd >= 0)
         return pfd;
+    /* ESRCH: the peer is already gone. Any pid-based fallback would probe a
+     * possibly recycled pid, so report it dead instead. */
+    if (errno == ESRCH) {
+        *gone = 1;
+        return -1;
+    }
 #endif
 #ifdef SYS_pidfd_open
     if (pid > 0) {
         long r = syscall(SYS_pidfd_open, pid, 0);
         if (r >= 0)
             return (int)r;
+        if (errno == ESRCH) {
+            *gone = 1;
+            return -1;
+        }
     }
 #endif
     (void)conn_fd;
@@ -559,6 +582,23 @@ int main(void)
         goto reject_dir;
     }
 
+    /* The session is now recorded: metadata is on disk and the recording file
+     * exists. Only now tell the connector to proceed. Every rejection above
+     * (oversized/malformed/wrong-version header, duplicate id, ensure_user_dir
+     * failure) returned before this point, so the connector gets EOF instead
+     * of the ACK and the recorder refuses the session -- fail-closed (#287). */
+    {
+        unsigned char ack = OB_RECORD_ACK;
+        ssize_t w;
+        while ((w = write(conn_fd, &ack, 1)) < 0 && errno == EINTR)
+            ;
+        if (w != 1) {
+            fail("could not acknowledge the connection; the peer is gone");
+            close(recfd);
+            goto reject_dir;
+        }
+    }
+
     /* A status is only ever set from what the loop below observes; nothing
      * reaches "completed" without the forwarder's end-of-stream frame. */
     const char *status = "aborted";
@@ -574,8 +614,8 @@ int main(void)
         long max_sec = env_seconds("OB_RECORD_MAX_SEC", DEFAULT_MAX_SESSION_SEC,
                                    LONG_MAX / 2);
         long deadline = mono_now() + max_sec;
-        int pidfd = peer_pidfd(conn_fd, cred.pid);
         int peer_gone = 0;
+        int pidfd = peer_pidfd(conn_fd, cred.pid, &peer_gone);
         struct framer fr = {.have = 0, .left = 0};
         char buf[COPY_BUF];
         long total = 0;
