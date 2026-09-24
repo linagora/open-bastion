@@ -213,6 +213,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-prune
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# Install the Mode E key revocation list refresh (run by ob-krl-refresh.timer)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-krl-refresh
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # NOTE: the old setgid ob-session-recorder-wrapper has been removed. Recordings
 # are now streamed to the root ob-record-sink (socket-activated), which owns the
 # files; the recorder no longer needs an elevated gid or a per-user dir, so the
@@ -234,6 +239,13 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-cert-lib.sh
 # endpoint (ob-heartbeat, ob-bastion-id, ob-enroll, ob-session-monitor). Same
 # fixed path as ob-cert-lib.sh, which the scripts look up.
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-sign-lib.sh
+    DESTINATION lib/open-bastion
+)
+
+# The timers that replaced the KRL and audit cron jobs, and the migration from
+# those jobs (#281). Sourced by the setup script and by ob-post-upgrade, which
+# must migrate a host the same way. Same fixed path as the two libraries above.
+install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-timers-lib.sh
     DESTINATION lib/open-bastion
 )
 
@@ -562,13 +574,12 @@ endforeach()
 
 # Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
 # Read-only templates under /usr/share/open-bastion/audit/. The setup function
-# copies them into /etc/audit/rules.d/ and /etc/cron.daily/ at deployment time.
-# These are NOT dpkg conffiles / rpm config(noreplace) — see doc/audit.rst.
+# copies them into /etc/audit/rules.d/ at deployment time, and enables
+# ob-audit-rotate.timer for the daily rotation (a /etc/cron.daily script until
+# 0.7.0, #281). These are NOT dpkg conffiles / rpm config(noreplace) — see
+# doc/audit.rst.
 install(FILES ${CMAKE_SOURCE_DIR}/config/audit/rules.d/open-bastion.rules
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/rules.d
-)
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/config/audit/cron.daily/open-bastion-audit-rotate
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/cron.daily
 )
 
 # logrotate template for the JSON audit log (audit_log_file). Same arrangement
@@ -590,6 +601,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-prune.8
+    ${CMAKE_SOURCE_DIR}/man/ob-krl-refresh.8
     ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
     ${CMAKE_SOURCE_DIR}/man/ob-fp-daemon.8
     ${CMAKE_SOURCE_DIR}/man/ob-fp-submit.8
@@ -635,6 +647,10 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-fp@.service
         ${CMAKE_SOURCE_DIR}/systemd/ob-session-prune.timer
         ${CMAKE_SOURCE_DIR}/systemd/ob-session-prune.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-krl-refresh.timer
+        ${CMAKE_SOURCE_DIR}/systemd/ob-krl-refresh.service
+        ${CMAKE_SOURCE_DIR}/systemd/ob-audit-rotate.timer
+        ${CMAKE_SOURCE_DIR}/systemd/ob-audit-rotate.service
         DESTINATION lib/systemd/system
     )
     # Desktop-specific systemd service

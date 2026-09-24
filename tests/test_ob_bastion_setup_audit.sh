@@ -211,15 +211,18 @@ test_auditd_conf_not_modified() {
 
         # Provide minimal templates so the template-check passes.
         local tdir="$tmpdir/templates"
-        mkdir -p "$tdir/rules.d" "$tdir/cron.daily"
+        mkdir -p "$tdir/rules.d"
         printf '# rules\n' > "$tdir/rules.d/open-bastion.rules"
-        printf '#!/bin/sh\necho rotate\n' > "$tdir/cron.daily/open-bastion-audit-rotate"
-        chmod +x "$tdir/cron.daily/open-bastion-audit-rotate"
         AUDIT_TEMPLATE_DIR="$tdir"
 
-        # Redirect install targets so we don't need /etc.
+        # Redirect install targets so we don't need /etc. The rotation is a
+        # timer (the systemctl stub above arms it); keep the library's paths
+        # in the sandbox too.
         AUDIT_RULES_FILE="$tmpdir/open-bastion.rules"
-        AUDIT_CRON_FILE="$tmpdir/open-bastion-audit-rotate"
+        export OB_TIMERS_LIB="$SCRIPT_DIR/ob-timers-lib.sh"
+        export OB_SYSTEMD_UNIT_DIR="$tmpdir/units"
+        export OB_AUDIT_LEGACY_DAILY="$tmpdir/cron.daily-rotate"
+        export OB_AUDIT_LEGACY_WEEKLY="$tmpdir/cron.weekly-rotate"
 
         # The sandbox auditd.conf with a known sentinel value.
         local sandbox_conf="$tmpdir/auditd.conf"
@@ -282,23 +285,24 @@ test_rules_template_content() {
     fi
 }
 
-# ── Test 9: cron.daily template is a valid /bin/sh script that calls SIGUSR1 ──
-test_cron_template_content() {
-    local cron="$PROJECT_ROOT/config/audit/cron.daily/open-bastion-audit-rotate"
-    if [ ! -f "$cron" ]; then
-        fail "cron template content" "$cron missing"
-        return
-    fi
+# ── Test 9: the rotation is ob-audit-rotate.timer, and it signals auditd ──
+# The 0.6 cron.daily template is gone (#281): the rotation is a oneshot service
+# sending SIGUSR1 -- auditd's "rotate now" -- to auditd's main process, from a
+# daily timer. tests/test_ob_timers.sh covers the move from the old script.
+test_rotation_units() {
+    local svc="$PROJECT_ROOT/systemd/ob-audit-rotate.service"
+    local tmr="$PROJECT_ROOT/systemd/ob-audit-rotate.timer"
     local ok=true
-    head -1 "$cron" | grep -q "^#!/bin/sh" || ok=false
-    grep -q "USR1" "$cron" || ok=false
-    [ -x "$cron" ] || ok=false
-    # Must pass `bash -n` cleanly.
-    bash -n "$cron" 2>/dev/null || ok=false
+    [ -f "$svc" ] && [ -f "$tmr" ] || ok=false
+    grep -qE '^ExecStart=systemctl kill --kill-who=main --signal=SIGUSR1 auditd\.service$' "$svc" 2>/dev/null || ok=false
+    grep -qx 'Type=oneshot' "$svc" 2>/dev/null || ok=false
+    grep -qx 'OnCalendar=daily' "$tmr" 2>/dev/null || ok=false
+    grep -qx 'Persistent=true' "$tmr" 2>/dev/null || ok=false
+    [ ! -e "$PROJECT_ROOT/config/audit/cron.daily" ] || ok=false
     if $ok; then
-        pass "cron.daily template is valid (shebang, executable, signals USR1)"
+        pass "ob-audit-rotate.timer runs daily and signals auditd's main process with USR1"
     else
-        fail "cron.daily template is valid (shebang, executable, signals USR1)"
+        fail "ob-audit-rotate.timer runs daily and signals auditd's main process with USR1"
     fi
 }
 
@@ -390,7 +394,7 @@ run_test test_refuses_without_templates
 run_test test_no_audit_set_conf_key
 run_test test_auditd_conf_not_modified
 run_test test_rules_template_content
-run_test test_cron_template_content
+run_test test_rotation_units
 run_test test_main_gates_audit_trace
 run_test test_summary_distinguishes_state
 run_test test_skip_is_recorded

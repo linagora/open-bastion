@@ -109,6 +109,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-record-sink
 %{_sbindir}/ob-cache-admin
 %{_sbindir}/ob-session-prune
+%{_sbindir}/ob-krl-refresh
 %{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
@@ -119,6 +120,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %dir %{_prefix}/lib/open-bastion
 %{_prefix}/lib/open-bastion/ob-cert-lib.sh
 %{_prefix}/lib/open-bastion/ob-sign-lib.sh
+%{_prefix}/lib/open-bastion/ob-timers-lib.sh
 %{_prefix}/lib/open-bastion/ob-ssh-principals.bastion
 %{_prefix}/lib/open-bastion/ob-ssh-principals.backend
 %{_prefix}/lib/open-bastion/ob-fp-spool.tmpfiles
@@ -135,9 +137,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/audit
 %dir %{_datadir}/open-bastion/audit/rules.d
-%dir %{_datadir}/open-bastion/audit/cron.daily
 %{_datadir}/open-bastion/audit/rules.d/open-bastion.rules
-%{_datadir}/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 # logrotate template for the JSON audit log (the admin copies it into
 # /etc/logrotate.d/; not %config, since audit_log_file is configurable)
 %dir %{_datadir}/open-bastion/logrotate
@@ -152,6 +152,10 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_unitdir}/ob-record@.service
 %{_unitdir}/ob-session-prune.service
 %{_unitdir}/ob-session-prune.timer
+%{_unitdir}/ob-krl-refresh.service
+%{_unitdir}/ob-krl-refresh.timer
+%{_unitdir}/ob-audit-rotate.service
+%{_unitdir}/ob-audit-rotate.timer
 %{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
@@ -161,6 +165,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
 %{_mandir}/man8/ob-session-prune.8*
+%{_mandir}/man8/ob-krl-refresh.8*
 %{_mandir}/man8/ob-cert-daemon.8*
 %{_mandir}/man8/ob-fp-daemon.8*
 %{_mandir}/man8/ob-fp-submit.8*
@@ -294,6 +299,10 @@ fi
 %preun
 %systemd_preun ob-heartbeat.timer
 %systemd_preun ob-session-prune.timer
+# The Mode E KRL refresh and the auditd rotation (#281) are enabled by
+# ob-bastion-setup, not at install; disable them on removal.
+%systemd_preun ob-krl-refresh.timer
+%systemd_preun ob-audit-rotate.timer
 # Cert/record sockets are enabled by ob-bastion-setup (not at install); disable
 # on removal.
 %systemd_preun ob-cert.socket
@@ -303,6 +312,8 @@ fi
 %postun
 %systemd_postun_with_restart ob-heartbeat.timer
 %systemd_postun_with_restart ob-session-prune.timer
+%systemd_postun_with_restart ob-krl-refresh.timer
+%systemd_postun_with_restart ob-audit-rotate.timer
 %systemd_postun_with_restart ob-cert.socket
 %systemd_postun_with_restart ob-fp.socket
 %systemd_postun_with_restart ob-record.socket

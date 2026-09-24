@@ -32,10 +32,12 @@ usr/sbin/ob-service-account-keys
 usr/sbin/ob-record-sink
 usr/sbin/ob-cache-admin
 usr/sbin/ob-session-prune
+usr/sbin/ob-krl-refresh
 
 # Shared cert-vouching library (sourced by ob-ssh / ob-scp / ob-sftp)
 usr/lib/open-bastion/ob-cert-lib.sh
 usr/lib/open-bastion/ob-sign-lib.sh
+usr/lib/open-bastion/ob-timers-lib.sh
 usr/lib/open-bastion/ob-ssh-principals.bastion
 usr/lib/open-bastion/ob-ssh-principals.backend
 usr/lib/open-bastion/ob-fp-spool.tmpfiles
@@ -65,6 +67,7 @@ usr/share/man/man8/ob-standalone-setup.8
 usr/share/man/man8/ob-backend-setup.8
 usr/share/man/man8/ob-session-recorder.8
 usr/share/man/man8/ob-session-prune.8
+usr/share/man/man8/ob-krl-refresh.8
 usr/share/man/man8/ob-cert-daemon.8
 usr/share/man/man8/ob-fp-daemon.8
 usr/share/man/man8/ob-fp-submit.8
@@ -75,7 +78,6 @@ usr/share/man/man8/ob-post-upgrade.8
 
 # Audit trace templates (deployed by `ob-bastion-setup --enable-audit-trace`)
 usr/share/open-bastion/audit/rules.d/open-bastion.rules
-usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate
 
 # logrotate template for the JSON audit log (copied to /etc/logrotate.d/ by the
 # admin; not a conffile, since audit_log_file is configurable)
@@ -99,6 +101,15 @@ systemd/ob-heartbeat.service lib/systemd/system/
 # immediately and no-ops on hosts without recordings.
 systemd/ob-session-prune.timer lib/systemd/system/
 systemd/ob-session-prune.service lib/systemd/system/
+
+# Mode E key revocation list refresh, and the auditd rotation of
+# --enable-audit-trace: the two cron jobs of 0.6, as timers (#281). NOT enabled
+# at install time (see debian/rules): the package cannot know whether a host is
+# in Mode E or has the audit trace, and the setup enables each where it applies.
+systemd/ob-krl-refresh.timer lib/systemd/system/
+systemd/ob-krl-refresh.service lib/systemd/system/
+systemd/ob-audit-rotate.timer lib/systemd/system/
+systemd/ob-audit-rotate.service lib/systemd/system/
 
 # Socket-activated units, sockets and their @.service templates alike, installed
 # from systemd/ like every other unit in this package (#254).
