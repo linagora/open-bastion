@@ -21,9 +21,9 @@
  * with a stream that stops short, which it finalizes as "aborted".
  *
  * SIGHUP, SIGINT and SIGQUIT are ignored. A hang-up is how a session normally
- * ends -- the client goes away, or the recorder's max_duration watchdog hangs
- * the session up -- and the forwarder must outlive it long enough to drain
- * what `script` wrote and send the end-of-stream frame. It still ends as soon
+ * ends -- the client goes away, and SIGHUP reaches the whole process group --
+ * and the forwarder must outlive it long enough to drain what `script` wrote
+ * and send the end-of-stream frame. It still ends as soon
  * as `script` closes the FIFO, and SIGTERM still stops it (the recorder uses
  * that on a forwarder that is stuck).
  *

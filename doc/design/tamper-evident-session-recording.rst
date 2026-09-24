@@ -80,7 +80,7 @@ A connection carries one session. It is **header line + framed stream**:
 
    The framing exists so that the sink can tell a session that **ended** from a forwarder that was **killed**. Version 1 streamed raw bytes until EOF, and a ``SIGKILL`` on the forwarder -- which runs as the recorded user, who can send it from inside the session -- produced the same EOF as a normal logout, so both were stamped ``completed`` (`#287 <https://github.com/linagora/open-bastion/issues/287>`__, EBIOS measure MT34). Terminal output cannot forge the marker: whatever the session prints travels inside a frame's payload. The sink accepts only ``"v": 2``; recorder, connector and sink ship in the same package.
 
-   The forwarder ignores ``SIGHUP``, ``SIGINT`` and ``SIGQUIT``. A hang-up is how a session normally ends (client gone, or the recorder's ``max_duration`` watchdog), and the forwarder must outlive it long enough to drain what ``script`` wrote and send the marker.
+   The forwarder ignores ``SIGHUP``, ``SIGINT`` and ``SIGQUIT``. A hang-up is how a session normally ends (the client goes away and ``SIGHUP`` reaches the whole process group), and the forwarder must outlive it long enough to drain what ``script`` wrote and send the marker.
 
 The sink imposes an overall **per-session byte cap** and a **total duration cap**, to bound a hostile or runaway client. Reaching either finalizes the file as ``status:"truncated"`` rather than letting it grow unbounded (a DoS, explicitly logged).
 

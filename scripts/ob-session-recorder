@@ -35,7 +35,7 @@ SESSIONS_DIR="/var/lib/open-bastion/sessions"
 FORMAT="script"
 DEFAULT_MAX_SESSION_DURATION=86400  # 24 hours
 MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
-# Seconds between the watchdog's hang-up and its SIGKILL.
+# Seconds the watchdog gives the recorder to finish once the session is ended.
 WATCHDOG_GRACE=5
 # Where the recording channel's private directory is created (mktemp -d).
 REC_TMP_BASE="/tmp"
@@ -268,79 +268,75 @@ validate_max_duration() {
 # here script(1), that is the whole session -- so it never fired in time; the
 # pid it meant to kill was never assigned; and its `exit 124` skipped the FIFO
 # cleanup. This one acts from outside the recorder: when the time is up it
-# hangs the session up, as a client disconnect would (script dies, the shell
-# inside gets SIGHUP; the forwarder ignores SIGHUP, drains what was written and
-# completes the recording), and kills whatever is still there after
-# WATCHDOG_GRACE seconds.
+# kills what holds the session -- script(1), or the transfer program -- and
+# lets the recorder finish normally. Killing script closes the session's
+# terminal, so everything inside gets SIGHUP exactly as on a client
+# disconnect, and the forwarder reads EOF, drains what was written and sends
+# the end-of-stream marker: the recording ends complete. script is killed
+# outright because no gentler signal works everywhere: util-linux 2.39 does not
+# exit on SIGHUP while a command still holds its terminal, and on SIGTERM it
+# waits for a shell that ignores SIGTERM. If the recorder is still there
+# WATCHDOG_GRACE seconds later, it is killed too.
 #
 # It runs as the recorded user, who can kill it like any of their processes.
 # The bound that user cannot lift is the sink's own duration cap
 # (ob-record-sink(8), OB_RECORD_MAX_SEC).
 
-# What the watchdog signals: the session's process group when this recorder
-# leads it or shares the SSH session leader's (the production cases: sshd's
-# child calls setsid(), and the login shell usually execs us), otherwise the
-# recorder and its children only -- never a group that could hold unrelated
-# processes.
-watchdog_scope() {
-    local st pgid sid
-    { read -r st < "/proc/$$/stat"; } 2>/dev/null || { printf 'pid %s\n' "$$"; return 0; }
-    st=${st##*) }
-    read -r _ _ pgid sid _ <<< "$st"
-    if [ "$pgid" = "$$" ] || [ "$pgid" = "$sid" ]; then
-        printf 'group %s\n' "$pgid"
-    else
-        printf 'pid %s\n' "$$"
+# The pids the watchdog ends the session with: the recorder's children, except
+# the forwarder ($2) and the watchdog itself ($3). That is script, or the
+# transfer program -- never a process group that could hold anything else.
+watchdog_targets() { # $1 recorder pid  $2 forwarder pid (may be empty)  $3 watchdog pid
+    local kids="" c d st
+    if ! { read -r kids < "/proc/$1/task/$1/children"; } 2>/dev/null; then
+        kids=""
+        for d in /proc/[0-9]*; do
+            { read -r st < "$d/stat"; } 2>/dev/null || continue
+            st=${st##*) }
+            read -r _ c _ <<< "$st"
+            [ "$c" = "$1" ] && kids+=" ${d#/proc/}"
+        done
     fi
-}
-
-watchdog_signal() { # $1 signal  $2 scope, as printed by watchdog_scope
-    local sig="$1" kind="${2%% *}" id="${2#* }" kids="" c
-    if [ "$kind" = "group" ]; then
-        kill -"$sig" -- "-$id" 2>/dev/null || true
-        return 0
-    fi
-    { read -r kids < "/proc/$id/task/$id/children"; } 2>/dev/null || kids=""
-    kill -"$sig" "$id" 2>/dev/null || true
     for c in $kids; do
-        [ "$c" = "$BASHPID" ] || kill -"$sig" "$c" 2>/dev/null || true
+        [ "$c" = "$3" ] || [ "$c" = "$2" ] || printf '%s\n' "$c"
     done
 }
 
 start_watchdog() {
-    local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ scope
+    local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ fwd="$OB_REC_PID"
     [ "$limit" -gt 0 ] || return 0
-    scope=$(watchdog_scope)
     (
+        self=$BASHPID
         # Stopped early by cleanup(): take the sleep down too.
         trap 'kill "${sleep_pid:-}" 2>/dev/null; exit 0' TERM
         sleep "$limit" &
         sleep_pid=$!
         wait "$sleep_pid" 2>/dev/null
         proc_running "$recorder" || exit 0
-        # The hang-up below reaches this subshell too; cleanup()'s TERM is moot
-        # from here on, it exits by itself once the recorder is gone.
+        # From here on cleanup()'s TERM is moot: this exits by itself once the
+        # recorder is gone, and must not be stopped half-way.
         trap '' HUP TERM
         log_warn "Session $SESSION_ID reached max_duration (${limit}s); terminating it"
         if [ -n "${SSH_TTY:-}" ] && [ -c "$SSH_TTY" ]; then
             printf '\r\nSession terminated: maximum duration (%ss) reached.\r\n' "$limit" \
                 > "$SSH_TTY" 2>/dev/null || true
         fi
-        watchdog_signal HUP "$scope"
+        # shellcheck disable=SC2046  # one pid per word
+        kill -KILL $(watchdog_targets "$recorder" "$fwd" "$self") 2>/dev/null || true
         for ((i = 0; i < grace * 10; i++)); do
             proc_running "$recorder" || exit 0
             sleep 0.1
         done
-        log_warn "Session $SESSION_ID still running ${grace}s after the hang-up; killing it"
+        log_warn "Session $SESSION_ID: recorder still running ${grace}s after the timeout; killing it"
         [ -n "$OB_REC_DIR" ] && rm -rf -- "$OB_REC_DIR"
-        watchdog_signal KILL "$scope"
+        # shellcheck disable=SC2046
+        kill -KILL "$recorder" $(watchdog_targets "$recorder" "$fwd" "$self") 2>/dev/null || true
     ) </dev/null >/dev/null 2>&1 &
     TIMEOUT_PID=$!
 }
 
-# Not waited for: once it has hung the session up it ignores TERM and leaves
-# by itself when the recorder is gone, and waiting here would hold the
-# recorder -- which it is polling -- for the whole grace period.
+# Not waited for: once it has fired it ignores TERM and leaves by itself when
+# the recorder is gone, and waiting here would hold the recorder -- which it is
+# polling -- for the whole grace period.
 stop_watchdog() {
     if [ -n "$TIMEOUT_PID" ]; then
         kill "$TIMEOUT_PID" 2>/dev/null || true
@@ -908,10 +904,9 @@ main() {
 
     log_session_start
 
-    # cleanup() runs on every way out. A hang-up (client gone, or the
-    # max_duration watchdog) or a TERM becomes an ordinary exit, so it runs
-    # then too; bash defers these traps while script(1) is in the foreground,
-    # but script dies of the same hang-up, so they run right after.
+    # cleanup() runs on every way out. A hang-up (client gone) or a TERM
+    # becomes an ordinary exit, so it runs then too; bash defers these traps
+    # while script(1) is in the foreground, and runs them once it returns.
     trap cleanup EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT

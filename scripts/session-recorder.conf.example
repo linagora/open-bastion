@@ -16,7 +16,7 @@ sessions_dir = /var/lib/open-bastion/sessions
 format = script
 
 # Maximum session duration in seconds (default: 86400 = 24 hours)
-# Sessions exceeding this limit are hung up, then killed 5 seconds later.
+# At the limit the session is ended as a client disconnect would end it.
 # Must be a number of seconds: anything else falls back to the default, with
 # an error in the log. Keep it below ob-record-sink's own cap (7 days).
 # Set to 0 to disable timeout

@@ -447,14 +447,14 @@ replace || if false; then
 suite   || tests/test_ob_session_recorder.sh
 why     || #287: a non-numeric max_duration disabled the watchdog silently.
 
-id      || recorder-watchdog-hangs-up
+id      || recorder-watchdog-ends-session
 file    || scripts/ob-session-recorder
-search  || watchdog_signal HUP "$scope"
-replace || :
+search  || kill -KILL $(watchdog_targets
+replace || : $(watchdog_targets
 suite   || tests/test_ob_session_recorder.sh
-why     || #287: the ALRM-trap watchdog never ended a session. Without the
-why     || hang-up only the SIGKILL fallback is left, and it takes the
-why     || forwarder down before it can complete the recording.
+why     || #287: the ALRM-trap watchdog never ended a session. Without killing
+why     || script, only the last resort is left: the recorder dies without
+why     || cleaning up and the session goes on, unrecorded, until it ends.
 
 id      || recorder-header-escapes-every-field
 file    || scripts/ob-session-recorder

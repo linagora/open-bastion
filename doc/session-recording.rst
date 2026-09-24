@@ -73,11 +73,12 @@ Create ``/etc/open-bastion/session-recorder.conf``:
 
    # Maximum session duration in seconds (default 86400; ob-bastion-setup
    # writes 28800, 8 hours).
-   # Enforced by ob-session-recorder: at the limit it hangs the session up, as
-   # a client disconnect would, and kills what is left 5 s later. The stream
-   # is fully delivered, so the recording is "completed"; the timeout itself
-   # is logged (journalctl -t ob-session-recorder). A value that is not a
-   # number of seconds falls back to the default, with an error in the log.
+   # Enforced by ob-session-recorder: at the limit it kills script(1) (or the
+   # transfer program), which closes the session's terminal as a client
+   # disconnect would. The stream is fully delivered, so the recording is
+   # "completed"; the timeout itself is logged (journalctl -t
+   # ob-session-recorder). A value that is not a number of seconds falls back
+   # to the default, with an error in the log.
    # Set to 0 to disable (not recommended)
    max_duration = 86400
 

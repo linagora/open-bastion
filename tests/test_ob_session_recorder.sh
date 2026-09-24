@@ -853,23 +853,25 @@ test_e2e_private_channel_dir() {
 # ── E2E 5: max_duration really ends the session (#287) ──
 # The old watchdog was an ALRM trap, which bash defers until the foreground
 # command -- script, i.e. the whole session -- returns: it never fired in
-# time. Here a session that would run for 30 s has a 2 s limit.
+# time. Here a session that would run for 30 s has a 2 s limit, and must end
+# the orderly way -- script killed, the recorder finishing by itself -- well
+# before the watchdog's last resort (killing the recorder, 5 s later).
 test_e2e_max_duration() {
     local j tmp="$E2E_WORK/tmp" start elapsed rc=0 ok=1
     rm -rf "$tmp"; mkdir -p "$tmp"
-    e2e_driver "MAX_SESSION_DURATION=2" "WATCHDOG_GRACE=2" "REC_TMP_BASE=$(printf '%q' "$tmp")"
+    e2e_driver "MAX_SESSION_DURATION=2" "WATCHDOG_GRACE=5" "REC_TMP_BASE=$(printf '%q' "$tmp")"
     start=$SECONDS
     e2e_run 'echo WD-""START; sleep 30; echo WD-""END' </dev/null >/dev/null 2>&1 || rc=$?
     elapsed=$((SECONDS - start))
     j=$(e2e_last_json)
-    if [ "$elapsed" -ge 15 ]; then
-        fail "E2E: max_duration=2 did not end the session (${elapsed}s)"; ok=0
+    if [ "$elapsed" -gt 5 ]; then
+        fail "E2E: max_duration=2 did not end the session in time (${elapsed}s)"; ok=0
     fi
     if ! grep -q WD-START "${j%.json}.typescript" 2>/dev/null \
        || grep -q WD-END "${j%.json}.typescript" 2>/dev/null; then
         fail "E2E: the timed-out session's recording is wrong" "json=$j elapsed=$elapsed $(tr -d "\r" < "${j%.json}.typescript" 2>/dev/null | tr "\n" " ")"; ok=0
     fi
-    # The forwarder survives the hang-up and delivers the end of the stream.
+    # The forwarder reads EOF once script is gone, and completes the stream.
     grep -q '"status": "completed"' "$j" 2>/dev/null \
         || { fail "E2E: the timed-out session's recording is not complete" "$(cat "$j" 2>/dev/null)"; ok=0; }
     [ "$rc" -ne 0 ] || { fail "E2E: a timed-out session exited 0"; ok=0; }
@@ -891,7 +893,7 @@ test_e2e_max_duration() {
         elapsed=$((SECONDS - start))
         kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
         rm -f "$quiet"
-        [ "$elapsed" -lt 15 ] || { fail "E2E: max_duration=2 did not end an idle sftp transfer (${elapsed}s)"; ok=0; }
+        [ "$elapsed" -le 5 ] || { fail "E2E: max_duration=2 did not end an idle sftp transfer in time (${elapsed}s)"; ok=0; }
     else
         echo "SKIP: E2E max_duration on a transfer needs sftp-server"
     fi

@@ -124,9 +124,11 @@ Maximum session duration in seconds (default 86400;
 writes 28800).
 .B 0
 disables it. A value that is not a number of seconds falls back to the
-default, with an error in the log. At the limit the session is hung up, as a
-client disconnect would, and whatever is left is killed 5 seconds later. The
-recording is delivered in full and ends
+default, with an error in the log. At the limit the recorder kills
+.BR script (1)
+\(em or the transfer program \(em which closes the session's terminal as a
+client disconnect would; the recorder itself is killed if it has not
+finished 5 seconds later. The recording is delivered in full and ends
 .BR completed ;
 the timeout is logged.
 .TP
@@ -213,8 +215,9 @@ escapes the terminal recording; see the session containment settings of
 .SH EXIT STATUS
 The exit status of the shell, command or transfer; 1 when the session is
 refused because it cannot be recorded; 129 when the session was hung up
-(client gone, or
-.BR max_duration ).
+(client gone); 137 when
+.B max_duration
+ended it.
 .SH SEE ALSO
 .BR ob-record-sink (8),
 .BR ob-record-connect (1),
