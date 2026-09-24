@@ -315,6 +315,53 @@ test_role_switch_defers_helper() {
     fi
 }
 
+# ── 8. No sshd_config.d: a role switch is refused before anything happens ────
+# There the setup appends its block to sshd_config and keeps an existing one
+# ("already exists"), so the old role's sshd configuration would silently stay
+# in force under the new role's helper and PAM.
+test_sshd_config_fallback_refuses_switch() {
+    local tmp bad="" out rc
+    tmp=$(mktemp -d)
+    # $1 role, $2 principals line in sshd_config ("" = no block at all)
+    preflight_as() {
+        (
+            load_setup_as ob-bastion-setup || exit 99
+            parse_args -p https://x.example.com --node-role "$1" >/dev/null 2>&1 || exit 98
+            SSHD_CONFIG_DIR="$tmp/no-such-dir"
+            SSHD_CONFIG="$tmp/sshd_config"
+            preflight_sshd_config
+        )
+    }
+    backend_block='# LemonLDAP::NG Backend Configuration
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k'
+    bastion_block='# LemonLDAP::NG Bastion Configuration
+TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
+AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k'
+
+    printf 'Port 22\n%s\n' "$backend_block" > "$tmp/sshd_config"
+    out=$(preflight_as bastion 2>&1); rc=$?
+    { [ "$rc" -ne 0 ] && grep -q 'holds the Open Bastion block of a backend' <<<"$out"; } \
+        || bad="$bad backend-block/bastion(rc=$rc)"
+    preflight_as standalone >/dev/null 2>&1 && bad="$bad backend-block/standalone"
+    preflight_as backend >/dev/null 2>&1   || bad="$bad backend-block/backend-refused"
+
+    printf 'Port 22\n%s\n' "$bastion_block" > "$tmp/sshd_config"
+    preflight_as backend >/dev/null 2>&1   && bad="$bad bastion-block/backend"
+    preflight_as bastion >/dev/null 2>&1   || bad="$bad bastion-block/bastion-refused"
+
+    printf 'Port 22\n' > "$tmp/sshd_config"
+    preflight_as backend >/dev/null 2>&1   || bad="$bad no-block/backend-refused"
+    preflight_as bastion >/dev/null 2>&1   || bad="$bad no-block/bastion-refused"
+
+    rm -rf "$tmp"
+    if [ -z "$bad" ]; then
+        pass "without sshd_config.d, switching the role of an sshd_config block is refused"
+    else
+        fail "without sshd_config.d, switching the role of an sshd_config block is refused" "$bad"
+    fi
+}
+
 echo "=== one setup script, three roles (#288) ==="
 run_test test_role_from_name
 run_test test_node_role_overrides_the_stack
@@ -323,6 +370,7 @@ run_test test_right_role_options_accepted
 run_test test_help_is_role_specific
 run_test test_other_role_dropin_removed
 run_test test_role_switch_defers_helper
+run_test test_sshd_config_fallback_refuses_switch
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

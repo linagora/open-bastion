@@ -504,6 +504,28 @@ install_allowed_bastions() {
     fi
 }
 
+# Refuse, before anything is written, a role switch on an sshd without
+# sshd_config.d. There the setup appends its block to sshd_config and, finding
+# one already, keeps it ("already exists"): the old role's sshd configuration
+# would stay in force while the helper, PAM and the summary moved to the new
+# one. Rewriting a hand-maintained sshd_config is not something to guess at,
+# so the block has to go by hand.
+preflight_sshd_config() {
+    [ -d "$SSHD_CONFIG_DIR" ] && return 0
+    local current
+    current=$(configured_sshd_stack)
+    [ -n "$current" ] || return 0
+    [ "$current" = "$(sshd_dropin_stack)" ] && return 0
+    error "$SSHD_CONFIG holds the Open Bastion block of a $current, and this run"
+    error "configures a $(role_noun)."
+    error "This sshd has no $SSHD_CONFIG_DIR, so the setup appends its block to"
+    error "$SSHD_CONFIG and never rewrites one that is already there: the $current"
+    error "configuration would stay in force under a $(role_noun)'s helper and PAM."
+    error "Remove that block by hand (from '# LemonLDAP::NG ... Configuration' to"
+    error "'PermitRootLogin no'), then run this again."
+    return 1
+}
+
 # Configure sshd
 configure_sshd() {
     step "Configuring SSH server..."
@@ -2925,6 +2947,8 @@ main() {
             exit 1
         fi
     done
+
+    preflight_sshd_config || exit 1
 
     # Ask for server_group and client_id BEFORE printing the banner so the
     # final summary the user confirms reflects the values that will be used.

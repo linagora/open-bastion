@@ -284,3 +284,11 @@ suite   || tests/test_ob_setup_roles.sh
 why     || #290 review: on a role switch the new helper must not go in during
 why     || phase 1, where it meets the old role's live sshd for the length of
 why     || an enrollment.
+
+id      || setup-sshd-config-switch-refused
+file    || scripts/ob-bastion-setup
+search  || \n    error "'PermitRootLogin no'), then run this again."\n    return 1
+replace || \n    error "'PermitRootLogin no'), then run this again."\n    return 0
+suite   || tests/test_ob_setup_roles.sh
+why     || #290 review: without sshd_config.d an existing block is kept as is,
+why     || so a role switch there would leave the old role's sshd in force.
