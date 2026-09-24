@@ -547,8 +547,9 @@ test_pam_authorize_rejects_revoked_cert() {
 
 # End-to-end validation: attempt a real SSH connection with the cert that
 # was just revoked on the LLNG side via /ssh/myrevoke. The local KRL on
-# the bastion is NOT refreshed (no cron in the demo containers), so sshd
-# accepts the cert at the pubkey layer. pam_openbastion.so then forwards
+# the bastion is NOT refreshed in between (the demo's ob-krl-refresh loop runs
+# every 30 minutes, far longer than this suite), so sshd accepts the cert at
+# the pubkey layer. pam_openbastion.so then forwards
 # the SHA256 fingerprint to /pam/authorize (PAM `account` phase), LLNG
 # refuses, and the client gets a permission denial.
 #
@@ -963,21 +964,52 @@ test_krl_file_valid() {
     return 0
 }
 
-test_krl_cron() {
+# ob-krl-refresh.timer keeps a real Mode E host's revocation list current; it
+# replaced the /etc/cron.d/open-bastion-krl job of 0.6 (#281). These containers
+# have no systemd, so docker-demo-common/ob-demo-krl-refresh stands in with a
+# loop running ob-krl-refresh every 30 minutes. Checked: the loop runs on both
+# containers, and one run of the packaged program either installs a list that
+# is a KRL or -- when the portal has none to serve -- leaves the current one
+# byte-for-byte as it was. Never HTML, never half a file.
+test_krl_refresh_stand_in() {
     TESTS_RUN=$((TESTS_RUN + 1))
-    log "Testing KRL refresh cron job exists..."
+    log "Testing the KRL refresh stand-in and ob-krl-refresh..."
 
-    local bastion_cron backend_cron
-    bastion_cron=$(docker exec ob-maxsec-bastion cat /etc/cron.d/open-bastion-krl 2>&1) || true
-    backend_cron=$(docker exec ob-maxsec-backend cat /etc/cron.d/open-bastion-krl 2>&1) || true
+    local c before after rc head
+    for c in ob-maxsec-bastion ob-maxsec-backend; do
+        if ! docker exec "$c" pgrep -f ob-demo-krl-refresh >/dev/null 2>&1; then
+            fail "ob-demo-krl-refresh loop is not running on $c"
+            return 1
+        fi
+        if docker exec "$c" test -e /etc/cron.d/open-bastion-krl; then
+            fail "$c still has the 0.6 KRL cron job"
+            return 1
+        fi
+        before=$(docker exec "$c" md5sum /etc/ssh/revoked_keys 2>&1) || true
+        rc=0
+        docker exec "$c" ob-krl-refresh >/dev/null 2>&1 || rc=$?
+        after=$(docker exec "$c" md5sum /etc/ssh/revoked_keys 2>&1) || true
+        head=$(docker exec "$c" head -c 6 /etc/ssh/revoked_keys 2>/dev/null) || true
+        log_verbose "$c: ob-krl-refresh rc=$rc head=$head"
+        case "$rc" in
+            0)  # Success means the list now on disk is the portal's KRL
+                # (replaced, or already identical).
+                if [[ "$head" != "SSHKRL" ]]; then
+                    fail "$c: ob-krl-refresh succeeded but the list is not a KRL" "$head"
+                    return 1
+                fi ;;
+            2|3)
+                if [[ "$before" != "$after" ]]; then
+                    fail "$c: a failed refresh (rc=$rc) changed the current list"
+                    return 1
+                fi ;;
+            *)  fail "$c: ob-krl-refresh failed unexpectedly (rc=$rc)"
+                return 1 ;;
+        esac
+    done
 
-    if echo "$bastion_cron" | grep -q "ssh/revoked" && echo "$backend_cron" | grep -q "ssh/revoked"; then
-        pass "KRL refresh cron job configured on both servers"
-        return 0
-    else
-        fail "KRL refresh cron job missing" "bastion: $bastion_cron, backend: $backend_cron"
-        return 1
-    fi
+    pass "ob-demo-krl-refresh runs on both servers; ob-krl-refresh never installs a non-KRL"
+    return 0
 }
 
 test_sudo_pam_config() {
@@ -1363,7 +1395,7 @@ main() {
     test_authorized_keys_disabled
     test_krl_configured
     test_krl_file_valid
-    test_krl_cron
+    test_krl_refresh_stand_in
     test_sudo_pam_config
     test_password_auth_disabled
 

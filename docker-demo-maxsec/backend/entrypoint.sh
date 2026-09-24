@@ -3,7 +3,7 @@
 # - Downloads CA key from SSO
 # - Downloads KRL (Key Revocation List)
 # - Configures sshd for certificate-only auth
-# - Sets up KRL refresh cron
+# - Keeps the KRL fresh (stand-in for ob-krl-refresh.timer)
 # - Relies on certificate vouching (bastion-minted cert key-id + source-address)
 
 set -e
@@ -17,6 +17,7 @@ ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
 SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 TOKEN_FILE="/etc/open-bastion/server_token.json"
+# Minutes, as ob-krl-refresh.timer's OnCalendar=*:0/30.
 KRL_REFRESH_INTERVAL=30
 
 echo "=== Open Bastion Maximum Security Backend Starting (Mode E) ==="
@@ -63,13 +64,9 @@ else
 fi
 chmod 644 "$SSH_REVOKED_KEYS"
 
-# Set up KRL refresh cron job (validates KRL format before replacing)
-echo "Setting up KRL refresh cron (every ${KRL_REFRESH_INTERVAL} min)..."
-cat > /etc/cron.d/open-bastion-krl << CRONEOF
-*/${KRL_REFRESH_INTERVAL} * * * * root tmp=\$(mktemp /tmp/open-bastion-krl.XXXXXX) && curl -sf -o "\$tmp" "${PORTAL_URL}/ssh/revoked" && head -c 6 "\$tmp" | grep -q SSHKRL && mv "\$tmp" "${SSH_REVOKED_KEYS}" || rm -f "\$tmp"
-CRONEOF
-chmod 644 /etc/cron.d/open-bastion-krl
-cron
+# The refresh itself starts at the end, once openbastion.conf exists:
+# docker-demo-common/ob-demo-krl-refresh stands in for ob-krl-refresh.timer,
+# which replaced the cron job this demo used to start cron for (#281).
 
 # Configure sshd for maximum security (Mode E)
 cat > /etc/ssh/sshd_config.d/00-open-bastion-backend.conf << EOF
@@ -313,5 +310,10 @@ echo "      is applied by ob-backend-setup in a real deployment, not here."
 # -- cannot renew it on its own, so LLNG user resolution dies when the token
 # expires, and every new login with it. See docker-demo-common/ob-demo-heartbeat.
 /usr/local/sbin/ob-demo-heartbeat &
+
+# And for ob-krl-refresh.timer: without it the list fetched above never
+# changes, and a certificate revoked in LLNG keeps passing RevokedKeys here.
+# See docker-demo-common/ob-demo-krl-refresh.
+OB_DEMO_KRL_INTERVAL=$((KRL_REFRESH_INTERVAL * 60)) /usr/local/sbin/ob-demo-krl-refresh &
 
 exec "$@"

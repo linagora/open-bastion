@@ -12,7 +12,6 @@ FROM debian:13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server \
     sudo \
-    cron \
     libcurl4-gnutls-dev \
     libjson-c-dev \
     libssl-dev \
@@ -113,6 +112,11 @@ COPY --chmod=755 docker-demo-common/ob-demo-socket-activate \
 # token is never refreshed and NSS stops resolving LLNG users once it expires.
 COPY --chmod=755 docker-demo-common/ob-demo-heartbeat \
      /usr/local/sbin/ob-demo-heartbeat
+
+# KRL refresh stand-in for ob-krl-refresh.timer (Mode E): without it the
+# revocation list fetched at startup never changes.
+COPY --chmod=755 docker-demo-common/ob-demo-krl-refresh \
+     /usr/local/sbin/ob-demo-krl-refresh
 
 # Startup script
 COPY docker-demo-maxsec/bastion/entrypoint.sh /entrypoint.sh

@@ -1,0 +1,32 @@
+#!/bin/bash
+# KRL refresh timer for the Mode E Docker demo, where systemd is not PID 1.
+#
+# On a real Mode E host, ob-bastion-setup --max-security enables
+# ob-krl-refresh.timer, which runs ob-krl-refresh every 30 minutes
+# (OnCalendar=*:0/30) to fetch the portal's SSH key revocation list into
+# /etc/ssh/revoked_keys. It replaced the /etc/cron.d/open-bastion-krl job of
+# 0.6 (#281), and these containers used to start cron just for that job.
+#
+# Without systemd the timer never exists, so the list the entrypoint fetched at
+# startup would never change: a certificate revoked in LemonLDAP::NG would keep
+# passing sshd's RevokedKeys check here, and the demo would show a Mode E that
+# does not work the way a real one does.
+#
+# Hence this stand-in: same program, same cadence, nothing else. Demo
+# scaffolding only -- it is not installed by the package, and a real host gets
+# ob-krl-refresh.timer instead.
+set -euo pipefail
+
+INTERVAL="${OB_DEMO_KRL_INTERVAL:-1800}"
+
+echo "[ob-demo-krl-refresh] KRL refresh every ${INTERVAL}s"
+
+# First run immediately, as the timer does for a list it has never refreshed:
+# a misconfiguration shows in `docker logs` now rather than in half an hour. A
+# failed run leaves the current list in place (that is ob-krl-refresh's whole
+# contract) and is retried at the next tick; it must never stop the loop.
+while :; do
+    ob-krl-refresh \
+        || echo "[ob-demo-krl-refresh] refresh failed, current list kept; retrying in ${INTERVAL}s" >&2
+    sleep "$INTERVAL"
+done
