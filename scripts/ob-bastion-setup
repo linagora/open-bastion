@@ -201,6 +201,42 @@ sshd_dropin_stack() {
     if is_backend; then printf 'backend'; else printf 'bastion'; fi
 }
 
+# The stack this host's sshd is configured for right now -- "bastion",
+# "backend", or nothing when setup has not configured it -- read from what an
+# earlier run wrote: the drop-in name, or, on an sshd without sshd_config.d,
+# the principals line of the block appended to sshd_config (only the backend
+# passes the key-id, %i). A host with both drop-ins, left by a role switch
+# before #288, reads as a backend: that one sorts first and its
+# AuthorizedPrincipalsCommand is the one sshd uses.
+configured_sshd_stack() {
+    local f stack
+    if [ -d "$SSHD_CONFIG_DIR" ]; then
+        for stack in backend bastion; do
+            for f in "$SSHD_CONFIG_DIR/00-open-bastion-$stack.conf" \
+                     "$SSHD_CONFIG_DIR/50-open-bastion-$stack.conf"; do
+                [ -f "$f" ] && { printf '%s' "$stack"; return 0; }
+            done
+        done
+        return 0
+    fi
+    grep -q "TrustedUserCAKeys.*open-bastion" "$SSHD_CONFIG" 2>/dev/null || return 0
+    local line
+    line=$(grep -m1 '^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]].*ob-ssh-principals' \
+           "$SSHD_CONFIG" 2>/dev/null)
+    case "$line" in
+        "")      ;;   # a block from before the principals helper: cannot tell
+        *" %i"*) printf 'backend' ;;
+        *)       printf 'bastion' ;;
+    esac
+}
+
+# True when this run changes the stack the host's sshd is configured for.
+is_role_switch() {
+    local current
+    current=$(configured_sshd_stack)
+    [ -n "$current" ] && [ "$current" != "$(sshd_dropin_stack)" ]
+}
+
 # A boxed title, centred in the 57 columns of the frame.
 print_box() {
     local text="$1" width=57 left right
@@ -356,20 +392,32 @@ install_principals_helper() {
         return 1
     fi
 
-    install -D -m 0755 -o root -g root "$helper_src" "$script_path"
-    track_created "$script_path"
-
+    # Every step is checked: main() calls this as `install_principals_helper ||
+    # ...`, which suspends errexit for the whole body, so an unchecked failure
+    # would fall through to "installed" and the run would carry on.
+    #
+    # The allowlist goes in BEFORE the backend helper. The backend helper with
+    # no allowlist file at all is legacy non-enforcing mode, which accepts a
+    # direct SSO certificate; it must never be live in that state, not even
+    # between two lines of this function.
     if is_backend; then
-        install_allowed_bastions
+        install_allowed_bastions || return 1
     fi
+
+    install -D -m 0755 -o root -g root "$helper_src" "$script_path" || {
+        error "Could not install $script_path"
+        return 1
+    }
+    track_created "$script_path"
 
     # 0711 on /run/open-bastion, 0700 root on the drop directory: see the
     # tmpfiles rule for the rationale. ob-fp-daemon owns the drops; the
     # principals helper only needs to reach the deposit socket.
-    install -d -m 0711 -o root -g root /run/open-bastion
-    install -d -m 0700 -o root -g root "$spool_dir"
+    install -d -m 0711 -o root -g root /run/open-bastion || return 1
+    install -d -m 0700 -o root -g root "$spool_dir" || return 1
 
-    install -D -m 0644 -o root -g root "$data_dir/ob-fp-spool.tmpfiles" "$tmpfiles_conf"
+    install -D -m 0644 -o root -g root "$data_dir/ob-fp-spool.tmpfiles" "$tmpfiles_conf" \
+        || return 1
     track_created "$tmpfiles_conf"
 
     # Enable the fingerprint sink socket (#249). The principals helper deposits
@@ -392,22 +440,57 @@ install_principals_helper() {
     info "SSH fingerprint spool prepared at $spool_dir"
 }
 
+# Phase 1 half of the principals helper. On a role switch it is NOT installed
+# here: sshd keeps running the old role's configuration until it is restarted
+# at the very end, and the new helper under the old configuration is a
+# mismatch. Both helpers deny in that state, but a host locked for the length
+# of an enrollment -- or for good, if the run stops -- is no better. So the
+# helper goes in last, by finish_principals_helper, right before the restart,
+# where the mismatch lasts a moment.
+HELPER_DEFERRED=false
+prepare_principals_helper() {
+    if is_role_switch; then
+        HELPER_DEFERRED=true
+        info "This host's sshd is configured as a $(configured_sshd_stack): the principals"
+        info "helper will be replaced together with the sshd restart, at the end."
+        return 0
+    fi
+    install_principals_helper
+}
+
+finish_principals_helper() {
+    [ "$HELPER_DEFERRED" = "true" ] || return 0
+    install_principals_helper
+}
+
 # Backend: write the bastion allowlist the principals helper reads.
 install_allowed_bastions() {
     # Allowed-bastions list, world-readable (no secrets — just client_id values)
     # so the principals helper (running as nobody) can read it. Empty file means
     # "any vouched bastion"; its mere presence turns on bastion-only enforcement.
+    #
+    # Every step is checked (errexit is suspended here, see the caller): a
+    # write that failed unnoticed would leave no file, and the backend helper
+    # then runs in legacy mode and accepts a direct SSO certificate.
+    local dir
+    dir=$(dirname "$OB_ALLOWED_BASTIONS_FILE")
     backup_file "$OB_ALLOWED_BASTIONS_FILE"
-    mkdir -p "$(dirname "$OB_ALLOWED_BASTIONS_FILE")"
-    printf '%s\n' "$BASTION_ALLOWED_IDS" > "$OB_ALLOWED_BASTIONS_FILE"
-    chmod 644 "$OB_ALLOWED_BASTIONS_FILE"
+    if ! mkdir -p "$dir" \
+       || ! printf '%s\n' "$BASTION_ALLOWED_IDS" > "$OB_ALLOWED_BASTIONS_FILE" \
+       || ! chmod 644 "$OB_ALLOWED_BASTIONS_FILE"; then
+        error "Could not write $OB_ALLOWED_BASTIONS_FILE"
+        return 1
+    fi
     track_created "$OB_ALLOWED_BASTIONS_FILE"
     # CRITICAL: the principals helper runs as nobody and must traverse this
     # directory to read the 0644 allowlist above. If the dir stays 0700 root,
     # nobody cannot stat the file, the helper fails closed (post-fix) — or,
     # before the fail-closed fix, silently fell OPEN and accepted direct SSO
     # certs. Every secret inside is individually 0600, so 0711 is safe.
-    chmod 0711 "$(dirname "$OB_ALLOWED_BASTIONS_FILE")"
+    chmod 0711 "$dir" || {
+        error "Could not make $dir traversable (0711) for the principals helper"
+        return 1
+    }
     if [ -n "$BASTION_ALLOWED_IDS" ]; then
         info "Backend accepts bastions: $BASTION_ALLOWED_IDS"
     else
@@ -2884,7 +2967,9 @@ main() {
     # phase 2, the system is still usable: rollback_on_failure() restores
     # backups / removes new files and exits.
     download_ca_key || { rollback_on_failure; exit 1; }
-    install_principals_helper || { rollback_on_failure; exit 1; }
+    # On a role switch this only records that the helper is to be replaced
+    # at the end; see prepare_principals_helper.
+    prepare_principals_helper || { rollback_on_failure; exit 1; }
     configure_pam_openbastion || { rollback_on_failure; exit 1; }
     if is_backend; then
         : # a backend records nothing: the bastion in front of it does
@@ -2982,6 +3067,16 @@ main() {
         setup_audit_trace || warn "Audit trace setup failed (see errors above)"
     else
         info "Audit trace not applied (opt-in: pass --enable-audit-trace)"
+    fi
+
+    if [ "$HELPER_DEFERRED" = "true" ]; then
+        finish_principals_helper || {
+            error "The sshd configuration of the new role is written but its principals"
+            error "helper is not. sshd was not restarted and still runs the old role; its"
+            error "next restart would pair the new configuration with the old helper,"
+            error "which denies every certificate login. Re-run this setup first."
+            exit 1
+        }
     fi
 
     if [ "$DRY_RUN" = "false" ]; then

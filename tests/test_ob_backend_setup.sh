@@ -205,6 +205,71 @@ test_nss_not_in_rollback_phase() {
     fi
 }
 
+# ── Test 7g: install_principals_helper, for real (#288 review) ──
+# Every other test stops at --dry-run, which returns before the allowlist is
+# written: replacing the call to install_allowed_bastions with `:` left the
+# whole suite green. This runs the real path with `install` and `systemctl`
+# stubbed and the allowlist redirected, and pins what matters: the backend
+# helper is the one installed, the allowlist is written first (the backend
+# helper with no allowlist accepts direct SSO certificates), and a failed
+# write stops the step instead of being ignored under a suspended errexit.
+test_install_helper_real_path() {
+    local tmp out rc bad=""
+    tmp=$(mktemp -d)
+    # The run; $1 is where the allowlist goes.
+    run_install() {
+        (
+            load_setup_as ob-backend-setup || exit 99
+            parse_args -p "https://x" -g g --allowed-bastions "b1, b2" >/dev/null 2>&1 || exit 98
+            normalize_allowed_bastions
+            OB_ALLOWED_BASTIONS_FILE="$1"
+            BACKUP_DIR="$tmp/backup"
+            OB_DATA_DIR="$(cd "$TESTS_DIR/../share" && pwd)"
+            export OB_DATA_DIR
+            install() {
+                case "$*" in
+                    *ob-ssh-principals.*)
+                        if [ -f "$OB_ALLOWED_BASTIONS_FILE" ]; then
+                            echo "allowlist-before-helper" >> "$tmp/install.log"
+                        fi ;;
+                esac
+                printf '%s\n' "$*" >> "$tmp/install.log"
+            }
+            systemctl() { :; }
+            install_principals_helper >/dev/null 2>&1
+        )
+    }
+
+    run_install "$tmp/etc/open-bastion/allowed_bastions"
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad rc=$rc"
+    [ "$(cat "$tmp/etc/open-bastion/allowed_bastions" 2>/dev/null)" = "b1 b2" ] \
+        || bad="$bad allowlist-content"
+    [ "$(stat -c %a "$tmp/etc/open-bastion/allowed_bastions" 2>/dev/null)" = 644 ] \
+        || bad="$bad allowlist-mode"
+    [ "$(stat -c %a "$tmp/etc/open-bastion" 2>/dev/null)" = 711 ] || bad="$bad dir-mode"
+    grep -q 'ob-ssh-principals\.backend /usr/local/sbin/ob-ssh-principals$' "$tmp/install.log" \
+        || bad="$bad backend-helper"
+    grep -q '^allowlist-before-helper$' "$tmp/install.log" || bad="$bad order"
+
+    # The allowlist cannot be written (its directory is a file): the step fails
+    # and the helper is never installed.
+    rm -f "$tmp/install.log"
+    : > "$tmp/not-a-dir"
+    run_install "$tmp/not-a-dir/allowed_bastions"
+    rc=$?
+    [ "$rc" -ne 0 ] || bad="$bad failed-write-ignored"
+    grep -q 'ob-ssh-principals\.' "$tmp/install.log" 2>/dev/null \
+        && bad="$bad helper-installed-without-allowlist"
+
+    rm -rf "$tmp"
+    if [ -z "$bad" ]; then
+        pass "install_principals_helper writes the allowlist first, then the backend helper"
+    else
+        fail "install_principals_helper writes the allowlist first, then the backend helper" "$bad"
+    fi
+}
+
 # ── Test 8: --no-create-user sets CREATE_USERS=false ──
 test_no_create_user() {
     (
@@ -613,6 +678,7 @@ run_test test_no_sudo_skips_sudoers
 run_test test_max_security_sudo_provisions_sudoers
 run_test test_no_sudo_conflicts_with_max_security
 run_test test_nss_not_in_rollback_phase
+run_test test_install_helper_real_path
 run_test test_no_create_user
 run_test test_dry_run
 run_test test_confirm_noninteractive

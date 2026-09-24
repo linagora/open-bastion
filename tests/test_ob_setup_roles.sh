@@ -270,6 +270,51 @@ test_other_role_dropin_removed() {
     fi
 }
 
+# ── 7. A role switch installs the new helper last, not in phase 1 ───────────
+# sshd runs the old role's configuration until the restart at the end of the
+# run. Installing the new principals helper in phase 1 paired it with that
+# configuration for the whole enrollment -- and before the helpers learnt to
+# deny a mismatch, a backend's sshd with the bastion helper admitted a direct
+# SSO certificate, unrecorded (#290 review). The helper now waits for the end
+# on a switch, and only on a switch.
+test_role_switch_defers_helper() {
+    local tmp bad="" role current out
+    tmp=$(mktemp -d)
+    for role in bastion standalone backend; do
+        for current in none bastion backend; do
+            rm -rf "$tmp/d"; mkdir -p "$tmp/d"
+            [ "$current" = none ] || : > "$tmp/d/00-open-bastion-$current.conf"
+            out=$(
+                load_setup_as ob-bastion-setup || exit 99
+                parse_args -p https://x.example.com --node-role "$role" >/dev/null 2>&1 || exit 98
+                SSHD_CONFIG_DIR="$tmp/d"
+                install_principals_helper() { echo "INSTALLED"; }
+                echo "stack=$(configured_sshd_stack)"
+                prepare_principals_helper >/dev/null 2>&1 && echo "PREPARE-OK"
+                prepare_principals_helper 2>/dev/null | grep -q INSTALLED && echo "PHASE1"
+                finish_principals_helper 2>/dev/null | grep -q INSTALLED && echo "AT-END"
+            )
+            local stack="bastion"; [ "$role" = backend ] && stack=backend
+            local cur_label="$current"; [ "$current" = none ] && cur_label=""
+            grep -q "^stack=$cur_label$" <<<"$out"   || bad="$bad $role/$current(detected)"
+            grep -q '^PREPARE-OK$' <<<"$out"          || bad="$bad $role/$current(prepare-failed)"
+            if [ "$current" != none ] && [ "$current" != "$stack" ]; then
+                grep -q '^PHASE1$' <<<"$out" && bad="$bad $role/$current(installed-in-phase-1)"
+                grep -q '^AT-END$' <<<"$out" || bad="$bad $role/$current(never-installed)"
+            else
+                grep -q '^PHASE1$' <<<"$out" || bad="$bad $role/$current(not-in-phase-1)"
+                grep -q '^AT-END$' <<<"$out" && bad="$bad $role/$current(installed-twice)"
+            fi
+        done
+    done
+    rm -rf "$tmp"
+    if [ -z "$bad" ]; then
+        pass "on a role switch the principals helper is installed at the end, otherwise in phase 1"
+    else
+        fail "on a role switch the principals helper is installed at the end" "$bad"
+    fi
+}
+
 echo "=== one setup script, three roles (#288) ==="
 run_test test_role_from_name
 run_test test_node_role_overrides_the_stack
@@ -277,6 +322,7 @@ run_test test_wrong_role_options_refused
 run_test test_right_role_options_accepted
 run_test test_help_is_role_specific
 run_test test_other_role_dropin_removed
+run_test test_role_switch_defers_helper
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
