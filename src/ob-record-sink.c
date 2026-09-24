@@ -559,12 +559,18 @@ int main(void)
      * is carried by the "format" field, not the status.
      *
      * Created with O_EXCL: a duplicate <ts>_<session_id> must be refused here
-     * rather than truncate an existing session's metadata (#198). Other write
-     * failures are non-fatal, as before — the recording itself still matters. */
-    if (write_metadata(dirfd, meta_name, 1, session_id, user, client_ip, tty,
-                       start_time, NULL, "active",
-                       command, format, rec_name, gid) == -2) {
+     * rather than truncate an existing session's metadata (#198). Any other
+     * failure must refuse too: we ACK only once the metadata exists, so the
+     * connector fails closed if it does not (#287). */
+    int mrc = write_metadata(dirfd, meta_name, 1, session_id, user, client_ip, tty,
+                             start_time, NULL, "active",
+                             command, format, rec_name, gid);
+    if (mrc == -2) {
         fail("metadata for this session id/timestamp already exists; refusing");
+        goto reject_dir;
+    }
+    if (mrc != 0) {
+        fail("could not write the initial metadata; refusing (fail-closed)");
         goto reject_dir;
     }
 
@@ -593,8 +599,14 @@ int main(void)
         while ((w = write(conn_fd, &ack, 1)) < 0 && errno == EINTR)
             ;
         if (w != 1) {
+            /* The peer is gone before we could hand off. The initial metadata
+             * is "active"; finalize it as aborted so it does not lie. */
             fail("could not acknowledge the connection; the peer is gone");
             close(recfd);
+            iso_utc(end_time, sizeof(end_time));
+            write_metadata(dirfd, meta_name, 0, session_id, user, client_ip, tty,
+                           start_time, end_time, "aborted", command, format,
+                           rec_name, gid);
             goto reject_dir;
         }
     }
