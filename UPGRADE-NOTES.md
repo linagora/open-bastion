@@ -41,7 +41,9 @@ SSH fp spool /run/open-bastion/ssh-fp is owned by uid 65534, not root
 `ob-post-upgrade` takes no arguments and asks nothing. It does **not** enrol,
 and does not touch `openbastion.conf`, your server token, `sshd_config` or any
 PAM stack — so you do not need to remember how this host was set up, and it is
-safe to run again at any time. Add `--dry-run` to see what it would change.
+safe to run again at any time. Add `--dry-run` to see what it would change. On
+a bastion that records sessions it also changes the login shell of SSO users:
+see [A7](#a7-sso-users-log-in-through-ob-login-shell-on-a-recording-host).
 
 You can still use `ob-bastion-setup` / `ob-backend-setup` instead if you have
 your original arguments; you need them only to _change_ a decision.
@@ -217,6 +219,49 @@ The recorder, `ob-record-connect` and `ob-record-sink` now speak a framed
 protocol (v2), and the sink refuses the old one. They ship in the same
 package; sessions open during the upgrade keep the processes they started
 with and finish normally.
+
+### A7. SSO users log in through `ob-login-shell` on a recording host
+
+Bastions and standalone hosts that record sessions (set up without
+`--disable-session-recorder`). Not backends.
+
+The package alone does not switch an existing host; its postinst says when one
+needs it. Run `sudo ob-post-upgrade` ([A1](#a1-finish-the-upgrade)), or re-run
+the setup script. Either one:
+
+- adds `force_shell = /usr/sbin/ob-login-shell` to
+  `/etc/open-bastion/nss_openbastion.conf`. `ob-post-upgrade` changes nothing
+  else in the file, and leaves a `force_shell` you set yourself alone, with a
+  warning. `default_shell` becomes the shell of the recorded session;
+- lists the launcher in `/etc/shells`;
+- restarts `nscd` if it runs. No NSS cache needs purging.
+
+A setup run also adds `PermitUserEnvironment no` to the sshd drop-in.
+
+Check it:
+
+```sh
+getent passwd <an SSO user> | cut -d: -f7   # expect: /usr/sbin/ob-login-shell
+grep ^force_shell /etc/open-bastion/nss_openbastion.conf
+```
+
+What changes for SSO users on a recording host:
+
+- **The portal's per-user shell no longer applies**: every recorded session
+  runs `default_shell`. Backends still honour the portal's shell.
+- **A `Match` block in `sshd_config` no longer exempts them from recording.**
+  Exemptions work for local accounts only.
+- **`su - <sso user>`, `sudo -i -u <sso user>` and their console logins are
+  recorded**, and fail like SSH when the recording sink is down. Keep a local
+  account, root on the console for instance, as your rescue path.
+- **Their session environment is rebuilt**: only `TERM`, the `SSH_*` variables
+  sshd sets, locale names, `XDG_RUNTIME_DIR` and `XDG_SESSION_*` are kept, and
+  `PATH` is `/usr/local/bin:/usr/bin:/bin:/usr/games`. Variables set through
+  `pam_env`, `SetEnv` or `AcceptEnv` (`TZ`, for instance) no longer arrive: set
+  them in the shell's system-wide startup files.
+
+Local accounts keep their shell. To give one that logs in over SSH the same
+protection: `chsh -s /usr/sbin/ob-login-shell <user>`.
 
 ---
 

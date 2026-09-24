@@ -307,6 +307,29 @@ Key security properties:
 
 For the full design, protocol, and migration details see :doc:` </design/tamper-evident-session-recording>`.
 
+.. _session-recording-login-shell:
+
+The login shell: nothing of the user's before the recorder
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+sshd does not execute a ``ForceCommand`` itself: it runs it through the user's **login shell**, as ``$SHELL -c /usr/sbin/ob-session-recorder``. A shell reads startup files before it runs that command, and some of them belong to the user. Debian's and Ubuntu's ``bash`` source ``/etc/bash.bashrc`` and ``~/.bashrc`` for ``bash -c`` whenever ``SSH_CLIENT`` is set, and ``zsh`` reads ``~/.zshenv`` for every invocation. With such a login shell, the user's own files run **before** the recorder starts, and outside the recording (#293).
+
+On a host that records, the login shell of SSO users is therefore ``/usr/sbin/ob-login-shell`` (see ``ob-login-shell(8)``):
+
+- ``libnss_openbastion`` hands it out to every user it resolves when ``nss_openbastion.conf`` sets ``force_shell = /usr/sbin/ob-login-shell``. It wins over the shell the portal supplies and over ``default_shell``, and it applies to entries served from the NSS caches too, including ones written before the key was set. ``ob-bastion-setup`` writes the key on the bastion and standalone roles when recording is on, and ``ob-post-upgrade`` adds it to a recording host set up before. A backend (no ``ForceCommand``, nothing recorded) and ``--disable-session-recorder`` (no recorder) keep bash.
+- The launcher reads no file the user controls and starts no shell. It execs the recorder with an environment it builds itself: identity from the passwd entry, a fixed ``PATH``, and only ``SSH_CLIENT``, ``SSH_CONNECTION``, ``SSH_TTY``, ``SSH_ORIGINAL_COMMAND``, ``TERM``, ``SSH_AUTH_SOCK``, locale names and the ``XDG_SESSION_*`` variables, each validated. ``BASH_ENV``, ``ENV``, exported functions, ``LD_*`` and ``OB_*`` never reach it.
+- The recorder then starts the user's **real** shell inside ``script(1)``: ``default_shell`` from ``nss_openbastion.conf`` (``/bin/bash`` as the setup writes it). The recorded session is an ordinary bash, and reading ``~/.bashrc`` there is harmless: it is recorded.
+- The setup also pins ``PermitUserEnvironment no`` next to the ``ForceCommand``: ``~/.ssh/environment`` is a file the user writes, which sshd would read into the launcher's environment before it runs.
+
+Every way into the launcher ends in the recorder. ``ob-login-shell -c COMMAND`` for anything other than the recorder (``su -c``, ``sudo -i -u USER COMMAND``, an sshd ``Match`` block that exempts the user from the ``ForceCommand``) does not run ``COMMAND``: it hands it to the recorder, which records it. An interactive login -- the console, ``su -``, ``sudo -i`` -- is a recorded session too.
+
+Two consequences to know:
+
+- **Exempting an SSO user from recording with a ``Match`` block no longer works**: the launcher records them anyway. Exemptions apply to local accounts only.
+- **A per-user shell from the portal is not honoured on a recording host**: everyone's recorded session runs ``default_shell``. The portal's shell still applies on backends.
+
+Local accounts in ``/etc/passwd`` are not resolved by ``libnss_openbastion`` and keep the shell you gave them. Any of them that logs in over SSH on a recording host goes through the same ``ForceCommand``, with the same exposure; give it the launcher with ``chsh -s /usr/sbin/ob-login-shell <user>``.
+
 Availability: fail-closed recording requires out-of-band rescue access
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -314,7 +337,7 @@ Recording is **fail-closed**, and ``ob-bastion-setup`` forces **every** session 
 
 In particular, **a full disk is a lockout risk**. The recordings are written by the root sink under ``/var/lib/open-bastion/sessions``; when that filesystem fills up (including the root-reserved blocks the sink can use), writes fail with ``ENOSPC``. Depending on timing, a new connection is then either refused (fail-closed) or its recording is lost — and this applies to **interactive shells and ``scp``/``sftp`` transfers** (file transfers are fail-closed too). You can therefore be locked out of SSH exactly when you need to log in to free space.
 
-**Always keep an administrative path that does not transit sshd's ``ForceCommand``** — a serial console, BMC/IPMI, or hypervisor / cloud-provider console (e.g. OVH KVM). Open Bastion only wires the recorder into sshd's ``ForceCommand``, and only reconfigures the ``sshd`` / ``sudo`` / ``sudo-i`` PAM stacks — it does **not** touch ``/etc/pam.d/login`` or ``/etc/pam.d/su``. A console login (and ``su -`` from it) therefore bypasses recording and remains usable to free space, restart ``ob-record.socket``, or otherwise recover. (The in-SSH alternative — exempting an admin account with ``Match User …,!admin``, Option A — leaves that account's sessions **unrecorded**, an audit/trust trade-off, and is not what ``ob-bastion-setup`` configures.)
+**Always keep an administrative path that does not transit sshd's ``ForceCommand``** — a serial console, BMC/IPMI, or hypervisor / cloud-provider console (e.g. OVH KVM). Open Bastion only wires the recorder into sshd's ``ForceCommand``, and only reconfigures the ``sshd`` / ``sudo`` / ``sudo-i`` PAM stacks — it does **not** touch ``/etc/pam.d/login`` or ``/etc/pam.d/su``. A console login **as a local account such as root** (and ``su -`` to another local account from it) therefore bypasses recording and remains usable to free space, restart ``ob-record.socket``, or otherwise recover. An **SSO user's** console login, like their ``su -`` or ``sudo -i``, now goes through the recorder (see :ref:`the login shell <session-recording-login-shell>`) and fails with it: the rescue path has to be a local account. (The in-SSH alternative — exempting an admin account with ``Match User …,!admin``, Option A — leaves that account's sessions **unrecorded**, an audit/trust trade-off, and is not what ``ob-bastion-setup`` configures.)
 
 Operational recommendations:
 

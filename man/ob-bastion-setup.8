@@ -273,7 +273,24 @@ PAM module configuration, including
 .BR node_role .
 .TP
 .IR /etc/open-bastion/nss_openbastion.conf ", " /etc/nsswitch.conf
-NSS module configuration.
+NSS module configuration. On a bastion or standalone host that records
+sessions it sets
+.BR "force_shell = /usr/sbin/ob-login-shell" :
+sshd runs the
+.B ForceCommand
+through the login shell, and
+.BR ob-login-shell (8)
+is the one that reads nothing of the user's before the recorder starts.
+.B default_shell
+is then the shell of the recorded session. A backend, and
+.BR \-\-disable\-session\-recorder ,
+keep bash. The launcher is also listed in
+.IR /etc/shells ,
+.BR nscd (8)
+is restarted if it runs, and the sshd drop-in pins
+.B PermitUserEnvironment no
+next to the
+.BR ForceCommand .
 .TP
 .I /etc/open-bastion/session-recorder.conf
 Bastion only: session recorder configuration.
@@ -318,6 +335,7 @@ Setup failed, or an option does not apply to the role in effect.
 .BR ob-enroll (8),
 .BR ob-heartbeat (8),
 .BR ob-krl-refresh (8),
+.BR ob-login-shell (8),
 .BR ob-post-upgrade (8),
 .BR ob-session-recorder (8),
 .BR ob-ssh (1),
