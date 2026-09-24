@@ -583,3 +583,269 @@ suite   || tests/test_ob_record_sink.sh
 why     || #287: the ACK read must have a deadline; the transfer path runs the
 why     || connector synchronously, so a sink that accepts but never answers
 why     || would hang the transfer forever.
+
+# ── #293: nothing of the user's runs before the session recorder ─────────────
+# sshd runs the ForceCommand through the login shell, and bash or zsh read the
+# user's startup files first. ob-login-shell is the login shell that reads none
+# and execs the recorder; libnss_openbastion hands it out (force_shell); the
+# setup and ob-post-upgrade decide where.
+
+id      || login-shell-env-built-not-inherited
+file    || src/ob-login-shell.c
+search  || execve(rec_argv[0], rec_argv, g_env);
+replace || execve(rec_argv[0], rec_argv, environ);
+suite   || tests/test_ob_login_shell.sh
+why     || #293: the recorder must not inherit BASH_ENV, exported functions,
+why     || LD_*, OB_* or a PATH the user chose.
+
+id      || login-shell-path-fixed
+file    || src/ob-login-shell.c
+search  || env_add("PATH", OB_SESSION_PATH);
+replace || env_keep("PATH", ok_any);
+suite   || tests/test_ob_login_shell.sh
+why     || #293: the old recorder resolved script and ob-record-connect through
+why     || PATH; one from the environment is the user's choice.
+
+id      || login-shell-identity-from-passwd
+file    || src/ob-login-shell.c
+search  || env_add("USER", pw->pw_name);
+replace || env_keep("USER", ok_any);
+suite   || tests/test_ob_login_shell.sh
+why     || #293: USER in the environment is anyone's to set.
+
+id      || login-shell-locale-not-a-path
+file    || src/ob-login-shell.c
+search  || static int ok_locale(const char *v)  { return only_chars(v, "._@-", 64); }
+replace || static int ok_locale(const char *v)  { return v != NULL; }
+suite   || tests/test_ob_login_shell.sh
+why     || #293: glibc loads a locale named by an absolute path from that path,
+why     || i.e. from a file the user may have written.
+
+id      || login-shell-command-recorded-not-passed
+file    || src/ob-login-shell.c
+search  || env_add("SSH_ORIGINAL_COMMAND", cmd);
+replace || env_keep("SSH_ORIGINAL_COMMAND", ok_any);
+suite   || tests/test_ob_login_shell.sh
+why     || #293: a command that is not the ForceCommand must reach the recorder
+why     || as the command to record, not vanish in favour of an inherited one.
+
+id      || login-shell-interactive-no-inherited-command
+file    || src/ob-login-shell.c
+search  || /* No command: an interactive session. Whatever SSH_ORIGINAL_COMMAND the
+replace || if (!cmd) env_keep("SSH_ORIGINAL_COMMAND", ok_any);\n    /* No command: an interactive session. Whatever SSH_ORIGINAL_COMMAND the
+suite   || tests/test_ob_login_shell.sh
+why     || #293: `su - user` from inside a session must not carry the caller's
+why     || command into the recorder, which would run it instead of a shell.
+
+id      || login-shell-recorder-word-boundary
+file    || src/ob-login-shell.c
+search  || if (cmd[rlen] != '\0' && cmd[rlen] != ' ' && cmd[rlen] != '\t')
+replace || if (0)
+suite   || tests/test_ob_login_shell.sh
+why     || #293: "/usr/sbin/ob-session-recorderX" is another program, not the
+why     || ForceCommand.
+
+id      || login-shell-recorder-plain-options
+file    || src/ob-login-shell.c
+search  || if (n >= MAX_REC_ARGS || !only_chars(tok, "_./=:,+-", 256)) {
+replace || if (n >= MAX_REC_ARGS) {
+suite   || tests/test_ob_login_shell.sh
+why     || #293: a ForceCommand-looking string with shell syntax is not the
+why     || ForceCommand; it is recorded as a command.
+
+id      || login-shell-refuses-extra-arguments
+file    || src/ob-login-shell.c
+search  || i + 1 >= argc || i + 2 < argc)
+replace || i + 1 >= argc)
+suite   || tests/test_ob_login_shell.sh
+why     || #293: an invocation the launcher does not understand runs nothing.
+
+id      || login-shell-conf-root-owned
+file    || src/ob-login-shell.c
+search  || st.st_uid != OB_CONF_TRUSTED_UID || (st.st_mode
+replace || 0 || (st.st_mode
+suite   || tests/test_ob_login_shell.sh
+needs   || nonroot
+why     || #293: the file that names the recorded session's shell is root's.
+
+id      || login-shell-conf-not-writable
+file    || src/ob-login-shell.c
+search  || || (st.st_mode & (S_IWGRP | S_IWOTH))) {
+replace || ) {
+suite   || tests/test_ob_login_shell.sh
+why     || #293: a configuration another account can write is that account's.
+
+id      || login-shell-conf-nofollow
+file    || src/ob-login-shell.c
+search  || fd = open(OB_NSS_CONF, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+replace || fd = open(OB_NSS_CONF, O_RDONLY | O_CLOEXEC);
+suite   || tests/test_ob_login_shell.sh
+why     || #293: a symlink in place of the configuration is not followed.
+
+id      || login-shell-no-loop
+file    || src/ob-login-shell.c
+search  || if (same_file(&st, "/proc/self/exe") || same_file(&st, OB_LOGIN_SHELL) ||\n        same_file(&st, OB_RECORDER))
+replace || if (0 && same_file(&st, OB_RECORDER))
+suite   || tests/test_ob_login_shell.sh
+why     || #293: default_shell = the launcher or the recorder would have the
+why     || recorder start itself inside its own recording, forever.
+
+id      || nss-force-shell-key-read
+file    || nss/libnss_openbastion.c
+search  || else if (strcmp(key, "force_shell") == 0) {
+replace || else if (0) {
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: the key that makes every SSO user log in through the launcher.
+
+id      || nss-force-shell-typo-forces-launcher
+file    || nss/libnss_openbastion.c
+search  || config->force_shell = strdup(DEFAULT_FORCE_SHELL);
+replace || config->force_shell = NULL;
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: a typo in force_shell must not quietly hand out bash again.
+
+id      || nss-force-shell-over-portal
+file    || nss/libnss_openbastion.c
+search  || return login_shell(shell_to_use);
+replace || return shell_to_use;
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: a portal-supplied zsh reads ~/.zshenv even for zsh -c.
+
+id      || nss-force-shell-helper
+file    || nss/libnss_openbastion.c
+search  || return g_config.force_shell ? g_config.force_shell : shell;
+replace || return shell;
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: the one place every serving path asks.
+
+id      || nss-force-shell-file-cache
+file    || nss/libnss_openbastion.c
+search  || if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return -1;
+replace || if (safe_strcpy(&p, &remaining, shell_str) != 0) return -1;
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: a record cached before the upgrade still says bash, and is
+why     || served for up to cache_ttl.
+
+id      || nss-force-shell-memory-by-name
+file    || nss/libnss_openbastion.c
+search  || }\n\n        /* Copy from cache with safe bounds checking */\n        const char *shell = login_shell(cached->pw.pw_shell);
+replace || }\n\n        /* Copy from cache with safe bounds checking */\n        const char *shell = (cached->pw.pw_shell);
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: the in-memory copy of a long-lived consumer (nscd) is a
+why     || serving path too.
+
+id      || nss-force-shell-memory-by-uid
+file    || nss/libnss_openbastion.c
+search  || if (cached && cached->valid) {\n        /* Copy from cache with safe bounds checking */\n        const char *shell = login_shell(cached->pw.pw_shell);
+replace || if (cached && cached->valid) {\n        /* Copy from cache with safe bounds checking */\n        const char *shell = (cached->pw.pw_shell);
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #293: getpwuid is what the session's own processes ask.
+
+id      || nss-force-shell-service-account
+file    || nss/libnss_openbastion.c
+search  || if (safe_strcpy(&p, &remaining, login_shell(shell_to_use)) != 0) return -1;
+replace || if (safe_strcpy(&p, &remaining, shell_to_use) != 0) return -1;
+suite   || tests/test_ob_nss_force_shell.sh
+needs   || root
+why     || #293: service accounts go through the same ForceCommand; their
+why     || configuration file is only read when it is root:root 0600.
+
+id      || setup-renders-force-shell
+file    || scripts/ob-bastion-setup
+search  || \n        ob_nss_force_shell_block\n    fi
+replace || \n        :\n    fi
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: the setup is what gives a new recording host the launcher.
+
+id      || setup-force-shell-only-with-recorder
+file    || scripts/ob-bastion-setup
+search  || ! is_backend && [ "$DISABLE_SESSION_RECORDER" != "true" ]
+replace || ! is_backend
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: without a recorder there is nothing to protect, and a launcher
+why     || that execs a recorder nobody configured would refuse every login.
+
+id      || setup-refuses-missing-launcher
+file    || scripts/ob-bastion-setup
+search  || if records_sessions && [ ! -x "$OB_LOGIN_SHELL" ]; then
+replace || if false; then
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: sshd refuses an account whose shell does not exist; forcing a
+why     || missing launcher locks every SSO user out.
+
+id      || setup-registers-launcher
+file    || scripts/ob-bastion-setup
+search  || \n        ob_register_login_shell "$SHELLS_FILE"
+replace || \n        true "$SHELLS_FILE"
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: pam_shells refuses a login shell /etc/shells does not list.
+
+id      || setup-restarts-nscd
+file    || scripts/ob-bastion-setup
+search  || ob_restart_nscd || warn "nscd could not be restarted
+replace || true || warn "nscd could not be restarted
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: nscd serves the old shells, from a module that read the old
+why     || configuration, until it restarts.
+
+id      || setup-pins-permit-user-environment
+file    || scripts/ob-bastion-setup
+search  || \nPermitUserEnvironment no\n
+replace || \n
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: ~/.ssh/environment is a file the user writes, read by sshd into
+why     || the launcher's environment (LD_PRELOAD) before it runs.
+
+id      || lib-admin-force-shell-respected
+file    || scripts/ob-login-shell-lib.sh
+search  || [ -n "$cur" ] && return 2
+replace || :
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: ob-post-upgrade must not overwrite a force_shell someone chose.
+
+id      || lib-records-only-active-forcecommand
+file    || scripts/ob-login-shell-lib.sh
+search  || grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+[^#]*ob-session-recorder' "$f"
+replace || grep -q 'ob-session-recorder' "$f"
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: --disable-session-recorder leaves no active ForceCommand, and
+why     || forcing the launcher there would refuse every login.
+
+id      || lib-records-main-config-is-ours
+file    || scripts/ob-login-shell-lib.sh
+search  || grep -q 'TrustedUserCAKeys.*open-bastion' "$main" || return 1
+replace || :
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: a ForceCommand in sshd_config that the setup did not write is
+why     || not a recording host of ours.
+
+id      || post-upgrade-only-on-recording-hosts
+file    || scripts/ob-post-upgrade
+search  || if ! ob_host_records_sessions "$SSHD_CONFIG_DIR" "$SSHD_MAIN_CONFIG"; then
+replace || if false; then
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: the repair is derived from the host's ForceCommand, and must
+why     || not force the launcher where no recorder runs.
+
+id      || postinst-registers-launcher
+file    || debian/open-bastion.postinst
+search  || add-shell /usr/sbin/ob-login-shell 2>/dev/null || true
+replace || true
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: pam_shells refuses a login shell /etc/shells does not list.
+
+id      || postinst-tells-recording-host
+file    || debian/open-bastion.postinst
+search  || grep -Eq '^[[:space:]]*force_shell[[:space:]]*=' "$_nss" && return 0
+replace || return 0
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: the package does not switch an existing host; the admin must be
+why     || told that ob-post-upgrade does.
+
+id      || postrm-unregisters-launcher
+file    || debian/open-bastion.postrm
+search  || remove-shell /usr/sbin/ob-login-shell 2>/dev/null || true
+replace || true
+suite   || tests/test_ob_setup_login_shell.sh
+why     || #293: a removed launcher left in /etc/shells is a valid login shell
+why     || that does not exist.
