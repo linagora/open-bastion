@@ -250,48 +250,332 @@ handle_timeout() {
     exit 124  # Standard timeout exit code
 }
 
-# Detect non-interactive file-transfer commands that cannot tolerate a PTY.
-# scp, sftp-server and rsync exchange a binary protocol over stdin/stdout;
-# wrapping them in script/asciinema/ttyrec corrupts the stream (NL→CR+NL
-# translation, terminal echo, etc.) and the client aborts with errors like
-# "Connection closed" or "unexpected <newline>". Returns 0 if the command
-# must be exec'd directly (no PTY), 1 otherwise.
-is_file_transfer() {
-    local cmd="${ORIGINAL_COMMAND:-}"
-    [ -z "$cmd" ] && return 1
-    local first="${cmd%%[[:space:]]*}"
-    # Strip an optional leading path: ssh subsystem invocations come as
-    # the full path defined by "Subsystem sftp ...".
-    local base="${first##*/}"
-    case "$base" in
-        scp)
-            # scp server-side is invoked as "scp -t <dir>" (to) or
-            # "scp -f <file>" (from). The interactive 'scp' command on
-            # the bastion itself would not have these flags.
-            case " $cmd " in
-                *" -t "*|*" -f "*) return 0 ;;
-            esac
-            ;;
-        sftp-server|internal-sftp)
-            return 0
-            ;;
-        rsync)
-            # Server-side rsync is always invoked with --server.
-            case " $cmd " in
-                *" --server "*) return 0 ;;
-            esac
-            ;;
-    esac
-    return 1
+# ── File transfers ────────────────────────────────────────────────────────────
+#
+# scp, rsync and sftp-server speak a binary protocol over stdin/stdout, which a
+# PTY corrupts (NL -> CR NL translation, echo), so they cannot run under
+# script(1): they run with raw stdio and the sink records their metadata only.
+# Deciding "this is a transfer" is therefore deciding NOT to record the
+# session's stream, on a string the client wrote. It used to be a substring
+# test followed by `$SHELL -c "$SSH_ORIGINAL_COMMAND"`, so anything appended to
+# a transfer-looking command ran unrecorded: `ssh -tt bastion 'scp -t /x; bash'`
+# was an interactive shell with an empty typescript (#287).
+#
+# It is now an allow-list parser of the exact forms genuine clients send. A
+# command that passes is executed as an argv -- never through a shell -- with
+# the program taken from a fixed root-owned path. Anything else, a transfer
+# with anything appended included, is an ordinary recorded session. A request
+# with a PTY is never a transfer: no transfer client asks for one.
+#
+# The forms (checked against OpenSSH 10 and rsync 3.x clients):
+#   rsync --server [--sender] -FLAGS[e.CAPS] [--long-option[=value]...] . PATH...
+#       Shell-special characters in paths arrive backslash-escaped (my\ file);
+#       wildcards and a leading ~ arrive unescaped, for the remote shell to
+#       expand, which transfer_expand() does -- pathname expansion only.
+#   scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...   (legacy protocol, scp -O)
+#   internal-sftp | /usr/lib*/.../sftp-server [OPTIONS]
+#       The sftp subsystem, also used by modern scp: under ForceCommand sshd
+#       passes the Subsystem command as SSH_ORIGINAL_COMMAND. internal-sftp is
+#       not a program, so both run the system sftp-server binary.
+# A receiving rsync or scp (-t) takes exactly one path; a sender one or more.
+
+TRANSFER_MAX_LEN=32768
+TRANSFER_PROG=""     # rsync | scp | sftp-server, once classify_transfer passed
+TRANSFER_ARGS=()     # argv after the program name
+TRANSFER_BIN=""      # absolute path of the program to execute
+TRANSFER_PATHS=()
+TOK_LIT=() TOK_PAT=() TOK_GLOB=() TOK_TILDE=()
+
+RSYNC_CANDIDATES=(/usr/bin/rsync /bin/rsync)
+SCP_CANDIDATES=(/usr/bin/scp /bin/scp)
+SFTP_SERVER_CANDIDATES=(/usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server
+                        /usr/lib/ssh/sftp-server /usr/libexec/sftp-server)
+
+# rsync long options a client sends to the server: rrsync(1)'s list without
+# the ones it disables. --daemon above all: `rsync --server --daemon` reads an
+# rsyncd.conf of the caller's choosing, whose "pre-xfer exec" runs anything.
+RSYNC_LONG_NOARG=" append copy-unsafe-links delay-updates delete delete-after delete-before
+ delete-delay delete-during delete-excluded delete-missing-args dirs existing fake-super force
+ from0 fsync fuzzy group hard-links ignore-errors ignore-existing ignore-missing-args
+ ignore-times inplace links list-only mkpath msgs2stderr munge-links new-compress no-W
+ no-implied-dirs no-msgs2stderr no-r no-relative no-specials numeric-ids old-compress
+ one-file-system open-noatime owner partial perms preallocate recursive remove-sent-files
+ remove-source-files safe-links sender size-only specials stats super times use-qsort "
+RSYNC_LONG_ARG=" backup-dir block-size bwlimit checksum-choice checksum-seed compare-dest
+ compress-choice compress-level compress-threads copy-dest files-from groupmap iconv info
+ link-dest log-file log-format max-alloc max-delete max-size min-size modify-window
+ only-write-batch partial-dir skip-compress stderr suffix temp-dir timeout usermap "
+# Short options: rrsync's set without `s` (--secluded-args sends the real
+# arguments over the protocol, past any check made here). A trailing
+# e[VERSION].CAPS is the capability string (-logDtpre.iLsfxCIvu), not options.
+RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrtuvxyz]*(e[0-9]*\.[A-Za-z0-9_]*)?$'
+RSYNC_NUM_RE='^-[@B]-?[0-9]+$'
+RSYNC_LONG_RE='^--([A-Za-z0-9-]+)$'
+RSYNC_LONG_VAL_RE='^--([A-Za-z0-9-]+)=(.*)$'
+SFTP_OPTARG_RE='^[A-Za-z0-9_.,/%:+-]+$'
+
+# Split $1 into words the way a shell would, for the forms above only, or fail.
+# Fills TOK_LIT (the word, escapes removed), TOK_PAT (the same word as a glob
+# pattern: escaped glob characters stay escaped), TOK_GLOB (1 if it holds an
+# unescaped * ? [) and TOK_TILDE (1 if it starts with an unescaped ~). Fails on
+# an unescaped shell metacharacter, on any control character, on a trailing
+# backslash, and on anything but single spaces between words: none of those
+# occurs in what a transfer client sends.
+transfer_split() {
+    local s="$1" LC_ALL=C
+    local n=${#s} i=0 c lit="" pat="" glob=0 tilde=0 inword=0
+    TOK_LIT=() TOK_PAT=() TOK_GLOB=() TOK_TILDE=()
+    [ "$n" -gt 0 ] && [ "$n" -le "$TRANSFER_MAX_LEN" ] || return 1
+    while [ "$i" -lt "$n" ]; do
+        c=${s:i:1}
+        case "$c" in
+            ' ')
+                [ "$inword" = 1 ] || return 1
+                TOK_LIT+=("$lit") TOK_PAT+=("$pat") TOK_GLOB+=("$glob") TOK_TILDE+=("$tilde")
+                lit="" pat="" glob=0 tilde=0 inword=0
+                ;;
+            \\)
+                i=$((i + 1))
+                [ "$i" -lt "$n" ] || return 1
+                c=${s:i:1}
+                case "$c" in [[:cntrl:]]) return 1 ;; esac
+                lit+=$c
+                case "$c" in
+                    '*'|'?'|'['|']'|\\) pat+="\\$c" ;;
+                    *) pat+=$c ;;
+                esac
+                inword=1
+                ;;
+            [[:cntrl:]]) return 1 ;;
+            ';'|'&'|'|'|'<'|'>'|'('|')'|'$'|'`'|"'"|'"'|'{'|'}'|'!'|'#') return 1 ;;
+            '*'|'?'|'[')
+                lit+=$c pat+=$c glob=1 inword=1
+                ;;
+            '~')
+                [ "$inword" = 1 ] || tilde=1
+                lit+=$c pat+=$c inword=1
+                ;;
+            *)
+                lit+=$c pat+=$c inword=1
+                ;;
+        esac
+        i=$((i + 1))
+    done
+    [ "$inword" = 1 ] || return 1
+    TOK_LIT+=("$lit") TOK_PAT+=("$pat") TOK_GLOB+=("$glob") TOK_TILDE+=("$tilde")
 }
 
-# Exec a file-transfer command directly, bypassing the PTY recorder.
-# Stdin/stdout/stderr stay raw so the SCP/SFTP/rsync protocol works. We still
-# record the session (command, start/end) for audit by sending a metadata-only
-# header to the sink (no stream). Recording is mandatory: if the sink is
-# unreachable we refuse the transfer (fail-closed) rather than running unrecorded.
+# Word $1 of TOK_* as a path operand, expanded as the remote shell would have:
+# a leading ~ or ~/ becomes $HOME, and a word with unescaped glob characters
+# becomes the names it matches (or itself, unescaped, when nothing matches).
+# Pathname expansion only: an unquoted expansion with an empty IFS is never
+# split, and its result is never parsed again for $, ` or quotes. Appends to
+# TRANSFER_PATHS; fails on ~user.
+transfer_expand() {
+    local k="$1" lit="${TOK_LIT[$1]}" pat="${TOK_PAT[$1]}" home="${HOME:-}"
+    if [ "${TOK_TILDE[$k]}" = 1 ]; then
+        # A literal ~ is being matched here, not expanded.
+        # shellcheck disable=SC2088
+        case "$lit" in
+            '~'|'~/'*) ;;
+            *) return 1 ;;
+        esac
+        [ -n "$home" ] || return 1
+        glob_quote "$home"
+        lit="$home${lit:1}"
+        pat="$GLOB_QUOTED${pat:1}"
+    fi
+    if [ "${TOK_GLOB[$k]}" = 1 ]; then
+        local IFS=
+        local -a matches
+        # shellcheck disable=SC2206  # pathname expansion is the point here
+        matches=( $pat )
+        if [ "${#matches[@]}" -eq 1 ] && [ "${matches[0]}" = "$pat" ]; then
+            TRANSFER_PATHS+=("$lit")
+        else
+            TRANSFER_PATHS+=("${matches[@]}")
+        fi
+    else
+        TRANSFER_PATHS+=("$lit")
+    fi
+}
+
+GLOB_QUOTED=""
+glob_quote() {
+    local s="$1" c i LC_ALL=C
+    GLOB_QUOTED=""
+    for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        case "$c" in
+            '*'|'?'|'['|']'|\\) GLOB_QUOTED+="\\$c" ;;
+            *) GLOB_QUOTED+=$c ;;
+        esac
+    done
+}
+
+# 0 if word $1 of TOK_* is a plain word: no glob character, no leading ~.
+tok_plain() {
+    [ "${TOK_GLOB[$1]}" = 0 ] && [ "${TOK_TILDE[$1]}" = 0 ]
+}
+
+# rsync --server [--sender] OPTIONS . PATH...
+transfer_parse_rsync() {
+    local n=${#TOK_LIT[@]} k=2 w sender=0 dot=0
+    local -a opts=()
+    [ "$n" -ge 4 ] && [ "${TOK_LIT[1]}" = "--server" ] && tok_plain 1 || return 1
+    while [ "$k" -lt "$n" ]; do
+        tok_plain "$k" || return 1
+        w=${TOK_LIT[$k]}
+        k=$((k + 1))
+        if [ "$w" = "." ]; then
+            dot=1
+            break
+        elif [ "${#w}" -gt 1 ] && [[ "$w" =~ $RSYNC_SHORT_RE ]]; then
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_NUM_RE ]]; then
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_LONG_RE ]] && [[ "$RSYNC_LONG_NOARG" == *[[:space:]]"${BASH_REMATCH[1]}"[[:space:]]* ]]; then
+            [ "${BASH_REMATCH[1]}" = "sender" ] && sender=1
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_LONG_VAL_RE ]] && [[ "$RSYNC_LONG_ARG" == *[[:space:]]"${BASH_REMATCH[1]}"[[:space:]]* ]]; then
+            opts+=("$w")
+        else
+            return 1
+        fi
+    done
+    [ "$dot" = 1 ] && [ "$k" -lt "$n" ] || return 1
+    TRANSFER_PATHS=()
+    while [ "$k" -lt "$n" ]; do
+        transfer_expand "$k" || return 1
+        k=$((k + 1))
+    done
+    [ "$sender" = 1 ] || [ "${#TRANSFER_PATHS[@]}" -eq 1 ] || return 1
+    TRANSFER_PROG=rsync
+    # `--` as rrsync does: a path (or a name a glob matched) starting with a
+    # dash must never be read as an option -- `--daemon`, say.
+    TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} -- . "${TRANSFER_PATHS[@]}")
+}
+
+# scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...
+transfer_parse_scp() {
+    local n=${#TOK_LIT[@]} k=1 w mode="" seen=" " dashdash=0
+    local -a flags=()
+    while [ "$k" -lt "$n" ] && tok_plain "$k"; do
+        w=${TOK_LIT[$k]}
+        case "$w" in
+            -r|-p|-d|-v)
+                [[ "$seen" == *" $w "* ]] && return 1
+                seen+="$w "
+                flags+=("$w")
+                ;;
+            -t|-f)
+                [ -z "$mode" ] || return 1
+                mode=$w
+                ;;
+            --)
+                dashdash=1
+                k=$((k + 1))
+                break
+                ;;
+            -*) return 1 ;;
+            *) break ;;
+        esac
+        k=$((k + 1))
+    done
+    [ -n "$mode" ] && [ "$k" -lt "$n" ] || return 1
+    # -d (target should be a directory) only makes sense when receiving.
+    [ "$mode" = "-t" ] || [[ "$seen" != *" -d "* ]] || return 1
+    TRANSFER_PATHS=()
+    while [ "$k" -lt "$n" ]; do
+        # Without --, a word starting with a dash would be read as an option.
+        [ "$dashdash" = 1 ] || [[ "${TOK_LIT[$k]}" != -* ]] || return 1
+        transfer_expand "$k" || return 1
+        k=$((k + 1))
+    done
+    [ "$mode" = "-f" ] || [ "${#TRANSFER_PATHS[@]}" -eq 1 ] || return 1
+    TRANSFER_PROG=scp
+    TRANSFER_ARGS=(${flags[@]+"${flags[@]}"} "$mode" -- "${TRANSFER_PATHS[@]}")
+}
+
+# internal-sftp | sftp-server [-e] [-R] [-f FAC] [-l LEVEL] [-u UMASK] [-d DIR]
+#                             [-p LIST] [-P LIST]
+transfer_parse_sftp() {
+    local n=${#TOK_LIT[@]} k=1 w
+    local -a args=()
+    tok_plain 0 || return 1
+    case "${TOK_LIT[0]}" in
+        internal-sftp|sftp-server|/usr/lib/openssh/sftp-server|/usr/libexec/openssh/sftp-server|/usr/lib/ssh/sftp-server|/usr/libexec/sftp-server) ;;
+        *) return 1 ;;
+    esac
+    while [ "$k" -lt "$n" ]; do
+        tok_plain "$k" || return 1
+        w=${TOK_LIT[$k]}
+        case "$w" in
+            -e|-R)
+                args+=("$w")
+                ;;
+            -f|-l|-u|-d|-p|-P)
+                k=$((k + 1))
+                [ "$k" -lt "$n" ] && tok_plain "$k" || return 1
+                [[ "${TOK_LIT[$k]}" =~ $SFTP_OPTARG_RE ]] || return 1
+                args+=("$w" "${TOK_LIT[$k]}")
+                ;;
+            *) return 1 ;;
+        esac
+        k=$((k + 1))
+    done
+    TRANSFER_PROG=sftp-server
+    TRANSFER_ARGS=(${args[@]+"${args[@]}"})
+}
+
+# 0 when SSH_ORIGINAL_COMMAND is one of the forms above and its program exists
+# at a root-owned system path (TRANSFER_PROG, TRANSFER_ARGS and TRANSFER_BIN
+# set); 1 otherwise, and the session is recorded like any other. A command
+# that names a transfer program but fails the check is logged: it is either a
+# client this parser does not know, or someone trying the #287 bypass.
+classify_transfer() {
+    local cmd="$ORIGINAL_COMMAND" first base why=""
+    TRANSFER_PROG="" TRANSFER_ARGS=() TRANSFER_BIN=""
+    [ -n "$cmd" ] || return 1
+    first=${cmd%%[[:space:]]*}
+    base=${first##*/}
+    case "$base" in
+        scp|rsync|sftp-server|internal-sftp) ;;
+        *) return 1 ;;
+    esac
+    if [ -n "${SSH_TTY:-}" ]; then
+        why="a PTY was requested"
+    elif ! transfer_split "$cmd"; then
+        why="shell syntax a transfer client never sends"
+    else
+        case "${TOK_LIT[0]}" in
+            rsync) transfer_parse_rsync ;;
+            scp) transfer_parse_scp ;;
+            *) transfer_parse_sftp ;;
+        esac || why="not a form a transfer client sends"
+    fi
+    if [ -z "$why" ]; then
+        case "$TRANSFER_PROG" in
+            rsync) TRANSFER_BIN=$(resolve_system_bin "${RSYNC_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+            scp) TRANSFER_BIN=$(resolve_system_bin "${SCP_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+            sftp-server) TRANSFER_BIN=$(resolve_system_bin "${SFTP_SERVER_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+        esac
+        [ -n "$TRANSFER_BIN" ] || why="no root-owned $TRANSFER_PROG on this host"
+    fi
+    if [ -n "$why" ]; then
+        TRANSFER_PROG="" TRANSFER_ARGS=() TRANSFER_BIN=""
+        log_warn "Session $SESSION_ID: transfer-like command recorded as a normal session ($why): $(log_safe "$cmd")"
+        return 1
+    fi
+    return 0
+}
+
+# Run a validated file transfer with raw stdio, bypassing the PTY recorder: the
+# argv classify_transfer built, the program at TRANSFER_BIN, no shell. The
+# session is still recorded -- a metadata-only header to the sink (no stream).
+# Recording is mandatory: if the sink is unreachable the transfer is refused
+# (fail-closed) rather than run unrecorded.
 record_transfer() {
-    local shell="${SHELL:-/bin/bash}"
     FORMAT="transfer"
     log_info "Session $SESSION_ID: file-transfer (no PTY recording): $(log_safe "$ORIGINAL_COMMAND")"
     # Send the header with an EMPTY stream (/dev/null): ob-record-connect connects,
@@ -304,8 +588,8 @@ record_transfer() {
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
     fi
-    # Run under the user's login shell so $PATH and aliases behave as usual.
-    "$shell" -c "$ORIGINAL_COMMAND"
+    # An argv, not a command line: no shell ever sees the client's string.
+    "$TRANSFER_BIN" ${TRANSFER_ARGS[@]+"${TRANSFER_ARGS[@]}"}
 }
 
 # Recording channel state (PTY sessions). The recorder cannot hand `script` a
@@ -521,10 +805,11 @@ main() {
         TIMEOUT_PID=$!
     fi
 
-    # File-transfer commands (scp, sftp, rsync) need raw stdio: bypass the PTY
-    # recorder, record metadata only. Otherwise stream the PTY typescript to the
-    # sink. Both paths fail closed when the sink is unreachable.
-    if is_file_transfer; then
+    # A genuine file transfer (scp, sftp, rsync; see classify_transfer) needs
+    # raw stdio: it bypasses the PTY recorder, metadata only. Everything else
+    # streams its PTY typescript to the sink. Both paths fail closed when the
+    # sink is unreachable.
+    if classify_transfer; then
         record_transfer
     else
         record_script

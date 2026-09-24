@@ -155,6 +155,27 @@ ttyrec (planned — not yet supported over the recording sink)
 
 ttyrec support over the root sink is planned for a future release. In v1 any ``format = ttyrec`` setting falls back to ``script``.
 
+File transfers
+--------------
+
+``scp``, ``rsync`` and ``sftp`` speak a binary protocol that a terminal would corrupt, so they cannot run under ``script``: they run with raw input and output, and the sink records their **metadata only** (``"format": "transfer"``, an empty ``.typescript``). Because that means *not* recording the session's stream, the recorder only treats a command as a transfer when it is exactly what a genuine client sends:
+
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| Client                            | ``SSH_ORIGINAL_COMMAND`` accepted                                                                                        |
++===================================+==========================================================================================================================+
+| ``rsync`` 3.x                     | ``rsync --server [--sender] -FLAGS [--long-option[=value]...] . PATH...`` — rrsync's option list, without ``--daemon``   |
+|                                   | and without ``-s`` (``--secluded-args`` would carry the real arguments past the check)                                   |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``scp -O`` (legacy protocol)      | ``scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...``, one word per flag                                                        |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``scp``, ``sftp`` (sftp protocol) | the ``Subsystem sftp`` command sshd passes under ``ForceCommand``: ``internal-sftp`` or an ``sftp-server`` system path,  |
+|                                   | with ``sftp-server``'s ``-e -R -f -l -u -d -p -P`` options                                                               |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+
+Paths may carry what those clients send for the remote shell: backslash escapes (``my\ file``), a leading ``~`` and wildcards, which the recorder expands itself (pathname expansion only). Any unescaped shell metacharacter (``; & | < > ( ) $ ` ' " { } ! #``), any control character, or anything appended to one of these forms, and the command is **recorded as an ordinary session** instead, with a warning in the log (``journalctl -t ob-session-recorder``). A session that requested a terminal is never a transfer. A command that passes is executed as an argument vector, never through a shell, and the program is taken from a fixed root-owned path (``/usr/bin/rsync``, ``/usr/bin/scp``, the distribution's ``sftp-server``), never from the user's ``PATH``. ``internal-sftp`` runs that ``sftp-server`` binary.
+
+A transfer client this does not recognise therefore fails the way any binary protocol fails in a terminal. ``rsync`` with ``--secluded-args`` (``-s``, or ``RSYNC_PROTECT_ARGS`` set) is the known case; so is a remote path using shell syntax (``$HOME``, quotes) rather than plain escaping.
+
 Session Metadata
 ----------------
 

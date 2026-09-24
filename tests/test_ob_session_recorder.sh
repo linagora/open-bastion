@@ -330,6 +330,150 @@ test_log_lines_sanitized() {
     rm -f "$log"
 }
 
+# ── Test 8d: which commands skip the PTY recording (#287) ──
+#
+# A command classified as a file transfer runs WITHOUT its stream being
+# recorded, so the classifier is an allow-list of what genuine clients send,
+# and everything else must be recorded. The forms below were captured from
+# OpenSSH 10 scp/sftp and rsync 3.x through a stand-in ssh; the refusals are
+# the #287 bypasses and their variations.
+CT_DIR=""
+classify() { # $1 SSH_ORIGINAL_COMMAND  [$2 SSH_TTY] -> the verdict on stdout
+    (
+        source_script "ob-session-recorder"
+        cd "$CT_DIR" || exit 99
+        HOME="$CT_DIR/home"
+        # The first candidate stands for "the root-owned system binary", so the
+        # verdict does not depend on what this host has installed.
+        resolve_system_bin() { printf '%s\n' "$1"; }
+        logger() { printf '%s\n' "$*" >> "$CT_DIR/log"; }
+        SESSION_ID="t"
+        SSH_TTY="${2:-}"
+        ORIGINAL_COMMAND="$1"
+        if classify_transfer; then
+            printf '%s' "$TRANSFER_BIN"
+            [ "${#TRANSFER_ARGS[@]}" -eq 0 ] || printf ' [%s]' "${TRANSFER_ARGS[@]}"
+        else
+            printf 'RECORD'
+        fi
+    )
+}
+
+test_transfer_classification() {
+    CT_DIR=$(mktemp -d)
+    mkdir -p "$CT_DIR/home/foo"
+    : > "$CT_DIR/home/foo/a.txt"; : > "$CT_DIR/home/foo/b.txt"
+    : > "$CT_DIR/r1.log"; : > "$CT_DIR/r2.log"
+    local H="$CT_DIR/home" bad=0 i got
+    # command | expected argv (the program is the root-owned system binary)
+    local -a accept=(
+        'rsync --server -logDtpre.iLsfxCIvu . dst\ dir/'
+        '/usr/bin/rsync [--server] [-logDtpre.iLsfxCIvu] [--] [.] [dst dir/]'
+        'rsync --server --sender -vlogDtpre.iLsfxCIvu . ~/foo/*.txt my\ file'
+        "/usr/bin/rsync [--server] [--sender] [-vlogDtpre.iLsfxCIvu] [--] [.] [$H/foo/a.txt] [$H/foo/b.txt] [my file]"
+        'rsync --server --sender -vlogDtprze.iLsfxCIvu . /tmp/x'
+        '/usr/bin/rsync [--server] [--sender] [-vlogDtprze.iLsfxCIvu] [--] [.] [/tmp/x]'
+        'rsync --server -vlogDtpre.iLsfxCIvu --log-format=%i . ./-dash'
+        '/usr/bin/rsync [--server] [-vlogDtpre.iLsfxCIvu] [--log-format=%i] [--] [.] [./-dash]'
+        'rsync --server -lHogDtpAXre.iLsfxCIvu --numeric-ids . a\;b\$c'
+        '/usr/bin/rsync [--server] [-lHogDtpAXre.iLsfxCIvu] [--numeric-ids] [--] [.] [a;b$c]'
+        'rsync --server --sender -logDtpre.iLsfxCIvu . .'
+        '/usr/bin/rsync [--server] [--sender] [-logDtpre.iLsfxCIvu] [--] [.] [.]'
+        'rsync --server -logDtpre.iLsfxCIvu --delete --partial-dir=.p --timeout=30 . ~'
+        "/usr/bin/rsync [--server] [-logDtpre.iLsfxCIvu] [--delete] [--partial-dir=.p] [--timeout=30] [--] [.] [$H]"
+        'scp -t /tmp/d/'
+        '/usr/bin/scp [-t] [--] [/tmp/d/]'
+        'scp -r -p -f my\ file'
+        '/usr/bin/scp [-r] [-p] [-f] [--] [my file]'
+        'scp -v -f -- -x'
+        '/usr/bin/scp [-v] [-f] [--] [-x]'
+        'scp -d -t dir'
+        '/usr/bin/scp [-d] [-t] [--] [dir]'
+        'scp -f ~/foo/*.txt nomatch*.txt'
+        "/usr/bin/scp [-f] [--] [$H/foo/a.txt] [$H/foo/b.txt] [nomatch*.txt]"
+        'internal-sftp'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/libexec/openssh/sftp-server -f AUTHPRIV -l INFO'
+        '/usr/lib/openssh/sftp-server [-f] [AUTHPRIV] [-l] [INFO]'
+    )
+    local -a refuse=(
+        'scp -t /tmp/x; bash'
+        'scp -t /tmp/x;bash'
+        'scp -t /tmp/x && bash'
+        'scp -t /tmp/x | bash'
+        'scp -t /tmp/x > /tmp/y'
+        'scp -f $(id)'
+        'scp -f `id`'
+        'scp -f "a b"'
+        "scp -f 'a'"
+        'scp -f a{b,c}'
+        'scp -f #x'
+        'scp -f a!b'
+        $'scp -t /tmp/x\nbash'
+        $'scp\t-t\t/tmp/x'
+        $'scp -f my\\\nfile'
+        ' scp -t /tmp/x'
+        'scp  -t /tmp/x'
+        'scp -t /tmp/x '
+        'scp -t /tmp/x\'
+        'scp -t/tmp/d'
+        'scp -tr /tmp/d'
+        'scp -t'
+        'scp -t a b'
+        'scp -t -f x'
+        'scp -x -t /tmp'
+        'scp -f -x'
+        'scp -d -f x'
+        'scp -r -r -t x'
+        'scp -f ~root/x'
+        '~/.local/bin/scp -t /x'
+        '/home/u/bin/scp -t /x'
+        'rsync --server --daemon .'
+        'rsync --server --daemon --config=/tmp/x . .'
+        'rsync --server -slogDtpre.iLsfxCIvu'
+        'rsync --server -slogDtpre.iLsfxCIvu . x'
+        'rsync --server -logDtpre.iLsfxCIvu . a b'
+        'rsync --server -logDtpre.iLsfxCIvu --rsh=sh . a'
+        'rsync --server -logDtpre.iLsfxCIvu --log-file . a'
+        'rsync --server -logDtpre.iLsfxCIvu a'
+        'rsync -logDtpre.iLsfxCIvu --server . a'
+        'rsync --server -logDtpre.iLsfxCIvu . a; id'
+        '/usr/bin/rsync --server -logDtpre.iLsfxCIvu . a'
+        'internal-sftp; bash'
+        'internal-sftp -f $(id)'
+        'sftp-server -h'
+        'sftp-server -l'
+        '/tmp/sftp-server'
+        'sftp-server -d /tmp;id'
+    )
+    for ((i = 0; i < ${#accept[@]}; i += 2)); do
+        got=$(classify "${accept[i]}")
+        if [ "$got" != "${accept[i+1]}" ]; then
+            fail "transfer allow-list: accept $(printf '%q' "${accept[i]}")" "got: $got"
+            bad=1
+        fi
+    done
+    for i in "${!refuse[@]}"; do
+        got=$(classify "${refuse[i]}")
+        if [ "$got" != "RECORD" ]; then
+            fail "transfer allow-list: must record $(printf '%q' "${refuse[i]}")" "got: $got"
+            bad=1
+        fi
+    done
+    # A PTY request is never a transfer, however genuine the command.
+    got=$(classify 'scp -t /tmp/d/' /dev/pts/3)
+    [ "$got" = "RECORD" ] || { fail "transfer allow-list: a PTY session must be recorded" "got: $got"; bad=1; }
+    # Refusals of transfer-like commands are logged, on one line each.
+    if ! grep -q 'transfer-like command recorded as a normal session' "$CT_DIR/log" 2>/dev/null \
+       || grep -q '^bash' "$CT_DIR/log"; then
+        fail "transfer allow-list: refusals must be logged, one line each"; bad=1
+    fi
+    [ "$bad" = 0 ] && pass "transfer allow-list: ${#refuse[@]} forged forms recorded, $(( ${#accept[@]} / 2 )) genuine forms accepted, PTY never a transfer"
+    rm -rf "$CT_DIR"
+}
+
 # ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
 # script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
 # and ob-record-connect forwards the FIFO to the sink socket.
@@ -507,6 +651,138 @@ test_e2e_command_recorded() {
     fi
 }
 
+# ── E2E 2: the #287 bypass now opens a RECORDED session ──
+# `ssh -tt bastion 'scp -t /tmp/x; bash'` used to run the whole string through
+# a shell with no typescript at all. Now it is an ordinary command session.
+test_e2e_bypass_recorded() {
+    local j
+    e2e_driver
+    e2e_run 'scp -t /nonexistent-ob-287; echo OB-287-NOW-RECORDED' </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json)
+    if [ -n "$j" ] && grep -q '"format": "script"' "$j" \
+       && grep -q OB-287-NOW-RECORDED "${j%.json}.typescript" 2>/dev/null; then
+        pass "E2E: 'scp -t /x; <command>' runs recorded, output in the typescript"
+    else
+        fail "E2E: the #287 compound command was not recorded" "json=$j"
+        [ -n "$j" ] && cat "$j"
+    fi
+}
+
+# A stand-in for ssh, for rsync -e / scp -S / sftp -S: it runs the recorder as
+# sshd would under ForceCommand, with the remote command (or, for a subsystem
+# request, the Subsystem command) as SSH_ORIGINAL_COMMAND, and no PTY.
+e2e_fakessh() {
+    cat > "$E2E_WORK/fakessh" <<'EOF'
+#!/bin/bash
+sub=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s) sub=1; shift ;;
+        -[bcDEeFIiJLlmOoPpQRSWw]) shift 2 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+shift                                   # the host
+if [ "$sub" = 1 ]; then cmd=$OB_TEST_SUBSYSTEM; else cmd="$*"; fi
+exec env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" SSH_CLIENT="203.0.113.7 50000 22" \
+    HOME="$OB_TEST_HOME" setsid bash -p "$OB_TEST_RECORDER"
+EOF
+    chmod +x "$E2E_WORK/fakessh"
+}
+
+# The last session must be a transfer: metadata only, completed.
+e2e_expect_transfer() { # $1 label  $2 sessions before
+    local j
+    if [ "$(e2e_session_count)" -le "$2" ]; then
+        fail "E2E transfer ($1): no session recorded"; return 1
+    fi
+    j=$(e2e_last_json)
+    if grep -q '"format": "transfer"' "$j" && grep -q '"status": "completed"' "$j" \
+       && [ ! -s "${j%.json}.typescript" ]; then
+        return 0
+    fi
+    fail "E2E transfer ($1): not recorded as a completed transfer" "json=$j"
+    return 1
+}
+
+# ── E2E 3: genuine rsync, scp (both protocols) and sftp still work ──
+test_e2e_transfers() {
+    local w="$E2E_WORK" ssh="$E2E_WORK/fakessh" n ok=1
+    local -a missing=()
+    for b in rsync scp sftp; do command -v "$b" >/dev/null 2>&1 || missing+=("$b"); done
+    [ -x /usr/bin/rsync ] || missing+=("/usr/bin/rsync")
+    local have_sftp=0 s
+    for s in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server \
+             /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; do
+        [ -x "$s" ] && have_sftp=1
+    done
+    [ "$have_sftp" = 1 ] || missing+=("sftp-server")
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "SKIP: E2E transfers need ${missing[*]}"
+        return
+    fi
+    e2e_driver
+    e2e_fakessh
+    export OB_TEST_RECORDER="$w/recorder" OB_TEST_HOME="$w/home" OB_TEST_SUBSYSTEM=internal-sftp
+    mkdir -p "$w/src" "$w/dst" "$w/home/pull" "$w/rsync-pull" "$w/scp-pull"
+    printf 'first\n' > "$w/src/my file.txt"
+    printf 'second\n' > "$w/src/b.txt"
+    cp "$w/src/"*.txt "$w/home/pull/"
+
+    # rsync push, into a directory whose name needs escaping
+    n=$(e2e_session_count)
+    if rsync -a -e "$ssh" "$w/src/" "h:$w/dst/sub dir/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/my file.txt" "$w/dst/sub dir/my file.txt"; then
+        e2e_expect_transfer "rsync push" "$n" || ok=0
+    else
+        fail "E2E transfer: rsync push failed"; ok=0
+    fi
+    # rsync pull, with a leading ~ and a wildcard for the remote shell
+    n=$(e2e_session_count)
+    if rsync -a -e "$ssh" "h:~/pull/*.txt" "$w/rsync-pull/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/rsync-pull/b.txt" \
+       && cmp -s "$w/src/my file.txt" "$w/rsync-pull/my file.txt"; then
+        e2e_expect_transfer "rsync pull" "$n" || ok=0
+    else
+        fail "E2E transfer: rsync pull with ~ and a wildcard failed"; ok=0
+    fi
+    # legacy scp (-O): push, then pull with ~ and a wildcard
+    n=$(e2e_session_count)
+    if scp -O -q -S "$ssh" "$w/src/b.txt" "h:$w/dst/scp-legacy.txt" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/scp-legacy.txt"; then
+        e2e_expect_transfer "scp -O push" "$n" || ok=0
+    else
+        fail "E2E transfer: legacy scp push failed"; ok=0
+    fi
+    n=$(e2e_session_count)
+    if scp -O -q -S "$ssh" "h:~/pull/*.txt" "$w/scp-pull/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/my file.txt" "$w/scp-pull/my file.txt"; then
+        e2e_expect_transfer "scp -O pull" "$n" || ok=0
+    else
+        fail "E2E transfer: legacy scp pull with ~ and a wildcard failed"; ok=0
+    fi
+    # modern scp and sftp: the sftp subsystem, i.e. internal-sftp
+    n=$(e2e_session_count)
+    if scp -q -S "$ssh" "$w/src/b.txt" "h:$w/dst/scp-sftp.txt" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/scp-sftp.txt"; then
+        e2e_expect_transfer "scp (sftp protocol)" "$n" || ok=0
+    else
+        fail "E2E transfer: scp over the sftp subsystem failed"; ok=0
+    fi
+    n=$(e2e_session_count)
+    if printf 'put %s %s\nget %s %s\n' "$w/src/b.txt" "$w/dst/sftp-put.txt" \
+            "$w/src/b.txt" "$w/sftp-get.txt" \
+       | sftp -q -b - -S "$ssh" h >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/sftp-put.txt" && cmp -s "$w/src/b.txt" "$w/sftp-get.txt"; then
+        e2e_expect_transfer "sftp" "$n" || ok=0
+    else
+        fail "E2E transfer: sftp (internal-sftp subsystem) failed"; ok=0
+    fi
+    [ "$ok" = 1 ] && pass "E2E: rsync push/pull, scp -O push/pull, scp and sftp work, each recorded as a transfer"
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -520,6 +796,7 @@ run_test test_build_header_single_line
 run_test test_build_header_no_newline_injection
 run_test test_build_header_fallback_escapes_all_fields
 run_test test_log_lines_sanitized
+run_test test_transfer_classification
 run_test test_streams_via_connect
 run_test test_fail_closed_no_connect
 run_test test_env_ignored
@@ -532,6 +809,8 @@ run_test test_session_user_from_uid
 echo "--- end to end (real recorder, connector and sink) ---"
 if e2e_setup; then
     run_test test_e2e_command_recorded
+    run_test test_e2e_bypass_recorded
+    run_test test_e2e_transfers
 fi
 
 echo ""
