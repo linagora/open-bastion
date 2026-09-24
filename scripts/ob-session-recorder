@@ -849,7 +849,7 @@ open_record_channel() {
     local ready="" deadline=$((SECONDS + CONNECT_TIMEOUT))
     while [ "$SECONDS" -lt "$deadline" ]; do
         if IFS= read -r -t 1 -u "$rfd" ready 2>/dev/null; then
-            [ "$ready" = "OB_READY" ] && break
+            [ "$ready" = OB_READY ] && break
             ready=""
         else
             ready=""
@@ -858,6 +858,8 @@ open_record_channel() {
     done
     exec {rfd}<&-
     rm -f "$ready_fifo"
+    # The one gate on starting the session: only a connector that reported the
+    # sink's ACK gets here with OB_READY (mutation: recorder-ack-required).
     if [ "$ready" = "OB_READY" ]; then
         return 0
     fi
