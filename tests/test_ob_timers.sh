@@ -525,6 +525,75 @@ test_setup_audit_trace() {
     fi
 }
 
+# ── 14. ob-post-upgrade migrates, in a dry run, and re-asserts Mode E ────────
+test_post_upgrade() {
+    local d bad="" out rc
+    d=$(sandbox post-upgrade)
+    mkdir -p "$d/sshd"
+    printf 'node_role = bastion\n' > "$d/ob.conf"
+    printf 'AuthorizedPrincipalsCommand /x %%u %%f %%t %%k\n' > "$d/sshd/00-open-bastion-bastion.conf"
+    legacy_krl_cron "$d/etc/cron.d/open-bastion-krl" 15
+    legacy_audit "$d/etc/cron.daily/open-bastion-audit-rotate"
+    out=$(
+        . "$d/env"
+        OB_CONFIG="$d/ob.conf" OB_SSHD_CONFIG_DIR="$d/sshd" \
+            "$ROOT_DIR/scripts/ob-post-upgrade" --dry-run 2>&1
+    ); rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad rc=$rc"
+    grep -q 'would carry over the interval .*every 15 min' <<<"$out" || bad="$bad no-carry"
+    grep -q 'would enable ob-krl-refresh.timer (every 15 min)' <<<"$out" || bad="$bad no-krl-enable"
+    grep -q 'would enable ob-audit-rotate.timer (daily)' <<<"$out" || bad="$bad no-audit-enable"
+    [ -e "$d/etc/cron.d/open-bastion-krl" ] || bad="$bad dry-removed"
+
+    # Mode E with no old job and no armed timer: it is re-asserted.
+    rm -f "$d/etc/cron.d/open-bastion-krl" "$d/etc/cron.daily/open-bastion-audit-rotate"
+    printf 'RevokedKeys /etc/ssh/revoked_keys\n' > "$d/sshd/60-max-security.conf"
+    out=$(
+        . "$d/env"
+        OB_CONFIG="$d/ob.conf" OB_SSHD_CONFIG_DIR="$d/sshd" \
+            "$ROOT_DIR/scripts/ob-post-upgrade" --dry-run 2>&1
+    )
+    grep -q 'would enable ob-krl-refresh.timer' <<<"$out" || bad="$bad mode-e-not-reasserted"
+    # ...and reported as fine once it is.
+    touch "$d/sysd/state/ob-krl-refresh.timer.enabled" "$d/sysd/state/ob-krl-refresh.timer.active"
+    out=$(
+        . "$d/env"
+        OB_CONFIG="$d/ob.conf" OB_SSHD_CONFIG_DIR="$d/sshd" \
+            "$ROOT_DIR/scripts/ob-post-upgrade" --dry-run 2>&1
+    )
+    grep -q 'ob-krl-refresh.timer is enabled and active' <<<"$out" || bad="$bad mode-e-ok-not-reported"
+    # A host that is not in Mode E and has no old job is not given a timer.
+    rm -f "$d/sshd/60-max-security.conf" "$d/sysd/state/"*
+    out=$(
+        . "$d/env"
+        OB_CONFIG="$d/ob.conf" OB_SSHD_CONFIG_DIR="$d/sshd" \
+            "$ROOT_DIR/scripts/ob-post-upgrade" --dry-run 2>&1
+    )
+    grep -q 'krl-refresh' <<<"$out" && bad="$bad timer-on-non-mode-e"
+    if [ -z "$bad" ]; then
+        pass "ob-post-upgrade plans both migrations, and re-arms the KRL timer on Mode E only"
+    else
+        fail "ob-post-upgrade" "$bad :: $(tr '\n' ' ' <<<"$out")"
+    fi
+}
+
+# ── 15. The package says so, and does not do it itself ───────────────────────
+test_postinst_notice_only() {
+    local bad="" f
+    for f in "$ROOT_DIR/debian/open-bastion.postinst" "$ROOT_DIR/rpm/open-bastion.spec"; do
+        grep -q "run 'ob-post-upgrade' to replace them" "$f" || bad="$bad no-notice:$(basename "$f")"
+        # The package must not remove the old jobs: that is ob-post-upgrade's,
+        # which arms the timer first.
+        grep -nE 'rm .*(cron\.d/open-bastion-krl|open-bastion-refresh-krl|open-bastion-audit-rotate)' "$f" \
+            && bad="$bad removes-jobs:$(basename "$f")"
+    done
+    if [ -z "$bad" ]; then
+        pass "the postinst and %post point at ob-post-upgrade and remove nothing themselves"
+    else
+        fail "package scripts" "$bad"
+    fi
+}
+
 run_test test_legacy_interval_parsing
 run_test test_krl_migration
 run_test test_never_neither
@@ -538,6 +607,8 @@ run_test test_setup_download_failure
 run_test test_setup_interval_option
 run_test test_setup_dry_run
 run_test test_setup_audit_trace
+run_test test_post_upgrade
+run_test test_postinst_notice_only
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

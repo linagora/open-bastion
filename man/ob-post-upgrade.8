@@ -31,6 +31,42 @@ for exactly one value \(em
 .PP
 It is idempotent. Run it as often as you like; on a host that is already
 current it reports that and changes nothing.
+.SH CRON JOBS OF 0.6
+Up to 0.6 the setup scheduled two jobs with cron:
+.I /etc/cron.d/open-bastion-krl
+(maximum security mode: refresh the key revocation list with a generated
+.IR /usr/local/bin/open-bastion-refresh-krl )
+and
+.I /etc/cron.daily/open-bastion-audit-rotate
+.RB ( \-\-enable\-audit\-trace ).
+Both are now systemd timers,
+.B ob-krl-refresh.timer
+and
+.BR ob-audit-rotate.timer .
+The old jobs keep working after the upgrade; this command replaces them:
+.IP \(bu 2
+The KRL job's interval
+.RB ( */N " in the minute field)"
+is carried over: when it is not 30 minutes it is written to
+.IR /etc/systemd/system/ob-krl-refresh.timer.d/schedule.conf .
+A rotation moved to
+.I /etc/cron.weekly
+becomes a weekly timer the same way.
+.IP \(bu 2
+The timer is enabled and started, and the old job is removed only once the
+timer is enabled and active. If the timer cannot be armed, the old job is
+kept, the failure is reported and the exit status is 1: the host is never left
+with neither.
+.IP \(bu 2
+A job whose schedule is not the one the setup wrote, or an audit script that
+has been edited, is not translated or removed: the timer is armed next to it
+and a warning says what to port by hand.
+.PP
+On a host in maximum security mode
+.RB ( RevokedKeys
+in an sshd drop-in) with no old job, it checks that
+.B ob-krl-refresh.timer
+is enabled and active, and enables it if not.
 .SH WHAT IT DOES NOT DO
 .TP
 .B It does not enrol, or re-enrol.
@@ -81,6 +117,7 @@ proves nothing.
 .SH SEE ALSO
 .BR ob-bastion-setup (8),
 .BR ob-backend-setup (8),
+.BR ob-krl-refresh (8),
 .BR ob-fp-daemon (8),
 .BR ob-fp-submit (8)
 .SH AUTHOR

@@ -409,6 +409,23 @@ if [ "$1" = configure ] \
     done
 fi
 
+# ── The 0.6 cron jobs, now systemd timers (#281) ─────────────────────────────
+# Up to 0.6 ob-bastion-setup wrote /etc/cron.d/open-bastion-krl (Mode E KRL
+# refresh, running a generated /usr/local/bin/open-bastion-refresh-krl) and
+# /etc/cron.daily/open-bastion-audit-rotate (--enable-audit-trace). Both keep
+# working after this upgrade, so nothing stops -- but they are not moved here:
+# /usr/local is not this package's, a job may have been edited, and the
+# replacement must keep the interval the job had. ob-post-upgrade does it, and
+# removes each job only once its timer runs. Say so, and only when it applies.
+if [ "$1" = configure ] \
+    && { [ -e /etc/cron.d/open-bastion-krl ] \
+         || [ -e /etc/cron.daily/open-bastion-audit-rotate ] \
+         || [ -e /etc/cron.weekly/open-bastion-audit-rotate ]; }; then
+    echo "open-bastion: this host still runs the cron jobs of 0.6 (KRL refresh and/or" >&2
+    echo "  audit rotation). They keep working; run 'ob-post-upgrade' to replace them" >&2
+    echo "  with ob-krl-refresh.timer / ob-audit-rotate.timer, same schedule." >&2
+fi
+
 # ── Upgrade safety: SSH key policy needs the v1 principals helper ────────────
 # pam_openbastion enforces ssh_key_policy_* FAIL-CLOSED (issue #181): with the
 # policy enabled, a key whose type/size cannot be determined is DENIED. The key

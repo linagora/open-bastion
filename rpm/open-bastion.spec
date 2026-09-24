@@ -296,6 +296,18 @@ if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     done
 fi
 
+# The 0.6 cron jobs (KRL refresh, audit rotation) are now timers (#281). They
+# keep working after the upgrade, and are not moved here: /usr/local is not the
+# package's, a job may have been edited, and the timer must keep its interval.
+# ob-post-upgrade does it; say so when it applies. Same as the Debian postinst.
+if [ -e /etc/cron.d/open-bastion-krl ] \
+   || [ -e /etc/cron.daily/open-bastion-audit-rotate ] \
+   || [ -e /etc/cron.weekly/open-bastion-audit-rotate ]; then
+    echo "open-bastion: this host still runs the cron jobs of 0.6 (KRL refresh and/or" >&2
+    echo "  audit rotation). They keep working; run 'ob-post-upgrade' to replace them" >&2
+    echo "  with ob-krl-refresh.timer / ob-audit-rotate.timer, same schedule." >&2
+fi
+
 %preun
 %systemd_preun ob-heartbeat.timer
 %systemd_preun ob-session-prune.timer
