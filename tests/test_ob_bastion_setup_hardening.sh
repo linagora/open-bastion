@@ -523,8 +523,13 @@ test_setup_hardening_linger_real_aborts() {
     fi
 }
 
-# ── Test 17: cron.allow without 'root' triggers a WARN ──
-test_cron_allow_missing_root_warns() {
+# ── Test 17: an admin cron.allow without 'root' is kept, and needs no warning ──
+# Until 0.7.0 the Mode E KRL refresh ran from /etc/cron.d as root, so a
+# cron.allow without 'root' was reported as breaking it. Nothing of ours runs
+# from cron any more (#281): the refresh is ob-krl-refresh.timer. The file is
+# still the admin's and still left alone; the warning would now be noise that
+# points at a job that no longer exists.
+test_cron_allow_without_root_is_fine() {
     local sandbox
     sandbox=$(mktemp -d)
     mkdir -p "$sandbox/share/hardening/logind.conf.d" \
@@ -565,16 +570,16 @@ test_cron_allow_missing_root_warns() {
         out=$(setup_hardening 2>&1)
         # The admin cron.allow must be left untouched
         grep -q "^alice$" "$sandbox/etc/cron.allow" || exit 2
-        # Must surface the WARN about root missing
-        echo "$out" | grep -q "does not list 'root'" || exit 3
+        # No talk of a KRL cron job, or of root in cron.allow
+        echo "$out" | grep -qiE "does not list 'root'|open-bastion-krl" && exit 3
         exit 0
     )
     local rc=$?
     rm -rf "$sandbox"
     if [ $rc -eq 0 ]; then
-        pass "setup_hardening warns when cron.allow is missing 'root'"
+        pass "setup_hardening keeps an admin cron.allow without 'root', and no longer warns about it"
     else
-        fail "setup_hardening warns when cron.allow is missing 'root'" "rc=$rc"
+        fail "setup_hardening keeps an admin cron.allow without 'root', and no longer warns about it" "rc=$rc"
     fi
 }
 
@@ -619,7 +624,7 @@ run_test test_detect_lingering_users_clean
 run_test test_detect_lingering_users_no_loginctl
 run_test test_setup_hardening_linger_dryrun_warns
 run_test test_setup_hardening_linger_real_aborts
-run_test test_cron_allow_missing_root_warns
+run_test test_cron_allow_without_root_is_fine
 run_test test_limits_template_exempts_ob_service
 run_test test_setup_script_reload_only
 
