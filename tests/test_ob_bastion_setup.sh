@@ -278,8 +278,8 @@ test_node_role_default() {
 }
 
 # -- Test 17: portal URL with shell metacharacters is rejected --
-# PORTAL_URL is interpolated into generated artefacts (notably the root-cron
-# open-bastion-refresh-krl script, written through an unquoted heredoc), so the
+# PORTAL_URL is interpolated into generated artefacts (openbastion.conf and
+# ssh-proxy.conf, read back by root programs such as ob-krl-refresh), so the
 # script validates its shape the same way ob-builder's is_valid_url() does.
 test_portal_url_rejects_metacharacters() {
     local bad out rc failed=0

@@ -59,7 +59,13 @@ TIMEOUT=30
 DRY_RUN=false
 BACKUP_DIR="/var/backup/open-bastion-setup-$(date +%Y%m%d-%H%M%S)"
 MAX_SECURITY=false
+# KRL refresh interval in minutes (Mode E), --krl-refresh-interval. The packaged
+# ob-krl-refresh.timer runs every 30; any other value becomes a drop-in.
 KRL_REFRESH_INTERVAL=30
+KRL_INTERVAL_GIVEN=false
+# How the summary describes the refresh schedule; set by download_krl.
+KRL_SCHEDULE="every 30 min"
+KRL_REFRESH_BIN="/usr/sbin/ob-krl-refresh"
 ENABLE_AUDIT_TRACE=false
 # ── Bastion and standalone only ──
 # Session recording is a core bastion guarantee and is ON by default.
@@ -141,7 +147,8 @@ AUDIT_RESULT="not-applied"
 # Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
 AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
-AUDIT_CRON_FILE="/etc/cron.daily/open-bastion-audit-rotate"
+# Daily rotation: ob-audit-rotate.timer, enabled by --enable-audit-trace. Up to
+# 0.6 it was a copy of a template in /etc/cron.daily; see ob-timers-lib.sh.
 
 # Result of enroll_server, consumed by print_summary. One of:
 #   not-attempted (default — step never ran)
@@ -1304,7 +1311,35 @@ ExposeAuthInfo yes
     fi
 }
 
-# Download KRL from LLNG
+# Timer helpers shared with ob-post-upgrade: the systemd timers that replaced
+# the KRL and audit cron jobs, and the migration from those jobs (#281).
+# Installed next to ob-sign-lib.sh; the tree copy serves an uninstalled run.
+load_timers_lib() {
+    declare -F ob_timer_enable >/dev/null && return 0
+    local lib="${OB_TIMERS_LIB:-/usr/lib/open-bastion/ob-timers-lib.sh}"
+    if [ ! -r "$lib" ]; then
+        lib="$(dirname "$(readlink -f "$0")")/ob-timers-lib.sh"
+    fi
+    if [ ! -r "$lib" ]; then
+        error "ob-timers-lib.sh not found (reinstall the open-bastion package)"
+        return 1
+    fi
+    # shellcheck source=scripts/ob-timers-lib.sh
+    . "$lib"
+}
+
+# Download the KRL now, and keep it fresh with ob-krl-refresh.timer (Mode E).
+#
+# The first download happens here, synchronously, because sshd is about to be
+# restarted with RevokedKeys pointing at this file, and sshd refuses every key
+# while that file is missing. Both the download and the timer run the packaged
+# ob-krl-refresh, so there is one implementation of the checks that keep a bad
+# list away from sshd.
+#
+# Until 0.7.0 this wrote /etc/cron.d/open-bastion-krl and a generated
+# /usr/local/bin/open-bastion-refresh-krl. A run on such a host replaces them,
+# carrying over the interval of the old job unless --krl-refresh-interval says
+# otherwise, and removes them only once the timer is running.
 download_krl() {
     if [ "$MAX_SECURITY" != "true" ]; then
         return 0
@@ -1312,56 +1347,62 @@ download_krl() {
 
     step "Downloading Key Revocation List (KRL)..."
 
-    build_curl_opts
+    load_timers_lib || return 1
+
+    # An explicit --krl-refresh-interval wins. Without it ob_krl_timer_setup
+    # carries over the interval of a 0.6 cron job, or leaves the schedule the
+    # host already has.
+    local given=""
+    [ "$KRL_INTERVAL_GIVEN" = "true" ] && given="$KRL_REFRESH_INTERVAL"
 
     if [ "$DRY_RUN" = "true" ]; then
-        info "[DRY-RUN] Would download KRL from ${PORTAL_URL}/ssh/revoked"
-        info "[DRY-RUN] Would create cron job for KRL refresh"
+        info "[DRY-RUN] Would download KRL from ${PORTAL_URL}/ssh/revoked with $KRL_REFRESH_BIN"
+        OB_TIMERS_DRY_RUN=true
+        ob_krl_timer_setup "$given" || true
+        report_timers "[DRY-RUN] Would "
         return 0
     fi
 
-    # Download KRL (validate format: must start with "SSHKRL" magic bytes)
-    if curl "${CURL_OPTS[@]}" "${PORTAL_URL}/ssh/revoked" -o "${SSH_REVOKED_KEYS}.tmp" 2>/dev/null \
-       && head -c 6 "${SSH_REVOKED_KEYS}.tmp" | grep -q "SSHKRL"; then
-        mv "${SSH_REVOKED_KEYS}.tmp" "$SSH_REVOKED_KEYS"
-        chmod 644 "$SSH_REVOKED_KEYS"
+    # 1. The list sshd reads, now.
+    if [ -x "$KRL_REFRESH_BIN" ] \
+       && "$KRL_REFRESH_BIN" --config "$OB_CONFIG" --output "$SSH_REVOKED_KEYS"; then
         info "KRL saved to $SSH_REVOKED_KEYS"
+    elif [ -f "$SSH_REVOKED_KEYS" ]; then
+        warn "KRL not available or invalid; keeping the current $SSH_REVOKED_KEYS"
     else
-        # Create empty revocation file if KRL not available or invalid
-        rm -f "${SSH_REVOKED_KEYS}.tmp"
-        touch "$SSH_REVOKED_KEYS"
-        chmod 644 "$SSH_REVOKED_KEYS"
+        # An empty file is a valid, empty KRL for sshd; a missing one is not.
+        install -m 0644 /dev/null "$SSH_REVOKED_KEYS"
         warn "KRL not available or invalid format, created empty file"
     fi
 
-    # Create refresh script that reuses curl options (SSL verification, timeout)
-    local cron_file="/etc/cron.d/open-bastion-krl"
-    local refresh_script="/usr/local/bin/open-bastion-refresh-krl"
+    # 2. The timer that keeps it fresh, replacing the 0.6 cron job.
+    OB_TIMERS_DRY_RUN=false
+    if ! ob_krl_timer_setup "$given"; then
+        report_timers ""
+        error "KRL refresh: $OB_TIMERS_MSG"
+        return 1
+    fi
+    report_timers ""
+    KRL_SCHEDULE="$OB_TIMERS_SCHEDULE"
+}
 
-    cat > "$refresh_script" << REFRESHEOF
-#!/bin/bash
-set -euo pipefail
-tmp_file=\$(mktemp /tmp/open-bastion-krl.XXXXXX)
-trap 'rm -f "\$tmp_file"' EXIT
-CURL_OPTS="-sf --connect-timeout ${TIMEOUT}"
-if [ "${VERIFY_SSL}" = "false" ]; then
-    CURL_OPTS="\$CURL_OPTS -k"
-fi
-if curl \$CURL_OPTS "${PORTAL_URL}/ssh/revoked" -o "\$tmp_file" \\
-   && head -c 6 "\$tmp_file" | grep -q "SSHKRL"; then
-    mv "\$tmp_file" "${SSH_REVOKED_KEYS}"
-    chmod 644 "${SSH_REVOKED_KEYS}"
-fi
-REFRESHEOF
-    chmod 755 "$refresh_script"
-
-    cat > "$cron_file" << CRONEOF
-# Open Bastion KRL refresh (Mode E - Maximum Security)
-# Downloads Key Revocation List every ${KRL_REFRESH_INTERVAL} minutes
-*/${KRL_REFRESH_INTERVAL} * * * * root ${refresh_script} >/dev/null 2>&1
-CRONEOF
-    chmod 644 "$cron_file"
-    info "Created KRL refresh cron job ($cron_file) every ${KRL_REFRESH_INTERVAL} min"
+# Print what ob_krl_timer_setup / ob_audit_timer_setup did (or, in a dry run,
+# would do). In a dry run their sentences start with "would "; PREFIX replaces
+# that word, so the lines read like the other [DRY-RUN] lines.
+report_timers() {
+    local prefix="$1" line
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if [ -n "$prefix" ]; then
+            info "${prefix}${line#would }"
+        else
+            info "${line^}"
+        fi
+    done <<< "$OB_TIMERS_DONE"
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then warn "${line^}"; fi
+    done <<< "$OB_TIMERS_WARN"
+    return 0
 }
 
 # Backend: stop what only a bastion runs, left by an earlier bastion setup of
@@ -2016,38 +2057,51 @@ setup_audit_trace() {
 
     # 2. Templates must be deployed (CMake installs them under datarootdir).
     local rules_template="$AUDIT_TEMPLATE_DIR/rules.d/open-bastion.rules"
-    local cron_template="$AUDIT_TEMPLATE_DIR/cron.daily/open-bastion-audit-rotate"
     if [ ! -f "$rules_template" ]; then
         error "Audit rules template not found: $rules_template"
         error "Reinstall the open-bastion package, or set AUDIT_TEMPLATE_DIR=<path>."
         AUDIT_RESULT="failed"
         return 1
     fi
-    if [ ! -f "$cron_template" ]; then
-        error "Audit cron template not found: $cron_template"
+    if ! load_timers_lib; then
         AUDIT_RESULT="failed"
         return 1
     fi
 
-    # 3. Confirmation: this deploys rules.d/cron.daily entries and restarts
-    #    auditd. Default-OFF policy applies. /etc/audit/auditd.conf is NOT
-    #    touched — see rationale below.
-    if ! confirm "Enable primary audit trace? Installs rules.d + cron.daily and restarts auditd."; then
+    # 3. Confirmation: this deploys a rules.d entry and the rotation timer and
+    #    restarts auditd. Default-OFF policy applies. /etc/audit/auditd.conf is
+    #    NOT touched — see rationale below.
+    if ! confirm "Enable primary audit trace? Installs rules.d + a daily rotation timer and restarts auditd."; then
         info "Audit trace setup skipped by user."
         AUDIT_RESULT="declined"
         return 0
     fi
 
     if [ "$DRY_RUN" = "true" ]; then
+        OB_TIMERS_DRY_RUN=true
+        ob_audit_timer_setup || true
+        report_timers "[DRY-RUN] Would "
         info "[DRY-RUN] Would install $AUDIT_RULES_FILE (0640 root:root)"
-        info "[DRY-RUN] Would install $AUDIT_CRON_FILE (0755 root:root)"
         info "[DRY-RUN] Would augenrules --load and restart auditd"
         info "[DRY-RUN] /etc/audit/auditd.conf intentionally NOT modified"
         AUDIT_RESULT="dry-run"
         return 0
     fi
 
-    # 4. Install rules template into /etc/audit/rules.d/.
+    # 4. The rotation, first: if it cannot be armed, stop before auditd is
+    #    touched rather than leave a trace that grows without bound. A 0.6
+    #    /etc/cron.daily (or cron.weekly) rotation is replaced on the same
+    #    schedule, and removed only once the timer runs.
+    OB_TIMERS_DRY_RUN=false
+    if ! ob_audit_timer_setup; then
+        report_timers ""
+        error "Audit rotation: $OB_TIMERS_MSG"
+        AUDIT_RESULT="failed"
+        return 1
+    fi
+    report_timers ""
+
+    # 5. Install rules template into /etc/audit/rules.d/.
     #    auditd's default rules.d entries (e.g. audit.rules) ship as 0640
     #    root:root on Debian; we match that.
     #    Guard against `set -e` aborting the whole setup run if
@@ -2060,18 +2114,9 @@ setup_audit_trace() {
     fi
     info "Installed $AUDIT_RULES_FILE"
 
-    # 5. Install daily rotation cron. cron.daily entries must be executable
-    #    and unsuffixed (run-parts ignores files with dots/tildes).
-    if ! install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"; then
-        error "Failed to install $AUDIT_CRON_FILE"
-        AUDIT_RESULT="failed"
-        return 1
-    fi
-    info "Installed $AUDIT_CRON_FILE"
-
     # /etc/audit/auditd.conf is intentionally NOT modified. It is a single
     # admin-tunable file owned by the audit distro package. Drop-in mechanisms
-    # (rules.d/, cron.daily/) are used where they exist; auditd.conf is left
+    # (rules.d/, a timer) are used where they exist; auditd.conf is left
     # for the administrator to tune manually (see doc/audit.rst).
     info "Audit trace deployed. /etc/audit/auditd.conf is intentionally NOT modified."
     info "For ~1 week retention, set num_logs=7 max_log_file=50 max_log_file_action=ROTATE in /etc/audit/auditd.conf manually (see doc/audit.rst)."
@@ -2080,7 +2125,7 @@ setup_audit_trace() {
     #    /etc/audit/rules.d/*.rules into /etc/audit/audit.rules and tells
     #    auditctl to load them. A non-zero exit usually means a bad rule
     #    (e.g. arch mismatch on 32-bit kernel) — surface it but don't abort:
-    #    the cron rotation is still in effect.
+    #    the rotation timer is still in effect.
     if augenrules --load >/dev/null 2>&1; then
         info "auditd rules loaded via augenrules"
     else
@@ -2549,7 +2594,7 @@ print_summary() {
         echo "  ✓ Maximum Security Mode E"
         echo "    - SSH: SSO-signed certificates only"
         echo "    - sudo: LLNG temporary token required"
-        echo "    - KRL: mandatory, refreshed every ${KRL_REFRESH_INTERVAL} min"
+        echo "    - KRL: mandatory, refreshed ${KRL_SCHEDULE} (ob-krl-refresh.timer)"
         if [ "$SUDO_FRESH_OTP" = "true" ]; then
             echo "    - sudo: fresh LLNG token on EVERY elevation (timestamp_timeout=0)"
         else
@@ -2665,6 +2710,10 @@ Options:
                           ($OB_TOKEN), in which case it is reused.
   -k, --insecure          Skip SSL certificate verification
   --max-security          Enable Mode E (SSO certificates only, sudo via LLNG token, KRL)
+  --krl-refresh-interval MINUTES
+                          Mode E: refresh the KRL every MINUTES (1-60) instead
+                          of every 30, via a drop-in for ob-krl-refresh.timer.
+                          Without it a new run keeps the schedule the host has.
   --enable-service-keys   Configure the SSH layer for service accounts: writes
                           the AuthorizedKeysCommand drop-in that serves
                           /etc/open-bastion/service-accounts.d/<name>.pub, plus
@@ -2682,7 +2731,7 @@ Options:
                           modifies system-wide behaviour, opt in only on dedicated hosts.
   --enable-audit-trace    Enable primary audit trace via auditd (OFF by default).
                           Installs audit rules (rules.d/open-bastion.rules)
-                          and a daily rotation cron, then restarts auditd.
+                          and a daily rotation timer, then restarts auditd.
                           /etc/audit/auditd.conf is NOT modified; tune
                           retention manually (see doc/audit.rst).
                           Requires auditd package (apt install auditd /
@@ -2859,6 +2908,17 @@ parse_args() {
                 MAX_SECURITY=true
                 shift
                 ;;
+            --krl-refresh-interval)
+                # Minutes, as cron's */N meant them: the timer runs at
+                # *:0/N, which only means "every N minutes" for 1..60.
+                if ! [[ "${2:-}" =~ ^[1-9][0-9]?$ ]] || [ "$2" -gt 60 ]; then
+                    error "Option $1 requires a number of minutes between 1 and 60"
+                    exit 1
+                fi
+                KRL_REFRESH_INTERVAL="$2"
+                KRL_INTERVAL_GIVEN=true
+                shift 2
+                ;;
             --no-sudo)
                 ENABLE_SUDO=false
                 BACKEND_ONLY_OPTS+=("$1")
@@ -2944,6 +3004,13 @@ check_role_options() {
         exit 1
     fi
 
+    # The interval is the schedule of Mode E's KRL refresh; without Mode E there
+    # is no refresh, and an accepted option that does nothing reads as done.
+    if [ "$KRL_INTERVAL_GIVEN" = "true" ] && [ "$MAX_SECURITY" != "true" ]; then
+        error "--krl-refresh-interval applies to --max-security (Mode E) only."
+        exit 1
+    fi
+
     # --no-sudo cannot be honoured under Mode E: configure_max_security_sudo
     # replaces /etc/pam.d/sudo with the LLNG-token-only stack whatever this
     # flag says. Accepting both used to install that stack with no sudoers
@@ -2993,14 +3060,14 @@ main() {
 
     # Validate the URL shape before it is used anywhere.
     #
-    # PORTAL_URL is interpolated into generated artefacts, notably
-    # /usr/local/bin/open-bastion-refresh-krl (an unquoted heredoc, run from
-    # root cron every ${KRL_REFRESH_INTERVAL} minutes). No privilege boundary is
-    # crossed here — this script already requires root and the value is the
-    # admin's own --portal argument — but a URL containing shell metacharacters
-    # would silently produce a broken or surprising cron script. The character
-    # class is the same one ob-builder enforces with is_valid_url(), so a portal
-    # accepted by the builder is accepted here.
+    # PORTAL_URL is interpolated into generated artefacts -- openbastion.conf,
+    # ssh-proxy.conf -- that root programs read back, ob-krl-refresh among them
+    # (it applies the same check before writing into /etc/ssh). No privilege
+    # boundary is crossed here — this script already requires root and the
+    # value is the admin's own --portal argument — but a URL containing shell
+    # metacharacters would silently produce a broken or surprising
+    # configuration. The character class is the same one ob-builder enforces
+    # with is_valid_url(), so a portal accepted by the builder is accepted here.
     if ! [[ "$PORTAL_URL" =~ ^https?://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]; then
         error "Invalid portal URL: $PORTAL_URL"
         error "Expected http(s)://host[:port][/path] without shell metacharacters"
@@ -3167,7 +3234,7 @@ main() {
     else
         info "Session containment hardening not applied (opt-in: pass --enable-hardening to activate)"
     fi
-    download_krl || warn "KRL download failed"
+    download_krl || warn "KRL download or refresh timer failed (see above)"
 
     # Optional primary audit trace (default OFF — modifies global system).
     if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
