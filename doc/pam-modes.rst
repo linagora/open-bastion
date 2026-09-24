@@ -227,7 +227,7 @@ Line by line, and why each matters:
 
 ..
 
-   **``ssh_cert_aware=true`` is currently a no-op.** Both setup scripts pass it as a module argument, but no code reads it: PAM module arguments of the form ``key=value`` are handed to ``config_parse_args()`` → ``parse_line()``, whose final branch silently ignores unknown keys (``src/config.c``). Nothing in ``src/`` mentions ``ssh_cert_aware``. Keep it or drop it as you like — it changes no behaviour today. This is tracked as a code cleanup, not a configuration knob; do not document it as one.
+   **``ssh_cert_aware=true`` is currently a no-op.** The setup script passes it, for every role, as a module argument, but no code reads it: PAM module arguments of the form ``key=value`` are handed to ``config_parse_args()`` → ``parse_line()``, whose final branch silently ignores unknown keys (``src/config.c``). Nothing in ``src/`` mentions ``ssh_cert_aware``. Keep it or drop it as you like — it changes no behaviour today. This is tracked as a code cleanup, not a configuration knob; do not document it as one.
 
 PAM Configuration for sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

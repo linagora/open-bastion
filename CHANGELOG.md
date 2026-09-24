@@ -78,6 +78,21 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
 
 ### Changed
 
+- **One setup script for the three node roles** (#288). `ob-bastion-setup` and
+  `ob-backend-setup` were two 2,400-line copies whose diff ran to 1,760 lines,
+  much of it fixes that had reached only one of them. `ob-backend-setup` is now
+  a symlink to `ob-bastion-setup`, like `ob-standalone-setup`: the name picks
+  the default role and `--node-role` overrides it. **`--node-role` now
+  configures the role it names**; it used to change only the label, so
+  `ob-bastion-setup --node-role backend` wrote a complete bastion (session
+  recorder, `ForceCommand`, a principals helper that accepts direct SSO
+  certificates) recorded as `backend`, and `ob-backend-setup --node-role
+  bastion` the reverse. Options of one role are refused for another with the
+  reason (`--no-sudo`, `--no-create-user`, `--allowed-bastions`,
+  `--allow-any-bastion` outside a backend; `--disable-session-recorder` on one),
+  `--help` lists only the options of the role in effect, writing one role's
+  sshd drop-in removes the other's, and one man page, `ob-bastion-setup`(8),
+  documents all three names. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
 - **`SECURITY.md` is a reporting policy again** (#276). It had grown to 986 lines
   describing the product, with the policy a few lines at the top. It now holds
   what the [OpenSSF finder guide](https://github.com/ossf/oss-vulnerability-guide/blob/main/finder-guide.md)
@@ -196,6 +211,20 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
 
 ### Fixed
 
+- **Setup fixes that had reached only one of the two scripts** (#288), found
+  while merging them. On a **bastion or standalone host**, the summary reported
+  "Audit trace: applied" whenever `--enable-audit-trace` was given, even when
+  auditd was missing, the prompt was declined or the rules failed to install;
+  it now reports what happened. On a **backend**, NSS was configured before
+  enrollment, where a rolled-back run left `openbastion` in `nsswitch.conf` with
+  its configuration file deleted; it is now configured with the lockdown, as on
+  a bastion. A backend in Mode E now creates the `open-bastion-sudo` group and
+  its sudoers rule itself, and `--no-sudo` with `--max-security` — which used to
+  install the token-only sudo stack with no rule, so no SSO user could elevate —
+  is refused. The Mode E summary states the sudo credential-cache setting on a
+  backend too, and a 404 on `/oauth2/device` names the portal setting to
+  enable. `--help` no longer tries to execute the `Defaults:` sudoers line it
+  quotes, which printed "(writes )" on every role.
 - **Three records that contradicted the tree** (#268): a `SECURITY.md` bullet
   still naming the removed secret store, and two treatment-plan measures (MT51,
   MT52) left "en revue"/"ouvert" with #248 and #252 merged.

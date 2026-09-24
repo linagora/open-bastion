@@ -83,6 +83,34 @@ Until you do, desktop-SSO users need one online re-authentication each: the
 existing offline cache entries can no longer be read. No lockout, nothing to
 clean up. The rejection is logged to syslog with that same command.
 
+### A4. Before re-running a setup script with `--node-role`
+
+Only if your automation passes `--node-role`, or you run a setup script again
+later. `ob-backend-setup` is now a symlink to `ob-bastion-setup` (#288), and
+**`--node-role` configures the role it names** instead of only writing it into
+`openbastion.conf`. Until now, `ob-bastion-setup --node-role backend` produced
+a bastion labelled `backend`, and `ob-backend-setup --node-role bastion` or
+`--node-role standalone` a backend labelled otherwise. Re-running such a
+command now turns the host into what the label says.
+
+Check that the label and the configuration agree:
+
+```sh
+grep '^node_role' /etc/open-bastion/openbastion.conf
+ls /etc/ssh/sshd_config.d/*-open-bastion-*.conf   # -bastion.conf or -backend.conf
+```
+
+A `-backend.conf` drop-in goes with `node_role = backend`; a `-bastion.conf`
+one with `bastion` or `standalone`. If they disagree, fix the command before
+the next run — the drop-in says what the host really is — or the run will
+switch the host's role (and remove the other role's drop-in, backed up).
+
+Two command lines that used to be accepted are now refused, before anything is
+touched: `ob-backend-setup --no-sudo --max-security` (Mode E rewrites the sudo
+stack regardless, and the run left SSO users with no sudoers rule), and any
+option of one role combined with `--node-role` naming the other, such as
+`ob-backend-setup --node-role standalone --allowed-bastions ...`.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0
