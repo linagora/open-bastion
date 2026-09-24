@@ -282,12 +282,16 @@ La KRL est le mécanisme de révocation immédiate des certificats. Elle est mai
    # Téléchargement depuis LLNG
    curl -sf -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
 
-   # Cron de rafraîchissement (toutes les 30 min)
-   # /etc/cron.d/open-bastion-krl
-   */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
+   # Rafraîchissement (toutes les 30 min) : ob-krl-refresh.timer, activé par
+   # ob-bastion-setup --max-security. N'installe qu'une KRL qui se lit, par
+   # renommage atomique ; en cas d'échec, la liste en place est conservée.
+   systemctl list-timers ob-krl-refresh.timer
 
-   # Monitoring : alerter si KRL > 1h sans mise à jour
-   */15 * * * * root find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
+   # Monitoring : alerter si le dernier rafraîchissement a échoué, ou si la
+   # KRL n'a pas été confirmée depuis plus d'une heure (ob-krl-refresh
+   # met à jour sa date même quand la liste n'a pas changé)
+   systemctl is-failed --quiet ob-krl-refresh.service && echo "KRL refresh failed"
+   find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
 
 **Révocation d'un certificat compromis :**
 
@@ -295,7 +299,7 @@ La KRL est le mécanisme de révocation immédiate des certificats. Elle est mai
 
    # Côté LLNG (admin) : révoquer via l'interface /ssh/admin
    # → La KRL est mise à jour immédiatement
-   # → Propagation sur les serveurs dans les 30 min suivantes (cron)
+   # → Propagation sur les serveurs dans les 30 min suivantes (ob-krl-refresh.timer)
    # → Fenêtre d'exposition maximale : 30 min
 
 Binding fingerprint SSH sur ``/pam/authorize`` et ``/pam/verify`` (défense en profondeur)
@@ -1107,7 +1111,7 @@ R-S15 - Certificat 1 an compromis sans KRL à jour
 
 **Vecteurs de risque :**
 
-- Cron de rafraîchissement KRL en panne ou mal configuré
+- Timer de rafraîchissement KRL (``ob-krl-refresh.timer``) désactivé, en échec ou mal configuré
 - Serveur LLNG indisponible empêchant le téléchargement KRL
 - Délai entre la révocation et la propagation (jusqu'à 30 min)
 - Serveur SSH dont la directive ``RevokedKeys`` a été oubliée ou supprimée par inadvertance
@@ -1136,17 +1140,17 @@ R-S15 - Certificat 1 an compromis sans KRL à jour
 
 .. code:: ini
 
-   # Rafraîchissement KRL fréquent
-   # /etc/cron.d/open-bastion-krl
-   */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
+   # Rafraîchissement KRL fréquent : ob-krl-refresh.timer (30 min par défaut)
+   # ob-bastion-setup --max-security --krl-refresh-interval 10
 
-   # Monitoring : alerter si KRL > 1h
-   */15 * * * * root find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
+   # Monitoring : alerter si le rafraîchissement échoue ou si la KRL > 1h
+   systemctl is-failed --quiet ob-krl-refresh.service && echo "KRL refresh failed"
+   find /etc/ssh/revoked_keys -mmin +60 -exec echo "KRL stale" \;
 
 +-----------------+----------------------------------------------------------------------------------------------+
 |                 | Score résiduel                                                                               |
 +=================+==============================================================================================+
-| **Probabilité** | 1 (cron KRL + binding fingerprint ``/pam/authorize`` + ``/pam/verify`` comme triple défense) |
+| **Probabilité** | 1 (timer KRL + binding fingerprint ``/pam/authorize`` + ``/pam/verify``, triple défense)     |
 +-----------------+----------------------------------------------------------------------------------------------+
 | **Impact**      | 1 (ouverture SSH et sudo bloqués au niveau LLNG même avec KRL absente ou périmée côté sshd)  |
 +-----------------+----------------------------------------------------------------------------------------------+
@@ -1404,7 +1408,7 @@ R-S20 - Action différée hors session (at, cron, systemd-run timer)
 **Remédiation implémentée — Désactivation des planificateurs utilisateur (PR1 #112, opt-in via ``--enable-hardening``) :**
 
 - ``/etc/at.allow`` vide (root only) + ``systemctl mask atd`` : ``at(1)`` est désactivé pour les non-root et le démon ``atd`` ne tourne plus.
-- ``/etc/cron.allow`` root-only : ``crontab(1)`` refuse les non-root au moment de l'édition. ``cron.service`` reste actif parce que ``/etc/cron.d/open-bastion-krl`` (utilisé par le mode max-security pour le rafraîchissement de la KRL) requiert un démon cron en service. ``cron.allow`` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans ``/etc/cron.d/`` restent root-only par construction.
+- ``/etc/cron.allow`` root-only : ``crontab(1)`` refuse les non-root au moment de l'édition. ``cron.service`` n'est pas masqué : aucune tâche Open Bastion n'en dépend plus (le rafraîchissement de la KRL et la rotation d'audit sont des timers systemd depuis 0.7.0), mais d'autres tâches de l'hôte peuvent en dépendre. ``cron.allow`` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans ``/etc/cron.d/`` restent root-only par construction.
 - Pre-flight bloquant : ``setup_hardening`` **refuse de s'exécuter** si un utilisateur non-root a ``Linger=yes``. L'administrateur doit faire ``loginctl disable-linger <user>`` avant. Cette protection ferme le canal ``systemd-run --user --on-active=...``.
 
 **Remédiation complémentaire — Trace primaire auditd (PR2 #113) :**
@@ -1652,8 +1656,8 @@ KRL (Key Revocation List)
 
 - ☐ ``RevokedKeys /etc/ssh/revoked_keys`` dans sshd_config
 - ☐ KRL initialisée et téléchargée depuis LLNG (``/ssh/revoked``)
-- ☐ Cron de rafraîchissement KRL toutes les 30 min
-- ☐ Monitoring KRL (alerte si > 1h sans mise à jour)
+- ☐ ``ob-krl-refresh.timer`` actif (rafraîchissement KRL toutes les 30 min)
+- ☐ Monitoring KRL (alerte si ``ob-krl-refresh.service`` en échec ou KRL > 1h sans confirmation)
 - ☐ Processus de révocation documenté et testé
 
 Bastion et vouching par certificat éphémère
@@ -2068,7 +2072,7 @@ Mesures critiques (non négociables)
 +======================================================================+=============================================================+
 | ``AuthorizedKeysFile none``                                          | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
 +----------------------------------------------------------------------+-------------------------------------------------------------+
-| KRL avec cron 30 min                                                 | Contrôle compensatoire pour les certificats 1 an            |
+| KRL rafraîchie toutes les 30 min (``ob-krl-refresh.timer``)          | Contrôle compensatoire pour les certificats 1 an            |
 +----------------------------------------------------------------------+-------------------------------------------------------------+
 | Cert éphémère + ``source-address`` + ``AuthorizedPrincipalsCommand`` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
 +----------------------------------------------------------------------+-------------------------------------------------------------+

@@ -165,14 +165,12 @@ Pour une révocation en ligne de commande :
 
 **Propagation de la KRL aux serveurs** :
 
-La KRL est automatiquement distribuée si le cron est configuré :
+La KRL est automatiquement distribuée sur les serveurs en mode E : ``ob-krl-refresh.timer`` (activé par ``ob-bastion-setup --max-security``) lance ``ob-krl-refresh`` toutes les 30 minutes, qui n'installe qu'une KRL valide, par renommage atomique :
 
 .. code:: bash
 
-   # /etc/cron.hourly/update-ssh-krl (déjà en place sur les serveurs)
-   #!/bin/bash
-   curl -s https://auth.example.com/ssh/revoked > /etc/ssh/revoked_keys.new
-   mv /etc/ssh/revoked_keys.new /etc/ssh/revoked_keys
+   # Dernière et prochaine exécution
+   systemctl list-timers ob-krl-refresh.timer
 
 Pour une propagation immédiate :
 

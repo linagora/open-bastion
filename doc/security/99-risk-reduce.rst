@@ -210,9 +210,9 @@ R-S15 *(P=1, I=1)* - KRL non à jour
 
 Pistes pour réduire P à quasi-zéro :
 
-1. **Monitoring actif** : Alerte si le fichier KRL a plus d'1h sans mise à jour
+1. **Monitoring actif** : Alerte si ``ob-krl-refresh.service`` est en échec, ou si le fichier KRL n'a pas été confirmé depuis plus d'1h
 2. **Push de notification** : LLNG notifie les serveurs via webhook lors d'une révocation
-3. **Réduction de l'intervalle cron** : Passer de 30 min à 5-10 min pour les environnements critiques
+3. **Réduction de l'intervalle de rafraîchissement** : Passer de 30 min à 5-10 min pour les environnements critiques (``ob-bastion-setup --max-security --krl-refresh-interval 10``)
 
 R-S16 *(P=1, I=2)* - Escalade sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

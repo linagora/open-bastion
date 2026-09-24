@@ -1079,7 +1079,7 @@ EOF
         ENABLE_HARDENING=$(ask_choice "Enable system containment hardening (--enable-hardening)?" "yes|no" "no")
     fi
     if [ -z "$ENABLE_AUDIT_TRACE" ]; then
-        explain "Audit trace installs auditd rules and a daily rotation cron on the target (requires the auditd package). OFF by default."
+        explain "Audit trace installs auditd rules and a daily rotation timer on the target (requires the auditd package). OFF by default."
         ENABLE_AUDIT_TRACE=$(ask_choice "Enable primary audit trace via auditd (--enable-audit-trace)?" "yes|no" "no")
     fi
     if [ "$TARGET_ROLE" != "backend" ] && [ -z "$DISABLE_SESSION_RECORDER" ]; then
@@ -1853,7 +1853,7 @@ render_ansible_role() {
         # Mode E always ships a KRL file: the role's mandatory "Deploy KRL" task
         # references it unconditionally. An empty/unavailable upstream KRL is
         # valid for a fresh portal with no revocations yet — ship an empty file
-        # (the refresh cron fills it in later), matching ob-bastion-setup's
+        # (ob-krl-refresh.timer fills it in later), matching ob-bastion-setup's
         # download_krl. Without this, Mode E deploys fail with "Could not find
         # open-bastion-krl" whenever the portal KRL is still empty.
         [ -f "$WORK_DIR/krl" ] || : > "$WORK_DIR/krl"

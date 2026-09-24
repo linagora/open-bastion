@@ -28,7 +28,7 @@ SSH / certificate paths
 +=========================================================+===========================================================================================+=============================================+
 | ``/etc/ssh/open-bastion_ca.pub``                        | LLNG CA public key (``TrustedUserCAKeys``)                                                | ``ob-bastion-setup``, ``ob-backend-setup``  |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
-| ``/etc/ssh/revoked_keys``                               | KRL (``RevokedKeys``)                                                                     | ``ob-bastion-setup``, refreshed out of band |
+| ``/etc/ssh/revoked_keys``                               | KRL (``RevokedKeys``), Mode E                                                             | ``ob-krl-refresh`` (setup, then its timer)  |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
 | ``/etc/ssh/sshd_config.d/00-open-bastion-bastion.conf`` | bastion sshd drop-in — also the **role marker** the postinst looks for                    | ``ob-bastion-setup``                        |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
@@ -109,10 +109,16 @@ All unit names use the ``ob-`` prefix. There is no ``open-bastion-*.timer`` or `
 +-----------------------------------------------+----------------------------------------------------------------------------------+
 | ``ob-session-prune.timer`` / ``.service``     | recording compression and retention                                              |
 +-----------------------------------------------+----------------------------------------------------------------------------------+
+| ``ob-krl-refresh.timer`` / ``.service``       | Mode E key revocation list refresh (``ob-krl-refresh``), every 30 min            |
++-----------------------------------------------+----------------------------------------------------------------------------------+
+| ``ob-audit-rotate.timer`` / ``.service``      | daily auditd log rotation (``--enable-audit-trace``)                             |
++-----------------------------------------------+----------------------------------------------------------------------------------+
 | ``ob-session-monitor.service``                | connected-session reporting                                                      |
 +-----------------------------------------------+----------------------------------------------------------------------------------+
 
 ``ob-cert.socket`` and ``ob-record.socket`` ship disabled (the package cannot know a host's role); ``ob-bastion-setup`` enables them, and the Debian ``postinst`` re-asserts them on upgrade for hosts that already carry the bastion sshd drop-in.
+
+``ob-krl-refresh.timer`` and ``ob-audit-rotate.timer`` ship disabled too: the setup enables the first under ``--max-security`` and the second under ``--enable-audit-trace``. They replace the two cron jobs of 0.6 (``/etc/cron.d/open-bastion-krl``, ``/etc/cron.daily/open-bastion-audit-rotate``); no Open Bastion job runs from cron any more. A non-default schedule is a drop-in, ``/etc/systemd/system/<timer>.d/schedule.conf``.
 
 Commands
 --------
@@ -139,6 +145,8 @@ Commands
 | ``ob-cache-admin``                  | ``/usr/sbin`` | offline cache inspection                                                                                   |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 | ``ob-session-prune``                | ``/usr/sbin`` | recording retention                                                                                        |
++-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
+| ``ob-krl-refresh``                  | ``/usr/sbin`` | Mode E key revocation list refresh (driven by ``ob-krl-refresh.timer``)                                    |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 | ``ob-ssh``, ``ob-scp``, ``ob-sftp`` | ``/usr/bin``  | bastion→backend hop with cert vouching                                                                     |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+

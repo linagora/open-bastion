@@ -112,7 +112,23 @@ Skip TLS certificate verification.
 .TP
 .B \-\-max\-security
 Mode E: SSO-signed certificates only, sudo only with a LemonLDAP::NG
-temporary token, key revocation list refreshed periodically.
+temporary token, key revocation list refreshed periodically by
+.BR ob-krl-refresh (8)
+from
+.BR ob-krl-refresh.timer ,
+every 30 minutes by default.
+.TP
+.BI \-\-krl\-refresh\-interval " minutes"
+With
+.BR \-\-max\-security :
+refresh the key revocation list every
+.I minutes
+(1 to 60) instead, through the drop-in
+.IR /etc/systemd/system/ob-krl-refresh.timer.d/schedule.conf .
+Without it, a new run keeps the schedule the host already has, including the
+interval of a 0.6
+.I /etc/cron.d/open-bastion-krl
+job, which the run replaces with the timer.
 .TP
 .B \-\-enable\-service\-keys
 Write the sshd drop-in that serves service-account keys from
@@ -133,10 +149,12 @@ at/cron allow-lists, atd masked). Off by default.
 Enable the primary audit trace based on
 .BR auditd (8):
 installs
-.I /etc/audit/rules.d/open-bastion.rules
-and
-.IR /etc/cron.daily/open-bastion-audit-rotate ,
-loads the rules and restarts auditd.
+.IR /etc/audit/rules.d/open-bastion.rules ,
+enables
+.B ob-audit-rotate.timer
+(daily rotation; it replaces the
+.I /etc/cron.daily/open-bastion-audit-rotate
+script of 0.6), loads the rules and restarts auditd.
 .I /etc/audit/auditd.conf
 is not modified. Requires the auditd package. Off by default.
 .TP
@@ -299,6 +317,7 @@ Setup failed, or an option does not apply to the role in effect.
 .BR ob-bastion-id (1),
 .BR ob-enroll (8),
 .BR ob-heartbeat (8),
+.BR ob-krl-refresh (8),
 .BR ob-post-upgrade (8),
 .BR ob-session-recorder (8),
 .BR ob-ssh (1),

@@ -138,6 +138,52 @@ option of one role combined with `--node-role` naming the other, such as
 run of a copy of the script under a name other than `ob-bastion-setup`,
 `ob-backend-setup` or `ob-standalone-setup`, unless it passes `--node-role`.
 
+### A5. The KRL refresh and the audit rotation are systemd timers
+
+Only on hosts set up with `--max-security` (Mode E) or `--enable-audit-trace`.
+Up to 0.6 the setup scheduled them with cron (#281):
+
+| 0.6 (cron)                                                                 | 0.7.0 (systemd)         |
+| -------------------------------------------------------------------------- | ----------------------- |
+| `/etc/cron.d/open-bastion-krl` + `/usr/local/bin/open-bastion-refresh-krl` | `ob-krl-refresh.timer`  |
+| `/etc/cron.daily/open-bastion-audit-rotate` (or `cron.weekly`)             | `ob-audit-rotate.timer` |
+
+**Nothing stops at the upgrade.** The old jobs are self-contained and keep
+running; the package does not touch them, and its postinst says when a host
+still has them. The `sudo ob-post-upgrade` of [A1](#a1-finish-the-upgrade)
+moves them over (so does a new setup run with the same options):
+
+- the KRL job's interval is carried over — any `*/N` in the minute field
+  becomes `/etc/systemd/system/ob-krl-refresh.timer.d/schedule.conf` when it is
+  not the default 30; a rotation moved to `cron.weekly` becomes a weekly timer;
+- the timer is enabled and started, and **the old job is removed only once the
+  timer is enabled and active**. If the timer cannot be armed, `ob-post-upgrade`
+  keeps the job, says why and exits 1: a host is never left with neither;
+- a job you reshaped (hours restricted, several jobs in the file, another user)
+  or an audit script you edited is not translated and not removed: the timer
+  is armed next to it and a warning tells you what to port. Port it, then
+  delete the old file.
+
+Check the result:
+
+```sh
+systemctl list-timers ob-krl-refresh.timer ob-audit-rotate.timer
+ls /etc/cron.d/open-bastion-krl /etc/cron.daily/open-bastion-audit-rotate  # expect: gone
+```
+
+Two behaviour changes come with it. The refresh reads `portal_url`,
+`verify_ssl`, `timeout` and `ca_cert` from `openbastion.conf` at every run
+instead of the values frozen into the old script, so its connection timeout is
+now that file's `timeout` (10 s as written by the setup) rather than 30 s. And a
+failed refresh now shows as a failed `ob-krl-refresh.service` rather than
+nothing: if you monitored the age of `/etc/ssh/revoked_keys`, that still works
+(the file's date is updated at every successful refresh), and
+`systemctl is-failed ob-krl-refresh.service` is the more direct check.
+
+With `--enable-hardening`, the setup no longer asks for `root` in
+`/etc/cron.allow`: nothing of ours runs from cron. Your `cron.allow` is left as
+it is, and `cron` itself is still not masked.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0
