@@ -12,8 +12,8 @@
 #   - a direct user SSO cert, a wrong bastion_id, a cert/login user mismatch, a
 #     principal mismatch and an off-bastion source-address are all DENIED.
 #
-# The principals helper is extracted from scripts/ob-backend-setup so there is a
-# single source of truth. Certs are signed by a local test CA whose structure is
+# The principals helper is the one the package ships, share/ob-ssh-principals.backend,
+# so there is a single source of truth. Certs are signed by a local test CA whose structure is
 # identical to what LLNG /pam/bastion-cert issues (the sshd acceptance logic does
 # not care which CA, only that it is the trusted one).
 #

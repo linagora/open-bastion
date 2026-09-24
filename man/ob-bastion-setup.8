@@ -194,6 +194,33 @@ Checks the portal and enrolls the server.
 Lockdown: sshd drop-in, PAM for SSH, sudo (backend: LLNG rules; Mode E: token
 only), ob-ssh configuration (bastion), NSS, optional hardening and audit trace,
 then restarts sshd.
+.SH CHANGING A HOST'S ROLE
+Running the command under the other role switches the host between the
+bastion stack (bastion, standalone) and a backend. The other role's sshd
+drop-in is removed (backed up), and the principals helper is replaced only at
+the end of the run, right before sshd is restarted; until then either helper
+denies a login made through the other role's sshd configuration. A backend
+disables
+.B ob-cert.socket
+and
+.B ob-record.socket
+and removes
+.IR /etc/open-bastion/ssh-proxy.conf .
+A bastion leaves a backend's LLNG sudo stack
+.RI ( /etc/pam.d/sudo ", " /etc/pam.d/sudo-i ", " /etc/sudoers.d/open-bastion )
+in place and warns about it. On an sshd without
+.IR /etc/ssh/sshd_config.d ,
+where the configuration is a block appended to
+.IR sshd_config ,
+a switch is refused: remove the old block first.
+.PP
+Invoked under a name other than the three above, the command configures a
+bastion unless
+.B \-\-node\-role
+is given, and a
+.B \-\-yes
+run then requires
+.BR \-\-node\-role .
 .SH USER CREATION
 On a backend, when an authorized user does not exist locally,
 .B pam_openbastion

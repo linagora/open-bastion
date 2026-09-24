@@ -90,9 +90,14 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   bastion` the reverse. Options of one role are refused for another with the
   reason (`--no-sudo`, `--no-create-user`, `--allowed-bastions`,
   `--allow-any-bastion` outside a backend; `--disable-session-recorder` on one),
-  `--help` lists only the options of the role in effect, writing one role's
-  sshd drop-in removes the other's, and one man page, `ob-bastion-setup`(8),
-  documents all three names. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
+  `--help` lists only the options of the role in effect, and one man page,
+  `ob-bastion-setup`(8), documents all three names. **Switching a host's
+  role** is supported: the other role's sshd drop-in is removed, the principals
+  helper is replaced only right before sshd restarts, and a backend disables a
+  bastion's `ob-cert.socket` and `ob-record.socket`. A backend's LLNG sudo stack
+  is left on a new bastion, with a warning; an sshd without `sshd_config.d`
+  refuses the switch. A `--yes` run under an unknown command name must pass
+  `--node-role`. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A4).
 - **`SECURITY.md` is a reporting policy again** (#276). It had grown to 986 lines
   describing the product, with the policy a few lines at the top. It now holds
   what the [OpenSSF finder guide](https://github.com/ossf/oss-vulnerability-guide/blob/main/finder-guide.md)
@@ -224,7 +229,15 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   is refused. The Mode E summary states the sudo credential-cache setting on a
   backend too, and a 404 on `/oauth2/device` names the portal setting to
   enable. `--help` no longer tries to execute the `Defaults:` sudoers line it
-  quotes, which printed "(writes )" on every role.
+  quotes, which printed "(writes )" on every role. On a backend, a failed
+  write of `allowed_bastions` is no longer ignored (it left the principals
+  helper in legacy mode, accepting direct SSO certificates), and the list is
+  written before the helper.
+- **The bastion principals helper denies when a backend's sshd calls it**
+  (#288). A backend's sshd has no `ForceCommand` and passes the certificate
+  key-id; the bastion helper, which vouches for nothing, printed the principal
+  for any certificate. Reached during a backend-to-bastion switch, before sshd
+  restarts, that admitted a direct SSO certificate with no recording.
 - **Three records that contradicted the tree** (#268): a `SECURITY.md` bullet
   still naming the removed secret store, and two treatment-plan measures (MT51,
   MT52) left "en revue"/"ouvert" with #248 and #252 merged.

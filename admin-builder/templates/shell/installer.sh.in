@@ -717,7 +717,8 @@ step_setup() {
         yes)   _do_setup=true ;;
         no)    log_info "Setup skipped (auto_enroll_setup=no in artifact)"; return 0 ;;
         prompt)
-            # standalone runs ob-bastion-setup (there is no ob-standalone-setup)
+            # standalone runs ob-bastion-setup --node-role standalone (the
+            # same program as ob-standalone-setup, which is a symlink to it)
             local _setup_label="ob-${TARGET_ROLE}-setup"
             [ "${TARGET_ROLE}" = "standalone" ] && _setup_label="ob-bastion-setup"
             if prompt_yn "Run ${_setup_label} now?"; then
