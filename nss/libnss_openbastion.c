@@ -36,8 +36,15 @@
 /* Mark NSS entry points as visible when using -fvisibility=hidden */
 #define NSS_VISIBLE __attribute__((visibility("default")))
 
-/* Configuration file path */
+/* Configuration file path. Overridable, with the uid that must own it, ONLY by
+ * tests/test_nss_force_shell.c, which runs unprivileged and needs the real
+ * loader to read a file it wrote. */
+#ifndef NSS_OB_CONF
 #define NSS_OB_CONF "/etc/open-bastion/nss_openbastion.conf"
+#endif
+#ifndef NSS_CONF_TRUSTED_UID
+#define NSS_CONF_TRUSTED_UID ((uid_t)0)
+#endif
 
 /* Cache settings */
 #define CACHE_TTL 300           /* 5 minutes */
@@ -96,6 +103,9 @@
 
 /* Default values for user creation */
 #define DEFAULT_SHELL "/bin/bash"
+
+/* An unusable force_shell value falls back to the launcher, never to bash. */
+#define DEFAULT_FORCE_SHELL "/usr/sbin/ob-login-shell"
 #define DEFAULT_HOME_BASE "/home"
 #define DEFAULT_MIN_UID 10000
 
@@ -155,6 +165,7 @@ typedef struct {
     int verify_ssl;
     int cache_ttl;
     char *default_shell;
+    char *force_shell;            /* login shell of EVERY user resolved here */
     char *default_home_base;
     uid_t min_uid;
     uid_t max_uid;
@@ -355,6 +366,35 @@ static inline int validate_shell(const char *shell)
 static inline int validate_home(const char *home)
 {
     return path_validator_check_home(home, NULL);
+}
+
+/*
+ * Not held to the portal's list of approved shells (the launcher is not on
+ * it), only to being a plain absolute path. Anything else, the empty string
+ * included, forces DEFAULT_FORCE_SHELL: only removing the line disables it.
+ */
+static void finalize_force_shell(nss_llng_config_t *config)
+{
+    if (!config->force_shell) {
+        return;
+    }
+    if (path_validator_is_dangerous(config->force_shell)) {
+        syslog(LOG_ERR, "libnss_openbastion: force_shell '%s' is not a plain "
+               "absolute path; forcing %s instead",
+               config->force_shell, DEFAULT_FORCE_SHELL);
+        free(config->force_shell);
+        config->force_shell = strdup(DEFAULT_FORCE_SHELL);
+    }
+}
+
+/*
+ * Applied where an entry is served (portal, service account, disk and memory
+ * caches), not where it is stored: entries cached before force_shell was set
+ * come out right without purging the cache.
+ */
+static const char *login_shell(const char *shell)
+{
+    return g_config.force_shell ? g_config.force_shell : shell;
 }
 
 /*
@@ -586,7 +626,7 @@ static int load_config(nss_llng_config_t *config)
         close(fd);
         return -1;
     }
-    if (st.st_uid != 0) {
+    if (st.st_uid != NSS_CONF_TRUSTED_UID) {
         syslog(LOG_ERR, "libnss_openbastion: config file %s not owned by root", NSS_OB_CONF);
         close(fd);
         return -1;
@@ -666,6 +706,10 @@ static int load_config(nss_llng_config_t *config)
             free(config->default_shell);
             config->default_shell = strdup(value);
         }
+        else if (strcmp(key, "force_shell") == 0) {
+            free(config->force_shell);
+            config->force_shell = strdup(value);
+        }
         else if (strcmp(key, "default_home_base") == 0) {
             free(config->default_home_base);
             config->default_home_base = strdup(value);
@@ -717,6 +761,7 @@ static int load_config(nss_llng_config_t *config)
     if (!config->default_shell) {
         config->default_shell = strdup(DEFAULT_SHELL);
     }
+    finalize_force_shell(config);
     if (!config->default_home_base) {
         config->default_home_base = strdup(DEFAULT_HOME_BASE);
     }
@@ -1486,7 +1531,7 @@ static int file_cache_parse_into(char *line, int dirfd, const char *leaf,
     if (safe_strcpy(&p, &remaining, home_str) != 0) return -1;
 
     pw->pw_shell = p;
-    if (safe_strcpy(&p, &remaining, shell_str) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return -1;
 
     if (out_created) *out_created = (time_t)timestamp;
     return 0;
@@ -1871,7 +1916,7 @@ static int query_service_account(const char *username, struct passwd *pw,
     if (safe_strcpy(&p, &remaining, home_to_use) != 0) return -1;
 
     pw->pw_shell = p;
-    if (safe_strcpy(&p, &remaining, shell_to_use) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, login_shell(shell_to_use)) != 0) return -1;
 
     return 0;
 }
@@ -1938,6 +1983,23 @@ static gid_t select_primary_gid(struct json_object *json, const char *username)
            (unsigned)g_config.min_gid, (unsigned)g_config.max_gid,
            (unsigned)g_config.default_gid);
     return g_config.default_gid;
+}
+
+/* force_shell overrides the portal's shell even when it is approved. */
+static const char *select_login_shell(struct json_object *json)
+{
+    struct json_object *val;
+    const char *shell_to_use = g_config.default_shell;
+
+    if (json && json_object_object_get_ex(json, "shell", &val)) {
+        const char *shell = json_object_get_string(val);
+        /* Only use server-provided shell if it passes validation */
+        if (shell && *shell && validate_shell(shell) == 0) {
+            shell_to_use = shell;
+        }
+        /* Otherwise fall back to default shell */
+    }
+    return login_shell(shell_to_use);
 }
 
 /* Query LLNG server for user info */
@@ -2178,16 +2240,7 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
 
     /* Shell - validate server-provided path */
     pw->pw_shell = p;
-    const char *shell_to_use = g_config.default_shell;
-    if (json_object_object_get_ex(json, "shell", &val)) {
-        const char *shell = json_object_get_string(val);
-        /* Only use server-provided shell if it passes validation */
-        if (shell && *shell && validate_shell(shell) == 0) {
-            shell_to_use = shell;
-        }
-        /* Otherwise fall back to default shell */
-    }
-    if (safe_strcpy(&p, &remaining, shell_to_use) != 0) {
+    if (safe_strcpy(&p, &remaining, select_login_shell(json)) != 0) {
         json_object_put(json);
         return -1;
     }
@@ -2256,9 +2309,10 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
         }
 
         /* Copy from cache with safe bounds checking */
+        const char *shell = login_shell(cached->pw.pw_shell);
         size_t needed = strlen(cached->pw.pw_name) + strlen(cached->pw.pw_passwd) +
                        strlen(cached->pw.pw_gecos) + strlen(cached->pw.pw_dir) +
-                       strlen(cached->pw.pw_shell) + 16;
+                       strlen(shell) + 16;
 
         if (buflen < needed) {
             pthread_mutex_unlock(&g_cache.lock);
@@ -2286,7 +2340,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
         if (safe_strcpy(&p, &remaining, cached->pw.pw_dir) != 0) goto cache_overflow;
 
         result->pw_shell = p;
-        if (safe_strcpy(&p, &remaining, cached->pw.pw_shell) != 0) goto cache_overflow;
+        if (safe_strcpy(&p, &remaining, shell) != 0) goto cache_overflow;
 
         pthread_mutex_unlock(&g_cache.lock);
         g_in_nss_lookup = 0;
@@ -2423,9 +2477,10 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwuid_r(uid_t uid,
     cache_entry_t *cached = cache_find_by_uid(uid);
     if (cached && cached->valid) {
         /* Copy from cache with safe bounds checking */
+        const char *shell = login_shell(cached->pw.pw_shell);
         size_t needed = strlen(cached->pw.pw_name) + strlen(cached->pw.pw_passwd) +
                        strlen(cached->pw.pw_gecos) + strlen(cached->pw.pw_dir) +
-                       strlen(cached->pw.pw_shell) + 16;
+                       strlen(shell) + 16;
 
         if (buflen < needed) {
             pthread_mutex_unlock(&g_cache.lock);
@@ -2453,7 +2508,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwuid_r(uid_t uid,
         if (safe_strcpy(&p, &remaining, cached->pw.pw_dir) != 0) goto uid_cache_overflow;
 
         result->pw_shell = p;
-        if (safe_strcpy(&p, &remaining, cached->pw.pw_shell) != 0) goto uid_cache_overflow;
+        if (safe_strcpy(&p, &remaining, shell) != 0) goto uid_cache_overflow;
 
         pthread_mutex_unlock(&g_cache.lock);
         g_in_nss_lookup = 0;

@@ -341,3 +341,19 @@ target_compile_definitions(ob-login-shell-strictuid PRIVATE
 )
 target_compile_options(ob-login-shell-strictuid PRIVATE -Wall -Wextra -Werror -D_GNU_SOURCE)
 
+# force_shell in libnss_openbastion (#293): read from the configuration, and
+# applied on every path an entry is served from. Includes the module source,
+# like test_nss_cache, with the configuration and cache paths redirected.
+add_executable(test_nss_force_shell test_nss_force_shell.c ../src/str_utils.c)
+target_compile_definitions(test_nss_force_shell PRIVATE _GNU_SOURCE)
+target_include_directories(test_nss_force_shell PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+)
+target_link_libraries(test_nss_force_shell
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    pthread
+)
+add_test(NAME test_nss_force_shell COMMAND test_nss_force_shell)
