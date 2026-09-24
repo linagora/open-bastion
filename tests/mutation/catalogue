@@ -300,3 +300,11 @@ replace || for unit in ob-record.socket; do
 suite   || tests/test_ob_setup_roles.sh
 why     || #290 review: a backend must not keep a bastion's ob-cert.socket,
 why     || which mints hop certificates with the host's server token.
+
+id      || setup-unknown-name-needs-role
+file    || scripts/ob-bastion-setup
+search  || \n                if [ "$NON_INTERACTIVE" = "true" ]; then\n                    error "Invoked as
+replace || \n                if false; then\n                    error "Invoked as
+suite   || tests/test_ob_setup_roles.sh
+why     || A renamed copy of ob-backend-setup run with --yes would configure a
+why     || bastion, and nobody would read the banner that says so.

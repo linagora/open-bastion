@@ -52,6 +52,7 @@ NODE_ROLE="$PROG_ROLE"
 BACKEND_ONLY_OPTS=()
 BASTION_ONLY_OPTS=()
 SHOW_HELP=false
+NODE_ROLE_GIVEN=false
 NON_INTERACTIVE=false
 VERIFY_SSL=true
 TIMEOUT=30
@@ -2781,7 +2782,7 @@ parse_args() {
                     exit 1
                 fi
                 case "$2" in
-                    bastion | standalone | backend) NODE_ROLE="$2" ;;
+                    bastion | standalone | backend) NODE_ROLE="$2"; NODE_ROLE_GIVEN=true ;;
                     *)
                         error "Invalid --node-role '$2' (bastion|standalone|backend)"
                         exit 1
@@ -2958,6 +2959,28 @@ check_role_options() {
 # Main
 main() {
     parse_args "$@"
+
+    # A copy of the script under another name falls back to the bastion role,
+    # as ob-bastion-setup always did. Interactively the banner shows the role
+    # and asks before anything happens. Under --yes nobody reads the banner,
+    # and a renamed copy of ob-backend-setup would configure a bastion -- a
+    # principals helper that accepts direct SSO certificates -- without a word.
+    # So a non-interactive run under an unknown name must say which role.
+    case "$PROG_NAME" in
+        ob-bastion-setup | ob-backend-setup | ob-standalone-setup) ;;
+        *)
+            if [ "$NODE_ROLE_GIVEN" != "true" ]; then
+                if [ "$NON_INTERACTIVE" = "true" ]; then
+                    error "Invoked as '$PROG_NAME', a name that does not choose a node role,"
+                    error "and --yes leaves nobody to check the role in the banner."
+                    error "Pass --node-role bastion|standalone|backend."
+                    exit 1
+                fi
+                warn "Invoked as '$PROG_NAME', a name that does not choose a node role:"
+                warn "configuring a $(role_noun). Pass --node-role to choose another."
+            fi
+            ;;
+    esac
 
     # Validate required parameters
     if [ -z "$PORTAL_URL" ]; then

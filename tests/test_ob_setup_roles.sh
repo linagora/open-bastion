@@ -434,6 +434,33 @@ test_other_role_leftovers() {
     fi
 }
 
+# ── 10. An unknown command name needs --node-role under --yes ────────────────
+# A renamed copy falls back to the bastion role. Interactively the banner shows
+# it and asks; under --yes nobody would see a renamed ob-backend-setup turn a
+# backend into a bastion.
+test_unknown_name_needs_role_when_unattended() {
+    local out bad="" copy
+    copy="$SETUP_LINK_DIR/ob-setup-copy"
+    ln -s "$SETUP_SCRIPT" "$copy"
+    out=$(bash "$copy" -p https://x.example.com -g g -c c --dry-run --yes 2>&1)
+    # Refused as an error, and the run stops there: nothing after it runs --
+    # not even the root check, which would fail an unprivileged run anyway
+    # and make a mere warning look like a refusal.
+    grep -q "\[ERROR\] Invoked as 'ob-setup-copy', a name that does not choose a node role" <<<"$out" \
+        || bad="$bad not-refused"
+    grep -q 'Pass --node-role bastion|standalone|backend' <<<"$out" || bad="$bad no-hint"
+    grep -q 'must be run as root\|Required command not found' <<<"$out" && bad="$bad did-not-stop"
+    out=$(bash "$copy" -p https://x.example.com -g g -c c --node-role backend --dry-run --yes 2>&1)
+    grep -q 'a name that does not choose a node role' <<<"$out" && bad="$bad refused-with-role"
+    out=$(bash "$(setup_command ob-backend-setup)" -p https://x.example.com -g g -c c --dry-run --yes 2>&1)
+    grep -q 'a name that does not choose a node role' <<<"$out" && bad="$bad refused-known-name"
+    if [ -z "$bad" ]; then
+        pass "an unknown command name needs --node-role in a --yes run"
+    else
+        fail "an unknown command name needs --node-role in a --yes run" "$bad"
+    fi
+}
+
 echo "=== one setup script, three roles (#288) ==="
 run_test test_role_from_name
 run_test test_node_role_overrides_the_stack
@@ -444,6 +471,7 @@ run_test test_other_role_dropin_removed
 run_test test_role_switch_defers_helper
 run_test test_sshd_config_fallback_refuses_switch
 run_test test_other_role_leftovers
+run_test test_unknown_name_needs_role_when_unattended
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
