@@ -94,6 +94,8 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder
+# One setup script; the other two names are symlinks to it made by CMake,
+# which choose the default node role (#288).
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup

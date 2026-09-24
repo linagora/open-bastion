@@ -588,7 +588,6 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-enroll.8
     ${CMAKE_SOURCE_DIR}/man/ob-heartbeat.8
     ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
-    ${CMAKE_SOURCE_DIR}/man/ob-backend-setup.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
     ${CMAKE_SOURCE_DIR}/man/ob-session-prune.8
     ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
@@ -601,12 +600,15 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 
-# Man page for the ob-standalone-setup symlink (points at ob-bastion-setup.8).
-execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
-    ob-bastion-setup.8 "${CMAKE_BINARY_DIR}/ob-standalone-setup.8")
-install(FILES ${CMAKE_BINARY_DIR}/ob-standalone-setup.8
-    DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
-)
+# Man pages for the ob-standalone-setup and ob-backend-setup symlinks: one page,
+# ob-bastion-setup.8, documents the three roles.
+foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+        ob-bastion-setup.8 "${CMAKE_BINARY_DIR}/${_ob_setup_alias}.8")
+    install(FILES ${CMAKE_BINARY_DIR}/${_ob_setup_alias}.8
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
+    )
+endforeach()
 
 # Install man pages (section 1 - user commands)
 install(FILES

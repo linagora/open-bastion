@@ -17,6 +17,8 @@ etc/open-bastion/ssh-proxy.conf.example
 usr/sbin/ob-enroll
 usr/sbin/ob-heartbeat
 usr/sbin/ob-session-recorder
+# One setup script; the other two names are symlinks to it made by CMake,
+# which choose the default node role (#288).
 usr/sbin/ob-bastion-setup
 usr/sbin/ob-standalone-setup
 usr/sbin/ob-backend-setup
