@@ -100,6 +100,10 @@ ENABLE_SERVICE_KEYS=false
 #   dry-run     (--dry-run, nothing was actually applied)
 HARDENING_RESULT="not-applied"
 
+# Audit outcome for the summary: not-applied (default), applied, skipped
+# (auditd missing), declined (user said no), dry-run, failed.
+AUDIT_RESULT="not-applied"
+
 # Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
 AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
@@ -1599,6 +1603,7 @@ setup_audit_trace() {
         warn "  To enable audit trace later, install auditd then re-run with --enable-audit-trace:"
         warn "    Debian/Ubuntu: apt install auditd"
         warn "    RHEL/Rocky/Fedora: dnf install audit"
+        AUDIT_RESULT="skipped"
         return 0
     fi
 
@@ -1608,10 +1613,12 @@ setup_audit_trace() {
     if [ ! -f "$rules_template" ]; then
         error "Audit rules template not found: $rules_template"
         error "Reinstall the open-bastion package, or set AUDIT_TEMPLATE_DIR=<path>."
+        AUDIT_RESULT="failed"
         return 1
     fi
     if [ ! -f "$cron_template" ]; then
         error "Audit cron template not found: $cron_template"
+        AUDIT_RESULT="failed"
         return 1
     fi
 
@@ -1620,6 +1627,7 @@ setup_audit_trace() {
     #    touched — see rationale below.
     if ! confirm "Enable primary audit trace? Installs rules.d + cron.daily and restarts auditd."; then
         info "Audit trace setup skipped by user."
+        AUDIT_RESULT="declined"
         return 0
     fi
 
@@ -1628,6 +1636,7 @@ setup_audit_trace() {
         info "[DRY-RUN] Would install $AUDIT_CRON_FILE (0755 root:root)"
         info "[DRY-RUN] Would augenrules --load and restart auditd"
         info "[DRY-RUN] /etc/audit/auditd.conf intentionally NOT modified"
+        AUDIT_RESULT="dry-run"
         return 0
     fi
 
@@ -1639,6 +1648,7 @@ setup_audit_trace() {
     #    instead so main() catches it via `setup_audit_trace || warn …`.
     if ! install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"; then
         error "Failed to install $AUDIT_RULES_FILE"
+        AUDIT_RESULT="failed"
         return 1
     fi
     info "Installed $AUDIT_RULES_FILE"
@@ -1647,6 +1657,7 @@ setup_audit_trace() {
     #    and unsuffixed (run-parts ignores files with dots/tildes).
     if ! install -o root -g root -m 0755 "$cron_template" "$AUDIT_CRON_FILE"; then
         error "Failed to install $AUDIT_CRON_FILE"
+        AUDIT_RESULT="failed"
         return 1
     fi
     info "Installed $AUDIT_CRON_FILE"
@@ -1682,6 +1693,8 @@ setup_audit_trace() {
     else
         warn "auditd.service is not active; start it with 'systemctl enable --now auditd'."
     fi
+
+    AUDIT_RESULT="applied"
 }
 
 # Pre-flight: verify the portal's Device Authorization endpoint is reachable
@@ -2035,11 +2048,26 @@ print_summary() {
             echo "      elevations (use --enable-sudo-fresh-otp to require a token each time)"
         fi
     fi
-    if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
-        echo "  ✓ Audit trace: applied (auditd rules + daily rotation)"
-    else
-        echo "  ✗ Audit trace: not applied (opt-in: --enable-audit-trace)"
-    fi
+    case "$AUDIT_RESULT" in
+        applied)
+            echo "  ✓ Audit trace: applied (auditd rules + daily rotation)"
+            ;;
+        skipped)
+            echo "  ✗ Audit trace: NOT applied (auditd not installed)"
+            ;;
+        declined)
+            echo "  ✗ Audit trace: NOT applied (declined at prompt)"
+            ;;
+        dry-run)
+            echo "  ✓ Audit trace: dry-run (nothing actually changed)"
+            ;;
+        failed)
+            echo "  ✗ Audit trace: FAILED — see [ERROR] lines above"
+            ;;
+        *)
+            echo "  ✗ Audit trace: not applied (opt-in: --enable-audit-trace)"
+            ;;
+    esac
     # A change that alters sshd for every session on the host has to be visible
     # in the record the operator keeps. Without this line a --yes run ends
     # byte-identical whether or not the flag was given.
