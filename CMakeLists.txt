@@ -545,17 +545,20 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# ob-standalone-setup is a symlink to ob-bastion-setup: invoked under that name
-# the script defaults --node-role to "standalone", giving admins a clearer,
-# self-documenting command for combined bastion+backend hosts.
-# The link is made in the build tree and installed like any other file, so it
-# follows the install-time prefix: cpack installs under /usr, not the
+# ob-standalone-setup and ob-backend-setup are symlinks to ob-bastion-setup,
+# which serves all three node roles: the name it is invoked under chooses the
+# default role (--node-role overrides it), so each role has a self-documenting
+# command and there is one implementation to maintain (#288).
+# The links are made in the build tree and installed like any other file, so
+# they follow the install-time prefix: cpack installs under /usr, not the
 # configure-time /usr/local a CMAKE_INSTALL_FULL_* path would bake in.
-execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
-    ob-bastion-setup "${CMAKE_BINARY_DIR}/ob-standalone-setup")
-install(FILES ${CMAKE_BINARY_DIR}/ob-standalone-setup
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
-)
+foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+        ob-bastion-setup "${CMAKE_BINARY_DIR}/${_ob_setup_alias}")
+    install(FILES ${CMAKE_BINARY_DIR}/${_ob_setup_alias}
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
+endforeach()
 
 # Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
 # Read-only templates under /usr/share/open-bastion/audit/. The setup function
@@ -573,10 +576,6 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/config/audit/cron.daily/open-bastion-audit-
 # /etc/logrotate.d/, NOT a conffile, because the log path is configurable.
 install(FILES ${CMAKE_SOURCE_DIR}/config/logrotate/open-bastion
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/logrotate
-)
-
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-backend-setup
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
 # Install cache admin tool (useful for both SSH and Desktop offline modes)

@@ -37,7 +37,7 @@ PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="${OB_CONFIG:-/etc/open-bastion/openbastion.conf}"
 # Overridable for the test suite only, like OB_CONFIG above. On a real host
-# this is where both setup scripts write their drop-in.
+# this is where the setup script writes its drop-in.
 SSHD_CONFIG_DIR="${OB_SSHD_CONFIG_DIR:-/etc/ssh/sshd_config.d}"
 HELPER_PATH="/usr/local/sbin/ob-ssh-principals"
 SPOOL_DIR="/run/open-bastion/ssh-fp"
@@ -106,7 +106,7 @@ if [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" != "true" ]; then
 fi
 
 # ── Which helper does this host need? ────────────────────────────────────────
-# node_role is written by both setup scripts and is the only thing read here.
+# node_role is written by the setup script, next to its sshd drop-in.
 # A host with no config file has never been set up: repairing its helper would
 # be meaningless, and the honest answer is to say so rather than install a
 # bastion helper on something that may be a backend.
@@ -120,15 +120,16 @@ read_conf() {
 #
 # The sshd drop-in first, node_role only as a fallback.
 #
-# node_role is a reporting label: both setup scripts accept
-# `--node-role bastion|standalone|backend` and write whatever they are given.
-# `ob-backend-setup --node-role standalone` is a valid, accepted invocation, and
-# trusting node_role there would install the BASTION helper on a backend --
+# node_role used to be a reporting label only: until the two setup scripts
+# became one (#288), `ob-backend-setup --node-role standalone` configured a
+# backend and recorded "standalone". A host set up that way still carries it,
+# and trusting node_role there would install the BASTION helper on a backend --
 # which does no vouching and ignores allowed_bastions, so a direct SSO
 # certificate would be accepted. Silently, under a reassuring "[DONE] installed
-# the bastion helper".
+# the bastion helper". Hosts set up before the fix are exactly the ones this
+# command exists to repair.
 #
-# Which script configured this host is written where it cannot be relabelled:
+# Which stack configured this host is written where it cannot be relabelled:
 # the name of the sshd drop-in it wrote. debian/open-bastion.postinst already
 # keys off exactly these two files.
 detect_role() {
