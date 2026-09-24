@@ -994,9 +994,11 @@ except FileNotFoundError: pass
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); srv.bind(path); srv.listen(4)
 while True:
     c, _ = srv.accept()
-    f = c.makefile("rb"); f.readline()          # the header line
+    f = c.makefile("rb"); f.readline(); f.close()  # the header line; close the
+                                                    # dup'd fd or the peer never
+                                                    # sees EOF on c.close()
     if mode == "permit":
-        c.sendall(b"\x06")                        # OB_RECORD_ACK
+        c.sendall(b"\x06")                          # OB_RECORD_ACK
         try:
             while c.recv(65536): pass
         except OSError:
@@ -1010,20 +1012,41 @@ PY
 # The recorder must not start `script` unless the connector reported OB_READY,
 # which it does only after the sink's ACK. A stub that closes without the ACK
 # stands for any rejection; the session must be refused and nothing recorded.
+# Run the recorder for at most $1 s against the sink socket $3, with the given
+# SSH_ORIGINAL_COMMAND, without setsid (these callers refuse BEFORE the
+# watchdog, so they need no session of their own). The recorder's private FIFO
+# dir is a per-call path so that, if a broken build started `script` and it
+# blocked on the FIFO, the whole subtree can be reaped by that path. Returns
+# the recorder's rc, or 137 if it had to be killed for overrunning.
+e2e_run_bounded() { # $1 secs  $2 recdir  $3 sock  $4 command
+    local secs="$1" recdir="$2" sock="$3" cmd="$4"
+    rm -rf "$recdir"; mkdir -p "$recdir"
+    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")" "REC_TMP_BASE=$(printf '%q' "$recdir")"
+    local rc=0
+    timeout -s KILL "$secs" env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" \
+        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
+        bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    # timeout -s KILL kills the recorder (bash); reap any orphaned connector or
+    # `script` still holding the FIFO under this call's private dir.
+    pkill -KILL -f "$recdir" 2>/dev/null || true
+    return "$rc"
+}
+
+# ── E2E 7: the recorder refuses a session the sink does not ACK (#287) ──
+# The recorder must not start `script` unless the connector reported OB_READY,
+# which it does only after the sink's ACK. A stub that closes without the ACK
+# stands for any rejection; the session must be refused and nothing recorded.
 test_e2e_no_ack_refused() {
-    local sock="$E2E_WORK/noack.sock" pid n0 rc=0 j
+    local sock="$E2E_WORK/noack.sock" pid n0 rc=0
     pid=$(e2e_stub_sink "$sock" noack)
     for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
-    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")"
     n0=$(e2e_session_count)
-    # Refusal must be prompt: a version that ignored the missing ACK and started
-    # `script` would block forever opening the FIFO (no reader), so `timeout`
-    # bounds it and a 124 (killed) counts as "not properly refused".
-    timeout 30 env -u SSH_TTY SSH_ORIGINAL_COMMAND='echo OB-SHOULD-NOT-""RUN' \
-        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
-        setsid -w bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    # Refusal must be prompt: a build that ignored the missing ACK and started
+    # `script` would block forever opening the FIFO (no reader). e2e_run_bounded
+    # kills it after 15 s (rc 137), which counts as "not properly refused".
+    e2e_run_bounded 15 "$E2E_WORK/noack-tmp" "$sock" 'echo OB-SHOULD-NOT-""RUN' || rc=$?
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-    if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 137 ]; then
         fail "E2E: a session with no sink ACK was not promptly refused (rc=$rc)"
     elif [ "$(e2e_session_count)" -ne "$n0" ]; then
         fail "E2E: a session with no sink ACK still recorded something"
@@ -1038,21 +1061,17 @@ test_e2e_no_ack_refused() {
 # connecting, so the permissive sink never lets it record. Without that check
 # the recorder would connect, get the ACK, and record the oversized session.
 test_e2e_header_cap_early() {
-    local sock="$E2E_WORK/permit.sock" pid n0 rc=0
+    local sock="$E2E_WORK/permit.sock" pid rc=0 pad
     pid=$(e2e_stub_sink "$sock" permit)
     for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
-    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")"
-    n0=$(e2e_session_count)
-    local pad; pad=$(head -c 9000 /dev/zero | tr '\0' A)
-    timeout 30 env -u SSH_TTY SSH_ORIGINAL_COMMAND="echo hi #$pad" \
-        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
-        setsid -w bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    pad=$(head -c 9000 /dev/zero | tr '\0' A)
+    e2e_run_bounded 15 "$E2E_WORK/hdrcap-tmp" "$sock" "echo hi #$pad" || rc=$?
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
     # The stub is not the real sink, so nothing lands on disk either way; the
     # observable is the recorder's refusal (non-zero, prompt) before it ever
     # connected. Without check_header_size it would connect, get the ACK and
     # record -- exit 0.
-    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 137 ]; then
         pass "E2E: check_header_size refuses an oversized command before connecting"
     else
         fail "E2E: an oversized command was accepted when the sink would ACK (rc=$rc)"

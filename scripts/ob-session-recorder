@@ -827,17 +827,36 @@ open_record_channel() {
         close_record_channel
         return 1
     fi
+    # Hold our own read+write handle on the ready FIFO BEFORE starting the
+    # connector. Opening it O_RDWR (`<>`) never blocks on "no reader/!writer",
+    # so two failure modes are avoided: the connector's `>ready` open no longer
+    # waits for us, and -- the bug this replaces -- if the connector exits fast
+    # (sink rejects at once) before we open the read end, our open cannot block
+    # forever waiting for a writer that will never come. Because we keep a write
+    # end too, `read` never sees a spurious EOF, so the connector's exit is
+    # detected by polling its pid, not by EOF.
+    local rfd
+    exec {rfd}<>"$ready_fifo"
     # The connector's stdout is the ready FIFO (its OB_READY token); its stderr
     # is left on the recorder's stderr so a "cannot reach the sink" message
     # reaches the user and the journal instead of being swallowed.
     OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
         </dev/null >"$ready_fifo" &
     OB_REC_PID=$!
-    # Blocks until the connector opens its stdout (at once) and either writes
-    # the token or exits. The timeout guards against a sink that took the
-    # connection but never answers.
-    local ready=""
-    read -r -t "$CONNECT_TIMEOUT" ready <"$ready_fifo" 2>/dev/null || ready=""
+    # Wait, bounded by CONNECT_TIMEOUT, for either the OB_READY token or the
+    # connector's exit (a sink rejection, or a connect failure). A sink that
+    # took the connection but never answers is caught by the deadline.
+    local ready="" deadline=$((SECONDS + CONNECT_TIMEOUT))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if IFS= read -r -t 1 -u "$rfd" ready 2>/dev/null; then
+            [ "$ready" = "OB_READY" ] && break
+            ready=""
+        else
+            ready=""
+            proc_running "$OB_REC_PID" || break
+        fi
+    done
+    exec {rfd}<&-
     rm -f "$ready_fifo"
     if [ "$ready" = "OB_READY" ]; then
         return 0
