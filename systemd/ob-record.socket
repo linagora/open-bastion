@@ -13,6 +13,15 @@ ListenStream=/run/open-bastion/rec.sock
 # alter what is written.
 SocketMode=0666
 Accept=yes
+# A recorded connection now lives for the whole session (it is bounded by the
+# recorder's liveness and a duration cap, not by an idle timeout -- #287), so
+# the default MaxConnections=64 would cap the host at 64 concurrent recorded
+# sessions, and, since the socket is world-connectable, let any local user peg
+# it by opening 64 idle connections. Raise the ceiling and bound it per source
+# user (SO_PEERCRED uid on AF_UNIX), so one user cannot starve the rest. These
+# bound resource use; the integrity guarantee does not depend on them.
+MaxConnections=1024
+MaxConnectionsPerSource=16
 # Parent /run/open-bastion is created at 0711 by the package tmpfiles.d entry and
 # by the setup scripts; it exists before sockets.target.
 
