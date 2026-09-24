@@ -21,15 +21,32 @@ metadata
 .I HEADER_JSON
 to the socket, then opens
 .I STREAM_PATH
-and copies it to the socket until EOF, half-closing so the sink finalizes the
-recording.
+and copies it to the socket in length-prefixed frames until EOF. After a clean
+EOF, and only then, it sends an empty end-of-stream frame and half-closes the
+connection; the sink finalizes the recording as
+.B completed
+only when that frame arrives, so a forwarder that is killed or crashes leaves
+an
+.B aborted
+recording rather than one that looks whole.
+.PP
+.BR SIGHUP ,
+.B SIGINT
+and
+.B SIGQUIT
+are ignored: a hang-up is how a session normally ends, and the forwarder must
+outlive it long enough to drain the stream and send the end-of-stream frame.
+It still exits as soon as the writer closes
+.IR STREAM_PATH ;
+.B SIGTERM
+stops it.
 .PP
 For a PTY session,
 .I STREAM_PATH
 is a FIFO that
 .BR script (1)
 writes the typescript to; for a metadata-only transfer session it is
-\fI/dev/null\fR (immediate EOF). A FIFO is used rather than handing
+\fI/dev/null\fR (immediate EOF, so only the end-of-stream frame). A FIFO is used rather than handing
 .BR script
 the socket directly because
 .BR script
@@ -47,7 +64,8 @@ Override the socket path (default \fI/run/open-bastion/rec.sock\fR).
 .SH EXIT STATUS
 .TP
 .B 0
-The stream was forwarded and the sink half-closed.
+The stream was forwarded, the end-of-stream frame sent, and the connection
+half-closed.
 .TP
 .B 1
 Could not reach the sink, or an I/O error occurred. Recording is mandatory, so

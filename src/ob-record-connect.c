@@ -12,7 +12,20 @@
  *   2. writes the one-line JSON metadata header to the socket,
  *   3. opens STREAM_PATH (a FIFO that `script` writes the typescript to, or
  *      /dev/null for a metadata-only transfer session) and copies it to the
- *      socket until EOF, then half-closes so the sink finalizes the recording.
+ *      socket in length-prefixed frames until EOF, then sends the empty
+ *      END-OF-STREAM frame and half-closes so the sink finalizes the recording.
+ *
+ * The end-of-stream frame is what lets the sink tell a session that ended from
+ * a forwarder that was killed (#287, EBIOS MT34): it is sent only after a clean
+ * EOF on STREAM_PATH, so a SIGKILL, a crash or a read error leaves the sink
+ * with a stream that stops short, which it finalizes as "aborted".
+ *
+ * SIGHUP, SIGINT and SIGQUIT are ignored. A hang-up is how a session normally
+ * ends -- the client goes away, or the recorder's max_duration watchdog hangs
+ * the session up -- and the forwarder must outlive it long enough to drain
+ * what `script` wrote and send the end-of-stream frame. It still ends as soon
+ * as `script` closes the FIFO, and SIGTERM still stops it (the recorder uses
+ * that on a forwarder that is stuck).
  *
  * Why a FIFO and not script's typescript=/dev/fd/N: `script(1)` re-open()s its
  * typescript path, and a Unix-domain socket CANNOT be opened via /dev/fd/N
@@ -32,6 +45,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,8 +72,28 @@ static int write_all(int fd, const char *buf, size_t len)
     return 0;
 }
 
+/* One frame: 4-byte big-endian length, then the payload. len 0 is the
+ * end-of-stream marker. */
+static int write_frame(int fd, const char *buf, size_t len)
+{
+    unsigned char hdr[4] = {
+        (unsigned char)((uint32_t)len >> 24), (unsigned char)((uint32_t)len >> 16),
+        (unsigned char)((uint32_t)len >> 8), (unsigned char)len,
+    };
+    if (write_all(fd, (const char *)hdr, sizeof(hdr)) < 0)
+        return -1;
+    return len ? write_all(fd, buf, len) : 0;
+}
+
 int main(int argc, char **argv)
 {
+    /* See the header comment: a hang-up must not cost the end-of-stream
+     * frame. A write to a closed socket is reported as EPIPE, not a signal. */
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
+
     if (argc != 3) {
         fprintf(stderr, "Usage: %s HEADER_JSON STREAM_PATH\n", argv[0]);
         return 2;
@@ -120,7 +155,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* Forward stream -> socket. */
+    /* Forward stream -> socket, one frame per read. BUF_SZ must not exceed
+     * the sink's frame cap (its COPY_BUF, also 64 KiB). */
     char buf[BUF_SZ];
     ssize_t n;
     int rc = 0;
@@ -132,11 +168,16 @@ int main(int argc, char **argv)
             rc = 1;
             break;
         }
-        if (write_all(fd, buf, (size_t)n) < 0) {
+        if (write_frame(fd, buf, (size_t)n) < 0) {
             fprintf(stderr, "[ob-record-connect] write(socket): %s\n", strerror(errno));
             rc = 1;
             break;
         }
+    }
+    /* Clean EOF only: vouch that the stream is complete. */
+    if (rc == 0 && write_frame(fd, NULL, 0) < 0) {
+        fprintf(stderr, "[ob-record-connect] write(socket): %s\n", strerror(errno));
+        rc = 1;
     }
 
     close(in);

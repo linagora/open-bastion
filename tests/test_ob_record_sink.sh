@@ -68,7 +68,7 @@ if ! start_activator "$CAP_SOCK" "$WORK/sa-cap.log" OB_RECORD_POLL_SEC=1 OB_RECO
 fi
 
 hdr() { # $1 session_id  $2 format
-    printf '{"v":1,"session_id":"%s","format":"%s","client_ip":"203.0.113.9","ssh_tty":"/dev/pts/9","original_command":"","start":"2026-01-01T00:00:00Z"}' "$1" "$2"
+    printf '{"v":2,"session_id":"%s","format":"%s","client_ip":"203.0.113.9","ssh_tty":"/dev/pts/9","original_command":"","start":"2026-01-01T00:00:00Z"}' "$1" "$2"
 }
 
 # Wait until the sink has finalized the session (json exists and status != active).
@@ -121,7 +121,7 @@ fi
 
 # ── Test 2: the recorded user comes from SO_PEERCRED, NOT the header
 record_via_script \
-    '{"v":1,"session_id":"spoofid1","format":"script","client_ip":"x","ssh_tty":"x","original_command":"","start":"x"}' \
+    '{"v":2,"session_id":"spoofid1","format":"script","client_ip":"x","ssh_tty":"x","original_command":"","start":"x"}' \
     'printf "x\n"' 2>/dev/null
 sj=$(wait_done spoofid1)
 if [ -n "$sj" ]; then
@@ -234,10 +234,11 @@ fi
 # and exits: the socket never reaches EOF, and only the peer's death can end
 # the recording.
 python3 - "$SOCK" "$(hdr deadpeer01 script)" "$WORK/holder.pid" <<'PY' >/dev/null 2>&1
-import os, socket, sys, time
+import os, socket, struct, sys, time
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect(sys.argv[1])
-s.sendall(sys.argv[2].encode() + b"\nBEFORE-PEER-EXIT\n")
+data = b"BEFORE-PEER-EXIT\n"
+s.sendall(sys.argv[2].encode() + b"\n" + struct.pack(">I", len(data)) + data)
 pid = os.fork()
 if pid == 0:
     time.sleep(30)          # keeps the connection open, never writes
@@ -266,6 +267,110 @@ if [ -n "$cj" ] && grep -q '"status": "truncated"' "$cj" \
 else
     bad "the duration cap did not finalize the recording as truncated (json=$cj)"
     [ -n "$cj" ] && cat "$cj"
+fi
+
+# ── Test 9: a killed forwarder is an aborted recording, not a completed one
+#
+# #287 / EBIOS MT34: the forwarder runs as the recorded user, who can kill it
+# from inside the session. An unframed stream ends in EOF either way, and the
+# sink stamped both "completed". Now only the end-of-stream frame, sent after a
+# clean EOF on the FIFO, completes a recording.
+kfifo="$WORK/fifo.kill"
+mkfifo -m 600 "$kfifo"
+OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr killid01 script)" "$kfifo" 2>/dev/null &
+kpid=$!
+sleep 0.2
+script -q -f -c 'printf "BEFORE-KILL\n"; sleep 3; printf "AFTER-KILL\n"' "$kfifo" \
+    >/dev/null 2>&1 &
+spid=$!
+sleep 1
+kill -KILL "$kpid" 2>/dev/null
+wait "$kpid" 2>/dev/null
+wait "$spid" 2>/dev/null
+rm -f "$kfifo"
+kj=$(wait_done killid01)
+if [ -n "$kj" ] && grep -q '"status": "aborted"' "$kj" \
+   && grep -q BEFORE-KILL "${kj%.json}.typescript"; then
+    ok "forwarder killed mid-session: finalized as aborted"
+else
+    bad "a killed forwarder was not finalized as aborted (json=$kj)"; [ -n "$kj" ] && cat "$kj"
+fi
+
+# ── Test 10: a hang-up does not cost the end-of-stream frame
+#
+# SIGHUP is how sessions end (client gone, max_duration watchdog). The
+# forwarder must survive it, drain what script wrote, and complete the stream.
+hfifo="$WORK/fifo.hup"
+mkfifo -m 600 "$hfifo"
+OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr hupid01 script)" "$hfifo" 2>/dev/null &
+hpid=$!
+sleep 0.2
+script -q -f -c 'printf "BEFORE-HUP\n"; sleep 2; printf "AFTER-HUP\n"' "$hfifo" \
+    >/dev/null 2>&1 &
+hspid=$!
+sleep 1
+kill -HUP "$hpid" 2>/dev/null
+wait "$hspid" 2>/dev/null
+wait "$hpid" 2>/dev/null
+rm -f "$hfifo"
+hj=$(wait_done hupid01)
+if [ -n "$hj" ] && grep -q '"status": "completed"' "$hj" \
+   && grep -q AFTER-HUP "${hj%.json}.typescript"; then
+    ok "forwarder survives SIGHUP and completes the stream"
+else
+    bad "SIGHUP on the forwarder lost the end of the stream (json=$hj)"; [ -n "$hj" ] && cat "$hj"
+fi
+
+# ── Test 11: the framing itself — end frame completes, anything else does not
+frame_session() { # $1 session_id  $2 mode: end | noend | garbage | v1
+    python3 - "$SOCK" "$1" "$2" <<'PY' >/dev/null 2>&1
+import socket, struct, sys
+sock, sid, mode = sys.argv[1:4]
+v = 1 if mode == "v1" else 2
+hdr = ('{"v":%d,"session_id":"%s","format":"script","client_ip":"x",'
+       '"ssh_tty":"x","original_command":"","start":"x"}' % (v, sid))
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sock)
+data = b"FRAMED-PAYLOAD\n"
+out = hdr.encode() + b"\n" + struct.pack(">I", len(data)) + data
+if mode == "end" or mode == "v1":
+    out += struct.pack(">I", 0)
+elif mode == "garbage":
+    out += struct.pack(">I", 0x7fffffff)      # longer than any frame may be
+s.sendall(out)
+s.shutdown(socket.SHUT_WR)
+s.recv(1)
+PY
+}
+frame_session frameend01 end
+fe=$(wait_done frameend01)
+frame_session framecut01 noend
+fc=$(wait_done framecut01)
+frame_session framebad01 garbage
+fb=$(wait_done framebad01)
+frame_session framev101 v1
+sleep 1
+fv=$(ls "$SESS/$USER_NAME"/*_framev101.json 2>/dev/null | head -1)
+if grep -q '"status": "completed"' "$fe" 2>/dev/null \
+   && grep -q FRAMED-PAYLOAD "${fe%.json}.typescript" 2>/dev/null; then
+    ok "framed stream with its end frame: completed, payload unframed"
+else
+    bad "a well-framed stream was not completed (json=$fe)"
+fi
+if grep -q '"status": "aborted"' "$fc" 2>/dev/null; then
+    ok "framed stream cut before its end frame: aborted"
+else
+    bad "a stream with no end frame was not finalized as aborted (json=$fc)"
+fi
+if grep -q '"status": "aborted"' "$fb" 2>/dev/null; then
+    ok "oversized frame: aborted"
+else
+    bad "an oversized frame was not finalized as aborted (json=$fb)"
+fi
+if [ -z "$fv" ]; then
+    ok "unframed v1 header refused"
+else
+    bad "the sink accepted a v1 (unframed) header ($fv)"
 fi
 
 echo "=== record-sink e2e: $([ $fail -eq 0 ] && echo PASS || echo FAIL) ==="

@@ -60,14 +60,14 @@ The username is validated against ``^[a-z_][a-z0-9_.-]*$`` (same regex as the re
 §2. Wire protocol
 -----------------
 
-A connection carries one session. It is **header line + opaque stream**:
+A connection carries one session. It is **header line + framed stream**:
 
 1. **Header**: a single ``\n``-terminated JSON object (cap **8 KiB**), e.g.
 
    .. code:: json
 
       {
-        "v": 1,
+        "v": 2,
         "client_ip": "203.0.113.5",
         "ssh_tty": "/dev/pts/3",
         "format": "script",
@@ -76,7 +76,11 @@ A connection carries one session. It is **header line + opaque stream**:
       }
 
    The sink uses these only as **metadata** (never for the path or uid). Fields are length-checked and the JSON is parsed defensively; a malformed/oversized header → the sink logs and closes (fail-closed for that session).
-2. **Stream**: everything after the first ``\n`` is the recording payload (typescript bytes for ``format:"script"``, asciinema JSON for ``"asciinema"``, etc.), copied verbatim to the output file until EOF (the user side closing the write half, ``shutdown(SHUT_WR)``).
+2. **Stream**: everything after the first ``\n`` is the recording payload (typescript bytes for ``format:"script"``), cut into **frames**: a 4-byte big-endian length (at most 64 KiB), then that many bytes, which the sink appends verbatim to the output file. A **zero-length frame is the end-of-stream marker**; ``ob-record-connect`` sends it only after reading a clean EOF from its source, then half-closes (``shutdown(SHUT_WR)``).
+
+   The framing exists so that the sink can tell a session that **ended** from a forwarder that was **killed**. Version 1 streamed raw bytes until EOF, and a ``SIGKILL`` on the forwarder -- which runs as the recorded user, who can send it from inside the session -- produced the same EOF as a normal logout, so both were stamped ``completed`` (`#287 <https://github.com/linagora/open-bastion/issues/287>`__, EBIOS measure MT34). Terminal output cannot forge the marker: whatever the session prints travels inside a frame's payload. The sink accepts only ``"v": 2``; recorder, connector and sink ship in the same package.
+
+   The forwarder ignores ``SIGHUP``, ``SIGINT`` and ``SIGQUIT``. A hang-up is how a session normally ends (client gone, or the recorder's ``max_duration`` watchdog), and the forwarder must outlive it long enough to drain what ``script`` wrote and send the marker.
 
 The sink imposes an overall **per-session byte cap** and a **total duration cap**, to bound a hostile or runaway client. Reaching either finalizes the file as ``status:"truncated"`` rather than letting it grow unbounded (a DoS, explicitly logged).
 
@@ -102,9 +106,9 @@ The unprivileged helper **``ob-record-connect``** (sibling of ``ob-cert-request`
    script -q -f -c "$shell" "$fifo"             # script open()s the FIFO (a real inode)
    wait                                          # forwarder drains, half-closes the socket
 
-``ob-record-connect`` ``connect()``\ s **first** (fast for a local listening socket) and exits non-zero on failure, so the recorder can refuse the session *before* ``script`` starts. It then writes the header and copies the FIFO to the socket until EOF. ``script``'s PTY handling (raw mode, window size, **Ctrl-C** delivered to the foreground process group) is unchanged — we reuse it rather than re-implementing a PTY relay. ``-f`` flushes after each write so the sink (and any live monitor) sees output promptly.
+``ob-record-connect`` ``connect()``\ s **first** (fast for a local listening socket) and exits non-zero on failure, so the recorder can refuse the session *before* ``script`` starts. It then writes the header, copies the FIFO to the socket in frames until EOF, and sends the end-of-stream frame (§2). ``script``'s PTY handling (raw mode, window size, **Ctrl-C** delivered to the foreground process group) is unchanged — we reuse it rather than re-implementing a PTY relay. ``-f`` flushes after each write so the sink (and any live monitor) sees output promptly.
 
-For a metadata-only **transfer** session there is no PTY: the recorder calls ``ob-record-connect "$header" /dev/null`` (immediate EOF → header only).
+For a metadata-only **transfer** session there is no PTY: the recorder calls ``ob-record-connect "$header" /dev/null`` (immediate EOF → header, then the end-of-stream frame).
 
    Note: timing files. Plain ``script`` keeps timing in a separate ``-t`` stream. For v1 we record the typescript only. asciinema/ttyrec, which embed timing in one stream, map cleanly onto "header + stream" and can be added later.
 
@@ -113,7 +117,7 @@ For a metadata-only **transfer** session there is no PTY: the recorder calls ``o
 §4. File-transfer sessions (scp / sftp / rsync — no PTY)
 --------------------------------------------------------
 
-``is_file_transfer()`` already detects these and runs them raw (no PTY) because a PTY corrupts the binary protocol. They have **no stream to record**, only metadata. In the new model the recorder still opens a connection and sends the header with ``format:"transfer"`` and **no payload** (``shutdown(SHUT_WR)`` immediately after the header). The sink writes the ``<id>.json`` (command, start/end, sink-observed ``status``) and a zero-byte placeholder, like today's ``record_transfer``. The transfer itself continues to run on the user side with raw stdio.
+``is_file_transfer()`` already detects these and runs them raw (no PTY) because a PTY corrupts the binary protocol. They have **no stream to record**, only metadata. In the new model the recorder still opens a connection and sends the header with ``format:"transfer"`` and **no payload** (the end-of-stream frame immediately after the header, then ``shutdown(SHUT_WR)``). The sink writes the ``<id>.json`` (command, start/end, sink-observed ``status``) and a zero-byte placeholder, like today's ``record_transfer``. The transfer itself continues to run on the user side with raw stdio.
 
 .. _design-tamper-evident-session-recording-5-metadata--session-status:
 
@@ -127,11 +131,13 @@ The metadata *file* is owned by the **sink** (root), so a user cannot edit it af
 
 **Status lifecycle (all sink-observed):**
 
-1. recorder → ``rec.sock``: header (start metadata) + stream; the sink writes ``<id>.json`` with ``status:"active"`` immediately, then streams the ``.cast``/``.typescript``.
-2. on a clean stream EOF (the recorder ``shutdown(SHUT_WR)``\ s normally) the sink stamps ``status:"completed"`` and the ``end`` timestamp.
-3. if the stream is cut by a size cap or timeout, ``status:"truncated"``; if the connection drops abnormally (process killed, crash), ``status:"aborted"``.
+1. recorder → ``rec.sock``: header (start metadata) + stream; the sink writes ``<id>.json`` with ``status:"active"`` immediately, then streams the ``.typescript``.
+2. when the end-of-stream frame arrives (the forwarder read a clean EOF from ``script``'s FIFO) the sink stamps ``status:"completed"`` and the ``end`` timestamp.
+3. if the stream is cut by the byte cap or the total duration cap, ``status:"truncated"``; if it stops **without** the end-of-stream frame (forwarder killed, crash, malformed framing) or the peer process dies while its connection is held open elsewhere, ``status:"aborted"``.
 
 ``"completed"`` here means "the session ended and its stream was fully received", **not** "the last command succeeded". The session-id is a UUID generated by the recorder and carried in the header.
+
+What the framing does **not** give: the forwarder and ``script`` run as the recorded user, who can also open the FIFO through ``/proc/<pid>/fd`` and read or append to their own stream -- the self-forgery limit of §10. A killed forwarder is therefore *detected* (``aborted``), not *prevented*; and ``script`` itself dies of ``SIGPIPE`` at the next output once nothing reads the FIFO, which ends the session.
 
 .. _design-tamper-evident-session-recording-6-storage-layout--admin-access:
 

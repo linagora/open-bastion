@@ -7,8 +7,9 @@
  *
  * The unprivileged ob-session-recorder (running as the logged-in user) connects
  * via ob-record-connect and sends:
- *   - line 1: a one-line JSON metadata HEADER, then
- *   - the opaque recording STREAM (typescript bytes) until EOF.
+ *   - line 1: a one-line JSON metadata HEADER ("v": 2), then
+ *   - the recording STREAM (typescript bytes) in length-prefixed frames,
+ *     closed by an empty END-OF-STREAM frame (see feed_frames()).
  *
  * This sink:
  *   1. derives the recorded user from the connection's SO_PEERCRED. This is the
@@ -20,9 +21,11 @@
  *      recorded user is NOT in ob-sessions and the tree is o-rwx, so the user
  *      cannot list, read, unlink or truncate its own recording — which is the
  *      whole point (#151).
- *   3. records ONLY what it observes: status active -> completed (clean EOF) /
- *      truncated (size or duration cap) / aborted (abnormal drop, or the peer
- *      died while the connection was held open elsewhere). The child
+ *   3. records ONLY what it observes: status active -> completed (the
+ *      end-of-stream frame arrived) / truncated (size or duration cap) /
+ *      aborted (the stream stopped without that frame: forwarder killed,
+ *      crash, protocol error, or the peer died while the connection was held
+ *      open elsewhere). The child
  *      command's exit code is deliberately not recorded (it would be entirely
  *      client-reported; see the design §5).
  *
@@ -45,6 +48,7 @@
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,7 +63,9 @@
 
 #include "ob_cert_proto.h" /* ob_read_line, ob_valid_username */
 
-#define OB_RECORD_SINK_VERSION "0.1.0"
+#define OB_RECORD_SINK_VERSION "0.2.0"
+/* Wire protocol version: the header's "v". See feed_frames() for v2. */
+#define OB_RECORD_PROTO 2
 
 #define SESSIONS_DIR "/var/lib/open-bastion/sessions"
 #define SESSIONS_GROUP "ob-sessions"
@@ -200,6 +206,80 @@ static int pid_alive(pid_t pid)
     if (pid <= 0)
         return 1;
     return kill(pid, 0) == 0 || errno == EPERM;
+}
+
+/* Stream framing (protocol v2). After the header line, the stream is a
+ * sequence of frames: a 4-byte big-endian length, then that many bytes of
+ * recording. A zero-length frame is the END-OF-STREAM marker, which
+ * ob-record-connect sends only after reading EOF from its source. Without it
+ * the sink cannot tell a session that ended from a forwarder that was killed:
+ * both look like EOF, and v1 stamped them both "completed" (#287, EBIOS MT34).
+ * Terminal output cannot forge the marker, because everything the session
+ * prints travels inside a frame's payload. */
+#define FRAME_MAX COPY_BUF
+
+enum { FRAME_MORE, FRAME_END, FRAME_CAP, FRAME_BAD, FRAME_IOERR };
+
+struct framer {
+    unsigned char hdr[4];
+    int have;        /* bytes of the current length prefix received */
+    uint32_t left;   /* payload bytes still expected in the current frame */
+};
+
+static int write_all(int fd, const char *p, size_t n)
+{
+    while (n > 0) {
+        ssize_t w = write(fd, p, n);
+        if (w < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        p += w;
+        n -= (size_t)w;
+    }
+    return 0;
+}
+
+/* Consume n stream bytes: append payload to recfd (within MAX_RECORDING),
+ * track frame boundaries. Returns FRAME_MORE to keep reading, FRAME_END on
+ * the end-of-stream marker, FRAME_CAP when the byte cap is reached (what fits
+ * is written), FRAME_BAD on a protocol violation, FRAME_IOERR on a write
+ * error. */
+static int feed_frames(struct framer *f, const char *p, size_t n, int recfd, long *total)
+{
+    size_t i = 0;
+    while (i < n) {
+        if (f->left == 0) {
+            f->hdr[f->have++] = (unsigned char)p[i++];
+            if (f->have < 4)
+                continue;
+            f->have = 0;
+            uint32_t len = ((uint32_t)f->hdr[0] << 24) | ((uint32_t)f->hdr[1] << 16) |
+                           ((uint32_t)f->hdr[2] << 8) | (uint32_t)f->hdr[3];
+            if (len == 0)
+                return i == n ? FRAME_END : FRAME_BAD; /* nothing may follow */
+            if (len > FRAME_MAX)
+                return FRAME_BAD;
+            f->left = len;
+            continue;
+        }
+        size_t take = n - i;
+        if (take > f->left)
+            take = f->left;
+        if (*total + (long)take > MAX_RECORDING) {
+            size_t room = (size_t)(MAX_RECORDING - *total);
+            if (room > 0 && write_all(recfd, p + i, room) == 0)
+                *total += (long)room;
+            return FRAME_CAP;
+        }
+        if (write_all(recfd, p + i, take) < 0)
+            return FRAME_IOERR;
+        *total += (long)take;
+        f->left -= (uint32_t)take;
+        i += take;
+    }
+    return FRAME_MORE;
 }
 
 /* Base sessions directory. Hard-coded by default; OB_SESSIONS_DIR overrides it
@@ -408,6 +488,15 @@ int main(void)
     char *tty = hdr_str(hdr, "ssh_tty", MAX_SHORT);
     char *command = hdr_str(hdr, "original_command", MAX_CMD);
 
+    /* Only framed streams (v2) are accepted: an unframed v1 stream can never
+     * be told apart from a cut one, which is the gap v2 closes. The recorder,
+     * the connector and the sink ship together. */
+    struct json_object *jv = NULL;
+    if (!json_object_object_get_ex(hdr, "v", &jv) || !json_object_is_type(jv, json_type_int) ||
+        json_object_get_int(jv) != OB_RECORD_PROTO) {
+        fail("unsupported protocol version in header (this sink speaks v2)");
+        goto reject;
+    }
     if (!session_id || !valid_session_id(session_id)) {
         fail("missing/invalid session_id in header");
         goto reject;
@@ -470,20 +559,24 @@ int main(void)
         goto reject_dir;
     }
 
-    const char *status = "completed";
-    if (!is_transfer) {
+    /* A status is only ever set from what the loop below observes; nothing
+     * reaches "completed" without the forwarder's end-of-stream frame. */
+    const char *status = "aborted";
+    {
         /* 4. Stream copy, bounded by the peer's life, a total duration and a
          * byte cap -- never by silence. An interactive session that prints
          * nothing for a while is a live session: the idle timeout this
          * replaces (30 s, until #287) finalized such a recording as
          * "aborted", and the recorder then died of SIGPIPE at the user's
-         * next keystroke. */
+         * next keystroke. A transfer session goes through the same loop: its
+         * stream is empty, and only its end-of-stream frame completes it. */
         long poll_sec = env_seconds("OB_RECORD_POLL_SEC", DEFAULT_POLL_SEC, 3600);
         long max_sec = env_seconds("OB_RECORD_MAX_SEC", DEFAULT_MAX_SESSION_SEC,
                                    LONG_MAX / 2);
         long deadline = mono_now() + max_sec;
         int pidfd = peer_pidfd(conn_fd, cred.pid);
         int peer_gone = 0;
+        struct framer fr = {.have = 0, .left = 0};
         char buf[COPY_BUF];
         long total = 0;
         for (;;) {
@@ -534,47 +627,32 @@ int main(void)
                 break;
             }
             if (r == 0) {
-                status = "completed"; /* clean EOF */
+                /* EOF with no end-of-stream frame: the forwarder was killed
+                 * or crashed, or something else closed the connection. What
+                 * arrived is kept, but it is not a complete recording. */
+                fail("stream closed without its end-of-stream frame; finalizing as aborted");
+                status = "aborted";
                 break;
             }
-            if (total + r > MAX_RECORDING) {
-                /* Write what fits, then stop. */
-                long room = MAX_RECORDING - total;
-                if (room > 0) {
-                    ssize_t off = 0;
-                    while (off < room) {
-                        ssize_t w = write(recfd, buf + off, (size_t)(room - off));
-                        if (w < 0) {
-                            if (errno == EINTR)
-                                continue;
-                            break;
-                        }
-                        off += w;
-                    }
-                }
-                status = "truncated";
+            int fv = feed_frames(&fr, buf, (size_t)r, recfd, &total);
+            if (fv == FRAME_MORE)
+                continue;
+            if (fv == FRAME_END) {
+                status = "completed";
+            } else if (fv == FRAME_CAP) {
                 fail("recording hit the size cap; finalizing as truncated");
-                break;
+                status = "truncated";
+            } else if (fv == FRAME_IOERR) {
+                fail("write(recording) failed");
+                status = "aborted";
+            } else {
+                fail("malformed stream framing; finalizing as aborted");
+                status = "aborted";
             }
-            ssize_t off = 0;
-            while (off < r) {
-                ssize_t w = write(recfd, buf + off, (size_t)(r - off));
-                if (w < 0) {
-                    if (errno == EINTR)
-                        continue;
-                    fail("write(recording) failed");
-                    status = "aborted";
-                    goto stream_done;
-                }
-                off += w;
-            }
-            total += r;
+            break;
         }
-    stream_done:
         if (pidfd >= 0)
             close(pidfd);
-    } else {
-        status = "completed"; /* transfer: metadata only, no stream */
     }
     close(recfd);
 
