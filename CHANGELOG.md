@@ -160,6 +160,12 @@ here.
   killed is `aborted`, not `completed`, and a silent session is no longer
   finalized after 30 s. A recording lasts at most 7 days
   (`OB_RECORD_MAX_SEC`, see `ob-record-sink`(8)); the session is then cut.
+- **Nothing of a user's runs before the session recorder any more** (#293): on
+  a recording host, SSO users log in through `ob-login-shell`(8), not a shell
+  reading `~/.bashrc` or `~/.zshenv`. The portal's per-user shell and `Match`
+  exemptions from recording no longer apply to them there. See the login shell
+  in [doc/session-recording.rst](doc/session-recording.rst) and
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A7).
 - **`ob-record.socket` bounds concurrency** (#287): `MaxConnections=1024` and
   `MaxConnectionsPerSource=16`, so one local user cannot hold every slot and
   block logins; a user's 17th concurrent recorded session is refused. The
