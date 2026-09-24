@@ -71,7 +71,8 @@ Create ``/etc/open-bastion/session-recorder.conf``:
    # Any format other than "script" falls back to "script" in v1.
    format = script
 
-   # Maximum session duration in seconds (default 86400).
+   # Maximum session duration in seconds (default 86400; ob-bastion-setup
+   # writes 28800, 8 hours).
    # Enforced by ob-session-recorder: at the limit it hangs the session up, as
    # a client disconnect would, and kills what is left 5 s later. The stream
    # is fully delivered, so the recording is "completed"; the timeout itself
@@ -198,7 +199,7 @@ Each recording has an accompanying JSON metadata file (``.json``):
      "format": "script",
      "recording_file": "20251216-103000_550e8400-e29b-41d4-a716-446655440000.typescript",
      "hostname": "bastion.example.com",
-     "version": "0.1.0"
+     "version": "0.2.0"
    }
 
 Metadata Fields
@@ -229,8 +230,15 @@ Metadata Fields
 +----------------------+------------------------------------------------------------------------------+
 | ``hostname``         | Bastion hostname                                                             |
 +----------------------+------------------------------------------------------------------------------+
-| ``version``          | Recorder version                                                             |
+| ``version``          | ``ob-record-sink`` version (0.2.0: framed stream, see ``status``)            |
 +----------------------+------------------------------------------------------------------------------+
+
+What ``status`` means, as observed by the sink:
+
+- ``completed``: the forwarder read the end of ``script``'s output and sent the end-of-stream marker, so the recording is whole. It says nothing about how the session ended -- logout, disconnect or ``max_duration`` -- nor about the last command's exit code.
+- ``truncated``: the recording reached the 1 GiB byte cap or the sink's duration cap (7 days by default); the session loses its recording channel and is cut at its next output.
+- ``aborted``: the stream stopped without its end-of-stream marker (the forwarder was killed or crashed, or the framing was malformed), or the process that opened the connection died while something else held it open. Before 0.7.0 a killed forwarder produced ``completed``, and a session silent for 30 s produced ``aborted`` (`#287 <https://github.com/linagora/open-bastion/issues/287>`__).
+- ``active``: the session is still open, or the sink itself was killed.
 
 Directory Structure
 -------------------

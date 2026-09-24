@@ -184,6 +184,40 @@ With `--enable-hardening`, the setup no longer asks for `root` in
 `/etc/cron.allow`: nothing of ours runs from cron. Your `cron.allow` is left as
 it is, and `cron` itself is still not masked.
 
+### A6. Session recording: what now actually applies (#287)
+
+Bastions only. Four behaviours change because controls that were documented
+but did not work now do:
+
+- **`max_duration` ends sessions.** It never did: the watchdog could not fire
+  before the session was over. `ob-bastion-setup` writes `max_duration = 28800`,
+  so on a bastion it set up **sessions are now cut after 8 hours** (24 hours
+  where the file has no value). Check
+  `grep max_duration /etc/open-bastion/session-recorder.conf`, and raise it if
+  that is too short for your users (`0` disables it).
+- **`OB_RECORDER_CONFIG`, `OB_RECORDER_FORMAT`, `OB_MAX_SESSION` and
+  `OB_SESSIONS_DIR` are no longer read.** They came from the recorded user's
+  environment. If you set any of them (in `/etc/environment`, a pam_env file,
+  `SetEnv` in `sshd_config`), move the setting to the config file or to the
+  `ForceCommand` line (`-c FILE`, `-f FORMAT`).
+- **Only genuine scp, rsync and sftp commands skip the terminal recording**
+  (they are recorded as metadata only, as before). Anything else that merely
+  looks like a transfer is now recorded as an ordinary session, so
+  a transfer client the recorder does not recognise fails the way a binary
+  protocol fails in a terminal. The known case is rsync with `--secluded-args`
+  (`-s`, or `RSYNC_PROTECT_ARGS` set on the client); remote paths written with
+  shell syntax (`$HOME`, quotes) rather than backslash escapes are the other.
+  Refusals are logged: `journalctl -t ob-session-recorder | grep transfer-like`.
+- **A recording lasts at most 7 days** (`ob-record-sink`'s new cap; it had no
+  bound but a 30 s idle timeout that cut silent sessions). Longer sessions:
+  `systemctl edit ob-record@.service`, then
+  `Environment=OB_RECORD_MAX_SEC=<seconds>`.
+
+The recorder, `ob-record-connect` and `ob-record-sink` now speak a framed
+protocol (v2), and the sink refuses the old one. They ship in the same
+package; sessions open during the upgrade keep the processes they started
+with and finish normally.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0

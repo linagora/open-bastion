@@ -300,6 +300,30 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
 
 ### Security
 
+- **A client could open a shell on the bastion that was never recorded**
+  (#287). The recorder ran any command that *looked* like scp, rsync or sftp
+  -- first word `scp`, a ` -t ` somewhere -- through the user's shell with no
+  typescript, so `ssh -tt bastion 'scp -t /tmp/x; bash'` was an interactive
+  shell whose recording was an empty file. The check is now an allow-list of
+  the exact forms genuine clients send, executed as an argument vector from a
+  root-owned path, never through a shell; anything else is recorded like any
+  command, and a session with a terminal is never a transfer. Known cost:
+  rsync with `--secluded-args` now fails. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) A6.
+- **Session recordings no longer end, or lie, on their own** (#287). The sink
+  finalized any session silent for 30 s as `aborted`, and the user was then
+  disconnected at the next keystroke; it now bounds a connection by the
+  recorder's own liveness and a total duration cap (7 days) instead. A
+  forwarder killed from inside the session left a recording stamped
+  `completed`: the stream is now framed with an end-of-stream marker, and
+  without it the recording is `aborted` (EBIOS MT34). `max_duration` never
+  fired -- bash deferred its signal trap until the session had ended -- and
+  now ends the session, so **sessions are cut after the 8 hours
+  `ob-bastion-setup` configures** (24 without a value). The
+  recorder no longer takes its `PATH`, its sink socket or its tunables
+  (`OB_MAX_SESSION` and the other `OB_*` variables) from the recorded user's
+  environment, escapes every header field and every client string it logs,
+  and keeps its FIFO in a private directory it always removes.
 - **R-P1 is now a release prerequisite, not an assumption** (#268). With
   `pamAccessServerGroups` empty — the shipped default, and what
   `doc/bastion-architecture.md` used to recommend — `server_group` is read from
