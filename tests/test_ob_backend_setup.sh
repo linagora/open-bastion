@@ -149,6 +149,40 @@ test_no_sudo_skips_sudoers() {
     fi
 }
 
+# ── Test 7d: Mode E provisions the sudoers rule itself ──
+# The Mode E sudo stack is useless to an SSO user without the group and its
+# sudoers rule. On a backend configure_pam_sudo happened to create them first;
+# Mode E must not depend on that ordering, as it does not on a bastion.
+test_max_security_sudo_provisions_sudoers() {
+    local out
+    out=$(
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --max-security --dry-run
+        configure_max_security_sudo 2>&1
+    )
+    if grep -q "Would create group open-bastion-sudo" <<<"$out" \
+       && grep -q "/etc/sudoers.d/open-bastion" <<<"$out"; then
+        pass "Mode E sudo provisions the open-bastion-sudo group + sudoers rule"
+    else
+        fail "Mode E sudo provisions the open-bastion-sudo group + sudoers rule" "$out"
+    fi
+}
+
+# ── Test 7e: --no-sudo and --max-security are refused together ──
+# Mode E rewrites /etc/pam.d/sudo whatever --no-sudo says, so the pair cannot
+# both be honoured; the run must stop before touching anything.
+test_no_sudo_conflicts_with_max_security() {
+    local out rc
+    out=$(bash "$SCRIPT_DIR/ob-backend-setup" -p "https://x.example.com" -g g \
+              --no-sudo --max-security --dry-run --yes 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ] && grep -q -- "--no-sudo cannot be combined with --max-security" <<<"$out"; then
+        pass "--no-sudo with --max-security is refused"
+    else
+        fail "--no-sudo with --max-security is refused" "rc=$rc $out"
+    fi
+}
+
 # ── Test 8: --no-create-user sets CREATE_USERS=false ──
 test_no_create_user() {
     (
@@ -554,6 +588,8 @@ run_test test_parse_args_sets_variables
 run_test test_no_sudo
 run_test test_sudo_creates_sudoers_rule
 run_test test_no_sudo_skips_sudoers
+run_test test_max_security_sudo_provisions_sudoers
+run_test test_no_sudo_conflicts_with_max_security
 run_test test_no_create_user
 run_test test_dry_run
 run_test test_confirm_noninteractive

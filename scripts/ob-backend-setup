@@ -958,6 +958,11 @@ session    required     pam_unix.so
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would configure PAM sudo for LLNG token auth"
         echo "$pam_content"
+        info "[DRY-RUN] Would create group open-bastion-sudo"
+        info "[DRY-RUN] Would create /etc/sudoers.d/open-bastion with: %open-bastion-sudo ALL=(ALL) ALL"
+        if [ "$SUDO_FRESH_OTP" = "true" ]; then
+            info "[DRY-RUN] Would add: Defaults:%open-bastion-sudo timestamp_timeout=0"
+        fi
         return 0
     fi
 
@@ -966,12 +971,21 @@ session    required     pam_unix.so
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO for LLNG token authentication"
 
-    # `sudo -i` uses the separate "sudo-i" PAM service; mirror the Mode E stack
-    # so `sudo -i` also requires a fresh LLNG token.
+    # `sudo -i` uses the separate "sudo-i" PAM service. Give it the same stack,
+    # otherwise it falls back to the distro default (pam_unix) and fails for
+    # NSS-only SSO users ("account validation failure, is your account locked?").
     backup_file "$PAM_SUDO_I"
     echo "$pam_content" > "$PAM_SUDO_I"
     chmod 644 "$PAM_SUDO_I"
     info "Configured $PAM_SUDO_I for LLNG token authentication"
+
+    # Create open-bastion-sudo group for defense-in-depth sudo authorization
+    groupadd --system open-bastion-sudo 2>/dev/null || true
+
+    # Configure sudoers: only open-bastion-sudo group members can sudo (PAM also required)
+    local sudoers_file="/etc/sudoers.d/open-bastion"
+    local sudoers_header="# Open Bastion Mode E: defense-in-depth sudo authorization"
+    write_open_bastion_sudoers "$sudoers_file" "$sudoers_header"
 }
 
 # Ensure /etc/nsswitch.conf has a usable "<db>: files openbastion ..." line.
@@ -1194,6 +1208,7 @@ preflight_check_portal() {
 
     if [ "$http_code" = "404" ]; then
         error "Portal responded with 404 on /oauth2/device — Device Authorization Grant is not enabled."
+        error "Enable 'oidcServiceAllowAuthorizationCodeGrant' / Device Flow on the LLNG portal."
         return 1
     fi
 
@@ -1967,6 +1982,12 @@ print_summary() {
         echo "    - SSH: SSO-signed certificates only"
         echo "    - sudo: LLNG temporary token required"
         echo "    - KRL: mandatory, refreshed every ${KRL_REFRESH_INTERVAL} min"
+        if [ "$SUDO_FRESH_OTP" = "true" ]; then
+            echo "    - sudo: fresh LLNG token on EVERY elevation (timestamp_timeout=0)"
+        else
+            echo "    - sudo: sudo's own 15-min credential cache applies between"
+            echo "      elevations (use --enable-sudo-fresh-otp to require a token each time)"
+        fi
     fi
     case "$AUDIT_RESULT" in
         applied)
@@ -2277,6 +2298,17 @@ main() {
     # Validate required parameters
     if [ -z "$PORTAL_URL" ]; then
         error "Portal URL is required (-p/--portal)"
+        exit 1
+    fi
+
+    # --no-sudo cannot be honoured under Mode E: configure_max_security_sudo
+    # replaces /etc/pam.d/sudo with the LLNG-token-only stack whatever this
+    # flag says. Accepting both used to install that stack with no sudoers
+    # rule for the SSO group, so no SSO user could elevate while the summary
+    # reported Mode E sudo as active. Refuse the contradiction instead.
+    if [ "$ENABLE_SUDO" != "true" ] && [ "$MAX_SECURITY" = "true" ]; then
+        error "--no-sudo cannot be combined with --max-security: Mode E replaces the"
+        error "sudo PAM stack with LLNG-token-only authentication (see doc/pam-modes.rst)."
         exit 1
     fi
 
