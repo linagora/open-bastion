@@ -170,18 +170,57 @@ build_header() {
             --arg start "$SESSION_START" \
             '{v:2,session_id:$sid,format:$fmt,client_ip:$ip,ssh_tty:$tty,original_command:$cmd,start:$start}'
     else
-        # Minimal fallback (jq is a package dependency; this is best-effort). We
-        # MUST keep the header on one line, so JSON-escape backslash, quote and
-        # the control chars that would otherwise break it (newline/CR/tab) in the
-        # only field that can carry them, original_command.
-        local c="${ORIGINAL_COMMAND//\\/\\\\}"
-        c="${c//\"/\\\"}"
-        c="${c//$'\n'/\\n}"
-        c="${c//$'\r'/\\r}"
-        c="${c//$'\t'/\\t}"
+        # Minimal fallback (jq is a package dependency; this is best-effort). The
+        # header MUST stay one valid JSON line, and every field comes from the
+        # client side (SSH_CLIENT, SSH_TTY and the command are all sshd
+        # environment the session influences), so every field is escaped, not
+        # only the command.
         printf '{"v":2,"session_id":"%s","format":"%s","client_ip":"%s","ssh_tty":"%s","original_command":"%s","start":"%s"}' \
-            "$SESSION_ID" "$FORMAT" "$CLIENT_IP" "$TTY_NAME" "$c" "$SESSION_START"
+            "$(json_escape "$SESSION_ID")" "$(json_escape "$FORMAT")" \
+            "$(json_escape "$CLIENT_IP")" "$(json_escape "$TTY_NAME")" \
+            "$(json_escape "$ORIGINAL_COMMAND")" "$(json_escape "$SESSION_START")"
     fi
+}
+
+# JSON string escaping (RFC 8259 §7): backslash, quote, and every control
+# character, the common ones by name and the rest as \u00XX.
+json_escape() {
+    local s="$1" out="" c code i LC_ALL=C
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    if [[ "$s" == *[[:cntrl:]]* ]]; then
+        for ((i = 0; i < ${#s}; i++)); do
+            c=${s:i:1}
+            case "$c" in
+                [[:cntrl:]]) printf -v code '\\u%04x' "'$c"; out+=$code ;;
+                *) out+=$c ;;
+            esac
+        done
+        s=$out
+    fi
+    printf '%s' "$s"
+}
+
+# A client-supplied string made safe for one syslog line: at most 1024 bytes,
+# and quoted with printf %q -- one line, every control character visible --
+# when it holds any. Plain commands are logged as they are, readable.
+log_safe() {
+    local s="$1" LC_ALL=C
+    if [ "${#s}" -gt 1024 ]; then
+        s="${s:0:1024}[...]"
+    fi
+    if [[ "$s" == *[[:cntrl:]]* ]]; then
+        printf '%q' "$s"
+    else
+        printf '%s' "$s"
+    fi
+}
+
+log_session_start() {
+    log_info "Session $SESSION_ID started for user $SESSION_USER from $(log_safe "$CLIENT_IP")${ORIGINAL_COMMAND:+, command: $(log_safe "$ORIGINAL_COMMAND")}"
 }
 
 # Cleanup on exit. The sink owns the metadata file (end time + status), so the
@@ -254,7 +293,7 @@ is_file_transfer() {
 record_transfer() {
     local shell="${SHELL:-/bin/bash}"
     FORMAT="transfer"
-    log_info "Session $SESSION_ID: file-transfer (no PTY recording): $ORIGINAL_COMMAND"
+    log_info "Session $SESSION_ID: file-transfer (no PTY recording): $(log_safe "$ORIGINAL_COMMAND")"
     # Send the header with an EMPTY stream (/dev/null): ob-record-connect connects,
     # sends the header, reads EOF from /dev/null and half-closes → the sink records
     # a transfer session (metadata only). A connect failure returns non-zero, so we
@@ -452,7 +491,7 @@ main() {
         FORMAT="script"
     fi
 
-    log_info "Session $SESSION_ID started for user $SESSION_USER from $CLIENT_IP"
+    log_session_start
 
     # Setup cleanup trap
     trap cleanup EXIT

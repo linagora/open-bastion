@@ -276,6 +276,60 @@ test_build_header_no_newline_injection() {
     fi
 }
 
+# ── Test 8b: the no-jq header escapes EVERY field (#287) ──
+# The fallback escaped only original_command. SSH_CLIENT and SSH_TTY are just as
+# client-side: a quote or a newline there produced an invalid or multi-line
+# header, which the connector refuses -- a session refused for a stray byte.
+test_build_header_fallback_escapes_all_fields() {
+    command -v python3 >/dev/null 2>&1 || { fail "python3 is needed to check the header"; return; }
+    local h
+    h=$(
+        source_script "ob-session-recorder"
+        # Hide jq from build_header, so the fallback is what runs.
+        command() { [ "${1:-}" = "-v" ] && [ "${2:-}" = "jq" ] && return 1; builtin command "$@"; }
+        SESSION_ID='id"1\'
+        FORMAT=$'scr\tipt'
+        CLIENT_IP=$'198.51.100.1\n"injected":1'
+        TTY_NAME=$'/dev/pts/1\x01\x1b[2J'
+        ORIGINAL_COMMAND=$'ls "a b"\\\r\n'
+        SESSION_START=$'2026\x7f'
+        build_header
+    )
+    if [ "$(printf '%s' "$h" | wc -l)" -eq 0 ] && printf '%s' "$h" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+want = {"session_id": "id\"1\\", "format": "scr\tipt",
+        "client_ip": "198.51.100.1\n\"injected\":1",
+        "ssh_tty": "/dev/pts/1\x01\x1b[2J", "original_command": "ls \"a b\"\\\r\n",
+        "start": "2026\x7f", "v": 2}
+sys.exit(0 if h == want else 1)'; then
+        pass "no-jq header: every field escaped, one valid JSON line"
+    else
+        fail "no-jq header is not one valid JSON line with every field intact" "$h"
+    fi
+}
+
+# ── Test 8c: client-supplied strings reach syslog on one line (#287) ──
+test_log_lines_sanitized() {
+    local log
+    log=$(mktemp)
+    (
+        source_script "ob-session-recorder"
+        logger() { printf '%s\n' "$*" >> "$log"; }
+        SESSION_ID="sid"
+        CLIENT_IP=$'198.51.100.1\nFAKE: forged line'
+        ORIGINAL_COMMAND=$'id\nFAKE: another forged line\x1b[1A'
+        log_session_start
+    )
+    if [ "$(wc -l < "$log")" -eq 1 ] && ! grep -q $'\x1b' "$log" \
+       && grep -q 'FAKE: forged line' "$log"; then
+        pass "session start logged on one line, control characters escaped"
+    else
+        fail "a client-supplied string broke the syslog line" "$(cat -A "$log")"
+    fi
+    rm -f "$log"
+}
+
 # ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
 # script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
 # and ob-record-connect forwards the FIFO to the sink socket.
@@ -464,6 +518,8 @@ run_test test_config_comments
 run_test test_generate_session_id
 run_test test_build_header_single_line
 run_test test_build_header_no_newline_injection
+run_test test_build_header_fallback_escapes_all_fields
+run_test test_log_lines_sanitized
 run_test test_streams_via_connect
 run_test test_fail_closed_no_connect
 run_test test_env_ignored
