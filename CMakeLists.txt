@@ -211,6 +211,15 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-timers-lib.sh
     DESTINATION lib/open-bastion
 )
 
+# Same fixed path; sourced by the setup script and ob-post-upgrade.
+install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-login-shell-lib.sh
+    DESTINATION lib/open-bastion
+)
+
+# The generated sshd principals helper, and the tmpfiles rule that recreates its
+# spool at boot. One copy, installed as data: ob-bastion-setup, ob-backend-setup
+# and ob-post-upgrade all read these rather than each carrying a heredoc (#254).
+#
 # Plain lib/, not CMAKE_INSTALL_LIBDIR: that expands to the multiarch
 # lib/x86_64-linux-gnu on Debian, but the .install file and the scripts'
 # OB_DATA_DIR default both name /usr/lib/open-bastion.
