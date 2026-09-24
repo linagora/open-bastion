@@ -219,7 +219,7 @@ fi
 # the stream stays silent for four of the sink's idle wake-ups; everything
 # printed after the pause must still be recorded, and the session completed.
 record_via_script "$(hdr idleid01 script)" \
-    'printf "BEFORE-IDLE\n"; sleep 4; printf "AFTER-IDLE\n"' 2>/dev/null
+    'printf "BEFORE-IDLE\n"; sleep 3; printf "AFTER-IDLE\n"' 2>/dev/null
 ij=$(wait_done idleid01)
 its="${ij%.json}.typescript"
 if [ -n "$ij" ] && grep -q '"status": "completed"' "$ij" \
@@ -264,7 +264,7 @@ fi
 
 # ── Test 8: the total duration cap still bounds a live, silent session
 REC_SOCK="$CAP_SOCK" record_via_script "$(hdr capid01 script)" \
-    'printf "UNDER-CAP\n"; sleep 5' 2>/dev/null
+    'printf "UNDER-CAP\n"; sleep 3' 2>/dev/null
 cj=$(wait_done capid01)
 if [ -n "$cj" ] && grep -q '"status": "truncated"' "$cj" \
    && grep -q UNDER-CAP "${cj%.json}.typescript"; then
@@ -285,7 +285,7 @@ mkfifo -m 600 "$kfifo"
 OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr killid01 script)" "$kfifo" 2>/dev/null &
 kpid=$!
 sleep 0.2
-script -q -f -c 'printf "BEFORE-KILL\n"; sleep 3; printf "AFTER-KILL\n"' "$kfifo" \
+script -q -f -c 'printf "BEFORE-KILL\n"; sleep 2; printf "AFTER-KILL\n"' "$kfifo" \
     </dev/null >/dev/null 2>&1 &
 spid=$!
 sleep 1
@@ -477,7 +477,9 @@ fi
 # that accepts and reads the header but NEVER answers must not hang the
 # connector forever -- the transfer path runs it synchronously. The connector's
 # own SO_RCVTIMEO must fire and it must exit non-zero; an outer `timeout` only
-# catches the failure (rc 124), which would mean the connector hung.
+# catches the failure (rc 124), which would mean the connector hung. The ACK
+# timeout is set to 3 s (OB_RECORD_ACK_TIMEOUT) so the test does not wait the
+# 15 s production default.
 silent_sock="$WORK/silent.sock"
 python3 - "$silent_sock" <<'PY' &
 import os, socket, sys, time
@@ -493,11 +495,12 @@ PY
 slpid=$!
 for _ in $(seq 1 50); do [ -S "$silent_sock" ] && break; sleep 0.1; done
 sil_start=$SECONDS
-timeout 40 env OB_RECORD_SOCKET="$silent_sock" "$CONNECT" "$(hdr silid001 transfer)" - </dev/null >/dev/null 2>&1
+timeout 20 env OB_RECORD_SOCKET="$silent_sock" OB_RECORD_ACK_TIMEOUT=3 \
+    "$CONNECT" "$(hdr silid001 transfer)" - </dev/null >/dev/null 2>&1
 silrc=$?
 sil_elapsed=$((SECONDS - sil_start))
 kill "$slpid" 2>/dev/null; wait "$slpid" 2>/dev/null
-if [ "$silrc" -ne 0 ] && [ "$silrc" -ne 124 ] && [ "$sil_elapsed" -lt 30 ]; then
+if [ "$silrc" -ne 0 ] && [ "$silrc" -ne 124 ] && [ "$sil_elapsed" -lt 15 ]; then
     ok "no ACK answer: the connector's own timeout fires (rc=$silrc, ${sil_elapsed}s)"
 else
     bad "the connector did not time out its ACK read (rc=$silrc, ${sil_elapsed}s)"

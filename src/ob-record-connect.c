@@ -76,8 +76,12 @@
 #define OB_RECORD_ACK 0x06 /* ASCII ACK */
 /* Bound the wait for that ACK: a sink that accepts the connection but never
  * answers must not hang the caller forever (the transfer path runs this
- * synchronously). Matches the recorder's CONNECT_TIMEOUT for the PTY path. */
+ * synchronously). Matches the recorder's CONNECT_TIMEOUT for the PTY path.
+ * OB_RECORD_ACK_TIMEOUT overrides it (clamped 1..60), for tests; a user-set
+ * value can only shorten or slightly lengthen the wait for an unresponsive
+ * sink, and the PTY path is bounded by the recorder's own timeout regardless. */
 #define ACK_TIMEOUT_SEC 15
+#define ACK_TIMEOUT_MAX 60
 
 static int write_all(int fd, const char *buf, size_t len)
 {
@@ -174,7 +178,15 @@ int main(int argc, char **argv)
      * exit non-zero WITHOUT opening the stream. The recorder then refuses the
      * session. The timeout matters on the transfer path, which runs this
      * synchronously: a sink that accepts but never answers must not hang it. */
-    struct timeval atv = {.tv_sec = ACK_TIMEOUT_SEC, .tv_usec = 0};
+    long ack_to = ACK_TIMEOUT_SEC;
+    const char *ate = getenv("OB_RECORD_ACK_TIMEOUT");
+    if (ate && *ate) {
+        char *end = NULL;
+        long v = strtol(ate, &end, 10);
+        if (end && *end == '\0' && v >= 1 && v <= ACK_TIMEOUT_MAX)
+            ack_to = v;
+    }
+    struct timeval atv = {.tv_sec = ack_to, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &atv, sizeof(atv));
     unsigned char ack = 0;
     ssize_t an = read(fd, &ack, 1);

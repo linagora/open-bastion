@@ -77,6 +77,11 @@ Override the socket path (default \fI/run/open-bastion/rec.sock\fR).
 .BR ob-session-recorder (8)
 always sets it to the system socket when it starts the connector, so a value
 in the recorded user's environment never reaches it.
+.TP
+.B OB_RECORD_ACK_TIMEOUT
+Seconds to wait for the sink's acknowledgement (default 15, clamped 1..60);
+intended for tests. The wait only bounds an unresponsive sink; the PTY path is
+additionally bounded by the recorder's own timeout.
 .SH EXIT STATUS
 .TP
 .B 0
