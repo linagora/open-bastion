@@ -308,3 +308,65 @@ replace || \n                if false; then\n                    error "Invoked 
 suite   || tests/test_ob_setup_roles.sh
 why     || A renamed copy of ob-backend-setup run with --yes would configure a
 why     || bastion, and nobody would read the banner that says so.
+
+id      || krl-refresh-magic
+file    || scripts/ob-krl-refresh
+search  || if [ "$header" != "$KRL_HEADER_HEX" ]; then
+replace || if false; then
+suite   || tests/test_ob_krl_refresh.sh
+why     || #281: sshd treats a RevokedKeys file it cannot parse as revoking
+why     || every key. On a host without ssh-keygen the KRL header is the only
+why     || thing between a portal error page and a locked-out host.
+
+id      || krl-refresh-full-parse
+file    || scripts/ob-krl-refresh
+search  || if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+replace || if false; then
+suite   || tests/test_ob_krl_refresh.sh
+why     || #281: a good header on a truncated or corrupt body passes the magic
+why     || check and still makes sshd refuse every key; only a full parse
+why     || (ssh-keygen -Q) catches it.
+
+id      || krl-refresh-atomic-rename
+file    || scripts/ob-krl-refresh
+search  || mv -f "$tmp" "$OUTPUT" || die 4 "cannot replace $OUTPUT"
+replace || cat "$tmp" > "$OUTPUT" || die 4 "cannot replace $OUTPUT"
+suite   || tests/test_ob_krl_refresh.sh
+why     || #281: the list must be replaced by rename(2). Rewriting it in place
+why     || lets sshd, mid-authentication, read half of it -- and half a KRL
+why     || revokes every key.
+
+id      || krl-refresh-config-writable
+file    || scripts/ob-krl-refresh
+search  || if (( (8#$conf_mode & 8#022) != 0 )); then
+replace || if false; then
+suite   || tests/test_ob_krl_refresh.sh
+why     || #281: the portal URL read from openbastion.conf decides what this
+why     || root program writes into /etc/ssh; a config others can write must be
+why     || refused, not followed.
+
+id      || timers-never-neither
+file    || scripts/ob-timers-lib.sh
+search  || if ! ob_timer_enable "$OB_KRL_TIMER"; then
+replace || if ! ob_timer_enable "$OB_KRL_TIMER" && false; then
+suite   || tests/test_ob_timers.sh
+why     || #281: the 0.6 KRL cron job may be removed only once its timer is
+why     || enabled and active. Otherwise a failed enable leaves a Mode E host
+why     || with no refresh at all, and revoked certificates keep working.
+
+id      || timers-foreign-dropin
+file    || scripts/ob-timers-lib.sh
+search  || if [ -e "$file" ] && ! head -n 1 "$file" | grep -qxF "$OB_TIMERS_MARK"; then
+replace || if false; then
+suite   || tests/test_ob_timers.sh
+why     || #281: a schedule.conf an administrator wrote is theirs; the setup
+why     || and ob-post-upgrade may rewrite or remove only the drop-in they wrote.
+
+id      || setup-krl-keeps-current-list
+file    || scripts/ob-bastion-setup
+search  || elif [ -f "$SSH_REVOKED_KEYS" ]; then
+replace || elif false; then
+suite   || tests/test_ob_timers.sh
+why     || #281: when the first download fails, the setup must keep the list
+why     || the host already has, not replace it with an empty one -- an empty
+why     || KRL revokes nothing.
