@@ -12,6 +12,20 @@
 # Since #249 this helper does not write the spool itself: it runs as the
 # unprivileged AuthorizedPrincipalsCommandUser, and the spool is 0700 root.
 
+# Five arguments is the BACKEND's sshd line (%u %f %i %t %k). This helper does
+# no vouching, so it must never serve a backend's sshd: a host whose sshd still
+# runs the backend configuration while this helper is in place (a backend being
+# turned into a bastion, before sshd is restarted, or a run interrupted in
+# between) would otherwise accept a direct SSO certificate with no bastion
+# voucher and no recording. Deny instead. Two and four arguments are this
+# helper's own older and current lines.
+if [ "$#" -gt 4 ]; then
+    logger -t ob-ssh-principals -p authpriv.warning \
+        "called with the backend's arguments by an sshd still configured as a backend; denying '$1' (finish the role change: re-run the setup, restart sshd)" \
+        2>/dev/null || :
+    exit 0
+fi
+
 USERNAME="$1"
 FINGERPRINT="$2"
 KEYTYPE="$3"
