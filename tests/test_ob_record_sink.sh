@@ -96,7 +96,9 @@ record_via_script() { # $1 header  $2 command
     local cpid=$!
     sleep 0.2
     if ! kill -0 "$cpid" 2>/dev/null; then wait "$cpid"; rm -f "$fifo"; return 1; fi
-    script -q -f -c "$2" "$fifo" >/dev/null 2>&1
+    # script forwards its stdin to the session: never let it read the caller's
+    # (the mutation runner feeds its catalogue to a `while read` loop).
+    script -q -f -c "$2" "$fifo" </dev/null >/dev/null 2>&1
     wait "$cpid"; local rc=$?
     rm -f "$fifo"
     return $rc
@@ -247,9 +249,12 @@ with open(sys.argv[3], "w") as f:
     f.write(str(pid))
 os._exit(0)                 # the peer the sink identified is gone
 PY
-dj=$(wait_done deadpeer01)
+# Judge the status BEFORE releasing the holder: once it is killed the socket
+# reaches EOF, and "aborted" would then be reached the ordinary way.
+dstatus=$(dj=$(wait_done deadpeer01) && grep -o '"status": "[a-z]*"' "$dj")
+dj=$(ls "$SESS/$USER_NAME"/*_deadpeer01.json 2>/dev/null | head -1)
 [ -s "$WORK/holder.pid" ] && kill "$(cat "$WORK/holder.pid")" 2>/dev/null
-if [ -n "$dj" ] && grep -q '"status": "aborted"' "$dj" \
+if [ "$dstatus" = '"status": "aborted"' ] \
    && grep -q BEFORE-PEER-EXIT "${dj%.json}.typescript"; then
     ok "peer gone, connection held elsewhere: finalized as aborted"
 else
@@ -281,7 +286,7 @@ OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr killid01 script)" "$kfifo" 2>/dev/nul
 kpid=$!
 sleep 0.2
 script -q -f -c 'printf "BEFORE-KILL\n"; sleep 3; printf "AFTER-KILL\n"' "$kfifo" \
-    >/dev/null 2>&1 &
+    </dev/null >/dev/null 2>&1 &
 spid=$!
 sleep 1
 kill -KILL "$kpid" 2>/dev/null
@@ -306,7 +311,7 @@ OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$(hdr hupid01 script)" "$hfifo" 2>/dev/null
 hpid=$!
 sleep 0.2
 script -q -f -c 'printf "BEFORE-HUP\n"; sleep 2; printf "AFTER-HUP\n"' "$hfifo" \
-    >/dev/null 2>&1 &
+    </dev/null >/dev/null 2>&1 &
 hspid=$!
 sleep 1
 kill -HUP "$hpid" 2>/dev/null

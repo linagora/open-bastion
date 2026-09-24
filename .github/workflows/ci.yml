@@ -42,7 +42,10 @@ jobs:
           libsodium-dev \
           curl \
           jq \
-          socat
+          socat \
+          rsync \
+          openssh-client \
+          openssh-sftp-server
 
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON -DINSTALL_DESKTOP=ON
@@ -126,6 +129,21 @@ jobs:
             echo "::error::tests/test_ob_fp_daemon.sh skipped; it must run in CI"
             exit 1 ;;
         esac
+
+    # Same for session recording (#287): these two suites are what proves a
+    # client cannot talk its way out of being recorded, and both skip parts of
+    # themselves when the sink is not built or rsync/sftp-server are missing.
+    - name: The session-recording suites must actually run
+      run: |
+        for t in tests/test_ob_session_recorder.sh tests/test_ob_record_sink.sh; do
+          out=$(bash "$t" 2>&1 </dev/null) || { echo "$out"; exit 1; }
+          echo "$out"
+          case "$out" in
+            *SKIP*)
+              echo "::error::$t skipped something; it must run in full in CI"
+              exit 1 ;;
+          esac
+        done
 
   build-debug:
     name: Build Debug with Sanitizers
@@ -429,13 +447,15 @@ jobs:
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
           build-essential cmake pkg-config git jq curl python3 openssh-client \
-          socat util-linux \
+          socat util-linux systemd rsync openssh-sftp-server \
           libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev
 
     # The suites the catalogue drives must be able to RUN here: one that skips
     # for a missing dependency is green before and after the mutation, and the
     # runner now refuses to conclude from that rather than calling it a
-    # surviving mutant. socat is what tests/test_ob_fp_daemon.sh needs.
+    # surviving mutant. socat is what tests/test_ob_fp_daemon.sh needs;
+    # systemd (for systemd-socket-activate, not as init), rsync and
+    # openssh-sftp-server are what the session-recording suites need (#287).
     - name: Build
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug

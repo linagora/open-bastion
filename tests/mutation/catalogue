@@ -370,3 +370,140 @@ suite   || tests/test_ob_timers.sh
 why     || #281: when the first download fails, the setup must keep the list
 why     || the host already has, not replace it with an empty one -- an empty
 why     || KRL revokes nothing.
+
+# ── #287: session recording bypass ──────────────────────────────────────────
+# The recorder decides, on a string the client wrote, whether a session's
+# stream is recorded at all; the sink decides what a recording's status says.
+
+id      || recorder-transfer-metachars
+file    || scripts/ob-session-recorder
+search  || '{'|'}'|'!'|'#') return 1 ;;
+replace || '{'|'}'|'!'|'#') lit+=$c pat+=$c inword=1 ;;
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: an unescaped shell metacharacter in a transfer-looking command
+why     || must send it to the recorded path -- `scp -t /tmp/x;bash` was an
+why     || unrecorded shell.
+
+id      || recorder-transfer-never-with-pty
+file    || scripts/ob-session-recorder
+search  || if [ -n "${SSH_TTY:-}" ]; then
+replace || if false; then
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: no transfer client asks for a PTY; a PTY session whose command
+why     || looks like a transfer is an interactive session and is recorded.
+
+id      || recorder-rsync-no-daemon
+file    || scripts/ob-session-recorder
+search  || RSYNC_LONG_NOARG=" append
+replace || RSYNC_LONG_NOARG=" daemon append
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: `rsync --server --daemon` reads an rsyncd.conf of the caller's
+why     || choosing, whose pre-xfer exec runs any command, unrecorded.
+
+id      || recorder-rsync-no-secluded-args
+file    || scripts/ob-session-recorder
+search  || RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrtuvxyz]*
+replace || RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrstuvxyz]*
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: -s sends rsync's real arguments over the protocol, past the
+why     || allow-list.
+
+id      || recorder-rsync-end-of-options
+file    || scripts/ob-session-recorder
+search  || TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} -- . "${TRANSFER_PATHS[@]}")
+replace || TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} . "${TRANSFER_PATHS[@]}")
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: rsync's option parser permutes; without `--` a path, or a name
+why     || a wildcard matched, such as `--daemon` would be read as an option.
+
+id      || recorder-fixed-path
+file    || scripts/ob-session-recorder
+search  || PATH=/usr/sbin:/usr/bin:/sbin:/bin
+replace || PATH=$PATH
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the recorder runs as the recorded user; a user-writable PATH
+why     || entry could shadow script(1) with something that records nothing.
+
+id      || recorder-env-max-duration
+file    || scripts/ob-session-recorder
+search  || MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
+replace || MAX_SESSION_DURATION="${OB_MAX_SESSION:-$DEFAULT_MAX_SESSION_DURATION}"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: OB_MAX_SESSION=0 in the user's environment switched the
+why     || max_duration watchdog off.
+
+id      || recorder-socket-pinned
+file    || scripts/ob-session-recorder
+search  || OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO"
+replace || "$RECORD_CONNECT" "$header" "$OB_REC_FIFO"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: OB_RECORD_SOCKET from the user's environment would pick the
+why     || sink the session is recorded to.
+
+id      || recorder-max-duration-validated
+file    || scripts/ob-session-recorder
+search  || if [[ ! "$MAX_SESSION_DURATION" =~ ^[0-9]{1,9}$ ]]; then
+replace || if false; then
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: a non-numeric max_duration disabled the watchdog silently.
+
+id      || recorder-watchdog-hangs-up
+file    || scripts/ob-session-recorder
+search  || watchdog_signal HUP "$scope"
+replace || :
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the ALRM-trap watchdog never ended a session. Without the
+why     || hang-up only the SIGKILL fallback is left, and it takes the
+why     || forwarder down before it can complete the recording.
+
+id      || recorder-header-escapes-every-field
+file    || scripts/ob-session-recorder
+search  || "$(json_escape "$CLIENT_IP")"
+replace || "$CLIENT_IP"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the no-jq header escaped original_command only.
+
+id      || recorder-log-sanitized
+file    || scripts/ob-session-recorder
+search  || from $(log_safe "$CLIENT_IP")
+replace || from $CLIENT_IP
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: client-supplied strings must not forge syslog lines.
+
+id      || sink-silence-is-not-an-end
+file    || src/ob-record-sink.c
+search  || peer_gone = 1; /* one more interval to drain, then abort */\n                continue;
+replace || peer_gone = 1; /* one more interval to drain, then abort */\n                status = "aborted";\n                break;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: a 30 s idle timeout aborted the recording of every silent
+why     || session, then disconnected the user at the next keystroke.
+
+id      || sink-dead-peer-ends-recording
+file    || src/ob-record-sink.c
+search  || if (peer_gone) {
+replace || if (0) {
+suite   || tests/test_ob_record_sink.sh
+why     || #287: with no idle timeout, a connection that outlives the process
+why     || that opened it is bounded only by that process's death.
+
+id      || sink-completed-needs-end-frame
+file    || src/ob-record-sink.c
+search  || fail("stream closed without its end-of-stream frame; finalizing as aborted");\n                status = "aborted";
+replace || status = "completed";
+suite   || tests/test_ob_record_sink.sh
+why     || #287 / EBIOS MT34: a killed forwarder was stamped "completed".
+
+id      || sink-protocol-version
+file    || src/ob-record-sink.c
+search  || json_object_get_int(jv) != OB_RECORD_PROTO
+replace || 0
+suite   || tests/test_ob_record_sink.sh
+why     || #287: an unframed (v1) stream cannot be told apart from a cut one.
+
+id      || connector-survives-hangup
+file    || src/ob-record-connect.c
+search  || signal(SIGHUP, SIG_IGN);
+replace || (void)0;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: a hang-up is how sessions end; a forwarder it killed would
+why     || turn every disconnect into an "aborted" recording.

@@ -435,6 +435,7 @@ test_transfer_classification() {
         '~/.local/bin/scp -t /x'
         '/home/u/bin/scp -t /x'
         'rsync --server --daemon .'
+        'rsync --server --daemon . .'
         'rsync --server --daemon --config=/tmp/x . .'
         'rsync --server -slogDtpre.iLsfxCIvu'
         'rsync --server -slogDtpre.iLsfxCIvu . x'
