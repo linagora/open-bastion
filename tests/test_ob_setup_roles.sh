@@ -362,6 +362,78 @@ AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k'
     fi
 }
 
+# ── 9. What the other role left behind ───────────────────────────────────────
+# A backend must not keep a bastion's ob-cert.socket: it mints hop
+# certificates with the host's server token. The recording sink and ob-ssh's
+# configuration go too; a bastion's own files are left alone. The other way
+# round, a backend's LLNG sudo stack is a policy decision, so a bastion only
+# says it is there.
+test_other_role_leftovers() {
+    local tmp bad="" out
+    tmp=$(mktemp -d)
+    # $1 role; prints the systemctl calls made
+    retire_as() {
+        (
+            load_setup_as ob-bastion-setup || exit 99
+            parse_args -p https://x.example.com --node-role "$1" >/dev/null 2>&1 || exit 98
+            SSH_PROXY_CONF="$tmp/ssh-proxy.conf"
+            BACKUP_DIR="$tmp/backup"
+            systemctl() {
+                echo "systemctl $*" >> "$tmp/systemctl.log"
+                case "$1" in
+                    is-enabled) [ "$3" = ob-cert.socket ] || [ "$3" = ob-record.socket ] ;;
+                    is-active)  return 1 ;;
+                    *)          return 0 ;;
+                esac
+            }
+            retire_bastion_services >/dev/null 2>&1
+        )
+    }
+    printf '# Open Bastion ssh-proxy configuration\nPORTAL_URL="x"\n' > "$tmp/ssh-proxy.conf"
+    retire_as backend
+    grep -q '^systemctl disable --now ob-cert.socket$' "$tmp/systemctl.log" 2>/dev/null \
+        || bad="$bad cert-socket-left"
+    grep -q '^systemctl disable --now ob-record.socket$' "$tmp/systemctl.log" 2>/dev/null \
+        || bad="$bad record-socket-left"
+    [ -e "$tmp/ssh-proxy.conf" ] && bad="$bad proxy-conf-left"
+    [ -f "$tmp/backup/ssh-proxy.conf" ] || bad="$bad proxy-conf-not-backed-up"
+
+    rm -f "$tmp/systemctl.log"
+    printf '# written by an operator\n' > "$tmp/ssh-proxy.conf"
+    retire_as backend
+    [ -f "$tmp/ssh-proxy.conf" ] || bad="$bad foreign-proxy-conf-removed"
+
+    rm -f "$tmp/systemctl.log"
+    printf '# Open Bastion ssh-proxy configuration\n' > "$tmp/ssh-proxy.conf"
+    retire_as bastion
+    grep -q 'disable' "$tmp/systemctl.log" 2>/dev/null && bad="$bad bastion-disabled-its-own"
+    [ -f "$tmp/ssh-proxy.conf" ] || bad="$bad bastion-removed-its-own"
+
+    # The backend sudo stack, seen from a bastion.
+    printf 'auth       required     pam_openbastion.so service_type=sudo\n' > "$tmp/sudo"
+    out=$(
+        load_setup_as ob-bastion-setup || exit 99
+        parse_args -p https://x.example.com >/dev/null 2>&1
+        PAM_SUDO="$tmp/sudo"
+        warn_backend_sudo_left 2>&1
+    )
+    grep -q 'LLNG sudo stack of an earlier backend setup' <<<"$out" || bad="$bad no-sudo-warning"
+    out=$(
+        load_setup_as ob-backend-setup || exit 99
+        parse_args -p https://x.example.com >/dev/null 2>&1
+        PAM_SUDO="$tmp/sudo"
+        warn_backend_sudo_left 2>&1
+    )
+    [ -z "$out" ] || bad="$bad sudo-warning-on-backend"
+
+    rm -rf "$tmp"
+    if [ -z "$bad" ]; then
+        pass "a backend retires the bastion's cert/record sockets and ob-ssh config; a bastion flags LLNG sudo"
+    else
+        fail "what the other role left behind is retired or flagged" "$bad"
+    fi
+}
+
 echo "=== one setup script, three roles (#288) ==="
 run_test test_role_from_name
 run_test test_node_role_overrides_the_stack
@@ -371,6 +443,7 @@ run_test test_help_is_role_specific
 run_test test_other_role_dropin_removed
 run_test test_role_switch_defers_helper
 run_test test_sshd_config_fallback_refuses_switch
+run_test test_other_role_leftovers
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

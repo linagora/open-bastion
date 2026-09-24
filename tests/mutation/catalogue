@@ -292,3 +292,11 @@ replace || \n    error "'PermitRootLogin no'), then run this again."\n    return
 suite   || tests/test_ob_setup_roles.sh
 why     || #290 review: without sshd_config.d an existing block is kept as is,
 why     || so a role switch there would leave the old role's sshd in force.
+
+id      || setup-backend-retires-cert-socket
+file    || scripts/ob-bastion-setup
+search  || for unit in ob-cert.socket ob-record.socket; do
+replace || for unit in ob-record.socket; do
+suite   || tests/test_ob_setup_roles.sh
+why     || #290 review: a backend must not keep a bastion's ob-cert.socket,
+why     || which mints hop certificates with the host's server token.
