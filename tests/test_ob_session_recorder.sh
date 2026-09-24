@@ -334,6 +334,51 @@ test_log_lines_sanitized() {
     rm -f "$log"
 }
 
+# ── Test 8c2: a long logged command keeps its length and a hash (#287) ──
+# Truncating at 1024 bytes would let an attacker pad the interesting part out of
+# the log; log_safe must record the true length and a hash instead.
+test_log_safe_truncation() {
+    local out
+    out=$(
+        source_script "ob-session-recorder"
+        big=$(head -c 5000 /dev/zero | tr '\0' A)
+        log_safe "scp -t /x; evil $big"
+    )
+    local hexpect
+    hexpect=$(printf '%s' "scp -t /x; evil $(head -c 5000 /dev/zero | tr '\0' A)" | sha256sum | cut -c1-16)
+    if [ "${#out}" -lt 1200 ] && [[ "$out" == *"sha256:${hexpect}"* ]] && [[ "$out" == *"total"* ]]; then
+        pass "log_safe truncates long commands with a length and a matching hash"
+    else
+        fail "log_safe did not record length+hash for a long command" "len=${#out}"
+    fi
+}
+
+# ── Test 8c3: C1 control bytes (0x80-0x9f) are escaped, not passed raw ──
+# LC_ALL=C [[:cntrl:]] covers only C0 and DEL; 0x9b is CSI, an escape sequence
+# introducer, and must not reach the JSON header or a log line raw.
+test_c1_bytes_escaped() {
+    local h logline
+    h=$(
+        source_script "ob-session-recorder"
+        command() { [ "${1:-}" = "-v" ] && [ "${2:-}" = "jq" ] && return 1; builtin command "$@"; }
+        SESSION_ID="id"; FORMAT="script"; CLIENT_IP="x"; TTY_NAME="x"; SESSION_START="x"
+        ORIGINAL_COMMAND=$'ls\x9b2J\x80end'
+        build_header
+    )
+    logline=$(
+        source_script "ob-session-recorder"
+        log_safe $'ls\x9b2J'
+    )
+    # The raw C1 byte must be gone from both, and the header must name it \u009b.
+    if ! printf '%s' "$h" | grep -q $'\x9b' && printf '%s' "$h" | grep -q '\\u009b' \
+       && printf '%s' "$h" | grep -q '\\u0080' \
+       && ! printf '%s' "$logline" | grep -q $'\x9b'; then
+        pass "C1 control bytes escaped in the header and the log"
+    else
+        fail "a C1 control byte was passed through raw" "hdr=$h log=$logline"
+    fi
+}
+
 # ── Test 8d: which commands skip the PTY recording (#287) ──
 #
 # A command classified as a file transfer runs WITHOUT its stream being
@@ -900,6 +945,35 @@ test_e2e_max_duration() {
     [ "$ok" = 1 ] && pass "E2E: max_duration ends the session (and a transfer), recording complete, FIFO removed"
 }
 
+# ── E2E 6: an oversized command is refused, and nothing runs (#287) ──
+# A command long enough to push the metadata header past the sink's cap used to
+# connect anyway; the sink then rejected the header and exited, but the
+# connector stayed alive on the FIFO and the command ran unrecorded. Now the
+# recorder refuses it up front (check_header_size), and the ACK handshake would
+# stop it even if that check were bypassed. The command here would `touch` a
+# marker if it ran; it must not, and no session must be recorded.
+test_e2e_oversized_command() {
+    local j marker pad n0 rc=0
+    marker="$E2E_WORK/oversize-ran"
+    rm -f "$marker"
+    pad=$(head -c 9000 /dev/zero | tr '\0' A)
+    e2e_driver
+    n0=$(e2e_session_count)
+    e2e_run "touch $marker #$pad" </dev/null >/dev/null 2>&1 || rc=$?
+    # Give a (buggy) build a moment to have recorded or run something.
+    sleep 1
+    if [ -e "$marker" ]; then
+        fail "E2E: an oversized command ran (recording bypass)"
+    elif [ "$rc" -eq 0 ]; then
+        fail "E2E: an oversized command was not refused (rc=0)"
+    elif [ "$(e2e_session_count)" -ne "$n0" ]; then
+        j=$(e2e_last_json)
+        fail "E2E: an oversized command still opened a session" "json=$j"
+    else
+        pass "E2E: an oversized command is refused, nothing runs, nothing recorded"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -913,6 +987,8 @@ run_test test_build_header_single_line
 run_test test_build_header_no_newline_injection
 run_test test_build_header_fallback_escapes_all_fields
 run_test test_log_lines_sanitized
+run_test test_log_safe_truncation
+run_test test_c1_bytes_escaped
 run_test test_transfer_classification
 run_test test_max_duration_validation
 run_test test_streams_via_connect
@@ -931,6 +1007,7 @@ if e2e_setup; then
     run_test test_e2e_transfers
     run_test test_e2e_private_channel_dir
     run_test test_e2e_max_duration
+    run_test test_e2e_oversized_command
 fi
 
 echo ""

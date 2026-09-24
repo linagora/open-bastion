@@ -36,7 +36,18 @@ FORMAT="script"
 DEFAULT_MAX_SESSION_DURATION=86400  # 24 hours
 MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
 # Seconds the watchdog gives the recorder to finish once the session is ended.
-WATCHDOG_GRACE=5
+# Must stay LARGER than the forwarder-drain wait in close_record_channel (5 s):
+# otherwise the watchdog could SIGKILL the recorder while it is still waiting to
+# SIGTERM a stuck forwarder, and that forwarder would then hold the sink open
+# for the whole duration cap.
+WATCHDOG_GRACE=15
+# Seconds to wait for the connector to report the sink's ACK (below). Generous:
+# the sink resolves the peer's user (NSS, possibly networked) before it answers.
+CONNECT_TIMEOUT=15
+# The sink caps one metadata header at 8192 bytes (MAX_HEADER); a longer one is
+# rejected. We refuse such a command up front rather than let the sink reject
+# it after the connection is made.
+OB_HEADER_MAX=8192
 # Where the recording channel's private directory is created (mktemp -d).
 REC_TMP_BASE="/tmp"
 
@@ -85,16 +96,27 @@ log_err() {
 }
 
 # Print the first of the given absolute paths that is an executable regular
-# file owned by root and writable by nobody else. PATH is never consulted: a
-# program the recorder trusts with the session must not be one the recorded
-# user could have put there.
+# file owned by root and writable by nobody else, in a directory that is also
+# root-owned and not group/world-writable. PATH is never consulted: a program
+# the recorder trusts with the session must not be one the recorded user (or a
+# member of a privileged group) could have planted or swapped.
+#
+# The directory check matters because a file's own mode is not enough: a
+# group-writable directory lets a member replace the file (unlink + create).
+# Older Debian ships /usr/local/bin as root:staff 2775 (group-writable, setgid);
+# a member of "staff" could then swap ob-record-connect. We REFUSE such a
+# directory, so on those hosts the connector must be installed under /usr/bin
+# (the package default) or /usr/local/bin must be tightened to 0755 root:root.
 resolve_system_bin() {
-    local p st
+    local p st dst
     for p in "$@"; do
         [ -f "$p" ] && [ -x "$p" ] || continue
         st=$(stat -L -c '%u %a' "$p" 2>/dev/null) || continue
         [ "${st%% *}" = "0" ] || continue
         [ $(( 8#${st##* } & 8#022 )) -eq 0 ] || continue
+        dst=$(stat -L -c '%u %a' "${p%/*}" 2>/dev/null) || continue
+        [ "${dst%% *}" = "0" ] || continue
+        [ $(( 8#${dst##* } & 8#022 )) -eq 0 ] || continue
         printf '%s\n' "$p"
         return 0
     done
@@ -187,7 +209,10 @@ build_header() {
 }
 
 # JSON string escaping (RFC 8259 §7): backslash, quote, and every control
-# character, the common ones by name and the rest as \u00XX.
+# character, the common ones by name and the rest as \u00XX. That includes the
+# C1 range 0x80-0x9f: LC_ALL=C keeps this working byte by byte, but its
+# [[:cntrl:]] covers only C0 and DEL, so the C1 controls (0x9b is CSI, an escape
+# sequence introducer) would otherwise pass through raw and be invalid JSON.
 json_escape() {
     local s="$1" out="" c code i LC_ALL=C
     s=${s//\\/\\\\}
@@ -195,13 +220,16 @@ json_escape() {
     s=${s//$'\n'/\\n}
     s=${s//$'\r'/\\r}
     s=${s//$'\t'/\\t}
-    if [[ "$s" == *[[:cntrl:]]* ]]; then
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f'-$'\x9f']* ]]; then
         for ((i = 0; i < ${#s}; i++)); do
             c=${s:i:1}
-            case "$c" in
-                [[:cntrl:]]) printf -v code '\\u%04x' "'$c"; out+=$code ;;
-                *) out+=$c ;;
-            esac
+            printf -v code '%d' "'$c"
+            [ "$code" -lt 0 ] && code=$((code + 256))
+            if { [ "$code" -ge 1 ] && [ "$code" -le 31 ]; } || [ "$code" -eq 127 ] \
+               || { [ "$code" -ge 128 ] && [ "$code" -le 159 ]; }; then
+                printf -v c '\\u%04x' "$code"
+            fi
+            out+=$c
         done
         s=$out
     fi
@@ -210,13 +238,19 @@ json_escape() {
 
 # A client-supplied string made safe for one syslog line: at most 1024 bytes,
 # and quoted with printf %q -- one line, every control character visible --
-# when it holds any. Plain commands are logged as they are, readable.
+# when it holds any C0, DEL or C1 (0x80-0x9f) control. A truncated string keeps
+# its true length and a hash, so an attacker cannot pad the interesting part out
+# of the logged window. Plain commands are logged as they are, readable.
 log_safe() {
     local s="$1" LC_ALL=C
     if [ "${#s}" -gt 1024 ]; then
-        s="${s:0:1024}[...]"
+        local len hash
+        len=${#s}
+        hash=$(printf '%s' "$s" | sha256sum 2>/dev/null | cut -c1-16)
+        [ -n "$hash" ] || hash="?"
+        s="${s:0:1024}[...+$((len - 1024)) bytes, ${len} total, sha256:${hash}]"
     fi
-    if [[ "$s" == *[[:cntrl:]]* ]]; then
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f'-$'\x9f']* ]]; then
         printf '%q' "$s"
     else
         printf '%s' "$s"
@@ -225,6 +259,27 @@ log_safe() {
 
 log_session_start() {
     log_info "Session $SESSION_ID started for user $SESSION_USER from $(log_safe "$CLIENT_IP")${ORIGINAL_COMMAND:+, command: $(log_safe "$ORIGINAL_COMMAND")}"
+}
+
+# Refuse a command whose metadata header would exceed the sink's cap
+# (OB_HEADER_MAX). The header carries the client's command, and the sink
+# rejects an oversized line -- so without this the connection would be made and
+# only then refused, the window #287 is about. We measure the built header, so
+# JSON escaping (which can expand a byte up to sixfold) is counted exactly; the
+# check covers the transfer path too (its header is 2 bytes shorter). A refused
+# command is logged with its length and a hash, never in full. Fail closed.
+check_header_size() {
+    local h LC_ALL=C
+    h=$(build_header)
+    if [ "${#h}" -ge "$((OB_HEADER_MAX - 2))" ]; then
+        local len hash
+        len=$(printf '%s' "$ORIGINAL_COMMAND" | LC_ALL=C wc -c | tr -d ' ')
+        hash=$(printf '%s' "$ORIGINAL_COMMAND" | sha256sum 2>/dev/null | cut -c1-16)
+        [ -n "$hash" ] || hash="?"
+        log_err "Session $SESSION_ID refused: command too long for a recording header (${#h} bytes, over ${OB_HEADER_MAX}; command ${len} bytes, sha256:${hash})"
+        echo "Session cannot be recorded (command too long); access refused." >&2
+        exit 1
+    fi
 }
 
 # Cleanup on exit. The sink owns the metadata file (end time + status), so the
@@ -248,6 +303,27 @@ proc_running() {
     { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
     st=${st##*) }
     [ "${st%% *}" != "Z" ]
+}
+
+# Start time of process $1 (field 22 of /proc/<pid>/stat, in clock ticks), so a
+# pid can be told apart from a later process that reused it. Empty if gone.
+proc_starttime() {
+    local st f
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }            # drop "pid (comm) "; $f then starts at field 3
+    read -ra f <<< "$st"
+    printf '%s' "${f[19]}"   # field 22 = index 19 from field 3
+}
+
+# 0 while process $1 is the same live process whose start time is $2 (not a
+# zombie, not a pid the kernel has since handed to someone else).
+proc_is() { # $1 pid  $2 expected start time
+    local st f
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }
+    read -ra f <<< "$st"
+    [ "${f[0]}" != "Z" ] || return 1   # state, field 3
+    [ "${f[19]}" = "$2" ]              # start time, field 22
 }
 
 # max_duration must be a number of seconds. A typo used to disable the
@@ -303,6 +379,8 @@ watchdog_targets() { # $1 recorder pid  $2 forwarder pid (may be empty)  $3 watc
 
 start_watchdog() {
     local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ fwd="$OB_REC_PID"
+    local rstart
+    rstart=$(proc_starttime "$recorder") || return 0
     [ "$limit" -gt 0 ] || return 0
     (
         self=$BASHPID
@@ -311,7 +389,10 @@ start_watchdog() {
         sleep "$limit" &
         sleep_pid=$!
         wait "$sleep_pid" 2>/dev/null
-        proc_running "$recorder" || exit 0
+        # Every liveness test below is start-time-guarded: this runs on past the
+        # recorder's death, so the pid may already belong to someone else, and
+        # a bare-pid kill would then hit an innocent process.
+        proc_is "$recorder" "$rstart" || exit 0
         # From here on cleanup()'s TERM is moot: this exits by itself once the
         # recorder is gone, and must not be stopped half-way.
         trap '' HUP TERM
@@ -323,9 +404,11 @@ start_watchdog() {
         # shellcheck disable=SC2046  # one pid per word
         kill -KILL $(watchdog_targets "$recorder" "$fwd" "$self") 2>/dev/null || true
         for ((i = 0; i < grace * 10; i++)); do
-            proc_running "$recorder" || exit 0
+            proc_is "$recorder" "$rstart" || exit 0
             sleep 0.1
         done
+        # Last resort. Re-check the identity right before the bare-pid kill.
+        proc_is "$recorder" "$rstart" || exit 0
         log_warn "Session $SESSION_ID: recorder still running ${grace}s after the timeout; killing it"
         [ -n "$OB_REC_DIR" ] && rm -rf -- "$OB_REC_DIR"
         # shellcheck disable=SC2046
@@ -696,35 +779,49 @@ OB_REC_DIR=""
 OB_REC_FIFO=""
 OB_REC_PID=""
 
-# Open the recording channel: make a FIFO, start ob-record-connect reading it
-# (it connects + sends the header FIRST, then blocks opening the FIFO), and
-# confirm the connection succeeded BEFORE the caller starts the shell. Returns
-# non-zero (cleaning up) when the sink is unreachable — so we fail closed.
+# Open the recording channel: make a FIFO, start ob-record-connect on it, and
+# confirm the sink ACCEPTED the session BEFORE the caller starts `script`.
+# Returns non-zero (cleaning up) when the sink is unreachable or refuses the
+# header — so we fail closed.
 #
-# The FIFO lives in a private directory made by `mktemp -d` (mode 0700), not
-# at a name `mktemp -u` merely predicted in the shared /tmp, which another
-# user could take first between the two calls.
+# The connector connects, sends the header, waits for the sink's one-byte ACK,
+# and only then prints OB_READY on its stdout and opens the FIFO. We read that
+# token from a second FIFO: OB_READY means the sink created the metadata and
+# recording file, so it is safe to run the session; EOF (the connector exited
+# without it) or a timeout means the session is NOT recorded, and we refuse it.
+# The 0.2 s "is it still alive" probe this replaces could not see a header the
+# sink rejected AFTER connect: the connector was still blocked on the FIFO and
+# looked alive, so the command ran unrecorded (#287).
+#
+# Both FIFOs live in a private directory made by `mktemp -d` (mode 0700), not at
+# a name `mktemp -u` merely predicted in the shared /tmp, which another user
+# could take first between the two calls.
 open_record_channel() {
     local header="$1"
     OB_REC_DIR=$(mktemp -d "$REC_TMP_BASE/ob-rec.XXXXXXXXXX") || { OB_REC_DIR=""; return 1; }
     OB_REC_FIFO="$OB_REC_DIR/stream"
-    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then
+    local ready_fifo="$OB_REC_DIR/ready"
+    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null || ! mkfifo -m 600 "$ready_fifo" 2>/dev/null; then
         close_record_channel
         return 1
     fi
     OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
-        </dev/null >/dev/null &
+        </dev/null >"$ready_fifo" 2>/dev/null &
     OB_REC_PID=$!
-    # ob-record-connect connects (fast) then blocks on open(FIFO). If it has
-    # already exited a moment later, the connect failed → the sink is down.
-    sleep 0.2
-    if ! proc_running "$OB_REC_PID"; then
-        wait "$OB_REC_PID" 2>/dev/null || true
-        OB_REC_PID=""
-        close_record_channel
-        return 1
+    # Blocks until the connector opens its stdout (at once) and either writes
+    # the token or exits. The timeout guards against a sink that took the
+    # connection but never answers.
+    local ready=""
+    read -r -t "$CONNECT_TIMEOUT" ready <"$ready_fifo" 2>/dev/null || ready=""
+    rm -f "$ready_fifo"
+    if [ "$ready" = "OB_READY" ]; then
+        return 0
     fi
-    return 0
+    kill "$OB_REC_PID" 2>/dev/null || true
+    wait "$OB_REC_PID" 2>/dev/null || true
+    OB_REC_PID=""
+    close_record_channel
+    return 1
 }
 
 # Let the forwarder finish and remove the channel's directory. Idempotent:
@@ -901,6 +998,10 @@ main() {
         [ "$FORMAT" != "transfer" ] && log_warn "format '$FORMAT' not supported by the sink yet; using 'script'"
         FORMAT="script"
     fi
+
+    # Refuse a command whose header would not fit the sink's cap, before any
+    # connection is made (fail-closed; see check_header_size).
+    check_header_size
 
     log_session_start
 
