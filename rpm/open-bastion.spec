@@ -94,6 +94,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder
+%{_sbindir}/ob-login-shell
 # One setup script; the other two names are symlinks to it made by CMake,
 # which choose the default node role (#288).
 %{_sbindir}/ob-bastion-setup
@@ -121,6 +122,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_prefix}/lib/open-bastion/ob-cert-lib.sh
 %{_prefix}/lib/open-bastion/ob-sign-lib.sh
 %{_prefix}/lib/open-bastion/ob-timers-lib.sh
+%{_prefix}/lib/open-bastion/ob-login-shell-lib.sh
 %{_prefix}/lib/open-bastion/ob-ssh-principals.bastion
 %{_prefix}/lib/open-bastion/ob-ssh-principals.backend
 %{_prefix}/lib/open-bastion/ob-fp-spool.tmpfiles
@@ -164,6 +166,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-standalone-setup.8*
 %{_mandir}/man8/ob-backend-setup.8*
 %{_mandir}/man8/ob-session-recorder.8*
+%{_mandir}/man8/ob-login-shell.8*
 %{_mandir}/man8/ob-session-prune.8*
 %{_mandir}/man8/ob-krl-refresh.8*
 %{_mandir}/man8/ob-cert-daemon.8*
@@ -282,6 +285,19 @@ if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
         break
     done
 fi
+# Mirrors note_login_shell in debian/open-bastion.postinst.
+grep -qxF %{_sbindir}/ob-login-shell /etc/shells 2>/dev/null \
+    || echo %{_sbindir}/ob-login-shell >> /etc/shells
+for _ob_dropin in /etc/ssh/sshd_config.d/*-open-bastion-bastion.conf; do
+    [ -f "$_ob_dropin" ] || continue
+    grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+[^#]*ob-session-recorder' "$_ob_dropin" || break
+    [ -f /etc/open-bastion/nss_openbastion.conf ] || break
+    grep -Eq '^[[:space:]]*force_shell[[:space:]]*=' /etc/open-bastion/nss_openbastion.conf && break
+    echo "*** open-bastion: ACTION REQUIRED *** this host records SSH sessions, but SSO" >&2
+    echo "users still log in through a shell that reads their startup files before the" >&2
+    echo "recorder. Run ob-post-upgrade to switch them to ob-login-shell." >&2
+    break
+done
 # SSH fingerprint sink (#249), needed on BOTH roles: a backend runs an
 # AuthorizedPrincipalsCommand too, so this gets its own loop rather than
 # riding along with the bastion-only block above. Without it the principals
@@ -329,6 +345,10 @@ fi
 %systemd_postun_with_restart ob-cert.socket
 %systemd_postun_with_restart ob-fp.socket
 %systemd_postun_with_restart ob-record.socket
+# Erase, not upgrade.
+if [ $1 -eq 0 ]; then
+    sed -i '\#^%{_sbindir}/ob-login-shell$#d' /etc/shells 2>/dev/null || :
+fi
 
 %post desktop
 %systemd_post ob-session-monitor.service

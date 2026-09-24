@@ -453,4 +453,31 @@ if [ "$1" = configure ] && [ -f "$_ob_conf" ] && [ -f "$_ob_helper" ] \
 fi
 unset _ob_conf _ob_helper
 
+# ── ob-login-shell in /etc/shells; recording hosts still on bash ─────────────
+# Arguments (tests only): the sshd drop-in directory, the NSS configuration.
+note_login_shell() {
+    _dir="${1:-/etc/ssh/sshd_config.d}"
+    _nss="${2:-/etc/open-bastion/nss_openbastion.conf}"
+    add-shell /usr/sbin/ob-login-shell 2>/dev/null || true
+    for _dropin in "$_dir"/*-open-bastion-bastion.conf; do
+        [ -f "$_dropin" ] || continue
+        grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+[^#]*ob-session-recorder' "$_dropin" || return 0
+        [ -f "$_nss" ] || return 0
+        grep -Eq '^[[:space:]]*force_shell[[:space:]]*=' "$_nss" && return 0
+        echo "" >&2
+        echo "*** open-bastion: ACTION REQUIRED ***" >&2
+        echo "This host records SSH sessions, but SSO users still log in through" >&2
+        echo "bash (or the shell the portal supplies), which reads their own" >&2
+        echo "startup files before the session recorder starts. Run:" >&2
+        echo "    ob-post-upgrade" >&2
+        echo "to make /usr/sbin/ob-login-shell their login shell." >&2
+        echo "" >&2
+        return 0
+    done
+    return 0
+}
+if [ "$1" = configure ]; then
+    note_login_shell
+fi
+
 exit 0
