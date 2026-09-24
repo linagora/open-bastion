@@ -303,6 +303,64 @@ test_post_upgrade_writes_nss_only_through_lib() {
     fi
 }
 
+# ── 6. Packaging ─────────────────────────────────────────────────────────────
+# The postinst lists the launcher in /etc/shells on every configure, and tells
+# a recording host that still hands out bash to run ob-post-upgrade.
+test_postinst_registers_and_warns() {
+    local bad="" d="$WORK/pi" out
+    rm -rf "$d"
+    mkdir -p "$d/bin" "$d/sshd.d"
+    sed -n '/^note_login_shell() {/,/^}/p' "$ROOT_DIR/debian/open-bastion.postinst" > "$d/fn.sh"
+    [ -s "$d/fn.sh" ] || { fail "the postinst registers and warns" "note_login_shell not found"; return; }
+    printf '#!/bin/sh\necho "$1" >> "%s/added"\n' "$d" > "$d/bin/add-shell"
+    chmod +x "$d/bin/add-shell"
+    run_pi() { (cd "$d" && PATH="$d/bin:$PATH" sh -c '. ./fn.sh; note_login_shell "$1" "$2"' _ "$d/sshd.d" "$d/nss.conf" 2>&1); }
+
+    printf 'ForceCommand /usr/sbin/ob-session-recorder\n' > "$d/sshd.d/00-open-bastion-bastion.conf"
+    printf 'default_shell = /bin/bash\n' > "$d/nss.conf"
+    out=$(run_pi)
+    grep -q 'ACTION REQUIRED' <<<"$out" && grep -q 'ob-post-upgrade' <<<"$out" || bad="$bad no-warning"
+    grep -qx /usr/sbin/ob-login-shell "$d/added" 2>/dev/null || bad="$bad not-added"
+
+    printf 'force_shell = /usr/sbin/ob-login-shell\n' >> "$d/nss.conf"
+    out=$(run_pi)
+    [ -z "$out" ] || bad="$bad warns-when-done"
+    printf '# Session recording disabled\n' > "$d/sshd.d/00-open-bastion-bastion.conf"
+    printf 'default_shell = /bin/bash\n' > "$d/nss.conf"
+    out=$(run_pi)
+    [ -z "$out" ] || bad="$bad warns-without-recorder"
+    rm -f "$d/sshd.d/"*
+    out=$(run_pi)
+    [ -z "$out" ] || bad="$bad warns-on-unconfigured-host"
+    [ "$(grep -c . "$d/added")" = 4 ] || bad="$bad not-added-every-time"
+    if [ -z "$bad" ]; then
+        pass "the postinst lists the launcher in /etc/shells, and asks a recording host still on bash to run ob-post-upgrade"
+    else
+        fail "the postinst registers the launcher and warns" "$bad"
+    fi
+}
+
+test_packages_ship_and_unregister() {
+    local bad="" f
+    for f in usr/sbin/ob-login-shell usr/lib/open-bastion/ob-login-shell-lib.sh \
+             usr/share/man/man8/ob-login-shell.8; do
+        grep -qx "$f" "$ROOT_DIR/debian/open-bastion.install" || bad="$bad deb:$f"
+    done
+    grep -q 'remove-shell /usr/sbin/ob-login-shell' "$ROOT_DIR/debian/open-bastion.postrm" \
+        || bad="$bad postrm"
+    for f in '%{_sbindir}/ob-login-shell' '%{_prefix}/lib/open-bastion/ob-login-shell-lib.sh' \
+             '%{_mandir}/man8/ob-login-shell.8*'; do
+        grep -qxF "$f" "$ROOT_DIR/rpm/open-bastion.spec" || bad="$bad rpm:$f"
+    done
+    grep -q '>> /etc/shells' "$ROOT_DIR/rpm/open-bastion.spec" || bad="$bad rpm-post"
+    grep -q 'ob-login-shell\$#d. /etc/shells' "$ROOT_DIR/rpm/open-bastion.spec" || bad="$bad rpm-postun"
+    if [ -z "$bad" ]; then
+        pass "both packages ship the launcher, its library and man page, and take it out of /etc/shells on removal"
+    else
+        fail "the packages ship and unregister the launcher" "$bad"
+    fi
+}
+
 run_test test_force_shell_by_role
 run_test test_dropin_pins_user_environment
 run_test test_setup_writes_and_registers
@@ -313,6 +371,8 @@ run_test test_lib_records_sessions
 run_test test_lib_register_shell
 run_test test_post_upgrade_switches_recording_hosts
 run_test test_post_upgrade_writes_nss_only_through_lib
+run_test test_postinst_registers_and_warns
+run_test test_packages_ship_and_unregister
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

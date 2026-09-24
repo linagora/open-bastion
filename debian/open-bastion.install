@@ -11,6 +11,7 @@ etc/open-bastion/ssh-proxy.conf.example
 usr/sbin/ob-enroll
 usr/sbin/ob-heartbeat
 usr/sbin/ob-session-recorder
+usr/sbin/ob-login-shell
 # ob-standalone-setup and ob-backend-setup are symlinks to this script, made
 # by CMake, which choose the default node role.
 usr/sbin/ob-bastion-setup
@@ -32,6 +33,7 @@ usr/sbin/ob-krl-refresh
 usr/lib/open-bastion/ob-cert-lib.sh
 usr/lib/open-bastion/ob-sign-lib.sh
 usr/lib/open-bastion/ob-timers-lib.sh
+usr/lib/open-bastion/ob-login-shell-lib.sh
 usr/lib/open-bastion/ob-ssh-principals.bastion
 usr/lib/open-bastion/ob-ssh-principals.backend
 usr/lib/open-bastion/ob-fp-spool.tmpfiles
@@ -58,6 +60,7 @@ usr/share/man/man8/ob-bastion-setup.8
 usr/share/man/man8/ob-standalone-setup.8
 usr/share/man/man8/ob-backend-setup.8
 usr/share/man/man8/ob-session-recorder.8
+usr/share/man/man8/ob-login-shell.8
 usr/share/man/man8/ob-session-prune.8
 usr/share/man/man8/ob-krl-refresh.8
 usr/share/man/man8/ob-cert-daemon.8
