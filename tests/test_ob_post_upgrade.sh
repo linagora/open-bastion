@@ -85,17 +85,17 @@ test_helper_has_one_home() {
     fi
 }
 
-# ── 2. All three installers use the shipped copy ─────────────────────────────
+# ── 2. Both installers use the shipped copy ──────────────────────────────────
 test_all_installers_use_share() {
     local missing="" f
-    for f in ob-bastion-setup ob-backend-setup ob-post-upgrade; do
+    for f in ob-bastion-setup ob-post-upgrade; do
         grep -q 'ob-ssh-principals\.' "$ROOT_DIR/scripts/$f" \
             || missing="$missing $f"
     done
     if [ -z "$missing" ]; then
-        pass "all three installers read the shipped helper"
+        pass "the setup script and ob-post-upgrade read the shipped helper"
     else
-        fail "all three installers read the shipped helper" "not:$missing"
+        fail "the setup script and ob-post-upgrade read the shipped helper" "not:$missing"
     fi
 }
 
@@ -261,10 +261,11 @@ test_refuses_stale_sshd_line() {
 
 # ── 11. The role comes from the sshd drop-in, not from node_role ────────────
 #
-# node_role is a reporting label: `ob-backend-setup --node-role bastion` is a
-# valid invocation. Trusting it would install the BASTION helper on a backend --
-# no vouching, allowlist ignored, a direct SSO certificate accepted -- under a
-# reassuring "[DONE] installed the bastion helper".
+# node_role used to be a reporting label: before #288, `ob-backend-setup
+# --node-role bastion` configured a backend and recorded "bastion", and hosts
+# set up that way still say so. Trusting it would install the BASTION helper on
+# a backend -- no vouching, allowlist ignored, a direct SSO certificate
+# accepted -- under a reassuring "[DONE] installed the bastion helper".
 test_role_prefers_the_sshd_dropin() {
     local d="$WORK/sshd-role" bad=""
     mkdir -p "$d"

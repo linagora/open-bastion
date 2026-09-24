@@ -44,6 +44,8 @@ skip_all() { echo "  SKIP: $1"; echo "=== Skipped (exit 77) ==="; exit 77; }
 
 # shellcheck source=tests/lib_pam_stack.sh
 . "$REPO_ROOT/tests/lib_pam_stack.sh"
+# shellcheck source=tests/lib_setup_script.sh
+. "$REPO_ROOT/tests/lib_setup_script.sh"
 
 # PAM return codes we assert on (values from <security/_pam_types.h>).
 PAM_SUCCESS=0
@@ -57,7 +59,8 @@ CC_BIN="${CC:-cc}"
 command -v "$CC_BIN" >/dev/null 2>&1 || skip_all "no C compiler ($CC_BIN) available"
 
 TMPDIR_RUN=$(mktemp -d) || skip_all "mktemp failed"
-cleanup() { rm -rf "$TMPDIR_RUN"; }
+# Replaces lib_setup_script.sh's EXIT trap, so it takes over its directory too.
+cleanup() { rm -rf "$TMPDIR_RUN" "$SETUP_LINK_DIR"; }
 trap cleanup EXIT
 
 PROBE="$TMPDIR_RUN/pam_stack_probe"
@@ -164,24 +167,16 @@ else
 fi
 
 # ── The setup scripts ──
-echo "--- scripts/ob-bastion-setup, scripts/ob-backend-setup ---"
+echo "--- scripts/ob-bastion-setup, as ob-bastion-setup and ob-backend-setup ---"
 
-# Load a setup script without running main(), the same way
-# tests/test_ob_bastion_setup.sh does, then run configure_pam_sshd in dry-run
-# mode and keep its generated stack.
-source_setup_script() {
-    local content
-    content=$(cat "$REPO_ROOT/scripts/$1")
-    content="${content%main \"\$@\"}"
-    content=$(echo "$content" | sed -E 's/^set -e(uo pipefail)?$//')
-    eval "$content"
-}
-
+# Load the setup script under one of its names (which picks the role) without
+# running main(), then run configure_pam_sshd in dry-run mode and keep its
+# generated stack.
 setup_sshd_stack() {
     local script="$1"
     shift
     (
-        source_setup_script "$script"
+        load_setup_as "$script" || exit 1
         parse_args "$@" >/dev/null 2>&1
         configure_pam_sshd 2>/dev/null
     )

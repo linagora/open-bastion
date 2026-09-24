@@ -414,7 +414,7 @@ test_helpers_deposit_via_submit() {
 # ── 7. The shipped spool is root-owned ───────────────────────────────────────
 test_setup_scripts_own_the_spool_as_root() {
     local bad=""
-    for f in scripts/ob-bastion-setup scripts/ob-backend-setup scripts/ob-post-upgrade; do
+    for f in scripts/ob-bastion-setup scripts/ob-post-upgrade; do
         grep -qE 'chown[[:space:]]+nobody(:[a-z]+)?' "$ROOT_DIR/$f" && bad="$bad $f"
         # Anchored on the spool directory itself, not on "an 0700 somewhere in
         # the file": the point is that THIS directory is root's, and an
@@ -427,9 +427,9 @@ test_setup_scripts_own_the_spool_as_root() {
     grep -q 'd /run/open-bastion/ssh-fp   0700 root root' \
         "$ROOT_DIR/share/ob-fp-spool.tmpfiles" || bad="$bad tmpfiles"
     if [ -z "$bad" ]; then
-        pass "both setups create the spool 0700 root, in place and at boot"
+        pass "the setup script and ob-post-upgrade create the spool 0700 root, in place and at boot"
     else
-        fail "both setups create the spool 0700 root" "$bad"
+        fail "the setup script and ob-post-upgrade create the spool 0700 root" "$bad"
     fi
 }
 

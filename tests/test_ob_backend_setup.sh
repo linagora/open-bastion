@@ -1,10 +1,15 @@
 #!/bin/bash
+# test_ob_backend_setup.sh -- the backend role of the setup script.
+#
+# ob-backend-setup is a symlink to scripts/ob-bastion-setup, which takes its
+# default role from the name it is invoked under (#288). Everything here goes
+# through that name, exactly as an admin runs it: the script is loaded or run
+# as "ob-backend-setup", never as ob-bastion-setup with the role patched in.
 set -uo pipefail
 
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
-SCRIPT_DIR="$(cd "$(dirname "$0")/../scripts" && pwd)"
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); echo "  PASS: $1"; }
@@ -13,19 +18,16 @@ run_test() { TESTS_RUN=$((TESTS_RUN + 1)); "$@"; }
 
 # shellcheck source=tests/lib_pam_stack.sh
 . "$TESTS_DIR/lib_pam_stack.sh"
+# shellcheck source=tests/lib_setup_script.sh
+. "$TESTS_DIR/lib_setup_script.sh"
 
-source_script() {
-    local script="$1"
-    local content
-    content=$(cat "$SCRIPT_DIR/$script")
-    content="${content%main \"\$@\"}"
-    content=$(echo "$content" | sed -E 's/^set -e(uo pipefail)?$//')
-    eval "$content"
-}
+# The command under test, and its definitions loaded under the same name.
+BACKEND=$(setup_command ob-backend-setup)
+source_script() { load_setup_as "$1"; }
 
 # ── Test 1: Syntax check ──
 test_syntax() {
-    if bash -n "$SCRIPT_DIR/ob-backend-setup" 2>/dev/null; then
+    if bash -n "$BACKEND" 2>/dev/null; then
         pass "Syntax check"
     else
         fail "Syntax check"
@@ -35,7 +37,7 @@ test_syntax() {
 # ── Test 2: --version / --help ──
 test_version() {
     local out
-    out=$(bash "$SCRIPT_DIR/ob-backend-setup" --version 2>&1)
+    out=$(bash "$BACKEND" --version 2>&1)
     if echo "$out" | grep -q "version"; then
         pass "--version outputs version"
     else
@@ -45,7 +47,7 @@ test_version() {
 
 test_help() {
     local out
-    out=$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)
+    out=$(bash "$BACKEND" --help 2>&1)
     if echo "$out" | grep -q "Usage"; then
         pass "--help outputs usage"
     else
@@ -55,7 +57,7 @@ test_help() {
 
 # ── Test 3: Unknown option rejected ──
 test_unknown_option() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" --bogus 2>/dev/null; then
+    if bash "$BACKEND" --bogus 2>/dev/null; then
         fail "Unknown option rejected"
     else
         pass "Unknown option rejected"
@@ -64,7 +66,7 @@ test_unknown_option() {
 
 # ── Test 4: Missing portal URL exits with error ──
 test_missing_portal() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" -g mygroup 2>/dev/null; then
+    if bash "$BACKEND" -g mygroup 2>/dev/null; then
         fail "Missing portal URL exits with error"
     else
         pass "Missing portal URL exits with error"
@@ -73,7 +75,7 @@ test_missing_portal() {
 
 # ── Test 5: Missing server-group exits with error ──
 test_missing_server_group() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" -p "https://x" 2>/dev/null; then
+    if bash "$BACKEND" -p "https://x" 2>/dev/null; then
         fail "Missing server-group exits with error"
     else
         pass "Missing server-group exits with error"
@@ -173,7 +175,7 @@ test_max_security_sudo_provisions_sudoers() {
 # both be honoured; the run must stop before touching anything.
 test_no_sudo_conflicts_with_max_security() {
     local out rc
-    out=$(bash "$SCRIPT_DIR/ob-backend-setup" -p "https://x.example.com" -g g \
+    out=$(bash "$BACKEND" -p "https://x.example.com" -g g \
               --no-sudo --max-security --dry-run --yes 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ] && grep -q -- "--no-sudo cannot be combined with --max-security" <<<"$out"; then
@@ -190,7 +192,7 @@ test_no_sudo_conflicts_with_max_security() {
 # rolled-back backend kept "openbastion" in it with its config file deleted.
 test_nss_not_in_rollback_phase() {
     local body enroll nss
-    body=$(sed -n '/^main() {/,/^}/p' "$SCRIPT_DIR/ob-backend-setup")
+    body=$(sed -n '/^main() {/,/^}/p' "$SETUP_SCRIPT")
     enroll=$(grep -n 'while ! enroll_server' <<<"$body" | cut -d: -f1)
     nss=$(grep -n '^[[:space:]]*configure_nss ' <<<"$body" | cut -d: -f1)
     if [ -n "$enroll" ] && [ -n "$nss" ] && [ "$(wc -l <<<"$nss")" -eq 1 ] \
@@ -367,7 +369,7 @@ test_sudo_fresh_otp_optin() {
         || { ok=0; echo "    (--enable-sudo-fresh-otp did not scope timestamp_timeout=0)"; }
     grep -q '^%open-bastion-sudo ALL=(ALL) ALL$' <<<"$on" \
         || { ok=0; echo "    (opt-in drop-in lost its sudo rule)"; }
-    grep -q 'enable-sudo-fresh-otp' <<<"$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)" \
+    grep -q 'enable-sudo-fresh-otp' <<<"$(bash "$BACKEND" --help 2>&1)" \
         || { ok=0; echo "    (not documented in --help)"; }
 
     if command -v visudo >/dev/null 2>&1; then
@@ -555,7 +557,7 @@ test_allowed_bastions_empty_is_explicit() {
 
     # Both options must be discoverable, since the prompt now depends on them.
     local help
-    help=$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)
+    help=$(bash "$BACKEND" --help 2>&1)
     grep -q -- '--allowed-bastions' <<<"$help" \
         || { ok=0; echo "    (--allowed-bastions missing from --help)"; }
     grep -q -- '--allow-any-bastion' <<<"$help" \

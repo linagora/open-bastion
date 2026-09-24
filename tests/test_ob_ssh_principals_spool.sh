@@ -45,7 +45,10 @@ fail() { TESTS_FAILED=$((TESTS_FAILED + 1)); echo "  FAIL: $1${2:+ - $2}"; }
 run_test() { TESTS_RUN=$((TESTS_RUN + 1)); "$@"; }
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=tests/lib_setup_script.sh
+. "$ROOT_DIR/tests/lib_setup_script.sh"
+# Replaces lib_setup_script.sh's EXIT trap, so it takes over its directory too.
+trap 'rm -rf "$TMP" "$SETUP_LINK_DIR"' EXIT
 
 SPOOL="$TMP/spool"
 CONF_DIR="$TMP/etc"
@@ -352,11 +355,22 @@ test_backend_legacy_mode_warns() {
 }
 
 # ── Test 10: both sshd_config templates pass %t and %k ──
+# The drop-in is rendered, not grepped: one script writes both, and which line
+# a role gets is decided at run time. Each role is reached by its command name.
+sshd_principals_line() {
+    local out
+    out=$(
+        load_setup_as "$1" || exit 1
+        parse_args -p https://x.example.com -g g --dry-run >/dev/null 2>&1
+        configure_sshd 2>/dev/null
+    )
+    grep -m1 '^AuthorizedPrincipalsCommand ' <<<"$out"
+}
 test_sshd_config_tokens() {
     # The sshd_config template lives in the setup script, not in the helper.
     local bastion_line backend_line
-    bastion_line=$(grep -m1 '^AuthorizedPrincipalsCommand ' "$ROOT_DIR/scripts/ob-bastion-setup")
-    backend_line=$(grep -m1 '^AuthorizedPrincipalsCommand ' "$ROOT_DIR/scripts/ob-backend-setup")
+    bastion_line=$(sshd_principals_line ob-bastion-setup)
+    backend_line=$(sshd_principals_line ob-backend-setup)
     if [ "$bastion_line" = "AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k" ] \
        && [ "$backend_line" = "AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k" ]; then
         pass "sshd_config templates pass %t and %k to the helper"

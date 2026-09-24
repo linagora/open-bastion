@@ -107,7 +107,6 @@ test_all_generated_stacks() {
     local f files=(
         "debian/open-bastion.postinst"
         "scripts/ob-bastion-setup"
-        "scripts/ob-backend-setup"
         "docker-demo-cert/bastion/entrypoint.sh"
         "docker-demo-cert/backend/entrypoint.sh"
         "docker-demo-cert/bastion/Dockerfile"

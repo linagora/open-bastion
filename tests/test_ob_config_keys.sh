@@ -3,8 +3,8 @@
 # Every key this project writes into openbastion.conf must be recognised by
 # src/config.c (#229).
 #
-# Why: config_load() runs once per PAM process, so a key that ob-bastion-setup,
-# ob-backend-setup or an ob-builder template emits and the parser does not know
+# Why: config_load() runs once per PAM process, so a key that ob-bastion-setup
+# (every role, ob-backend-setup included) or an ob-builder template emits and the parser does not know
 # costs one syslog warning per login on every deployed host. Reporting unknown
 # keys is only useful while the report means something -- three to five
 # warnings per authentication would bury the single typo the feature exists to
@@ -62,8 +62,7 @@ check_source() {
 
 echo "=== openbastion.conf keys the project writes are all parsed (#229) ==="
 
-check_source "ob-bastion-setup writes only known keys"  "$ROOT_DIR/scripts/ob-bastion-setup"  printf
-check_source "ob-backend-setup writes only known keys"  "$ROOT_DIR/scripts/ob-backend-setup"  printf
+check_source "ob-bastion-setup writes only known keys (all roles)"  "$ROOT_DIR/scripts/ob-bastion-setup"  printf
 check_source "the shipped example carries only known keys" \
     "$ROOT_DIR/config/openbastion.conf.example" conf
 check_source "the ansible template carries only known keys" \

@@ -216,3 +216,42 @@ suite   || tests/test_ob_cache_key.sh
 why     || #268: fail-closed on any group or other bit. The security reference
 why     || (doc/security-reference.rst) documented a
 why     || `dd` recipe with no chmod, which under umask 022 yields 0644.
+
+id      || setup-node-role-drives-stack
+file    || scripts/ob-bastion-setup
+search  || is_backend() { [ "$NODE_ROLE" = "backend" ]; }
+replace || is_backend() { [ "$PROG_ROLE" = "backend" ]; }
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: --node-role must configure the role it names. Keying the stack
+why     || on the command name instead is exactly the old behaviour, where
+why     || `ob-bastion-setup --node-role backend` wrote a full bastion -- recorder,
+why     || ForceCommand, a principals helper that accepts direct SSO
+why     || certificates -- and labelled it backend.
+
+id      || setup-role-options-refused
+file    || scripts/ob-bastion-setup
+search  || \n    if [ "$bad" = "true" ]; then\n        exit 1\n    fi
+replace || \n    :
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: an option of one role given to another (--no-sudo on a bastion,
+why     || --disable-session-recorder on a backend) must stop the run, not be
+why     || silently ignored while reading like a decision that was carried out.
+
+id      || setup-other-role-dropin-removed
+file    || scripts/ob-bastion-setup
+search  || \n            rm -f "$stale"\n
+replace || \n
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: re-running a host under the other role must not leave the old
+why     || drop-in behind. Both would be read, and a bastion's ForceCommand
+why     || would then apply to every session of the new backend.
+
+id      || setup-backend-vouching-token
+file    || scripts/ob-bastion-setup
+search  || principals_args="%u %f %i %t %k"
+replace || principals_args="%u %f %t %k"
+suite   || tests/test_ob_ssh_principals_spool.sh
+why     || A backend's principals helper reads the certificate key-id (%i) to
+why     || check which bastion vouched for the hop. Without it every argument
+why     || after the fingerprint shifts by one: the key type is read as the
+why     || key-id, and the vouching check no longer checks anything real.
