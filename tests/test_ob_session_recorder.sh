@@ -23,6 +23,90 @@ source_script() {
     eval "$content"
 }
 
+# ── End-to-end harness ──
+#
+# The end-to-end tests run the real recorder against the real connector and
+# sink (build/), stood up with systemd-socket-activate exactly as
+# tests/test_ob_record_sink.sh does. The recorder takes nothing from the
+# environment, so the test settings (connector, socket, config) are written
+# into a copy of it, just before its final `main "$@"`: a knob only a modified
+# program can turn, never the recorded user.
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+E2E_SINK="$ROOT_DIR/build/ob-record-sink"
+E2E_CONNECT="$ROOT_DIR/build/ob-record-connect"
+E2E_WORK=""
+E2E_SA_PID=""
+
+e2e_setup() {
+    local sa
+    [ -x "$E2E_SINK" ] && [ -x "$E2E_CONNECT" ] || {
+        echo "SKIP: end-to-end recorder tests need build/ob-record-sink and build/ob-record-connect"
+        return 1; }
+    sa=$(command -v systemd-socket-activate 2>/dev/null)
+    [ -z "$sa" ] && [ -x /usr/lib/systemd/systemd-socket-activate ] && sa=/usr/lib/systemd/systemd-socket-activate
+    [ -z "$sa" ] && [ -x /lib/systemd/systemd-socket-activate ] && sa=/lib/systemd/systemd-socket-activate
+    [ -n "$sa" ] || { echo "SKIP: end-to-end recorder tests need systemd-socket-activate"; return 1; }
+    command -v setsid >/dev/null 2>&1 || { echo "SKIP: end-to-end recorder tests need setsid"; return 1; }
+    [ "$(tail -n 1 "$SCRIPT_DIR/ob-session-recorder")" = 'main "$@"' ] || {
+        fail "e2e harness: the recorder no longer ends with main \"\$@\""; return 1; }
+
+    E2E_WORK=$(mktemp -d)
+    mkdir -p "$E2E_WORK/sessions" "$E2E_WORK/home" "$E2E_WORK/tmp"
+    "$sa" --accept -l "$E2E_WORK/rec.sock" \
+        env OB_SESSIONS_DIR="$E2E_WORK/sessions" OB_RECORD_POLL_SEC=1 "$E2E_SINK" \
+        >"$E2E_WORK/sa.log" 2>&1 &
+    E2E_SA_PID=$!
+    for _ in $(seq 1 50); do [ -S "$E2E_WORK/rec.sock" ] && break; sleep 0.1; done
+    [ -S "$E2E_WORK/rec.sock" ] || {
+        echo "SKIP: the test sink socket did not come up"; return 1; }
+}
+
+e2e_teardown() {
+    [ -n "$E2E_SA_PID" ] && kill "$E2E_SA_PID" 2>/dev/null
+    [ -n "$E2E_WORK" ] && rm -rf "$E2E_WORK"
+}
+trap e2e_teardown EXIT
+
+# Write the recorder under test to $E2E_WORK/recorder, with the test settings
+# and any extra shell assignments given as arguments.
+e2e_driver() {
+    {
+        sed '$d' "$SCRIPT_DIR/ob-session-recorder"
+        printf 'RECORD_CONNECT=%q\n' "$E2E_CONNECT"
+        printf 'RECORD_SOCKET=%q\n' "$E2E_WORK/rec.sock"
+        printf 'CONFIG_FILE=%q\n' "$E2E_WORK/no-such.conf"
+        printf '%s\n' "$@"
+        printf 'main "$@"\n'
+    } > "$E2E_WORK/recorder"
+}
+
+# Run the recorder under test as sshd would for SSH_ORIGINAL_COMMAND=$1, in a
+# session of its own (it is then the leader of its process group, as under
+# sshd). Extra environment as VAR=value after the command. Stdin/stdout are the
+# caller's. Returns the recorder's exit status.
+e2e_run() { # $1 original command, [VAR=value ...]
+    local cmd="$1"; shift
+    env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" SSH_CLIENT="203.0.113.7 50000 22" \
+        HOME="$E2E_WORK/home" "$@" setsid -w bash -p "$E2E_WORK/recorder"
+}
+
+# The metadata file of the most recent session, once the sink has finalized it.
+e2e_last_json() {
+    local j
+    for _ in $(seq 1 100); do
+        j=$(ls -t "$E2E_WORK/sessions/$(id -un)"/*.json 2>/dev/null | head -1)
+        if [ -n "$j" ] && ! grep -q '"status": "active"' "$j"; then
+            echo "$j"; return 0
+        fi
+        sleep 0.1
+    done
+    echo "$j"; return 1
+}
+
+e2e_session_count() {
+    ls "$E2E_WORK/sessions/$(id -un)"/*.json 2>/dev/null | wc -l
+}
+
 # ── Test 1: Syntax check ──
 test_syntax() {
     if bash -n "$SCRIPT_DIR/ob-session-recorder" 2>/dev/null; then
@@ -223,24 +307,61 @@ test_fail_closed_no_connect() {
     fi
 }
 
-# ── Test 11: Environment variable defaults ──
-test_env_defaults() {
+# ── Test 11: the user's environment does not set the tunables (#287) ──
+# The recorder runs as the recorded user. OB_MAX_SESSION=0 in that user's
+# environment used to switch the max_duration watchdog off, and
+# OB_RECORDER_CONFIG could point it at a config other than the admin's.
+test_env_ignored() {
     (
+        export OB_RECORDER_CONFIG="/tmp/user-chosen.conf"
         export OB_SESSIONS_DIR="/tmp/env-sessions"
         export OB_RECORDER_FORMAT="ttyrec"
-        export OB_MAX_SESSION="7200"
+        export OB_MAX_SESSION="0"
+        export RECORD_CONNECT="/tmp/fake-connect"
+        export RECORD_SOCKET="/tmp/fake.sock"
         source_script "ob-session-recorder"
         local ok=true
-        [ "$SESSIONS_DIR" = "/tmp/env-sessions" ] || ok=false
-        [ "$FORMAT" = "ttyrec" ] || ok=false
-        [ "$MAX_SESSION_DURATION" = "7200" ] || ok=false
+        [ "$CONFIG_FILE" = "/etc/open-bastion/session-recorder.conf" ] || ok=false
+        [ "$SESSIONS_DIR" = "/var/lib/open-bastion/sessions" ] || ok=false
+        [ "$FORMAT" = "script" ] || ok=false
+        [ "$MAX_SESSION_DURATION" = "86400" ] || ok=false
+        [ -z "$RECORD_CONNECT" ] || ok=false
+        [ "$RECORD_SOCKET" = "/run/open-bastion/rec.sock" ] || ok=false
         if $ok; then exit 0; else exit 1; fi
     )
     if [ $? -eq 0 ]; then
-        pass "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
+        pass "OB_* and RECORD_* in the environment are ignored"
     else
-        fail "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
+        fail "the environment overrode a recorder tunable"
     fi
+}
+
+# ── Test 11b: helpers do not come from the user's PATH (#287) ──
+# A user-writable PATH entry (PermitUserEnvironment, a pam_env file, ~/bin
+# added by an operator) could shadow `script` or `ob-record-connect` with a
+# program that records nothing. The recorder sets its own PATH and looks the
+# connector up among root-owned paths only.
+test_helpers_not_from_user_path() {
+    local fake marker out rc
+    fake=$(mktemp -d)
+    marker="$fake/used"
+    for prog in ob-record-connect script logger jq uuidgen; do
+        printf '#!/bin/sh\necho %s >> %s\nexit 0\n' "$prog" "$marker" > "$fake/$prog"
+        chmod +x "$fake/$prog"
+    done
+    out=$(PATH="$fake:$PATH" SSH_CLIENT="1.2.3.4 5 22" SSH_TTY="" SSH_ORIGINAL_COMMAND="id" \
+          bash -p "$SCRIPT_DIR/ob-session-recorder" 2>&1)
+    rc=$?
+    if [ -e "$marker" ]; then
+        fail "the recorder ran a helper from the user's PATH" "$(tr '\n' ' ' < "$marker")"
+    elif [ -x /usr/bin/ob-record-connect ] || [ -x /usr/local/bin/ob-record-connect ]; then
+        pass "no helper taken from the user's PATH (connector installed, rc=$rc)"
+    elif [ $rc -ne 0 ]; then
+        pass "no helper taken from the user's PATH (no system connector: refused)"
+    else
+        fail "no system connector, yet the session was not refused" "$out"
+    fi
+    rm -rf "$fake"
 }
 
 # ── Test 12: parse_args -c, -d, -f set correct variables ──
@@ -309,6 +430,29 @@ test_session_user_from_uid() {
 }
 
 
+# ── E2E 1: a command session is recorded, whatever the user's environment ──
+# OB_RECORD_SOCKET pointing nowhere and a fake `script` first in PATH must not
+# change where, or whether, the session is recorded.
+test_e2e_command_recorded() {
+    local fake j ts
+    fake="$E2E_WORK/fakebin"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\ntouch %s/fake-script-ran\nexec /bin/sh -c "$4"\n' "$E2E_WORK" > "$fake/script"
+    chmod +x "$fake/script"
+    e2e_driver
+    e2e_run 'echo OB-E2E-HELLO' OB_RECORD_SOCKET="$E2E_WORK/nowhere.sock" \
+        PATH="$fake:$PATH" </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json); ts="${j%.json}.typescript"
+    if [ -e "$E2E_WORK/fake-script-ran" ]; then
+        fail "E2E: the recorder ran \`script\` from the user's PATH"
+    elif [ -n "$j" ] && grep -q '"status": "completed"' "$j" && grep -q '"format": "script"' "$j" \
+         && grep -q OB-E2E-HELLO "$ts" 2>/dev/null; then
+        pass "E2E: command session recorded through the system sink, env ignored"
+    else
+        fail "E2E: command session not recorded as expected" "json=$j"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -322,11 +466,17 @@ run_test test_build_header_single_line
 run_test test_build_header_no_newline_injection
 run_test test_streams_via_connect
 run_test test_fail_closed_no_connect
-run_test test_env_defaults
+run_test test_env_ignored
+run_test test_helpers_not_from_user_path
 run_test test_parse_args
 run_test test_invalid_session_user
 run_test test_valid_session_user
 run_test test_session_user_from_uid
+
+echo "--- end to end (real recorder, connector and sink) ---"
+if e2e_setup; then
+    run_test test_e2e_command_recorded
+fi
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

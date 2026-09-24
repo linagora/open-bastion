@@ -1,28 +1,47 @@
-#!/bin/bash
+#!/bin/bash -p
 #
 # ob-session-recorder - Record SSH sessions for audit purposes
 #
 # This script is designed to be used as ForceCommand in sshd_config
 # to record all SSH sessions passing through a bastion host.
 #
-# Supports recording formats:
-# - script: Plain typescript (default, always available)
-# - asciinema: Using asciinema tool if installed
-# - ttyrec: Using ttyrec tool if installed
+# Recording format: a plain typescript (script(1)), streamed to the root
+# ob-record-sink. asciinema/ttyrec are not supported over the sink yet.
+#
+# It runs as the recorded user, so nothing in that user's environment may
+# decide how, or whether, the session is recorded (#287):
+#   - `bash -p` (privileged mode) ignores BASH_ENV, ENV, SHELLOPTS, BASHOPTS,
+#     GLOBIGNORE, CDPATH and functions exported through the environment;
+#   - helpers come from a fixed system PATH, set below before any is run, and
+#     ob-record-connect from a fixed root-owned path;
+#   - the tunables come from the root-owned config file or the ForceCommand
+#     line, never from OB_* environment variables.
 #
 # Copyright (C) 2025 Linagora
 # License: AGPL-3.0
 
 set -euo pipefail
 
-VERSION="0.2.3"
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+VERSION="0.3.0"
 PROG_NAME=$(basename "$0")
 
-# Default configuration
-CONFIG_FILE="${OB_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
-SESSIONS_DIR="${OB_SESSIONS_DIR:-/var/lib/open-bastion/sessions}"
-FORMAT="${OB_RECORDER_FORMAT:-script}"
-MAX_SESSION_DURATION="${OB_MAX_SESSION:-86400}"  # 24 hours default
+# Default configuration. Plain assignments on purpose: a same-named variable in
+# the environment must not pre-empt them.
+CONFIG_FILE="/etc/open-bastion/session-recorder.conf"
+SESSIONS_DIR="/var/lib/open-bastion/sessions"
+FORMAT="script"
+MAX_SESSION_DURATION="86400"  # 24 hours default
+
+# The connector that streams to the sink, and the sink's socket. The connector
+# is looked up only among these root-owned paths (see resolve_system_bin), and
+# the socket is passed to it explicitly, so OB_RECORD_SOCKET in the user's
+# environment cannot point the recording at a sink of the user's choosing.
+RECORD_CONNECT=""
+RECORD_CONNECT_CANDIDATES=(/usr/bin/ob-record-connect /usr/local/bin/ob-record-connect)
+RECORD_SOCKET="/run/open-bastion/rec.sock"
 
 # Metadata
 SESSION_ID=""
@@ -38,7 +57,7 @@ TTY_NAME="${SSH_TTY:-notty}"
 # Must contain only safe characters before it is used to construct file paths.
 if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
     SAFE_USER=$(printf '%q' "$SESSION_USER")
-    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER"
+    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER" 2>/dev/null || true
     echo "Error: invalid session user" >&2
     exit 1
 fi
@@ -47,17 +66,35 @@ fi
 TIMEOUT_PID=""
 RECORDING_PID=""
 
-# Logging to syslog
+# Logging to syslog. A logging failure (no /dev/log in a container, a stopped
+# journal) must not end the session half-way under `set -e`.
 log_info() {
-    logger -t "$PROG_NAME" -p auth.info "$*"
+    logger -t "$PROG_NAME" -p auth.info "$*" 2>/dev/null || true
 }
 
 log_warn() {
-    logger -t "$PROG_NAME" -p auth.warning "$*"
+    logger -t "$PROG_NAME" -p auth.warning "$*" 2>/dev/null || true
 }
 
 log_err() {
-    logger -t "$PROG_NAME" -p auth.err "$*"
+    logger -t "$PROG_NAME" -p auth.err "$*" 2>/dev/null || true
+}
+
+# Print the first of the given absolute paths that is an executable regular
+# file owned by root and writable by nobody else. PATH is never consulted: a
+# program the recorder trusts with the session must not be one the recorded
+# user could have put there.
+resolve_system_bin() {
+    local p st
+    for p in "$@"; do
+        [ -f "$p" ] && [ -x "$p" ] || continue
+        st=$(stat -L -c '%u %a' "$p" 2>/dev/null) || continue
+        [ "${st%% *}" = "0" ] || continue
+        [ $(( 8#${st##* } & 8#022 )) -eq 0 ] || continue
+        printf '%s\n' "$p"
+        return 0
+    done
+    return 1
 }
 
 # Generate unique session ID (UUID v4)
@@ -222,7 +259,8 @@ record_transfer() {
     # sends the header, reads EOF from /dev/null and half-closes → the sink records
     # a transfer session (metadata only). A connect failure returns non-zero, so we
     # fail closed and never run the transfer unrecorded.
-    if ! ob-record-connect "$(build_header)" /dev/null; then
+    if ! OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$(build_header)" /dev/null \
+            </dev/null >/dev/null; then
         log_err "recording sink unreachable; refusing file transfer (fail-closed)"
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
@@ -247,7 +285,8 @@ open_record_channel() {
     local header="$1"
     OB_REC_FIFO="$(mktemp -u "${TMPDIR:-/tmp}/ob-rec.$$.XXXXXX")" || { OB_REC_FIFO=""; return 1; }
     if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then OB_REC_FIFO=""; return 1; fi
-    ob-record-connect "$header" "$OB_REC_FIFO" &
+    OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
+        </dev/null >/dev/null &
     OB_REC_PID=$!
     # ob-record-connect connects (fast) then blocks on open(FIFO). If it has
     # already exited a moment later, the connect failed → the sink is down.
@@ -325,11 +364,10 @@ sshd_config example:
     Match Group recorded-users
         ForceCommand /usr/sbin/ob-session-recorder
 
-Environment variables:
-    OB_RECORDER_CONFIG      Config file path
-    OB_SESSIONS_DIR         Ignored (see -d above)
-    OB_RECORDER_FORMAT      Recording format
-    OB_MAX_SESSION          Max session duration in seconds
+The recorder runs as the recorded user, so it reads no OB_* environment
+variable: OB_RECORDER_CONFIG, OB_RECORDER_FORMAT, OB_MAX_SESSION and
+OB_SESSIONS_DIR are ignored. Settings come from the root-owned configuration
+file or from the options above, on the ForceCommand line.
 
 EOF
 }
@@ -398,8 +436,11 @@ main() {
     # the on-disk files under /var/lib/open-bastion/sessions/<user>/ so the user
     # cannot delete or alter them (#151). The recorder therefore creates no files
     # and no per-user directory. The recorder must be able to reach the sink.
-    if ! command -v ob-record-connect >/dev/null 2>&1; then
-        log_err "ob-record-connect not found; recording is required — refusing session"
+    if [ -z "$RECORD_CONNECT" ]; then
+        RECORD_CONNECT=$(resolve_system_bin "${RECORD_CONNECT_CANDIDATES[@]}") || RECORD_CONNECT=""
+    fi
+    if [ -z "$RECORD_CONNECT" ]; then
+        log_err "no root-owned ob-record-connect in ${RECORD_CONNECT_CANDIDATES[*]}; recording is required — refusing session"
         echo "Session recording is required but not installed; access refused." >&2
         exit 1
     fi

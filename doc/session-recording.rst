@@ -384,19 +384,9 @@ Debug mode
 Environment Variables
 ---------------------
 
-The recorder reads ``OB_*`` variables. The ``LLNG_*`` names documented before 0.5.0 are **not** read by anything: setting one is a silent no-op.
+**None, since 0.7.0.** The recorder runs as the recorded user, and a setting that user's environment could change is not a control: ``OB_MAX_SESSION=0`` switched the ``max_duration`` watchdog off, and ``OB_RECORDER_CONFIG`` let the session pick a configuration other than the administrator's (`#287 <https://github.com/linagora/open-bastion/issues/287>`__). ``OB_RECORDER_CONFIG``, ``OB_RECORDER_FORMAT``, ``OB_MAX_SESSION`` and ``OB_SESSIONS_DIR`` are therefore ignored. Settings come from the root-owned ``/etc/open-bastion/session-recorder.conf``, or from options on the ``ForceCommand`` line (``-c FILE``, ``-f FORMAT``), which only the administrator writes. The ``LLNG_*`` names documented before 0.5.0 were never read either.
 
-+------------------------+------------------------------------------------------------------------------------------------------+
-| Variable               | Description                                                                                          |
-+========================+======================================================================================================+
-| ``OB_RECORDER_CONFIG`` | Config file path                                                                                     |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_RECORDER_FORMAT`` | Recording format (v1: ``script`` only — anything else falls back to it)                              |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_MAX_SESSION``     | Max session duration in seconds                                                                      |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_SESSIONS_DIR``    | **Ignored.** The storage path belongs to ``ob-record-sink``; see the note on ``sessions_dir`` above. |
-+------------------------+------------------------------------------------------------------------------------------------------+
+For the same reason the recorder does not trust the user's ``PATH``, nor anything bash would import from the environment: it runs under ``bash -p`` (which ignores ``BASH_ENV``, ``SHELLOPTS``, exported functions and the like), sets ``PATH`` to the system directories before running any helper, takes ``ob-record-connect`` only from a root-owned ``/usr/bin`` or ``/usr/local/bin``, and passes the sink's socket path to it explicitly, so ``OB_RECORD_SOCKET`` in the session's environment is ignored as well.
 
 Integration with LLNG
 ---------------------

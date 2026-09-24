@@ -61,6 +61,9 @@ user's name.
 .TP
 .B OB_RECORD_SOCKET
 Override the socket path (default \fI/run/open-bastion/rec.sock\fR).
+.BR ob-session-recorder (8)
+always sets it to the system socket when it starts the connector, so a value
+in the recorded user's environment never reaches it.
 .SH EXIT STATUS
 .TP
 .B 0
