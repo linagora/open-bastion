@@ -49,10 +49,21 @@ then
 .B completed
 (clean EOF),
 .B truncated
-(size cap or timeout) or
+(byte cap or duration cap reached) or
 .B aborted
-(abnormal drop). The child command's exit code is deliberately not recorded \(em
-it would be entirely client-reported.
+(abnormal drop, or the connecting process died while the connection was held
+open by something else). The child command's exit code is deliberately not
+recorded \(em it would be entirely client-reported.
+.PP
+Silence is not an abnormal end: an interactive session may print nothing for
+hours, so the stream has no idle timeout. The sink instead watches the process
+that connected (the
+.B SO_PEERCRED
+pid, through a pidfd when the kernel offers one, else
+.BR kill (2)
+with signal 0 at each idle wake-up), and bounds every recording by a 1 GiB
+byte cap and a total duration cap. Only the header must arrive within 30
+seconds of the connection.
 .SH THREAT MODEL
 Root is trusted; the sink defends only against the unprivileged user tampering
 with its own recordings. Defending against root requires an LSM, append-only
@@ -64,6 +75,20 @@ Override the base sessions directory (default
 .IR /var/lib/open-bastion/sessions ).
 Read from the daemon's own environment, which is set by the systemd unit (never
 by the connecting client); intended for tests.
+.TP
+.B OB_RECORD_MAX_SEC
+Total duration cap of one recording, in seconds (default 604800, seven days).
+A recording that reaches it is finalized as
+.BR truncated ,
+and the session loses its recording channel. Set it with a drop-in
+.RB ( "systemctl edit ob-record@.service" )
+if sessions may legitimately last longer; it should not be shorter than the
+recorder's
+.BR max_duration .
+.TP
+.B OB_RECORD_POLL_SEC
+How often, in seconds, an idle stream wakes the sink to check the peer and the
+duration cap (default 30). The tests set it to 1.
 .SH FILES
 .TP
 .I /run/open-bastion/rec.sock

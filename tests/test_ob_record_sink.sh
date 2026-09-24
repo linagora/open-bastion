@@ -40,17 +40,31 @@ fail=0
 ok()  { printf 'ok   %s\n' "$1"; }
 bad() { printf 'FAIL %s\n' "$1"; fail=1; }
 
-# Start the activator: each connection spawns the sink with OB_SESSIONS_DIR set.
-"$SA" --accept -l "$SOCK" env OB_SESSIONS_DIR="$SESS" "$SINK" >"$WORK/sa.log" 2>&1 &
-SA_PID=$!
-trap 'kill "$SA_PID" 2>/dev/null; rm -rf "$WORK"' EXIT
+# Start an activator: each connection spawns the sink with OB_SESSIONS_DIR set,
+# plus any extra VAR=value given (the daemon's own environment, which systemd
+# owns in production). OB_RECORD_POLL_SEC=1 makes an idle stream wake the sink
+# every second instead of every 30, so the tests below can idle for several
+# wake-ups -- longer than the 30 s timeout #287 removed, in the sink's own
+# units -- without sleeping for half a minute.
+SA_PIDS=""
+trap 'kill $SA_PIDS 2>/dev/null; rm -rf "$WORK"' EXIT
+start_activator() { # $1 socket  $2 log  [VAR=value...]
+    local sock="$1" log="$2"; shift 2
+    "$SA" --accept -l "$sock" env OB_SESSIONS_DIR="$SESS" "$@" "$SINK" >"$log" 2>&1 &
+    SA_PIDS="$SA_PIDS $!"
+    for _ in $(seq 1 50); do [ -S "$sock" ] && return 0; sleep 0.1; done
+    return 1
+}
 
-# Wait for the socket to appear.
-for _ in $(seq 1 50); do [ -S "$SOCK" ] && break; sleep 0.1; done
-if [ ! -S "$SOCK" ]; then
+if ! start_activator "$SOCK" "$WORK/sa.log" OB_RECORD_POLL_SEC=1; then
     echo "SKIP: socket did not come up (systemd-socket-activate unusable here)"
     cat "$WORK/sa.log" 2>/dev/null
     exit 0
+fi
+# A second sink whose duration cap is two seconds.
+CAP_SOCK="$WORK/rec-cap.sock"
+if ! start_activator "$CAP_SOCK" "$WORK/sa-cap.log" OB_RECORD_POLL_SEC=1 OB_RECORD_MAX_SEC=2; then
+    bad "the duration-capped sink did not come up"
 fi
 
 hdr() { # $1 session_id  $2 format
@@ -78,7 +92,7 @@ wait_done() { # $1 session_id
 record_via_script() { # $1 header  $2 command
     local fifo; fifo="$WORK/fifo.$$.$RANDOM"
     mkfifo -m 600 "$fifo" || return 1
-    OB_RECORD_SOCKET="$SOCK" "$CONNECT" "$1" "$fifo" &
+    OB_RECORD_SOCKET="${REC_SOCK:-$SOCK}" "$CONNECT" "$1" "$fifo" &
     local cpid=$!
     sleep 0.2
     if ! kill -0 "$cpid" 2>/dev/null; then wait "$cpid"; rm -f "$fifo"; return 1; fi
@@ -193,6 +207,65 @@ if [ "$dup_ok" = 1 ]; then
     ok "duplicate session_id refused, existing metadata intact"
 else
     bad "$dup_msg"
+fi
+
+# ── Test 6: silence is not the end of a session (#287)
+#
+# The sink used to put a 30 s SO_RCVTIMEO on the stream: a user who read a man
+# page for half a minute had their recording finalized as "aborted", and was
+# then disconnected at the next keystroke when the forwarder hit SIGPIPE. Here
+# the stream stays silent for four of the sink's idle wake-ups; everything
+# printed after the pause must still be recorded, and the session completed.
+record_via_script "$(hdr idleid01 script)" \
+    'printf "BEFORE-IDLE\n"; sleep 4; printf "AFTER-IDLE\n"' 2>/dev/null
+ij=$(wait_done idleid01)
+its="${ij%.json}.typescript"
+if [ -n "$ij" ] && grep -q '"status": "completed"' "$ij" \
+   && grep -q BEFORE-IDLE "$its" && grep -q AFTER-IDLE "$its"; then
+    ok "an idle session keeps recording and completes"
+else
+    bad "an idle stream ended the recording (json=$ij)"; [ -n "$ij" ] && cat "$ij"
+fi
+
+# ── Test 7: a connection that outlives its peer is not held open forever
+#
+# With no idle timeout, what bounds a connection is the process that opened it.
+# The peer connects, sends a header and some bytes, hands the socket to a child
+# and exits: the socket never reaches EOF, and only the peer's death can end
+# the recording.
+python3 - "$SOCK" "$(hdr deadpeer01 script)" "$WORK/holder.pid" <<'PY' >/dev/null 2>&1
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(sys.argv[1])
+s.sendall(sys.argv[2].encode() + b"\nBEFORE-PEER-EXIT\n")
+pid = os.fork()
+if pid == 0:
+    time.sleep(30)          # keeps the connection open, never writes
+    os._exit(0)
+with open(sys.argv[3], "w") as f:
+    f.write(str(pid))
+os._exit(0)                 # the peer the sink identified is gone
+PY
+dj=$(wait_done deadpeer01)
+[ -s "$WORK/holder.pid" ] && kill "$(cat "$WORK/holder.pid")" 2>/dev/null
+if [ -n "$dj" ] && grep -q '"status": "aborted"' "$dj" \
+   && grep -q BEFORE-PEER-EXIT "${dj%.json}.typescript"; then
+    ok "peer gone, connection held elsewhere: finalized as aborted"
+else
+    bad "a connection outliving its peer was not finalized as aborted (json=$dj)"
+    [ -n "$dj" ] && cat "$dj"
+fi
+
+# ── Test 8: the total duration cap still bounds a live, silent session
+REC_SOCK="$CAP_SOCK" record_via_script "$(hdr capid01 script)" \
+    'printf "UNDER-CAP\n"; sleep 5' 2>/dev/null
+cj=$(wait_done capid01)
+if [ -n "$cj" ] && grep -q '"status": "truncated"' "$cj" \
+   && grep -q UNDER-CAP "${cj%.json}.typescript"; then
+    ok "duration cap reached: finalized as truncated"
+else
+    bad "the duration cap did not finalize the recording as truncated (json=$cj)"
+    [ -n "$cj" ] && cat "$cj"
 fi
 
 echo "=== record-sink e2e: $([ $fail -eq 0 ] && echo PASS || echo FAIL) ==="

@@ -21,9 +21,15 @@
  *      cannot list, read, unlink or truncate its own recording — which is the
  *      whole point (#151).
  *   3. records ONLY what it observes: status active -> completed (clean EOF) /
- *      truncated (size cap or timeout) / aborted (abnormal drop). The child
+ *      truncated (size or duration cap) / aborted (abnormal drop, or the peer
+ *      died while the connection was held open elsewhere). The child
  *      command's exit code is deliberately not recorded (it would be entirely
  *      client-reported; see the design §5).
+ *
+ * An idle stream is NOT an abnormal end: an interactive session can print
+ * nothing for hours. The sink bounds a connection by the recorder's own
+ * liveness (the SO_PEERCRED pid), a total duration and a byte cap -- never by
+ * silence (#287).
  *
  * Threat model: root is trusted; we defend only against the unprivileged user.
  *
@@ -35,12 +41,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <limits.h>
+#include <poll.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -62,8 +72,17 @@
 /* Field bounds for header metadata (informational, JSON-escaped on output). */
 #define MAX_CMD 8192
 #define MAX_SHORT 256
-/* Drop a stalled peer instead of pinning a per-connection process. */
-#define IO_TIMEOUT_SEC 30
+/* The header is written right after connect(); a peer that has not sent it
+ * by then is not a recorder. This bounds the HEADER only: once the stream
+ * starts, silence is normal and never ends a recording (#287). */
+#define HEADER_TIMEOUT_SEC 30
+/* How long an idle stream sleeps before the sink checks that the peer is
+ * still alive and the session is within its duration cap. Overridable by
+ * OB_RECORD_POLL_SEC in the daemon's environment (tests use 1). */
+#define DEFAULT_POLL_SEC 30
+/* Total duration cap of one recording (7 days); reaching it finalizes as
+ * "truncated". Overridable by OB_RECORD_MAX_SEC in the daemon's environment. */
+#define DEFAULT_MAX_SESSION_SEC (7L * 24L * 3600L)
 #define COPY_BUF (64 * 1024)
 
 static void fail(const char *msg)
@@ -121,6 +140,66 @@ static gid_t sessions_gid(void)
         return grp->gr_gid;
     fail("group " SESSIONS_GROUP " not found; falling back to root group");
     return 0;
+}
+
+/* A positive number of seconds from the daemon's own environment, or def when
+ * unset or malformed. Like OB_SESSIONS_DIR below, this is the environment the
+ * systemd unit gives the sink, never anything the connecting client sends. */
+static long env_seconds(const char *name, long def, long max)
+{
+    const char *e = getenv(name);
+    if (!e || !*e)
+        return def;
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(e, &end, 10);
+    if (errno != 0 || !end || *end != '\0' || v <= 0 || v > max) {
+        fail("ignoring a malformed timing override in the unit environment");
+        return def;
+    }
+    return v;
+}
+
+static long mono_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec;
+}
+
+/* A pidfd for the process that connected, so that its exit wakes the copy
+ * loop. SO_PEERPIDFD (Linux 6.5+) names that very process, with no pid-reuse
+ * window; pidfd_open() on the SO_PEERCRED pid is the next best thing. Returns
+ * -1 when neither is available -- an older kernel, or a SystemCallFilter
+ * without pidfd_open -- and the caller then falls back to kill(pid, 0) at
+ * each idle wake-up. */
+static int peer_pidfd(int conn_fd, pid_t pid)
+{
+#ifdef SO_PEERPIDFD
+    int pfd = -1;
+    socklen_t plen = sizeof(pfd);
+    if (getsockopt(conn_fd, SOL_SOCKET, SO_PEERPIDFD, &pfd, &plen) == 0 && pfd >= 0)
+        return pfd;
+#endif
+#ifdef SYS_pidfd_open
+    if (pid > 0) {
+        long r = syscall(SYS_pidfd_open, pid, 0);
+        if (r >= 0)
+            return (int)r;
+    }
+#endif
+    (void)conn_fd;
+    (void)pid;
+    return -1;
+}
+
+/* Fallback liveness probe. A pid of 0 (peer in another pid namespace) cannot
+ * be checked and counts as alive: the duration cap still bounds it. */
+static int pid_alive(pid_t pid)
+{
+    if (pid <= 0)
+        return 1;
+    return kill(pid, 0) == 0 || errno == EPERM;
 }
 
 /* Base sessions directory. Hard-coded by default; OB_SESSIONS_DIR overrides it
@@ -281,7 +360,7 @@ int main(void)
             conn_fd = 3;
     }
 
-    struct timeval tv = {.tv_sec = IO_TIMEOUT_SEC, .tv_usec = 0};
+    struct timeval tv = {.tv_sec = HEADER_TIMEOUT_SEC, .tv_usec = 0};
     setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     /* 1. Recorded user from the connection, kernel-verified. */
@@ -318,6 +397,10 @@ int main(void)
         fail("malformed metadata header (not a JSON object)");
         return 1;
     }
+    /* The header timeout ends here. The stream has no idle timeout at all: it
+     * is read through poll(), which watches the peer as well as the socket. */
+    tv.tv_sec = 0;
+    setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     char *session_id = hdr_str(hdr, "session_id", 64);
     char *format = hdr_str(hdr, "format", 32);
@@ -389,16 +472,65 @@ int main(void)
 
     const char *status = "completed";
     if (!is_transfer) {
-        /* 4. Stream copy with a byte cap and the recv timeout set above. */
+        /* 4. Stream copy, bounded by the peer's life, a total duration and a
+         * byte cap -- never by silence. An interactive session that prints
+         * nothing for a while is a live session: the idle timeout this
+         * replaces (30 s, until #287) finalized such a recording as
+         * "aborted", and the recorder then died of SIGPIPE at the user's
+         * next keystroke. */
+        long poll_sec = env_seconds("OB_RECORD_POLL_SEC", DEFAULT_POLL_SEC, 3600);
+        long max_sec = env_seconds("OB_RECORD_MAX_SEC", DEFAULT_MAX_SESSION_SEC,
+                                   LONG_MAX / 2);
+        long deadline = mono_now() + max_sec;
+        int pidfd = peer_pidfd(conn_fd, cred.pid);
+        int peer_gone = 0;
         char buf[COPY_BUF];
         long total = 0;
         for (;;) {
-            ssize_t r = read(conn_fd, buf, sizeof(buf));
-            if (r < 0) {
+            long left = deadline - mono_now();
+            if (left <= 0) {
+                status = "truncated";
+                fail("recording hit the duration cap; finalizing as truncated");
+                break;
+            }
+            long wait_sec = left < poll_sec ? left : poll_sec;
+            struct pollfd pfds[2] = {
+                {.fd = conn_fd, .events = POLLIN, .revents = 0},
+                {.fd = pidfd, .events = POLLIN, .revents = 0},
+            };
+            nfds_t nfds = (pidfd >= 0 && !peer_gone) ? 2 : 1;
+            int pr = poll(pfds, nfds, (int)(wait_sec * 1000));
+            if (pr < 0) {
                 if (errno == EINTR)
                     continue;
-                /* timeout (EAGAIN/EWOULDBLOCK) or hard error -> abnormal end */
                 status = "aborted";
+                break;
+            }
+            if (pr == 0) {
+                /* Idle. Only a dead peer ends the recording here: the
+                 * connection outlived the process that opened it, so it is
+                 * held by something else and nothing will ever close it. */
+                if (peer_gone) {
+                    fail("peer exited but its connection is still open; finalizing as aborted");
+                    status = "aborted";
+                    break;
+                }
+                if (pidfd < 0 && !pid_alive(cred.pid))
+                    peer_gone = 1; /* one more interval to drain, then abort */
+                continue;
+            }
+            /* The peer exiting is ordinary at the end of a session: keep
+             * draining what the socket still holds. Its EOF, or the next idle
+             * wake-up, decides. */
+            if (nfds == 2 && pfds[1].revents)
+                peer_gone = 1;
+            if (!(pfds[0].revents & (POLLIN | POLLHUP | POLLERR)))
+                continue;
+            ssize_t r = read(conn_fd, buf, sizeof(buf));
+            if (r < 0) {
+                if (errno == EINTR || errno == EAGAIN)
+                    continue;
+                status = "aborted"; /* hard error -> abnormal end */
                 break;
             }
             if (r == 0) {
@@ -438,7 +570,9 @@ int main(void)
             }
             total += r;
         }
-    stream_done:;
+    stream_done:
+        if (pidfd >= 0)
+            close(pidfd);
     } else {
         status = "completed"; /* transfer: metadata only, no stream */
     }
