@@ -467,11 +467,18 @@ jobs:
     # PR at a time.
     # The repository must be readable by the unprivileged user the runner drops
     # to for `needs: nonroot` entries (setpriv, from util-linux above).
+    # 35 min, not 20: the #287 session-recording controls added real
+    # end-to-end suites (recorder and sink, each stand up a socket-activated
+    # sink and drive script(1)/scp/rsync/sftp), and the runner replays the
+    # guarding suite for every one of the ~25 recording mutants, pre and post.
+    # Those suites are ~20 s each and now run to completion (before #287 the
+    # recorder entries failed in seconds), so the job legitimately grew from
+    # ~9 min to ~25 min; the margin absorbs a slow shared runner.
     - name: Mutation
       run: |
         chmod -R a+rX .
         OB_MUTATION_STRICT=1 bash tests/test_ob_mutation.sh
-      timeout-minutes: 20
+      timeout-minutes: 35
 
   integration-test:
     name: Integration Tests (Docker)
