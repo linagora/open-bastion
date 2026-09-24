@@ -1,0 +1,35 @@
+[Unit]
+Description=Open Bastion auditd log rotation
+Documentation=man:auditd(8) https://github.com/linagora/open-bastion/blob/main/doc/audit.rst
+After=auditd.service
+
+[Service]
+Type=oneshot
+# SIGUSR1 is auditd's "rotate the logs now", which is what `service auditd
+# rotate` sends. It goes to the main process only: auditd's children, if any,
+# have no use for it. With auditd stopped this fails, and the unit shows as
+# failed -- on a host where the audit trace was enabled, a stopped auditd is
+# worth noticing, which the cron.daily script this replaces (#281) did not do.
+ExecStart=systemctl kill --kill-who=main --signal=SIGUSR1 auditd.service
+
+# Nothing is written and no network is used: systemctl only talks to PID 1
+# over its private socket.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

@@ -1,0 +1,22 @@
+[Unit]
+Description=Open Bastion auditd log rotation timer
+Documentation=https://github.com/linagora/open-bastion/blob/main/doc/audit.rst
+
+[Timer]
+# Once a day: with num_logs=7 in auditd.conf that keeps about a week of audit
+# history (doc/audit.rst). Not enabled at install time: the audit trace is
+# opt-in, and ob-bastion-setup --enable-audit-trace enables this timer. A
+# different schedule is a drop-in,
+# /etc/systemd/system/ob-audit-rotate.timer.d/schedule.conf:
+#
+#     [Timer]
+#     OnCalendar=
+#     OnCalendar=weekly
+OnCalendar=daily
+# Catch up if the machine was off when the rotation was due.
+Persistent=true
+# Spread the rotation across the fleet.
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
