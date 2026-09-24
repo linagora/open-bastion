@@ -333,8 +333,11 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   session without it, which also covers a duplicate session id, a wrong
   protocol version and a failed directory setup. The recorder additionally
   refuses an over-long command up front, and logs a refused command by length
-  and hash, not in full. C1 control bytes (0x80–0x9f, e.g. the CSI introducer)
-  are now escaped in the header and in logs, not passed through raw.
+  and hash, not in full. The no-jq header fallback and the syslog helper escape
+  the C1 controls U+0080–U+009F (e.g. the CSI introducer), matching their UTF-8
+  form `0xc2 0x80`–`0xc2 0x9f` so valid UTF-8 is left intact; jq and the sink's
+  json-c already keep those code points as data, so the primary path was never
+  affected.
 - **The recording socket bounds concurrency** (#287). Because a recorded
   connection now lives for the whole session, `ob-record.socket` raises
   `MaxConnections` above the systemd default of 64 and adds

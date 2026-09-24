@@ -322,7 +322,10 @@ Operational recommendations:
 - Recordings are compressed and expired automatically — see :ref:`Retention and disk management <session-recording-retention-and-disk-management>` below.
 - Put ``/var/lib/open-bastion/sessions`` on a **dedicated partition** so a full recordings store cannot also take down the host's root filesystem.
 
-**Concurrency.** Each recorded session holds one connection on ``ob-record.socket`` for its whole lifetime. ``ob-record.socket`` ships with ``MaxConnections=1024`` and ``MaxConnectionsPerSource=16`` (connections per source uid) so that neither the total nor any single user's share of concurrent sessions can exhaust the socket and, because it is fail-closed, lock logins out. Raise ``MaxConnections`` (``systemctl edit ob-record.socket``) on a host that legitimately runs more than 1024 simultaneous recorded sessions.
+**Concurrency.** Each recorded session holds one connection on ``ob-record.socket`` for its whole lifetime. ``ob-record.socket`` ships with ``MaxConnections=1024`` and ``MaxConnectionsPerSource=16`` (connections per source uid) so that neither the total nor any single user's share of concurrent sessions can exhaust the socket and, because recording is fail-closed, lock logins out. Two caveats:
+
+- ``MaxConnectionsPerSource`` is honoured only by **systemd v256 or newer**. On older systemd — Debian bookworm (252), RHEL/Rocky/Alma 9 (252), Ubuntu noble (255) — it is **ignored**, and only the total ``MaxConnections=1024`` applies; there a single local user can hold all 1024 slots. On those hosts, rely on the total cap and on session containment (``--enable-hardening``, which kills a user's processes at logout).
+- Where it *is* honoured, a user's **17th** concurrent recorded session is refused (fail-closed: that session cannot start). Raise ``MaxConnectionsPerSource`` if your users legitimately open more than 16 simultaneous sessions from one account. Raise ``MaxConnections`` for more than 1024 host-wide. Both with ``systemctl edit ob-record.socket``.
 
 .. _session-recording-retention-and-disk-management:
 
