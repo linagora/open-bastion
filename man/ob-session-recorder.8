@@ -1,94 +1,233 @@
-.TH OB-SESSION-RECORDER 8 "December 2025" "open-bastion 0.1.0" "System Administration"
+.TH OB-SESSION-RECORDER 8 "September 2026" "open-bastion" "System Administration"
 .SH NAME
-ob-session-recorder \- Record SSH sessions for Open Bastion
+ob-session-recorder \- record SSH sessions on an Open Bastion host
 .SH SYNOPSIS
 .B ob-session-recorder
+.RB [ \-c
+.IR FILE ]
+.RB [ \-f
+.IR FORMAT ]
+.RB [ \-d
+.IR DIR ]
+.br
+.B ob-session-recorder
+.BR \-h | \-v
 .SH DESCRIPTION
 .B ob-session-recorder
-is used as a ForceCommand in SSH bastion configurations to record all
-user sessions. It captures terminal input/output using the
-.BR script (1)
-utility.
+is run by
+.BR sshd (8)
+as
+.B ForceCommand
+for every recorded session; it is not meant to be run by hand. It runs as the
+recorded user. The recording itself is written by
+.BR ob-record-sink (8),
+a root service the user cannot reach, so the user can neither read, alter nor
+delete it.
 .PP
-The script is typically invoked automatically by sshd when configured with
-ForceCommand. It should not normally be run directly by users.
+For an interactive session, or a command
+.RB ( SSH_ORIGINAL_COMMAND ),
+it starts
+.BR ob-record-connect (1),
+which connects to the sink and sends a one-line JSON header, then runs the
+user's shell or command under
+.BR script (1),
+whose typescript goes through a FIFO to the connector and on to the sink.
+If the sink cannot be reached, the session is refused: recording is
+mandatory.
 .PP
-Session recordings are stored in a directory organized by date and user,
-making it easy to audit user activity.
-.SH CONFIGURATION
-Configuration is read from
-.I /etc/open-bastion/session-recorder.conf
-with the following options:
+A genuine file transfer cannot run under a terminal \(em its binary protocol
+would be corrupted \(em so it runs with raw input and output, and the sink
+records its metadata only (format
+.BR transfer ).
+Because that means not recording the session's stream, a command is only
+treated as a transfer when it is exactly what a genuine client sends:
 .TP
-.B sessions_dir
-Directory where session recordings are stored.
-Default: /var/lib/open-bastion/sessions
+.B rsync \-\-server \fR[\fB\-\-sender\fR] \fIFLAGS\fR [\fI\-\-long\-option\fR[\fB=\fIvalue\fR]...] \fB. \fIPATH\fR...
+with the option list of
+.BR rrsync (1),
+minus
+.B \-\-daemon
+and
+.B \-s
+.RB ( \-\-secluded\-args ).
+.TP
+.B scp \fR[\fB\-v\fR] [\fB\-r\fR] [\fB\-p\fR] [\fB\-d\fR] \fB\-t\fR|\fB\-f\fR [\fB\-\-\fR] \fIPATH\fR...
+the legacy protocol
+.RB ( "scp \-O" ),
+one word per flag.
+.TP
+.B internal\-sftp\fR | \fIsftp\-server path\fR [\fIoptions\fR]
+the sftp subsystem, which sshd passes as
+.B SSH_ORIGINAL_COMMAND
+under
+.BR ForceCommand ;
+modern
+.BR scp (1)
+uses it too.
+.B internal\-sftp
+runs the system
+.B sftp\-server
+binary.
+.PP
+A receiving
+.B rsync
+or
+.B scp \-t
+takes one path, a sender one or more. Paths may use backslash escapes, a
+leading
+.B ~
+and wildcards, which the recorder expands itself (pathname expansion only).
+Any unescaped shell metacharacter or control character, anything appended to
+these forms, or a session that requested a terminal, and the command is
+recorded as an ordinary session, with a warning in the log. A transfer is run
+as an argument vector, never through a shell, and the program is taken from a
+fixed root-owned path, never from
+.BR PATH .
+.SH OPTIONS
+.TP
+.BI \-c " FILE" "\fR, \fP\-\-config " FILE
+Read the configuration from
+.I FILE
+instead of
+.IR /etc/open-bastion/session-recorder.conf .
+.TP
+.BI \-f " FORMAT" "\fR, \fP\-\-format " FORMAT
+Recording format. Only
+.B script
+is supported;
+.B asciinema
+and
+.B ttyrec
+fall back to it.
+.TP
+.BI \-d " DIR" "\fR, \fP\-\-dir " DIR
+Ignored. The storage path belongs to
+.BR ob-record-sink (8).
+Accepted for compatibility.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary.
+.TP
+.BR \-v ", " \-\-version
+Print the version.
+.SH CONFIGURATION
+.I /etc/open-bastion/session-recorder.conf
+is read only if it is owned by root and not writable by group or others.
 .TP
 .B format
-Recording format. Currently only "script" is supported.
+As
+.BR \-f .
 .TP
 .B max_duration
-Maximum session duration in seconds. Sessions longer than this
-are terminated. Default: 28800 (8 hours)
-.SH SESSION HANDLING
-When invoked via SSH, the script:
-.IP 1. 4
-Creates a session directory under sessions_dir.
-.IP 2. 4
-Records the session using script(1).
-.IP 3. 4
-If SSH_ORIGINAL_COMMAND is set, executes that command.
-.IP 4. 4
-Otherwise, starts the user's login shell.
+Maximum session duration in seconds (default 86400;
+.BR ob-bastion-setup (8)
+writes 28800).
+.B 0
+disables it. A value that is not a number of seconds falls back to the
+default, with an error in the log. At the limit the recorder kills
+.BR script (1)
+\(em or the transfer program \(em which closes the session's terminal as a
+client disconnect would; the recorder itself is killed if it has not
+finished 5 seconds later. The recording is delivered in full and ends
+.BR completed ;
+the timeout is logged.
+.TP
+.B sessions_dir
+Ignored (see
+.BR \-d ).
+.PP
+.BR recording_compress_after_days " and " recording_retention_days
+belong to
+.BR ob-session-prune (8).
+.SH ENVIRONMENT
+The recorder reads what sshd sets for the session:
+.BR SSH_ORIGINAL_COMMAND ,
+.B SSH_CLIENT
+(client address, informational),
+.B SSH_TTY
+(whether a terminal was requested),
+.BR HOME " and " SHELL .
+.PP
+Nothing in the environment changes how, or whether, the session is recorded.
+.BR OB_RECORDER_CONFIG ,
+.BR OB_RECORDER_FORMAT ,
+.B OB_MAX_SESSION
+and
+.B OB_SESSIONS_DIR
+are ignored since 0.7.0; so is
+.BR OB_RECORD_SOCKET ,
+which the recorder sets itself for the connector. The script runs under
+.B bash \-p
+(no
+.BR BASH_ENV ,
+no functions or shell options imported from the environment), sets
+.B PATH
+to the system directories, and takes
+.B ob-record-connect
+only from a root-owned
+.I /usr/bin
+or
+.IR /usr/local/bin .
+The username comes from the real uid, never from
+.BR USER .
 .SH FILES
 .TP
 .I /etc/open-bastion/session-recorder.conf
-Configuration file.
+Configuration.
 .TP
-.I /var/lib/open-bastion/sessions/
-Default session recordings directory.
+.I /run/open-bastion/rec.sock
+The sink's socket.
 .TP
-.I /var/lib/open-bastion/sessions/YYYY-MM-DD/USER/SESSION.typescript
-Session recording file.
+.I /var/lib/open-bastion/sessions/USER/TIMESTAMP_ID.typescript
+The recording, written by
+.BR ob-record-sink (8),
+root-owned.
 .TP
-.I /var/lib/open-bastion/sessions/YYYY-MM-DD/USER/SESSION.timing
-Timing data for session playback.
-.SH ENVIRONMENT
+.I /var/lib/open-bastion/sessions/USER/TIMESTAMP_ID.json
+Its metadata, including the sink-observed status:
+.BR completed ,
+.B truncated
+(byte or duration cap) or
+.B aborted
+(the stream stopped without its end-of-stream marker).
 .TP
-.B SSH_ORIGINAL_COMMAND
-If set by sshd, this command is executed instead of the user's shell.
-.TP
-.B SSH_CLIENT
-Used to identify the client connection.
-.TP
-.B USER
-The authenticated username.
-.SH PLAYBACK
-Sessions recorded with script format can be replayed using:
-.RS
-.nf
-scriptreplay \-\-typescript session.typescript \-\-timing session.timing
-.fi
-.RE
-.SH SECURITY CONSIDERATIONS
-.IP \(bu 2
-Session recordings may contain sensitive data (passwords typed in
-terminals, etc.). Ensure proper access controls on the sessions directory.
-.IP \(bu 2
-Consider implementing log rotation and secure deletion policies.
-.IP \(bu 2
-The recordings directory should only be accessible by root.
+.I /tmp/ob-rec.XXXXXXXXXX/stream
+The FIFO between
+.B script
+and the connector, in a private directory removed when the session ends.
+.SH LIMITS
+The recorder, the connector and
+.B script
+run as the recorded user, who can kill them. Killing the connector is
+detected (the recording ends
+.BR aborted ,
+and
+.B script
+dies at its next output); killing the
+.B max_duration
+watchdog is not prevented. The bound the user cannot lift is the sink's own
+duration cap (see
+.BR ob-record-sink (8)).
+A process detached from the session with
+.B setsid
+escapes the terminal recording; see the session containment settings of
+.BR ob-bastion-setup (8).
 .SH EXIT STATUS
-Returns the exit status of the executed command or shell.
+The exit status of the shell, command or transfer; 1 when the session is
+refused because it cannot be recorded; 129 when the session was hung up
+(client gone); 137 when
+.B max_duration
+ended it.
 .SH SEE ALSO
+.BR ob-record-sink (8),
+.BR ob-record-connect (1),
+.BR ob-session-prune (8),
 .BR ob-bastion-setup (8),
 .BR script (1),
-.BR scriptreplay (1),
+.BR rrsync (1),
 .BR sshd_config (5)
-.PP
-LemonLDAP::NG documentation: https://lemonldap-ng.org/
 .SH AUTHOR
 Xavier Guimard <xguimard@linagora.com>
 .SH COPYRIGHT
-Copyright (C) 2025 Linagora.
+Copyright (C) 2025-2026 Linagora.
 License: AGPL-3.0+

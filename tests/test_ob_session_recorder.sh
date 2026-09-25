@@ -23,6 +23,94 @@ source_script() {
     eval "$content"
 }
 
+# ── End-to-end harness ──
+#
+# The end-to-end tests run the real recorder against the real connector and
+# sink (build/), stood up with systemd-socket-activate exactly as
+# tests/test_ob_record_sink.sh does. The recorder takes nothing from the
+# environment, so the test settings (connector, socket, config) are written
+# into a copy of it, just before its final `main "$@"`: a knob only a modified
+# program can turn, never the recorded user.
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+E2E_SINK="$ROOT_DIR/build/ob-record-sink"
+E2E_CONNECT="$ROOT_DIR/build/ob-record-connect"
+E2E_WORK=""
+E2E_SA_PID=""
+
+e2e_setup() {
+    local sa
+    [ -x "$E2E_SINK" ] && [ -x "$E2E_CONNECT" ] || {
+        echo "SKIP: end-to-end recorder tests need build/ob-record-sink and build/ob-record-connect"
+        return 1; }
+    sa=$(command -v systemd-socket-activate 2>/dev/null)
+    [ -z "$sa" ] && [ -x /usr/lib/systemd/systemd-socket-activate ] && sa=/usr/lib/systemd/systemd-socket-activate
+    [ -z "$sa" ] && [ -x /lib/systemd/systemd-socket-activate ] && sa=/lib/systemd/systemd-socket-activate
+    [ -n "$sa" ] || { echo "SKIP: end-to-end recorder tests need systemd-socket-activate"; return 1; }
+    command -v setsid >/dev/null 2>&1 || { echo "SKIP: end-to-end recorder tests need setsid"; return 1; }
+    [ "$(tail -n 1 "$SCRIPT_DIR/ob-session-recorder")" = 'main "$@"' ] || {
+        fail "e2e harness: the recorder no longer ends with main \"\$@\""; return 1; }
+
+    E2E_WORK=$(mktemp -d)
+    mkdir -p "$E2E_WORK/sessions" "$E2E_WORK/home" "$E2E_WORK/tmp"
+    "$sa" --accept -l "$E2E_WORK/rec.sock" \
+        env OB_SESSIONS_DIR="$E2E_WORK/sessions" OB_RECORD_POLL_SEC=1 "$E2E_SINK" \
+        >"$E2E_WORK/sa.log" 2>&1 &
+    E2E_SA_PID=$!
+    for _ in $(seq 1 50); do [ -S "$E2E_WORK/rec.sock" ] && break; sleep 0.1; done
+    [ -S "$E2E_WORK/rec.sock" ] || {
+        echo "SKIP: the test sink socket did not come up"; return 1; }
+}
+
+e2e_teardown() {
+    [ -n "$E2E_SA_PID" ] && kill "$E2E_SA_PID" 2>/dev/null
+    [ -n "$E2E_WORK" ] && rm -rf "$E2E_WORK"
+}
+trap e2e_teardown EXIT
+
+# Write the recorder under test to $E2E_WORK/recorder, with the test settings
+# and any extra shell assignments given as arguments.
+e2e_driver() {
+    {
+        sed '$d' "$SCRIPT_DIR/ob-session-recorder"
+        printf 'RECORD_CONNECT=%q\n' "$E2E_CONNECT"
+        printf 'RECORD_SOCKET=%q\n' "$E2E_WORK/rec.sock"
+        printf 'CONFIG_FILE=%q\n' "$E2E_WORK/no-such.conf"
+        printf '%s\n' "$@"
+        printf 'main "$@"\n'
+    } > "$E2E_WORK/recorder"
+}
+
+# Run the recorder under test as sshd would for SSH_ORIGINAL_COMMAND=$1, in a
+# session of its own (it is then the leader of its process group, as under
+# sshd). Extra environment as VAR=value after the command. Stdin/stdout are the
+# caller's. Returns the recorder's exit status.
+#
+# script(1) copies the command line into the typescript's first line, so a
+# marker the tests look for is split with "" in the command (echo A-""B): only
+# the command's OUTPUT then contains it whole.
+e2e_run() { # $1 original command, [VAR=value ...]
+    local cmd="$1"; shift
+    env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" SSH_CLIENT="203.0.113.7 50000 22" \
+        HOME="$E2E_WORK/home" "$@" setsid -w bash -p "$E2E_WORK/recorder"
+}
+
+# The metadata file of the most recent session, once the sink has finalized it.
+e2e_last_json() {
+    local j
+    for _ in $(seq 1 100); do
+        j=$(ls -t "$E2E_WORK/sessions/$(id -un)"/*.json 2>/dev/null | head -1)
+        if [ -n "$j" ] && ! grep -q '"status": "active"' "$j"; then
+            echo "$j"; return 0
+        fi
+        sleep 0.1
+    done
+    echo "$j"; return 1
+}
+
+e2e_session_count() {
+    ls "$E2E_WORK/sessions/$(id -un)"/*.json 2>/dev/null | wc -l
+}
+
 # ── Test 1: Syntax check ──
 test_syntax() {
     if bash -n "$SCRIPT_DIR/ob-session-recorder" 2>/dev/null; then
@@ -192,6 +280,298 @@ test_build_header_no_newline_injection() {
     fi
 }
 
+# ── Test 8b: the no-jq header escapes EVERY field (#287) ──
+# The fallback escaped only original_command. SSH_CLIENT and SSH_TTY are just as
+# client-side: a quote or a newline there produced an invalid or multi-line
+# header, which the connector refuses -- a session refused for a stray byte.
+test_build_header_fallback_escapes_all_fields() {
+    command -v python3 >/dev/null 2>&1 || { fail "python3 is needed to check the header"; return; }
+    local h
+    h=$(
+        source_script "ob-session-recorder"
+        # Hide jq from build_header, so the fallback is what runs.
+        command() { [ "${1:-}" = "-v" ] && [ "${2:-}" = "jq" ] && return 1; builtin command "$@"; }
+        SESSION_ID='id"1\'
+        FORMAT=$'scr\tipt'
+        CLIENT_IP=$'198.51.100.1\n"injected":1'
+        TTY_NAME=$'/dev/pts/1\x01\x1b[2J'
+        ORIGINAL_COMMAND=$'ls "a b"\\\r\n'
+        SESSION_START=$'2026\x7f'
+        build_header
+    )
+    if [ "$(printf '%s' "$h" | wc -l)" -eq 0 ] && printf '%s' "$h" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+want = {"session_id": "id\"1\\", "format": "scr\tipt",
+        "client_ip": "198.51.100.1\n\"injected\":1",
+        "ssh_tty": "/dev/pts/1\x01\x1b[2J", "original_command": "ls \"a b\"\\\r\n",
+        "start": "2026\x7f", "v": 2}
+sys.exit(0 if h == want else 1)'; then
+        pass "no-jq header: every field escaped, one valid JSON line"
+    else
+        fail "no-jq header is not one valid JSON line with every field intact" "$h"
+    fi
+}
+
+# ── Test 8c: client-supplied strings reach syslog on one line (#287) ──
+test_log_lines_sanitized() {
+    local log
+    log=$(mktemp)
+    (
+        source_script "ob-session-recorder"
+        logger() { printf '%s\n' "$*" >> "$log"; }
+        SESSION_ID="sid"
+        CLIENT_IP=$'198.51.100.1\nFAKE: forged line'
+        ORIGINAL_COMMAND=$'id\nFAKE: another forged line\x1b[1A'
+        log_session_start
+    )
+    if [ "$(wc -l < "$log")" -eq 1 ] && ! grep -q $'\x1b' "$log" \
+       && grep -q 'FAKE: forged line' "$log"; then
+        pass "session start logged on one line, control characters escaped"
+    else
+        fail "a client-supplied string broke the syslog line" "$(cat -A "$log")"
+    fi
+    rm -f "$log"
+}
+
+# ── Test 8c2: a long logged command keeps its length and a hash (#287) ──
+# Truncating at 1024 bytes would let an attacker pad the interesting part out of
+# the log; log_safe must record the true length and a hash instead.
+test_log_safe_truncation() {
+    local out
+    out=$(
+        source_script "ob-session-recorder"
+        big=$(head -c 5000 /dev/zero | tr '\0' A)
+        log_safe "scp -t /x; evil $big"
+    )
+    local hexpect
+    hexpect=$(printf '%s' "scp -t /x; evil $(head -c 5000 /dev/zero | tr '\0' A)" | sha256sum | cut -c1-16)
+    if [ "${#out}" -lt 1200 ] && [[ "$out" == *"sha256:${hexpect}"* ]] && [[ "$out" == *"total"* ]]; then
+        pass "log_safe truncates long commands with a length and a matching hash"
+    else
+        fail "log_safe did not record length+hash for a long command" "len=${#out}"
+    fi
+}
+
+# ── Test 8c3: real C1 controls (U+0080-U+009F) are escaped, valid UTF-8 kept ──
+# U+009B is CSI; in UTF-8 it is the two bytes 0xc2 0x9b and must not reach the
+# JSON header or a syslog line intact. But 0x80-0x9f as raw bytes are ordinary
+# UTF-8 continuation bytes (é, emoji, Cyrillic), and escaping them byte-wise
+# would corrupt valid text -- so those must pass through untouched.
+test_c1_bytes_escaped() {
+    local h logline
+    h=$(
+        source_script "ob-session-recorder"
+        command() { [ "${1:-}" = "-v" ] && [ "${2:-}" = "jq" ] && return 1; builtin command "$@"; }
+        SESSION_ID="id"; FORMAT="script"; CLIENT_IP="x"; TTY_NAME="x"; SESSION_START="x"
+        # U+009B (CSI, 0xc2 0x9b) then a valid UTF-8 word "Élève café".
+        ORIGINAL_COMMAND=$'ls\xc2\x9b2J \xc3\x89l\xc3\xa8ve caf\xc3\xa9'
+        build_header
+    )
+    logline=$(
+        source_script "ob-session-recorder"
+        log_safe $'ls\xc2\x9b2J'
+    )
+    # The C1 control must be escaped to \u009b, the raw sequence gone; and the
+    # valid UTF-8 must survive byte for byte (still parseable, accents intact).
+    if printf '%s' "$h" | grep -q '\\u009b' \
+       && ! printf '%s' "$h" | grep -q $'\xc2\x9b' \
+       && printf '%s' "$h" | grep -q $'caf\xc3\xa9' \
+       && printf '%s' "$h" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null \
+       && ! printf '%s' "$logline" | grep -q $'\xc2\x9b'; then
+        pass "real C1 controls escaped, valid UTF-8 preserved, header still parses"
+    else
+        fail "C1 escaping wrong or UTF-8 mangled" "hdr=$h log=$logline"
+    fi
+}
+
+# ── Test 8d: which commands skip the PTY recording (#287) ──
+#
+# A command classified as a file transfer runs WITHOUT its stream being
+# recorded, so the classifier is an allow-list of what genuine clients send,
+# and everything else must be recorded. The forms below were captured from
+# OpenSSH 10 scp/sftp and rsync 3.x through a stand-in ssh; the refusals are
+# the #287 bypasses and their variations.
+CT_DIR=""
+classify() { # $1 SSH_ORIGINAL_COMMAND  [$2 SSH_TTY] -> the verdict on stdout
+    (
+        source_script "ob-session-recorder"
+        cd "$CT_DIR" || exit 99
+        HOME="$CT_DIR/home"
+        # The first candidate stands for "the root-owned system binary", so the
+        # verdict does not depend on what this host has installed.
+        resolve_system_bin() { printf '%s\n' "$1"; }
+        logger() { printf '%s\n' "$*" >> "$CT_DIR/log"; }
+        SESSION_ID="t"
+        SSH_TTY="${2:-}"
+        ORIGINAL_COMMAND="$1"
+        if classify_transfer; then
+            printf '%s' "$TRANSFER_BIN"
+            [ "${#TRANSFER_ARGS[@]}" -eq 0 ] || printf ' [%s]' "${TRANSFER_ARGS[@]}"
+        else
+            printf 'RECORD'
+        fi
+    )
+}
+
+test_transfer_classification() {
+    CT_DIR=$(mktemp -d)
+    mkdir -p "$CT_DIR/home/foo"
+    : > "$CT_DIR/home/foo/a.txt"; : > "$CT_DIR/home/foo/b.txt"
+    : > "$CT_DIR/r1.log"; : > "$CT_DIR/r2.log"
+    local H="$CT_DIR/home" bad=0 i got
+    # command | expected argv (the program is the root-owned system binary)
+    local -a accept=(
+        'rsync --server -logDtpre.iLsfxCIvu . dst\ dir/'
+        '/usr/bin/rsync [--server] [-logDtpre.iLsfxCIvu] [--] [.] [dst dir/]'
+        'rsync --server --sender -vlogDtpre.iLsfxCIvu . ~/foo/*.txt my\ file'
+        "/usr/bin/rsync [--server] [--sender] [-vlogDtpre.iLsfxCIvu] [--] [.] [$H/foo/a.txt] [$H/foo/b.txt] [my file]"
+        'rsync --server --sender -vlogDtprze.iLsfxCIvu . /tmp/x'
+        '/usr/bin/rsync [--server] [--sender] [-vlogDtprze.iLsfxCIvu] [--] [.] [/tmp/x]'
+        'rsync --server -vlogDtpre.iLsfxCIvu --log-format=%i . ./-dash'
+        '/usr/bin/rsync [--server] [-vlogDtpre.iLsfxCIvu] [--log-format=%i] [--] [.] [./-dash]'
+        'rsync --server -lHogDtpAXre.iLsfxCIvu --numeric-ids . a\;b\$c'
+        '/usr/bin/rsync [--server] [-lHogDtpAXre.iLsfxCIvu] [--numeric-ids] [--] [.] [a;b$c]'
+        'rsync --server --sender -logDtpre.iLsfxCIvu . .'
+        '/usr/bin/rsync [--server] [--sender] [-logDtpre.iLsfxCIvu] [--] [.] [.]'
+        'rsync --server -logDtpre.iLsfxCIvu --delete --partial-dir=.p --timeout=30 . ~'
+        "/usr/bin/rsync [--server] [-logDtpre.iLsfxCIvu] [--delete] [--partial-dir=.p] [--timeout=30] [--] [.] [$H]"
+        'scp -t /tmp/d/'
+        '/usr/bin/scp [-t] [--] [/tmp/d/]'
+        'scp -r -p -f my\ file'
+        '/usr/bin/scp [-r] [-p] [-f] [--] [my file]'
+        'scp -v -f -- -x'
+        '/usr/bin/scp [-v] [-f] [--] [-x]'
+        'scp -d -t dir'
+        '/usr/bin/scp [-d] [-t] [--] [dir]'
+        'scp -f ~/foo/*.txt nomatch*.txt'
+        "/usr/bin/scp [-f] [--] [$H/foo/a.txt] [$H/foo/b.txt] [nomatch*.txt]"
+        'internal-sftp'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/lib/openssh/sftp-server'
+        '/usr/libexec/openssh/sftp-server -f AUTHPRIV -l INFO'
+        '/usr/lib/openssh/sftp-server [-f] [AUTHPRIV] [-l] [INFO]'
+    )
+    local -a refuse=(
+        'scp -t /tmp/x; bash'
+        'scp -t /tmp/x;bash'
+        'scp -t /tmp/x && bash'
+        'scp -t /tmp/x | bash'
+        'scp -t /tmp/x > /tmp/y'
+        'scp -f $(id)'
+        'scp -f `id`'
+        'scp -f "a b"'
+        "scp -f 'a'"
+        'scp -f a{b,c}'
+        'scp -f #x'
+        'scp -f a!b'
+        $'scp -t /tmp/x\nbash'
+        $'scp\t-t\t/tmp/x'
+        $'scp -f my\\\nfile'
+        ' scp -t /tmp/x'
+        'scp  -t /tmp/x'
+        'scp -t /tmp/x '
+        'scp -t /tmp/x\'
+        'scp -t/tmp/d'
+        'scp -tr /tmp/d'
+        'scp -t'
+        'scp -t a b'
+        'scp -t -f x'
+        'scp -x -t /tmp'
+        'scp -f -x'
+        'scp -d -f x'
+        'scp -r -r -t x'
+        'scp -f ~root/x'
+        '~/.local/bin/scp -t /x'
+        '/home/u/bin/scp -t /x'
+        'rsync --server --daemon .'
+        'rsync --server --daemon . .'
+        'rsync --server --daemon --config=/tmp/x . .'
+        'rsync --server -slogDtpre.iLsfxCIvu'
+        'rsync --server -slogDtpre.iLsfxCIvu . x'
+        'rsync --server -logDtpre.iLsfxCIvu . a b'
+        'rsync --server -logDtpre.iLsfxCIvu --rsh=sh . a'
+        'rsync --server -logDtpre.iLsfxCIvu --log-file . a'
+        'rsync --server -logDtpre.iLsfxCIvu a'
+        'rsync -logDtpre.iLsfxCIvu --server . a'
+        'rsync --server -logDtpre.iLsfxCIvu . a; id'
+        '/usr/bin/rsync --server -logDtpre.iLsfxCIvu . a'
+        'internal-sftp; bash'
+        'internal-sftp -f $(id)'
+        'sftp-server -h'
+        'sftp-server -l'
+        '/tmp/sftp-server'
+        'sftp-server -d /tmp;id'
+    )
+    for ((i = 0; i < ${#accept[@]}; i += 2)); do
+        got=$(classify "${accept[i]}")
+        if [ "$got" != "${accept[i+1]}" ]; then
+            fail "transfer allow-list: accept $(printf '%q' "${accept[i]}")" "got: $got"
+            bad=1
+        fi
+    done
+    for i in "${!refuse[@]}"; do
+        got=$(classify "${refuse[i]}")
+        if [ "$got" != "RECORD" ]; then
+            fail "transfer allow-list: must record $(printf '%q' "${refuse[i]}")" "got: $got"
+            bad=1
+        fi
+    done
+    # A PTY request is never a transfer, however genuine the command.
+    got=$(classify 'scp -t /tmp/d/' /dev/pts/3)
+    [ "$got" = "RECORD" ] || { fail "transfer allow-list: a PTY session must be recorded" "got: $got"; bad=1; }
+    # Refusals of transfer-like commands are logged, on one line each.
+    if ! grep -q 'transfer-like command recorded as a normal session' "$CT_DIR/log" 2>/dev/null \
+       || grep -q '^bash' "$CT_DIR/log"; then
+        fail "transfer allow-list: refusals must be logged, one line each"; bad=1
+    fi
+    [ "$bad" = 0 ] && pass "transfer allow-list: ${#refuse[@]} forged forms recorded, $(( ${#accept[@]} / 2 )) genuine forms accepted, PTY never a transfer"
+    rm -rf "$CT_DIR"
+}
+
+# ── Test 8e: a malformed max_duration does not switch the watchdog off ──
+# `[ "abc" -gt 0 ]` fails inside an `if`, which `set -e` ignores: any typo in
+# max_duration used to disable the watchdog silently.
+test_max_duration_validation() {
+    local v got bad=0 tmpconf
+    for v in abc "" -5 1e3 12abc 1234567890 " 60" "60 "; do
+        got=$(
+            source_script "ob-session-recorder"
+            logger() { :; }
+            MAX_SESSION_DURATION="$v"
+            validate_max_duration
+            printf '%s' "$MAX_SESSION_DURATION"
+        )
+        [ "$got" = "86400" ] || { fail "max_duration '$v' should fall back to 86400" "got '$got'"; bad=1; }
+    done
+    for v in 0:0 007:7 3600:3600; do
+        got=$(
+            source_script "ob-session-recorder"
+            logger() { :; }
+            MAX_SESSION_DURATION="${v%%:*}"
+            validate_max_duration
+            printf '%s' "$MAX_SESSION_DURATION"
+        )
+        [ "$got" = "${v##*:}" ] || { fail "max_duration '${v%%:*}' should read as ${v##*:}" "got '$got'"; bad=1; }
+    done
+    # Through the config file, as an administrator's typo would arrive.
+    tmpconf=$(mktemp)
+    printf 'max_duration = 8h\n' > "$tmpconf"
+    got=$(
+        source_script "ob-session-recorder"
+        stat() { echo "0:644"; }
+        logger() { :; }
+        CONFIG_FILE="$tmpconf"
+        load_config
+        validate_max_duration
+        printf '%s' "$MAX_SESSION_DURATION"
+    )
+    rm -f "$tmpconf"
+    [ "$got" = "86400" ] || { fail "max_duration = 8h in the config should fall back to 86400" "got '$got'"; bad=1; }
+    [ "$bad" = 0 ] && pass "max_duration: non-numeric values fall back to the default, numbers are kept"
+}
+
 # ── Test 9: the recorder streams to the sink via ob-record-connect + a FIFO ──
 # script(1) writes the typescript to a FIFO (a socket cannot be opened by path),
 # and ob-record-connect forwards the FIFO to the sink socket.
@@ -223,24 +603,61 @@ test_fail_closed_no_connect() {
     fi
 }
 
-# ── Test 11: Environment variable defaults ──
-test_env_defaults() {
+# ── Test 11: the user's environment does not set the tunables (#287) ──
+# The recorder runs as the recorded user. OB_MAX_SESSION=0 in that user's
+# environment used to switch the max_duration watchdog off, and
+# OB_RECORDER_CONFIG could point it at a config other than the admin's.
+test_env_ignored() {
     (
+        export OB_RECORDER_CONFIG="/tmp/user-chosen.conf"
         export OB_SESSIONS_DIR="/tmp/env-sessions"
         export OB_RECORDER_FORMAT="ttyrec"
-        export OB_MAX_SESSION="7200"
+        export OB_MAX_SESSION="0"
+        export RECORD_CONNECT="/tmp/fake-connect"
+        export RECORD_SOCKET="/tmp/fake.sock"
         source_script "ob-session-recorder"
         local ok=true
-        [ "$SESSIONS_DIR" = "/tmp/env-sessions" ] || ok=false
-        [ "$FORMAT" = "ttyrec" ] || ok=false
-        [ "$MAX_SESSION_DURATION" = "7200" ] || ok=false
+        [ "$CONFIG_FILE" = "/etc/open-bastion/session-recorder.conf" ] || ok=false
+        [ "$SESSIONS_DIR" = "/var/lib/open-bastion/sessions" ] || ok=false
+        [ "$FORMAT" = "script" ] || ok=false
+        [ "$MAX_SESSION_DURATION" = "86400" ] || ok=false
+        [ -z "$RECORD_CONNECT" ] || ok=false
+        [ "$RECORD_SOCKET" = "/run/open-bastion/rec.sock" ] || ok=false
         if $ok; then exit 0; else exit 1; fi
     )
     if [ $? -eq 0 ]; then
-        pass "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
+        pass "OB_* and RECORD_* in the environment are ignored"
     else
-        fail "Environment variable defaults (OB_SESSIONS_DIR, OB_RECORDER_FORMAT, OB_MAX_SESSION)"
+        fail "the environment overrode a recorder tunable"
     fi
+}
+
+# ── Test 11b: helpers do not come from the user's PATH (#287) ──
+# A user-writable PATH entry (PermitUserEnvironment, a pam_env file, ~/bin
+# added by an operator) could shadow `script` or `ob-record-connect` with a
+# program that records nothing. The recorder sets its own PATH and looks the
+# connector up among root-owned paths only.
+test_helpers_not_from_user_path() {
+    local fake marker out rc
+    fake=$(mktemp -d)
+    marker="$fake/used"
+    for prog in ob-record-connect script logger jq uuidgen; do
+        printf '#!/bin/sh\necho %s >> %s\nexit 0\n' "$prog" "$marker" > "$fake/$prog"
+        chmod +x "$fake/$prog"
+    done
+    out=$(PATH="$fake:$PATH" SSH_CLIENT="1.2.3.4 5 22" SSH_TTY="" SSH_ORIGINAL_COMMAND="id" \
+          bash -p "$SCRIPT_DIR/ob-session-recorder" 2>&1)
+    rc=$?
+    if [ -e "$marker" ]; then
+        fail "the recorder ran a helper from the user's PATH" "$(tr '\n' ' ' < "$marker")"
+    elif [ -x /usr/bin/ob-record-connect ] || [ -x /usr/local/bin/ob-record-connect ]; then
+        pass "no helper taken from the user's PATH (connector installed, rc=$rc)"
+    elif [ $rc -ne 0 ]; then
+        pass "no helper taken from the user's PATH (no system connector: refused)"
+    else
+        fail "no system connector, yet the session was not refused" "$out"
+    fi
+    rm -rf "$fake"
 }
 
 # ── Test 12: parse_args -c, -d, -f set correct variables ──
@@ -309,6 +726,358 @@ test_session_user_from_uid() {
 }
 
 
+# ── E2E 1: a command session is recorded, whatever the user's environment ──
+# OB_RECORD_SOCKET pointing nowhere and a fake `script` first in PATH must not
+# change where, or whether, the session is recorded.
+test_e2e_command_recorded() {
+    local fake j ts
+    fake="$E2E_WORK/fakebin"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\ntouch %s/fake-script-ran\nexec /bin/sh -c "$4"\n' "$E2E_WORK" > "$fake/script"
+    chmod +x "$fake/script"
+    e2e_driver
+    e2e_run 'echo OB-E2E-""HELLO' OB_RECORD_SOCKET="$E2E_WORK/nowhere.sock" \
+        PATH="$fake:$PATH" </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json); ts="${j%.json}.typescript"
+    if [ -e "$E2E_WORK/fake-script-ran" ]; then
+        fail "E2E: the recorder ran \`script\` from the user's PATH"
+    elif [ -n "$j" ] && grep -q '"status": "completed"' "$j" && grep -q '"format": "script"' "$j" \
+         && grep -q OB-E2E-HELLO "$ts" 2>/dev/null; then
+        pass "E2E: command session recorded through the system sink, env ignored"
+    else
+        fail "E2E: command session not recorded as expected" "json=$j"
+    fi
+}
+
+# ── E2E 2: the #287 bypass now opens a RECORDED session ──
+# `ssh -tt bastion 'scp -t /tmp/x; bash'` used to run the whole string through
+# a shell with no typescript at all. Now it is an ordinary command session.
+test_e2e_bypass_recorded() {
+    local j
+    e2e_driver
+    e2e_run 'scp -t /nonexistent-ob-287; echo OB-287-NOW-""RECORDED' </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json)
+    if [ -n "$j" ] && grep -q '"format": "script"' "$j" \
+       && grep -q OB-287-NOW-RECORDED "${j%.json}.typescript" 2>/dev/null; then
+        pass "E2E: 'scp -t /x; <command>' runs recorded, output in the typescript"
+    else
+        fail "E2E: the #287 compound command was not recorded" "json=$j"
+        [ -n "$j" ] && cat "$j"
+    fi
+}
+
+# A stand-in for ssh, for rsync -e / scp -S / sftp -S: it runs the recorder as
+# sshd would under ForceCommand, with the remote command (or, for a subsystem
+# request, the Subsystem command) as SSH_ORIGINAL_COMMAND, and no PTY.
+e2e_fakessh() {
+    cat > "$E2E_WORK/fakessh" <<'EOF'
+#!/bin/bash
+sub=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s) sub=1; shift ;;
+        -[bcDEeFIiJLlmOoPpQRSWw]) shift 2 ;;
+        --) shift; break ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+shift                                   # the host
+if [ "$sub" = 1 ]; then cmd=$OB_TEST_SUBSYSTEM; else cmd="$*"; fi
+exec env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" SSH_CLIENT="203.0.113.7 50000 22" \
+    HOME="$OB_TEST_HOME" setsid bash -p "$OB_TEST_RECORDER"
+EOF
+    chmod +x "$E2E_WORK/fakessh"
+}
+
+# The last session must be a transfer: metadata only, completed.
+e2e_expect_transfer() { # $1 label  $2 sessions before
+    local j
+    if [ "$(e2e_session_count)" -le "$2" ]; then
+        fail "E2E transfer ($1): no session recorded"; return 1
+    fi
+    j=$(e2e_last_json)
+    if grep -q '"format": "transfer"' "$j" && grep -q '"status": "completed"' "$j" \
+       && [ ! -s "${j%.json}.typescript" ]; then
+        return 0
+    fi
+    fail "E2E transfer ($1): not recorded as a completed transfer" "json=$j"
+    return 1
+}
+
+# ── E2E 3: genuine rsync, scp (both protocols) and sftp still work ──
+test_e2e_transfers() {
+    local w="$E2E_WORK" ssh="$E2E_WORK/fakessh" n ok=1
+    local -a missing=()
+    for b in rsync scp sftp; do command -v "$b" >/dev/null 2>&1 || missing+=("$b"); done
+    [ -x /usr/bin/rsync ] || missing+=("/usr/bin/rsync")
+    local have_sftp=0 s
+    for s in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server \
+             /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; do
+        [ -x "$s" ] && have_sftp=1
+    done
+    [ "$have_sftp" = 1 ] || missing+=("sftp-server")
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "SKIP: E2E transfers need ${missing[*]}"
+        return
+    fi
+    e2e_driver
+    e2e_fakessh
+    export OB_TEST_RECORDER="$w/recorder" OB_TEST_HOME="$w/home" OB_TEST_SUBSYSTEM=internal-sftp
+    mkdir -p "$w/src" "$w/dst" "$w/home/pull" "$w/rsync-pull" "$w/scp-pull"
+    printf 'first\n' > "$w/src/my file.txt"
+    printf 'second\n' > "$w/src/b.txt"
+    cp "$w/src/"*.txt "$w/home/pull/"
+
+    # rsync push, into a directory whose name needs escaping
+    n=$(e2e_session_count)
+    if rsync -a -e "$ssh" "$w/src/" "h:$w/dst/sub dir/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/my file.txt" "$w/dst/sub dir/my file.txt"; then
+        e2e_expect_transfer "rsync push" "$n" || ok=0
+    else
+        fail "E2E transfer: rsync push failed"; ok=0
+    fi
+    # rsync pull, with a leading ~ and a wildcard for the remote shell
+    n=$(e2e_session_count)
+    if rsync -a -e "$ssh" "h:~/pull/*.txt" "$w/rsync-pull/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/rsync-pull/b.txt" \
+       && cmp -s "$w/src/my file.txt" "$w/rsync-pull/my file.txt"; then
+        e2e_expect_transfer "rsync pull" "$n" || ok=0
+    else
+        fail "E2E transfer: rsync pull with ~ and a wildcard failed"; ok=0
+    fi
+    # legacy scp (-O): push, then pull with ~ and a wildcard
+    n=$(e2e_session_count)
+    if scp -O -q -S "$ssh" "$w/src/b.txt" "h:$w/dst/scp-legacy.txt" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/scp-legacy.txt"; then
+        e2e_expect_transfer "scp -O push" "$n" || ok=0
+    else
+        fail "E2E transfer: legacy scp push failed"; ok=0
+    fi
+    n=$(e2e_session_count)
+    if scp -O -q -S "$ssh" "h:~/pull/*.txt" "$w/scp-pull/" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/my file.txt" "$w/scp-pull/my file.txt"; then
+        e2e_expect_transfer "scp -O pull" "$n" || ok=0
+    else
+        fail "E2E transfer: legacy scp pull with ~ and a wildcard failed"; ok=0
+    fi
+    # modern scp and sftp: the sftp subsystem, i.e. internal-sftp
+    n=$(e2e_session_count)
+    if scp -q -S "$ssh" "$w/src/b.txt" "h:$w/dst/scp-sftp.txt" </dev/null >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/scp-sftp.txt"; then
+        e2e_expect_transfer "scp (sftp protocol)" "$n" || ok=0
+    else
+        fail "E2E transfer: scp over the sftp subsystem failed"; ok=0
+    fi
+    n=$(e2e_session_count)
+    if printf 'put %s %s\nget %s %s\n' "$w/src/b.txt" "$w/dst/sftp-put.txt" \
+            "$w/src/b.txt" "$w/sftp-get.txt" \
+       | sftp -q -b - -S "$ssh" h >/dev/null 2>&1 \
+       && cmp -s "$w/src/b.txt" "$w/dst/sftp-put.txt" && cmp -s "$w/src/b.txt" "$w/sftp-get.txt"; then
+        e2e_expect_transfer "sftp" "$n" || ok=0
+    else
+        fail "E2E transfer: sftp (internal-sftp subsystem) failed"; ok=0
+    fi
+    [ "$ok" = 1 ] && pass "E2E: rsync push/pull, scp -O push/pull, scp and sftp work, each recorded as a transfer"
+}
+
+# ── E2E 4: the recording channel lives in a private directory, removed after ──
+# The FIFO used to be `mktemp -u` + `mkfifo` in /tmp: a predicted name in a
+# shared directory. It is now inside a `mktemp -d` directory (0700). The
+# session itself looks at it, so the answer lands in its own typescript.
+test_e2e_private_channel_dir() {
+    local j tmp="$E2E_WORK/tmp"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    e2e_driver "REC_TMP_BASE=$(printf '%q' "$tmp")"
+    e2e_run "stat -c 'OB-CHAN %a %F' $tmp/ob-rec.* $tmp/ob-rec.*/stream" </dev/null >/dev/null 2>&1
+    j=$(e2e_last_json)
+    if grep -q 'OB-CHAN 700 directory' "${j%.json}.typescript" 2>/dev/null \
+       && grep -q 'OB-CHAN 600 fifo' "${j%.json}.typescript" 2>/dev/null \
+       && [ -z "$(ls -A "$tmp")" ]; then
+        pass "E2E: FIFO in a private 0700 directory, removed when the session ends"
+    else
+        fail "E2E: recording channel not private, or left behind" \
+            "$(grep -a OB-CHAN "${j%.json}.typescript" 2>/dev/null | tr -d '\r' | tr '\n' ' ') left: $(ls -A "$tmp")"
+    fi
+}
+
+# ── E2E 5: max_duration really ends the session (#287) ──
+# The old watchdog was an ALRM trap, which bash defers until the foreground
+# command -- script, i.e. the whole session -- returns: it never fired in
+# time. Here a session that would run for 30 s has a 2 s limit, and must end
+# the orderly way -- script killed, the recorder finishing by itself -- well
+# before the watchdog's last resort (killing the recorder, 5 s later).
+test_e2e_max_duration() {
+    local j tmp="$E2E_WORK/tmp" start elapsed rc=0 ok=1
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    e2e_driver "MAX_SESSION_DURATION=2" "WATCHDOG_GRACE=5" "REC_TMP_BASE=$(printf '%q' "$tmp")"
+    start=$SECONDS
+    e2e_run 'echo WD-""START; sleep 30; echo WD-""END' </dev/null >/dev/null 2>&1 || rc=$?
+    elapsed=$((SECONDS - start))
+    j=$(e2e_last_json)
+    if [ "$elapsed" -gt 5 ]; then
+        fail "E2E: max_duration=2 did not end the session in time (${elapsed}s)"; ok=0
+    fi
+    if ! grep -q WD-START "${j%.json}.typescript" 2>/dev/null \
+       || grep -q WD-END "${j%.json}.typescript" 2>/dev/null; then
+        fail "E2E: the timed-out session's recording is wrong" "json=$j elapsed=$elapsed $(tr -d "\r" < "${j%.json}.typescript" 2>/dev/null | tr "\n" " ")"; ok=0
+    fi
+    # The forwarder reads EOF once script is gone, and completes the stream.
+    grep -q '"status": "completed"' "$j" 2>/dev/null \
+        || { fail "E2E: the timed-out session's recording is not complete" "$(cat "$j" 2>/dev/null)"; ok=0; }
+    [ "$rc" -ne 0 ] || { fail "E2E: a timed-out session exited 0"; ok=0; }
+    [ -z "$(ls -A "$tmp")" ] || { fail "E2E: the timed-out session left its FIFO behind" "$(ls -A "$tmp")"; ok=0; }
+
+    # A transfer is bounded too: an sftp-server whose client never speaks.
+    local s have_sftp=0
+    for s in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server \
+             /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; do
+        [ -x "$s" ] && have_sftp=1
+    done
+    if [ "$have_sftp" = 1 ]; then
+        local quiet="$E2E_WORK/quiet-client" qpid
+        mkfifo "$quiet"
+        sleep 30 > "$quiet" 2>/dev/null &     # holds the transfer's stdin open, says nothing
+        qpid=$!
+        start=$SECONDS
+        e2e_run internal-sftp < "$quiet" >/dev/null 2>&1
+        elapsed=$((SECONDS - start))
+        kill "$qpid" 2>/dev/null; wait "$qpid" 2>/dev/null
+        rm -f "$quiet"
+        [ "$elapsed" -le 5 ] || { fail "E2E: max_duration=2 did not end an idle sftp transfer in time (${elapsed}s)"; ok=0; }
+    else
+        echo "SKIP: E2E max_duration on a transfer needs sftp-server"
+    fi
+    [ "$ok" = 1 ] && pass "E2E: max_duration ends the session (and a transfer), recording complete, FIFO removed"
+}
+
+# ── E2E 6: an oversized command is refused, and nothing runs (#287) ──
+# A command long enough to push the metadata header past the sink's cap used to
+# connect anyway; the sink then rejected the header and exited, but the
+# connector stayed alive on the FIFO and the command ran unrecorded. Now the
+# recorder refuses it up front (check_header_size), and the ACK handshake would
+# stop it even if that check were bypassed. The command here would `touch` a
+# marker if it ran; it must not, and no session must be recorded.
+test_e2e_oversized_command() {
+    local j marker pad n0 rc=0
+    marker="$E2E_WORK/oversize-ran"
+    rm -f "$marker"
+    pad=$(head -c 9000 /dev/zero | tr '\0' A)
+    e2e_driver
+    n0=$(e2e_session_count)
+    e2e_run "touch $marker #$pad" </dev/null >/dev/null 2>&1 || rc=$?
+    # Give a (buggy) build a moment to have recorded or run something.
+    sleep 1
+    if [ -e "$marker" ]; then
+        fail "E2E: an oversized command ran (recording bypass)"
+    elif [ "$rc" -eq 0 ]; then
+        fail "E2E: an oversized command was not refused (rc=0)"
+    elif [ "$(e2e_session_count)" -ne "$n0" ]; then
+        j=$(e2e_last_json)
+        fail "E2E: an oversized command still opened a session" "json=$j"
+    else
+        pass "E2E: an oversized command is refused, nothing runs, nothing recorded"
+    fi
+}
+
+# A tiny AF_UNIX stub sink at $1, in the background, that accepts one
+# connection, reads the header line, and then behaves per $2:
+#   noack   close without the ACK          (rejection the recorder must obey)
+#   permit  send the ACK, drain, then close (a sink that would accept anything)
+# Echoes nothing; kill it via the returned pid.
+e2e_stub_sink() { # $1 sockpath  $2 mode -> pid
+    python3 - "$1" "$2" >/dev/null 2>&1 <<'PY' &
+import os, socket, sys
+path, mode = sys.argv[1], sys.argv[2]
+try: os.unlink(path)
+except FileNotFoundError: pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); srv.bind(path); srv.listen(4)
+while True:
+    c, _ = srv.accept()
+    f = c.makefile("rb"); f.readline(); f.close()  # the header line; close the
+                                                    # dup'd fd or the peer never
+                                                    # sees EOF on c.close()
+    if mode == "permit":
+        c.sendall(b"\x06")                          # OB_RECORD_ACK
+        try:
+            while c.recv(65536): pass
+        except OSError:
+            pass
+    c.close()
+PY
+    echo $!
+}
+
+# ── E2E 7: the recorder refuses a session the sink does not ACK (#287) ──
+# The recorder must not start `script` unless the connector reported OB_READY,
+# which it does only after the sink's ACK. A stub that closes without the ACK
+# stands for any rejection; the session must be refused and nothing recorded.
+# Run the recorder for at most $1 s against the sink socket $3, with the given
+# SSH_ORIGINAL_COMMAND, without setsid (these callers refuse BEFORE the
+# watchdog, so they need no session of their own). The recorder's private FIFO
+# dir is a per-call path so that, if a broken build started `script` and it
+# blocked on the FIFO, the whole subtree can be reaped by that path. Returns
+# the recorder's rc, or 137 if it had to be killed for overrunning.
+e2e_run_bounded() { # $1 secs  $2 recdir  $3 sock  $4 command
+    local secs="$1" recdir="$2" sock="$3" cmd="$4"
+    rm -rf "$recdir"; mkdir -p "$recdir"
+    e2e_driver "RECORD_SOCKET=$(printf '%q' "$sock")" "REC_TMP_BASE=$(printf '%q' "$recdir")"
+    local rc=0
+    timeout -s KILL "$secs" env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" \
+        SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
+        bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+    # timeout -s KILL kills the recorder (bash); reap any orphaned connector or
+    # `script` still holding the FIFO under this call's private dir.
+    pkill -KILL -f "$recdir" 2>/dev/null || true
+    return "$rc"
+}
+
+# ── E2E 7: the recorder refuses a session the sink does not ACK (#287) ──
+# The recorder must not start `script` unless the connector reported OB_READY,
+# which it does only after the sink's ACK. A stub that closes without the ACK
+# stands for any rejection; the session must be refused and nothing recorded.
+test_e2e_no_ack_refused() {
+    local sock="$E2E_WORK/noack.sock" pid n0 rc=0
+    pid=$(e2e_stub_sink "$sock" noack)
+    for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
+    n0=$(e2e_session_count)
+    # Refusal must be prompt: a build that ignored the missing ACK and started
+    # `script` would block forever opening the FIFO (no reader). e2e_run_bounded
+    # kills it after 15 s (rc 137), which counts as "not properly refused".
+    e2e_run_bounded 15 "$E2E_WORK/noack-tmp" "$sock" 'echo OB-SHOULD-NOT-""RUN' || rc=$?
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 137 ]; then
+        fail "E2E: a session with no sink ACK was not promptly refused (rc=$rc)"
+    elif [ "$(e2e_session_count)" -ne "$n0" ]; then
+        fail "E2E: a session with no sink ACK still recorded something"
+    else
+        pass "E2E: no sink ACK -> session refused, nothing recorded"
+    fi
+}
+
+# ── E2E 8: check_header_size refuses up front, before any sink is consulted ──
+# Point the recorder at a stub that would ACK anything, and give it an oversized
+# command. If check_header_size is in place, the recorder refuses BEFORE
+# connecting, so the permissive sink never lets it record. Without that check
+# the recorder would connect, get the ACK, and record the oversized session.
+test_e2e_header_cap_early() {
+    local sock="$E2E_WORK/permit.sock" pid rc=0 pad
+    pid=$(e2e_stub_sink "$sock" permit)
+    for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
+    pad=$(head -c 9000 /dev/zero | tr '\0' A)
+    e2e_run_bounded 15 "$E2E_WORK/hdrcap-tmp" "$sock" "echo hi #$pad" || rc=$?
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    # The stub is not the real sink, so nothing lands on disk either way; the
+    # observable is the recorder's refusal (non-zero, prompt) before it ever
+    # connected. Without check_header_size it would connect, get the ACK and
+    # record -- exit 0.
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 137 ]; then
+        pass "E2E: check_header_size refuses an oversized command before connecting"
+    else
+        fail "E2E: an oversized command was accepted when the sink would ACK (rc=$rc)"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-session-recorder ==="
 run_test test_syntax
@@ -320,13 +1089,32 @@ run_test test_config_comments
 run_test test_generate_session_id
 run_test test_build_header_single_line
 run_test test_build_header_no_newline_injection
+run_test test_build_header_fallback_escapes_all_fields
+run_test test_log_lines_sanitized
+run_test test_log_safe_truncation
+run_test test_c1_bytes_escaped
+run_test test_transfer_classification
+run_test test_max_duration_validation
 run_test test_streams_via_connect
 run_test test_fail_closed_no_connect
-run_test test_env_defaults
+run_test test_env_ignored
+run_test test_helpers_not_from_user_path
 run_test test_parse_args
 run_test test_invalid_session_user
 run_test test_valid_session_user
 run_test test_session_user_from_uid
+
+echo "--- end to end (real recorder, connector and sink) ---"
+if e2e_setup; then
+    run_test test_e2e_command_recorded
+    run_test test_e2e_bypass_recorded
+    run_test test_e2e_transfers
+    run_test test_e2e_private_channel_dir
+    run_test test_e2e_max_duration
+    run_test test_e2e_oversized_command
+    run_test test_e2e_no_ack_refused
+    run_test test_e2e_header_cap_early
+fi
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

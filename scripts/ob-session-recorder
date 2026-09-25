@@ -1,28 +1,63 @@
-#!/bin/bash
+#!/bin/bash -p
 #
 # ob-session-recorder - Record SSH sessions for audit purposes
 #
 # This script is designed to be used as ForceCommand in sshd_config
 # to record all SSH sessions passing through a bastion host.
 #
-# Supports recording formats:
-# - script: Plain typescript (default, always available)
-# - asciinema: Using asciinema tool if installed
-# - ttyrec: Using ttyrec tool if installed
+# Recording format: a plain typescript (script(1)), streamed to the root
+# ob-record-sink. asciinema/ttyrec are not supported over the sink yet.
+#
+# It runs as the recorded user, so nothing in that user's environment may
+# decide how, or whether, the session is recorded (#287):
+#   - `bash -p` (privileged mode) ignores BASH_ENV, ENV, SHELLOPTS, BASHOPTS,
+#     GLOBIGNORE, CDPATH and functions exported through the environment;
+#   - helpers come from a fixed system PATH, set below before any is run, and
+#     ob-record-connect from a fixed root-owned path;
+#   - the tunables come from the root-owned config file or the ForceCommand
+#     line, never from OB_* environment variables.
 #
 # Copyright (C) 2025 Linagora
 # License: AGPL-3.0
 
 set -euo pipefail
 
-VERSION="0.2.3"
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+VERSION="0.3.0"
 PROG_NAME=$(basename "$0")
 
-# Default configuration
-CONFIG_FILE="${OB_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
-SESSIONS_DIR="${OB_SESSIONS_DIR:-/var/lib/open-bastion/sessions}"
-FORMAT="${OB_RECORDER_FORMAT:-script}"
-MAX_SESSION_DURATION="${OB_MAX_SESSION:-86400}"  # 24 hours default
+# Default configuration. Plain assignments on purpose: a same-named variable in
+# the environment must not pre-empt them.
+CONFIG_FILE="/etc/open-bastion/session-recorder.conf"
+SESSIONS_DIR="/var/lib/open-bastion/sessions"
+FORMAT="script"
+DEFAULT_MAX_SESSION_DURATION=86400  # 24 hours
+MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
+# Seconds the watchdog gives the recorder to finish once the session is ended.
+# Must stay LARGER than the forwarder-drain wait in close_record_channel (5 s):
+# otherwise the watchdog could SIGKILL the recorder while it is still waiting to
+# SIGTERM a stuck forwarder, and that forwarder would then hold the sink open
+# for the whole duration cap.
+WATCHDOG_GRACE=15
+# Seconds to wait for the connector to report the sink's ACK (below). Generous:
+# the sink resolves the peer's user (NSS, possibly networked) before it answers.
+CONNECT_TIMEOUT=15
+# The sink caps one metadata header at 8192 bytes (MAX_HEADER); a longer one is
+# rejected. We refuse such a command up front rather than let the sink reject
+# it after the connection is made.
+OB_HEADER_MAX=8192
+# Where the recording channel's private directory is created (mktemp -d).
+REC_TMP_BASE="/tmp"
+
+# The connector that streams to the sink, and the sink's socket. The connector
+# is looked up only among these root-owned paths (see resolve_system_bin), and
+# the socket is passed to it explicitly, so OB_RECORD_SOCKET in the user's
+# environment cannot point the recording at a sink of the user's choosing.
+RECORD_CONNECT=""
+RECORD_CONNECT_CANDIDATES=(/usr/bin/ob-record-connect /usr/local/bin/ob-record-connect)
+RECORD_SOCKET="/run/open-bastion/rec.sock"
 
 # Metadata
 SESSION_ID=""
@@ -38,26 +73,54 @@ TTY_NAME="${SSH_TTY:-notty}"
 # Must contain only safe characters before it is used to construct file paths.
 if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
     SAFE_USER=$(printf '%q' "$SESSION_USER")
-    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER"
+    logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER" 2>/dev/null || true
     echo "Error: invalid session user" >&2
     exit 1
 fi
 
 # Process management
 TIMEOUT_PID=""
-RECORDING_PID=""
 
-# Logging to syslog
+# Logging to syslog. A logging failure (no /dev/log in a container, a stopped
+# journal) must not end the session half-way under `set -e`.
 log_info() {
-    logger -t "$PROG_NAME" -p auth.info "$*"
+    logger -t "$PROG_NAME" -p auth.info "$*" 2>/dev/null || true
 }
 
 log_warn() {
-    logger -t "$PROG_NAME" -p auth.warning "$*"
+    logger -t "$PROG_NAME" -p auth.warning "$*" 2>/dev/null || true
 }
 
 log_err() {
-    logger -t "$PROG_NAME" -p auth.err "$*"
+    logger -t "$PROG_NAME" -p auth.err "$*" 2>/dev/null || true
+}
+
+# Print the first of the given absolute paths that is an executable regular
+# file owned by root and writable by nobody else, in a directory that is also
+# root-owned and not group/world-writable. PATH is never consulted: a program
+# the recorder trusts with the session must not be one the recorded user (or a
+# member of a privileged group) could have planted or swapped.
+#
+# The directory check matters because a file's own mode is not enough: a
+# group-writable directory lets a member replace the file (unlink + create).
+# Older Debian ships /usr/local/bin as root:staff 2775 (group-writable, setgid);
+# a member of "staff" could then swap ob-record-connect. We REFUSE such a
+# directory, so on those hosts the connector must be installed under /usr/bin
+# (the package default) or /usr/local/bin must be tightened to 0755 root:root.
+resolve_system_bin() {
+    local p st dst
+    for p in "$@"; do
+        [ -f "$p" ] && [ -x "$p" ] || continue
+        st=$(stat -L -c '%u %a' "$p" 2>/dev/null) || continue
+        [ "${st%% *}" = "0" ] || continue
+        [ $(( 8#${st##* } & 8#022 )) -eq 0 ] || continue
+        dst=$(stat -L -c '%u %a' "${p%/*}" 2>/dev/null) || continue
+        [ "${dst%% *}" = "0" ] || continue
+        [ $(( 8#${dst##* } & 8#022 )) -eq 0 ] || continue
+        printf '%s\n' "$p"
+        return 0
+    done
+    return 1
 }
 
 # Generate unique session ID (UUID v4)
@@ -131,104 +194,602 @@ build_header() {
             --arg tty "$TTY_NAME" \
             --arg cmd "$ORIGINAL_COMMAND" \
             --arg start "$SESSION_START" \
-            '{v:1,session_id:$sid,format:$fmt,client_ip:$ip,ssh_tty:$tty,original_command:$cmd,start:$start}'
+            '{v:2,session_id:$sid,format:$fmt,client_ip:$ip,ssh_tty:$tty,original_command:$cmd,start:$start}'
     else
-        # Minimal fallback (jq is a package dependency; this is best-effort). We
-        # MUST keep the header on one line, so JSON-escape backslash, quote and
-        # the control chars that would otherwise break it (newline/CR/tab) in the
-        # only field that can carry them, original_command.
-        local c="${ORIGINAL_COMMAND//\\/\\\\}"
-        c="${c//\"/\\\"}"
-        c="${c//$'\n'/\\n}"
-        c="${c//$'\r'/\\r}"
-        c="${c//$'\t'/\\t}"
-        printf '{"v":1,"session_id":"%s","format":"%s","client_ip":"%s","ssh_tty":"%s","original_command":"%s","start":"%s"}' \
-            "$SESSION_ID" "$FORMAT" "$CLIENT_IP" "$TTY_NAME" "$c" "$SESSION_START"
+        # Minimal fallback (jq is a package dependency; this is best-effort). The
+        # header MUST stay one valid JSON line, and every field comes from the
+        # client side (SSH_CLIENT, SSH_TTY and the command are all sshd
+        # environment the session influences), so every field is escaped, not
+        # only the command.
+        printf '{"v":2,"session_id":"%s","format":"%s","client_ip":"%s","ssh_tty":"%s","original_command":"%s","start":"%s"}' \
+            "$(json_escape "$SESSION_ID")" "$(json_escape "$FORMAT")" \
+            "$(json_escape "$CLIENT_IP")" "$(json_escape "$TTY_NAME")" \
+            "$(json_escape "$ORIGINAL_COMMAND")" "$(json_escape "$SESSION_START")"
+    fi
+}
+
+# JSON string escaping (RFC 8259 §7): backslash, quote, and every control
+# character, the common ones by name and the rest as \u00XX.
+#
+# The control set is C0 (0x00-0x1f) + DEL (0x7f), each a single byte, and the
+# C1 controls U+0080-U+009F (0x9b is CSI, an escape-sequence introducer). In
+# UTF-8 those C1 code points are the TWO bytes 0xc2 0x80 .. 0xc2 0x9f, not the
+# raw bytes 0x80-0x9f -- those are ordinary continuation bytes of accented
+# letters, emoji and the like, and escaping them byte-wise corrupts valid
+# UTF-8. So we escape the 0xc2 0x8x/0x9x sequence, and leave every other high
+# byte untouched. (jq, the normal path, does all this itself; this fallback is
+# best-effort but must not mangle UTF-8.)
+json_escape() {
+    local s="$1" out="" c nx code i LC_ALL=C
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f']* || "$s" == *$'\xc2'[$'\x80'-$'\x9f']* ]]; then
+        for ((i = 0; i < ${#s}; i++)); do
+            c=${s:i:1}
+            printf -v code '%d' "'$c"
+            [ "$code" -lt 0 ] && code=$((code + 256))
+            if { [ "$code" -ge 1 ] && [ "$code" -le 31 ]; } || [ "$code" -eq 127 ]; then
+                printf -v c '\\u%04x' "$code"
+            elif [ "$code" -eq 194 ]; then   # 0xc2: maybe a C1 control
+                nx=${s:i+1:1}
+                printf -v code '%d' "'$nx"
+                [ "$code" -lt 0 ] && code=$((code + 256))
+                if [ "$code" -ge 128 ] && [ "$code" -le 159 ]; then
+                    printf -v c '\\u%04x' "$code"
+                    i=$((i + 1))   # consumed the second byte too
+                fi
+            fi
+            out+=$c
+        done
+        s=$out
+    fi
+    printf '%s' "$s"
+}
+
+# A client-supplied string made safe for one syslog line: at most 1024 bytes,
+# and quoted with printf %q -- one line, every control character visible --
+# when it holds a C0/DEL control or a real C1 control (U+0080-U+009F, i.e. the
+# UTF-8 bytes 0xc2 0x80..0xc2 0x9f). Raw high bytes that are ordinary UTF-8 are
+# left readable. A truncated string keeps its true length and a hash, so an
+# attacker cannot pad the interesting part out of the logged window.
+log_safe() {
+    local s="$1" LC_ALL=C
+    if [ "${#s}" -gt 1024 ]; then
+        local len hash
+        len=${#s}
+        hash=$(printf '%s' "$s" | sha256sum 2>/dev/null | cut -c1-16)
+        [ -n "$hash" ] || hash="?"
+        s="${s:0:1024}[...+$((len - 1024)) bytes, ${len} total, sha256:${hash}]"
+    fi
+    if [[ "$s" == *[$'\x01'-$'\x1f'$'\x7f']* || "$s" == *$'\xc2'[$'\x80'-$'\x9f']* ]]; then
+        printf '%q' "$s"
+    else
+        printf '%s' "$s"
+    fi
+}
+
+log_session_start() {
+    log_info "Session $SESSION_ID started for user $SESSION_USER from $(log_safe "$CLIENT_IP")${ORIGINAL_COMMAND:+, command: $(log_safe "$ORIGINAL_COMMAND")}"
+}
+
+# Refuse a command whose metadata header would exceed the sink's cap
+# (OB_HEADER_MAX). The header carries the client's command, and the sink
+# rejects an oversized line -- so without this the connection would be made and
+# only then refused, the window #287 is about. We measure the built header, so
+# JSON escaping (which can expand a byte up to sixfold) is counted exactly.
+# FORMAT is "script" here; the transfer header uses "transfer", 2 bytes LONGER,
+# so we leave a 4-byte margin (the newline the connector adds, plus those 2) to
+# be sure the transfer form fits the sink's cap too. A refused command is
+# logged with its length and a hash, never in full. Fail closed.
+check_header_size() {
+    local h LC_ALL=C
+    h=$(build_header)
+    if [ "${#h}" -ge "$((OB_HEADER_MAX - 4))" ]; then
+        local len hash
+        len=$(printf '%s' "$ORIGINAL_COMMAND" | LC_ALL=C wc -c | tr -d ' ')
+        hash=$(printf '%s' "$ORIGINAL_COMMAND" | sha256sum 2>/dev/null | cut -c1-16)
+        [ -n "$hash" ] || hash="?"
+        log_err "Session $SESSION_ID refused: command too long for a recording header (${#h} bytes, over ${OB_HEADER_MAX}; command ${len} bytes, sha256:${hash})"
+        echo "Session cannot be recorded (command too long); access refused." >&2
+        exit 1
     fi
 }
 
 # Cleanup on exit. The sink owns the metadata file (end time + status), so the
 # recorder no longer writes any session file here — it only tears down the
 # timeout watchdog and logs.
+#
+# Runs on EVERY exit path -- normal end, a signal caught by the traps set in
+# main(), an error under `set -e` -- so the recording channel's private
+# directory never outlives the recorder (the old timeout path exited without
+# removing its FIFO).
 cleanup() {
     local exit_code=$?
-
-    if [ -n "$TIMEOUT_PID" ]; then
-        kill "$TIMEOUT_PID" 2>/dev/null || true
-        wait "$TIMEOUT_PID" 2>/dev/null || true
-    fi
-
+    stop_watchdog
+    close_record_channel
     log_info "Session $SESSION_ID ended for user $SESSION_USER (recorder rc: $exit_code)"
 }
 
-# Handle session timeout
-handle_timeout() {
-    log_warn "Session $SESSION_ID timed out after $MAX_SESSION_DURATION seconds"
-    echo "Session timed out after $MAX_SESSION_DURATION seconds" >&2
+# 0 while process $1 exists and is not a zombie.
+proc_running() {
+    local st
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }
+    [ "${st%% *}" != "Z" ]
+}
 
-    # Kill the recording process if running
-    if [ -n "$RECORDING_PID" ]; then
-        kill -TERM "$RECORDING_PID" 2>/dev/null || true
+# Start time of process $1 (field 22 of /proc/<pid>/stat, in clock ticks), so a
+# pid can be told apart from a later process that reused it. Empty if gone.
+proc_starttime() {
+    local st f
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }            # drop "pid (comm) "; $f then starts at field 3
+    read -ra f <<< "$st"
+    printf '%s' "${f[19]}"   # field 22 = index 19 from field 3
+}
+
+# 0 while process $1 is the same live process whose start time is $2 (not a
+# zombie, not a pid the kernel has since handed to someone else).
+proc_is() { # $1 pid  $2 expected start time
+    local st f
+    { read -r st < "/proc/$1/stat"; } 2>/dev/null || return 1
+    st=${st##*) }
+    read -ra f <<< "$st"
+    [ "${f[0]}" != "Z" ] || return 1   # state, field 3
+    [ "${f[19]}" = "$2" ]              # start time, field 22
+}
+
+# max_duration must be a number of seconds. A typo used to disable the
+# watchdog without a word (`[ "abc" -gt 0 ]` fails inside an `if`, which
+# `set -e` does not catch): it now falls back to the default, loudly.
+validate_max_duration() {
+    if [[ ! "$MAX_SESSION_DURATION" =~ ^[0-9]{1,9}$ ]]; then
+        log_err "invalid max_duration '$(log_safe "$MAX_SESSION_DURATION")' (seconds expected); using the default, ${DEFAULT_MAX_SESSION_DURATION}s"
+        MAX_SESSION_DURATION=$DEFAULT_MAX_SESSION_DURATION
     fi
-
-    exit 124  # Standard timeout exit code
+    MAX_SESSION_DURATION=$((10#$MAX_SESSION_DURATION))
 }
 
-# Detect non-interactive file-transfer commands that cannot tolerate a PTY.
-# scp, sftp-server and rsync exchange a binary protocol over stdin/stdout;
-# wrapping them in script/asciinema/ttyrec corrupts the stream (NL→CR+NL
-# translation, terminal echo, etc.) and the client aborts with errors like
-# "Connection closed" or "unexpected <newline>". Returns 0 if the command
-# must be exec'd directly (no PTY), 1 otherwise.
-is_file_transfer() {
-    local cmd="${ORIGINAL_COMMAND:-}"
-    [ -z "$cmd" ] && return 1
-    local first="${cmd%%[[:space:]]*}"
-    # Strip an optional leading path: ssh subsystem invocations come as
-    # the full path defined by "Subsystem sftp ...".
-    local base="${first##*/}"
-    case "$base" in
-        scp)
-            # scp server-side is invoked as "scp -t <dir>" (to) or
-            # "scp -f <file>" (from). The interactive 'scp' command on
-            # the bastion itself would not have these flags.
-            case " $cmd " in
-                *" -t "*|*" -f "*) return 0 ;;
-            esac
-            ;;
-        sftp-server|internal-sftp)
-            return 0
-            ;;
-        rsync)
-            # Server-side rsync is always invoked with --server.
-            case " $cmd " in
-                *" --server "*) return 0 ;;
-            esac
-            ;;
+# ── max_duration watchdog ─────────────────────────────────────────────────────
+#
+# The previous watchdog was `trap handle_timeout ALRM`, the alarm sent by a
+# background sleep. Bash defers a trap until the foreground command returns --
+# here script(1), that is the whole session -- so it never fired in time; the
+# pid it meant to kill was never assigned; and its `exit 124` skipped the FIFO
+# cleanup. This one acts from outside the recorder: when the time is up it
+# kills what holds the session -- script(1), or the transfer program -- and
+# lets the recorder finish normally. Killing script closes the session's
+# terminal, so everything inside gets SIGHUP exactly as on a client
+# disconnect, and the forwarder reads EOF, drains what was written and sends
+# the end-of-stream marker: the recording ends complete. script is killed
+# outright because no gentler signal works everywhere: util-linux 2.39 does not
+# exit on SIGHUP while a command still holds its terminal, and on SIGTERM it
+# waits for a shell that ignores SIGTERM. If the recorder is still there
+# WATCHDOG_GRACE seconds later, it is killed too.
+#
+# It runs as the recorded user, who can kill it like any of their processes.
+# The bound that user cannot lift is the sink's own duration cap
+# (ob-record-sink(8), OB_RECORD_MAX_SEC).
+
+# The pids the watchdog ends the session with: the recorder's children, except
+# the forwarder ($2) and the watchdog itself ($3). That is script, or the
+# transfer program -- never a process group that could hold anything else.
+watchdog_targets() { # $1 recorder pid  $2 forwarder pid (may be empty)  $3 watchdog pid
+    local kids="" c d st
+    if ! { read -r kids < "/proc/$1/task/$1/children"; } 2>/dev/null; then
+        kids=""
+        for d in /proc/[0-9]*; do
+            { read -r st < "$d/stat"; } 2>/dev/null || continue
+            st=${st##*) }
+            read -r _ c _ <<< "$st"
+            [ "$c" = "$1" ] && kids+=" ${d#/proc/}"
+        done
+    fi
+    for c in $kids; do
+        [ "$c" = "$3" ] || [ "$c" = "$2" ] || printf '%s\n' "$c"
+    done
+}
+
+start_watchdog() {
+    local limit="$MAX_SESSION_DURATION" grace="$WATCHDOG_GRACE" recorder=$$ fwd="$OB_REC_PID"
+    local rstart
+    [ "$limit" -gt 0 ] || return 0
+    if ! rstart=$(proc_starttime "$recorder"); then
+        log_warn "Session $SESSION_ID: cannot read /proc/$recorder/stat; max_duration watchdog not armed"
+        return 0
+    fi
+    (
+        self=$BASHPID
+        # Stopped early by cleanup(): take the sleep down too.
+        trap 'kill "${sleep_pid:-}" 2>/dev/null; exit 0' TERM
+        sleep "$limit" &
+        sleep_pid=$!
+        wait "$sleep_pid" 2>/dev/null
+        # Every liveness test below is start-time-guarded: this runs on past the
+        # recorder's death, so the pid may already belong to someone else, and
+        # a bare-pid kill would then hit an innocent process.
+        proc_is "$recorder" "$rstart" || exit 0
+        # From here on cleanup()'s TERM is moot: this exits by itself once the
+        # recorder is gone, and must not be stopped half-way.
+        trap '' HUP TERM
+        log_warn "Session $SESSION_ID reached max_duration (${limit}s); terminating it"
+        if [ -n "${SSH_TTY:-}" ] && [ -c "$SSH_TTY" ]; then
+            printf '\r\nSession terminated: maximum duration (%ss) reached.\r\n' "$limit" \
+                > "$SSH_TTY" 2>/dev/null || true
+        fi
+        # shellcheck disable=SC2046  # one pid per word
+        kill -KILL $(watchdog_targets "$recorder" "$fwd" "$self") 2>/dev/null || true
+        for ((i = 0; i < grace * 10; i++)); do
+            proc_is "$recorder" "$rstart" || exit 0
+            sleep 0.1
+        done
+        # Last resort. Re-check the identity right before the bare-pid kill.
+        proc_is "$recorder" "$rstart" || exit 0
+        log_warn "Session $SESSION_ID: recorder still running ${grace}s after the timeout; killing it"
+        [ -n "$OB_REC_DIR" ] && rm -rf -- "$OB_REC_DIR"
+        # shellcheck disable=SC2046
+        kill -KILL "$recorder" $(watchdog_targets "$recorder" "$fwd" "$self") 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    TIMEOUT_PID=$!
+}
+
+# Not waited for: once it has fired it ignores TERM and leaves by itself when
+# the recorder is gone, and waiting here would hold the recorder -- which it is
+# polling -- for the whole grace period.
+stop_watchdog() {
+    if [ -n "$TIMEOUT_PID" ]; then
+        kill "$TIMEOUT_PID" 2>/dev/null || true
+        TIMEOUT_PID=""
+    fi
+}
+
+# ── File transfers ────────────────────────────────────────────────────────────
+#
+# scp, rsync and sftp-server speak a binary protocol over stdin/stdout, which a
+# PTY corrupts (NL -> CR NL translation, echo), so they cannot run under
+# script(1): they run with raw stdio and the sink records their metadata only.
+# Deciding "this is a transfer" is therefore deciding NOT to record the
+# session's stream, on a string the client wrote. It used to be a substring
+# test followed by `$SHELL -c "$SSH_ORIGINAL_COMMAND"`, so anything appended to
+# a transfer-looking command ran unrecorded: `ssh -tt bastion 'scp -t /x; bash'`
+# was an interactive shell with an empty typescript (#287).
+#
+# It is now an allow-list parser of the exact forms genuine clients send. A
+# command that passes is executed as an argv -- never through a shell -- with
+# the program taken from a fixed root-owned path. Anything else, a transfer
+# with anything appended included, is an ordinary recorded session. A request
+# with a PTY is never a transfer: no transfer client asks for one.
+#
+# The forms (checked against OpenSSH 10 and rsync 3.x clients):
+#   rsync --server [--sender] -FLAGS[e.CAPS] [--long-option[=value]...] . PATH...
+#       Shell-special characters in paths arrive backslash-escaped (my\ file);
+#       wildcards and a leading ~ arrive unescaped, for the remote shell to
+#       expand, which transfer_expand() does -- pathname expansion only.
+#   scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...   (legacy protocol, scp -O)
+#   internal-sftp | /usr/lib*/.../sftp-server [OPTIONS]
+#       The sftp subsystem, also used by modern scp: under ForceCommand sshd
+#       passes the Subsystem command as SSH_ORIGINAL_COMMAND. internal-sftp is
+#       not a program, so both run the system sftp-server binary.
+# A receiving rsync or scp (-t) takes exactly one path; a sender one or more.
+
+TRANSFER_MAX_LEN=32768
+TRANSFER_PROG=""     # rsync | scp | sftp-server, once classify_transfer passed
+TRANSFER_ARGS=()     # argv after the program name
+TRANSFER_BIN=""      # absolute path of the program to execute
+TRANSFER_PATHS=()
+TOK_LIT=() TOK_PAT=() TOK_GLOB=() TOK_TILDE=()
+
+RSYNC_CANDIDATES=(/usr/bin/rsync /bin/rsync)
+SCP_CANDIDATES=(/usr/bin/scp /bin/scp)
+SFTP_SERVER_CANDIDATES=(/usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server
+                        /usr/lib/ssh/sftp-server /usr/libexec/sftp-server)
+
+# rsync long options a client sends to the server: rrsync(1)'s list without
+# the ones it disables. --daemon above all: `rsync --server --daemon` reads an
+# rsyncd.conf of the caller's choosing, whose "pre-xfer exec" runs anything.
+RSYNC_LONG_NOARG=" append copy-unsafe-links delay-updates delete delete-after delete-before
+ delete-delay delete-during delete-excluded delete-missing-args dirs existing fake-super force
+ from0 fsync fuzzy group hard-links ignore-errors ignore-existing ignore-missing-args
+ ignore-times inplace links list-only mkpath msgs2stderr munge-links new-compress no-W
+ no-implied-dirs no-msgs2stderr no-r no-relative no-specials numeric-ids old-compress
+ one-file-system open-noatime owner partial perms preallocate recursive remove-sent-files
+ remove-source-files safe-links sender size-only specials stats super times use-qsort "
+RSYNC_LONG_ARG=" backup-dir block-size bwlimit checksum-choice checksum-seed compare-dest
+ compress-choice compress-level compress-threads copy-dest files-from groupmap iconv info
+ link-dest log-file log-format max-alloc max-delete max-size min-size modify-window
+ only-write-batch partial-dir skip-compress stderr suffix temp-dir timeout usermap "
+# Short options: rrsync's set without `s` (--secluded-args sends the real
+# arguments over the protocol, past any check made here). A trailing
+# e[VERSION].CAPS is the capability string (-logDtpre.iLsfxCIvu), not options.
+RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrtuvxyz]*(e[0-9]*\.[A-Za-z0-9_]*)?$'
+RSYNC_NUM_RE='^-[@B]-?[0-9]+$'
+RSYNC_LONG_RE='^--([A-Za-z0-9-]+)$'
+RSYNC_LONG_VAL_RE='^--([A-Za-z0-9-]+)=(.*)$'
+SFTP_OPTARG_RE='^[A-Za-z0-9_.,/%:+-]+$'
+
+# Split $1 into words the way a shell would, for the forms above only, or fail.
+# Fills TOK_LIT (the word, escapes removed), TOK_PAT (the same word as a glob
+# pattern: escaped glob characters stay escaped), TOK_GLOB (1 if it holds an
+# unescaped * ? [) and TOK_TILDE (1 if it starts with an unescaped ~). Fails on
+# an unescaped shell metacharacter, on any control character, on a trailing
+# backslash, and on anything but single spaces between words: none of those
+# occurs in what a transfer client sends.
+transfer_split() {
+    local s="$1" LC_ALL=C
+    local n=${#s} i=0 c lit="" pat="" glob=0 tilde=0 inword=0
+    TOK_LIT=() TOK_PAT=() TOK_GLOB=() TOK_TILDE=()
+    [ "$n" -gt 0 ] && [ "$n" -le "$TRANSFER_MAX_LEN" ] || return 1
+    while [ "$i" -lt "$n" ]; do
+        c=${s:i:1}
+        case "$c" in
+            ' ')
+                [ "$inword" = 1 ] || return 1
+                TOK_LIT+=("$lit") TOK_PAT+=("$pat") TOK_GLOB+=("$glob") TOK_TILDE+=("$tilde")
+                lit="" pat="" glob=0 tilde=0 inword=0
+                ;;
+            \\)
+                i=$((i + 1))
+                [ "$i" -lt "$n" ] || return 1
+                c=${s:i:1}
+                case "$c" in [[:cntrl:]]) return 1 ;; esac
+                lit+=$c
+                case "$c" in
+                    '*'|'?'|'['|']'|\\) pat+="\\$c" ;;
+                    *) pat+=$c ;;
+                esac
+                inword=1
+                ;;
+            [[:cntrl:]]) return 1 ;;
+            ';'|'&'|'|'|'<'|'>'|'('|')'|'$'|'`'|"'"|'"'|'{'|'}'|'!'|'#') return 1 ;;
+            '*'|'?'|'[')
+                lit+=$c pat+=$c glob=1 inword=1
+                ;;
+            '~')
+                [ "$inword" = 1 ] || tilde=1
+                lit+=$c pat+=$c inword=1
+                ;;
+            *)
+                lit+=$c pat+=$c inword=1
+                ;;
+        esac
+        i=$((i + 1))
+    done
+    [ "$inword" = 1 ] || return 1
+    TOK_LIT+=("$lit") TOK_PAT+=("$pat") TOK_GLOB+=("$glob") TOK_TILDE+=("$tilde")
+}
+
+# Word $1 of TOK_* as a path operand, expanded as the remote shell would have:
+# a leading ~ or ~/ becomes $HOME, and a word with unescaped glob characters
+# becomes the names it matches (or itself, unescaped, when nothing matches).
+# Pathname expansion only: an unquoted expansion with an empty IFS is never
+# split, and its result is never parsed again for $, ` or quotes. Appends to
+# TRANSFER_PATHS; fails on ~user.
+transfer_expand() {
+    local k="$1" lit="${TOK_LIT[$1]}" pat="${TOK_PAT[$1]}" home="${HOME:-}"
+    if [ "${TOK_TILDE[$k]}" = 1 ]; then
+        # A literal ~ is being matched here, not expanded.
+        # shellcheck disable=SC2088
+        case "$lit" in
+            '~'|'~/'*) ;;
+            *) return 1 ;;
+        esac
+        [ -n "$home" ] || return 1
+        glob_quote "$home"
+        lit="$home${lit:1}"
+        pat="$GLOB_QUOTED${pat:1}"
+    fi
+    if [ "${TOK_GLOB[$k]}" = 1 ]; then
+        local IFS=
+        local -a matches
+        # shellcheck disable=SC2206  # pathname expansion is the point here
+        matches=( $pat )
+        if [ "${#matches[@]}" -eq 1 ] && [ "${matches[0]}" = "$pat" ]; then
+            TRANSFER_PATHS+=("$lit")
+        else
+            TRANSFER_PATHS+=("${matches[@]}")
+        fi
+    else
+        TRANSFER_PATHS+=("$lit")
+    fi
+}
+
+GLOB_QUOTED=""
+glob_quote() {
+    local s="$1" c i LC_ALL=C
+    GLOB_QUOTED=""
+    for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        case "$c" in
+            '*'|'?'|'['|']'|\\) GLOB_QUOTED+="\\$c" ;;
+            *) GLOB_QUOTED+=$c ;;
+        esac
+    done
+}
+
+# 0 if word $1 of TOK_* is a plain word: no glob character, no leading ~.
+tok_plain() {
+    [ "${TOK_GLOB[$1]}" = 0 ] && [ "${TOK_TILDE[$1]}" = 0 ]
+}
+
+# rsync --server [--sender] OPTIONS . PATH...
+transfer_parse_rsync() {
+    local n=${#TOK_LIT[@]} k=2 w sender=0 dot=0
+    local -a opts=()
+    [ "$n" -ge 4 ] && [ "${TOK_LIT[1]}" = "--server" ] && tok_plain 1 || return 1
+    while [ "$k" -lt "$n" ]; do
+        tok_plain "$k" || return 1
+        w=${TOK_LIT[$k]}
+        k=$((k + 1))
+        if [ "$w" = "." ]; then
+            dot=1
+            break
+        elif [ "${#w}" -gt 1 ] && [[ "$w" =~ $RSYNC_SHORT_RE ]]; then
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_NUM_RE ]]; then
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_LONG_RE ]] && [[ "$RSYNC_LONG_NOARG" == *[[:space:]]"${BASH_REMATCH[1]}"[[:space:]]* ]]; then
+            [ "${BASH_REMATCH[1]}" = "sender" ] && sender=1
+            opts+=("$w")
+        elif [[ "$w" =~ $RSYNC_LONG_VAL_RE ]] && [[ "$RSYNC_LONG_ARG" == *[[:space:]]"${BASH_REMATCH[1]}"[[:space:]]* ]]; then
+            opts+=("$w")
+        else
+            return 1
+        fi
+    done
+    [ "$dot" = 1 ] && [ "$k" -lt "$n" ] || return 1
+    TRANSFER_PATHS=()
+    while [ "$k" -lt "$n" ]; do
+        transfer_expand "$k" || return 1
+        k=$((k + 1))
+    done
+    [ "$sender" = 1 ] || [ "${#TRANSFER_PATHS[@]}" -eq 1 ] || return 1
+    TRANSFER_PROG=rsync
+    # `--` as rrsync does: a path (or a name a glob matched) starting with a
+    # dash must never be read as an option -- `--daemon`, say.
+    TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} -- . "${TRANSFER_PATHS[@]}")
+}
+
+# scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...
+transfer_parse_scp() {
+    local n=${#TOK_LIT[@]} k=1 w mode="" seen=" " dashdash=0
+    local -a flags=()
+    while [ "$k" -lt "$n" ] && tok_plain "$k"; do
+        w=${TOK_LIT[$k]}
+        case "$w" in
+            -r|-p|-d|-v)
+                [[ "$seen" == *" $w "* ]] && return 1
+                seen+="$w "
+                flags+=("$w")
+                ;;
+            -t|-f)
+                [ -z "$mode" ] || return 1
+                mode=$w
+                ;;
+            --)
+                dashdash=1
+                k=$((k + 1))
+                break
+                ;;
+            -*) return 1 ;;
+            *) break ;;
+        esac
+        k=$((k + 1))
+    done
+    [ -n "$mode" ] && [ "$k" -lt "$n" ] || return 1
+    # -d (target should be a directory) only makes sense when receiving.
+    [ "$mode" = "-t" ] || [[ "$seen" != *" -d "* ]] || return 1
+    TRANSFER_PATHS=()
+    while [ "$k" -lt "$n" ]; do
+        # Without --, a word starting with a dash would be read as an option.
+        [ "$dashdash" = 1 ] || [[ "${TOK_LIT[$k]}" != -* ]] || return 1
+        transfer_expand "$k" || return 1
+        k=$((k + 1))
+    done
+    [ "$mode" = "-f" ] || [ "${#TRANSFER_PATHS[@]}" -eq 1 ] || return 1
+    TRANSFER_PROG=scp
+    TRANSFER_ARGS=(${flags[@]+"${flags[@]}"} "$mode" -- "${TRANSFER_PATHS[@]}")
+}
+
+# internal-sftp | sftp-server [-e] [-R] [-f FAC] [-l LEVEL] [-u UMASK] [-d DIR]
+#                             [-p LIST] [-P LIST]
+transfer_parse_sftp() {
+    local n=${#TOK_LIT[@]} k=1 w
+    local -a args=()
+    tok_plain 0 || return 1
+    case "${TOK_LIT[0]}" in
+        internal-sftp|sftp-server|/usr/lib/openssh/sftp-server|/usr/libexec/openssh/sftp-server|/usr/lib/ssh/sftp-server|/usr/libexec/sftp-server) ;;
+        *) return 1 ;;
     esac
-    return 1
+    while [ "$k" -lt "$n" ]; do
+        tok_plain "$k" || return 1
+        w=${TOK_LIT[$k]}
+        case "$w" in
+            -e|-R)
+                args+=("$w")
+                ;;
+            -f|-l|-u|-d|-p|-P)
+                k=$((k + 1))
+                [ "$k" -lt "$n" ] && tok_plain "$k" || return 1
+                [[ "${TOK_LIT[$k]}" =~ $SFTP_OPTARG_RE ]] || return 1
+                args+=("$w" "${TOK_LIT[$k]}")
+                ;;
+            *) return 1 ;;
+        esac
+        k=$((k + 1))
+    done
+    TRANSFER_PROG=sftp-server
+    TRANSFER_ARGS=(${args[@]+"${args[@]}"})
 }
 
-# Exec a file-transfer command directly, bypassing the PTY recorder.
-# Stdin/stdout/stderr stay raw so the SCP/SFTP/rsync protocol works. We still
-# record the session (command, start/end) for audit by sending a metadata-only
-# header to the sink (no stream). Recording is mandatory: if the sink is
-# unreachable we refuse the transfer (fail-closed) rather than running unrecorded.
+# 0 when SSH_ORIGINAL_COMMAND is one of the forms above and its program exists
+# at a root-owned system path (TRANSFER_PROG, TRANSFER_ARGS and TRANSFER_BIN
+# set); 1 otherwise, and the session is recorded like any other. A command
+# that names a transfer program but fails the check is logged: it is either a
+# client this parser does not know, or someone trying the #287 bypass.
+classify_transfer() {
+    local cmd="$ORIGINAL_COMMAND" first base why=""
+    TRANSFER_PROG="" TRANSFER_ARGS=() TRANSFER_BIN=""
+    [ -n "$cmd" ] || return 1
+    first=${cmd%%[[:space:]]*}
+    base=${first##*/}
+    case "$base" in
+        scp|rsync|sftp-server|internal-sftp) ;;
+        *) return 1 ;;
+    esac
+    if [ -n "${SSH_TTY:-}" ]; then
+        why="a PTY was requested"
+    elif ! transfer_split "$cmd"; then
+        why="shell syntax a transfer client never sends"
+    else
+        case "${TOK_LIT[0]}" in
+            rsync) transfer_parse_rsync ;;
+            scp) transfer_parse_scp ;;
+            *) transfer_parse_sftp ;;
+        esac || why="not a form a transfer client sends"
+    fi
+    if [ -z "$why" ]; then
+        case "$TRANSFER_PROG" in
+            rsync) TRANSFER_BIN=$(resolve_system_bin "${RSYNC_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+            scp) TRANSFER_BIN=$(resolve_system_bin "${SCP_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+            sftp-server) TRANSFER_BIN=$(resolve_system_bin "${SFTP_SERVER_CANDIDATES[@]}") || TRANSFER_BIN="" ;;
+        esac
+        [ -n "$TRANSFER_BIN" ] || why="no root-owned $TRANSFER_PROG on this host"
+    fi
+    if [ -n "$why" ]; then
+        TRANSFER_PROG="" TRANSFER_ARGS=() TRANSFER_BIN=""
+        log_warn "Session $SESSION_ID: transfer-like command recorded as a normal session ($why): $(log_safe "$cmd")"
+        return 1
+    fi
+    return 0
+}
+
+# Run a validated file transfer with raw stdio, bypassing the PTY recorder: the
+# argv classify_transfer built, the program at TRANSFER_BIN, no shell. The
+# session is still recorded -- a metadata-only header to the sink (no stream).
+# Recording is mandatory: if the sink is unreachable the transfer is refused
+# (fail-closed) rather than run unrecorded.
 record_transfer() {
-    local shell="${SHELL:-/bin/bash}"
     FORMAT="transfer"
-    log_info "Session $SESSION_ID: file-transfer (no PTY recording): $ORIGINAL_COMMAND"
-    # Send the header with an EMPTY stream (/dev/null): ob-record-connect connects,
-    # sends the header, reads EOF from /dev/null and half-closes → the sink records
-    # a transfer session (metadata only). A connect failure returns non-zero, so we
-    # fail closed and never run the transfer unrecorded.
-    if ! ob-record-connect "$(build_header)" /dev/null; then
-        log_err "recording sink unreachable; refusing file transfer (fail-closed)"
+    log_info "Session $SESSION_ID: file-transfer (no PTY recording): $(log_safe "$ORIGINAL_COMMAND")"
+    # Send the header with NO stream ("-"): ob-record-connect connects, sends
+    # the header, waits for the sink's ACK, and sends only the end-of-stream
+    # frame → the sink records a transfer session (metadata only). "-", not
+    # /dev/null: the connector must not read back a path, and its own stdout
+    # here goes to /dev/null. A connect failure, or no ACK, returns non-zero,
+    # so we fail closed and never run the transfer unrecorded. Its stderr is
+    # left visible (it explains an unreachable sink to the user).
+    if ! OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$(build_header)" - \
+            </dev/null >/dev/null; then
+        log_err "recording sink unavailable; refusing file transfer (fail-closed)"
         echo "Session recording is required but unavailable; transfer refused." >&2
         return 1
     fi
-    # Run under the user's login shell so $PATH and aliases behave as usual.
-    "$shell" -c "$ORIGINAL_COMMAND"
+    start_watchdog
+    # An argv, not a command line: no shell ever sees the client's string.
+    "$TRANSFER_BIN" ${TRANSFER_ARGS[@]+"${TRANSFER_ARGS[@]}"}
 }
 
 # Recording channel state (PTY sessions). The recorder cannot hand `script` a
@@ -236,35 +797,104 @@ record_transfer() {
 # cannot be opened via a path/`/dev/fd` (ENXIO). So `script` writes the typescript
 # to a FIFO (a real inode it can open) and ob-record-connect forwards FIFO →
 # socket in the background.
+OB_REC_DIR=""
 OB_REC_FIFO=""
 OB_REC_PID=""
 
-# Open the recording channel: make a FIFO, start ob-record-connect reading it
-# (it connects + sends the header FIRST, then blocks opening the FIFO), and
-# confirm the connection succeeded BEFORE the caller starts the shell. Returns
-# non-zero (cleaning up) when the sink is unreachable — so we fail closed.
+# Open the recording channel: make a FIFO, start ob-record-connect on it, and
+# confirm the sink ACCEPTED the session BEFORE the caller starts `script`.
+# Returns non-zero (cleaning up) when the sink is unreachable or refuses the
+# header — so we fail closed.
+#
+# The connector connects, sends the header, waits for the sink's one-byte ACK,
+# and only then prints OB_READY on its stdout and opens the FIFO. We read that
+# token from a second FIFO: OB_READY means the sink created the metadata and
+# recording file, so it is safe to run the session; EOF (the connector exited
+# without it) or a timeout means the session is NOT recorded, and we refuse it.
+# The 0.2 s "is it still alive" probe this replaces could not see a header the
+# sink rejected AFTER connect: the connector was still blocked on the FIFO and
+# looked alive, so the command ran unrecorded (#287).
+#
+# Both FIFOs live in a private directory made by `mktemp -d` (mode 0700), not at
+# a name `mktemp -u` merely predicted in the shared /tmp, which another user
+# could take first between the two calls.
 open_record_channel() {
     local header="$1"
-    OB_REC_FIFO="$(mktemp -u "${TMPDIR:-/tmp}/ob-rec.$$.XXXXXX")" || { OB_REC_FIFO=""; return 1; }
-    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null; then OB_REC_FIFO=""; return 1; fi
-    ob-record-connect "$header" "$OB_REC_FIFO" &
-    OB_REC_PID=$!
-    # ob-record-connect connects (fast) then blocks on open(FIFO). If it has
-    # already exited a moment later, the connect failed → the sink is down.
-    sleep 0.2
-    if ! kill -0 "$OB_REC_PID" 2>/dev/null; then
-        wait "$OB_REC_PID" 2>/dev/null || true
-        rm -f "$OB_REC_FIFO"; OB_REC_FIFO=""; OB_REC_PID=""
+    OB_REC_DIR=$(mktemp -d "$REC_TMP_BASE/ob-rec.XXXXXXXXXX") || { OB_REC_DIR=""; return 1; }
+    OB_REC_FIFO="$OB_REC_DIR/stream"
+    local ready_fifo="$OB_REC_DIR/ready"
+    if ! mkfifo -m 600 "$OB_REC_FIFO" 2>/dev/null || ! mkfifo -m 600 "$ready_fifo" 2>/dev/null; then
+        close_record_channel
         return 1
     fi
-    return 0
+    # Hold our own read+write handle on the ready FIFO BEFORE starting the
+    # connector. Opening it O_RDWR (`<>`) never blocks on "no reader/!writer",
+    # so two failure modes are avoided: the connector's `>ready` open no longer
+    # waits for us, and -- the bug this replaces -- if the connector exits fast
+    # (sink rejects at once) before we open the read end, our open cannot block
+    # forever waiting for a writer that will never come. Because we keep a write
+    # end too, `read` never sees a spurious EOF, so the connector's exit is
+    # detected by polling its pid, not by EOF.
+    local rfd
+    exec {rfd}<>"$ready_fifo"
+    # The connector's stdout is the ready FIFO (its OB_READY token); its stderr
+    # is left on the recorder's stderr so a "cannot reach the sink" message
+    # reaches the user and the journal instead of being swallowed.
+    OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO" \
+        </dev/null >"$ready_fifo" &
+    OB_REC_PID=$!
+    # Wait, bounded by CONNECT_TIMEOUT, for either the OB_READY token or the
+    # connector's exit (a sink rejection, or a connect failure). A sink that
+    # took the connection but never answers is caught by the deadline.
+    local ready="" deadline=$((SECONDS + CONNECT_TIMEOUT))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if IFS= read -r -t 1 -u "$rfd" ready 2>/dev/null; then
+            [ "$ready" = OB_READY ] && break
+            ready=""
+        else
+            ready=""
+            proc_running "$OB_REC_PID" || break
+        fi
+    done
+    exec {rfd}<&-
+    rm -f "$ready_fifo"
+    # The one gate on starting the session: only a connector that reported the
+    # sink's ACK gets here with OB_READY (mutation: recorder-ack-required).
+    if [ "$ready" = "OB_READY" ]; then
+        return 0
+    fi
+    kill "$OB_REC_PID" 2>/dev/null || true
+    wait "$OB_REC_PID" 2>/dev/null || true
+    OB_REC_PID=""
+    close_record_channel
+    return 1
 }
 
-# Wait for the forwarder to drain and tidy up the FIFO.
+# Let the forwarder finish and remove the channel's directory. Idempotent:
+# record_script() calls it, and cleanup() on every exit path.
+#
+# Once script has closed the FIFO the forwarder has only the pipe buffer left
+# to send, then the end-of-stream frame. One still running after a few seconds
+# is stuck -- script never opened the FIFO, or the sink stopped reading -- and
+# is stopped with SIGTERM (it ignores SIGHUP), which leaves the recording
+# "aborted": what it is.
 close_record_channel() {
-    [ -n "$OB_REC_PID" ] && { wait "$OB_REC_PID" 2>/dev/null || true; }
-    [ -n "$OB_REC_FIFO" ] && rm -f "$OB_REC_FIFO"
-    OB_REC_FIFO=""; OB_REC_PID=""
+    local i
+    if [ -n "$OB_REC_PID" ]; then
+        for ((i = 0; i < 50; i++)); do
+            proc_running "$OB_REC_PID" || break
+            sleep 0.1
+        done
+        if proc_running "$OB_REC_PID"; then
+            log_warn "Session $SESSION_ID: recording forwarder still running at the end of the session; stopping it"
+            kill -TERM "$OB_REC_PID" 2>/dev/null || true
+        fi
+        wait "$OB_REC_PID" 2>/dev/null || true
+    fi
+    if [ -n "$OB_REC_DIR" ]; then
+        rm -rf -- "$OB_REC_DIR"
+    fi
+    OB_REC_DIR="" OB_REC_FIFO="" OB_REC_PID=""
 }
 
 # Record an interactive/PTY session: script writes the typescript to a FIFO that
@@ -280,9 +910,11 @@ record_script() {
     [ -n "$ORIGINAL_COMMAND" ] && target="$ORIGINAL_COMMAND"
 
     if ! open_record_channel "$header"; then
+        log_err "Session $SESSION_ID: recording sink did not acknowledge the session; refusing (fail-closed)"
         echo "Session recording is required but unavailable; access refused." >&2
         return 1
     fi
+    start_watchdog
 
     # -f flushes after each write so the sink (and any live monitor) sees output
     # promptly. `|| rc=$?` keeps `set -e` from exiting before cleanup.
@@ -325,11 +957,10 @@ sshd_config example:
     Match Group recorded-users
         ForceCommand /usr/sbin/ob-session-recorder
 
-Environment variables:
-    OB_RECORDER_CONFIG      Config file path
-    OB_SESSIONS_DIR         Ignored (see -d above)
-    OB_RECORDER_FORMAT      Recording format
-    OB_MAX_SESSION          Max session duration in seconds
+The recorder runs as the recorded user, so it reads no OB_* environment
+variable: OB_RECORDER_CONFIG, OB_RECORDER_FORMAT, OB_MAX_SESSION and
+OB_SESSIONS_DIR are ignored. Settings come from the root-owned configuration
+file or from the options above, on the ForceCommand line.
 
 EOF
 }
@@ -389,6 +1020,7 @@ main() {
     fi
 
     load_config
+    validate_max_duration
 
     # Generate session ID and timestamps
     SESSION_ID=$(generate_session_id)
@@ -398,8 +1030,11 @@ main() {
     # the on-disk files under /var/lib/open-bastion/sessions/<user>/ so the user
     # cannot delete or alter them (#151). The recorder therefore creates no files
     # and no per-user directory. The recorder must be able to reach the sink.
-    if ! command -v ob-record-connect >/dev/null 2>&1; then
-        log_err "ob-record-connect not found; recording is required — refusing session"
+    if [ -z "$RECORD_CONNECT" ]; then
+        RECORD_CONNECT=$(resolve_system_bin "${RECORD_CONNECT_CANDIDATES[@]}") || RECORD_CONNECT=""
+    fi
+    if [ -z "$RECORD_CONNECT" ]; then
+        log_err "no root-owned ob-record-connect in ${RECORD_CONNECT_CANDIDATES[*]}; recording is required — refusing session"
         echo "Session recording is required but not installed; access refused." >&2
         exit 1
     fi
@@ -411,40 +1046,31 @@ main() {
         FORMAT="script"
     fi
 
-    log_info "Session $SESSION_ID started for user $SESSION_USER from $CLIENT_IP"
+    # Refuse a command whose header would not fit the sink's cap, before any
+    # connection is made (fail-closed; see check_header_size).
+    check_header_size
 
-    # Setup cleanup trap
+    log_session_start
+
+    # cleanup() runs on every way out. A hang-up (client gone) or a TERM
+    # becomes an ordinary exit, so it runs then too; bash defers these traps
+    # while script(1) is in the foreground, and runs them once it returns.
     trap cleanup EXIT
-    trap handle_timeout ALRM
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
-    # Set session timeout (in background).
-    #
-    # CRITICAL: redirect stdin/stdout/stderr to /dev/null. Without this, the
-    # background subshell inherits the SSH channel's FDs from sshd; sshd then
-    # waits for ALL processes holding those FDs to release them before closing
-    # the channel. For interactive sessions this is masked because the user's
-    # shell holds the channel anyway, but for scp/sftp/rsync the transfer
-    # finishes cleanly yet "the command hangs" because sshd is waiting on the
-    # leaked sleep child. See: https://serverfault.com/q/342436
-    #
-    # We also trap TERM in the subshell to kill the sleep grandchild on
-    # cleanup, so we don't leak a sleep process for MAX_SESSION_DURATION.
-    if [ "$MAX_SESSION_DURATION" -gt 0 ]; then
-        local parent_pid=$$
-        (
-            trap 'kill "${sleep_pid:-0}" 2>/dev/null; exit 0' TERM HUP
-            sleep "$MAX_SESSION_DURATION" &
-            sleep_pid=$!
-            wait "$sleep_pid" 2>/dev/null
-            kill -ALRM "$parent_pid" 2>/dev/null || true
-        ) </dev/null >/dev/null 2>&1 &
-        TIMEOUT_PID=$!
-    fi
+    # The max_duration watchdog is started by record_script/record_transfer,
+    # once there is a session to stop (see start_watchdog). Its stdio goes to
+    # /dev/null: a background process holding the SSH channel's descriptors
+    # makes sshd wait for it before closing the channel, and a finished scp
+    # then "hangs" (https://serverfault.com/q/342436).
 
-    # File-transfer commands (scp, sftp, rsync) need raw stdio: bypass the PTY
-    # recorder, record metadata only. Otherwise stream the PTY typescript to the
-    # sink. Both paths fail closed when the sink is unreachable.
-    if is_file_transfer; then
+    # A genuine file transfer (scp, sftp, rsync; see classify_transfer) needs
+    # raw stdio: it bypasses the PTY recorder, metadata only. Everything else
+    # streams its PTY typescript to the sink. Both paths fail closed when the
+    # sink is unreachable.
+    if classify_transfer; then
         record_transfer
     else
         record_script

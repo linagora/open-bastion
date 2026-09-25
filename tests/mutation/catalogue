@@ -169,11 +169,14 @@ why     || existed.
 id      || portal-prereq-builder-ansible
 file    || admin-builder/ob-builder
 search  || "$ansible_out/PORTAL-CHECKLIST.md" "$role"
-replace || /dev/null "$role"
+replace || "$ansible_out/OB-MUTANT-CHECKLIST.md" "$role"
 suite   || tests/test_ob_portal_prerequisites.sh
 why     || #268: the Ansible role runs the setup script through a task whose
 why     || stdout nobody reads, so for that artefact the checklist file IS the
-why     || notification.
+why     || notification. The mutant writes the checklist to the wrong NAME (not
+why     || /dev/null: as root render_template's atomic mktemp+mv would replace
+why     || the /dev/null device with a regular file for the rest of the run,
+why     || breaking every later test that writes to /dev/null -- #287).
 
 id      || cache-key-regular-file
 file    || src/cache_key.c
@@ -370,3 +373,213 @@ suite   || tests/test_ob_timers.sh
 why     || #281: when the first download fails, the setup must keep the list
 why     || the host already has, not replace it with an empty one -- an empty
 why     || KRL revokes nothing.
+
+# ── #287: session recording bypass ──────────────────────────────────────────
+# The recorder decides, on a string the client wrote, whether a session's
+# stream is recorded at all; the sink decides what a recording's status says.
+
+id      || recorder-transfer-metachars
+file    || scripts/ob-session-recorder
+search  || '{'|'}'|'!'|'#') return 1 ;;
+replace || '{'|'}'|'!'|'#') lit+=$c pat+=$c inword=1 ;;
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: an unescaped shell metacharacter in a transfer-looking command
+why     || must send it to the recorded path -- `scp -t /tmp/x;bash` was an
+why     || unrecorded shell.
+
+id      || recorder-transfer-never-with-pty
+file    || scripts/ob-session-recorder
+search  || if [ -n "${SSH_TTY:-}" ]; then
+replace || if false; then
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: no transfer client asks for a PTY; a PTY session whose command
+why     || looks like a transfer is an interactive session and is recorded.
+
+id      || recorder-rsync-no-daemon
+file    || scripts/ob-session-recorder
+search  || RSYNC_LONG_NOARG=" append
+replace || RSYNC_LONG_NOARG=" daemon append
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: `rsync --server --daemon` reads an rsyncd.conf of the caller's
+why     || choosing, whose pre-xfer exec runs any command, unrecorded.
+
+id      || recorder-rsync-no-secluded-args
+file    || scripts/ob-session-recorder
+search  || RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrtuvxyz]*
+replace || RSYNC_SHORT_RE='^-[ACDEHIJKLNORSUWXbcdgklmnopqrstuvxyz]*
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: -s sends rsync's real arguments over the protocol, past the
+why     || allow-list.
+
+id      || recorder-rsync-end-of-options
+file    || scripts/ob-session-recorder
+search  || TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} -- . "${TRANSFER_PATHS[@]}")
+replace || TRANSFER_ARGS=(--server ${opts[@]+"${opts[@]}"} . "${TRANSFER_PATHS[@]}")
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: rsync's option parser permutes; without `--` a path, or a name
+why     || a wildcard matched, such as `--daemon` would be read as an option.
+
+id      || recorder-fixed-path
+file    || scripts/ob-session-recorder
+search  || PATH=/usr/sbin:/usr/bin:/sbin:/bin
+replace || PATH=$PATH
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the recorder runs as the recorded user; a user-writable PATH
+why     || entry could shadow script(1) with something that records nothing.
+
+id      || recorder-env-max-duration
+file    || scripts/ob-session-recorder
+search  || MAX_SESSION_DURATION="$DEFAULT_MAX_SESSION_DURATION"
+replace || MAX_SESSION_DURATION="${OB_MAX_SESSION:-$DEFAULT_MAX_SESSION_DURATION}"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: OB_MAX_SESSION=0 in the user's environment switched the
+why     || max_duration watchdog off.
+
+id      || recorder-socket-pinned
+file    || scripts/ob-session-recorder
+search  || OB_RECORD_SOCKET="$RECORD_SOCKET" "$RECORD_CONNECT" "$header" "$OB_REC_FIFO"
+replace || "$RECORD_CONNECT" "$header" "$OB_REC_FIFO"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: OB_RECORD_SOCKET from the user's environment would pick the
+why     || sink the session is recorded to.
+
+id      || recorder-max-duration-validated
+file    || scripts/ob-session-recorder
+search  || if [[ ! "$MAX_SESSION_DURATION" =~ ^[0-9]{1,9}$ ]]; then
+replace || if false; then
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: a non-numeric max_duration disabled the watchdog silently.
+
+id      || recorder-watchdog-ends-session
+file    || scripts/ob-session-recorder
+search  || kill -KILL $(watchdog_targets
+replace || : $(watchdog_targets
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the ALRM-trap watchdog never ended a session. Without killing
+why     || script, only the last resort is left: the recorder dies without
+why     || cleaning up and the session goes on, unrecorded, until it ends.
+
+id      || recorder-header-escapes-every-field
+file    || scripts/ob-session-recorder
+search  || "$(json_escape "$CLIENT_IP")"
+replace || "$CLIENT_IP"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the no-jq header escaped original_command only.
+
+id      || recorder-log-sanitized
+file    || scripts/ob-session-recorder
+search  || from $(log_safe "$CLIENT_IP")
+replace || from $CLIENT_IP
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: client-supplied strings must not forge syslog lines.
+
+id      || sink-silence-is-not-an-end
+file    || src/ob-record-sink.c
+search  || peer_gone = 1; /* one more interval to drain, then abort */\n                continue;
+replace || peer_gone = 1; /* one more interval to drain, then abort */\n                status = "aborted";\n                break;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: a 30 s idle timeout aborted the recording of every silent
+why     || session, then disconnected the user at the next keystroke.
+
+id      || sink-dead-peer-ends-recording
+file    || src/ob-record-sink.c
+search  || if (peer_gone) {
+replace || if (0) {
+suite   || tests/test_ob_record_sink.sh
+why     || #287: with no idle timeout, a connection that outlives the process
+why     || that opened it is bounded only by that process's death.
+
+id      || sink-completed-needs-end-frame
+file    || src/ob-record-sink.c
+search  || fail("stream closed without its end-of-stream frame; finalizing as aborted");\n                status = "aborted";
+replace || status = "completed";
+suite   || tests/test_ob_record_sink.sh
+why     || #287 / EBIOS MT34: a killed forwarder was stamped "completed".
+
+id      || sink-protocol-version
+file    || src/ob-record-sink.c
+search  || json_object_get_int(jv) != OB_RECORD_PROTO
+replace || 0
+suite   || tests/test_ob_record_sink.sh
+why     || #287: an unframed (v1) stream cannot be told apart from a cut one.
+
+id      || connector-survives-hangup
+file    || src/ob-record-connect.c
+search  || signal(SIGHUP, SIG_IGN);
+replace || (void)0;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: a hang-up is how sessions end; a forwarder it killed would
+why     || turn every disconnect into an "aborted" recording.
+
+id      || connector-requires-ack
+file    || src/ob-record-connect.c
+search  || if (an != 1 || ack != OB_RECORD_ACK) {
+replace || if (0) {
+suite   || tests/test_ob_record_sink.sh
+why     || #287: the connector must not stream (nor let the recorder start the
+why     || session) unless the sink acknowledged that it created the metadata
+why     || and recording file. Without the ACK, a header the sink rejects
+why     || (oversized, wrong version) still leaves the command running
+why     || unrecorded -- the connector was alive on the FIFO, looking fine.
+
+id      || sink-frame-max
+file    || src/ob-record-sink.c
+search  || if (len > FRAME_MAX)
+replace || if (0)
+suite   || tests/test_ob_record_sink.sh
+why     || #287: a frame length over the buffer cap is malformed framing and
+why     || must be refused at once; without it a client that declares a huge
+why     || frame and sends nothing keeps the connection un-finalized.
+
+id      || sink-nothing-after-end-frame
+file    || src/ob-record-sink.c
+search  || return i == n ? FRAME_END : FRAME_BAD;
+replace || return FRAME_END;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: the end-of-stream marker must be the last thing on the wire;
+why     || bytes after it mean a desynchronised or hostile stream, not a
+why     || completed one.
+
+id      || recorder-log-command-sanitized
+file    || scripts/ob-session-recorder
+search  || command: $(log_safe "$ORIGINAL_COMMAND")
+replace || command: $ORIGINAL_COMMAND
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the command is logged to syslog; unsanitised, a newline in it
+why     || forges extra log lines under the recorder's tag.
+
+id      || recorder-private-channel-dir
+file    || scripts/ob-session-recorder
+search  || mktemp -d "$REC_TMP_BASE/ob-rec.XXXXXXXXXX"
+replace || mktemp -u "$REC_TMP_BASE/ob-rec.XXXXXXXXXX"
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the recording FIFO must live in a real private directory
+why     || (mktemp -d, 0700), not at a name mktemp -u merely predicts in the
+why     || shared /tmp, which another user could win first.
+
+id      || recorder-ack-required
+file    || scripts/ob-session-recorder
+search  || [ "$ready" = "OB_READY" ]
+replace || true
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: the recorder must start the session only when the connector
+why     || reported the sink's ACK (OB_READY). Accepting a session the sink did
+why     || not acknowledge runs the command unrecorded.
+
+id      || recorder-header-cap
+file    || scripts/ob-session-recorder
+search  || check_header_size\n\n    log_session_start
+replace || :\n\n    log_session_start
+suite   || tests/test_ob_session_recorder.sh
+why     || #287: an over-long command must be refused up front; without it the
+why     || recorder would connect and record a session the operator's header cap
+why     || is meant to keep out.
+
+id      || connector-ack-timeout
+file    || src/ob-record-connect.c
+search  || setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &atv, sizeof(atv));
+replace || (void)atv;
+suite   || tests/test_ob_record_sink.sh
+why     || #287: the ACK read must have a deadline; the transfer path runs the
+why     || connector synchronously, so a sink that accepts but never answers
+why     || would hang the transfer forever.

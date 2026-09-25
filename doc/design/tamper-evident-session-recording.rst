@@ -60,14 +60,14 @@ The username is validated against ``^[a-z_][a-z0-9_.-]*$`` (same regex as the re
 §2. Wire protocol
 -----------------
 
-A connection carries one session. It is **header line + opaque stream**:
+A connection carries one session. It is **header line + framed stream**:
 
 1. **Header**: a single ``\n``-terminated JSON object (cap **8 KiB**), e.g.
 
    .. code:: json
 
       {
-        "v": 1,
+        "v": 2,
         "client_ip": "203.0.113.5",
         "ssh_tty": "/dev/pts/3",
         "format": "script",
@@ -76,9 +76,17 @@ A connection carries one session. It is **header line + opaque stream**:
       }
 
    The sink uses these only as **metadata** (never for the path or uid). Fields are length-checked and the JSON is parsed defensively; a malformed/oversized header → the sink logs and closes (fail-closed for that session).
-2. **Stream**: everything after the first ``\n`` is the recording payload (typescript bytes for ``format:"script"``, asciinema JSON for ``"asciinema"``, etc.), copied verbatim to the output file until EOF (the user side closing the write half, ``shutdown(SHUT_WR)``).
+2. **Stream**: everything after the first ``\n`` is the recording payload (typescript bytes for ``format:"script"``), cut into **frames**: a 4-byte big-endian length (at most 64 KiB), then that many bytes, which the sink appends verbatim to the output file. A **zero-length frame is the end-of-stream marker**; ``ob-record-connect`` sends it only after reading a clean EOF from its source, then half-closes (``shutdown(SHUT_WR)``).
 
-The sink imposes an overall **per-session byte cap** and an **idle/total timeout** (mirrors ``MAX_SESSION`` and the ``MAX_RESP``/``SO_RCVTIMEO`` guards already in ``ob-cert-daemon``), to bound a hostile or runaway client. Exceeding the cap finalizes the file as ``status:"truncated-by-limit"`` rather than letting it grow unbounded (a DoS, explicitly logged).
+   The framing exists so that the sink can tell a session that **ended** from a forwarder that was **killed**. Version 1 streamed raw bytes until EOF, and a ``SIGKILL`` on the forwarder -- which runs as the recorded user, who can send it from inside the session -- produced the same EOF as a normal logout, so both were stamped ``completed`` (`#287 <https://github.com/linagora/open-bastion/issues/287>`__, EBIOS measure MT34). Terminal output cannot forge the marker: whatever the session prints travels inside a frame's payload. The sink accepts only ``"v": 2``; recorder, connector and sink ship in the same package.
+
+   The forwarder ignores ``SIGHUP``, ``SIGINT`` and ``SIGQUIT``. A hang-up is how a session normally ends (the client goes away and ``SIGHUP`` reaches the whole process group), and the forwarder must outlive it long enough to drain what ``script`` wrote and send the marker.
+
+Between the header and the stream the sink sends a **one-byte ACK**, and only once it has written the initial metadata and created the recording file. ``ob-record-connect`` waits for that ACK before it opens the stream, and the recorder refuses the session (before ``script`` starts) if it never comes. This makes *every* header the sink rejects fail closed — oversized (over the 8 KiB cap), wrong version, a replayed session id, or a directory it cannot create — where before the sink rejected such a header **after** the connection was made, while the connector sat blocked on the FIFO looking alive, so the command ran unrecorded (`#287 <https://github.com/linagora/open-bastion/issues/287>`__). The recorder also refuses a command whose header would exceed the cap up front, so an over-long command never reaches the sink at all.
+
+The sink imposes an overall **per-session byte cap** and a **total duration cap**, to bound a hostile or runaway client. Reaching either finalizes the file as ``status:"truncated"`` rather than letting it grow unbounded (a DoS, explicitly logged).
+
+There is deliberately **no idle timeout** on the stream. An interactive session that prints nothing is still a session: the first implementation put a 30 s ``SO_RCVTIMEO`` on the socket, which finalized the recording of any user who stayed silent for half a minute as ``aborted`` and then, through ``SIGPIPE``, disconnected them at their next keystroke (`#287 <https://github.com/linagora/open-bastion/issues/287>`__). A connection is bounded instead by the process that opened it: the sink takes a pidfd on the ``SO_PEERCRED`` peer (``SO_PEERPIDFD``, else ``pidfd_open()``, else a ``kill(pid, 0)`` probe at each idle wake-up), and when that process is gone and the socket has nothing more to give, the recording is finalized as ``aborted``. Only the header keeps a 30 s receive timeout: it is sent straight after ``connect()``.
 
 .. _design-tamper-evident-session-recording-3-how-script1s-output-reaches-the-socket--via-a-fifo:
 
@@ -100,9 +108,9 @@ The unprivileged helper **``ob-record-connect``** (sibling of ``ob-cert-request`
    script -q -f -c "$shell" "$fifo"             # script open()s the FIFO (a real inode)
    wait                                          # forwarder drains, half-closes the socket
 
-``ob-record-connect`` ``connect()``\ s **first** (fast for a local listening socket) and exits non-zero on failure, so the recorder can refuse the session *before* ``script`` starts. It then writes the header and copies the FIFO to the socket until EOF. ``script``'s PTY handling (raw mode, window size, **Ctrl-C** delivered to the foreground process group) is unchanged — we reuse it rather than re-implementing a PTY relay. ``-f`` flushes after each write so the sink (and any live monitor) sees output promptly.
+``ob-record-connect`` ``connect()``\ s **first** (fast for a local listening socket) and exits non-zero on failure, so the recorder can refuse the session *before* ``script`` starts. It then writes the header, copies the FIFO to the socket in frames until EOF, and sends the end-of-stream frame (§2). ``script``'s PTY handling (raw mode, window size, **Ctrl-C** delivered to the foreground process group) is unchanged — we reuse it rather than re-implementing a PTY relay. ``-f`` flushes after each write so the sink (and any live monitor) sees output promptly.
 
-For a metadata-only **transfer** session there is no PTY: the recorder calls ``ob-record-connect "$header" /dev/null`` (immediate EOF → header only).
+For a metadata-only **transfer** session there is no PTY: the recorder calls ``ob-record-connect "$header" /dev/null`` (immediate EOF → header, then the end-of-stream frame).
 
    Note: timing files. Plain ``script`` keeps timing in a separate ``-t`` stream. For v1 we record the typescript only. asciinema/ttyrec, which embed timing in one stream, map cleanly onto "header + stream" and can be added later.
 
@@ -111,7 +119,9 @@ For a metadata-only **transfer** session there is no PTY: the recorder calls ``o
 §4. File-transfer sessions (scp / sftp / rsync — no PTY)
 --------------------------------------------------------
 
-``is_file_transfer()`` already detects these and runs them raw (no PTY) because a PTY corrupts the binary protocol. They have **no stream to record**, only metadata. In the new model the recorder still opens a connection and sends the header with ``format:"transfer"`` and **no payload** (``shutdown(SHUT_WR)`` immediately after the header). The sink writes the ``<id>.json`` (command, start/end, sink-observed ``status``) and a zero-byte placeholder, like today's ``record_transfer``. The transfer itself continues to run on the user side with raw stdio.
+These run raw (no PTY) because a PTY corrupts the binary protocol. They have **no stream to record**, only metadata.
+
+Classifying a command as a transfer is therefore a decision **not to record its stream**, taken on a string the client wrote. The first implementation used a substring test (``scp`` followed somewhere by ``-t``) and then ran the whole string through the user's shell, so ``ssh -tt bastion 'scp -t /tmp/x; bash'`` was an interactive shell with an empty typescript (`#287 <https://github.com/linagora/open-bastion/issues/287>`__). ``classify_transfer()`` is now an allow-list parser of the forms genuine clients send -- ``rsync --server`` with rrsync's option list minus ``--daemon`` and ``-s``, legacy ``scp -t|-f`` with one word per flag, and the sftp subsystem (``internal-sftp`` or the ``sftp-server`` path) -- that rejects every unescaped shell metacharacter and control character. A command that passes is executed as an **argv**, never through a shell, with the program taken from a fixed root-owned system path; the remote-shell expansions clients rely on (a leading ``~``, wildcards in paths) are done by pathname expansion alone. A request with a PTY is never a transfer. Anything else is recorded like any other command, and the refusal is logged. See :doc:`/session-recording` for the accepted forms. In the new model the recorder still opens a connection and sends the header with ``format:"transfer"`` and **no payload** (the end-of-stream frame immediately after the header, then ``shutdown(SHUT_WR)``). The sink writes the ``<id>.json`` (command, start/end, sink-observed ``status``) and a zero-byte placeholder. The transfer itself continues to run on the user side with raw stdio.
 
 .. _design-tamper-evident-session-recording-5-metadata--session-status:
 
@@ -125,11 +135,13 @@ The metadata *file* is owned by the **sink** (root), so a user cannot edit it af
 
 **Status lifecycle (all sink-observed):**
 
-1. recorder → ``rec.sock``: header (start metadata) + stream; the sink writes ``<id>.json`` with ``status:"active"`` immediately, then streams the ``.cast``/``.typescript``.
-2. on a clean stream EOF (the recorder ``shutdown(SHUT_WR)``\ s normally) the sink stamps ``status:"completed"`` and the ``end`` timestamp.
-3. if the stream is cut by a size cap or timeout, ``status:"truncated"``; if the connection drops abnormally (process killed, crash), ``status:"aborted"``.
+1. recorder → ``rec.sock``: header (start metadata) + stream; the sink writes ``<id>.json`` with ``status:"active"`` immediately, then streams the ``.typescript``.
+2. when the end-of-stream frame arrives (the forwarder read a clean EOF from ``script``'s FIFO) the sink stamps ``status:"completed"`` and the ``end`` timestamp.
+3. if the stream is cut by the byte cap or the total duration cap, ``status:"truncated"``; if it stops **without** the end-of-stream frame (forwarder killed, crash, malformed framing) or the peer process dies while its connection is held open elsewhere, ``status:"aborted"``.
 
 ``"completed"`` here means "the session ended and its stream was fully received", **not** "the last command succeeded". The session-id is a UUID generated by the recorder and carried in the header.
+
+What the framing does **not** give: the forwarder and ``script`` run as the recorded user, who can also open the FIFO through ``/proc/<pid>/fd`` and read or append to their own stream -- the self-forgery limit of §10. A killed forwarder is therefore *detected* (``aborted``), not *prevented*; and ``script`` itself dies of ``SIGPIPE`` at the next output once nothing reads the FIFO, which ends the session.
 
 .. _design-tamper-evident-session-recording-6-storage-layout--admin-access:
 
@@ -220,7 +232,7 @@ In other words: *if it is configured, it is enforced.* This is the core reason t
 ----------------------------
 
 - **Path safety:** ``<user>`` derived only from ``SO_PEERCRED`` + regex-validated; open the per-user dir with ``O_DIRECTORY|O_NOFOLLOW`` and create files with ``O_CREAT|O_EXCL|O_NOFOLLOW`` (no symlink following, no overwrite) — same hardening as the wrapper's ``ensure_user_session_dir``.
-- **Resource bounds:** header ≤ 8 KiB; per-session byte cap; idle + total timeouts; the ``Accept=yes`` model gives one process per connection so a stuck session cannot block others. (DoS is explicitly *out* of the security-review exclusions, but bounding it is good hygiene.)
+- **Resource bounds:** header ≤ 8 KiB with a 30 s header timeout; per-session byte cap; total duration cap; the peer's liveness instead of an idle timeout (§2). The ``Accept=yes`` model gives one process per connection, but because a recorded connection now lives for the whole session, ``ob-record.socket`` sets ``MaxConnections`` above systemd's default of 64 and ``MaxConnectionsPerSource`` (per ``SO_PEERCRED`` uid). ``MaxConnectionsPerSource`` needs **systemd v256+**; on older systemd (bookworm/EL9 252, noble 255) only the total cap applies, so a single user could hold all of it — bounded further only by session containment (``--enable-hardening``). Where the per-source cap applies, a user's session past the limit is refused (fail-closed). (DoS is explicitly *out* of the security-review exclusions, but bounding it is good hygiene.)
 - **No secrets in the stream:** the recording may capture whatever the user typed; files are ``0640 root:ob-sessions`` and never world-readable.
 - **Concurrency:** session-id is a UUID; ``O_EXCL`` create avoids collisions.
 - **Migration symlink hijack (one-shot):** legacy per-user dirs are currently *user-writable*, so a user can pre-plant a symlink (``…/sessions/<me>`` → ``/etc``, say) before the migration step runs as root. A naïve ``chown -R`` / ``install`` would then have root write or chown *through* the symlink. The migration (§12) must apply the same ``O_NOFOLLOW`` discipline: refuse any per-user entry that is a symlink or not a directory, and recreate the tree root-owned rather than chown-in-place. After migration the parent is ``0750`` ``o-rwx``, so the planting vector is closed for steady state.

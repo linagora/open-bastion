@@ -7,8 +7,9 @@
  *
  * The unprivileged ob-session-recorder (running as the logged-in user) connects
  * via ob-record-connect and sends:
- *   - line 1: a one-line JSON metadata HEADER, then
- *   - the opaque recording STREAM (typescript bytes) until EOF.
+ *   - line 1: a one-line JSON metadata HEADER ("v": 2), then
+ *   - the recording STREAM (typescript bytes) in length-prefixed frames,
+ *     closed by an empty END-OF-STREAM frame (see feed_frames()).
  *
  * This sink:
  *   1. derives the recorded user from the connection's SO_PEERCRED. This is the
@@ -20,10 +21,24 @@
  *      recorded user is NOT in ob-sessions and the tree is o-rwx, so the user
  *      cannot list, read, unlink or truncate its own recording — which is the
  *      whole point (#151).
- *   3. records ONLY what it observes: status active -> completed (clean EOF) /
- *      truncated (size cap or timeout) / aborted (abnormal drop). The child
+ *   3. records ONLY what it observes: status active -> completed (the
+ *      end-of-stream frame arrived) / truncated (size or duration cap) /
+ *      aborted (the stream stopped without that frame: forwarder killed,
+ *      crash, protocol error, or the peer died while the connection was held
+ *      open elsewhere). The child
  *      command's exit code is deliberately not recorded (it would be entirely
  *      client-reported; see the design §5).
+ *
+ * An idle stream is NOT an abnormal end: an interactive session can print
+ * nothing for hours. The sink bounds a connection by the liveness of the
+ * connecting process (ob-record-connect, the SO_PEERCRED pid), a total
+ * duration and a byte cap -- never by silence (#287).
+ *
+ * Once the initial metadata and recording file exist, the sink writes a
+ * one-byte ACK to the connection. ob-record-connect waits for it before it
+ * streams anything, and the recorder refuses the session if it never arrives,
+ * so a header the sink rejects (oversized, wrong version, duplicate id) or a
+ * setup failure can never leave the command running unrecorded (#287).
  *
  * Threat model: root is trusted; we defend only against the unprivileged user.
  *
@@ -35,12 +50,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <limits.h>
+#include <poll.h>
 #include <pwd.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -49,7 +69,13 @@
 
 #include "ob_cert_proto.h" /* ob_read_line, ob_valid_username */
 
-#define OB_RECORD_SINK_VERSION "0.1.0"
+#define OB_RECORD_SINK_VERSION "0.2.0"
+/* Wire protocol version: the header's "v". See feed_frames() for v2. */
+#define OB_RECORD_PROTO 2
+/* Sent to the connector once metadata + recording file exist, so it (and the
+ * recorder) can fail closed on any earlier rejection. Matches OB_RECORD_ACK in
+ * ob-record-connect.c. */
+#define OB_RECORD_ACK 0x06 /* ASCII ACK */
 
 #define SESSIONS_DIR "/var/lib/open-bastion/sessions"
 #define SESSIONS_GROUP "ob-sessions"
@@ -62,8 +88,17 @@
 /* Field bounds for header metadata (informational, JSON-escaped on output). */
 #define MAX_CMD 8192
 #define MAX_SHORT 256
-/* Drop a stalled peer instead of pinning a per-connection process. */
-#define IO_TIMEOUT_SEC 30
+/* The header is written right after connect(); a peer that has not sent it
+ * by then is not a recorder. This bounds the HEADER only: once the stream
+ * starts, silence is normal and never ends a recording (#287). */
+#define HEADER_TIMEOUT_SEC 30
+/* How long an idle stream sleeps before the sink checks that the peer is
+ * still alive and the session is within its duration cap. Overridable by
+ * OB_RECORD_POLL_SEC in the daemon's environment (tests use 1). */
+#define DEFAULT_POLL_SEC 30
+/* Total duration cap of one recording (7 days); reaching it finalizes as
+ * "truncated". Overridable by OB_RECORD_MAX_SEC in the daemon's environment. */
+#define DEFAULT_MAX_SESSION_SEC (7L * 24L * 3600L)
 #define COPY_BUF (64 * 1024)
 
 static void fail(const char *msg)
@@ -121,6 +156,153 @@ static gid_t sessions_gid(void)
         return grp->gr_gid;
     fail("group " SESSIONS_GROUP " not found; falling back to root group");
     return 0;
+}
+
+/* A positive number of seconds from the daemon's own environment, or def when
+ * unset or malformed. Like OB_SESSIONS_DIR below, this is the environment the
+ * systemd unit gives the sink, never anything the connecting client sends. */
+static long env_seconds(const char *name, long def, long max)
+{
+    const char *e = getenv(name);
+    if (!e || !*e)
+        return def;
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(e, &end, 10);
+    if (errno != 0 || !end || *end != '\0' || v <= 0 || v > max) {
+        fail("ignoring a malformed timing override in the unit environment");
+        return def;
+    }
+    return v;
+}
+
+static long mono_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec;
+}
+
+/* A pidfd for the process that connected, so that its exit wakes the copy
+ * loop. SO_PEERPIDFD (Linux 6.5+) names that very process, with no pid-reuse
+ * window; pidfd_open() on the SO_PEERCRED pid is the next best thing. Returns
+ * -1 when neither is available -- an older kernel, or a SystemCallFilter
+ * without pidfd_open -- and the caller then falls back to kill(pid, 0) at
+ * each idle wake-up. Sets *gone to 1 when SO_PEERPIDFD reports the peer has
+ * already exited (ESRCH): the pid may have been reused, so we must NOT fall
+ * back to pidfd_open/kill on it -- the caller treats the connection as dead. */
+static int peer_pidfd(int conn_fd, pid_t pid, int *gone)
+{
+    *gone = 0;
+#ifdef SO_PEERPIDFD
+    int pfd = -1;
+    socklen_t plen = sizeof(pfd);
+    if (getsockopt(conn_fd, SOL_SOCKET, SO_PEERPIDFD, &pfd, &plen) == 0 && pfd >= 0)
+        return pfd;
+    /* ESRCH: the peer is already gone. Any pid-based fallback would probe a
+     * possibly recycled pid, so report it dead instead. */
+    if (errno == ESRCH) {
+        *gone = 1;
+        return -1;
+    }
+#endif
+#ifdef SYS_pidfd_open
+    if (pid > 0) {
+        long r = syscall(SYS_pidfd_open, pid, 0);
+        if (r >= 0)
+            return (int)r;
+        if (errno == ESRCH) {
+            *gone = 1;
+            return -1;
+        }
+    }
+#endif
+    (void)conn_fd;
+    (void)pid;
+    return -1;
+}
+
+/* Fallback liveness probe. A pid of 0 (peer in another pid namespace) cannot
+ * be checked and counts as alive: the duration cap still bounds it. */
+static int pid_alive(pid_t pid)
+{
+    if (pid <= 0)
+        return 1;
+    return kill(pid, 0) == 0 || errno == EPERM;
+}
+
+/* Stream framing (protocol v2). After the header line, the stream is a
+ * sequence of frames: a 4-byte big-endian length, then that many bytes of
+ * recording. A zero-length frame is the END-OF-STREAM marker, which
+ * ob-record-connect sends only after reading EOF from its source. Without it
+ * the sink cannot tell a session that ended from a forwarder that was killed:
+ * both look like EOF, and v1 stamped them both "completed" (#287, EBIOS MT34).
+ * Terminal output cannot forge the marker, because everything the session
+ * prints travels inside a frame's payload. */
+#define FRAME_MAX COPY_BUF
+
+enum { FRAME_MORE, FRAME_END, FRAME_CAP, FRAME_BAD, FRAME_IOERR };
+
+struct framer {
+    unsigned char hdr[4];
+    int have;        /* bytes of the current length prefix received */
+    uint32_t left;   /* payload bytes still expected in the current frame */
+};
+
+static int write_all(int fd, const char *p, size_t n)
+{
+    while (n > 0) {
+        ssize_t w = write(fd, p, n);
+        if (w < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        p += w;
+        n -= (size_t)w;
+    }
+    return 0;
+}
+
+/* Consume n stream bytes: append payload to recfd (within MAX_RECORDING),
+ * track frame boundaries. Returns FRAME_MORE to keep reading, FRAME_END on
+ * the end-of-stream marker, FRAME_CAP when the byte cap is reached (what fits
+ * is written), FRAME_BAD on a protocol violation, FRAME_IOERR on a write
+ * error. */
+static int feed_frames(struct framer *f, const char *p, size_t n, int recfd, long *total)
+{
+    size_t i = 0;
+    while (i < n) {
+        if (f->left == 0) {
+            f->hdr[f->have++] = (unsigned char)p[i++];
+            if (f->have < 4)
+                continue;
+            f->have = 0;
+            uint32_t len = ((uint32_t)f->hdr[0] << 24) | ((uint32_t)f->hdr[1] << 16) |
+                           ((uint32_t)f->hdr[2] << 8) | (uint32_t)f->hdr[3];
+            if (len == 0)
+                return i == n ? FRAME_END : FRAME_BAD; /* nothing may follow */
+            if (len > FRAME_MAX)
+                return FRAME_BAD;
+            f->left = len;
+            continue;
+        }
+        size_t take = n - i;
+        if (take > f->left)
+            take = f->left;
+        if (*total + (long)take > MAX_RECORDING) {
+            size_t room = (size_t)(MAX_RECORDING - *total);
+            if (room > 0 && write_all(recfd, p + i, room) == 0)
+                *total += (long)room;
+            return FRAME_CAP;
+        }
+        if (write_all(recfd, p + i, take) < 0)
+            return FRAME_IOERR;
+        *total += (long)take;
+        f->left -= (uint32_t)take;
+        i += take;
+    }
+    return FRAME_MORE;
 }
 
 /* Base sessions directory. Hard-coded by default; OB_SESSIONS_DIR overrides it
@@ -281,7 +463,7 @@ int main(void)
             conn_fd = 3;
     }
 
-    struct timeval tv = {.tv_sec = IO_TIMEOUT_SEC, .tv_usec = 0};
+    struct timeval tv = {.tv_sec = HEADER_TIMEOUT_SEC, .tv_usec = 0};
     setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     /* 1. Recorded user from the connection, kernel-verified. */
@@ -318,6 +500,10 @@ int main(void)
         fail("malformed metadata header (not a JSON object)");
         return 1;
     }
+    /* The header timeout ends here. The stream has no idle timeout at all: it
+     * is read through poll(), which watches the peer as well as the socket. */
+    tv.tv_sec = 0;
+    setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     char *session_id = hdr_str(hdr, "session_id", 64);
     char *format = hdr_str(hdr, "format", 32);
@@ -325,6 +511,15 @@ int main(void)
     char *tty = hdr_str(hdr, "ssh_tty", MAX_SHORT);
     char *command = hdr_str(hdr, "original_command", MAX_CMD);
 
+    /* Only framed streams (v2) are accepted: an unframed v1 stream can never
+     * be told apart from a cut one, which is the gap v2 closes. The recorder,
+     * the connector and the sink ship together. */
+    struct json_object *jv = NULL;
+    if (!json_object_object_get_ex(hdr, "v", &jv) || !json_object_is_type(jv, json_type_int) ||
+        json_object_get_int(jv) != OB_RECORD_PROTO) {
+        fail("unsupported protocol version in header (this sink speaks v2)");
+        goto reject;
+    }
     if (!session_id || !valid_session_id(session_id)) {
         fail("missing/invalid session_id in header");
         goto reject;
@@ -364,12 +559,18 @@ int main(void)
      * is carried by the "format" field, not the status.
      *
      * Created with O_EXCL: a duplicate <ts>_<session_id> must be refused here
-     * rather than truncate an existing session's metadata (#198). Other write
-     * failures are non-fatal, as before — the recording itself still matters. */
-    if (write_metadata(dirfd, meta_name, 1, session_id, user, client_ip, tty,
-                       start_time, NULL, "active",
-                       command, format, rec_name, gid) == -2) {
+     * rather than truncate an existing session's metadata (#198). Any other
+     * failure must refuse too: we ACK only once the metadata exists, so the
+     * connector fails closed if it does not (#287). */
+    int mrc = write_metadata(dirfd, meta_name, 1, session_id, user, client_ip, tty,
+                             start_time, NULL, "active",
+                             command, format, rec_name, gid);
+    if (mrc == -2) {
         fail("metadata for this session id/timestamp already exists; refusing");
+        goto reject_dir;
+    }
+    if (mrc != 0) {
+        fail("could not write the initial metadata; refusing (fail-closed)");
         goto reject_dir;
     }
 
@@ -387,60 +588,123 @@ int main(void)
         goto reject_dir;
     }
 
-    const char *status = "completed";
-    if (!is_transfer) {
-        /* 4. Stream copy with a byte cap and the recv timeout set above. */
+    /* The session is now recorded: metadata is on disk and the recording file
+     * exists. Only now tell the connector to proceed. Every rejection above
+     * (oversized/malformed/wrong-version header, duplicate id, ensure_user_dir
+     * failure) returned before this point, so the connector gets EOF instead
+     * of the ACK and the recorder refuses the session -- fail-closed (#287). */
+    {
+        unsigned char ack = OB_RECORD_ACK;
+        ssize_t w;
+        while ((w = write(conn_fd, &ack, 1)) < 0 && errno == EINTR)
+            ;
+        if (w != 1) {
+            /* The peer is gone before we could hand off. The initial metadata
+             * is "active"; finalize it as aborted so it does not lie. */
+            fail("could not acknowledge the connection; the peer is gone");
+            close(recfd);
+            iso_utc(end_time, sizeof(end_time));
+            write_metadata(dirfd, meta_name, 0, session_id, user, client_ip, tty,
+                           start_time, end_time, "aborted", command, format,
+                           rec_name, gid);
+            goto reject_dir;
+        }
+    }
+
+    /* A status is only ever set from what the loop below observes; nothing
+     * reaches "completed" without the forwarder's end-of-stream frame. */
+    const char *status = "aborted";
+    {
+        /* 4. Stream copy, bounded by the peer's life, a total duration and a
+         * byte cap -- never by silence. An interactive session that prints
+         * nothing for a while is a live session: the idle timeout this
+         * replaces (30 s, until #287) finalized such a recording as
+         * "aborted", and the recorder then died of SIGPIPE at the user's
+         * next keystroke. A transfer session goes through the same loop: its
+         * stream is empty, and only its end-of-stream frame completes it. */
+        long poll_sec = env_seconds("OB_RECORD_POLL_SEC", DEFAULT_POLL_SEC, 3600);
+        long max_sec = env_seconds("OB_RECORD_MAX_SEC", DEFAULT_MAX_SESSION_SEC,
+                                   LONG_MAX / 2);
+        long deadline = mono_now() + max_sec;
+        int peer_gone = 0;
+        int pidfd = peer_pidfd(conn_fd, cred.pid, &peer_gone);
+        struct framer fr = {.have = 0, .left = 0};
         char buf[COPY_BUF];
         long total = 0;
         for (;;) {
-            ssize_t r = read(conn_fd, buf, sizeof(buf));
-            if (r < 0) {
+            long left = deadline - mono_now();
+            if (left <= 0) {
+                status = "truncated";
+                fail("recording hit the duration cap; finalizing as truncated");
+                break;
+            }
+            long wait_sec = left < poll_sec ? left : poll_sec;
+            struct pollfd pfds[2] = {
+                {.fd = conn_fd, .events = POLLIN, .revents = 0},
+                {.fd = pidfd, .events = POLLIN, .revents = 0},
+            };
+            nfds_t nfds = (pidfd >= 0 && !peer_gone) ? 2 : 1;
+            int pr = poll(pfds, nfds, (int)(wait_sec * 1000));
+            if (pr < 0) {
                 if (errno == EINTR)
                     continue;
-                /* timeout (EAGAIN/EWOULDBLOCK) or hard error -> abnormal end */
                 status = "aborted";
                 break;
             }
-            if (r == 0) {
-                status = "completed"; /* clean EOF */
-                break;
-            }
-            if (total + r > MAX_RECORDING) {
-                /* Write what fits, then stop. */
-                long room = MAX_RECORDING - total;
-                if (room > 0) {
-                    ssize_t off = 0;
-                    while (off < room) {
-                        ssize_t w = write(recfd, buf + off, (size_t)(room - off));
-                        if (w < 0) {
-                            if (errno == EINTR)
-                                continue;
-                            break;
-                        }
-                        off += w;
-                    }
-                }
-                status = "truncated";
-                fail("recording hit the size cap; finalizing as truncated");
-                break;
-            }
-            ssize_t off = 0;
-            while (off < r) {
-                ssize_t w = write(recfd, buf + off, (size_t)(r - off));
-                if (w < 0) {
-                    if (errno == EINTR)
-                        continue;
-                    fail("write(recording) failed");
+            if (pr == 0) {
+                /* Idle. Only a dead peer ends the recording here: the
+                 * connection outlived the process that opened it, so it is
+                 * held by something else and nothing will ever close it. */
+                if (peer_gone) {
+                    fail("peer exited but its connection is still open; finalizing as aborted");
                     status = "aborted";
-                    goto stream_done;
+                    break;
                 }
-                off += w;
+                if (pidfd < 0 && !pid_alive(cred.pid))
+                    peer_gone = 1; /* one more interval to drain, then abort */
+                continue;
             }
-            total += r;
+            /* The peer exiting is ordinary at the end of a session: keep
+             * draining what the socket still holds. Its EOF, or the next idle
+             * wake-up, decides. */
+            if (nfds == 2 && pfds[1].revents)
+                peer_gone = 1;
+            if (!(pfds[0].revents & (POLLIN | POLLHUP | POLLERR)))
+                continue;
+            ssize_t r = read(conn_fd, buf, sizeof(buf));
+            if (r < 0) {
+                if (errno == EINTR || errno == EAGAIN)
+                    continue;
+                status = "aborted"; /* hard error -> abnormal end */
+                break;
+            }
+            if (r == 0) {
+                /* EOF with no end-of-stream frame: the forwarder was killed
+                 * or crashed, or something else closed the connection. What
+                 * arrived is kept, but it is not a complete recording. */
+                fail("stream closed without its end-of-stream frame; finalizing as aborted");
+                status = "aborted";
+                break;
+            }
+            int fv = feed_frames(&fr, buf, (size_t)r, recfd, &total);
+            if (fv == FRAME_MORE)
+                continue;
+            if (fv == FRAME_END) {
+                status = "completed";
+            } else if (fv == FRAME_CAP) {
+                fail("recording hit the size cap; finalizing as truncated");
+                status = "truncated";
+            } else if (fv == FRAME_IOERR) {
+                fail("write(recording) failed");
+                status = "aborted";
+            } else {
+                fail("malformed stream framing; finalizing as aborted");
+                status = "aborted";
+            }
+            break;
         }
-    stream_done:;
-    } else {
-        status = "completed"; /* transfer: metadata only, no stream */
+        if (pidfd >= 0)
+            close(pidfd);
     }
     close(recfd);
 

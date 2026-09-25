@@ -71,15 +71,20 @@ Create ``/etc/open-bastion/session-recorder.conf``:
    # Any format other than "script" falls back to "script" in v1.
    format = script
 
-   # Maximum session duration in seconds
-   # Enforced by ob-session-recorder itself (it terminates the session at the
-   # limit). The sink then records the end like any torn-down session (status:
-   # aborted). The sink's separate "truncated" status marks recordings that hit
-   # the byte cap, not the time limit.
+   # Maximum session duration in seconds (default 86400; ob-bastion-setup
+   # writes 28800, 8 hours).
+   # Enforced by ob-session-recorder: at the limit it kills script(1) (or the
+   # transfer program), which closes the session's terminal as a client
+   # disconnect would. The stream is fully delivered, so the recording is
+   # "completed"; the timeout itself is logged (journalctl -t
+   # ob-session-recorder). A value that is not a number of seconds falls back
+   # to the default, with an error in the log.
    # Set to 0 to disable (not recommended)
    max_duration = 86400
 
 Note: ``sessions_dir`` is no longer read by the recorder. The storage path is owned and managed entirely by ``ob-record-sink`` (root).
+
+The ``max_duration`` watchdog runs as the recorded user, like the rest of the recorder, and that user can kill it. The bound they cannot lift is the sink's own: ``ob-record-sink`` finalizes any recording as ``truncated`` after seven days (``OB_RECORD_MAX_SEC`` in the unit's environment, see ``ob-record-sink(8)``), and a session whose recording has ended is cut at its next output. Keep ``max_duration`` below that cap. Before 0.7.0 the watchdog did not work at all: it was a signal trap that bash deferred until the session itself had ended (`#287 <https://github.com/linagora/open-bastion/issues/287>`__).
 
 SSH Server Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -155,6 +160,27 @@ ttyrec (planned — not yet supported over the recording sink)
 
 ttyrec support over the root sink is planned for a future release. In v1 any ``format = ttyrec`` setting falls back to ``script``.
 
+File transfers
+--------------
+
+``scp``, ``rsync`` and ``sftp`` speak a binary protocol that a terminal would corrupt, so they cannot run under ``script``: they run with raw input and output, and the sink records their **metadata only** (``"format": "transfer"``, an empty ``.typescript``). Because that means *not* recording the session's stream, the recorder only treats a command as a transfer when it is exactly what a genuine client sends:
+
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| Client                            | ``SSH_ORIGINAL_COMMAND`` accepted                                                                                        |
++===================================+==========================================================================================================================+
+| ``rsync`` 3.x                     | ``rsync --server [--sender] -FLAGS [--long-option[=value]...] . PATH...`` — rrsync's option list, without ``--daemon``   |
+|                                   | and without ``-s`` (``--secluded-args`` would carry the real arguments past the check)                                   |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``scp -O`` (legacy protocol)      | ``scp [-v] [-r] [-p] [-d] -t|-f [--] PATH...``, one word per flag                                                        |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``scp``, ``sftp`` (sftp protocol) | the ``Subsystem sftp`` command sshd passes under ``ForceCommand``: ``internal-sftp`` or an ``sftp-server`` system path,  |
+|                                   | with ``sftp-server``'s ``-e -R -f -l -u -d -p -P`` options                                                               |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------+
+
+Paths may carry what those clients send for the remote shell: backslash escapes (``my\ file``), a leading ``~`` and wildcards, which the recorder expands itself (pathname expansion only). Any unescaped shell metacharacter (``; & | < > ( ) $ ` ' " { } ! #``), any control character, or anything appended to one of these forms, and the command is **recorded as an ordinary session** instead, with a warning in the log (``journalctl -t ob-session-recorder``). A session that requested a terminal is never a transfer. A command that passes is executed as an argument vector, never through a shell, and the program is taken from a fixed root-owned path (``/usr/bin/rsync``, ``/usr/bin/scp``, the distribution's ``sftp-server``), never from the user's ``PATH``. ``internal-sftp`` runs that ``sftp-server`` binary.
+
+A transfer client this does not recognise therefore fails the way any binary protocol fails in a terminal. ``rsync`` with ``--secluded-args`` (``-s``, or ``RSYNC_PROTECT_ARGS`` set) is the known case; so is a remote path using shell syntax (``$HOME``, quotes) rather than plain escaping.
+
 Session Metadata
 ----------------
 
@@ -174,7 +200,7 @@ Each recording has an accompanying JSON metadata file (``.json``):
      "format": "script",
      "recording_file": "20251216-103000_550e8400-e29b-41d4-a716-446655440000.typescript",
      "hostname": "bastion.example.com",
-     "version": "0.1.0"
+     "version": "0.2.0"
    }
 
 Metadata Fields
@@ -205,8 +231,15 @@ Metadata Fields
 +----------------------+------------------------------------------------------------------------------+
 | ``hostname``         | Bastion hostname                                                             |
 +----------------------+------------------------------------------------------------------------------+
-| ``version``          | Recorder version                                                             |
+| ``version``          | ``ob-record-sink`` version (0.2.0: framed stream, see ``status``)            |
 +----------------------+------------------------------------------------------------------------------+
+
+What ``status`` means, as observed by the sink:
+
+- ``completed``: the forwarder read the end of ``script``'s output and sent the end-of-stream marker, so the recording is whole. It says nothing about how the session ended -- logout, disconnect or ``max_duration`` -- nor about the last command's exit code.
+- ``truncated``: the recording reached the 1 GiB byte cap or the sink's duration cap (7 days by default); the session loses its recording channel and is cut at its next output.
+- ``aborted``: the stream stopped without its end-of-stream marker (the forwarder was killed or crashed, or the framing was malformed), or the process that opened the connection died while something else held it open. Before 0.7.0 a killed forwarder produced ``completed``, and a session silent for 30 s produced ``aborted`` (`#287 <https://github.com/linagora/open-bastion/issues/287>`__).
+- ``active``: the session is still open, or the sink itself was killed.
 
 Directory Structure
 -------------------
@@ -288,6 +321,11 @@ Operational recommendations:
 - **Monitor free space** on the recordings filesystem and alert well before full.
 - Recordings are compressed and expired automatically — see :ref:`Retention and disk management <session-recording-retention-and-disk-management>` below.
 - Put ``/var/lib/open-bastion/sessions`` on a **dedicated partition** so a full recordings store cannot also take down the host's root filesystem.
+
+**Concurrency.** Each recorded session holds one connection on ``ob-record.socket`` for its whole lifetime. ``ob-record.socket`` ships with ``MaxConnections=1024`` and ``MaxConnectionsPerSource=16`` (connections per source uid) so that neither the total nor any single user's share of concurrent sessions can exhaust the socket and, because recording is fail-closed, lock logins out. Two caveats:
+
+- ``MaxConnectionsPerSource`` is honoured only by **systemd v256 or newer**. On older systemd — Debian bookworm (252), RHEL/Rocky/Alma 9 (252), Ubuntu noble (255) — it is **ignored**, and only the total ``MaxConnections=1024`` applies; there a single local user can hold all 1024 slots. On those hosts, rely on the total cap and on session containment (``--enable-hardening``, which kills a user's processes at logout).
+- Where it *is* honoured, a user's **17th** concurrent recorded session is refused (fail-closed: that session cannot start). Raise ``MaxConnectionsPerSource`` if your users legitimately open more than 16 simultaneous sessions from one account. Raise ``MaxConnections`` for more than 1024 host-wide. Both with ``systemctl edit ob-record.socket``.
 
 .. _session-recording-retention-and-disk-management:
 
@@ -384,19 +422,9 @@ Debug mode
 Environment Variables
 ---------------------
 
-The recorder reads ``OB_*`` variables. The ``LLNG_*`` names documented before 0.5.0 are **not** read by anything: setting one is a silent no-op.
+**None, since 0.7.0.** The recorder runs as the recorded user, and a setting that user's environment could change is not a control: ``OB_MAX_SESSION=0`` switched the ``max_duration`` watchdog off, and ``OB_RECORDER_CONFIG`` let the session pick a configuration other than the administrator's (`#287 <https://github.com/linagora/open-bastion/issues/287>`__). ``OB_RECORDER_CONFIG``, ``OB_RECORDER_FORMAT``, ``OB_MAX_SESSION`` and ``OB_SESSIONS_DIR`` are therefore ignored. Settings come from the root-owned ``/etc/open-bastion/session-recorder.conf``, or from options on the ``ForceCommand`` line (``-c FILE``, ``-f FORMAT``), which only the administrator writes. The ``LLNG_*`` names documented before 0.5.0 were never read either.
 
-+------------------------+------------------------------------------------------------------------------------------------------+
-| Variable               | Description                                                                                          |
-+========================+======================================================================================================+
-| ``OB_RECORDER_CONFIG`` | Config file path                                                                                     |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_RECORDER_FORMAT`` | Recording format (v1: ``script`` only — anything else falls back to it)                              |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_MAX_SESSION``     | Max session duration in seconds                                                                      |
-+------------------------+------------------------------------------------------------------------------------------------------+
-| ``OB_SESSIONS_DIR``    | **Ignored.** The storage path belongs to ``ob-record-sink``; see the note on ``sessions_dir`` above. |
-+------------------------+------------------------------------------------------------------------------------------------------+
+For the same reason the recorder does not trust the user's ``PATH``, nor anything bash would import from the environment: it runs under ``bash -p`` (which ignores ``BASH_ENV``, ``SHELLOPTS``, exported functions and the like), sets ``PATH`` to the system directories before running any helper, takes ``ob-record-connect`` only from a root-owned ``/usr/bin`` or ``/usr/local/bin``, and passes the sink's socket path to it explicitly, so ``OB_RECORD_SOCKET`` in the session's environment is ignored as well.
 
 Integration with LLNG
 ---------------------

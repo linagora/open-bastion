@@ -265,6 +265,28 @@ test_units_verify() {
     fi
 }
 
+# ── 10. The recording socket bounds concurrency (#287) ───────────────────────
+# A recorded connection lives for the whole session now, so an unbounded
+# MaxConnections (default 64) would cap concurrent sessions and, since the
+# socket is world-connectable, let one user starve every login. The socket must
+# raise the ceiling and bound it per source uid.
+test_record_socket_bounds_connections() {
+    local sock="$ROOT_DIR/systemd/ob-record.socket" bad="" mc mcs
+    if [ ! -e "$sock" ]; then
+        fail "ob-record.socket is missing"
+        return
+    fi
+    mc=$(sed -n 's/^MaxConnections=\([0-9]\+\)$/\1/p' "$sock")
+    mcs=$(sed -n 's/^MaxConnectionsPerSource=\([0-9]\+\)$/\1/p' "$sock")
+    [ -n "$mc" ] && [ "$mc" -gt 64 ] || bad="$bad MaxConnections(=${mc:-unset})"
+    [ -n "$mcs" ] && [ "$mcs" -ge 1 ] || bad="$bad MaxConnectionsPerSource(=${mcs:-unset})"
+    if [ -z "$bad" ]; then
+        pass "ob-record.socket raises MaxConnections and bounds it per source"
+    else
+        fail "ob-record.socket concurrency limits are wrong or unset" "$bad"
+    fi
+}
+
 run_test test_no_duplicate_unit_files
 run_test test_rules_units_are_installed
 run_test test_templates_have_sockets
@@ -274,6 +296,7 @@ run_test test_timers_have_services_and_ship
 run_test test_opt_in_timers_not_enabled_at_install
 run_test test_krl_service_sandbox
 run_test test_units_verify
+run_test test_record_socket_bounds_connections
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

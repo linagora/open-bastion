@@ -131,7 +131,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
 | **MT33** | Signature cryptographique des enregistrements à la clôture (clé hors bastion)                        | R-S18                 | Produit     | P2       | Équipe Open Bastion | ``À COMPLÉTER`` | **Ouvert**                       |
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
-| **MT34** | Détection d'un enregistreur tué en cours de session (``killed_prematurely``)                         | R-S19                 | Produit     | P2       | Équipe Open Bastion | ``À COMPLÉTER`` | **Ouvert** — reliquat de MT10    |
+| **MT34** | Détection d'un enregistreur tué en cours de session (``killed_prematurely``)                         | R-S19                 | Produit     | P2       | Équipe Open Bastion | ``À COMPLÉTER`` | **Livré, non publié** — ``#287`` |
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
 | **MT35** | Webhook de révocation LLNG → fermeture des sessions ouvertes                                         | R-S8                  | Produit     | P2       | Équipe Open Bastion | ``À COMPLÉTER`` | **Ouvert**                       |
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
@@ -143,6 +143,10 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
 | **MT39** | Second facteur exigé pour l'obtention du token ``sudo``                                              | R-S16                 | Déploiement | P2       | Administrateur LLNG | ``À COMPLÉTER`` | **Ouvert**                       |
 +----------+------------------------------------------------------------------------------------------------------+-----------------------+-------------+----------+---------------------+-----------------+----------------------------------+
+
+..
+
+   **MT34 est livré avec le correctif de** `#287 <https://github.com/linagora/open-bastion/issues/287>`__. Le flux d'enregistrement est désormais découpé en trames, et ``ob-record-connect`` n'envoie la trame de fin qu'après une fin de fichier propre sur la FIFO : un transmetteur tué, planté ou coupé laisse un enregistrement ``aborted`` au lieu de ``completed``, et une connexion qui survit au processus qui l'a ouverte est close ``aborted`` elle aussi. C'est une **détection**, pas une prévention : le transmetteur et ``script`` tournent sous l'uid de l'utilisateur, qui peut toujours les tuer ou lire son propre flux (limite d'auto-falsification, voir :doc:`/design/tamper-evident-session-recording` §10). Un ``script`` privé de lecteur meurt de ``SIGPIPE`` à la sortie suivante, ce qui termine la session.
 
 .. _55-mesures-écartées:
 

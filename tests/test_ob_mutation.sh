@@ -119,7 +119,11 @@ run_stanza() {
 
     # The suite must be GREEN before the mutation, or the result means nothing.
     local pre
-    pre=$( cd "$ROOT_DIR" && $as bash "$suite" 2>&1 ) || {
+    # Suites run with stdin on /dev/null: this loop reads the catalogue from
+    # its stdin, and a suite that lets something read its own -- script(1)
+    # forwards stdin into the session -- silently ate the rest of the
+    # catalogue, which then looked like a shorter, all-green run.
+    pre=$( cd "$ROOT_DIR" && $as bash "$suite" 2>&1 </dev/null ) || {
         fail "$id" "$suite already fails before the mutation; nothing can be concluded"
         # Say why. Without it a red baseline in CI is a dead end: the main loop
         # stops at this suite, before it reaches the one that failed, and that
@@ -214,7 +218,7 @@ run_stanza() {
     fi
 
     local src=0
-    ( cd "$ROOT_DIR" && $as bash "$suite" ) >/dev/null 2>&1 || src=$?
+    ( cd "$ROOT_DIR" && $as bash "$suite" ) </dev/null >/dev/null 2>&1 || src=$?
     restore_all
     # Put the real binaries back before judging the next entry.
     case "$file" in
