@@ -48,7 +48,7 @@ flowchart LR
 | `AuthorizedKeysFile` | Default          | `none` (no unsigned keys)   |
 | `RevokedKeys` (KRL)  | Not configured   | Mandatory + auto-refresh    |
 | sudo                 | `NOPASSWD`       | LLNG token required         |
-| KRL refresh          | Manual           | Cron every 30 min           |
+| KRL refresh          | Manual           | Every 30 min (timer)        |
 
 ## Quick Start
 
@@ -137,14 +137,19 @@ To get a temporary token:
 
 ## KRL (Key Revocation List)
 
-The KRL is automatically refreshed every 30 minutes via cron. To manually check:
+The KRL is refreshed every 30 minutes by `ob-krl-refresh`, which only replaces
+the list with one that parses (see below for how the demo schedules it). To
+check:
 
 ```bash
 # Check KRL on bastion
 docker exec ob-maxsec-bastion ls -la /etc/ssh/revoked_keys
 
-# Check cron job
-docker exec ob-maxsec-bastion cat /etc/cron.d/open-bastion-krl
+# Refresh it now
+docker exec ob-maxsec-bastion ob-krl-refresh
+
+# Check the refresh loop is running
+docker exec ob-maxsec-bastion pgrep -af ob-demo-krl-refresh
 ```
 
 ## Troubleshooting
@@ -189,3 +194,4 @@ docker compose up -d
 - **Certificate minting socket**: a real bastion gets `/run/open-bastion/cert.sock` from `ob-cert.socket`, a systemd unit. These containers have no systemd, so the entrypoint starts `docker-demo-common/ob-demo-socket-activate` instead: one `ob-cert-daemon` per connection, on the accepted socket, exactly as `Accept=yes` does — the daemon still identifies the caller through `SO_PEERCRED`. Demo scaffolding only; the package never installs it.
 - **Session-recording socket**: a real bastion gets `/run/open-bastion/rec.sock` from `ob-record.socket`; the demo stand-in serves it the same way, one `ob-record-sink` per connection on the accepted socket. It matters because `ob-session-recorder` is fail-closed — with recording enabled and no sink, every session is refused.
 - **Heartbeat**: a real host refreshes its enrolment token from `ob-heartbeat.timer`; with no systemd the demos run `docker-demo-common/ob-demo-heartbeat` instead, `ob-heartbeat` every five minutes. Without it the token written at enrolment expires and NSS stops resolving LLNG users, so the container quietly stops accepting logins. Demo scaffolding; the package never installs it.
+- **KRL refresh**: a real Mode E host refreshes `/etc/ssh/revoked_keys` from `ob-krl-refresh.timer`, every 30 minutes (it replaced the `/etc/cron.d/open-bastion-krl` job of 0.6). With no systemd the containers run `docker-demo-common/ob-demo-krl-refresh` instead, `ob-krl-refresh` on the same cadence, and no longer need cron at all. Without it a certificate revoked in LLNG would keep passing `RevokedKeys` for the life of the container. Demo scaffolding; the package never installs it.

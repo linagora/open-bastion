@@ -55,8 +55,8 @@ What ``--enable-audit-trace`` does, in order:
 
 1. Warns and skips the audit-trace step if the ``auditd`` package is not installed (Debian/Ubuntu: ``apt install auditd``; RHEL/Rocky/Fedora: ``dnf install audit``). The rest of ``ob-bastion-setup`` continues normally — the operator can install ``auditd`` later and re-run with ``--enable-audit-trace``. We declare ``auditd`` as a ``Recommends`` soft dependency so installing the bastion package alone never silently flips a global system knob.
 2. Asks the admin to confirm (skipped under ``--yes``).
-3. Installs ``/etc/audit/rules.d/open-bastion.rules`` (mode 0640 ``root:root``) from the template at ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``.
-4. Installs ``/etc/cron.daily/open-bastion-audit-rotate`` (mode 0755 ``root:root``) from the corresponding template — this triggers a daily rotation so that ``num_logs=7`` gives a ~1-week retention window.
+3. Enables and starts ``ob-audit-rotate.timer``, which rotates the audit log once a day (``ob-audit-rotate.service`` sends ``SIGUSR1``, auditd's "rotate now", to auditd's main process) so that ``num_logs=7`` gives a ~1-week retention window. This comes first: if the timer cannot be armed the step fails before auditd is touched. Up to 0.6 the rotation was a ``/etc/cron.daily/open-bastion-audit-rotate`` script; a host that still has it gets the timer on the same schedule, and the script is removed once the timer runs (see :ref:`Upgrading from the cron.daily script <audit-upgrading-from-cron>`).
+4. Installs ``/etc/audit/rules.d/open-bastion.rules`` (mode 0640 ``root:root``) from the template at ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``.
 5. Loads the new rules with ``augenrules --load`` and restarts the ``auditd`` service. **Note:** restarting auditd does *not* terminate active SSH sessions (unlike ``logind``), so this is safe to run on a live bastion.
 
 **``/etc/audit/auditd.conf`` is deliberately NOT modified.** See :ref:`Tuning retention <audit-tuning-retention-manual-post-deployment-step>` below for the manual step.
@@ -104,16 +104,16 @@ Like the PR1 hardening drop-ins, the audit-trace files are **deployment artefact
 +========================================================================+==================+==========================================================================+
 | ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``           | open-bastion pkg | Read-only template (shipped by package).                                 |
 +------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``/usr/share/open-bastion/audit/cron.daily/open-bastion-audit-rotate`` | open-bastion pkg | Read-only template.                                                      |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
 | ``/etc/audit/rules.d/open-bastion.rules``                              | deployment       | Live copy deployed by ``--enable-audit-trace``. Edit in place if needed. |
 +------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``/etc/cron.daily/open-bastion-audit-rotate``                          | deployment       | Live copy deployed by ``--enable-audit-trace``. Edit in place if needed. |
+| ``ob-audit-rotate.timer`` / ``.service``                               | open-bastion pkg | Daily rotation. Shipped disabled; enabled by ``--enable-audit-trace``.   |
++------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
+| ``/etc/systemd/system/ob-audit-rotate.timer.d/``                       | deployment       | Optional schedule drop-in (``systemctl edit ob-audit-rotate.timer``).    |
 +------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
 | ``/etc/audit/auditd.conf``                                             | audit pkg        | Admin-tunable. **NOT modified by Open Bastion.**                         |
 +------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
 
-We deliberately do **not** modify ``/etc/audit/auditd.conf`` because it is a single admin-tunable file owned by the ``audit`` distro package. Drop-in mechanisms (``rules.d/``, ``cron.daily/``) are used where they exist; the single admin-tunable file ``auditd.conf`` is left untouched. If we patched it in place, any ``dpkg``/``rpm`` conffile prompt on the next ``audit`` package upgrade would confront the admin with unexpected diffs.
+We deliberately do **not** modify ``/etc/audit/auditd.conf`` because it is a single admin-tunable file owned by the ``audit`` distro package. Drop-in mechanisms (``rules.d/``, a systemd timer) are used where they exist; the single admin-tunable file ``auditd.conf`` is left untouched. If we patched it in place, any ``dpkg``/``rpm`` conffile prompt on the next ``audit`` package upgrade would confront the admin with unexpected diffs.
 
 .. _audit-tuning-retention-manual-post-deployment-step:
 
@@ -159,7 +159,23 @@ After editing, run:
 
    sudo systemctl restart auditd
 
-You may also want to adjust the cron frequency. By default we rotate daily; if your event volume is low you can move ``/etc/cron.daily/open-bastion-audit-rotate`` to ``/etc/cron.weekly/``, in which case ``num_logs = 7`` gives a ~7-week window instead.
+You may also want to adjust the rotation frequency. By default we rotate daily; if your event volume is low you can rotate weekly, in which case ``num_logs = 7`` gives a ~7-week window instead:
+
+.. code:: bash
+
+   sudo systemctl edit ob-audit-rotate.timer
+   # [Timer]
+   # OnCalendar=
+   # OnCalendar=weekly
+
+The empty ``OnCalendar=`` first is required: without it the drop-in adds a weekly trigger to the daily one instead of replacing it.
+
+.. _audit-upgrading-from-cron:
+
+Upgrading from the cron.daily script
+------------------------------------
+
+Up to 0.6 the rotation was ``/etc/cron.daily/open-bastion-audit-rotate``, a copy of a template the package shipped. The template is gone; the copy keeps working after the upgrade, so nothing stops. ``ob-post-upgrade`` (or a new ``ob-bastion-setup --enable-audit-trace`` run) replaces it with ``ob-audit-rotate.timer``: daily, or weekly when the script had been moved to ``/etc/cron.weekly/`` as this page used to suggest. The script is removed only once the timer is enabled and active. A script that no longer carries its ``Installed by `ob-bastion-setup --enable-audit-trace``` line is treated as yours: it is left in place and a warning says so, and until you delete it the log rotates twice a day.
 
 Forwarding to a remote collector
 --------------------------------
@@ -184,7 +200,7 @@ Two ways:
 
    # 2. Permanent: remove the drop-in and reload.
    rm /etc/audit/rules.d/open-bastion.rules
-   rm /etc/cron.daily/open-bastion-audit-rotate
+   systemctl disable --now ob-audit-rotate.timer
    augenrules --load
    systemctl restart auditd
 

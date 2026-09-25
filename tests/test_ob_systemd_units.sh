@@ -141,11 +141,139 @@ test_socket_services_are_hardened() {
     fi
 }
 
+# ── 6. Every timer has its service, and both ship everywhere ─────────────────
+# The timers that replaced the cron jobs of 0.6 (#281) are new units: a timer
+# whose service is not shipped starts nothing, and CMake, Debian and RPM each
+# have their own list.
+test_timers_have_services_and_ship() {
+    local bad="" tmr base u
+    for tmr in "$ROOT_DIR"/systemd/*.timer; do
+        base="$(basename "$tmr" .timer)"
+        [ -f "$ROOT_DIR/systemd/$base.service" ] || bad="$bad $base.service:missing"
+        for u in "$base.timer" "$base.service"; do
+            grep -q "systemd/$u" "$ROOT_DIR/CMakeLists.txt" || bad="$bad $u:cmake"
+            grep -qE "systemd/$u( |\$)" "$ROOT_DIR/debian/open-bastion.install" || bad="$bad $u:deb"
+            grep -q "%{_unitdir}/$u" "$ROOT_DIR/rpm/open-bastion.spec" || bad="$bad $u:rpm"
+        done
+    done
+    if [ -z "$bad" ]; then
+        pass "every timer has its service, installed by CMake, Debian and RPM"
+    else
+        fail "every timer has its service, installed by CMake, Debian and RPM" "$bad"
+    fi
+}
+
+# ── 7. The KRL and audit timers are enabled by the setup, not the package ────
+# A package cannot know whether a host is in Mode E or runs the audit trace;
+# enabling these at install would refresh a KRL nobody reads, or signal an
+# auditd that is not there, on every host. Both packagings must say so, and
+# still stop them on removal.
+test_opt_in_timers_not_enabled_at_install() {
+    local bad="" t
+    for t in ob-krl-refresh ob-audit-rotate; do
+        grep -qE "dh_installsystemd .*--no-enable --no-start --name=$t $t\.timer" "$ROOT_DIR/debian/rules" \
+            || bad="$bad $t:deb-enables"
+        grep -qE "^%systemd_post $t\.timer" "$ROOT_DIR/rpm/open-bastion.spec" && bad="$bad $t:rpm-enables"
+        grep -qE "enable .*$t\.timer" "$ROOT_DIR/rpm/open-bastion.spec" && bad="$bad $t:rpm-enables"
+        grep -qE "^%systemd_preun $t\.timer" "$ROOT_DIR/rpm/open-bastion.spec" || bad="$bad $t:rpm-no-preun"
+    done
+    # ...and the setup is what enables them, through the timers library.
+    grep -q 'ob_krl_timer_setup' "$ROOT_DIR/scripts/ob-bastion-setup" || bad="$bad setup-no-krl-timer"
+    grep -q 'ob_audit_timer_setup' "$ROOT_DIR/scripts/ob-bastion-setup" || bad="$bad setup-no-audit-timer"
+    if [ -z "$bad" ]; then
+        pass "ob-krl-refresh and ob-audit-rotate timers are not enabled at install; the setup enables them"
+    else
+        fail "opt-in timers are not enabled at install" "$bad"
+    fi
+}
+
+# ── 8. ob-krl-refresh.service may write /etc/ssh, and nothing else ───────────
+# It runs as root and writes the file sshd trusts. The rename that makes the
+# replacement atomic needs the directory writable; the sshd configuration in
+# that directory must stay read-only, and the service needs no capability.
+test_krl_service_sandbox() {
+    local svc="$ROOT_DIR/systemd/ob-krl-refresh.service" bad="" d
+    for d in ProtectSystem=strict ReadWritePaths=/etc/ssh NoNewPrivileges=yes \
+             PrivateTmp=yes SystemCallFilter=@system-service; do
+        grep -qx "$d" "$svc" || bad="$bad missing:$d"
+    done
+    grep -qx 'CapabilityBoundingSet=' "$svc" || bad="$bad capabilities"
+    [ "$(grep -c '^ReadWritePaths=' "$svc")" = "1" ] || bad="$bad extra-rw-paths"
+    grep -qE '^ReadOnlyPaths=.*/etc/ssh/sshd_config( |$)' "$svc" || bad="$bad sshd_config-writable"
+    grep -qE '^ReadOnlyPaths=.*/etc/ssh/sshd_config\.d( |$)' "$svc" || bad="$bad sshd_config.d-writable"
+    # It must reach the portal.
+    grep -qx 'PrivateNetwork=yes' "$svc" && bad="$bad no-network"
+    grep -q 'network-online.target' "$svc" || bad="$bad not-after-network"
+    if [ -z "$bad" ]; then
+        pass "ob-krl-refresh.service: /etc/ssh writable, sshd config read-only, no capabilities, network"
+    else
+        fail "ob-krl-refresh.service sandbox" "$bad"
+    fi
+}
+
+# ── 9. systemd itself accepts the timer units and the drop-ins we write ──────
+# systemd-analyze verify exits 0 on an unknown key or a bad value -- it warns
+# and ignores the line -- so any output is a failure too. The ExecStart= paths
+# are pointed at the source tree, where the programs exist.
+test_units_verify() {
+    # Not the word "SKIP": tests/test_ob_mutation.sh reads it as "the whole
+    # suite skipped", and this suite guards a catalogue entry that must run in
+    # the mutation job, whose container has no systemd-analyze.
+    if ! command -v systemd-analyze >/dev/null 2>&1; then
+        echo "  (not checked: systemd-analyze is not installed)"
+        return
+    fi
+    local work bad="" u out n
+    work=$(mktemp -d)
+    # verify also loads what our units pull in (network-online.target and its
+    # dependencies) from the host, and prints whatever it thinks of those. On a
+    # CI runner VM, full of units that are not ours, that was enough to fail
+    # this check with nothing wrong in systemd/. Only lines about our units,
+    # our copies, or the markers below count.
+    _ours() { grep -E "ob-|$work|^rc\$|^write:" || true; }
+    for u in "$ROOT_DIR"/systemd/*.timer "$ROOT_DIR"/systemd/ob-heartbeat.service \
+             "$ROOT_DIR"/systemd/ob-session-prune.service \
+             "$ROOT_DIR"/systemd/ob-krl-refresh.service \
+             "$ROOT_DIR"/systemd/ob-audit-rotate.service; do
+        sed "s|^ExecStart=/usr/sbin/|ExecStart=$ROOT_DIR/scripts/|" "$u" > "$work/$(basename "$u")"
+    done
+    out=$(cd "$work" && systemd-analyze verify --man=no ./*.timer ./*.service 2>&1) \
+        || bad="$bad rc"
+    out=$(_ours <<<"$out")
+    [ -z "$out" ] || bad="$bad $(tr '\n' ' ' <<<"$out")"
+
+    # Every interval --krl-refresh-interval accepts, through the drop-in the
+    # timers library writes.
+    for n in 1 7 10 15 30 45 59 60; do
+        out=$(
+            OB_SYSTEMD_UNIT_DIR="$work"
+            # shellcheck source=scripts/ob-timers-lib.sh
+            . "$ROOT_DIR/scripts/ob-timers-lib.sh"
+            ob_timer_set_schedule ob-krl-refresh.timer "$(ob_krl_oncalendar "$n")" || echo "write:$OB_TIMERS_MSG"
+            cd "$work" && SYSTEMD_UNIT_PATH="$work:" \
+                systemd-analyze verify --man=no "$work/ob-krl-refresh.timer" 2>&1 || echo "rc"
+        )
+        out=$(_ours <<<"$out")
+        # shellcheck disable=SC2031  # n is only read in the subshell
+        [ -z "$out" ] || bad="$bad interval-$n:$(tr '\n' ' ' <<<"$out")"
+    done
+    rm -rf "$work"
+    if [ -z "$bad" ]; then
+        pass "systemd-analyze verify accepts the timers, their services and every schedule drop-in"
+    else
+        fail "systemd-analyze verify" "$bad"
+    fi
+}
+
 run_test test_no_duplicate_unit_files
 run_test test_rules_units_are_installed
 run_test test_templates_have_sockets
 run_test test_rpm_units_exist
 run_test test_socket_services_are_hardened
+run_test test_timers_have_services_and_ship
+run_test test_opt_in_timers_not_enabled_at_install
+run_test test_krl_service_sandbox
+run_test test_units_verify
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

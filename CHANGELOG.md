@@ -98,6 +98,27 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   is left on a new bastion, with a warning; an sshd without `sshd_config.d`
   refuses the switch. A `--yes` run under an unknown command name must pass
   `--node-role`. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A4).
+- **No Open Bastion job runs from cron any more: both are systemd timers**
+  (#281). The Mode E KRL refresh was `/etc/cron.d/open-bastion-krl` running a
+  script the setup generated into `/usr/local/bin/open-bastion-refresh-krl`,
+  with the portal URL, TLS setting and timeout frozen in at setup time. It is
+  now **`ob-krl-refresh`**(8), a packaged program run by
+  `ob-krl-refresh.timer` every 30 minutes, which reads those settings from
+  `openbastion.conf` at every run. It installs a list only if it carries the
+  KRL header and parses with `ssh-keygen -Q` — sshd reads a broken list as
+  revoking every key — and replaces `/etc/ssh/revoked_keys` by rename, where
+  the old script used `mv` from `/tmp`, a copy across filesystems. Failures
+  leave the current list and fail the unit, instead of the job's silence. The
+  service runs without capabilities, with only `/etc/ssh` writable and the
+  sshd configuration in it read-only. **`--krl-refresh-interval`** sets another
+  interval (1 to 60 minutes) through a drop-in. The `--enable-audit-trace`
+  rotation, a script copied into `/etc/cron.daily`, is `ob-audit-rotate.timer`.
+  Both timers ship disabled and are enabled by the setup where they apply;
+  `ob-post-upgrade` and a new setup run move a 0.6 host over, keeping the
+  interval, and remove each old job only once its timer is active. The
+  hardening step no longer warns about `root` missing from `cron.allow`, which
+  nothing of ours needs. The Mode E demo no longer installs cron. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
 - **`SECURITY.md` is a reporting policy again** (#276). It had grown to 986 lines
   describing the product, with the policy a few lines at the top. It now holds
   what the [OpenSSF finder guide](https://github.com/ossf/oss-vulnerability-guide/blob/main/finder-guide.md)

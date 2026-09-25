@@ -14,7 +14,7 @@
 #
 # This command needs none. Everything it re-asserts is derivable from the host:
 # the shipped helper text, the tmpfiles rule, the socket unit, the spool
-# ownership. It reads /etc/open-bastion/openbastion.conf for one thing only --
+# ownership, and the schedule of the cron jobs that systemd timers replace. It reads /etc/open-bastion/openbastion.conf for one thing only --
 # node_role, to pick the bastion or backend helper -- and writes nothing to it.
 #
 # What it deliberately does NOT do:
@@ -74,7 +74,8 @@ Usage: $PROG_NAME [--dry-run]
 
 Finishes an Open Bastion package upgrade on this host: re-installs the
 generated sshd principals helper, its tmpfiles rule, and the fingerprint sink
-socket, and takes the spool directory back to root.
+socket, takes the spool directory back to root, and replaces the KRL refresh
+and audit rotation cron jobs of 0.6 with their systemd timers.
 
 Takes no configuration and asks no questions. It does not enrol, does not
 re-enrol, and does not modify openbastion.conf, the server token, sshd_config
@@ -326,9 +327,81 @@ else
     fi
 fi
 
+# ── 6. and 7. The cron jobs of 0.6, as systemd timers (#281) ─────────────────
+#
+# Up to 0.6 the setup wrote /etc/cron.d/open-bastion-krl (Mode E) and
+# /etc/cron.daily/open-bastion-audit-rotate (--enable-audit-trace). Both keep
+# working after the upgrade -- the KRL script is self-contained -- so the
+# package leaves them alone: /usr/local is not its to clean, and a job may have
+# been edited. This is where they become ob-krl-refresh.timer and
+# ob-audit-rotate.timer, through the same code as the setup
+# (ob-timers-lib.sh): same interval, and the old job goes only once the timer
+# runs, so the host is never left with neither.
+#
+# The KRL timer is also re-asserted on a Mode E host that has no old job to
+# migrate: a revocation list nobody refreshes fails silently, the certificates
+# it should have killed keep working.
+TIMERS_LIB="${OB_TIMERS_LIB:-/usr/lib/open-bastion/ob-timers-lib.sh}"
+[ -r "$TIMERS_LIB" ] || TIMERS_LIB="$(dirname "$(readlink -f "$0")")/ob-timers-lib.sh"
+FAILED=0
+
+# Print what the library did, as this command reports things.
+report_timers() {
+    local line
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if [ "$DRY_RUN" = "true" ]; then info "$line"; else act "$line"; fi
+    done <<< "$OB_TIMERS_DONE"
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then warn "$line"; fi
+    done <<< "$OB_TIMERS_WARN"
+    return 0
+}
+
+# Mode E is the setup's 60-max-security.conf drop-in: the one place that says
+# sshd reads a revocation list.
+is_mode_e() {
+    grep -qsE '^[[:space:]]*RevokedKeys[[:space:]]' "$SSHD_CONFIG_DIR"/*.conf
+}
+
+if [ ! -r "$TIMERS_LIB" ]; then
+    error "Missing $TIMERS_LIB (reinstall the open-bastion package)"
+    FAILED=$((FAILED + 1))
+else
+    # shellcheck source=scripts/ob-timers-lib.sh
+    . "$TIMERS_LIB"
+    # shellcheck disable=SC2034  # read by ob-timers-lib.sh, sourced above
+    OB_TIMERS_DRY_RUN="$DRY_RUN"
+
+    if [ -e "$OB_KRL_LEGACY_CRON" ] \
+       || { is_mode_e && ! ob_timer_ready "$OB_KRL_TIMER"; }; then
+        if ob_krl_timer_setup; then
+            report_timers
+        else
+            report_timers
+            error "KRL refresh: $OB_TIMERS_MSG"
+            FAILED=$((FAILED + 1))
+        fi
+    elif is_mode_e; then
+        ok "$OB_KRL_TIMER is enabled and active"
+    fi
+
+    if [ -e "$OB_AUDIT_LEGACY_DAILY" ] || [ -e "$OB_AUDIT_LEGACY_WEEKLY" ]; then
+        if ob_audit_timer_setup; then
+            report_timers
+        else
+            report_timers
+            error "Audit rotation: $OB_TIMERS_MSG"
+            FAILED=$((FAILED + 1))
+        fi
+    fi
+fi
+
 echo
 if [ "$DRY_RUN" = "true" ]; then
     info "dry run complete — nothing was changed"
+elif [ "$FAILED" -gt 0 ]; then
+    error "$FAILED item(s) could not be repaired; see the [FAIL] lines above"
 elif [ "$CHANGED" -eq 0 ]; then
     ok "nothing to do: this host was already up to date"
 else
@@ -351,4 +424,5 @@ else
     warn "pamAccessAllowedRps in the LLNG Manager, or any enrolled host can"
     warn "declare itself a bastion. See doc/security/09-portail-llng.rst."
 fi
+[ "$FAILED" -eq 0 ] || exit 1
 exit 0

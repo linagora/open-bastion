@@ -24,7 +24,7 @@ jobs:
       # a different runner is the most useful evidence there is.
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-24.04, ubuntu-26.04]
 
     steps:
     - name: Checkout code

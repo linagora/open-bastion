@@ -39,7 +39,7 @@ The templates are installed by the package under ``/usr/share/open-bastion/harde
 
 ``systemd-logind`` is reloaded at the end of the step via ``systemctl reload systemd-logind`` (SIGHUP). This is **non-disruptive**: logind re-reads ``/etc/systemd/logind.conf.d/*.conf`` without restarting and without killing active sessions. ``KillUserProcesses=yes`` is consulted when each session ends, so existing sessions stay open and the new behaviour applies to their cleanup.
 
-``cron.service`` is **not** masked. ``ob-bastion-setup --max-security`` writes ``/etc/cron.d/open-bastion-krl`` to refresh the SSH key revocation list periodically; that job needs cron running. The allowlist is sufficient: only root can submit jobs via ``crontab(1)``, and ``/etc/cron.d/`` already requires root to write.
+``cron.service`` is **not** masked. No Open Bastion job runs from cron any more — the Mode E key revocation list refresh and the audit-trace rotation are systemd timers (``ob-krl-refresh.timer``, ``ob-audit-rotate.timer``) since 0.7.0 — but other jobs on the host may still need it (the administrator's own, or a distribution's). The allowlist is sufficient: only root can submit jobs via ``crontab(1)``, and ``/etc/cron.d/`` already requires root to write.
 
 Why ``KillUserProcesses=yes``
 -----------------------------
@@ -71,7 +71,7 @@ Why allow-listing ``at`` and ``cron``
 
 We mask ``atd`` rather than only relying on ``at.allow`` because some distros ship ``atd`` enabled by default, and a mis-edited ``at.allow`` would silently re-open the channel.
 
-   **Note on ``cron.allow``:** if the file already exists and does **not** list ``root`` on a line by itself, ``cron`` will refuse to dispatch root-owned jobs — including the Mode E KRL refresh job at ``/etc/cron.d/open-bastion-krl``. ``ob-bastion-setup`` warns when it detects this and asks you to add ``root`` to ``/etc/cron.allow``.
+   **Note on ``cron.allow``:** an existing ``/etc/cron.allow`` is never overwritten. Up to 0.6 the setup warned when it did not list ``root``, because the Mode E KRL refresh ran from ``/etc/cron.d/open-bastion-krl``; that refresh is now ``ob-krl-refresh.timer``, which cron's allow-list does not concern, so the warning is gone. List ``root`` only if you have root jobs of your own that need it.
 
 Why a ``nproc`` cap
 -------------------

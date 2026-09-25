@@ -316,16 +316,21 @@ This is deliberately **not** the default: with ``timestamp_timeout=0`` every ``s
 Mandatory KRL
 ~~~~~~~~~~~~~
 
-With long-lived certificates (1 year), the KRL is **mandatory**:
+With long-lived certificates (1 year), the KRL is **mandatory**. ``ob-bastion-setup --max-security`` downloads it once, then enables ``ob-krl-refresh.timer``, which runs ``ob-krl-refresh(8)`` every 30 minutes. The program reads the portal URL from ``openbastion.conf``, refuses anything that is not a KRL that parses (sshd would read a broken list as revoking every key), and replaces ``/etc/ssh/revoked_keys`` by an atomic rename:
 
 .. code:: bash
 
-   # Initial KRL download
-   curl -o /etc/ssh/revoked_keys https://auth.example.com/ssh/revoked
+   # Refresh now, and see when it last ran and runs next
+   sudo ob-krl-refresh
+   systemctl list-timers ob-krl-refresh.timer
+   journalctl -u ob-krl-refresh.service
 
-   # Automatic refresh (cron)
-   # /etc/cron.d/open-bastion-krl
-   */30 * * * * root curl -sf -o /etc/ssh/revoked_keys.tmp https://auth.example.com/ssh/revoked && mv /etc/ssh/revoked_keys.tmp /etc/ssh/revoked_keys
+   # Another interval: at setup time...
+   sudo ob-bastion-setup ... --max-security --krl-refresh-interval 10
+   # ...or by hand
+   sudo systemctl edit ob-krl-refresh.timer     # [Timer] OnCalendar= / OnCalendar=*:0/10
+
+Up to 0.6 the refresh was a cron job (``/etc/cron.d/open-bastion-krl``) running a generated ``/usr/local/bin/open-bastion-refresh-krl``. ``ob-post-upgrade`` replaces it with the timer and keeps its interval; see ``UPGRADE-NOTES.md``.
 
 .. _pam-modes-ssh-fingerprint-binding-on-pamauthorize-and-pamverify:
 

@@ -121,6 +121,10 @@ run_stanza() {
     local pre
     pre=$( cd "$ROOT_DIR" && $as bash "$suite" 2>&1 ) || {
         fail "$id" "$suite already fails before the mutation; nothing can be concluded"
+        # Say why. Without it a red baseline in CI is a dead end: the main loop
+        # stops at this suite, before it reaches the one that failed, and that
+        # one's output is printed nowhere.
+        grep -E 'FAIL|rror' <<<"$pre" | head -20 | sed 's/^/        | /'
         return
     }
     # And it must actually RUN. A suite that skips exits 0 before and after, so

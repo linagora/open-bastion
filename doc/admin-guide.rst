@@ -792,7 +792,7 @@ It performs all of the following automatically:
 - Writes ``/etc/pam.d/sshd`` and ``/etc/pam.d/sudo`` for Mode E
 - Configures NSS: adds ``openbastion`` to ``passwd`` and ``group`` in ``/etc/nsswitch.conf``
 - Runs ``ob-enroll`` to obtain ``/var/lib/open-bastion/token``
-- Downloads the initial KRL to ``/etc/ssh/revoked_keys``
+- Downloads the initial KRL to ``/etc/ssh/revoked_keys`` with ``ob-krl-refresh``, and enables ``ob-krl-refresh.timer`` to refresh it every 30 minutes (``--krl-refresh-interval`` to change it)
 - Creates ``/etc/sudoers.d/open-bastion`` for sudo authorization
 
 Step 4: Verify

@@ -38,6 +38,12 @@ override_dh_installsystemd:
 	# ConditionPathExists gate, unlike ob-heartbeat.timer, so it actually arms).
 	# It bounds recording disk usage and no-ops on hosts without recordings.
 	dh_installsystemd -popen-bastion --name=ob-session-prune ob-session-prune.timer
+	# Mode E KRL refresh and auditd rotation (#281). Not enabled/started at
+	# install: ob-bastion-setup enables the first under --max-security and the
+	# second under --enable-audit-trace; ob-post-upgrade moves a 0.6 host off
+	# the cron jobs they replace.
+	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-krl-refresh ob-krl-refresh.timer
+	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-audit-rotate ob-audit-rotate.timer
 	# Cert minting socket. The unit FILES all come from systemd/ via
 	# debian/open-bastion.install (#254); dh_installsystemd finds them already
 	# staged in the package tree and only generates the enable/cleanup
