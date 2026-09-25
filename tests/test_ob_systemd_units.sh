@@ -225,6 +225,12 @@ test_units_verify() {
     fi
     local work bad="" u out n
     work=$(mktemp -d)
+    # verify also loads what our units pull in (network-online.target and its
+    # dependencies) from the host, and prints whatever it thinks of those. On a
+    # CI runner VM, full of units that are not ours, that was enough to fail
+    # this check with nothing wrong in systemd/. Only lines about our units,
+    # our copies, or the markers below count.
+    _ours() { grep -E "ob-|$work|^rc\$|^write:" || true; }
     for u in "$ROOT_DIR"/systemd/*.timer "$ROOT_DIR"/systemd/ob-heartbeat.service \
              "$ROOT_DIR"/systemd/ob-session-prune.service \
              "$ROOT_DIR"/systemd/ob-krl-refresh.service \
@@ -233,6 +239,7 @@ test_units_verify() {
     done
     out=$(cd "$work" && systemd-analyze verify --man=no ./*.timer ./*.service 2>&1) \
         || bad="$bad rc"
+    out=$(_ours <<<"$out")
     [ -z "$out" ] || bad="$bad $(tr '\n' ' ' <<<"$out")"
 
     # Every interval --krl-refresh-interval accepts, through the drop-in the
@@ -246,6 +253,7 @@ test_units_verify() {
             cd "$work" && SYSTEMD_UNIT_PATH="$work:" \
                 systemd-analyze verify --man=no "$work/ob-krl-refresh.timer" 2>&1 || echo "rc"
         )
+        out=$(_ours <<<"$out")
         # shellcheck disable=SC2031  # n is only read in the subshell
         [ -z "$out" ] || bad="$bad interval-$n:$(tr '\n' ' ' <<<"$out")"
     done
