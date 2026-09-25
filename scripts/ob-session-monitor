@@ -9,12 +9,8 @@
 
 set -euo pipefail
 
-# Configuration defaults
 CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
 
-# Request signing for the /pam/ call below (#247). The HMAC is computed by
-# ob-sign-request so the signing secret never reaches a command line; the
-# rationale and the interface are in scripts/ob-sign-lib.sh.
 _OB_SIGN_LIB="${OB_SIGN_LIB:-/usr/lib/open-bastion/ob-sign-lib.sh}"
 if [ ! -r "$_OB_SIGN_LIB" ]; then
     _OB_SIGN_LIB="$(dirname "$(readlink -f "$0")")/ob-sign-lib.sh"
@@ -36,16 +32,12 @@ POLL_INTERVAL=60
 REVALIDATION_GRACE=14400    # 4 hours
 MAX_SSO_UNREACHABLE=3600    # 1 hour
 
-# State
 sso_unreachable_since=0
-# Separate from sso_unreachable_since on purpose (#257): check_portal() resets
-# that one every time the front end answers, so a working /desktop/login would
-# wipe the counter each cycle and a permanently broken /pam/userinfo would never
-# converge on any bound at all.
+# Separate from sso_unreachable_since: check_portal() resets that one whenever
+# the front end answers, so a broken /pam/userinfo would never hit the bound.
 userinfo_unusable_since=0
 userinfo_unusable=false
 
-# Verify required dependencies
 for cmd in curl jq loginctl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Error: required command '$cmd' not found" >&2
@@ -53,7 +45,6 @@ for cmd in curl jq loginctl; do
     fi
 done
 
-# Logging
 log_info() {
     logger -t ob-session-monitor -p auth.info "$@"
 }
@@ -70,7 +61,6 @@ log_debug() {
     logger -t ob-session-monitor -p auth.debug "$@"
 }
 
-# Read configuration from openbastion.conf
 read_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         log_warn "Configuration file not found: $CONFIG_FILE"
@@ -115,7 +105,6 @@ read_config() {
     fi
 }
 
-# Check if LLNG portal is reachable
 check_portal() {
     local url="${PORTAL_URL}/desktop/login?check=1"
     if curl -sf -o /dev/null -m 5 "$url" 2>/dev/null; then
@@ -124,7 +113,6 @@ check_portal() {
     return 1
 }
 
-# Check if general network is available (DNS resolution of portal hostname)
 check_network() {
     local hostname
     hostname=$(echo "$PORTAL_URL" | sed -E 's|https?://([^/:]+).*|\1|')
@@ -134,34 +122,15 @@ check_network() {
     if command -v host >/dev/null 2>&1 && host "$hostname" >/dev/null 2>&1; then
         return 0
     fi
-    # Fallback: try a simple network check
     if ping -c1 -W2 8.8.8.8 >/dev/null 2>&1; then
         return 0
     fi
     return 1
 }
 
-# Check if a user is still valid on LLNG
-# Ask the portal whether a user is still valid.
-#
-# THREE outcomes, not two (#257). "The portal says this user is gone" and "we
-# could not ask the portal" are different answers, and the caller terminates
-# live sessions on the first one:
-#
-#   0  valid    -- the portal answered, found: true
-#   1  revoked  -- the portal answered, and the answer is not "found"
-#   2  unknown  -- we could not ask, or could not understand the reply
-#
-# Until #257 every failure returned 1. `curl -sf` fails on a connection error, a
-# DNS or TLS failure, the timeout AND on any HTTP status >= 400, so a portal
-# returning 500, a rate limit, or an expired SERVER_TOKEN answering 401 all
-# terminated every offline session while logging "no longer valid on LLNG" --
-# a statement that was not true. The reachability probe in the main loop does
-# not cover this: it fetches /desktop/login, a different endpoint, so a healthy
-# front end says nothing about /pam/userinfo.
-#
-# `-f` is therefore gone: we need to tell an HTTP error apart from a transport
-# failure, and from a 200 that genuinely says the user is revoked.
+# Returns 0 valid, 1 revoked (the portal said so), 2 unknown (could not ask or
+# parse the reply); only 1 may terminate sessions. No curl -f: HTTP errors must
+# stay distinguishable from transport failures.
 check_user_valid() {
     local user="$1"
     local auth_header=""
@@ -172,10 +141,8 @@ check_user_valid() {
     local payload
     payload=$(jq -n --arg u "$user" '{user: $u}')
 
-    # Signed like every other /pam/ call (#247). #247 recorded /pam/userinfo as
-    # having no caller; this is the caller. Left unsigned, session monitoring
-    # would start reporting every user as gone the day the portal is switched
-    # to pamAccessRequestSigningMode=required -- and this loop prunes sessions.
+    # Unsigned, this would report every user gone once the portal sets
+    # pamAccessRequestSigningMode=required -- and this loop prunes sessions.
     # Read by ob-sign-lib.sh, which shellcheck cannot follow across the `.`.
     # shellcheck disable=SC2034
     OB_SIGN_CONFIG="$CONFIG_FILE"
@@ -204,10 +171,8 @@ check_user_valid() {
     case "$http_code" in
         200) ;;
         401|403)
-            # Our credentials, not the user's status. A SERVER_TOKEN that died
-            # overnight because the heartbeat timer was not armed is a bug this
-            # project has shipped before (#159); it must not read as "every user
-            # was revoked".
+            # Our credentials, not the user's status. An expired server token
+            # must not read as every user revoked.
             log_crit "portal refused our own credentials on /pam/userinfo (HTTP $http_code): check the server token and the heartbeat timer -- $user left alone"
             return 2 ;;
         *)
@@ -215,18 +180,11 @@ check_user_valid() {
             return 2 ;;
     esac
 
-    # NOT `.found // empty`: jq's alternative operator treats `false` as empty,
-    # so a genuine "found": false would come back indistinguishable from a
-    # missing field. That did not matter while every non-true answer meant the
-    # same thing; with three verdicts it would turn every revocation into
-    # "unknown" and the user would keep their session forever.
+    # Not `.found // empty`: `//` treats false as empty, which would turn every
+    # revocation into "unknown".
     local found
-    # `|| true` because the assignment's status is jq's: today's only caller is
-    # `check_user_valid "$user" || verdict=$?`, which suspends errexit for the
-    # whole function, so a jq failure falls through to the "unknown" branch
-    # below. A future caller that invokes this plainly would instead die here
-    # under `set -e`, at the one input the branch exists for -- and the test
-    # harness, which drops errexit to capture the return value, could not see it.
+    # `|| true`: a jq failure must reach the "unknown" branch even for a caller
+    # that does not suspend errexit.
     found=$(echo "$body" | jq -r 'if has("found") then (.found|tostring) else "missing" end' 2>/dev/null) || true
     case "$found" in
         true)  return 0 ;;
@@ -238,7 +196,6 @@ check_user_valid() {
     esac
 }
 
-# Get age of offline credential cache for a user
 get_cache_age() {
     local user="$1"
     local marker_file="$MARKER_DIR/$user"
@@ -255,7 +212,6 @@ get_cache_age() {
     echo 0
 }
 
-# Revalidate all offline sessions
 revalidate_sessions() {
     userinfo_unusable=false
     if [ ! -d "$MARKER_DIR" ]; then
@@ -277,7 +233,6 @@ revalidate_sessions() {
         local user_file
         user_file=$(basename "$marker_path")
 
-        # Sanitize: skip files with dots or slashes
         case "$user_file" in
             *.* ) continue ;;
         esac
@@ -285,7 +240,6 @@ revalidate_sessions() {
         local user="$user_file"
         log_debug "Checking offline session for user: $user"
 
-        # Check if user still has an active session
         local has_session=false
         while IFS= read -r line; do
             local session_user
@@ -297,33 +251,26 @@ revalidate_sessions() {
         done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}')
 
         if [ "$has_session" = "false" ]; then
-            # No active session - clean up marker
             log_debug "No active session for $user, removing marker"
             rm -f "$MARKER_DIR/$user"
             continue
         fi
 
-        # Check if user is still valid on LLNG. Three outcomes (#257): the
-        # `unknown` one must not terminate anything.
         local verdict=0
         check_user_valid "$user" || verdict=$?
         if [ "$verdict" -eq 2 ]; then
-            # We could not ask. Leave the session alone, but remember it: a
-            # /pam/userinfo that stays unusable is still a reason to stop
-            # trusting offline sessions eventually -- see the counter below,
-            # which mirrors Part D's bound rather than tolerating it forever.
+            # Leave the session alone, but only for a bounded time (see
+            # handle_userinfo_unusable).
             userinfo_unusable=true
             continue
         fi
         if [ "$verdict" -eq 0 ]; then
             log_debug "User $user is valid on LLNG"
 
-            # Check cache age
             local cache_age
             cache_age=$(get_cache_age "$user")
             if [ "$cache_age" -gt "$REVALIDATION_GRACE" ]; then
                 log_info "User $user: offline cache age ($cache_age seconds) exceeds grace period ($REVALIDATION_GRACE seconds), forcing online re-auth"
-                # Write user to force_online file with locking and deduplication
                 {
                     flock -x 200
                     if ! grep -qxF "$user" "$FORCE_ONLINE_FILE" 2>/dev/null; then
@@ -332,7 +279,6 @@ revalidate_sessions() {
                 } 200>"$FORCE_ONLINE_LOCK"
             fi
         else
-            # User no longer valid - terminate session
             log_crit "User $user no longer valid on LLNG, terminating session"
 
             while IFS= read -r line; do
@@ -346,20 +292,13 @@ revalidate_sessions() {
                 fi
             done < <(loginctl list-sessions --no-legend 2>/dev/null)
 
-            # Clean up marker
             rm -f "$MARKER_DIR/$user"
         fi
     done
 }
 
-# /pam/userinfo unusable while the portal front end answers (#257).
-#
-# Mirrors Part D's bound rather than inventing a new one: leaving a session
-# alive forever because the endpoint that would revoke it is broken is the same
-# hole Part D exists to close, just reached by a different route. The message is
-# deliberately different from Part D's, because the operator has to look in a
-# different place -- the portal is up, it is the pam-access route or our own
-# credentials that are not.
+# Same bound as handle_sso_unreachable: a broken revocation endpoint must not
+# keep offline sessions alive forever.
 handle_userinfo_unusable() {
     local now
     now=$(date +%s)
@@ -406,7 +345,7 @@ handle_userinfo_unusable() {
     done
 }
 
-# Part D: Handle network up but SSO unreachable (anti-firewall-bypass)
+# Network up but SSO unreachable may be a firewall bypass: bound it.
 handle_sso_unreachable() {
     local now
     now=$(date +%s)
@@ -451,11 +390,9 @@ handle_sso_unreachable() {
     fi
 }
 
-# Main loop
 main() {
     log_info "Starting ob-session-monitor"
 
-    # Read configuration
     read_config
 
     if [ -z "${PORTAL_URL:-}" ]; then
@@ -463,7 +400,6 @@ main() {
         exit 1
     fi
 
-    # Validate portal URL format
     case "$PORTAL_URL" in
         https://*|http://*)
             ;;
@@ -477,12 +413,10 @@ main() {
     log_info "Revalidation grace period: ${REVALIDATION_GRACE}s"
     log_info "Max SSO unreachable: ${MAX_SSO_UNREACHABLE}s"
 
-    # Create marker directory if it doesn't exist
     mkdir -p "$MARKER_DIR"
     chmod 700 "$MARKER_DIR"
 
     while true; do
-        # Check network and SSO separately
         network_up=false
         sso_up=false
 
@@ -492,7 +426,6 @@ main() {
 
         if check_portal; then
             sso_up=true
-            # Reset SSO unreachable counter
             if [ "$sso_unreachable_since" -gt 0 ]; then
                 log_info "SSO portal is reachable again"
                 sso_unreachable_since=0
@@ -500,7 +433,6 @@ main() {
         fi
 
         if [ "$network_up" = "true" ] && [ "$sso_up" = "true" ]; then
-            # Network and SSO both up: revalidate offline sessions
             revalidate_sessions
             if [ "$userinfo_unusable" = "true" ]; then
                 handle_userinfo_unusable
@@ -509,10 +441,8 @@ main() {
                 userinfo_unusable_since=0
             fi
         elif [ "$network_up" = "true" ] && [ "$sso_up" = "false" ]; then
-            # Network up but SSO down: potential firewall bypass (Part D)
             handle_sso_unreachable
         else
-            # Network down: normal offline mode, do nothing
             log_debug "Network unavailable, skipping revalidation"
             sso_unreachable_since=0
         fi

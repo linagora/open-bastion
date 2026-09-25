@@ -1,17 +1,15 @@
 # ob-ssh configuration
 #
-# This file is sourced by ob-ssh when the bastion connects to backends.
+# Read (never sourced) by ob-ssh, ob-scp and ob-sftp on the bastion.
 # Copy this file to /etc/open-bastion/ssh-proxy.conf and adjust the values.
 
 # LemonLDAP::NG portal URL (required)
 PORTAL_URL="https://auth.example.com"
 
-# Server token file (from ob-enroll)
-# The bastion must be enrolled with LLNG to get a token
+# Server token file (from ob-enroll), read by ob-cert-daemon.
 SERVER_TOKEN_FILE="/var/lib/open-bastion/token"
 
-# Server group for this bastion
-# This should match the group configured in LLNG
+# Ignored: the portal derives the bastion's group from its server token.
 SERVER_GROUP="bastion"
 
 # Target server group for backends

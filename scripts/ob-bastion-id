@@ -2,21 +2,8 @@
 #
 # ob-bastion-id - Print this bastion's identifier (as seen by backends)
 #
-# After a bastion has been enrolled (ob-enroll + ob-bastion-setup) it can ask
-# LLNG for its own identity (POST /pam/whoami). The returned 'bastion_id' is a
-# synthetic per-device identity assigned by the portal at enrolment -- NOT the
-# OIDC client_id, which identifies a project. It is the value backends list in
-# /etc/open-bastion/allowed_bastions, and that ob-ssh-principals checks against
-# the certificate key-id before PAM runs.
-#
-# This utility asks the portal and prints the bastion_id (or the whole response
-# with --verbose). Useful when configuring a new backend that must restrict
-# which bastions can reach it.
-#
-# Portals older than lemonldap-ng-plugins#94 have no /pam/whoami; against those
-# it falls back to the legacy 'POST /pam/bastion-token {"probe":true}', which
-# upstream removed in #86. The fallback exists so a mixed fleet keeps working
-# during the upgrade, and can go once every portal has moved.
+# Asks the portal (POST /pam/whoami, or the legacy /pam/bastion-token probe on
+# portals that lack it) for the bastion_id backends list in allowed_bastions.
 #
 # Usage:
 #   ob-bastion-id                    # prints bastion_id on stdout
@@ -41,18 +28,14 @@ VERBOSE=false
 JSON_OUT=false
 QUIET=false
 
-# Set by main() once the token file has been read, consumed by pam_post().
 SERVER_TOKEN=""
 CURL_OPTS=()
-# Filled by every pam_post() call.
 HTTP_STATUS=""
 BODY=""
 
 log_info()  { [ "$QUIET" = "true" ] || printf '[INFO] %s\n' "$*" >&2; }
 log_error() { printf '[ERROR] %s\n' "$*" >&2; }
-# $1 is the message, $2 the optional exit code. Only $1 is printed: `$*`
-# joined the code onto the message, so every call that passed one ended
-# its error with a stray digit ("... probe: <html>... 2").
+# die MESSAGE [EXIT_CODE]
 die() { log_error "$1"; exit "${2:-1}"; }
 
 usage() {
@@ -92,7 +75,6 @@ EOF
     exit 0
 }
 
-# Read a key=value from openbastion.conf (mirrors ob-enroll's read_config).
 read_config() {
     local key="$1" file="$2"
     [ -f "$file" ] || return 0
@@ -105,18 +87,10 @@ read_config() {
         || true
 }
 
-# Decode base64url to raw bytes (stdout). Pure bash + base64.
-# base64url uses '-' and '_' where standard base64 uses '+' and '/'.
 base64url_decode() {
     local s="$1"
-    # Strip whitespace (CR/LF/tab/space) that may have been introduced
-    # by sloppy HTTP intermediaries — base64 -d tolerates internal
-    # newlines, but our padding calculation below uses ${#s} which would
-    # otherwise be wrong.
+    # Whitespace would skew the ${#s}-based padding computation.
     s="${s//[$' \t\r\n']/}"
-    # Translate the base64url alphabet to standard base64 in one pass.
-    # (Previous form `${s//_//}` was correct but easily misread as
-    #  "delete _" by reviewers and static-analysis tools.)
     s=$(printf '%s' "$s" | tr '\-_' '+/')
     local pad=$(( (4 - ${#s} % 4) % 4 ))
     case "$pad" in
@@ -127,9 +101,6 @@ base64url_decode() {
     printf '%s' "$s" | base64 -d 2>/dev/null
 }
 
-# Request signing for the /pam/ calls below (#247). The HMAC is computed by
-# ob-sign-request so the signing secret never reaches a command line; the
-# rationale and the interface are in scripts/ob-sign-lib.sh.
 _OB_SIGN_LIB="${OB_SIGN_LIB:-/usr/lib/open-bastion/ob-sign-lib.sh}"
 if [ ! -r "$_OB_SIGN_LIB" ]; then
     _OB_SIGN_LIB="$(dirname "$(readlink -f "$0")")/ob-sign-lib.sh"
@@ -145,15 +116,8 @@ else
         OB_SIGN_NOTE="ob-sign-lib.sh not found; sending $2 unsigned"; return 0; }
 fi
 
-# POST a JSON body to a /pam/* endpoint. Sets HTTP_STATUS and BODY; returns
-# non-zero only when the request never got an answer at all (DNS, TLS, timeout).
-#
-# Deliberately no `-f`: this call used to carry one, which made curl exit
-# non-zero on any 4xx *and discard the body*, so the status could not be
-# inspected and every portal-side refusal collapsed into the same opaque
-# "Request failed". Telling 404 (portal upgraded, endpoint gone) from 403
-# (endpoint present, caller refused) is exactly what the fallback below turns
-# on, so the status has to survive.
+# Sets HTTP_STATUS and BODY. No curl -f: the fallback in main() must tell
+# 404 (endpoint absent) from 403 (refused), and -f fails on both alike.
 pam_post() {
     local path="$1" payload="$2" response
     # Read by ob-sign-lib.sh, which shellcheck cannot follow across the `.`.
@@ -182,15 +146,10 @@ pam_post() {
     return 0
 }
 
-# Print the identity carried by a JSON document, then exit 0. Returns non-zero
-# (without exiting) when the document has no identity to print, so the caller
-# decides what that means. --verbose dumps the whole document instead, which is
-# why this is not a jq one-liner at each call site: the endpoints answer three
-# different shapes and each is worth showing as-is.
+# Print the identity and exit 0; return non-zero if the document has none.
 emit_id() {
     local body="$1" filter="$2" id
-    # Identity first, then --verbose: a body with no id in it is not an answer,
-    # and dumping it would present the portal's HTML login page as one.
+    # Check the id before --verbose, or the portal's HTML page would be dumped.
     id=$(printf '%s' "$body" | jq -r "$filter" 2>/dev/null) || return 1
     [ -n "$id" ] || return 1
     if [ "$VERBOSE" = "true" ]; then
@@ -234,9 +193,6 @@ main() {
     verify_ssl_raw=$(read_config "verify_ssl" "$CONFIG_FILE")
     case "$verify_ssl_raw" in false|no|0) VERIFY_SSL=false ;; esac
 
-    # Honour `server_token_file = ...` in the conf, falling back to the
-    # canonical /var/lib/open-bastion/token when unset. Mirrors the PAM module
-    # so ob-bastion-id reads the same file PAM does, without manual --token.
     if [ "$TOKEN_FILE" = "/var/lib/open-bastion/token" ]; then
         local conf_token_file
         conf_token_file=$(read_config "server_token_file" "$CONFIG_FILE")
@@ -247,13 +203,11 @@ main() {
     [ -n "$PORTAL_URL" ]   || die "portal_url missing from $CONFIG_FILE"
     [ -n "$SERVER_GROUP" ] || die "server_group missing from $CONFIG_FILE"
 
-    # Accept both formats the PAM module's token_manager_load_file accepts:
-    #  1. Plain text bearer token (canonical, written by ob-enroll)
-    #  2. JSON with .access_token (docker-demo entrypoints, refresh-token aware)
+    # Same formats as the PAM module: plain token, or JSON with .access_token.
     local server_token
     if server_token=$(jq -er '.access_token' "$TOKEN_FILE" 2>/dev/null) \
        && [ -n "$server_token" ] && [ "$server_token" != "null" ]; then
-        :  # JSON form, server_token is the .access_token value
+        :
     else
         server_token=$(tr -d '\r\n' < "$TOKEN_FILE")
     fi
@@ -264,54 +218,26 @@ main() {
     CURL_OPTS=( -sS --max-time "$TIMEOUT" -L )
     [ "$VERIFY_SSL" = "true" ] || CURL_OPTS+=( --insecure )
 
-    # 1. POST /pam/whoami -- what answers this question on a current portal.
-    #
-    # It is a pure read: no JWT signed, no session written, no heartbeat stamp
-    # (running ob-bastion-id must not make a bastion look freshly seen). The
-    # response carries `server_id`, the canonical name, and `bastion_id`, the
-    # name the old probe used, kept as an alias.
     log_info "Asking $PORTAL_URL/pam/whoami"
     pam_post /pam/whoami '{}' || exit 2
 
     if [ "$HTTP_STATUS" = "200" ]; then
-        # A portal that implements /pam/whoami always answers JSON carrying the
-        # id, so a 200 without one means the endpoint is not there and
-        # something else claimed the URL. That is the normal shape of its
-        # absence, not an edge case: LemonLDAP::NG's catch-all serves the
-        # portal's own HTML login page, with a 200, for any /pam/* path no
-        # plugin has registered. Absence is what the fallback is for.
+        # A 200 without an id is LLNG's catch-all login page: the endpoint is
+        # absent, so fall through to the legacy probe.
         emit_id "$BODY" '.bastion_id // .server_id // empty' || true
         log_info "/pam/whoami answered 200 with no identity in it —" \
                  "this portal does not implement it"
     elif [ "$HTTP_STATUS" != "404" ]; then
-        # A real refusal (403 from the caller gate, 5xx, ...) must not be
-        # papered over by trying an endpoint that would answer the same way and
-        # report the wrong URL in the error.
+        # A real refusal: the fallback would fail too and name the wrong URL.
         log_error "LLNG returned HTTP $HTTP_STATUS on /pam/whoami: $BODY"
         exit 2
     fi
 
-    # 2. Legacy fallback: POST /pam/bastion-token with probe:true.
-    #
-    # Removed upstream (lemonldap-ng-plugins#86) because it signed a JWT even
-    # when the user lookup had failed, and /pam/whoami replaces the one part of
-    # it worth keeping. Kept here only so this script still works against a
-    # portal that has not been upgraded yet -- delete it once the fleet has.
+    # Legacy fallback for portals without /pam/whoami; delete once none remain.
     log_info "Portal has no /pam/whoami; falling back to the legacy" \
              "/pam/bastion-token probe (group=$SERVER_GROUP)"
 
-    # user/target_host are harmless placeholders: probe mode returns the id
-    # directly and skips the per-user _pamSeen recency gate that would
-    # otherwise reject a synthetic probe user.
-    #
-    # The JWT path below is a legacy of the original script, not a live
-    # population. Upstream only ever minted a JWT for this call up to plugin
-    # v0.1.16; v0.1.17 added the _pamSeen gate, so those versions answer a
-    # synthetic probe user 403 rather than a JWT; probe mode landed before
-    # v0.3.2 and has returned the id as JSON ever since. Keep it -- it costs
-    # nothing and a very old portal is exactly the case this fallback exists
-    # for -- but do not extend it, and do not delete it believing it covers
-    # anything current.
+    # user/target_host are placeholders: probe mode skips the per-user checks.
     local payload
     payload=$(jq -n \
         --arg user "ob-bastion-id-probe" \
@@ -326,31 +252,19 @@ main() {
         exit 2
     fi
 
-    # Probe mode returns bastion_id directly; prefer it when present.
     if printf '%s' "$BODY" | jq -e '.bastion_id // empty' >/dev/null 2>&1; then
         emit_id "$BODY" '.bastion_id // empty' \
             || die "No bastion_id in probe response: $BODY" 3
     fi
 
     local jwt
-    # `|| jwt=""` is load-bearing: under `set -e` with `pipefail`, jq exiting
-    # non-zero on a body that is not JSON (the portal's HTML page, exactly the
-    # case below) kills the script before it can say anything useful.
+    # `|| jwt=""`: under set -e + pipefail, jq failing on HTML would kill us.
     jwt=$(printf '%s' "$BODY" | jq -r '.bastion_jwt // empty' 2>/dev/null) || jwt=""
-    # Neither endpoint answered with an identity. Most often both are simply
-    # absent and the catch-all served the portal page twice, which is what a
-    # deployment missing the pam-access plugin looks like from here.
-    # Exit 3, not 2: both endpoints answered 200, they just carried no
-    # identity. 2 is for a request that failed or was refused.
     [ -n "$jwt" ] || die "this portal implements neither /pam/whoami nor the legacy /pam/bastion-token probe: $BODY" 3
 
-    # JWT is header.payload.signature -- decode the middle segment.
     local b64payload claims
     b64payload="${jwt#*.}"; b64payload="${b64payload%.*}"
-    # `|| claims=""` for the same reason as `jwt=""` above: base64url_decode
-    # ends in a pipe, so under `set -e` with `pipefail` a payload base64 cannot
-    # read kills the script at the assignment and the die below never runs --
-    # the caller got rc=1 and no message at all.
+    # `|| claims=""`: same set -e + pipefail trap as above.
     claims=$(base64url_decode "$b64payload") || claims=""
     [ -n "$claims" ] || die "Failed to base64url-decode JWT payload" 3
 

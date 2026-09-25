@@ -9,10 +9,8 @@
 # Each user gets a subdirectory: /var/lib/open-bastion/sessions/<username>/
 sessions_dir = /var/lib/open-bastion/sessions
 
-# Recording format:
-#   script    - Plain text typescript (default, always available)
-#   asciinema - JSON format, web-friendly (requires asciinema package)
-#   ttyrec    - Binary format, compact (requires ttyrec package)
+# Recording format. Only `script` (plain typescript) is currently supported;
+# other values fall back to it.
 format = script
 
 # Maximum session duration in seconds (default: 86400 = 24 hours)
@@ -22,16 +20,12 @@ format = script
 # Set to 0 to disable timeout
 max_duration = 86400
 
-# Retention of recordings, applied daily by ob-session-prune.timer.
-# Recording is fail-closed: a full disk refuses new logins, so recordings are
-# compressed and eventually expired to bound disk usage.
+# Retention, applied daily by ob-session-prune.timer (see doc/session-recording.rst).
 #
-# Compress closed recordings (typescripts compress ~10-20x) older than this many
-# days. The paired .json metadata is left uncompressed. Set to 0 to disable.
+# Compress closed recordings older than this many days (0 = never).
 recording_compress_after_days = 1
 #
-# Delete recordings (payload + .json) older than this many days. Expiry drops
-# audit evidence and is logged at notice level. Set to 0 to keep forever.
+# Delete recordings older than this many days (0 = keep forever).
 recording_retention_days = 365
 
 #
@@ -46,9 +40,4 @@ recording_retention_days = 365
 #
 #   Match User *,!admin,!root
 #       ForceCommand /usr/sbin/ob-session-recorder
-#
-# To record sessions with a specific format:
-#
-#   Match Group audited
-#       ForceCommand /usr/sbin/ob-session-recorder -f ttyrec
 #

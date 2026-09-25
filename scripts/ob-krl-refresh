@@ -2,31 +2,9 @@
 #
 # ob-krl-refresh - download the SSH key revocation list from the portal
 #
-# Run by ob-krl-refresh.timer on Mode E hosts (ob-bastion-setup --max-security),
-# every 30 minutes by default. sshd reads the file named by RevokedKeys on every
-# authentication, so this is what makes a certificate revoked in LemonLDAP::NG
-# stop working on this host.
-#
-# It replaces the refresh script ob-bastion-setup used to generate into
-# /usr/local/bin/open-bastion-refresh-krl, run from /etc/cron.d/open-bastion-krl
-# (#281). That script had the portal URL, the TLS setting and the timeout baked
-# in when the setup ran, so a change to openbastion.conf never reached it. This
-# program reads them from openbastion.conf at every run, like ob-heartbeat.
-#
-# What sshd is given matters more than whether the download worked. sshd treats
-# a RevokedKeys file it cannot parse as "every key is revoked", so a truncated
-# download or a portal error page written in place would lock every key-based
-# login out of the host. Hence:
-#
-#   - the download goes to a temporary file next to the target, never to the
-#     target itself;
-#   - it must carry the KRL magic and format version, and parse with
-#     ssh-keygen(1) when that is available;
-#   - only then is it renamed over the target, which is atomic: sshd reads the
-#     old list or the new one, never half of either.
-#
-# Anything else leaves the current list in place and exits non-zero, so the unit
-# shows as failed instead of the old cron job's silence.
+# sshd reads a RevokedKeys file it cannot parse as "every key is revoked", so
+# a list is installed only once it has the KRL header and parses, by an atomic
+# rename. Anything else keeps the current list and exits non-zero.
 #
 # Copyright (C) 2026 Linagora
 # License: AGPL-3.0
@@ -38,21 +16,15 @@ PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 OUTPUT="/etc/ssh/revoked_keys"
-# A KRL is compact (a few bytes per revoked serial or key hash); 16 MiB is
-# orders of magnitude above any real list and bounds what a misbehaving portal
-# can make this host write into /etc/ssh.
+# Far above any real KRL; bounds what a portal can write into /etc/ssh.
 MAX_SIZE=$((16 * 1024 * 1024))
 
-# First 12 bytes of every KRL OpenSSH accepts: the "SSHKRL\n\0" magic, then
-# format version 1 as a big-endian uint32 (PROTOCOL.krl).
+# "SSHKRL\n\0" then format version 1 as a big-endian uint32 (PROTOCOL.krl).
 KRL_HEADER_HEX="5353484b524c0a0000000001"
 
-# Public half of a throwaway ed25519 key, used only to make ssh-keygen parse the
-# whole list (-Q needs a key to test against). Its private half was discarded
-# when it was generated; whether the list revokes it is irrelevant.
+# A throwaway public key: ssh-keygen -Q needs one to test the list against.
 PROBE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIxgURjbVDXbfvWlXT6wQ/gqTxGgDNCd2pxbXwFX3lgT ob-krl-refresh-probe"
 
-# stderr goes to the journal under the unit's name; nothing else is needed.
 log()  { echo "$PROG_NAME: $*" >&2; }
 die()  { local rc="$1"; shift; log "$*"; exit "$rc"; }
 
@@ -92,8 +64,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Same parser as ob-heartbeat: last occurrence wins, inline comments are
-# dropped outside quotes, one pair of matching surrounding quotes is removed.
+# Same parser as ob-heartbeat.
 read_config() {
     awk -v key="$1" '
         $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
@@ -120,10 +91,8 @@ read_config() {
     ' "$CONFIG_FILE"
 }
 
-# ── Configuration ────────────────────────────────────────────────────────────
-# The URL read here decides what this root process writes into a file sshd
-# trusts, so the file it comes from must be as trustworthy as the process: owned
-# by the user running us (root, from the unit) and writable by nobody else.
+# The URL decides what root writes into a file sshd trusts: the configuration
+# must be ours and writable by nobody else.
 [ -f "$CONFIG_FILE" ] || die 1 "configuration file not found: $CONFIG_FILE"
 [ -r "$CONFIG_FILE" ] || die 1 "configuration file not readable: $CONFIG_FILE"
 conf_stat=$(stat -Lc '%u %a' "$CONFIG_FILE") || die 1 "cannot stat $CONFIG_FILE"
@@ -140,8 +109,7 @@ PORTAL_URL=$(read_config portal_url)
 [ -n "$PORTAL_URL" ] || PORTAL_URL=$(read_config portal)
 [ -n "$PORTAL_URL" ] || die 1 "portal_url is not set in $CONFIG_FILE"
 PORTAL_URL="${PORTAL_URL%/}"
-# The shape ob-bastion-setup and ob-builder accept, for the same reason: this
-# value names what gets written into /etc/ssh.
+# Same shape as ob-bastion-setup and ob-builder accept.
 if ! [[ "$PORTAL_URL" =~ ^https?://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]; then
     die 1 "invalid portal_url in $CONFIG_FILE: $PORTAL_URL"
 fi
@@ -163,10 +131,7 @@ if [ -n "$CA_CERT" ]; then
     CURL_OPTS+=(--cacert "$CA_CERT")
 fi
 
-# ── Download next to the target ──────────────────────────────────────────────
-# Same directory, so the final mv is a rename(2) and therefore atomic. A file
-# in /tmp would make it a copy across filesystems, which is exactly the
-# half-written list this program exists to never show sshd.
+# Same directory as the target, so the final mv is an atomic rename(2).
 out_dir=$(dirname "$OUTPUT")
 [ -d "$out_dir" ] || die 4 "directory $out_dir does not exist"
 tmp=$(mktemp "$out_dir/.$(basename "$OUTPUT").XXXXXX") \
@@ -178,15 +143,13 @@ if ! curl "${CURL_OPTS[@]}" -o "$tmp" "$PORTAL_URL/ssh/revoked"; then
     die 2 "download of $PORTAL_URL/ssh/revoked failed; $OUTPUT left unchanged"
 fi
 
-# ── Validate ─────────────────────────────────────────────────────────────────
 header=$(od -An -tx1 -N12 "$tmp" | tr -d ' \n')
 if [ "$header" != "$KRL_HEADER_HEX" ]; then
     die 3 "$PORTAL_URL/ssh/revoked did not return an SSH KRL (bad magic); $OUTPUT left unchanged"
 fi
 
-# A good header on a truncated body is still a list sshd refuses. ssh-keygen -Q
-# parses all of it: 0 = key not revoked, 1 = revoked, anything else = the list
-# is unreadable.
+# A truncated body behind a good header: ssh-keygen -Q exits 0 or 1 (not
+# revoked, revoked) only if the whole list parses.
 if command -v ssh-keygen >/dev/null 2>&1; then
     probe=$(mktemp) || die 4 "cannot create a temporary file"
     printf '%s\n' "$PROBE_KEY" > "$probe"
@@ -197,10 +160,8 @@ if command -v ssh-keygen >/dev/null 2>&1; then
     fi
 fi
 
-# ── Install ──────────────────────────────────────────────────────────────────
-# An identical list is not rewritten, but its date is brought forward: the
-# file's age then says when the list was last confirmed, so "revoked_keys is
-# more than an hour old" keeps meaning "the refresh is not working".
+# The date of an identical list is still updated, so the file's age tells
+# when the refresh last worked.
 if [ -f "$OUTPUT" ] && cmp -s "$tmp" "$OUTPUT"; then
     touch -c "$OUTPUT" || die 4 "cannot update the date of $OUTPUT"
     exit 0

@@ -1,7 +1,4 @@
-# Open Bastion SSH fingerprint spool — recreated at boot so the directory
-# survives /run wipes. See /usr/local/sbin/ob-ssh-principals and ob-fp-daemon.
-# 0711 on the parent: traversable by the principals helper (nobody) so it can
-# reach ssh-fp.sock, but not listable. The drop directory itself is 0700 ROOT
-# since #249: ob-fp-daemon writes it, nothing unprivileged reads it.
+# Open Bastion SSH fingerprint spool, recreated at boot since /run is wiped.
+# 0711 parent: the principals helper (nobody) reaches ssh-fp.sock but cannot list it.
 d /run/open-bastion          0711 root root -
 d /run/open-bastion/ssh-fp   0700 root root -

@@ -2,9 +2,6 @@
 #
 # ob-cache-admin - Manage Open Bastion offline credential cache
 #
-# This script provides administrative commands for managing the
-# offline credential cache used for Desktop SSO.
-#
 # Usage: ob-cache-admin <command> [options]
 #
 # Copyright (C) 2025 Linagora
@@ -12,11 +9,9 @@
 
 set -e
 
-# Configuration
 CACHE_DIR="${OB_CACHE_DIR:-/var/cache/open-bastion/credentials}"
 CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -25,16 +20,13 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Magic header for cache files
 CACHE_MAGIC="OBCRED01"
 
-# Logging
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
-# Check root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This command must be run as root"
@@ -42,7 +34,6 @@ check_root() {
     fi
 }
 
-# Load cache directory from config
 load_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         local dir
@@ -53,7 +44,6 @@ load_config() {
     fi
 }
 
-# Print usage
 usage() {
     cat << 'EOF'
 Usage: ob-cache-admin <command> [arguments]
@@ -92,7 +82,6 @@ EOF
     exit 0
 }
 
-# Count cache files
 count_cache_files() {
     local count=0
     if [[ -d "$CACHE_DIR" ]]; then
@@ -101,7 +90,6 @@ count_cache_files() {
     echo "$count"
 }
 
-# Get cache file for a user (hashed filename)
 get_cache_file() {
     local user="$1"
     # Hash the username the same way the C code does
@@ -110,7 +98,6 @@ get_cache_file() {
     echo "$CACHE_DIR/$hash.cred"
 }
 
-# Check if cache file is valid (has magic header)
 is_valid_cache() {
     local file="$1"
     if [[ ! -f "$file" ]]; then
@@ -121,7 +108,6 @@ is_valid_cache() {
     [[ "$magic" == "$CACHE_MAGIC" ]]
 }
 
-# Stats command
 cmd_stats() {
     check_root
 
@@ -158,8 +144,7 @@ cmd_stats() {
 
         if is_valid_cache "$file"; then
             ((valid++)) || true
-            # Note: We can't easily check expiration without decryption
-            # The C library handles this; here we just count valid files
+            # Expiration needs decryption, which only the C library can do.
         fi
     done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null)
 
@@ -169,7 +154,6 @@ cmd_stats() {
     echo "Valid format:    $valid"
     echo ""
 
-    # Show disk usage
     if [[ $total -gt 0 ]]; then
         local size
         size=$(du -sh "$CACHE_DIR" 2>/dev/null | cut -f1)
@@ -177,7 +161,6 @@ cmd_stats() {
     fi
     echo ""
 
-    # Show oldest and newest files
     if [[ $total -gt 0 ]]; then
         local oldest newest
         oldest=$(ls -t "$CACHE_DIR"/*.cred 2>/dev/null | tail -1)
@@ -193,7 +176,6 @@ cmd_stats() {
     fi
 }
 
-# List command
 cmd_list() {
     check_root
 
@@ -229,7 +211,6 @@ cmd_list() {
     echo ""
 }
 
-# Show command
 cmd_show() {
     local user="$1"
 
@@ -272,19 +253,16 @@ cmd_show() {
     echo "Cache file: $cache_file"
     echo ""
 
-    # Show file metadata
     echo "File details:"
     stat "$cache_file" 2>/dev/null | grep -E "Size|Access:|Modify:" | sed 's/^/  /'
     echo ""
 
-    # Note about encrypted content
     echo "Note: Cache content is encrypted with AES-256-GCM."
     echo "To inspect actual entry details (expiration, lock status),"
     echo "the PAM module must be used."
     echo ""
 }
 
-# Invalidate command
 cmd_invalidate() {
     local user="$1"
 
@@ -303,7 +281,6 @@ cmd_invalidate() {
         return 0
     fi
 
-    # Securely remove the file
     if shred -u "$cache_file" 2>/dev/null || rm -f "$cache_file"; then
         log_success "Invalidated cached credentials for user: $user"
     else
@@ -312,7 +289,6 @@ cmd_invalidate() {
     fi
 }
 
-# Invalidate all command
 cmd_invalidate_all() {
     check_root
 
@@ -340,9 +316,7 @@ cmd_invalidate_all() {
     log_success "Invalidated $count cached credential entries"
 }
 
-# Unlock command (reset failed attempts)
-# Note: This requires decrypting and re-encrypting the cache file,
-# which is not possible from shell. We provide a stub that explains this.
+# Stub: the cache is encrypted, so unlocking needs the C library.
 cmd_unlock() {
     local user="$1"
 
@@ -361,8 +335,6 @@ cmd_unlock() {
         return 0
     fi
 
-    # The cache files are encrypted, so we can't modify them from shell.
-    # The best we can do is note when the lockout expires (typically 5 min).
     log_warn "Cannot unlock from shell (cache is encrypted)"
     echo ""
     echo "Options to unlock user '$user':"
@@ -372,14 +344,12 @@ cmd_unlock() {
     echo "  3. Force online auth: touch /etc/open-bastion/force_online"
     echo ""
 
-    # Offer to invalidate instead
     read -rp "Would you like to invalidate the cache entry instead? [y/N] " answer
     if [[ "$answer" =~ ^[Yy]$ ]]; then
         cmd_invalidate "$user"
     fi
 }
 
-# Cleanup command
 cmd_cleanup() {
     check_root
 
@@ -390,7 +360,6 @@ cmd_cleanup() {
 
     local removed=0
 
-    # Remove files without valid magic header
     while IFS= read -r -d '' file; do
         if ! is_valid_cache "$file"; then
             if rm -f "$file"; then
@@ -400,7 +369,6 @@ cmd_cleanup() {
         fi
     done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -print0 2>/dev/null)
 
-    # Remove empty files
     while IFS= read -r -d '' file; do
         if rm -f "$file"; then
             ((removed++)) || true
@@ -408,7 +376,6 @@ cmd_cleanup() {
         fi
     done < <(find "$CACHE_DIR" -maxdepth 1 -name "*.cred" -type f -empty -print0 2>/dev/null)
 
-    # Remove orphaned temp files
     while IFS= read -r -d '' file; do
         if rm -f "$file"; then
             ((removed++)) || true
@@ -428,7 +395,6 @@ cmd_cleanup() {
     echo ""
 }
 
-# Parse arguments
 # shellcheck disable=SC2034
 QUIET=false
 COMMAND=""
@@ -455,7 +421,6 @@ while [[ $# -gt 0 ]]; do
         stats|list|show|invalidate|invalidate-all|unlock|cleanup)
             COMMAND="$1"
             shift
-            # Collect remaining positional arguments for the command
             CMD_ARGS=("$@")
             break
             ;;
@@ -467,10 +432,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Load configuration
 load_config
 
-# Execute command
 case "${COMMAND:-}" in
     stats)
         cmd_stats
