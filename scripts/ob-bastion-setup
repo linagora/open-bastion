@@ -1322,7 +1322,7 @@ write_open_bastion_sudoers() {
         fi
         tmp_sudoers=$(mktemp)
         {
-            printf '%s\n' "# --enable-sudo-fresh-otp: no sudo credential caching for SSO users (#178)"
+            printf '%s\n' "# --enable-sudo-fresh-otp: no sudo credential caching for SSO users"
             printf '%s\n' "Defaults:%open-bastion-sudo timestamp_timeout=0"
             cat "$sudoers_file"
         } > "$tmp_sudoers"
@@ -1945,7 +1945,7 @@ prompt_allowed_bastions() {
         printf "\n" >&2
         warn "An empty list accepts a hop voucher from ANY host enrolled in the"
         warn "project that can declare itself a bastion to the SSO -- not only"
-        warn "from the bastions you operate (#182). It is the residual defence"
+        warn "from the bastions you operate. It is the residual defence"
         warn "behind an SSO-side gap, and this is the only place it gets set."
         if confirm "Accept a hop from ANY bastion?"; then
             return 0
@@ -2229,7 +2229,7 @@ Options:
                           /etc/open-bastion/service-accounts.d/<name>.pub, plus
                           ExposeAuthInfo yes so the fingerprint is verifiable.
                           Without it, service-accounts.conf alone does not let a
-                          service account log in (#263). OFF by default — it
+                          service account log in. OFF by default — it
                           changes sshd for every session on the host.
   --enable-sudo-fresh-otp Require a fresh LLNG token on EVERY sudo for SSO users
                           (writes \`Defaults:%open-bastion-sudo timestamp_timeout=0\`).
