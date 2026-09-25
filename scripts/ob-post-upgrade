@@ -370,6 +370,7 @@ if [ ! -r "$TIMERS_LIB" ]; then
 else
     # shellcheck source=scripts/ob-timers-lib.sh
     . "$TIMERS_LIB"
+    # shellcheck disable=SC2034  # read by ob-timers-lib.sh, sourced above
     OB_TIMERS_DRY_RUN="$DRY_RUN"
 
     if [ -e "$OB_KRL_LEGACY_CRON" ] \

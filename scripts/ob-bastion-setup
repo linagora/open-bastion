@@ -2087,6 +2087,7 @@ setup_audit_trace() {
     #    touched rather than leave a trace that grows without bound. A 0.6
     #    /etc/cron.daily (or cron.weekly) rotation is replaced on the same
     #    schedule, and removed only once the timer runs.
+    # shellcheck disable=SC2034  # read by ob-timers-lib.sh, sourced above
     OB_TIMERS_DRY_RUN=false
     if ! ob_audit_timer_setup; then
         report_timers ""
