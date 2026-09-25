@@ -3,18 +3,17 @@ Description=Open Bastion session recording sink (per-connection)
 Documentation=https://github.com/linagora/open-bastion
 
 [Service]
-# One short-lived instance per connection. systemd passes the connected socket
-# as stdin; the sink reads the JSON header then the recording stream from fd 0.
+# systemd passes the connected socket as stdin; the sink reads the JSON header
+# then the recording stream from fd 0.
 ExecStart=/usr/sbin/ob-record-sink
 StandardInput=socket
 StandardError=journal
-# Runs as root to write recordings the recorded user cannot touch
+# Writes recordings the recorded user cannot touch
 # (/var/lib/open-bastion/sessions/<user>/, root-owned, group ob-sessions).
 User=root
 
-# Hardening: it resolves the peer uid (NSS, may be networked) and writes only
-# under the sessions tree. AF_INET(6) is required for NSS (getpwuid via
-# libnss_openbastion / SSSD); AF_UNIX for the activation socket itself.
+# AF_INET(6) is required for NSS (getpwuid via libnss_openbastion / SSSD),
+# which may be networked; AF_UNIX for the activation socket itself.
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/open-bastion/sessions
@@ -26,16 +25,9 @@ ProtectKernelModules=true
 RestrictNamespaces=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# Private-by-default modes for anything this instance creates, instead of
-# whatever umask the socket activation happened to inherit. It does not weaken
-# the recordings' group-read for auditors: the sink fchmod()s the session dir to
-# 0750 and every recording/metadata file to 0640 explicitly, it never relies on
+# Does not weaken the recordings' group-read for auditors: the sink fchmod()s
+# the session dir to 0750 and every file to 0640 explicitly, never relying on
 # the umask for those.
 UMask=0077
-# Deny the syscall classes this sink never needs (kexec, module loading, raw
-# ptrace, clock setting, ...). @system-service is systemd's broad, well-tested
-# allow set and keeps the AF_UNIX/AF_INET work above intact.
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# User=root here is deliberate (recordings must be untouchable by the recorded
-# user), so this sandbox is defence in depth, not the primary control.

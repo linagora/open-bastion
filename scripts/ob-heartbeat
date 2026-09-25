@@ -13,13 +13,11 @@ set -e
 VERSION="0.3.2"
 PROG_NAME=$(basename "$0")
 
-# Default values
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/var/lib/open-bastion/token"
 STATS_FILE="/var/lib/open-bastion/stats.json"
 TIMEOUT=10
 
-# Logging functions
 log_info() {
     logger -t "$PROG_NAME" -p auth.info "$*"
 }
@@ -38,7 +36,6 @@ log_debug() {
     fi
 }
 
-# Read value from config file
 read_config() {
     local key="$1"
     local file="$2"
@@ -75,7 +72,6 @@ read_config() {
     fi
 }
 
-# Load configuration
 load_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         log_error "Configuration file not found: $CONFIG_FILE"
@@ -88,8 +84,7 @@ load_config() {
     SERVER_GROUP=$(read_config "server_group" "$CONFIG_FILE")
     [ -z "$SERVER_GROUP" ] && SERVER_GROUP="default"
 
-    # Node role reported to the SSO: bastion | standalone | backend. Written by
-    # the setup scripts (ob-bastion-setup / ob-backend-setup); empty if unknown.
+    # bastion | standalone | backend, written by the setup scripts.
     NODE_ROLE=$(read_config "node_role" "$CONFIG_FILE")
 
     local token_file_config
@@ -100,16 +95,10 @@ load_config() {
     VERIFY_SSL=$(read_config "verify_ssl" "$CONFIG_FILE")
     [ -z "$VERIFY_SSL" ] && VERIFY_SSL="true"
 
-    # Whether to report the list of currently connected users to the SSO in the
-    # heartbeat ("who is connected on this machine"). Active sessions are
-    # privacy-sensitive, so this can be disabled. Default: true.
     REPORT_SESSIONS=$(read_config "report_sessions" "$CONFIG_FILE")
     [ -z "$REPORT_SESSIONS" ] && REPORT_SESSIONS="true"
 
-    # Upper bound on the number of sessions sent, to avoid a huge payload on a
-    # very busy machine. Must be a positive integer; fall back to 200 on an
-    # empty or invalid value (it is used in numeric `[ -ge ]` tests under
-    # `set -e`, where a non-integer would abort the heartbeat).
+    # Must be a positive integer: it feeds `[ -ge ]` tests under `set -e`.
     MAX_SESSIONS=$(read_config "max_reported_sessions" "$CONFIG_FILE")
     if ! [[ "$MAX_SESSIONS" =~ ^[1-9][0-9]*$ ]]; then
         [ -n "$MAX_SESSIONS" ] &&
@@ -122,28 +111,22 @@ load_config() {
         exit 1
     fi
 
-    # Remove trailing slash
     PORTAL_URL="${PORTAL_URL%/}"
 
-    # Security: warn if not using HTTPS (credentials sent in clear)
     if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
         log_warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 }
 
-# Read token file (JSON format)
 read_token() {
     if [ ! -f "$TOKEN_FILE" ]; then
         log_debug "Token file not found: $TOKEN_FILE"
         exit 0  # Exit silently - server may not be enrolled yet
     fi
 
-    # Check if token file is JSON or plain text
     if head -1 "$TOKEN_FILE" | grep -q '^{'; then
-        # JSON format
         REFRESH_TOKEN=$(jq -r '.refresh_token // empty' "$TOKEN_FILE" 2>/dev/null)
     else
-        # Legacy plain text format - no refresh token available
         log_debug "Token file is in legacy format, cannot send heartbeat"
         exit 0
     fi
@@ -154,7 +137,6 @@ read_token() {
     fi
 }
 
-# Get statistics from stats file
 get_stats() {
     if [ -f "$STATS_FILE" ]; then
         cat "$STATS_FILE"
@@ -163,10 +145,7 @@ get_stats() {
     fi
 }
 
-# Build a JSON array describing who is currently connected on this machine.
-# Each entry: { user, from (remote host), tty, since (login epoch or null) }.
-# Prefers systemd-logind (loginctl), falls back to who(1)/utmp when logind is
-# unavailable. Returns '[]' when reporting is disabled or nothing is found.
+# JSON array of {user, from, tty, since}; '[]' when disabled or nothing found.
 get_sessions() {
     case "$REPORT_SESSIONS" in
         true | 1 | yes | on) ;;
@@ -178,10 +157,8 @@ get_sessions() {
 
     local objs="" count=0 truncated=0
 
-    # Use loginctl only if it is present AND actually answers: on hosts where
-    # loginctl exists but systemd-logind/dbus is unavailable (containers,
-    # chroots) list-sessions fails, and we must fall back to who(1) rather than
-    # silently report an empty list.
+    # loginctl may exist without a working logind (containers, chroots): fall
+    # back to who(1) rather than report an empty list.
     local ids=""
     if command -v loginctl >/dev/null 2>&1 &&
         ids=$(loginctl list-sessions --no-legend 2>/dev/null); then
@@ -203,7 +180,6 @@ get_sessions() {
             done <<EOF
 $props
 EOF
-            # Only interactive user sessions (skip greeter/manager/etc.)
             [ "$class" = "user" ] || continue
             [ -n "$name" ] || continue
             if [ "$count" -ge "$MAX_SESSIONS" ]; then
@@ -221,8 +197,7 @@ EOF
             count=$((count + 1))
         done
     else
-        # Fallback: who reads utmp. Columns are NAME LINE DATE TIME [(HOST)];
-        # the optional source host is the parenthesised trailing comment.
+        # who(1) columns: NAME LINE DATE TIME [(HOST)].
         local user tty d t host since
         while read -r user tty d t host; do
             [ -n "$user" ] || continue
@@ -253,7 +228,6 @@ EOF
     fi
 }
 
-# Build curl options
 build_curl_opts() {
     CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
 
@@ -262,9 +236,6 @@ build_curl_opts() {
     fi
 }
 
-# Request signing for the /pam/ call below (#247). The HMAC is computed by
-# ob-sign-request so the signing secret never reaches a command line; the
-# rationale and the interface are in scripts/ob-sign-lib.sh.
 _OB_SIGN_LIB="${OB_SIGN_LIB:-/usr/lib/open-bastion/ob-sign-lib.sh}"
 if [ ! -r "$_OB_SIGN_LIB" ]; then
     _OB_SIGN_LIB="$(dirname "$(readlink -f "$0")")/ob-sign-lib.sh"
@@ -282,8 +253,7 @@ else
         OB_SIGN_NOTE="ob-sign-lib.sh not found; sending $2 unsigned"; return 0; }
 fi
 
-# Persist a freshly minted access token into the JSON token file, keeping the
-# existing refresh_token / enrolled_at. Atomic replace, root-only perms.
+# Keeps the existing refresh_token / enrolled_at.
 update_access_token() {
     local at="$1" ttl="$2"
     local now exp tmp
@@ -308,7 +278,6 @@ update_access_token() {
     return 0
 }
 
-# Send heartbeat
 send_heartbeat() {
     local hostname
     hostname=$(hostname -f 2>/dev/null || hostname)
@@ -319,11 +288,9 @@ send_heartbeat() {
     local stats
     stats=$(get_stats)
 
-    # List of users currently connected on this machine (may be '[]')
     local sessions
     sessions=$(get_sessions)
 
-    # Build JSON payload using jq for safety
     local payload
     payload=$(jq -n \
         --arg refresh_token "$REFRESH_TOKEN" \
@@ -347,8 +314,6 @@ send_heartbeat() {
 
     build_curl_opts
 
-    # Sign before sending, or do not send: an unsigned /pam/heartbeat is
-    # exactly what made pamAccessRequestSigningMode=required undeployable.
     # Read by ob-sign-lib.sh, which shellcheck cannot follow across the `.`.
     # shellcheck disable=SC2034
     OB_SIGN_CONFIG="$CONFIG_FILE"
@@ -377,23 +342,17 @@ send_heartbeat() {
     if [ "$http_code" = "200" ]; then
         log_debug "Heartbeat sent successfully to $PORTAL_URL"
 
-        # Extract next_heartbeat interval from response
         local next_interval
         next_interval=$(echo "$response" | jq -r '.next_heartbeat // empty' 2>/dev/null)
         if [ -n "$next_interval" ]; then
             log_debug "Next heartbeat in ${next_interval}s"
         fi
 
-        # The portal mints a fresh access token on every heartbeat (the RFC
-        # refresh loop: short access token, long-lived refresh token). Persist
-        # it so NSS/PAM keep working; the refresh_token is left untouched.
+        # Each heartbeat mints a fresh access token; persist it.
         local new_at new_ttl
         new_at=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
         new_ttl=$(echo "$response" | jq -r '.expires_in // empty' 2>/dev/null)
         if [ -n "$new_at" ]; then
-            # Persisting the fresh access token is critical: if it fails, exit
-            # non-zero so the systemd unit reports the problem instead of
-            # silently letting the on-disk token expire.
             update_access_token "$new_at" "${new_ttl:-3600}" || exit 1
         fi
     elif [ "$http_code" = "401" ]; then
@@ -408,7 +367,6 @@ send_heartbeat() {
     fi
 }
 
-# Usage
 usage() {
     cat << EOF
 Usage: $PROG_NAME [OPTIONS]
@@ -426,7 +384,6 @@ EOF
     exit 0
 }
 
-# Parse arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -457,7 +414,6 @@ parse_args() {
     done
 }
 
-# Main
 main() {
     parse_args "$@"
     load_config

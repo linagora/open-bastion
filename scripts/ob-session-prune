@@ -2,24 +2,7 @@
 #
 # ob-session-prune - compress and expire recorded SSH sessions
 #
-# Run periodically by ob-session-prune.timer (daily). Two stages, both
-# configured in the session-recorder config file:
-#
-#   1. Compress closed recordings older than `recording_compress_after_days`
-#      (gzip; typescripts compress ~10-20x). The paired `.json` metadata is
-#      left uncompressed so the index stays greppable.
-#   2. Delete recordings (and their `.json`) older than `recording_retention_days`.
-#
-# This bounds disk growth: recording is fail-closed (a full disk refuses new
-# logins — see doc/session-recording.rst), so unbounded recordings are an
-# availability risk. Deleting recordings also drops audit evidence, so the
-# expiry is logged at notice level for accountability and the retention default
-# is deliberately long (365 days). Set `recording_retention_days = 0` to keep
-# recordings forever (compression still applies).
-#
-# The recordings are root-owned (root:ob-sessions 0640) under a root-owned tree;
-# this runs as root from a sandboxed oneshot service, so the tamper-evident
-# layout is preserved (the recorded user never has access).
+# Run daily by ob-session-prune.timer; see doc/session-recording.rst.
 #
 # Copyright (C) 2025 Linagora
 # License: AGPL-3.0
@@ -28,26 +11,20 @@ set -euo pipefail
 
 PROG_NAME=$(basename "$0")
 
-# Config file shared with ob-session-recorder.
 CONFIG_FILE="${OB_RECORDER_CONFIG:-/etc/open-bastion/session-recorder.conf}"
 
-# Defaults (overridable from the config file).
 SESSIONS_DIR="/var/lib/open-bastion/sessions"
 COMPRESS_AFTER_DAYS=1
 RETENTION_DAYS=365
 
-# Logging must never abort the run (set -e): logger can fail where there is no
-# syslog socket (minimal containers), and pruning should not hinge on whether a
-# log line landed.
+# Never abort under set -e: logger fails where there is no syslog socket.
 log_info()  { logger -t "$PROG_NAME" -p auth.info    "$*" 2>/dev/null || true; }
 log_notice(){ logger -t "$PROG_NAME" -p auth.notice  "$*" 2>/dev/null || true; }
 log_warn()  { logger -t "$PROG_NAME" -p auth.warning "$*" 2>/dev/null || true; }
 log_err()   { logger -t "$PROG_NAME" -p auth.err     "$*" 2>/dev/null || true; }
 
-# Parse key=value from the config file. Only reads the keys this tool needs;
-# unknown keys (sessions_dir, format, max_duration, ...) are ignored. Mirrors
-# the defensive ownership/permission check ob-session-recorder does: a config
-# file not owned by root or group/world-writable is ignored (defaults stand).
+# Same ownership/permission check as ob-session-recorder: an unsafe file is
+# ignored and the defaults stand.
 load_config() {
     [ -f "$CONFIG_FILE" ] || return 0
 
@@ -95,12 +72,7 @@ main() {
     is_uint "$COMPRESS_AFTER_DAYS" || { log_warn "recording_compress_after_days not an integer; using 1"; COMPRESS_AFTER_DAYS=1; }
     is_uint "$RETENTION_DAYS"      || { log_warn "recording_retention_days not an integer; using 365"; RETENTION_DAYS=365; }
 
-    # Only ever operate on an absolute path that has a parent directory, so a
-    # malformed / empty / "/" sessions_dir can never turn `find -delete` loose at
-    # the filesystem root. The find stages are additionally bounded to two levels
-    # below it (sessions/<user>/<file>). The config is root-owned and trusted, so
-    # this is belt-and-suspenders, not an attacker boundary; the default is
-    # /var/lib/open-bastion/sessions but an admin may relocate it.
+    # Never let `find -delete` loose at or near the filesystem root.
     case "$SESSIONS_DIR" in
         /*/*) ;;   # absolute, ≥2 components — rejects "", "/", "/foo", relative paths
         *) log_err "sessions_dir must be an absolute path with a parent directory ($SESSIONS_DIR); refusing to run"; exit 1 ;;
@@ -111,13 +83,11 @@ main() {
         exit 0
     fi
 
-    # Stage 1: compress closed recording payloads (not the .json index).
     local compressed=0
     if [ "$COMPRESS_AFTER_DAYS" -gt 0 ]; then
         local f
         while IFS= read -r -d '' f; do
-            # gzip preserves the file's mtime on the .gz, so retention below
-            # still sees the original age. Keep mode/owner (root:ob-sessions 0640).
+            # gzip keeps the mtime, so retention below still sees the original age.
             if gzip -- "$f" 2>/dev/null; then
                 compressed=$((compressed + 1))
             else
@@ -128,7 +98,6 @@ main() {
                     -mtime +"$COMPRESS_AFTER_DAYS" -print0)
     fi
 
-    # Stage 2: expire recordings older than the retention window (payload + .json).
     local deleted=0
     if [ "$RETENTION_DAYS" -gt 0 ]; then
         local g
@@ -140,11 +109,10 @@ main() {
             fi
         done < <(find "$SESSIONS_DIR" -mindepth 2 -maxdepth 2 -type f \
                     -mtime +"$RETENTION_DAYS" -print0)
-        # Drop now-empty per-user directories (never the root).
         find "$SESSIONS_DIR" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null || true
     fi
 
-    # One audit-grade line: deletion removes evidence, so it is always recorded.
+    # Always logged: deletion removes audit evidence.
     if [ "$deleted" -gt 0 ]; then
         log_notice "Pruned recordings: compressed=$compressed deleted=$deleted (retention=${RETENTION_DAYS}d, compress_after=${COMPRESS_AFTER_DAYS}d)"
     elif [ "$compressed" -gt 0 ]; then

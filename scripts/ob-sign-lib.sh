@@ -6,39 +6,16 @@
 # License: AGPL-3.0
 #
 # Sourced by ob-heartbeat, ob-bastion-id, ob-enroll and ob-session-monitor.
-# The portal verifies X-Signature-256 on every /pam/ endpoint it serves, and
-# pamAccessRequestSigningMode=required refuses anything unsigned (#247).
 #
-# The HMAC is computed by ob-sign-request, never here. The obvious one-liner,
+# The HMAC is computed by ob-sign-request, never `openssl dgst -hmac`, which
+# takes the key on argv (world-readable via /proc). The body goes on stdin too:
+# some bodies carry credentials.
 #
-#     openssl dgst -sha256 -hmac "$secret"
+# ob_sign_request METHOD PATH BODY sets SIGN_HEADERS (curl args, maybe none).
+# It fails with OB_SIGN_ERROR when signing is configured but fails: sending
+# unsigned then would be a silent downgrade. OB_SIGN_CONFIG names the conf.
 #
-# is not usable: openssl takes the key on the command line and offers no form
-# that reads it from a file or the environment, /proc/<pid>/cmdline is
-# world-readable, and these scripts run as root on a host whose whole purpose
-# is to give other people a shell -- ob-heartbeat every few minutes, forever.
-# It would publish the fleet-wide signing secret to anyone who polls, and a
-# secret an attacker can read is a signature an attacker can forge. Some of the
-# signed bodies also carry credentials of their own (ob-heartbeat's carries
-# this host's refresh_token), which is why the body goes to the helper on
-# stdin rather than in an argument.
-#
-# Interface:
-#
-#   ob_sign_request METHOD PATH BODY
-#       Sets SIGN_HEADERS to the curl arguments to add ("-H" "X-...": possibly
-#       none). Returns 0 when the request may be sent, non-zero when signing
-#       was configured and failed -- sending unsigned then would be a silent
-#       downgrade, and the portal refuses a partially signed request in every
-#       mode. On failure the reason is in OB_SIGN_ERROR.
-#
-# The caller sets OB_SIGN_CONFIG to the openbastion.conf to read; it defaults
-# to the standard path.
-#
-# SIGN_HEADERS, OB_SIGN_ERROR and OB_SIGN_NOTE are set here and read by the
-# sourcing script. CI runs shellcheck one file at a time, without -x, so it
-# cannot follow the `.` that pulls this file in: every assignment to them
-# looks dead from inside this file alone.
+# Read by the sourcing script; shellcheck, run per file, cannot see that.
 # shellcheck disable=SC2034
 
 SIGN_HEADERS=()
@@ -60,10 +37,8 @@ ob_sign_request() {
             || helper="/usr/sbin/ob-sign-request"
     fi
     if [ ! -x "$helper" ]; then
-        # Running from a source checkout, where the binary is in the build
-        # tree and not on PATH. Not a reason to stop: unsigned is what these
-        # scripts did before #247, and a portal in `required` refuses it
-        # visibly rather than silently.
+        # Source checkout: not fatal, a portal in `required` refuses unsigned
+        # requests visibly.
         OB_SIGN_NOTE="ob-sign-request not found; sending $path unsigned"
         return 0
     fi

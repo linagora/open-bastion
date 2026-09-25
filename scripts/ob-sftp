@@ -3,18 +3,12 @@
 #
 # ob-sftp - bastion SFTP to a backend with LLNG certificate vouching
 #
-# The sftp counterpart of ob-ssh / ob-scp. Run on a bastion by a user already
-# authenticated to it; the bastion mints a short-lived, LLNG-signed certificate
-# for this user and runs sftp with it, so an interactive or batch SFTP session
-# can be opened to a backend WITHOUT any SSH key of the user's own on the
-# bastion and without agent forwarding.
+# The sftp counterpart of ob-ssh / ob-scp: the bastion mints a short-lived,
+# LLNG-signed certificate for this user and runs sftp with it.
 #
 #   * interactive:   ob-sftp user@backend
 #   * with a path:   ob-sftp user@backend:/remote/dir
 #   * batch mode:    ob-sftp -b script.sftp user@backend
-#
-# Unlike ob-scp there is no backend<->backend case: sftp connects to a single
-# remote endpoint (one vouched certificate authenticates as one principal).
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>
@@ -25,8 +19,6 @@ set -euo pipefail
 VERSION="0.2.4"
 PROG_NAME=$(basename "$0")
 
-# Source the shared cert-vouching library: the installed path first, then
-# alongside this script (running from the source tree / tests).
 _OB_LIB="${OB_CERT_LIB:-/usr/lib/open-bastion/ob-cert-lib.sh}"
 if [ ! -r "$_OB_LIB" ]; then
     _OB_LIB="$(dirname "$(readlink -f "$0")")/ob-cert-lib.sh"
@@ -64,10 +56,8 @@ Examples:
 EOF
 }
 
-# Parse the SFTP destination spec into REMOTE_USER / REMOTE_HOST. Accepts the
-# classic "[user@]host[:path]" form and the "sftp://[user@]host[:port][/path]"
-# URI form. Only the user and host matter for vouching; the path/port are left
-# for sftp itself.
+# Accepts [user@]host[:path] and sftp://[user@]host[:port][/path]; sets
+# REMOTE_USER / REMOTE_HOST.
 split_dest_spec() {
     local spec="$1"
     spec="${spec#sftp://}"              # drop an optional URI scheme
@@ -114,9 +104,7 @@ main() {
         exit 1
     fi
 
-    # Walk SFTP_ARGS to find the single destination: skip options and the
-    # argument of any option that consumes the next token, so e.g.
-    # `-b file user@backend` or `-o Foo=bar user@backend` resolve to the host.
+    # Skip option arguments so they are not mistaken for the destination.
     local default_user="${USER:-$(whoami)}"
     local dest="" i=0 n=${#SFTP_ARGS[@]}
     while [ "$i" -lt "$n" ]; do
@@ -142,11 +130,7 @@ main() {
 
     debug "Remote user=$resolved_user, vouching via host=$REMOTE_HOST"
     mint_ephemeral_cert "$resolved_user" "$REMOTE_HOST" || exit 1
-    # Clean the ephemeral key dir on exit. As with ob-ssh we trap EXIT only:
-    # sftp installs its own SIGINT handler (Ctrl-C interrupts the current
-    # transfer and returns to the sftp> prompt rather than killing this proxy),
-    # and the established connection no longer needs the on-disk key, so we let
-    # sftp own the interactive signals and clean up once it returns.
+    # EXIT only: sftp handles SIGINT itself (Ctrl-C aborts the transfer, not us).
     # shellcheck disable=SC2064
     trap "rm -rf '$OB_EPH_DIR'" EXIT
 

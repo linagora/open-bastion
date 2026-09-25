@@ -6,13 +6,10 @@ Wants=network-online.target
 ConditionPathExists=/var/lib/open-bastion/token
 
 [Timer]
-# First heartbeat 1 minute after boot
 OnBootSec=1min
-# Then every 5 minutes
 OnUnitActiveSec=5min
-# Persist the timer across reboots
 Persistent=true
-# Randomize by up to 30 seconds to avoid thundering herd
+# Avoids a thundering herd across a fleet.
 RandomizedDelaySec=30
 
 [Install]

@@ -8,8 +8,6 @@ ExecStart=/usr/sbin/ob-session-prune
 User=root
 Group=root
 
-# Security hardening. No network is needed: this only touches the local
-# recordings tree. Everything is read-only except the recordings directory.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -23,5 +21,4 @@ RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
-# Only the recordings tree is writable (compress in place + expire).
 ReadWritePaths=/var/lib/open-bastion/sessions

@@ -5,15 +5,10 @@ After=auditd.service
 
 [Service]
 Type=oneshot
-# SIGUSR1 is auditd's "rotate the logs now", which is what `service auditd
-# rotate` sends. It goes to the main process only: auditd's children, if any,
-# have no use for it. With auditd stopped this fails, and the unit shows as
-# failed -- on a host where the audit trace was enabled, a stopped auditd is
-# worth noticing, which the cron.daily script this replaces (#281) did not do.
+# SIGUSR1 is auditd's "rotate the logs now" (`service auditd rotate`). A
+# stopped auditd fails the unit, which is wanted.
 ExecStart=systemctl kill --kill-who=main --signal=SIGUSR1 auditd.service
 
-# Nothing is written and no network is used: systemctl only talks to PID 1
-# over its private socket.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

@@ -13,20 +13,14 @@ set -e
 VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
-# Default values
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/var/lib/open-bastion/token"
-# offline_access is REQUIRED: it makes LLNG issue a long-lived offline refresh
-# token (the durable machine identity). Without it the server only gets a
-# short-lived access token, SSO/NSS lookups break after ~1h, and there is no
-# way to refresh. The RP must allow it (oidcRPMetaDataOptionsAllowOffline=1).
+# offline_access is required: without it LLNG issues no refresh token and the
+# token dies after ~1h. The RP must allow it (oidcRPMetaDataOptionsAllowOffline=1).
 SCOPE="pam:server offline_access"
 POLL_INTERVAL=5
 TIMEOUT=300
 
-# Request signing for the /pam/ call below (#247). The HMAC is computed by
-# ob-sign-request so the signing secret never reaches a command line; the
-# rationale and the interface are in scripts/ob-sign-lib.sh.
 _OB_SIGN_LIB="${OB_SIGN_LIB:-/usr/lib/open-bastion/ob-sign-lib.sh}"
 if [ ! -r "$_OB_SIGN_LIB" ]; then
     _OB_SIGN_LIB="$(dirname "$(readlink -f "$0")")/ob-sign-lib.sh"
@@ -42,9 +36,8 @@ else
         OB_SIGN_NOTE="ob-sign-lib.sh not found; sending $2 unsigned"; return 0; }
 fi
 
-# client_secret_jwt assertions are signed by ob-client-jwt so the OIDC client
-# secret never reaches a command line (#256). Installed beside ob-sign-request;
-# the source-tree fallbacks are for running this script uninstalled.
+# ob-client-jwt signs the assertion so the client secret never reaches argv.
+# The source-tree candidates are for running uninstalled.
 OB_CLIENT_JWT="${OB_CLIENT_JWT:-}"
 if [ -z "$OB_CLIENT_JWT" ]; then
     for _candidate in /usr/sbin/ob-client-jwt /usr/local/sbin/ob-client-jwt \
@@ -60,7 +53,6 @@ if [ -z "$OB_CLIENT_JWT" ] && command -v ob-client-jwt >/dev/null 2>&1; then
     OB_CLIENT_JWT="$(command -v ob-client-jwt)"
 fi
 
-# Colors for output (disabled if not a terminal)
 if [ -t 1 ]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -77,7 +69,6 @@ else
     NC=''
 fi
 
-# Logging functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"
 }
@@ -98,7 +89,6 @@ log_step() {
     echo -e "\n${BOLD}==> $*${NC}"
 }
 
-# Show usage
 usage() {
     cat << EOF
 Usage: $PROG_NAME [OPTIONS]
@@ -131,13 +121,11 @@ EOF
     exit 0
 }
 
-# Show version
 show_version() {
     echo "$PROG_NAME version $VERSION"
     exit 0
 }
 
-# Check for required commands
 check_requirements() {
     local missing=()
 
@@ -154,50 +142,29 @@ check_requirements() {
     fi
 }
 
-# Generate PKCE code_verifier and code_challenge (RFC 7636)
-# This provides additional security for the Device Authorization Grant
 generate_pkce() {
-    # Generate 32 bytes of random data for code_verifier
-    # RFC 7636 requires 43-128 characters, base64url of 32 bytes = 43 chars
+    # RFC 7636 wants 43-128 chars; base64url of 32 bytes is 43.
     local random_bytes
     if [ -r /dev/urandom ]; then
         random_bytes=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
     else
-        # Fallback using openssl rand
         random_bytes=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')
     fi
 
     CODE_VERIFIER="$random_bytes"
 
-    # Generate code_challenge = BASE64URL(SHA256(code_verifier))
     CODE_CHALLENGE=$(echo -n "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
     CODE_CHALLENGE_METHOD="S256"
 }
 
-# Generate a JWT for client_secret_jwt authentication (RFC 7523)
-# This avoids sending the client_secret in plaintext over the network
+# client_secret_jwt assertion (RFC 7523).
 generate_client_jwt() {
     local client_id="$1"
     local client_secret="$2"
     local token_endpoint="$3"
 
-    # The assertion is built by ob-client-jwt, not here (#256).
-    #
-    # This used to be forty lines of shell ending in
-    #     openssl dgst -sha256 -hmac "$client_secret"
-    # and openssl has no form that takes the HMAC key anywhere but argv.
-    # /proc/<pid>/cmdline is world-readable, so every call published this
-    # host's OIDC client secret to any local user -- and the caller is the
-    # device-grant polling loop, so that is of the order of sixty times over
-    # five minutes, while an operator is away in a browser approving the grant.
-    #
-    # The secret goes down a pipe instead. `printf` is a shell builtin: it
-    # forks no process and creates no argv, and a pipe has no name anything
-    # else can open.
-    #
-    # There is deliberately no fallback to the openssl path. A missing helper
-    # must stop enrolment with an error, not silently go back to leaking the
-    # secret -- that is the whole point of the change.
+    # No openssl fallback: `openssl dgst -hmac` takes the key on argv, readable
+    # by any local user via /proc. See doc/security/01-enrollment.rst.
     if [ -z "$OB_CLIENT_JWT" ]; then
         log_error "ob-client-jwt not found: cannot authenticate to the token endpoint"
         log_error "It ships with open-bastion; set OB_CLIENT_JWT to its path if it is elsewhere."
@@ -212,13 +179,11 @@ generate_client_jwt() {
     printf '%s\n' "$jwt"
 }
 
-# Read value from config file
 read_config() {
     local key="$1"
     local file="$2"
 
     if [ -f "$file" ]; then
-        # Use || true to prevent set -e from exiting when grep finds no match
         grep -E "^\\s*${key}\\s*=" "$file" 2>/dev/null | \
             sed -E 's/^[^=]+=\s*//' | \
             sed -E 's/^["'\'']//' | \
@@ -228,7 +193,6 @@ read_config() {
     fi
 }
 
-# Load configuration from file
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         log_info "Loading configuration from $CONFIG_FILE"
@@ -258,7 +222,6 @@ load_config() {
     fi
 }
 
-# Parse command line arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -310,7 +273,6 @@ parse_args() {
     done
 }
 
-# Validate configuration
 validate_config() {
     local errors=0
 
@@ -336,16 +298,10 @@ validate_config() {
         exit 1
     fi
 
-    # Remove trailing slash from portal URL
     PORTAL_URL="${PORTAL_URL%/}"
 }
 
-# Build curl options array.
-# NOTE: we intentionally do NOT pass -f. With -f, curl exits non-zero on any
-# HTTP 4xx/5xx and prints nothing, which would mask the portal's actual error
-# response. The script checks the HTTP status code manually at each call site,
-# and the response body is needed to diagnose Device Authorization failures
-# (e.g. unknown client_id, missing scope, grant not enabled).
+# No -f: call sites check the status and need the body to diagnose failures.
 build_curl_opts() {
     CURL_OPTS=("-s")
 
@@ -354,11 +310,9 @@ build_curl_opts() {
     fi
 }
 
-# Step 1: Initiate Device Authorization flow
 initiate_device_auth() {
     log_step "Initiating device authorization"
 
-    # Generate PKCE parameters for additional security (RFC 7636)
     generate_pkce
     log_info "PKCE enabled (code_challenge_method=S256)"
 
@@ -393,7 +347,6 @@ initiate_device_auth() {
         exit 1
     fi
 
-    # Parse response
     DEVICE_CODE=$(echo "$response" | jq -r '.device_code // empty')
     USER_CODE=$(echo "$response" | jq -r '.user_code // empty')
     VERIFICATION_URI=$(echo "$response" | jq -r '.verification_uri // empty')
@@ -410,19 +363,11 @@ initiate_device_auth() {
     POLL_INTERVAL=$INTERVAL
     TIMEOUT=$EXPIRES_IN
 
-    # Optionally publish device-grant state to a file so external orchestrators
-    # (e.g. Ansible with an LLNG session cookie) can approve the user_code
-    # while ob-enroll is still polling the token endpoint. The file holds only
-    # admin-facing values (user_code + verification URIs, NOT the device_code
-    # secret), but it lives in /run/open-bastion which is 0711 (traversable so
-    # the SSH-fingerprint principals helper can reach its spool), so keep the
-    # file itself root-only (0600) — the orchestrator slurps it as root.
+    # Optional device-grant state for external orchestrators (e.g. Ansible). It
+    # holds no device_code, but /run/open-bastion is 0711: keep it 0600.
     if [ -n "${OB_ENROLL_STATE_FILE:-}" ]; then
         mkdir -p "$(dirname "$OB_ENROLL_STATE_FILE")" 2>/dev/null || true
-        # Create under umask 077 (in a subshell) so the temp file is never
-        # group/world-readable, even for the brief window before the chmod —
-        # /run/open-bastion is 0711 (traversable). The final chmod is kept as a
-        # belt-and-suspenders. Subshell so the umask change stays local.
+        # umask 077 so the temp file is never readable, even before the chmod.
         (
             umask 077
             jq -n \
@@ -439,7 +384,6 @@ initiate_device_auth() {
     fi
 }
 
-# Step 2: Display instructions to user
 display_instructions() {
     log_step "Administrator approval required"
 
@@ -462,7 +406,6 @@ display_instructions() {
     echo ""
 }
 
-# Step 3: Poll for token
 poll_for_token() {
     log_step "Waiting for administrator approval"
 
@@ -476,7 +419,6 @@ poll_for_token() {
 
     now=$(date +%s)
     while [ "$now" -lt $end_time ]; do
-        # Show progress
         local elapsed=$(($(date +%s) - start_time))
         local remaining=$((TIMEOUT - elapsed))
 
@@ -491,12 +433,8 @@ poll_for_token() {
         local token_endpoint="${PORTAL_URL}/oauth2/token"
 
         if [ -n "$CLIENT_SECRET" ]; then
-            # Generate JWT for client_secret_jwt authentication (RFC 7523)
-            # This avoids sending client_secret in plaintext over the network
             local client_jwt
-            # A failure here is not transient -- a missing helper or a secret
-            # the helper refuses will fail identically on every remaining poll
-            # -- so stop with the reason rather than spin out the device code.
+            # Not transient: it would fail identically on every poll, so stop now.
             if ! client_jwt=$(generate_client_jwt "$CLIENT_ID" "$CLIENT_SECRET" "$token_endpoint"); then
                 log_error "Cannot build the client assertion; aborting enrolment"
                 exit 1
@@ -511,7 +449,6 @@ poll_for_token() {
                 -d "client_assertion=${client_jwt}" \
                 -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
         else
-            # Public client: no client authentication
             response=$(curl "${CURL_OPTS[@]}" \
                 -X POST "$token_endpoint" \
                 -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
@@ -520,26 +457,21 @@ poll_for_token() {
                 -d "code_verifier=${CODE_VERIFIER}" 2>&1) || true
         fi
 
-        # Check for access token
         access_token=$(echo "$response" | jq -r '.access_token // empty' 2>/dev/null)
 
         if [ -n "$access_token" ]; then
             echo ""  # Clear the progress line
             ACCESS_TOKEN="$access_token"
-            # Also extract refresh_token and expires_in
             REFRESH_TOKEN=$(echo "$response" | jq -r '.refresh_token // empty' 2>/dev/null)
             EXPIRES_IN=$(echo "$response" | jq -r '.expires_in // 3600' 2>/dev/null)
-            # Best-effort cleanup of the device-grant state file, if used.
             [ -n "${OB_ENROLL_STATE_FILE:-}" ] && rm -f -- "$OB_ENROLL_STATE_FILE" 2>/dev/null || true
             return 0
         fi
 
-        # Check for error
         error=$(echo "$response" | jq -r '.error // empty' 2>/dev/null)
 
         case "$error" in
             authorization_pending|slow_down)
-                # Continue polling
                 if [ "$error" = "slow_down" ]; then
                     POLL_INTERVAL=$((POLL_INTERVAL + 1))
                 fi
@@ -572,15 +504,12 @@ poll_for_token() {
     exit 1
 }
 
-# Step 4: Save the token
 save_token() {
     log_step "Saving server token"
 
     local token_dir
     token_dir=$(dirname "$TOKEN_FILE")
 
-    # Create directory if needed. The token is runtime state, so it lives under
-    # /var/lib/open-bastion (FHS), created 0700 root if the package didn't.
     if [ ! -d "$token_dir" ]; then
         mkdir -p "$token_dir" || {
             log_error "Failed to create directory: $token_dir"
@@ -589,8 +518,6 @@ save_token() {
         chmod 0700 "$token_dir" 2>/dev/null || true
     fi
 
-    # Save token in JSON format with metadata for token lifecycle management
-    # The PAM module (token_manager.c) supports both JSON and plain text formats
     local now
     now=$(date +%s)
     local expires_at=$((now + ${EXPIRES_IN:-3600}))
@@ -609,7 +536,6 @@ save_token() {
         exit 1
     }
 
-    # Ensure proper ownership (root only)
     if [ "$(id -u)" = "0" ]; then
         chown root:root "$TOKEN_FILE"
         chmod 600 "$TOKEN_FILE"
@@ -620,11 +546,8 @@ save_token() {
         log_info "Refresh token saved - can be used for automatic token renewal"
         log_info "Token expires at: $(date -d "@$expires_at" 2>/dev/null || date -r "$expires_at" 2>/dev/null || echo "$expires_at")"
     elif printf '%s' "$SCOPE" | grep -qw offline_access; then
-        # offline_access was requested but the portal returned no refresh_token:
-        # the server got only a short-lived access token that cannot be renewed,
-        # so NSS/SSO lookups would break ~1h later. Fail loudly HERE (instead of
-        # returning success and letting ob-*-setup choke later) and remove the
-        # dead token so it is not reused on the next run.
+        # A refresh-less token dies in ~1h: fail here rather than in ob-*-setup,
+        # and remove it so the next run does not reuse it.
         rm -f "$TOKEN_FILE"
         log_error "No refresh_token was issued by the portal (enrollment FAILED)."
         log_error "The server would get only a short-lived access token; SSO/NSS"
@@ -636,16 +559,13 @@ save_token() {
         log_error "    which keeps offline_access instead of stripping it."
         exit 1
     else
-        # offline_access not requested: a refresh-less token is expected.
         log_success "Token saved to $TOKEN_FILE (JSON format)"
         log_warn "No refresh_token (offline_access not requested); token cannot be renewed."
     fi
 }
 
-# Step 5: Update config file with server_group if needed
 update_config() {
     if [ -f "$CONFIG_FILE" ] && [ "$(id -u)" = "0" ]; then
-        # Check if server_group is already set
         local current_group
         current_group=$(read_config "server_group" "$CONFIG_FILE")
 
@@ -656,7 +576,6 @@ update_config() {
             echo "server_group = $SERVER_GROUP" >> "$CONFIG_FILE"
         fi
 
-        # Ensure token_file is set
         local current_token_file
         current_token_file=$(read_config "server_token_file" "$CONFIG_FILE")
         if [ -z "$current_token_file" ]; then
@@ -670,7 +589,6 @@ update_config() {
     fi
 }
 
-# Step 6: Verify enrollment
 verify_enrollment() {
     log_step "Verifying enrollment"
 
@@ -678,7 +596,6 @@ verify_enrollment() {
     local the_hostname
     the_hostname=$(hostname -f 2>/dev/null || hostname)
 
-    # Build JSON payload safely using jq to prevent injection
     local json_payload
     json_payload=$(jq -n \
         --arg user "__test__" \
@@ -686,12 +603,8 @@ verify_enrollment() {
         --arg server_group "$SERVER_GROUP" \
         '{user: $user, host: $host, server_group: $server_group}')
 
-    # Try to call /pam/authorize to verify the token works.
-    #
-    # Signed like every other /pam/ call (#247). This one is easy to forget --
-    # it is a post-enrolment sanity check, not part of the running system --
-    # and forgetting it would make every enrolment report "could not verify"
-    # the day the portal is switched to pamAccessRequestSigningMode=required.
+    # Signed like every /pam/ call, or verification fails once the portal sets
+    # pamAccessRequestSigningMode=required.
     build_curl_opts
     # Read by ob-sign-lib.sh, which shellcheck cannot follow across the `.`.
     # shellcheck disable=SC2034
@@ -710,7 +623,6 @@ verify_enrollment() {
         return 0
     }
 
-    # Check if we got a valid response (even if user not found)
     local authorized
     authorized=$(echo "$response" | jq -r '.authorized // empty' 2>/dev/null)
 
@@ -725,7 +637,6 @@ verify_enrollment() {
     fi
 }
 
-# Display final summary
 show_summary() {
     log_step "Enrollment complete"
 
@@ -748,16 +659,8 @@ show_summary() {
     echo ""
 }
 
-# Arm the heartbeat timer so the freshly minted token keeps getting refreshed.
-#
-# ob-heartbeat.timer ships enabled, but its
-# ConditionPathExists=/var/lib/open-bastion/token is false at package-install
-# time (enrollment runs afterwards), so the install-time start is skipped and
-# the timer only arms on the next reboot. Until then the short-lived access
-# token expires with nothing to refresh it: PAM then falls back to the offline
-# cache (SSH login works but no bastion voucher is minted, so ob-ssh breaks) and
-# sudo locks out ("server token expired"). Start it here, right after the token
-# is in place. Only meaningful when the token sits at the path the timer watches.
+# The timer's ConditionPathExists (the token) was false at package install, so
+# it would only arm at next reboot and the access token would expire unrefreshed.
 arm_heartbeat_timer() {
     [ "$TOKEN_FILE" = "/var/lib/open-bastion/token" ] || return 0
     [ -s "$TOKEN_FILE" ] || return 0
@@ -770,9 +673,7 @@ arm_heartbeat_timer() {
     fi
 }
 
-# Main function
 main() {
-    # Check if running as root
     if [ "$(id -u)" != "0" ]; then
         log_warn "Not running as root. Token file permissions may be incorrect."
     fi
@@ -781,7 +682,6 @@ main() {
     load_config
     parse_args "$@"
 
-    # Accept client_secret from environment variable (highest priority)
     if [ -n "${OB_CLIENT_SECRET:-}" ]; then
         CLIENT_SECRET="$OB_CLIENT_SECRET"
     fi

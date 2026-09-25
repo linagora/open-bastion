@@ -3,22 +3,10 @@ Description=Open Bastion SSH key revocation list refresh timer
 Documentation=man:ob-krl-refresh(8)
 
 [Timer]
-# Every 30 minutes, on the hour and the half hour: the schedule of the
-# `*/30 * * * *` cron job this replaces (#281). Not enabled at install time:
-# only a Mode E host (ob-bastion-setup --max-security) reads a revocation list,
-# and the setup enables this timer there. A different interval is a drop-in,
-# /etc/systemd/system/ob-krl-refresh.timer.d/schedule.conf, which the setup
-# writes for --krl-refresh-interval:
-#
-#     [Timer]
-#     OnCalendar=
-#     OnCalendar=*:0/10
+# --krl-refresh-interval overrides this in ob-krl-refresh.timer.d/schedule.conf.
 OnCalendar=*:0/30
-# A host that was off when a refresh was due runs one as soon as it is back,
-# instead of trusting a list that may be hours old.
 Persistent=true
-# Spread a fleet's requests to the portal. Short enough to stay well inside the
-# interval.
+# Spreads a fleet's requests to the portal, well inside the interval.
 RandomizedDelaySec=1min
 
 [Install]

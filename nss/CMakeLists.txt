@@ -1,8 +1,5 @@
-# CMakeLists.txt for libnss_openbastion
-
-# NSS library
 # str_utils.c is shared with the PAM module: the NSS config loader reuses
-# str_parse_bool_strict() so both parsers agree on what a boolean is (#183).
+# str_parse_bool_strict() so both parsers agree on what a boolean is.
 add_library(nss_openbastion SHARED
     libnss_openbastion.c
     ../src/str_utils.c
@@ -20,7 +17,7 @@ target_link_libraries(nss_openbastion
     pthread
 )
 
-# NSS modules have specific naming convention: libnss_NAME.so.2
+# NSS modules must follow the libnss_NAME.so.2 naming convention.
 set_target_properties(nss_openbastion PROPERTIES
     OUTPUT_NAME "nss_openbastion"
     VERSION 2
@@ -28,35 +25,31 @@ set_target_properties(nss_openbastion PROPERTIES
     PREFIX "lib"
 )
 
-# Compiler flags
 target_compile_options(nss_openbastion PRIVATE
     -Wall -Wextra -fPIC
     -D_GNU_SOURCE
-    # Security hardening flags
-    -fstack-protector-strong      # Stack buffer overflow protection
-    -Wformat -Wformat-security    # Format string vulnerability detection
-    -fvisibility=hidden           # Hide internal symbols, reduce attack surface
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    -fvisibility=hidden
 )
 
-# Note: _FORTIFY_SOURCE is set by distribution build systems (Debian hardening)
-# Do not set it here to avoid redefinition warnings with -Werror
+# _FORTIFY_SOURCE is set by distribution build systems (Debian hardening);
+# setting it here too triggers a redefinition warning under -Werror.
 
-# Linker security flags (Full RELRO = relro + now)
+# -z,relro and -z,now together give Full RELRO; either alone is partial.
 target_link_options(nss_openbastion PRIVATE
-    -Wl,-z,relro                  # RELRO (with -z,now = Full RELRO)
-    -Wl,-z,now                    # Resolve symbols at load time (completes Full RELRO)
-    -Wl,-z,noexecstack            # Non-executable stack
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
 )
 
-# Install NSS module to the same libdir as PAM module
-# NAMELINK_SKIP prevents installing the .so symlink (only needed for development)
-# NSS modules are loaded by versioned name (libnss_NAME.so.2)
+# NAMELINK_SKIP: NSS modules are loaded by the versioned name
+# (libnss_NAME.so.2), so the development .so symlink is not needed.
 install(TARGETS nss_openbastion
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     NAMELINK_SKIP
 )
 
-# Install config file template
 install(FILES ${CMAKE_SOURCE_DIR}/config/nss_openbastion.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )

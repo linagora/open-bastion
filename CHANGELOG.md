@@ -7,458 +7,207 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Will ship as 0.7.0. Before deploying, read
-[UPGRADE-NOTES.md](UPGRADE-NOTES.md): it changes the fingerprint spool's owner,
-the `auth` line of certificate-mode PAM stacks, and the accepted permissions of
-`cache.key`. The fix for #263 shipped ahead of this release as 0.6.3, documented
-in that section below; it is in 0.7.0 too, and is not listed twice.
+Will ship as 0.7.0. Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before
+deploying: every host needs `ob-post-upgrade`, certificate-mode PAM stacks
+and `cache.key` permissions must be checked, and bastions now end sessions at
+`max_duration`. The #263 fix, released as 0.6.3, is included and not repeated
+here.
 
-> **Known issue.** SELinux `enforcing` (Rocky/RHEL/AlmaLinux) is untested with
-> the on-disk NSS cache. An NSS module writes from `sshd_t`, `sudo_t` and
-> friends rather than from a daemon of its own, and a denied write is silent by
-> design, so the cross-process cache may never populate there. No policy module
-> ships with the RPM; `doc/admin-guide.md` gives the `ausearch`/`audit2allow`
-> check to run first.
+> **Known issue.** The on-disk NSS cache is untested under SELinux `enforcing`
+> (Rocky/RHEL/AlmaLinux) and may silently never populate there; no policy
+> module ships. See the check in [doc/admin-guide.rst](doc/admin-guide.rst).
 
 ### Added
 
-- **`ob-post-upgrade`(8)** finishes a package upgrade with no arguments. An
-  upgrade replaces the daemon but not the host-generated sshd principals helper,
-  and the only cure was re-running the setup with arguments nobody kept. It
-  derives the helper text, tmpfiles rule, socket and spool ownership from the
-  host, reading `openbastion.conf` for `node_role` alone. It deliberately does
-  **not** enrol — a new device id matches no backend allowlist — and does not
-  touch the server token, `sshd_config` or any PAM stack.
-- **`ob-client-jwt`(8)** builds `ob-enroll`'s `client_secret_jwt` assertion with
-  the secret on stdin (#256). See Security below.
-- **`--enable-sudo-fresh-otp`** on `ob-bastion-setup` and `ob-backend-setup`
-  (#178). `sudo`'s own credential cache (15 min, idle) makes it skip the PAM
-  `auth` phase, so "a fresh SSO re-authentication for each `sudo`" was not what
-  a user experienced. The flag writes `timestamp_timeout=0` scoped to the SSO
-  group. Opt-in: it would otherwise start prompting inside scripts. What it does
-  **not** change is in `doc/pam-modes.md` and risk R-S16.
-- **The postinst reports a mode-c install on an sshd that still accepts
-  passwords** (#180), and escalates under `UsePAM no`, where sshd reads
-  `/etc/shadow` itself. Reported only: turning passwords off from a package
-  script can lock out an administrator on a password session.
-- **The PAM module invalidates the NSS file cache directly**, by name and by
-  uid, so user and group-membership changes are visible at once. The
-  `nscd --invalidate` fork is kept where `nscd` still exists, because glibc
-  routes `group` through it and this module implements `passwd` only.
-- **[UPGRADE-NOTES.md](UPGRADE-NOTES.md)** — what to do or check before
-  deploying, starting with the `lemonldap-ng-plugins` 0.6.0 upgrade.
-- **The EBIOS RM study is now complete** (#212, #216, #217, #218). `doc/security/`
-  held only workshop 4. Workshops 1–3, the treatment plan (29 measures) and the
-  homologation dossier are added, plus eight workshop-4 sheets for the LLNG
-  portal and its four plugins — a trusted boundary that had none. Owner names,
-  dates and acceptance decisions are left `À COMPLÉTER`: they belong to the
-  homologation authority. Start at [doc/security/index.rst](doc/security/index.rst).
-- **Mutation testing runs in CI** (`tests/test_ob_mutation.sh`, catalogue in
-  `tests/mutation/`). Each entry removes one security control and requires the
-  suite guarding it to fail; a surviving mutant means a green suite that checks
-  nothing. That is what the 0.7.0 reviews kept finding one PR at a time — a
-  `grep` matching the comment above a rule, an assertion passing because the
-  probed file was absent — none of them coverage gaps. Writing the catalogue
-  found four more, including one real gap. A mutation that does not apply is a
-  hard error; C mutants are rebuilt; a suite that **skips** is refused rather
-  than read as a surviving mutant; each entry declares `root` or `nonroot` and
-  the runner switches privilege for it.
-- **`tests/test_ob_ci_coverage.sh`** fails when a test file exists that no CI job
-  runs. `test_backend_cert_acceptance.sh` and `test_integration_token_svc.sh`
-  had been exiting 1 in silence; both are now wired into the Docker job. A test
-  nobody runs looks like coverage in review and in an audit.
-- **`tests/test_ob_upgrade.sh`** upgrades a host staged from the `v0.6.2` tag.
-  Both halves are pinned: that installing the package does **not** migrate the
-  `0700 nobody` spool, and that `ob-post-upgrade` then does.
-- **The legacy portal image is pinned** (`docker-demo-cert`), so
-  `ob-bastion-id`'s fallback to the removed `/pam/bastion-token` probe keeps its
-  only coverage. On `:latest` it would vanish silently, suite still green.
-- **`tests/test_ob_bastion_id.sh`** replays `ob-bastion-id` against a mock portal
-  in every shape it must survive, including LemonLDAP::NG's catch-all HTML.
+- **`ob-post-upgrade`(8)**: finishes a package upgrade with no arguments
+  (principals helper, tmpfiles rule, sockets, spool ownership). It does not
+  enrol and does not touch the server token, `sshd_config` or PAM stacks.
+- **`ob-client-jwt`(8)** and **`ob-sign-request`(8)**: build `ob-enroll`'s
+  `client_secret_jwt` assertion and sign `/pam/*` requests with the secret on
+  stdin (see Security).
+- **`--enable-sudo-fresh-otp`** on the setup script (#178): sets
+  `timestamp_timeout=0` for the SSO group so every `sudo` re-authenticates.
+  Opt-in; limits in [doc/pam-modes.rst](doc/pam-modes.rst).
+- **The postinst warns when a mode-c host's sshd still accepts passwords**
+  (#180), louder under `UsePAM no`. It reports only; it changes nothing.
+- **`min_gid` / `max_gid`**: server-supplied GIDs are checked against their own
+  range, no longer the UID range (an LDAP `gidNumber` such as `1000` was
+  replaced by `default_gid`); `gid 0` and `nogroup` are always refused, and an
+  out-of-policy GID is logged.
+- **Complete EBIOS RM study** (#212–#218): workshops 1–3, treatment plan,
+  homologation dossier and LLNG portal sheets, with matrices checked against
+  the sheets in CI. Owner, date and acceptance fields are left `À COMPLÉTER`.
+  Start at [doc/security/index.rst](doc/security/index.rst).
+- **Portal-outage matrix** in [doc/offline-mode.rst](doc/offline-mode.rst)
+  (#165), including when a personal SSH key is a usable fallback.
+- **`ob-krl-refresh`(8)**: the Mode E KRL refresh, packaged. It reads the
+  portal settings from `openbastion.conf` at every run, installs only a list
+  that parses as a KRL (sshd reads a broken one as revoking every key),
+  replaces `/etc/ssh/revoked_keys` atomically and fails its unit on error,
+  keeping the current list. It runs sandboxed from `ob-krl-refresh.timer`,
+  every 30 minutes; **`--krl-refresh-interval`** (1 to 60 minutes) changes
+  that. See [doc/pam-modes.rst](doc/pam-modes.rst).
 
 ### Changed
 
-- **One setup script for the three node roles** (#288). `ob-bastion-setup` and
-  `ob-backend-setup` were two 2,400-line copies whose diff ran to 1,760 lines,
-  much of it fixes that had reached only one of them. `ob-backend-setup` is now
-  a symlink to `ob-bastion-setup`, like `ob-standalone-setup`: the name picks
-  the default role and `--node-role` overrides it. **`--node-role` now
-  configures the role it names**; it used to change only the label, so
-  `ob-bastion-setup --node-role backend` wrote a complete bastion (session
-  recorder, `ForceCommand`, a principals helper that accepts direct SSO
-  certificates) recorded as `backend`, and `ob-backend-setup --node-role
-  bastion` the reverse. Options of one role are refused for another with the
-  reason (`--no-sudo`, `--no-create-user`, `--allowed-bastions`,
-  `--allow-any-bastion` outside a backend; `--disable-session-recorder` on one),
-  `--help` lists only the options of the role in effect, and one man page,
-  `ob-bastion-setup`(8), documents all three names. **Switching a host's
-  role** is supported: the other role's sshd drop-in is removed, the principals
-  helper is replaced only right before sshd restarts, and a backend disables a
-  bastion's `ob-cert.socket` and `ob-record.socket`. A backend's LLNG sudo stack
-  is left on a new bastion, with a warning; an sshd without `sshd_config.d`
-  refuses the switch. A `--yes` run under an unknown command name must pass
-  `--node-role`. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A4).
-- **No Open Bastion job runs from cron any more: both are systemd timers**
-  (#281). The Mode E KRL refresh was `/etc/cron.d/open-bastion-krl` running a
-  script the setup generated into `/usr/local/bin/open-bastion-refresh-krl`,
-  with the portal URL, TLS setting and timeout frozen in at setup time. It is
-  now **`ob-krl-refresh`**(8), a packaged program run by
-  `ob-krl-refresh.timer` every 30 minutes, which reads those settings from
-  `openbastion.conf` at every run. It installs a list only if it carries the
-  KRL header and parses with `ssh-keygen -Q` — sshd reads a broken list as
-  revoking every key — and replaces `/etc/ssh/revoked_keys` by rename, where
-  the old script used `mv` from `/tmp`, a copy across filesystems. Failures
-  leave the current list and fail the unit, instead of the job's silence. The
-  service runs without capabilities, with only `/etc/ssh` writable and the
-  sshd configuration in it read-only. **`--krl-refresh-interval`** sets another
-  interval (1 to 60 minutes) through a drop-in. The `--enable-audit-trace`
-  rotation, a script copied into `/etc/cron.daily`, is `ob-audit-rotate.timer`.
-  Both timers ship disabled and are enabled by the setup where they apply;
-  `ob-post-upgrade` and a new setup run move a 0.6 host over, keeping the
-  interval, and remove each old job only once its timer is active. The
-  hardening step no longer warns about `root` missing from `cron.allow`, which
-  nothing of ours needs. The Mode E demo no longer installs cron. See
-  [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
-- **`SECURITY.md` is a reporting policy again** (#276). It had grown to 986 lines
-  describing the product, with the policy a few lines at the top. It now holds
-  what the [OpenSSF finder guide](https://github.com/ossf/oss-vulnerability-guide/blob/main/finder-guide.md)
-  asks: the channel (security@linagora.com, never an issue or a PR), what to
-  send, what happens next and by when, a safe harbour, supported versions and
-  disclosure. The rest moved unchanged to **`doc/security-reference.md`**.
-- **The documentation is a Sphinx project** and ships as HTML. The two document
-  sets under `doc/` — the English technical documentation and the French EBIOS
-  Risk Manager study under `doc/security/` — are now reStructuredText and build
-  into one site with two parts. Cross-document links became `:doc:`/`:ref:`
-  roles, so a link to a page or a section that no longer exists is a build
-  failure rather than a 404 a reader finds first: the `docs` CI job builds with
-  `-W`, which also catches an orphan document and a table Sphinx cannot parse.
-  The HTML is built by CMake behind `-DBUILD_DOC=ON` (off by default, so the
-  ordinary build still needs no Python) and shipped in a new **`open-bastion-doc`**
-  binary package, installable on its own — a workstation can hold the
-  documentation without the PAM/NSS runtime. Each tag publishes it like every
-  other package: in the APT repository under `bookworm`, `trixie` and `noble`,
-  and attached to the GitHub release. References to `doc/*.md` across the
-  tree, scripts and man pages included, now name the `.rst` files.
-- **The sshd anchor walk lives in one place** (#268). `ob-fp-daemon` and
-  `pam_openbastion` each carried a copy, kept in step by a comment; a divergence
-  would break the SSH fingerprint binding silently. Both now call
-  `ob_find_sshd_anchor()`, covered by `tests/test_sshd_anchor.c` and two
-  mutation entries. No behaviour change.
-- **systemd units live in one place** (#254). The `debian/` copies of the socket
-  units had drifted — `UMask=0077` and the syscall filter never reached them. No
-  shipped unit lacked the hardening; the damage was two files looking
-  authoritative while one was wrong. All six install from `systemd/`, and a test
-  fails if unit content reappears under `debian/`.
-- **`ob-bastion-id` asks `POST /pam/whoami`** instead of the removed
-  `/pam/bastion-token` (#246), falling back to the legacy probe for 0.5.x. The
-  device id is unchanged: no `allowed_bastions` rewriting, no re-enrolment. LLNG
-  serves its login page with a 200 for any unregistered `/pam/*`, so the fallback
-  triggers on that too. Exit 2 is now "failed or refused", 3 "no identity in it".
-- **The lab deployment scripts no longer invent a `bastion_id`** when
-  `ob-bastion-id` fails (#246). They wrote the literal `ob-bastion` into
-  `allowed_bastions`, which matches no hop certificate, so hops were refused
-  several phases later with errors pointing at certificates.
-- **Request signing has one implementation, pinned to the portal's** (#247), in
-  `src/ob_sign.c`, shared by the PAM module, `ob-cert-daemon` and
-  `ob-sign-request`. `tests/test_ob_sign.c` checks the wire format against
-  `Digest::SHA`'s `hmac_sha256_hex` — the function `PamAccess.pm` itself calls.
-  A signing failure now fails the request instead of falling back to an unsigned
-  one; the exception is `ob-session-monitor`.
-- **`ob-builder` artefacts carrying the client secret are no longer
-  world-readable** (#203), and an embedded bundle gets a `.gitignore`. Bundles
-  built with the default `client_secret_mode: prompt` are unchanged.
-- **`ob-ssh` / `ob-scp` / `ob-sftp` lost their privileged shortcut around
-  `ob-cert-daemon`** (#202) — a branch calling `/pam/bastion-cert` directly with
-  the bastion's bearer token whenever the caller could read the token file, with
-  none of the daemon's checks. All callers now take the same audited path.
-- **The bastion→backend host-key policy can be tightened** (#202).
-  `StrictHostKeyChecking=accept-new` was passed *before* the operator's
-  `SSH_OPTIONS` and `ssh` keeps the first value, so the TOFU default could not be
-  overridden at all. It is now emitted only when `SSH_OPTIONS` does not set it.
-- **An unrecognised key in `openbastion.conf` is logged** (#229) — which is how
-  `auth_cache_offline_ttl`, a key the module never parsed, stayed in the
-  documentation. Still ignored, so no host is locked out; the key alone is
-  logged, never the value. `tests/test_ob_config_keys.sh` fails if a generator
-  emits a key the parser does not know. The authorization cache has **no** local
-  TTL setting; see [doc/configuration.rst](doc/configuration.rst).
-- **`SECURITY.md` documents the cache that actually exists** — the `LLNGCACHE04`
-  authorization cache — instead of the deleted token cache, whose documented
-  layout did not match its code either. Same correction in
-  `doc/security/00-architecture.md`.
-- **Every EBIOS matrix now agrees with the sheets it summarises** (#213, #214,
-  #215). The five hand-maintained matrices had drifted: risks a column off,
-  scores no sheet states, 11 analysed risks missing, three values for `R-S18`.
-  An evaluator reads the matrix, not the sheets. All five are derived from the 39
-  sheets, and `tests/ebios_matrix_check.py` fails in CI on any divergence.
-- **A failing `ctest` keeps its log, and the concurrency test says why it
-  failed** (#244). The three `ctest` jobs now upload `Testing/Temporary/` on
-  failure. `test_concurrent_failed_attempts` (the #186 lockout regression) had
-  four silent failure paths, one of which made the test **pass** on a barrier
-  that had not worked.
-- **The `test_offline_cache` flake was a one-second TTL boundary in the test**
-  (#244), not a concurrency bug: 0.01% per run on tmpfs, 0.2% on ext4. The
-  margin is widened; no production code changed.
-- **`doc/offline-mode.md` states what actually works during a portal outage**
-  (#165) — an eleven-row matrix, including whether a personal SSH key on the
-  bastion is a usable fallback (Mode E: no; key modes: yes, at a stated cost).
-  The key-mode path is labelled as analysis, not lab-validated.
-- **Resilience to an LLNG outage no longer depends on `nscd`, and the buffer is
-  shorter.** The NSS cache expires at `cache_ttl` (default 300 s) and never
-  serves stale data, so `getent` stops resolving about that long after the last
-  successful lookup. Raise `cache_ttl` for a longer buffer; the trade-off is in
-  `doc/admin-guide.md`.
-- **Only root can refill the NSS cache**, now visible in normal operation: past
-  `cache_ttl` in a long idle session, `id` fails and outgoing `ssh` says
-  `You don't exist, go away!`. Any root-side lookup repairs it at once — a
-  nuisance, not a lockout. A socket-activated refresher is not implemented yet.
-- **A lookup for a user that does not exist reaches LLNG on every attempt.**
-  Negative results are cached in memory only, per process: the on-disk cache is
-  populated from an unauthenticated path, and letting `sshd` create files there
-  would let a remote client fill it with inodes.
+- **One setup script for the three roles** (#288): `ob-backend-setup` and
+  `ob-standalone-setup` are symlinks to `ob-bastion-setup`, documented in
+  `ob-bastion-setup`(8). **`--node-role` now configures the role it names**
+  (it used to change only the label), switching a host's role is supported,
+  options of another role are refused and `--help` lists only the current
+  role's options. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A4).
+- **Documentation is a Sphinx (reStructuredText) project**, built with
+  `-DBUILD_DOC=ON` and shipped as HTML in the new **`open-bastion-doc`**
+  package (APT and GitHub release). References to `doc/*.md` now name `.rst`
+  files.
+- **`SECURITY.md` is a reporting policy only** (#276); the product security
+  description moved to [doc/security-reference.rst](doc/security-reference.rst).
+- **`ob-bastion-id` uses `POST /pam/whoami`** (#246), falling back to the legacy
+  `/pam/bastion-token` probe for older portals. The device id is unchanged.
+  Exit 2 means failed or refused, 3 means no identity in the answer.
+- **A request-signing failure fails the request** instead of sending it
+  unsigned, except in `ob-session-monitor` (#247).
+- **Unknown keys in `openbastion.conf` are logged** (key only, never the value)
+  and still ignored (#229). The authorization cache has no local TTL setting;
+  see [doc/configuration.rst](doc/configuration.rst).
+- **The PAM module invalidates the NSS file cache directly**, so user and group
+  changes are visible at once; `nscd --invalidate` is still called where `nscd`
+  exists.
+- **NSS outage buffer is `cache_ttl`** (default 300 s), no longer `nscd`: the
+  cache never serves stale data, so `getent` fails about that long after the
+  last successful lookup. Trade-off in [doc/admin-guide.rst](doc/admin-guide.rst).
+- **Only root refills the NSS cache**: in a session idle past `cache_ttl`, `id`
+  fails and outgoing `ssh` says `You don't exist, go away!` until any root-side
+  lookup repairs it.
+- **Lookups of non-existent users reach LLNG every time**: negative results are
+  cached in memory, per process, never on disk.
+- **The KRL refresh and the audit-trace rotation are systemd timers** (#281),
+  `ob-krl-refresh.timer` and `ob-audit-rotate.timer`, instead of
+  `/etc/cron.d/open-bastion-krl` and `/etc/cron.daily/open-bastion-audit-rotate`.
+  No Open Bastion job runs from cron. Both timers ship disabled and the setup
+  enables them where they apply; `ob-post-upgrade` migrates a 0.6 host,
+  keeping its interval. `--enable-hardening` no longer asks for `root` in
+  `cron.allow`. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A5).
 
 ### Removed
 
-- **`secret_store`, the last dead cryptographic module** (#225). Every entry
-  point was reachable only from its own unit test. This removes AES-GCM code and
-  writes under `/etc/open-bastion` from a root PAM module, and settles two
-  findings that had landed inside dead code (#187, #184). The docs advertised
-  `secrets_encrypted = true`; secrets in `openbastion.conf` are protected by file
-  permissions only. **Not** removed: `src/cache_key.c`, `src/offline_cache.c`.
-- **The dead token cache, `client_context`, and the kernel-keyring settings.**
-  All three were documented as active features and never wired into the PAM
-  chain — no `add_key` or `keyctl` call existed behind `secrets_use_keyring`.
-  Rewiring the cache would have reopened an offline authentication path nothing
-  needs. Their settings still parse as unknown keys, so existing files load.
-  **Not** removed: `src/auth_cache.c` and the `cache_rate_limit_*` settings.
-- **`nscd` is no longer a dependency.** The NSS module keeps its own in-memory
-  and on-disk cache, and `nscd` is deprecated upstream. Existing hosts are left
-  alone. (Its `SIGABRT` in this module's NSS path was a double-free fixed in
-  0.6.1 — not a reason to avoid it, only how the redundancy was noticed.)
+- **`secret_store`** (#225): `secrets_encrypted` never worked; secrets in
+  `openbastion.conf` are protected by file permissions only.
+- **The token cache, `client_context` and the kernel-keyring settings**
+  (`secrets_use_keyring`): documented but never wired in. Their keys now parse
+  as unknown keys, so existing files still load. The documentation now
+  describes the actual `LLNGCACHE04` authorization cache.
+- **`nscd` dependency.** Existing installations are left alone.
 
 ### Fixed
 
-- **Setup fixes that had reached only one of the two scripts** (#288), found
-  while merging them. On a **bastion or standalone host**, the summary reported
-  "Audit trace: applied" whenever `--enable-audit-trace` was given, even when
-  auditd was missing, the prompt was declined or the rules failed to install;
-  it now reports what happened. On a **backend**, NSS was configured before
-  enrollment, where a rolled-back run left `openbastion` in `nsswitch.conf` with
-  its configuration file deleted; it is now configured with the lockdown, as on
-  a bastion. A backend in Mode E now creates the `open-bastion-sudo` group and
-  its sudoers rule itself, and `--no-sudo` with `--max-security` — which used to
-  install the token-only sudo stack with no rule, so no SSO user could elevate —
-  is refused. The Mode E summary states the sudo credential-cache setting on a
-  backend too, and a 404 on `/oauth2/device` names the portal setting to
-  enable. `--help` no longer tries to execute the `Defaults:` sudoers line it
-  quotes, which printed "(writes )" on every role. On a backend, a failed
-  write of `allowed_bastions` is no longer ignored (it left the principals
-  helper in legacy mode, accepting direct SSO certificates), and the list is
-  written before the helper.
-- **The bastion principals helper denies when a backend's sshd calls it**
-  (#288). A backend's sshd has no `ForceCommand` and passes the certificate
-  key-id; the bastion helper, which vouches for nothing, printed the principal
-  for any certificate. Reached during a backend-to-bastion switch, before sshd
-  restarts, that admitted a direct SSO certificate with no recording.
-- **Three records that contradicted the tree** (#268): a `SECURITY.md` bullet
-  still naming the removed secret store, and two treatment-plan measures (MT51,
-  MT52) left "en revue"/"ouvert" with #248 and #252 merged.
-- **The SSH key policy is now actually enforced, fail-closed** (#181).
-  `ssh_key_policy_enabled` enforced nothing: the check read `SSH_USER_AUTH`,
-  which sshd does not export during `pam_acct_mgmt` on OpenSSH >= 9.8, and
-  skipped the block on `NULL`; `ssh_key_policy_check_rsa_size()` had no
-  production caller. `ob-ssh-principals` now writes a second spool drop carrying
-  the key blob, cross-checked against the fingerprint, and an unidentifiable key
-  **denies**. Still defaults to `false`; the postinst warns when it finds the
-  policy enabled next to a pre-v1 helper.
-- **Service-account `sudo` with `sudo_nopasswd = false` works at all** (#194).
-  The fingerprint check read `SSH_USER_AUTH`, absent from a `sudo` PAM handle, so
-  the branch always returned `PAM_AUTH_ERR` — leaving `sudo_nopasswd = true`,
-  which grants sudo with no proof of identity, as the only workable setting. The
-  fingerprint is now also recovered from the spool.
-- **`fingerprint_required` covers service accounts, and their SSH check runs.**
-  The service-account branch returned `PAM_SUCCESS` before the enforcement block,
-  so a setting documented as covering "every SSH login" skipped them. Now
-  documented in `doc/admin-guide.md`: it is condition of use CE09 and the
-  assumption behind the R-S3 / R-S15 residual scores.
-- **A missing `.key` drop is no longer reported as a missing key binding.** It
-  only exists when `sshd` passes `%t`; its absence is a missing capability the
-  caller handles by falling back. WARN for `.fp`, DEBUG for the rest.
-- **A server-supplied `gid` is no longer validated against the synthetic UID
-  range.** An LDAP `gidNumber` such as `1000` fell outside `[min_uid, max_uid]`
-  and was silently replaced by `default_gid`. GIDs now have `min_gid`/`max_gid`;
-  `gid 0` and `nogroup` are refused whatever the configuration says, and an
-  out-of-policy gid is logged with its value.
-- **A rejected `/pam/verify` token fails cleanly** instead of looking like a
-  server outage. The plugin answers `valid:false` with no `user` field, the
-  client required `user` unconditionally, and the resulting
-  `PAM_AUTHINFO_UNAVAIL` fell through to `pam_unix` under `auth sufficient`. The
-  reason is surfaced and authentication fails with `PAM_AUTH_ERR`.
-- **Three defects in `ob-bastion-id`'s own error paths**: `die()` appended the
-  exit code to every message as a stray digit; a portal answering 200 with no
-  identity exited 2 where the contract says 3; and a JWT whose payload is not
-  base64url killed the script under `set -e` before its own `die` could run.
+- **Setup script** (#288):
+  - the audit-trace summary reports what was actually applied;
+  - a backend configures NSS with the lockdown, so a rolled-back run no longer
+    leaves `openbastion` in `nsswitch.conf` without its configuration;
+  - a Mode E backend creates the `open-bastion-sudo` group and sudoers rule, and
+    `--no-sudo --max-security` (which left no SSO user able to elevate) is
+    refused;
+  - a failed write of `allowed_bastions` aborts, and the list is written before
+    the principals helper;
+  - a 404 on `/oauth2/device` names the portal setting to enable; the Mode E
+    summary shows the sudo credential-cache setting on a backend; `--help` no
+    longer prints "(writes )".
+- **The bastion principals helper denies when called by a backend's sshd**
+  (#288) instead of admitting a direct SSO certificate without recording.
+- **`ssh_key_policy_enabled` is enforced, fail-closed** (#181): it enforced
+  nothing on OpenSSH >= 9.8. Still off by default; the postinst warns if it is on
+  with a pre-v1 principals helper.
+- **Service-account `sudo` with `sudo_nopasswd = false` works** (#194).
+- **`fingerprint_required` also covers service accounts**; see
+  [doc/admin-guide.rst](doc/admin-guide.rst).
+- **A rejected `/pam/verify` token fails with `PAM_AUTH_ERR`** and its reason,
+  instead of `PAM_AUTHINFO_UNAVAIL` falling through to `pam_unix`.
+- **A missing `.key` spool drop is logged at DEBUG**, not as a missing binding
+  (WARN is kept for `.fp`).
+- **`ob-bastion-id`**: no stray digit in error messages, exit 3 on a 200 without
+  identity, clean error on a malformed JWT; LLNG's catch-all HTML page triggers
+  the legacy fallback.
+- **Lab deployment scripts stop when `ob-bastion-id` fails** instead of writing a
+  bogus `ob-bastion` into `allowed_bastions` (#246).
 
 ### Security
 
-- **A client could open a shell on the bastion that was never recorded**
-  (#287). The recorder ran any command that *looked* like scp, rsync or sftp
-  -- first word `scp`, a ` -t ` somewhere -- through the user's shell with no
-  typescript, so `ssh -tt bastion 'scp -t /tmp/x; bash'` was an interactive
-  shell whose recording was an empty file. The check is now an allow-list of
-  the exact forms genuine clients send, executed as an argument vector from a
-  root-owned path, never through a shell; anything else is recorded like any
-  command, and a session with a terminal is never a transfer. Known cost:
-  rsync with `--secluded-args` now fails. See
-  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) A6.
-- **Session recordings no longer end, or lie, on their own** (#287). The sink
-  finalized any session silent for 30 s as `aborted`, and the user was then
-  disconnected at the next keystroke; it now bounds a connection by the
-  liveness of the connecting process (ob-record-connect) and a total duration
-  cap (7 days) instead. A forwarder killed from inside the session left a
-  recording stamped `completed`: the stream is now framed with an end-of-stream
-  marker, and without it the recording is `aborted` (EBIOS MT34).
-  `max_duration` never fired -- bash deferred its signal trap until the session
-  had ended -- and now ends the session, so **sessions are cut after the 8
-  hours `ob-bastion-setup` configures** (24 without a value). The recorder no
-  longer takes its `PATH`, its sink socket or its tunables (`OB_MAX_SESSION`
-  and the other `OB_*` variables) from the recorded user's environment, escapes
-  every header field and every client string it logs, and keeps its FIFO in a
-  private directory it always removes.
-- **A rejected recording header can no longer let the command run unrecorded**
-  (#287). A command long enough to push the metadata header past the sink's
-  8 KiB cap was refused by the sink *after* the connection was made, but the
-  connector was still blocked on the FIFO and looked alive, so the shell ran
-  with no recording. The sink now sends a one-byte ACK once the metadata and
-  recording file exist; the connector waits for it and the recorder refuses the
-  session without it, which also covers a duplicate session id, a wrong
-  protocol version and a failed directory setup. The recorder additionally
-  refuses an over-long command up front, and logs a refused command by length
-  and hash, not in full. The no-jq header fallback and the syslog helper escape
-  the C1 controls U+0080–U+009F (e.g. the CSI introducer), matching their UTF-8
-  form `0xc2 0x80`–`0xc2 0x9f` so valid UTF-8 is left intact; jq and the sink's
-  json-c already keep those code points as data, so the primary path was never
-  affected.
-- **The recording socket bounds concurrency** (#287). Because a recorded
-  connection now lives for the whole session, `ob-record.socket` raises
-  `MaxConnections` above the systemd default of 64 and adds
-  `MaxConnectionsPerSource`, so a local user cannot hold the world-connectable
-  socket's connection slots open and block every login.
-- **R-P1 is now a release prerequisite, not an assumption** (#268). With
-  `pamAccessServerGroups` empty — the shipped default, and what
-  `doc/bastion-architecture.md` used to recommend — `server_group` is read from
-  the request body, so any compromised enrolled host of the project can declare
-  itself a bastion on `/pam/authorize` and obtain a hop voucher for a user.
-  `pamAccessServerGroups`, `pamAccessAllowedRps`, published plugins and a
-  non-empty `allowed_bastions` are **blocking** conditions (CE03, CE21, CE16,
-  CE06), and the docs now say so, including the cost: one `client_id` per server
-  group. The product cannot verify the portal-side half, so the enforcement is
-  declarative and sits everywhere an operator passes — the four setup commands
-  print it on every run, and `ob-builder` writes a `PORTAL-CHECKLIST.md`
-  pre-filled with that deployment's `client_id` and `server_group`, which matters
-  most for the Ansible role.
-- **The offline cache key file is opened non-blocking** (#268). The six refusals
-  `cache.key` must pass are checked after the `open()`, and opening a fifo
-  read-only waits for a writer — so a fifo at that path made the "not a regular
-  file" refusal unreachable and parked the caller, which on the PAM path is a
-  login that never finishes. Found while writing `tests/test_cache_key.c`, which
-  covers all six refusals; they had shipped with no test.
-- **`ob-enroll` no longer puts the OIDC client secret on a command line** (#256).
-  It signed with `openssl dgst -hmac "$client_secret"`, and OpenSSL reads the key
-  only from `argv`, which `/proc/<pid>/cmdline` publishes to every local user.
-  The call sits in the device-grant polling loop, so the secret landed there of
-  the order of sixty times over five minutes — exactly while the operator is away
-  approving the grant. `ob-client-jwt`(8) reads it on stdin instead, with no
-  fallback to the `openssl` path.
-- **`ob-session-monitor` no longer terminates sessions because it failed to reach
-  the portal** (#257). `curl -sf` fails on a connection error, a timeout **and
-  any HTTP status >= 400**, and the caller reads non-zero as "revoked" — so a
-  500, a rate limit or an overnight token expiry terminated every offline session
-  while logging "no longer valid on LLNG", which was untrue. There are now three
-  outcomes — valid, revoked, unknown — and only `found: false` can terminate.
-- **The SSH fingerprint spool no longer trusts `nobody`** (#249). `sshd` requires
-  an unprivileged `AuthorizedPrincipalsCommandUser`, so the helper wrote the drops
-  itself and the spool had to be `0700 nobody` — the integrity of the whole
-  binding on a shared, low-trust account, which matters most where a fingerprint
-  match grants `sudo_allowed`. Deposits now go through `ob-fp-submit` to a
-  socket-activated root daemon; reading is closed outright. Forging a binding
-  needs code execution as the helper user *inside the target connection's own
-  process tree*, because the anchor is derived from the depositor's `/proc`
-  ancestry rather than read from the request. A host that upgrades without
-  re-running setup keeps the old trust root, and the module logs that state; see
-  [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
-- **The fingerprint spool was already made harder to forge** (#235 review). The
-  anchor must be a live **root** process: it is chosen by process name, and
-  `prctl(PR_SET_NAME)` accepts fifteen characters while `sshd-session` is twelve.
-  A drop older than its anchor is refused, since nothing removes a drop when a
-  session ends and a recycled PID inherited the previous binding. A
-  service-account grant resting on a spool-derived fingerprint is logged at WARN.
-- **A missing SSH fingerprint drop is visible, and can be made fatal** (#192).
-  The module dropped the binding with a DEBUG line and authorized anyway. It is
-  now WARN, and opt-in `fingerprint_required = true` refuses such a login. Enable
-  it on certificate-mode hosts **before** upgrading the portal: from
-  `lemonldap-ng-plugins` 0.6.0 an unbound voucher expires in 15 min, so a missing
-  drop starts breaking a hop a quarter of an hour into the session instead of
-  degrading silently. Do **not** enable it in the token-only modes.
-- **Every caller of a `/pam/` endpoint signs its request, so
-  `pamAccessRequestSigningMode = required` is deployable** (#247). The portal
-  verifies `X-Signature-256` for all six endpoints; two were signed.
-  `/pam/heartbeat` was the dangerous one — it renews every enrolled host's access
-  token, so turning `required` on broke nothing at the moment of the change and
-  took the fleet down hours later, together. Three call sites missing from the
-  issue's own inventory are signed here too. A test walks the tree for anything
-  building a `/pam/` URL and fails if it is not in the signed inventory.
-- **The shell callers sign through `ob-sign-request`(8), not
-  `openssl dgst -hmac`** (#247) — the same `argv` exposure as #256, here with the
-  fleet-wide signing secret, published by a timer running every few minutes.
-- **`request_signing_secret` is no longer truncated at a `#`** (#247). `config.c`
-  exempts opaque secrets from inline-comment stripping; the three other readers
-  did not. A secret containing `#` produced a valid-looking signature over the
-  wrong key, reported as `bad_signature` — which looks like a portal problem.
-- **Certificate-mode sshd PAM stacks refuse password authentication** (#180). The
-  `auth` path was a single `pam_permit.so`, so `pam_authenticate()` succeeded
-  unconditionally. The certificate path never calls it, but sshd does for
-  password and keyboard-interactive logins — and `apt install open-bastion`
-  writes the stack without touching `sshd_config`, so any password authenticated
-  any account the `account` phase approved. Every generated stack now uses
-  `pam_deny.so`, and `tests/test_ob_pam_runtime.sh` calls `pam_authenticate()` on
-  each. Upgrading an existing host is manual: see
-  [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
-- **The portal `locationRules` guarding `/device` and the SSH CA admin routes are
-  shipped and documented** (#195). The two plugin regimes fail in opposite
-  directions: at `v0.5.2` and earlier the vhost rule is the *only* control, and
-  without it any SSO account can revoke anyone's certificate; from `0.6.0`
-  `sshCaAdminRule` is fail-closed, so a portal configured with the vhost rule
-  alone loses its admin UI on upgrade. Both are in
+- **Session recording could be bypassed** (#287): any command that looked like
+  scp, rsync or sftp ran unrecorded, so `ssh -tt bastion 'scp -t /tmp/x; bash'`
+  gave an unrecorded shell. Only the exact commands genuine clients send now
+  skip the terminal recording, run without a shell from a fixed path; a session
+  with a terminal is never a transfer. **rsync with `--secluded-args` now
+  fails.** See [doc/session-recording.rst](doc/session-recording.rst) and
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A6).
+- **`max_duration` ends the session** (#287); it never fired. **Sessions on a
+  bastion set up by `ob-bastion-setup` are now cut after 8 hours** (24 without
+  a value). See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A6).
+- **The recorder takes nothing from the recorded user's environment** (#287):
+  `PATH`, the sink socket and the `OB_*` settings (`OB_MAX_SESSION=0` disabled
+  the time limit) are ignored. It escapes every header field and every client
+  string it logs, including C1 control characters.
+- **A refused recording no longer leaves the command running** (#287): the
+  sink acknowledges each recording once its files exist, and the recorder
+  refuses the session without that acknowledgement (oversized header,
+  duplicate session id, protocol mismatch, setup failure). An over-long command
+  is refused up front and logged by length and hash.
+- **Recording status is reliable** (#287): a recording whose forwarder was
+  killed is `aborted`, not `completed`, and a silent session is no longer
+  finalized after 30 s. A recording lasts at most 7 days
+  (`OB_RECORD_MAX_SEC`, see `ob-record-sink`(8)); the session is then cut.
+- **`ob-record.socket` bounds concurrency** (#287): `MaxConnections=1024` and
+  `MaxConnectionsPerSource=16`, so one local user cannot hold every slot and
+  block logins; a user's 17th concurrent recorded session is refused. The
+  per-user limit needs systemd 256 or newer; see
+  [doc/session-recording.rst](doc/session-recording.rst).
+- **R-P1 is a release prerequisite** (#268): without `pamAccessServerGroups`
+  (the default), any compromised enrolled host can pose as a bastion and obtain
+  hop vouchers. `pamAccessServerGroups`, `pamAccessAllowedRps` and a non-empty
+  `allowed_bastions` are blocking conditions; the setup commands print them on
+  every run and `ob-builder` writes a pre-filled `PORTAL-CHECKLIST.md`. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (B0).
+- **The fingerprint spool no longer trusts `nobody`** (#249): drops go through
+  `ob-fp-submit`(8) to the root `ob-fp-daemon`(8), anchored on the depositor's
+  process ancestry. The anchor must be a live root process, drops older than
+  their anchor are refused, and a service-account grant based on a spool
+  fingerprint is logged at WARN. Hosts not finished with `ob-post-upgrade` keep
+  the old spool and log it; see [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A1).
+- **Certificate-mode sshd PAM stacks use `pam_deny.so` for `auth`** (#180);
+  `pam_permit.so` accepted any password. Existing stacks are not rewritten:
+  see [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A2).
+- **A missing SSH fingerprint drop is logged at WARN** (#192), and opt-in
+  `fingerprint_required = true` refuses the login. Enable it on
+  certificate-mode hosts before moving the portal to plugins 0.6.0; not in
+  token-only modes.
+- **Every `/pam/` caller signs its requests** (#247), so
+  `pamAccessRequestSigningMode = required` is usable; follow the order in
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (B3). The signature covers the nonce
+  (#188), and `request_signing_secret` is no longer truncated at a `#`.
+- **Secrets no longer appear on command lines**: `ob-enroll` (client secret,
+  #256) and the shell callers (signing secret, #247) no longer pass them to
+  `openssl` in `argv`.
+- **`ob-session-monitor` terminates a session only when the portal answers
+  "not found"** (#257); errors, timeouts and HTTP >= 400 no longer do.
+- **`ob-ssh` / `ob-scp` / `ob-sftp` always go through `ob-cert-daemon`** (#202),
+  and an operator's `StrictHostKeyChecking` in `SSH_OPTIONS` now overrides the
+  `accept-new` default.
+- **An empty `allowed_bastions` is flagged** (#182): the backend setup asks for
+  the list interactively and `ob-ssh-principals` logs every unchecked hop.
+  Glob characters in the list are no longer expanded.
+- **Mistyped booleans no longer mean `false`** (#183): `verify_ssl = TRUE`
+  disabled TLS verification. Unknown spellings keep the safe default and are
+  logged; the PAM module refuses the configuration, the NSS module uses the
+  safe value.
+- **`cache.key` must not be group- or world-readable** and is opened
+  non-blocking, so a fifo there no longer hangs logins. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A3).
+- **`ob-builder`** validates `apt_url`, `apt_suite` and `apt_component` (#190),
+  and artefacts embedding the client secret are no longer world-readable
+  (#203).
+- **Portal `locationRules` for `/device` and the SSH CA admin routes** are
+  documented for both plugin generations (#195), in
   [doc/llng-configuration.rst](doc/llng-configuration.rst).
-- **An empty `allowed_bastions` no longer passes unnoticed** (#182). It means
-  "accept a hop from any vouched bastion" and is the residual defence behind a
-  real gap on the SSO side. `ob-backend-setup` now asks for the list
-  interactively — pressing Enter is not an answer — and `ob-ssh-principals` logs
-  on **every** unchecked hop. The semantic is deliberately unchanged: inverting
-  it would deny every hop the moment a backend upgrades. The list is split with
-  globbing off, since word-splitting also ran pathname expansion — `b[1]`
-  matching a local file was rewritten to it and the typo accepted.
-- **A mistyped boolean no longer silently means `false`** (#183). Every
-  unrecognised value mapped to `false`, so `verify_ssl = TRUE` turned TLS
-  verification **off** without a word, and the same for ~25 other booleans.
-  Booleans now accept only the documented spellings; anything else keeps the safe
-  default, logs, and makes `config_validate()` refuse the configuration.
-- **The NSS module no longer disables TLS verification on a typo** (#183). It had
-  its own parser with the same fail-open expression. It cannot refuse to start —
-  it is loaded into every process that resolves a name — so it reports and uses
-  the safe value instead.
-- **The request-signing nonce is covered by the HMAC** (#188). The client sent
-  `X-Nonce` but signed `timestamp.method.path.body`, despite a comment claiming
-  otherwise, so a captured request could be replayed with a fresh nonce and still
-  verify. The message is now `timestamp.nonce.method.path.body`.
-- **`ob-builder` validates `apt_url`, `apt_suite` and `apt_component`** (#190).
-  They are interpolated verbatim into an installer that runs as root, and were
-  the only build inputs with no validation: `apt_url: "https://x/$(…)"` executed
-  at install time.
-- **A world- or group-readable `/etc/open-bastion/cache.key` is rejected** rather
-  than used with a warning. `SECURITY.md` used to suggest creating it with `dd`,
-  which under root's umask 022 produces `0644`. Upgrade impact and the one-line
-  remedy are in [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
 
 ## [0.6.3] - 2026-09-21
 

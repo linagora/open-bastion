@@ -12,7 +12,6 @@ STATS_DIR="/var/lib/open-bastion"
 
 case "$1" in
     purge)
-        # Restore original PAM files from backups
         if [ -f "$BACKUP_DIR/sshd.orig" ]; then
             cp -a "$BACKUP_DIR/sshd.orig" "$PAM_SSHD"
         fi
@@ -20,21 +19,16 @@ case "$1" in
             cp -a "$BACKUP_DIR/sudo.orig" "$PAM_SUDO"
         fi
 
-        # Remove backup directory
         rm -rf "$BACKUP_DIR"
 
-        # Remove configuration files
         rm -f "$CONF_FILE"
         rm -f "$TOKEN_FILE"
         rm -f "$LEGACY_TOKEN_FILE"
 
-        # Remove cache directory
         rm -rf "$CACHE_DIR"
 
-        # Remove stats directory
         rm -rf "$STATS_DIR"
 
-        # Purge debconf data
         if [ -e /usr/share/debconf/confmodule ]; then
             . /usr/share/debconf/confmodule
             db_purge

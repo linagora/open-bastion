@@ -3,44 +3,32 @@
 #
 # ob-cert-lib.sh - shared bastion certificate-vouching helpers
 #
-# Sourced by ob-ssh, ob-scp and ob-sftp. Holds the common configuration,
-# logging and certificate-minting flow so the SSH, SCP and SFTP front-ends
-# behave identically. Minting itself is delegated to ob-cert-daemon through the
-# unprivileged ob-cert-request client; nothing here contacts the portal.
-#
-# This file is meant to be SOURCED, not executed. It does not set shell options
-# (the sourcing script owns `set -euo pipefail`) and defines no main().
+# Sourced (never executed) by ob-ssh, ob-scp and ob-sftp; the caller owns
+# `set -euo pipefail`.
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>
 # License: AGPL-3.0
 
-# Configuration (can be overridden via /etc/open-bastion/ssh-proxy.conf, then by
-# the sourcing script before load_config is called).
 : "${PORTAL_URL:=}"
 : "${TARGET_GROUP:=default}"
 : "${TIMEOUT:=10}"
 : "${VERIFY_SSL:=true}"
 : "${DEBUG:=false}"
 : "${CONFIG_FILE:=/etc/open-bastion/ssh-proxy.conf}"
-# SSH_OPTIONS_ARRAY may already be set by the caller; default to empty.
 if ! declare -p SSH_OPTIONS_ARRAY >/dev/null 2>&1; then
     SSH_OPTIONS_ARRAY=()
 fi
 
-# Per-session voucher proving this user connected to this bastion. Set by
-# pam_openbastion (pam_putenv) at bastion login and inherited by this session
-# on the SAME host — unlike the old SendEnv JWT, this transport actually works.
+# Per-session voucher set by pam_openbastion (pam_putenv) at bastion login.
 VOUCHER="${LLNG_BASTION_VOUCHER:-}"
 
-# ── Logging ──────────────────────────────────────────────────────────────────
 debug() { if [ "$DEBUG" = "true" ]; then echo "[DEBUG] $*" >&2; fi; }
 warn()  { echo "[WARN] $*" >&2; }
 error() { echo "[ERROR] $*" >&2; }
 
-# ── Configuration loading ────────────────────────────────────────────────────
-# Load /etc/open-bastion/ssh-proxy.conf securely (root-owned, not group/world
-# writable). Parsed line-by-line — never sourced — to avoid code injection.
+# Parsed line by line, never sourced; must be root-owned and not
+# group/world-writable.
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         local file_stat
@@ -53,7 +41,6 @@ load_config() {
         local owner="${file_stat%%:*}"
         local perms="${file_stat##*:}"
 
-        # Must be owned by root (uid 0)
         if [ "$owner" != "0" ]; then
             error "Insecure config file ownership (must be root): $CONFIG_FILE"
             exit 1
@@ -76,12 +63,9 @@ load_config() {
             value="${value#\'}" ; value="${value%\'}"
             case "$key" in
                 PORTAL_URL)          PORTAL_URL="$value" ;;
-                # SERVER_TOKEN_FILE is consumed by ob-cert-daemon, which
-                # parses this same file; nothing in this library reads the
-                # server token any more, so accept the key and drop it here.
+                # Read by ob-cert-daemon from this same file.
                 SERVER_TOKEN_FILE)   : ;;
-                # SERVER_GROUP accepted-but-ignored (back-compat): the bastion's
-                # group is resolved server-side from its enrolled token.
+                # Ignored: the group is resolved server-side from the token.
                 SERVER_GROUP)        : ;;
                 TARGET_GROUP)        TARGET_GROUP="$value" ;;
                 TIMEOUT)             TIMEOUT="$value" ;;
@@ -95,13 +79,8 @@ load_config() {
     fi
 }
 
-# Validate required configuration and warn about insecure transports. Call after
-# load_config from the sourcing script's main().
-#
-# PORTAL_URL is no longer contacted from here -- ob-cert-daemon holds the portal
-# connection -- but it stays required: an ssh-proxy.conf without it is an
-# unconfigured bastion, and failing here says so far more clearly than a socket
-# error would.
+# PORTAL_URL is not contacted here (ob-cert-daemon is), but a conf without it
+# is an unconfigured bastion: fail clearly rather than on a socket error.
 validate_config() {
     if [ -z "$PORTAL_URL" ]; then
         error "PORTAL_URL not configured. Set it in $CONFIG_FILE"
@@ -112,23 +91,8 @@ validate_config() {
     fi
 }
 
-# ── Host-key policy ──────────────────────────────────────────────────────────
-# Emit the default host-key options for the bastion->backend hop, unless the
-# operator has already set StrictHostKeyChecking in SSH_OPTIONS.
-#
-# The default is accept-new: the first connection to a backend trusts whatever
-# host key it presents (TOFU), later ones are pinned by known_hosts. An attacker
-# who can intercept the bastion->backend path can therefore MITM that first hop
-# and read the session. The ephemeral private key never leaves the bastion and
-# the certificate is pinned to the bastion's source address, so credentials are
-# not stolen -- but the session content is exposed.
-#
-# ssh takes the FIRST value it is given for an option, so this must be emitted
-# after the operator's SSH_OPTIONS to be overridable; a site that pre-seeds
-# /etc/ssh/ssh_known_hosts sets, in /etc/open-bastion/ssh-proxy.conf:
-#
-#   SSH_OPTIONS="-o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/etc/ssh/ssh_known_hosts"
-#
+# Default is accept-new (TOFU) unless SSH_OPTIONS sets StrictHostKeyChecking.
+# ssh keeps the first value given, so this must follow SSH_OPTIONS.
 # See doc/security/02-ssh-connection.rst.
 build_host_key_opts() {
     # Consumed by the sourcing script (ob-ssh / ob-scp / ob-sftp), not this lib.
@@ -144,9 +108,7 @@ build_host_key_opts() {
     HOST_KEY_OPTS=(-o StrictHostKeyChecking=accept-new)
 }
 
-# ── Certificate minting ──────────────────────────────────────────────────────
-# Validate a hostname to prevent SSH option injection.
-# Only allows: alphanumeric, dots, hyphens, underscores, colons (IPv6), brackets.
+# Guards against SSH option injection.
 validate_hostname() {
     local host="$1"
     # NB: in an ERE bracket expression a literal ']' must come FIRST (and '-'
@@ -161,8 +123,6 @@ validate_hostname() {
     fi
 }
 
-# Request a short-lived bastion certificate from LLNG.
-# Args: <user> <target_host> <ephemeral_public_key>
 # Prints the signed certificate on stdout; returns non-zero on failure.
 request_bastion_cert() {
     local user="$1"
@@ -178,19 +138,8 @@ request_bastion_cert() {
 
     debug "Requesting bastion cert for user $user to host $target_host"
 
-    # The server token is root-only BY DESIGN, and this is the only path: the
-    # single privileged call is performed by ob-cert-daemon (socket-activated,
-    # runs as root), reached through the unprivileged ob-cert-request client.
-    # The daemon derives the certificate's user from the connection's
-    # SO_PEERCRED — so it always mints for the connecting user, whatever we send
-    # — and the server token never leaves it. No sudo, no setuid, and minting is
-    # decoupled from the interactive sudo policy (Mode E).
-    #
-    # Until 0.6.2 a `[ -r "$SERVER_TOKEN_FILE" ]` branch called LLNG directly
-    # with the bearer token whenever the caller could read it — root, or a lab
-    # that had relaxed the 0600. It was an escape hatch around the SO_PEERCRED
-    # design with no counterpart in the daemon's checks, so it is gone: root
-    # and unprivileged callers now take the same, audited path (#202).
+    # The server token is root-only: ob-cert-daemon holds it and mints for the
+    # SO_PEERCRED user, whatever we send.
     local response
     local rc=0
     local client
@@ -225,15 +174,8 @@ request_bastion_cert() {
     printf '%s\n' "$cert"
 }
 
-# Mint an ephemeral keypair + LLNG-signed certificate for <user> reaching
-# <target_host>. The private key lives in tmpfs and never leaves the bastion.
-#
-# On success sets the globals:
-#   OB_EPH_DIR   ephemeral directory (caller MUST clean it up, e.g.
-#                `trap 'rm -rf "$OB_EPH_DIR"' EXIT`)
-#   OB_EPH_KEY   path to the ephemeral private key
-#   OB_EPH_CERT  path to the signed certificate
-# Returns non-zero on failure (with a message on stderr).
+# Sets OB_EPH_DIR (caller must remove it), OB_EPH_KEY and OB_EPH_CERT. The
+# private key lives in tmpfs and never leaves the bastion.
 mint_ephemeral_cert() {
     local target_user="$1"
     local target_host="$2"
@@ -246,9 +188,8 @@ mint_ephemeral_cert() {
     }
     chmod 700 "$OB_EPH_DIR"
 
-    # Any failure from here on must wipe the tmpfs dir before returning: the
-    # caller only arms its cleanup trap AFTER we succeed, so an early return
-    # would otherwise leave the ephemeral private key on disk.
+    # The caller arms its cleanup trap only on success: every failure path
+    # must wipe the dir so the private key does not linger.
     if ! ssh-keygen -t ed25519 -N '' -q -f "$OB_EPH_DIR/id" -C "ob-ephemeral"; then
         error "Failed to generate ephemeral keypair"
         rm -rf "$OB_EPH_DIR"

@@ -2,13 +2,6 @@
 #
 # ob-desktop-setup - Configure desktop workstation for Open Bastion SSO
 #
-# This script:
-# 1. Installs the lightdm-webkit2-greeter if not present
-# 2. Copies the Open Bastion greeter theme
-# 3. Configures LightDM to use the webkit greeter
-# 4. Configures PAM for OAuth2 token authentication
-# 5. Optionally configures offline mode
-#
 # Usage: ob-desktop-setup [options]
 #
 # Copyright (C) 2025 Linagora
@@ -16,14 +9,12 @@
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Default values
 PORTAL_URL=""
 THEME_DIR="/usr/share/lightdm-webkit/themes/open-bastion"
 GREETER_CONFIG="/etc/lightdm/lightdm-webkit2-greeter.conf"
@@ -36,7 +27,6 @@ OFFLINE_MODE=false
 DRY_RUN=false
 FORCE=false
 
-# Logging functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -53,7 +43,6 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Print usage
 usage() {
     cat << EOF
 Usage: $(basename "$0") [options]
@@ -76,7 +65,6 @@ EOF
     exit 1
 }
 
-# Parse command line arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -111,7 +99,6 @@ parse_args() {
         usage
     fi
 
-    # Validate URL format
     if [[ ! "$PORTAL_URL" =~ ^https?:// ]]; then
         log_error "Portal URL must start with http:// or https://"
         exit 1
@@ -124,7 +111,6 @@ parse_args() {
     fi
 }
 
-# Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
@@ -132,7 +118,6 @@ check_root() {
     fi
 }
 
-# Detect distribution
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
@@ -145,7 +130,6 @@ detect_distro() {
     log_info "Detected distribution: $DISTRO $DISTRO_VERSION"
 }
 
-# Install dependencies
 install_dependencies() {
     log_info "Installing dependencies..."
 
@@ -181,7 +165,6 @@ install_dependencies() {
     log_success "Dependencies installed"
 }
 
-# Install greeter theme
 install_theme() {
     log_info "Installing Open Bastion greeter theme..."
 
@@ -190,10 +173,8 @@ install_theme() {
         return
     fi
 
-    # Create theme directory
     mkdir -p "$THEME_DIR"
 
-    # Find source files
     local src_dir=""
     for dir in /usr/share/open-bastion/lightdm/greeter \
                /usr/local/share/open-bastion/lightdm/greeter \
@@ -209,10 +190,8 @@ install_theme() {
         exit 1
     fi
 
-    # Copy theme files
     cp -r "$src_dir"/* "$THEME_DIR/"
 
-    # Create index.theme file
     cat > "$THEME_DIR/index.theme" << EOF
 [theme]
 name=Open Bastion
@@ -224,7 +203,6 @@ EOF
     log_success "Greeter theme installed to $THEME_DIR"
 }
 
-# Configure LightDM
 configure_lightdm() {
     log_info "Configuring LightDM..."
 
@@ -233,13 +211,11 @@ configure_lightdm() {
         return
     fi
 
-    # Configure LightDM to use webkit2-greeter
     local lightdm_conf="/etc/lightdm/lightdm.conf"
     if [[ -f "$lightdm_conf" ]] && ! $FORCE; then
         if grep -q "greeter-session" "$lightdm_conf"; then
             log_warn "$lightdm_conf already configured, use --force to overwrite"
         else
-            # Add greeter-session to existing config
             sed -i '/^[[:space:]]*\[Seat:\*\][[:space:]]*$/a greeter-session=lightdm-webkit2-greeter' "$lightdm_conf"
         fi
     else
@@ -249,7 +225,6 @@ greeter-session=lightdm-webkit2-greeter
 EOF
     fi
 
-    # Configure webkit2-greeter
     if [[ -f "$GREETER_CONFIG" ]] && ! $FORCE; then
         log_warn "$GREETER_CONFIG already exists, use --force to overwrite"
     else
@@ -270,7 +245,6 @@ EOF
     log_success "LightDM configured"
 }
 
-# Configure PAM
 configure_pam() {
     log_info "Configuring PAM for desktop authentication..."
 
@@ -279,10 +253,8 @@ configure_pam() {
         return
     fi
 
-    # Ensure open-bastion config directory exists
     mkdir -p "$OB_CONFIG_DIR"
 
-    # Create or update open-bastion config for desktop mode
     if [[ ! -f "$OB_CONFIG_FILE" ]] || $FORCE; then
         cat > "$OB_CONFIG_FILE" << EOF
 # Open Bastion Configuration for Desktop SSO
@@ -313,7 +285,6 @@ EOF
         log_warn "$OB_CONFIG_FILE already exists, use --force to overwrite"
     fi
 
-    # Configure PAM for lightdm
     local pam_lightdm="${PAM_CONFIG_DIR}/lightdm"
     if [[ -f "$pam_lightdm" ]] && ! $FORCE; then
         if grep -q "pam_openbastion" "$pam_lightdm"; then
@@ -324,7 +295,6 @@ EOF
             echo "auth    sufficient    pam_openbastion.so oauth2_token_auth"
         fi
     else
-        # Backup existing config
         if [[ -f "$pam_lightdm" ]]; then
             cp "$pam_lightdm" "${pam_lightdm}.bak"
             log_info "Backed up existing PAM config to ${pam_lightdm}.bak"
@@ -353,7 +323,6 @@ EOF
     fi
 }
 
-# Configure systemd to use LightDM
 configure_display_manager() {
     log_info "Configuring display manager..."
 
@@ -362,9 +331,7 @@ configure_display_manager() {
         return
     fi
 
-    # Check if systemd is available
     if command -v systemctl &> /dev/null; then
-        # Disable other display managers
         for dm in gdm gdm3 sddm lxdm; do
             if systemctl is-enabled "$dm" &> /dev/null; then
                 systemctl disable "$dm"
@@ -372,7 +339,6 @@ configure_display_manager() {
             fi
         done
 
-        # Enable lightdm
         systemctl enable lightdm
         log_success "LightDM enabled as default display manager"
     else
@@ -380,7 +346,6 @@ configure_display_manager() {
     fi
 }
 
-# Create cache directories
 create_directories() {
     log_info "Creating required directories..."
 
@@ -396,7 +361,6 @@ create_directories() {
         mkdir -p /var/cache/open-bastion/credentials
         chmod 700 /var/cache/open-bastion/credentials
 
-        # Generate encryption key for offline credential cache
         local key_file="${OB_CONFIG_DIR}/cache.key"
         if [[ ! -f "$key_file" ]]; then
             dd if=/dev/urandom of="$key_file" bs=32 count=1 status=none
@@ -411,7 +375,6 @@ create_directories() {
     log_success "Directories created"
 }
 
-# Test connectivity to portal
 test_connectivity() {
     log_info "Testing connectivity to $PORTAL_URL..."
 
@@ -427,15 +390,7 @@ test_connectivity() {
     fi
 }
 
-# The portal-side prerequisite for R-P1. A desktop is not a bastion, but it IS
-# an enrolled host of the project, and R-P1 is precisely "any enrolled host can
-# declare itself a bastion": a compromised workstation is one of the vectors the
-# risk sheet names. The fix is on the portal, which this host cannot inspect --
-# so it is stated, not checked.
-#
-# Shared text (share/ -> /usr/lib/open-bastion), printed by the three setup
-# scripts and ob-post-upgrade; four heredocs is how the units of #254 drifted
-# apart.
+# A desktop is not a bastion but is an enrolled host, so R-P1 applies here too.
 print_portal_prerequisites() {
     local d f
     d="${OB_DATA_DIR:-/usr/lib/open-bastion}"
@@ -457,7 +412,6 @@ print_portal_prerequisites() {
     fi
 }
 
-# Print summary
 print_summary() {
     echo ""
     echo "=============================================="
@@ -488,7 +442,6 @@ print_summary() {
     print_portal_prerequisites
 }
 
-# Main
 main() {
     echo ""
     echo "Open Bastion Desktop SSO Setup"

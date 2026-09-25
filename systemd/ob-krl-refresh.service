@@ -10,9 +10,7 @@ ExecStart=/usr/sbin/ob-krl-refresh
 User=root
 Group=root
 
-# Root only because /etc/ssh and the file sshd reads are root's. Root without
-# capabilities is enough for that: it owns both, so no DAC override is needed,
-# and the one config file read (openbastion.conf, 0600 root) is root's too.
+# Root owns every file it touches, so it needs no capability.
 CapabilityBoundingSet=
 AmbientCapabilities=
 NoNewPrivileges=yes
@@ -34,15 +32,10 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# It talks to the portal and to nothing else.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 UMask=0022
 
-# The new list is written next to the old one and renamed over it: a rename is
-# atomic only within a directory, so the directory has to be writable, not just
-# the file (a single-file bind mount cannot be renamed over at all). The sshd
-# configuration in that directory decides who logs in, and this program has no
-# business changing it: it stays read-only. The leading '-' tolerates a host
-# that has one without the other.
+# The directory, not just the file: the new list is renamed over the old one.
+# The sshd configuration in it stays read-only.
 ReadWritePaths=/etc/ssh
 ReadOnlyPaths=-/etc/ssh/sshd_config -/etc/ssh/sshd_config.d

@@ -3,19 +3,16 @@ Description=Open Bastion certificate minting (per-connection)
 Documentation=https://github.com/linagora/open-bastion
 
 [Service]
-# One short-lived instance per connection. systemd passes the connected socket
-# as stdin AND stdout; the daemon reads the request from fd 0 and writes the
-# LLNG JSON response to fd 1.
+# systemd passes the connected socket as stdin AND stdout; the daemon reads
+# the request from fd 0 and writes the LLNG JSON response to fd 1.
 ExecStart=/usr/sbin/ob-cert-daemon
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
-# Runs as root only to read the root-only server token (/var/lib/open-bastion/
-# token, 0600). It owns that file, so no capabilities are needed.
+# Must read the root-only server token (/var/lib/open-bastion/token, 0600).
 User=root
 
-# Hardening: it only reads config + the server token and makes one HTTPS call
-# to the portal. AF_INET(6) is required for that call and for NSS lookups
+# AF_INET(6) is required for the HTTPS call to the portal and for NSS lookups
 # (getpwuid via libnss_openbastion); AF_UNIX for the activation socket itself.
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -27,15 +24,10 @@ ProtectKernelModules=true
 RestrictNamespaces=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# Private-by-default modes for anything this instance creates, instead of
-# whatever umask the socket activation happened to inherit. The daemon holds no
-# files of its own, so this is purely belt-and-braces.
 UMask=0077
-# Deny the syscall classes a plain network client never needs (kexec, module
-# loading, raw ptrace, clock setting, ...). @system-service is systemd's broad,
-# well-tested allow set and keeps the AF_UNIX/AF_INET work above intact.
+# @system-service is systemd's broad, well-tested allow set; it keeps the
+# AF_UNIX/AF_INET syscalls above intact while denying kexec, module loading,
+# raw ptrace, clock setting, etc.
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# User=root here is deliberate (it must read the 0600 server token, which it
-# owns), so this sandbox is defence in depth, not the primary control.
 ReadOnlyPaths=/etc/open-bastion /var/lib/open-bastion

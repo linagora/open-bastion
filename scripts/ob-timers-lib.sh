@@ -2,28 +2,15 @@
 # The OB_* results are read by the scripts that source this file.
 # shellcheck disable=SC2034
 #
-# ob-timers-lib.sh - the systemd timers that replaced Open Bastion's cron jobs
+# ob-timers-lib.sh - arm ob-krl-refresh.timer and ob-audit-rotate.timer, and
+# replace the legacy cron jobs with them
 #
-# Sourced by ob-bastion-setup (and its ob-backend-setup / ob-standalone-setup
-# names) and by ob-post-upgrade. Up to 0.6, the setup wrote two cron jobs:
+# Sourced by ob-bastion-setup and ob-post-upgrade. An old job is removed only
+# once its timer is enabled and active: a host may briefly have both, never
+# neither.
 #
-#   /etc/cron.d/open-bastion-krl            Mode E KRL refresh, every 30 min,
-#                                           running a script it generated into
-#                                           /usr/local/bin/open-bastion-refresh-krl
-#   /etc/cron.daily/open-bastion-audit-rotate
-#                                           auditd rotation (--enable-audit-trace)
-#
-# They are now ob-krl-refresh.timer and ob-audit-rotate.timer (#281). Both the
-# setup (when it runs again) and ob-post-upgrade (when an upgrade is finished)
-# replace an old job with its timer, and must do it the same way -- one copy,
-# here, for the reason share/ exists: two copies of the same migration drift.
-#
-# The rule both follow: the old job is removed only once its timer is enabled
-# and active. A host may briefly have both (harmless: each refresh is atomic,
-# and one extra rotation is one extra log file); it never has neither.
-#
-# Functions print nothing: the two callers report differently. The two entry
-# points, ob_krl_timer_setup and ob_audit_timer_setup, leave their results in
+# Functions print nothing. The two entry points, ob_krl_timer_setup and
+# ob_audit_timer_setup, leave their results in
 #
 #   OB_TIMERS_DONE      what was done, one sentence per line
 #   OB_TIMERS_WARN      what was left for a human, one sentence per line
@@ -36,8 +23,7 @@
 # Copyright (C) 2026 Linagora
 # License: AGPL-3.0
 
-# Paths, overridable so the test suite can run all of this unprivileged. On a
-# real host none of them is set and the defaults apply.
+# Overridable for the test suite only.
 : "${OB_SYSTEMD_UNIT_DIR:=/etc/systemd/system}"
 : "${OB_KRL_LEGACY_CRON:=/etc/cron.d/open-bastion-krl}"
 : "${OB_KRL_LEGACY_SCRIPT:=/usr/local/bin/open-bastion-refresh-krl}"
@@ -46,11 +32,9 @@
 
 OB_KRL_TIMER="ob-krl-refresh.timer"
 OB_AUDIT_TIMER="ob-audit-rotate.timer"
-# The interval ob-krl-refresh.timer ships with (OnCalendar=*:0/30).
 OB_KRL_DEFAULT_INTERVAL=30
 
-# First line of every drop-in written here. It is what tells OUR file from one
-# an administrator wrote: ours may be rewritten or removed, theirs never.
+# First line of our drop-ins: an administrator's own is never touched.
 OB_TIMERS_MARK="# Open Bastion timer schedule"
 
 OB_TIMERS_MSG=""
@@ -72,15 +56,12 @@ _ob_timers_done() {
 }
 _ob_timers_warn() { OB_TIMERS_WARN+="$1"$'\n'; }
 
-# An interval in minutes the timer can express exactly as `*:0/N`, which is
-# also what cron's `*/N` in the minute field meant: 1 to 60, plain decimal.
+# `*:0/N`, like cron's `*/N`, means "every N minutes" only for 1 to 60.
 ob_krl_interval_valid() {
     [[ "${1:-}" =~ ^[1-9][0-9]?$ ]] && [ "$1" -le 60 ]
 }
 
-# OnCalendar= value for a refresh every N minutes. systemd refuses a repetition
-# as long as the range (*:0/60), where cron's */60 simply meant minute 0: that
-# one is spelled as the hourly run it is.
+# systemd refuses *:0/60 (a repetition as long as the range).
 ob_krl_oncalendar() {
     if [ "$1" = "60" ]; then
         printf '*:00'
@@ -95,11 +76,8 @@ ob_krl_oncalendar() {
 #      schedule into something this cannot translate faithfully
 #   2  no old job
 #
-# The only shape accepted is the one the setup generated, with any N:
-#     */N * * * * root /usr/local/bin/open-bastion-refresh-krl ...
-# Anything else (hours restricted, a list of minutes, another user) is left for
-# a human, because a wrong guess would silently change how fast a revocation
-# reaches this host.
+# Only the shape the setup generated is accepted: a wrong guess would silently
+# change how fast a revocation reaches this host.
 ob_krl_legacy_interval() {
     OB_TIMERS_INTERVAL=""
     OB_TIMERS_MSG=""
@@ -108,7 +86,6 @@ ob_krl_legacy_interval() {
     local line jobs=0 n=""
     while IFS= read -r line || [ -n "$line" ]; do
         [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-        # Environment lines (MAILTO=, SHELL=...) are not jobs.
         [[ "$line" =~ ^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*= ]] && continue
         jobs=$((jobs + 1))
         if [[ "$line" =~ ^[[:space:]]*\*/([0-9]+)[[:space:]]+\*[[:space:]]+\*[[:space:]]+\*[[:space:]]+\*[[:space:]]+root[[:space:]]+[^[:space:]]*open-bastion-refresh-krl([[:space:]]|$) ]]; then
@@ -125,8 +102,7 @@ ob_krl_legacy_interval() {
 }
 
 # The old audit rotation, by where it was installed.
-#   0  found; OB_TIMERS_SCHEDULE is daily or weekly (doc/audit.rst told admins
-#      they could move the file to cron.weekly)
+#   0  found; OB_TIMERS_SCHEDULE is daily or weekly
 #   1  found, but edited: it no longer carries the line the setup installed
 #   2  none
 ob_audit_legacy_schedule() {
@@ -151,7 +127,6 @@ ob_audit_legacy_schedule() {
     return 0
 }
 
-# Path of the schedule drop-in for a timer.
 ob_timer_dropin() {
     printf '%s/%s.d/schedule.conf' "$OB_SYSTEMD_UNIT_DIR" "$1"
 }
@@ -198,15 +173,13 @@ ob_timer_set_schedule() {
     return 0
 }
 
-# Is the timer both enabled (survives a reboot) and active (armed now)?
 ob_timer_ready() {
     systemctl is-enabled --quiet "$1" 2>/dev/null \
         && systemctl is-active --quiet "$1" 2>/dev/null
 }
 
-# Enable and (re)start a timer, picking up a drop-in written just before.
-# A restart, not just `enable --now`: an already running timer keeps the
-# schedule it was started with until it is restarted.
+# A restart, not `enable --now`: a running timer keeps its old schedule until
+# restarted.
 ob_timer_enable() {
     local unit="$1"
     OB_TIMERS_MSG=""
@@ -225,9 +198,8 @@ ob_timer_enable() {
     return 1
 }
 
-# Remove the old KRL job. Only called once ob-krl-refresh.timer is ready. The
-# script is removed only if it is the one the setup generated: /usr/local is
-# the administrator's, and a file there that does something else is theirs.
+# The script goes only if it is the one the setup generated: /usr/local is the
+# administrator's.
 ob_krl_remove_legacy() {
     _ob_timers_dry && return 0
     rm -f "$OB_KRL_LEGACY_CRON"
@@ -237,26 +209,16 @@ ob_krl_remove_legacy() {
     fi
 }
 
-# Remove the old audit rotation. Only called once ob-audit-rotate.timer is
-# ready, and only after ob_audit_legacy_schedule returned 0 (unedited files).
 ob_audit_remove_legacy() {
     _ob_timers_dry && return 0
     rm -f "$OB_AUDIT_LEGACY_DAILY" "$OB_AUDIT_LEGACY_WEEKLY"
 }
 
-# ── The two entry points ────────────────────────────────────────────────────
-
-# Arm ob-krl-refresh.timer, replacing the 0.6 cron job if the host has one.
+# ob_krl_timer_setup [MINUTES]
 #
-#   ob_krl_timer_setup [MINUTES]
-#
-# MINUTES, when given, is the interval to set (--krl-refresh-interval). Without
-# it the old job's interval is carried over, and without an old job the
-# schedule is left as it is: the packaged 30 minutes, or a drop-in written
-# earlier -- running the setup again must not reset what a host was given.
-#
-# Returns 1 when the timer could not be armed. The old job, if any, is then
-# still there: it is removed only after the timer runs.
+# Without MINUTES, the old job's interval is carried over, or else the current
+# schedule is kept: running the setup again must not reset it. Returns 1 when
+# the timer could not be armed, the old job then kept.
 ob_krl_timer_setup() {
     local interval="${1:-}" rc=0 legacy_msg="" dropin oncalendar
     OB_TIMERS_DONE=""; OB_TIMERS_WARN=""; OB_TIMERS_MSG=""
@@ -272,7 +234,6 @@ ob_krl_timer_setup() {
             "carried over the interval of $OB_KRL_LEGACY_CRON: every $interval min"
     fi
 
-    # The schedule.
     OB_TIMERS_SCHEDULE="every $OB_KRL_DEFAULT_INTERVAL min"
     [ -e "$dropin" ] && OB_TIMERS_SCHEDULE="as set in $dropin"
     if [ -n "$interval" ]; then
@@ -294,7 +255,7 @@ ob_krl_timer_setup() {
         fi
     fi
 
-    # The timer. Nothing below runs unless it is armed: never neither.
+    # Nothing below runs unless the timer is armed.
     if ! ob_timer_enable "$OB_KRL_TIMER"; then
         if [ -e "$OB_KRL_LEGACY_CRON" ]; then
             _ob_timers_warn "$OB_KRL_LEGACY_CRON was kept and still refreshes the list"
@@ -306,7 +267,6 @@ ob_krl_timer_setup() {
     _ob_timers_done "would enable $OB_KRL_TIMER ($OB_TIMERS_SCHEDULE)" \
                     "enabled $OB_KRL_TIMER ($OB_TIMERS_SCHEDULE)"
 
-    # The old job, now redundant.
     case "$rc" in
         0)  ob_krl_remove_legacy
             _ob_timers_done "would then remove $OB_KRL_LEGACY_CRON and $OB_KRL_LEGACY_SCRIPT" \
@@ -316,9 +276,7 @@ ob_krl_timer_setup() {
     return 0
 }
 
-# Arm ob-audit-rotate.timer, replacing the 0.6 cron rotation if the host has
-# one. The schedule follows the old job (daily, or weekly for a file moved to
-# cron.weekly as doc/audit.rst allowed); without one it is left as it is.
+# The schedule follows the old job (daily, or weekly); without one it is kept.
 ob_audit_timer_setup() {
     local rc=0 legacy_msg="" dropin schedule
     OB_TIMERS_DONE=""; OB_TIMERS_WARN=""; OB_TIMERS_MSG=""

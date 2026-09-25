@@ -3,16 +3,8 @@
 # spool-format: v1 (fingerprint drop + key-metadata drop)
 # Args: <username> <fingerprint> <key-id> <key-type> <key-blob-base64>
 #
-# Enforces bastion vouching: emits the username as an allowed principal ONLY
-# when the presented certificate is a bastion-vouched cert — its key-id is
-# "bastion=<id>;user=<u>;target=<host>", the encoded <u> equals the login
-# user, and <id> is in the allowed-bastions list (if one is configured). A
-# direct user SSO cert (no "bastion=" key-id) is therefore denied here, before
-# PAM runs. Combined with the cert's source-address critical option (sshd
-# refuses it off the bastion IP), this is the "only this bastion" enforcement.
-# Also deposits the SSH key fingerprint with ob-fp-daemon for pam_openbastion.
-# Since #249 it does not write the spool itself: it runs as the unprivileged
-# AuthorizedPrincipalsCommandUser, and the spool is 0700 root.
+# Admits only bastion-vouched certificates: key-id "bastion=<id>;user=<u>;...",
+# <u> the login user and <id> in allowed_bastions when configured.
 USERNAME="$1"
 FINGERPRINT="$2"
 KEYID="$3"
@@ -21,16 +13,9 @@ KEYBLOB="$5"
 ALLOWED_FILE="/etc/open-bastion/allowed_bastions"
 OB_DIR="/etc/open-bastion"
 
-# --- Decide whether bastion-vouching enforcement applies. ---
-# This helper runs as AuthorizedPrincipalsCommandUser (nobody), so it MUST be
-# able to read the allowlist: ob-backend-setup keeps $OB_DIR traversable (711)
-# and the file world-readable (644). FAIL CLOSED on any ambiguity — a config
-# the helper cannot read must never silently fall open and accept direct SSO
-# certs (that exact bug let an unvouched SSO cert in when $OB_DIR was 0700):
-#   - allowlist readable        -> enforce with its contents
-#   - allowlist truly absent    -> legacy non-enforcing (pre-vouching backend)
-#   - present-but-unreadable, or
-#     $OB_DIR not traversable   -> DENY (emit no principal)
+# Runs as nobody, so it must be able to read the allowlist. Fail closed: an
+# absent file is legacy non-enforcing mode; an unreadable one, or an
+# untraversable $OB_DIR, denies.
 enforce=0
 if [ -r "$ALLOWED_FILE" ]; then
     enforce=1
@@ -41,18 +26,15 @@ elif [ -d "$OB_DIR" ] && [ ! -x "$OB_DIR" ]; then
 fi
 
 if [ "$enforce" = 1 ]; then
-    # Must be a vouched cert: key-id "bastion=<id>;user=<u>;..."
     case "$KEYID" in
         bastion=*\;user=*) : ;;
         *) exit 0 ;;   # not vouched (or direct SSO cert) -> deny
     esac
     bid=${KEYID#bastion=}; bid=${bid%%;*}
     rest=${KEYID#*;user=}; cuser=${rest%%;*}
-    # Reject anything with unexpected characters (defence in depth; LLNG already
-    # sanitises these fields to [A-Za-z0-9._-]).
+    # Defense in depth: LLNG already restricts these to [A-Za-z0-9._-].
     case "$bid"   in ""|*[!A-Za-z0-9._-]*) exit 0 ;; esac
     case "$cuser" in ""|*[!A-Za-z0-9._-]*) exit 0 ;; esac
-    # The cert's encoded user must match the login user.
     [ "$cuser" = "$USERNAME" ] || exit 0
     # Enforce the allowlist if it is non-empty (empty => any vouched bastion).
     allowed=$(tr ',;' '  ' < "$ALLOWED_FILE" 2>/dev/null)
@@ -63,41 +45,25 @@ if [ "$enforce" = 1 ]; then
         done
         [ "$ok" = 1 ] || exit 0
     else
-        # An empty allowlist accepts a voucher from ANY enrolled bastion in the
-        # project, which is the residual defence behind the SSO-side gap where
-        # a compromised host can self-declare server_group: bastion. Say so on
-        # every hop rather than only at setup time, so it shows up in the logs
-        # of a running fleet (#182).
+        # Logged on every hop: an empty list accepts any enrolled bastion.
         logger -t ob-ssh-principals -p authpriv.warning \
             "allowed_bastions is empty: accepting a voucher from bastion '$bid' for user '$USERNAME' without checking which bastion it is" \
             2>/dev/null || :
     fi
 else
-    # Legacy non-enforcing mode: no allowlist file at all, so this accepts a
-    # DIRECT SSO certificate too -- a broader hole than the empty list above,
-    # and until now the only silent one. A backend set up by any current
-    # version has the file; reaching this means an old setup that was never
-    # re-run, which is exactly what should be visible in the logs (#182).
+    # No allowlist: a direct SSO certificate is accepted too. Logged every hop.
     logger -t ob-ssh-principals -p authpriv.warning \
         "$ALLOWED_FILE is absent: legacy non-enforcing mode, accepting a certificate for user '$USERNAME' without requiring a bastion voucher (re-run ob-backend-setup)" \
         2>/dev/null || :
 fi
 
-# Hand the fingerprint to ob-fp-daemon, which writes the spool (#249).
-# This helper runs as AuthorizedPrincipalsCommandUser (nobody) because sshd
-# demands an unprivileged user, so it must NOT own the spool: a shared,
-# low-trust account holding the integrity of the fingerprint binding is the
-# whole problem #249 fixes. ob-fp-submit hands the values to a root daemon over
-# /run/open-bastion/ssh-fp.sock; the daemon derives the sshd anchor from THIS
-# process's own /proc ancestry, so nothing here can name the session it is
-# depositing for, and the spool is 0700 root.
+# Runs as the unprivileged AuthorizedPrincipalsCommandUser, so it cannot own
+# the spool; the root daemon derives the session anchor from our /proc ancestry.
 case "$FINGERPRINT" in
     SHA256:[A-Za-z0-9+/]*) : ;;
     *) FINGERPRINT="" ;;
 esac
-# Reject anything that is not a plausible OpenSSH algorithm name / base64 blob
-# before it leaves this process (the daemon re-validates; this is defence in
-# depth and keeps the deposit parseable).
+# Defense in depth (the daemon re-validates); keeps the deposit parseable.
 case "$KEYTYPE" in
     ""|*[!A-Za-z0-9@._-]*) KEYTYPE="" ;;
 esac
@@ -105,10 +71,8 @@ case "$KEYBLOB" in
     ""|*[!A-Za-z0-9+/=]*) KEYBLOB="" ;;
 esac
 if [ -n "$FINGERPRINT" ]; then
-    # OB_FP_SUBMIT is for the test suite; on a real host this is the packaged
-    # path. Failure is never fatal: losing the binding removes an extra check,
-    # it must not refuse a login sshd has already accepted. pam_openbastion
-    # reports the missing drop itself (#192).
+    # Never fatal: a lost binding drops an extra check and must not refuse a
+    # login sshd has already accepted. OB_FP_SUBMIT is for the test suite.
     _ob_submit="${OB_FP_SUBMIT:-/usr/sbin/ob-fp-submit}"
     if [ -x "$_ob_submit" ]; then
         printf '%s\n%s\n%s\n' "$FINGERPRINT" "$KEYTYPE" "$KEYBLOB" \

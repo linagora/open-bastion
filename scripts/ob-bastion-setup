@@ -3,22 +3,8 @@
 #
 # ob-bastion-setup - Configure a server as an Open Bastion node with LLNG
 #
-# One script for the three node roles. The role comes from the name the
-# script is invoked under -- the other two are symlinks to this file -- and
-# --node-role overrides it:
-#
-#   ob-bastion-setup     bastion     SSH entry point: accepts SSO certificates,
-#                                    records every session (ForceCommand), mints
-#                                    hop certificates for ob-ssh
-#   ob-standalone-setup  standalone  the bastion stack, on a host with nothing
-#                                    behind it; only the recorded role differs
-#   ob-backend-setup     backend     reached through a bastion: accepts only
-#                                    bastion-vouched certificates, creates Unix
-#                                    accounts, authorizes sudo via LLNG rules
-#
-# Everything role-specific is keyed on the EFFECTIVE role (NODE_ROLE after
-# option parsing), never on the program name, so `--node-role backend`
-# configures a backend whatever the command was called.
+# ob-standalone-setup and ob-backend-setup are symlinks to this file; the
+# role comes from the command name or --node-role. See ob-bastion-setup(8).
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>
@@ -29,26 +15,18 @@ set -euo pipefail
 VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
-# Default configuration
 PORTAL_URL=""
-# SERVER_GROUP must match a group defined in LLNG (pamAccessServerGroups);
-# there is no sensible default, so we leave it empty and prompt for it in
-# main() if --server-group was not provided.
 SERVER_GROUP=""
 SERVER_TOKEN=""
-# Node role: what this run configures, recorded in openbastion.conf and
-# reported in the heartbeat. PROG_ROLE is the default the command name gives;
-# NODE_ROLE is the effective role, which --node-role overrides. Nothing may
-# branch on the role before parse_args() has run.
+# NODE_ROLE is the effective role (--node-role overrides PROG_ROLE). Branch
+# on NODE_ROLE only, and never before parse_args() has run.
 case "$PROG_NAME" in
     ob-backend-setup)    PROG_ROLE="backend" ;;
     ob-standalone-setup) PROG_ROLE="standalone" ;;
     *)                   PROG_ROLE="bastion" ;;
 esac
 NODE_ROLE="$PROG_ROLE"
-# Options that only mean something for one role, as given on the command
-# line. They are checked against the effective role once parsing is over,
-# because --node-role may come after them.
+# Role-specific options, checked after parsing: --node-role may come later.
 BACKEND_ONLY_OPTS=()
 BASTION_ONLY_OPTS=()
 SHOW_HELP=false
@@ -59,38 +37,26 @@ TIMEOUT=30
 DRY_RUN=false
 BACKUP_DIR="/var/backup/open-bastion-setup-$(date +%Y%m%d-%H%M%S)"
 MAX_SECURITY=false
-# KRL refresh interval in minutes (Mode E), --krl-refresh-interval. The packaged
-# ob-krl-refresh.timer runs every 30; any other value becomes a drop-in.
+# Minutes; anything but the packaged 30 becomes a timer drop-in.
 KRL_REFRESH_INTERVAL=30
 KRL_INTERVAL_GIVEN=false
-# How the summary describes the refresh schedule; set by download_krl.
 KRL_SCHEDULE="every 30 min"
 KRL_REFRESH_BIN="/usr/sbin/ob-krl-refresh"
 ENABLE_AUDIT_TRACE=false
 # ── Bastion and standalone only ──
-# Session recording is a core bastion guarantee and is ON by default.
-# Pass --disable-session-recorder to opt out (e.g. when recording is handled
-# by an external mechanism); this skips recorder configuration and removes
-# ForceCommand from the sshd config.
 DISABLE_SESSION_RECORDER=false
 
 # ── Backend only ──
-# LLNG-authorized sudo (--no-sudo) and account creation (--no-create-user).
 ENABLE_SUDO=true
 CREATE_USERS=true
-# Space/comma-separated list of bastion_id values (the enrolling client_id of a
-# bastion) this backend accepts certs from. Empty = accept any vouched bastion
-# (still rejects direct user SSO certs, which carry no bastion= key-id).
+# bastion_id values accepted; empty = any vouched bastion (direct SSO certs,
+# which carry no bastion= key-id, are still refused).
 BASTION_ALLOWED_IDS=""
 ALLOW_ANY_BASTION=false
-# nobody-readable allowlist consumed by the AuthorizedPrincipalsCommand helper
-# (openbastion.conf is 0600 root, so the helper cannot read the list from there).
+# Read by the principals helper as nobody: openbastion.conf is 0600 root.
 OB_ALLOWED_BASTIONS_FILE="/etc/open-bastion/allowed_bastions"
 
-# OIDC client credentials. CLIENT_ID defaults to "pam-access" inside ob-enroll
-# when empty here. CLIENT_SECRET is empty in public-client mode; if the LLNG
-# client requires authentication, set it via --client-secret-file or the
-# OB_CLIENT_SECRET env var (CLI arg avoided to keep the secret out of /proc).
+# No --client-secret option: a secret on the command line shows in /proc.
 CLIENT_ID=""
 CLIENT_SECRET=""
 
@@ -101,20 +67,13 @@ SSHD_CONFIG_DIR="/etc/ssh/sshd_config.d"
 PAM_SSHD="/etc/pam.d/sshd"
 OB_CONFIG="/etc/open-bastion/openbastion.conf"
 OB_TOKEN="/var/lib/open-bastion/token"
-# ForceCommand points directly at the recorder. The recording is streamed to the
-# root sink (ob-record-sink) over a socket, so the recorder no longer needs the
-# old setgid ob-session-recorder-wrapper (which created a user-owned per-user
-# dir — exactly what the tamper-evident design removes).
 SESSION_RECORDER="/usr/sbin/ob-session-recorder"
 SESSION_RECORDER_CONF="/etc/open-bastion/session-recorder.conf"
-# ob-ssh's own configuration (bastion stack only; see configure_ssh_proxy)
 SSH_PROXY_CONF="/etc/open-bastion/ssh-proxy.conf"
 SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
 PAM_SUDO="/etc/pam.d/sudo"
-# sudo 1.9 uses a separate PAM service ("sudo-i") for `sudo -i`. It must get the
-# same open-bastion stack as /etc/pam.d/sudo, otherwise `sudo -i` falls back to
-# the distro default (common-auth/common-account = pam_unix), which cannot
-# validate NSS-only SSO users and fails with "account validation failure".
+# sudo 1.9 runs `sudo -i` under its own PAM service; left to the distro
+# default (pam_unix) it rejects NSS-only SSO users.
 PAM_SUDO_I="/etc/pam.d/sudo-i"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
@@ -126,45 +85,23 @@ HARDENING_LIMITS_DST="/etc/security/limits.d/open-bastion.conf"
 HARDENING_AT_ALLOW="/etc/at.allow"
 HARDENING_CRON_ALLOW="/etc/cron.allow"
 ENABLE_HARDENING=false
-# Opt-in: scope `timestamp_timeout=0` to %open-bastion-sudo so SSO users present
-# a fresh LLNG token on every sudo instead of riding sudo's own credential cache
-# (#178). Off by default: it changes the prompt cadence for every SSO user.
 SUDO_FRESH_OTP=false
 ENABLE_SERVICE_KEYS=false
-# Result of setup_hardening, consumed by print_summary. One of:
-#   not-applied (default — step never ran or was opt-out)
-#   applied     (all sub-steps succeeded)
-#   partial     (one or more sub-steps emitted warn/error but step continued)
-#   declined    (user said no at the confirm prompt)
-#   failed      (hard refusal: templates missing, linger gate, etc.)
-#   dry-run     (--dry-run, nothing was actually applied)
+# not-applied, applied, partial, declined, failed or dry-run
 HARDENING_RESULT="not-applied"
 
-# Audit outcome for the summary: not-applied (default), applied, skipped
-# (auditd missing), declined (user said no), dry-run, failed.
+# not-applied, applied, skipped (no auditd), declined, dry-run or failed
 AUDIT_RESULT="not-applied"
 
-# Audit trace paths (opt-in, see --enable-audit-trace)
 AUDIT_TEMPLATE_DIR="${AUDIT_TEMPLATE_DIR:-/usr/share/open-bastion/audit}"
 AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
-# Daily rotation: ob-audit-rotate.timer, enabled by --enable-audit-trace. Up to
-# 0.6 it was a copy of a template in /etc/cron.daily; see ob-timers-lib.sh.
 
-# Result of enroll_server, consumed by print_summary. One of:
-#   not-attempted (default — step never ran)
-#   success       (enrollment completed; server token stored)
-#   token-provided (caller passed --token-file, no portal contact needed)
-#   reused        (existing token at $OB_TOKEN adopted, no re-enrollment)
-#   dry-run       (--dry-run, no enrollment attempted)
-#   failed        (portal contact or device-authorization failed)
+# not-attempted, success, token-provided, reused, dry-run or failed
 ENROLL_RESULT="not-attempted"
 
-# Files created (not just modified) during this run. Used by rollback_on_failure()
-# to remove inert config artefacts when the run aborts before SSH lockdown.
-# Files we MODIFIED have their originals in BACKUP_DIR via backup_file().
+# Files written by this run, for rollback_on_failure()
 CREATED_FILES=()
 
-# Colors (only if terminal)
 if [ -t 1 ]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
@@ -187,7 +124,6 @@ step() { echo -e "${BLUE}[STEP]${NC} $*"; }
 # A standalone host runs the bastion stack; only the backend differs.
 is_backend() { [ "$NODE_ROLE" = "backend" ]; }
 
-# How the effective role reads in a sentence.
 role_noun() {
     case "$NODE_ROLE" in
         standalone) printf 'standalone host' ;;
@@ -195,7 +131,6 @@ role_noun() {
     esac
 }
 
-# The same, capitalised, for titles.
 role_title() {
     case "$NODE_ROLE" in
         backend)    printf 'Backend' ;;
@@ -204,20 +139,14 @@ role_title() {
     esac
 }
 
-# The sshd drop-in carries the stack, not the recorded role: a standalone host
-# gets the bastion one. debian/open-bastion.postinst and ob-post-upgrade tell a
-# backend from a bastion by exactly these two names.
+# debian/open-bastion.postinst and ob-post-upgrade rely on these two names.
 sshd_dropin_stack() {
     if is_backend; then printf 'backend'; else printf 'bastion'; fi
 }
 
-# The stack this host's sshd is configured for right now -- "bastion",
-# "backend", or nothing when setup has not configured it -- read from what an
-# earlier run wrote: the drop-in name, or, on an sshd without sshd_config.d,
-# the principals line of the block appended to sshd_config (only the backend
-# passes the key-id, %i). A host with both drop-ins, left by a role switch
-# before #288, reads as a backend: that one sorts first and its
-# AuthorizedPrincipalsCommand is the one sshd uses.
+# Stack sshd is configured for now (empty if none). Without sshd_config.d,
+# only the backend principals line passes %i. With both drop-ins, backend
+# wins: it sorts first, so sshd uses its AuthorizedPrincipalsCommand.
 configured_sshd_stack() {
     local f stack
     if [ -d "$SSHD_CONFIG_DIR" ]; then
@@ -234,20 +163,18 @@ configured_sshd_stack() {
     line=$(grep -m1 '^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]].*ob-ssh-principals' \
            "$SSHD_CONFIG" 2>/dev/null)
     case "$line" in
-        "")      ;;   # a block from before the principals helper: cannot tell
+        "")      ;;   # no principals helper line: cannot tell
         *" %i"*) printf 'backend' ;;
         *)       printf 'bastion' ;;
     esac
 }
 
-# True when this run changes the stack the host's sshd is configured for.
 is_role_switch() {
     local current
     current=$(configured_sshd_stack)
     [ -n "$current" ] && [ "$current" != "$(sshd_dropin_stack)" ]
 }
 
-# A boxed title, centred in the 57 columns of the frame.
 print_box() {
     local text="$1" width=57 left right
     left=$(( (width - ${#text}) / 2 ))
@@ -257,7 +184,6 @@ print_box() {
     echo "└─────────────────────────────────────────────────────────┘"
 }
 
-# Check if running as root
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
         error "This script must be run as root"
@@ -265,18 +191,12 @@ check_root() {
     fi
 }
 
-# Record a path as something we wrote. Used by rollback_on_failure() to
-# decide what to restore from BACKUP_DIR (file existed before — restore)
-# vs. what to remove (file did not exist before — delete).
 track_created() {
     CREATED_FILES+=("$1")
 }
 
-# Rollback inert files written before enrollment, called if enrollment fails
-# before SSH/PAM lockdown is applied. Safe because the affected files
-# (open-bastion_ca.pub, ob-ssh-principals, openbastion.conf, and
-# session-recorder.conf on a bastion or allowed_bastions on a backend) are not
-# referenced by sshd/PAM until later steps.
+# Only safe before SSH/PAM lockdown: until then sshd and PAM do not reference
+# the tracked files.
 rollback_on_failure() {
     if [ ${#CREATED_FILES[@]} -eq 0 ]; then
         return 0
@@ -294,7 +214,6 @@ rollback_on_failure() {
     info "Backup directory preserved at: $BACKUP_DIR"
 }
 
-# Backup a file before modifying
 backup_file() {
     local file="$1"
     if [ -f "$file" ]; then
@@ -304,7 +223,6 @@ backup_file() {
     fi
 }
 
-# Confirm action (unless non-interactive)
 confirm() {
     local msg="$1"
     if [ "$NON_INTERACTIVE" = "true" ]; then
@@ -319,7 +237,6 @@ confirm() {
     esac
 }
 
-# Build curl options
 build_curl_opts() {
     CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
     if [ "$VERIFY_SSL" = "false" ]; then
@@ -327,7 +244,6 @@ build_curl_opts() {
     fi
 }
 
-# Download SSH CA public key
 download_ca_key() {
     step "Downloading SSH CA public key from LLNG..."
 
@@ -357,18 +273,7 @@ download_ca_key() {
     info "CA public key saved to $SSH_CA_FILE"
 }
 
-# Install /usr/local/sbin/ob-ssh-principals and its spool directory.
-# The script is invoked by sshd as AuthorizedPrincipalsCommand (running as
-# nobody); it records the SHA256 fingerprint of the client certificate in
-# /run/open-bastion/ssh-fp/<sshd-session-pid>.fp so pam_openbastion can
-# forward it to LLNG for the /pam/authorize + /pam/verify fingerprint
-# binding (see PamAccess >= 0.1.16). The backend variant also refuses any
-# certificate that is not vouched by an allowed bastion (key-id, %i).
-# Locate the shipped helper text and tmpfiles rule. They live in one place
-# (share/ in the tree, /usr/lib/open-bastion once installed) because they used
-# to be inline heredocs here AND in the other setup script AND would have been
-# a third time in ob-post-upgrade -- which is how debian/ and systemd/ ended up
-# with units that drifted apart (#254).
+# /usr/lib/open-bastion once installed, share/ when run from the source tree.
 _ob_data_dir() {
     local d="${OB_DATA_DIR:-/usr/lib/open-bastion}"
     if [ ! -r "$d/ob-fp-spool.tmpfiles" ]; then
@@ -402,14 +307,9 @@ install_principals_helper() {
         return 1
     fi
 
-    # Every step is checked: main() calls this as `install_principals_helper ||
-    # ...`, which suspends errexit for the whole body, so an unchecked failure
-    # would fall through to "installed" and the run would carry on.
-    #
-    # The allowlist goes in BEFORE the backend helper. The backend helper with
-    # no allowlist file at all is legacy non-enforcing mode, which accepts a
-    # direct SSO certificate; it must never be live in that state, not even
-    # between two lines of this function.
+    # Check every step: the caller's `||` suspends errexit in this body.
+    # Allowlist first: without that file the backend helper accepts direct
+    # SSO certificates, so it must never be live before it.
     if is_backend; then
         install_allowed_bastions || return 1
     fi
@@ -420,9 +320,7 @@ install_principals_helper() {
     }
     track_created "$script_path"
 
-    # 0711 on /run/open-bastion, 0700 root on the drop directory: see the
-    # tmpfiles rule for the rationale. ob-fp-daemon owns the drops; the
-    # principals helper only needs to reach the deposit socket.
+    # Modes match the tmpfiles rule; the helper only needs the deposit socket.
     install -d -m 0711 -o root -g root /run/open-bastion || return 1
     install -d -m 0700 -o root -g root "$spool_dir" || return 1
 
@@ -430,10 +328,7 @@ install_principals_helper() {
         || return 1
     track_created "$tmpfiles_conf"
 
-    # Enable the fingerprint sink socket (#249). The principals helper deposits
-    # through it instead of writing the spool as nobody; without it there is no
-    # fingerprint binding at all, so say so loudly rather than let logins
-    # silently lose a security control.
+    # Without ob-fp.socket there is no fingerprint binding at all: warn loudly.
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl enable --now ob-fp.socket >/dev/null 2>&1; then
             info "Enabled ob-fp.socket (SSH fingerprint sink)"
@@ -450,13 +345,8 @@ install_principals_helper() {
     info "SSH fingerprint spool prepared at $spool_dir"
 }
 
-# Phase 1 half of the principals helper. On a role switch it is NOT installed
-# here: sshd keeps running the old role's configuration until it is restarted
-# at the very end, and the new helper under the old configuration is a
-# mismatch. Both helpers deny in that state, but a host locked for the length
-# of an enrollment -- or for good, if the run stops -- is no better. So the
-# helper goes in last, by finish_principals_helper, right before the restart,
-# where the mismatch lasts a moment.
+# On a role switch, sshd keeps the old configuration until the final restart
+# and the new helper denies every login under it: install it just before.
 HELPER_DEFERRED=false
 prepare_principals_helper() {
     if is_role_switch; then
@@ -473,15 +363,9 @@ finish_principals_helper() {
     install_principals_helper
 }
 
-# Backend: write the bastion allowlist the principals helper reads.
 install_allowed_bastions() {
-    # Allowed-bastions list, world-readable (no secrets — just client_id values)
-    # so the principals helper (running as nobody) can read it. Empty file means
-    # "any vouched bastion"; its mere presence turns on bastion-only enforcement.
-    #
-    # Every step is checked (errexit is suspended here, see the caller): a
-    # write that failed unnoticed would leave no file, and the backend helper
-    # then runs in legacy mode and accepts a direct SSO certificate.
+    # The file's mere presence, even empty, enforces bastion-only certs, so
+    # check every step (errexit is suspended, see the caller).
     local dir
     dir=$(dirname "$OB_ALLOWED_BASTIONS_FILE")
     backup_file "$OB_ALLOWED_BASTIONS_FILE"
@@ -492,11 +376,8 @@ install_allowed_bastions() {
         return 1
     fi
     track_created "$OB_ALLOWED_BASTIONS_FILE"
-    # CRITICAL: the principals helper runs as nobody and must traverse this
-    # directory to read the 0644 allowlist above. If the dir stays 0700 root,
-    # nobody cannot stat the file, the helper fails closed (post-fix) — or,
-    # before the fail-closed fix, silently fell OPEN and accepted direct SSO
-    # certs. Every secret inside is individually 0600, so 0711 is safe.
+    # The helper runs as nobody and must traverse this dir, else it fails
+    # closed. Safe: every secret inside is 0600.
     chmod 0711 "$dir" || {
         error "Could not make $dir traversable (0711) for the principals helper"
         return 1
@@ -514,12 +395,8 @@ install_allowed_bastions() {
     fi
 }
 
-# Refuse, before anything is written, a role switch on an sshd without
-# sshd_config.d. There the setup appends its block to sshd_config and, finding
-# one already, keeps it ("already exists"): the old role's sshd configuration
-# would stay in force while the helper, PAM and the summary moved to the new
-# one. Rewriting a hand-maintained sshd_config is not something to guess at,
-# so the block has to go by hand.
+# Without sshd_config.d an existing block is never rewritten, so a role
+# switch there must be refused before anything is written.
 preflight_sshd_config() {
     [ -d "$SSHD_CONFIG_DIR" ] && return 0
     local current
@@ -536,13 +413,9 @@ preflight_sshd_config() {
     return 1
 }
 
-# Configure sshd
 configure_sshd() {
     step "Configuring SSH server..."
 
-    # Role-specific pieces of the drop-in. The backend helper also gets the
-    # certificate key-id (%i) to check the vouching bastion; only the bastion
-    # stack forces sessions through the recorder and allows agent forwarding.
     local title principals_comment principals_args password_comment
     local agent_snippet forcecommand_snippet="" pam_comment
     if is_backend; then
@@ -613,32 +486,23 @@ PermitRootLogin no
         return 0
     fi
 
-    # Use sshd_config.d if available (modern systems)
     if [ -d "$SSHD_CONFIG_DIR" ]; then
-        # Ensure Include directive exists in main sshd_config
         if ! grep -q "^Include $SSHD_CONFIG_DIR/\*.conf" "$SSHD_CONFIG" 2>/dev/null; then
             backup_file "$SSHD_CONFIG"
             sed -i "1i Include $SSHD_CONFIG_DIR/*.conf" "$SSHD_CONFIG"
             info "Added Include directive to $SSHD_CONFIG"
         fi
 
-        # Sort BEFORE distro drop-ins such as 50-cloud-init.conf, which ships
-        # `PasswordAuthentication yes`. sshd uses the FIRST value seen for
-        # keywords like PasswordAuthentication / PermitRootLogin / KbdInteractive,
-        # so our cert-only hardening must be read first or it is silently
-        # overridden. The 00- prefix guarantees that.
+        # 00- sorts before distro drop-ins such as 50-cloud-init.conf
+        # (PasswordAuthentication yes): sshd keeps the first value it reads.
         local stack other
         stack=$(sshd_dropin_stack)
         if [ "$stack" = "backend" ]; then other="bastion"; else other="backend"; fi
         local ob_config="$SSHD_CONFIG_DIR/00-open-bastion-$stack.conf"
-        # Drop the legacy 50- name from earlier installs (it sorted AFTER
-        # 50-cloud-init.conf and therefore lost the PasswordAuthentication race).
+        # Legacy name, sorted after 50-cloud-init.conf.
         rm -f "$SSHD_CONFIG_DIR/50-open-bastion-$stack.conf"
-        # And the other stack's drop-in, left by a run under the other role.
-        # Both would be read: the backend one sorts first and wins every keyword
-        # it sets, but the bastion's ForceCommand would still apply -- sending
-        # every backend session through a recorder whose sink is not enabled
-        # there, which fails closed.
+        # A leftover bastion drop-in would still force a backend's sessions
+        # through the recorder, whose sink is not enabled there.
         local stale
         for stale in "$SSHD_CONFIG_DIR/00-open-bastion-$other.conf" \
                      "$SSHD_CONFIG_DIR/50-open-bastion-$other.conf"; do
@@ -652,10 +516,8 @@ PermitRootLogin no
         chmod 644 "$ob_config"
         info "Created $ob_config"
     else
-        # Append to main sshd_config
         backup_file "$SSHD_CONFIG"
 
-        # Check if already configured
         if grep -q "TrustedUserCAKeys.*open-bastion" "$SSHD_CONFIG" 2>/dev/null; then
             warn "Open Bastion configuration already exists in $SSHD_CONFIG"
         else
@@ -665,7 +527,6 @@ PermitRootLogin no
         fi
     fi
 
-    # Validate sshd config
     if ! sshd -t 2>/dev/null; then
         error "SSH configuration is invalid!"
         error "Please check the configuration and fix manually"
@@ -675,9 +536,6 @@ PermitRootLogin no
     info "SSH configuration is valid"
 }
 
-# Configure PAM for SSH
-# True if a PAM module (e.g. pam_systemd.so) is installed in any of the standard
-# security module directories (covers Debian multiarch and RHEL lib64 layouts).
 pam_module_present() {
     local m="$1" d
     for d in /lib/security /lib64/security /usr/lib/security /usr/lib64/security \
@@ -690,9 +548,6 @@ pam_module_present() {
 configure_pam_sshd() {
     step "Configuring PAM for SSH..."
 
-    # Session phase: a backend has pam_openbastion create the Unix account
-    # (create_user=true) and fails the session if it cannot; the bastion stack
-    # only needs a home directory and keeps pam_openbastion optional.
     local session_comment session_lines
     if is_backend; then
         local create_user_opt=""
@@ -730,12 +585,8 @@ account    required     pam_openbastion.so ssh_cert_aware=true
 $session_lines
 "
 
-    # Register the session with systemd-logind so who/w/loginctl — and the
-    # ob-heartbeat connected-users report, which reads loginctl/who — actually
-    # see it. Append the line only when pam_systemd is installed: with 'optional'
-    # a missing module is normally ignored, but gating on presence avoids a
-    # per-login dlopen error on a non-systemd host (and any PAM-version edge
-    # case). Mirrors how distros tie the line to the libpam-systemd package.
+    # pam_systemd makes the session visible to loginctl/who (and ob-heartbeat).
+    # Only if installed: avoids a per-login dlopen error on non-systemd hosts.
     if pam_module_present pam_systemd.so; then
         pam_content="${pam_content}session    optional     pam_systemd.so
 "
@@ -753,10 +604,6 @@ $session_lines
     info "Configured $PAM_SSHD"
 }
 
-# Render openbastion.conf content using current globals. Used both by
-# the initial configure_pam_openbastion (Phase 1) and the post-enrollment
-# refresh that persists any client_id/client_secret entered during the
-# retry prompts.
 render_openbastion_conf() {
     printf '# LemonLDAP::NG PAM module configuration\n'
     printf '# Generated by %s on %s\n\n' "$PROG_NAME" "$(date)"
@@ -768,11 +615,8 @@ render_openbastion_conf() {
     printf 'server_group = %s\n\n' "$SERVER_GROUP"
     printf '# Node role reported to the SSO (bastion | standalone | backend)\n'
     printf 'node_role = %s\n\n' "$NODE_ROLE"
-    # Authorization-only mode: pam_sm_authenticate always succeeds (SSH already
-    # validated the cert), only pam_sm_acct_mgmt calls /pam/authorize. Without
-    # this, pam_openbastion would require client_id/client_secret in this file
-    # for OIDC token introspection — which this host never receives, since
-    # the user authenticates with an SSH certificate, not an OIDC token.
+    # Without authorize_only, pam_openbastion would require client credentials
+    # for OIDC token introspection, which certificate logins never use.
     printf '# SSH %s mode: cert auth via sshd, authorization via /pam/authorize\n' \
         "$(sshd_dropin_stack)"
     printf 'authorize_only = true\n\n'
@@ -797,12 +641,8 @@ render_openbastion_conf() {
         printf 'create_home = true\n'
         printf 'default_shell = /bin/bash\n\n'
     fi
-    # Carry over fingerprint_required if the operator set it. This function
-    # rewrites openbastion.conf wholesale on every run, so a setting it does not
-    # know about is silently dropped -- and this one decides whether a login with
-    # no recoverable SSH fingerprint is refused or merely allowed through. Losing
-    # it turns a deliberate control back off on the next setup run, which is the
-    # kind of silent downgrade this project exists to prevent (#263).
+    # The file is rewritten wholesale: keep an operator's fingerprint_required,
+    # or a rerun silently turns that control off.
     local _fpreq=""
     if [ -r "$OB_CONFIG" ]; then
         _fpreq=$(sed -n 's/^[[:space:]]*fingerprint_required[[:space:]]*=[[:space:]]*\([^#[:space:]]*\).*/\1/p' \
@@ -820,7 +660,6 @@ render_openbastion_conf() {
     printf 'audit_to_syslog = true\n'
 }
 
-# Configure PAM open-bastion module
 configure_pam_openbastion() {
     step "Configuring PAM open-bastion module..."
 
@@ -836,13 +675,12 @@ configure_pam_openbastion() {
     track_created "$OB_CONFIG"
     info "Created $OB_CONFIG"
 
-    # Create cache directory
     mkdir -p /var/cache/open-bastion
     chmod 750 /var/cache/open-bastion
 }
 
-# Re-render openbastion.conf in place (no fresh backup, no track) after
-# enrollment succeeds — persists credentials updated during retry prompts.
+# Persists credentials entered at the enrollment retry prompts. No backup or
+# tracking: Phase 1 already did both.
 refresh_openbastion_conf() {
     if [ "$DRY_RUN" = "true" ]; then
         return 0
@@ -851,12 +689,9 @@ refresh_openbastion_conf() {
     chmod 600 "$OB_CONFIG"
 }
 
-# Configure session recorder (bastion and standalone only: a backend records
-# nothing, the bastion in front of it does)
 configure_session_recorder() {
     step "Configuring session recorder..."
 
-    # Check if session recorder is installed
     if [ ! -x "$SESSION_RECORDER" ]; then
         warn "Session recorder not found at $SESSION_RECORDER"
         warn "Make sure open-bastion package is installed"
@@ -894,27 +729,18 @@ recording_retention_days = 365
     track_created "$SESSION_RECORDER_CONF"
     info "Created $SESSION_RECORDER_CONF"
 
-    # ob-sessions group (normally created by the package; be defensive for
-    # source installs). Recordings are owned root:ob-sessions so auditors in this
-    # group can read them; the recorded user is NOT a member.
+    # Auditors read recordings through ob-sessions; the recorded user is not a
+    # member. The package normally creates the group.
     getent group ob-sessions >/dev/null 2>&1 || groupadd --system ob-sessions 2>/dev/null || true
 
-    # Sessions tree, NEW tamper-evident layout: root:ob-sessions 0750.
-    #   - o-rwx  → a connecting user (not in ob-sessions) has NO access at all:
-    #     it cannot list, read, unlink or truncate any recording, including its
-    #     own. This is the whole point (#151); the recording is written by the
-    #     root sink, not by the user.
-    #   - g+rx (group ob-sessions) → auditors can read.
-    # NOTE: this replaces the old 3771 setgid+sticky+o+x layout, which left the
-    # tree user-traversable and the per-user dirs user-owned (deletable).
+    # o-rwx: a connecting user cannot list, read or delete any recording, even
+    # its own. The root sink writes them.
     mkdir -p /var/lib/open-bastion/sessions
     chown root:ob-sessions /var/lib/open-bastion/sessions
     chmod 0750 /var/lib/open-bastion/sessions
 
-    # Migrate any legacy user-owned per-user dirs to root ownership, safely:
-    # skip symlinks / non-dirs (a user could have planted one while the tree was
-    # still writable), and re-own + lock down the rest. The sink also re-owns on
-    # next use, but doing it here closes the window immediately.
+    # Re-own legacy user-owned per-user dirs now rather than on the sink's
+    # next use. Skip symlinks a user could have planted while it was writable.
     local d
     for d in /var/lib/open-bastion/sessions/*/; do
         [ -e "$d" ] || continue
@@ -924,13 +750,11 @@ recording_retention_days = 365
         fi
         chown -h root:ob-sessions "${d%/}" 2>/dev/null || true
         chmod 0750 "${d%/}" 2>/dev/null || true
-        # Recording/metadata files: root:ob-sessions 0640.
         find "$d" -maxdepth 1 -type f -exec chown root:ob-sessions {} + 2>/dev/null || true
         find "$d" -maxdepth 1 -type f -exec chmod 0640 {} + 2>/dev/null || true
     done
 
-    # Enable the recording sink socket (mirrors ob-cert.socket). Recording is
-    # mandatory when configured, so the recorder fails closed if this is down.
+    # The recorder fails closed while this socket is down.
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl enable --now ob-record.socket >/dev/null 2>&1; then
             info "Enabled ob-record.socket (session recording sink)"
@@ -942,10 +766,7 @@ recording_retention_days = 365
         warn "systemctl not available — enable ob-record.socket manually"
     fi
 
-    # Arm the daily retention timer. The package enables it at install time too
-    # (dh_installsystemd, no ConditionPathExists gate), but re-assert it here for
-    # source installs and to be idempotent. It bounds recording disk usage; on a
-    # host without recordings it simply no-ops.
+    # Also enabled by the package; repeated for source installs.
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl enable --now ob-session-prune.timer >/dev/null 2>&1; then
             info "Enabled ob-session-prune.timer (compresses + expires recordings)"
@@ -956,21 +777,12 @@ recording_retention_days = 365
     fi
 }
 
-# Allow bastion users to obtain vouched ephemeral certificates (bastion and
-# standalone only).
-# ob-ssh runs as the logged-in user but /pam/bastion-cert requires the bastion's
-# server token, which is root-only BY DESIGN. The bridge is ob-cert-daemon, a
-# socket-activated service (runs as root) reached through the unprivileged
-# ob-cert-request client. The daemon derives the certificate's user from the
-# connection's SO_PEERCRED, so it always mints for the connecting user — no
-# sudo, no setuid, and minting is decoupled from the interactive sudo policy.
+# /pam/bastion-cert needs the root-only server token: ob-ssh goes through
+# ob-cert-daemon, which mints for the SO_PEERCRED user of the connection.
 configure_ssh_proxy() {
     step "Configuring ob-ssh (config + cert socket)..."
 
-    # ob-ssh runs as the logged-in user, who cannot read the root-only
-    # /etc/open-bastion/openbastion.conf — give it its own world-readable
-    # configuration. It contains NO secret (the server token stays root-only;
-    # the privileged call goes through ob-cert-daemon over its socket below).
+    # ob-ssh cannot read the root-only openbastion.conf; this one has no secret.
     local proxy_conf="$SSH_PROXY_CONF"
     local proxy_conf_content="# Open Bastion ssh-proxy configuration
 # Generated by $PROG_NAME on $(date)
@@ -989,19 +801,11 @@ TIMEOUT=10
         chmod 644 "$proxy_conf"
         track_created "$proxy_conf"
         info "Created $proxy_conf"
-        # The directory must be traversable (not readable) by users so they
-        # can open the world-readable ssh-proxy.conf; every secret inside
-        # (token, openbastion.conf) stays 0600 root and the dir stays
-        # unlistable for non-root.
+        # Traversable, not listable: every secret inside stays 0600 root.
         chmod 711 /etc/open-bastion
     fi
 
-    # The privileged /pam/bastion-cert call is performed by ob-cert-daemon, a
-    # socket-activated service (runs as root, derives the certificate's user from
-    # the connection's SO_PEERCRED). ob-ssh reaches it through the unprivileged
-    # ob-cert-request client — no sudo, no setuid, and minting is decoupled from
-    # the interactive sudo policy (Mode E). Remove any sudoers drop-in left by
-    # older versions (the old ob-bastion-cert-helper bridge).
+    # Sudo-based bridge of older versions, superseded by ob-cert.socket.
     local old_sudoers="/etc/sudoers.d/ob-bastion-cert-helper"
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -1014,8 +818,7 @@ TIMEOUT=10
         info "Removed obsolete $old_sudoers (replaced by ob-cert.socket)"
     fi
 
-    # The socket lives under /run/open-bastion (0711, traversable so users can
-    # connect to the 0666 socket; every secret in the dir stays 0600 root).
+    # 0711 so users reach the 0666 socket; secrets inside stay 0600 root.
     mkdir -p /run/open-bastion
     chmod 0711 /run/open-bastion
 
@@ -1036,26 +839,14 @@ TIMEOUT=10
     fi
 }
 
-# Arm the heartbeat timer now that the server token exists.
-#
-# The packaged ob-heartbeat.timer is enabled+started at install time by
-# dh_installsystemd, but it carries ConditionPathExists=/var/lib/open-bastion/
-# token. Enrollment runs *after* package install, so at that install-time start
-# the token does not exist yet, the condition fails, and the timer is silently
-# skipped — it never arms in the running system until the next reboot. With no
-# heartbeat, the short-lived enrollment access token expires within hours and is
-# never refreshed: PAM then falls back to the offline cache (SSH login still
-# works but no bastion voucher is minted, so ob-ssh breaks with "voucher unset")
-# and sudo locks out ("server token invalid or expired"). Starting it here, once
-# the token is in place, closes that window. On a backend the same expiry
-# makes /pam/authorize fail for every login.
+# The timer's ConditionPathExists on the token failed at package install, so it
+# is not armed until reboot; without it the server token expires within hours.
 enable_heartbeat_timer() {
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would enable --now ob-heartbeat.timer"
         return 0
     fi
 
-    # No token (enrollment skipped/declined) -> nothing to heartbeat yet.
     [ -s "$OB_TOKEN" ] || return 0
 
     if command -v systemctl >/dev/null 2>&1; then
@@ -1070,24 +861,15 @@ enable_heartbeat_timer() {
     fi
 }
 
-# Header stamped into every drop-in this function writes. It is what lets a
-# later run tell OUR file from one an operator wrote by hand -- the difference
-# between cleaning up after ourselves and deleting someone's configuration.
+# Tells our drop-in from one an operator wrote by hand.
 _OB_SVC_KEYS_MARK="# Open Bastion service-account SSH layer"
 
-# Is there an AuthorizedKeysCommand on this host that is not ours?
-#
-# It matters because sshd keeps the FIRST value it sees for a keyword and
-# configure_sshd puts `Include sshd_config.d/*.conf` on line 1, so our drop-in
-# is read before the body of sshd_config. A host already running its own key
-# server -- LDAP, a corporate helper -- would have that line made dead by ours,
-# and every user who authenticates through it would lose access silently. That
-# is a worse outcome than not enabling this feature, so it is a refusal.
+# sshd keeps the first AuthorizedKeysCommand and our drop-in is read first, so
+# ours would silently disable an existing one (LDAP...): refuse instead.
 _ob_foreign_authorized_keys_command() {
     local f hit=""
     for f in "$SSHD_CONFIG" "$SSHD_CONFIG_DIR"/*.conf; do
         [ -f "$f" ] || continue
-        # Skip our own drop-in: re-running must be idempotent, not a refusal.
         grep -q "^${_OB_SVC_KEYS_MARK}\$" "$f" 2>/dev/null && continue
         if grep -qiE '^[[:space:]]*AuthorizedKeysCommand[[:space:]]' "$f" 2>/dev/null; then
             hit="$hit $f"
@@ -1097,13 +879,8 @@ _ob_foreign_authorized_keys_command() {
     return 1
 }
 
-# Remove a drop-in we generated, when the feature is not requested.
-#
-# Without this the flag is one-way: a host that was set up with it once keeps
-# AuthorizedKeysCommand and ExposeAuthInfo for every session forever, and a
-# later run without the flag reports a configuration it is not producing. Only
-# files carrying our header are touched -- an operator's hand-written file is
-# theirs, and this function has no business deleting it.
+# Keeps --enable-service-keys from being one-way. Only a file carrying our
+# header is removed.
 _ob_drop_service_keys_dropin() {
     local drop_in="$SSHD_CONFIG_DIR/09-open-bastion-service-keys.conf"
     [ -f "$drop_in" ] || return 0
@@ -1121,28 +898,9 @@ _ob_drop_service_keys_dropin() {
     info "Removed $drop_in (--enable-service-keys not given)"
 }
 
-# Configure the SSH layer for service accounts (#263), opt-in.
-#
-# ob-builder writes service-accounts.conf, which tells pam_openbastion which
-# accounts exist and what fingerprint each should present. It does NOT make the
-# key usable: sshd needs an authorized key for the account, and on a bastion
-# there is no ~/.ssh/authorized_keys to read (Mode E sets AuthorizedKeysFile
-# none, and the account often does not exist until first login). Without the
-# AuthorizedKeysCommand below, sshd refuses at the protocol layer and PAM never
-# runs -- which is how #263 was reported.
-#
-# Opt-in, per this project's rule that changes to system-wide behaviour are
-# --enable-*: this adds an sshd drop-in and turns ExposeAuthInfo on for every
-# session, on hosts that may have no service account at all.
-#
-# ExposeAuthInfo is written HERE and not left to Mode E. It is what puts
-# SSH_USER_AUTH in the PAM environment, and without it the fingerprint check
-# pam_openbastion is supposed to do for a plain public-key login has nothing to
-# read -- the principals spool cannot fill the gap either, since sshd runs
-# AuthorizedPrincipalsCommand only for certificate sessions. Shipping the
-# AuthorizedKeysCommand without ExposeAuthInfo would mean sshd accepts the key
-# and key_fingerprint is never enforced: the silent half-configuration that
-# doc/service-accounts.rst now warns about.
+# ExposeAuthInfo must come with the AuthorizedKeysCommand, not be left to
+# Mode E: without it key_fingerprint is never enforced. See
+# doc/service-accounts.rst.
 configure_service_account_keys() {
     if [ "$ENABLE_SERVICE_KEYS" != "true" ]; then
         _ob_drop_service_keys_dropin
@@ -1156,10 +914,7 @@ configure_service_account_keys() {
     local drop_in="$SSHD_CONFIG_DIR/09-open-bastion-service-keys.conf"
     local foreign=""
 
-    # ── Preconditions, before the dry-run short-circuit ──────────────────────
-    # Checked here so --dry-run reports the same refusals a real run would hit.
-    # Reporting "would write ..." on a host where the real run aborts is the
-    # opposite of what a preflight is for.
+    # Before the dry-run exit, so --dry-run reports the same refusals.
     if [ ! -x "$helper" ]; then
         error "$helper not found. It ships with the open-bastion package;"
         error "reinstall it, or drop --enable-service-keys."
@@ -1191,17 +946,11 @@ configure_service_account_keys() {
         return 0
     fi
 
-    # 0755: the AuthorizedKeysCommandUser (nobody) has to traverse and read it.
-    # The package creates it; assert it here because an older host upgraded
-    # from a release that did not ship it will not have it.
+    # 0755 for nobody. Hosts upgraded from older releases may lack it.
     install -d -m 0755 -o root -g root "$keys_dir" || return 1
 
     backup_file "$drop_in"
-    # errexit is off inside this function -- main() calls it as
-    # `configure_service_account_keys || exit 1`, and bash suspends errexit for
-    # the whole body of a function run in an || list. A failing write would
-    # otherwise fall through to "Created ..." and the setup would end 0 with no
-    # drop-in on disk. So every step is checked.
+    # Check every step: the caller's `||` suspends errexit in this body.
     if ! cat > "$drop_in" <<SVCKEYS
 ${_OB_SVC_KEYS_MARK}
 # Generated by $PROG_NAME on $(date)
@@ -1226,10 +975,8 @@ SVCKEYS
     chmod 644 "$drop_in" || return 1
     track_created "$drop_in"
 
-    # Validate with the file in place. configure_sshd's own `sshd -t` runs
-    # BEFORE this function, so nothing else checks what we just wrote -- and a
-    # malformed keyword here does not break this feature, it breaks sshd for
-    # everyone at the next restart.
+    # configure_sshd's `sshd -t` ran before this file existed, and a bad
+    # drop-in breaks sshd for everyone at the next restart.
     if command -v sshd >/dev/null 2>&1; then
         if ! sshd -t 2>/dev/null; then
             error "sshd rejects the configuration after writing $drop_in:"
@@ -1250,9 +997,7 @@ SVCKEYS
         info "  install -m 0644 -o root -g root <key>.pub $keys_dir/<name>.pub"
     fi
 
-    # fingerprint_required makes a missing fingerprint fatal instead of skipped.
-    # Only report: turning it on affects every SSH login on the host, not just
-    # service accounts, and that is the operator's call.
+    # Only report: fingerprint_required affects every SSH login on the host.
     if grep -qE '^[[:space:]]*(ssh_)?fingerprint_required[[:space:]]*=[[:space:]]*(1|true|yes|on)' \
        "$OB_CONFIG" 2>/dev/null; then
         info "fingerprint_required is set: a login whose fingerprint cannot be"
@@ -1266,7 +1011,6 @@ SVCKEYS
     fi
     return 0
 }
-# Configure sshd for max security (Mode E)
 configure_max_security_sshd() {
     if [ "$MAX_SECURITY" != "true" ]; then
         return 0
@@ -1311,9 +1055,6 @@ ExposeAuthInfo yes
     fi
 }
 
-# Timer helpers shared with ob-post-upgrade: the systemd timers that replaced
-# the KRL and audit cron jobs, and the migration from those jobs (#281).
-# Installed next to ob-sign-lib.sh; the tree copy serves an uninstalled run.
 load_timers_lib() {
     declare -F ob_timer_enable >/dev/null && return 0
     local lib="${OB_TIMERS_LIB:-/usr/lib/open-bastion/ob-timers-lib.sh}"
@@ -1328,18 +1069,8 @@ load_timers_lib() {
     . "$lib"
 }
 
-# Download the KRL now, and keep it fresh with ob-krl-refresh.timer (Mode E).
-#
-# The first download happens here, synchronously, because sshd is about to be
-# restarted with RevokedKeys pointing at this file, and sshd refuses every key
-# while that file is missing. Both the download and the timer run the packaged
-# ob-krl-refresh, so there is one implementation of the checks that keep a bad
-# list away from sshd.
-#
-# Until 0.7.0 this wrote /etc/cron.d/open-bastion-krl and a generated
-# /usr/local/bin/open-bastion-refresh-krl. A run on such a host replaces them,
-# carrying over the interval of the old job unless --krl-refresh-interval says
-# otherwise, and removes them only once the timer is running.
+# The first download is synchronous: sshd is about to restart with RevokedKeys
+# pointing at this file, and refuses every key while it is missing.
 download_krl() {
     if [ "$MAX_SECURITY" != "true" ]; then
         return 0
@@ -1349,9 +1080,8 @@ download_krl() {
 
     load_timers_lib || return 1
 
-    # An explicit --krl-refresh-interval wins. Without it ob_krl_timer_setup
-    # carries over the interval of a 0.6 cron job, or leaves the schedule the
-    # host already has.
+    # Without --krl-refresh-interval, ob_krl_timer_setup keeps the interval of
+    # a legacy cron job, or the host's current schedule.
     local given=""
     [ "$KRL_INTERVAL_GIVEN" = "true" ] && given="$KRL_REFRESH_INTERVAL"
 
@@ -1363,7 +1093,6 @@ download_krl() {
         return 0
     fi
 
-    # 1. The list sshd reads, now.
     if [ -x "$KRL_REFRESH_BIN" ] \
        && "$KRL_REFRESH_BIN" --config "$OB_CONFIG" --output "$SSH_REVOKED_KEYS"; then
         info "KRL saved to $SSH_REVOKED_KEYS"
@@ -1375,7 +1104,6 @@ download_krl() {
         warn "KRL not available or invalid format, created empty file"
     fi
 
-    # 2. The timer that keeps it fresh, replacing the 0.6 cron job.
     OB_TIMERS_DRY_RUN=false
     if ! ob_krl_timer_setup "$given"; then
         report_timers ""
@@ -1386,9 +1114,7 @@ download_krl() {
     KRL_SCHEDULE="$OB_TIMERS_SCHEDULE"
 }
 
-# Print what ob_krl_timer_setup / ob_audit_timer_setup did (or, in a dry run,
-# would do). In a dry run their sentences start with "would "; PREFIX replaces
-# that word, so the lines read like the other [DRY-RUN] lines.
+# In a dry run the library's lines start with "would "; PREFIX replaces it.
 report_timers() {
     local prefix="$1" line
     while IFS= read -r line; do
@@ -1405,14 +1131,8 @@ report_timers() {
     return 0
 }
 
-# Backend: stop what only a bastion runs, left by an earlier bastion setup of
-# this host. ob-cert.socket is the one that matters: it mints hop certificates
-# with this host's server token for any local user, and a backend must never
-# vouch for anyone (the package never enables it on one). ob-record.socket is
-# the recording sink, which nothing on a backend feeds. ssh-proxy.conf is
-# ob-ssh's configuration; it holds no secret, but ob-ssh has nowhere to hop
-# from a backend. ob-session-prune.timer stays: it expires the recordings the
-# bastion left on disk, and the package enables it on every host anyway.
+# ob-cert.socket would mint hop certificates with this host's token: a backend
+# must never vouch. ob-session-prune.timer stays for recordings left on disk.
 retire_bastion_services() {
     is_backend || return 0
     local unit proxy_conf="$SSH_PROXY_CONF"
@@ -1444,12 +1164,8 @@ retire_bastion_services() {
     return 0
 }
 
-# Bastion stack: say so when a backend's LLNG sudo stack is still in place.
-# Outside Mode E a bastion does not touch sudo, so an earlier backend setup of
-# this host left /etc/pam.d/sudo authorizing SSO users through LLNG, with the
-# sudoers rule that goes with it. Whether that should stay is a sudo policy
-# decision this script cannot make for the operator; restoring the
-# distribution's stack blindly could lock the local admin out.
+# Only warn: restoring the distribution's sudo stack blindly could lock the
+# local admin out.
 warn_backend_sudo_left() {
     is_backend && return 0
     [ "$MAX_SECURITY" = "true" ] && return 0
@@ -1461,8 +1177,7 @@ warn_backend_sudo_left() {
     return 0
 }
 
-# Configure PAM for sudo with LLNG authorization (backend only; Mode E then
-# replaces the stack with the token-only one below)
+# Mode E later replaces this stack with the token-only one.
 configure_pam_sudo() {
     if ! is_backend; then
         return 0
@@ -1512,25 +1227,19 @@ session    required     pam_unix.so
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO"
 
-    # `sudo -i` uses the separate "sudo-i" PAM service; mirror the stack so it
-    # behaves identically to plain sudo for SSO users.
     backup_file "$PAM_SUDO_I"
     echo "$pam_content" > "$PAM_SUDO_I"
     chmod 644 "$PAM_SUDO_I"
     info "Configured $PAM_SUDO_I"
 
-    # PAM authorizes sudo, but sudoers must still grant the right. pam_openbastion
-    # adds an authorized user to the open-bastion-sudo group during its session
-    # phase — but only if that group exists — and the group needs a sudoers rule.
-    # Without both, an LLNG-authorized SSO user still gets "not in the sudoers
-    # file" (#154). Same drop-in as configure_max_security_sudo.
+    # pam_openbastion adds authorized users to this group only if it exists,
+    # and sudoers must still grant it the right.
     groupadd --system open-bastion-sudo 2>/dev/null || true
 
     local sudoers_file="/etc/sudoers.d/open-bastion"
     write_open_bastion_sudoers "$sudoers_file" "# Open Bastion: defense-in-depth sudo authorization"
 }
 
-# Configure PAM for sudo with LLNG token (Mode E)
 configure_max_security_sudo() {
     if [ "$MAX_SECURITY" != "true" ]; then
         return 0
@@ -1572,26 +1281,19 @@ session    required     pam_unix.so
     chmod 644 "$PAM_SUDO"
     info "Configured $PAM_SUDO for LLNG token authentication"
 
-    # `sudo -i` uses the separate "sudo-i" PAM service. Give it the same stack,
-    # otherwise it falls back to the distro default (pam_unix) and fails for
-    # NSS-only SSO users ("account validation failure, is your account locked?").
     backup_file "$PAM_SUDO_I"
     echo "$pam_content" > "$PAM_SUDO_I"
     chmod 644 "$PAM_SUDO_I"
     info "Configured $PAM_SUDO_I for LLNG token authentication"
 
-    # Create open-bastion-sudo group for defense-in-depth sudo authorization
     groupadd --system open-bastion-sudo 2>/dev/null || true
 
-    # Configure sudoers: only open-bastion-sudo group members can sudo (PAM also required)
     local sudoers_file="/etc/sudoers.d/open-bastion"
     local sudoers_header="# Open Bastion Mode E: defense-in-depth sudo authorization"
     write_open_bastion_sudoers "$sudoers_file" "$sudoers_header"
 }
 
-# Render the drop-in's contents. Split out of write_open_bastion_sudoers so the
-# exact bytes can be asserted in a test without root (install -o root would
-# fail) and without touching /etc.
+# Separate so tests can check the output without root.
 render_open_bastion_sudoers() {
     local header="$1"
 
@@ -1605,22 +1307,7 @@ render_open_bastion_sudoers() {
     printf '%s\n' "%open-bastion-sudo ALL=(ALL) ALL"
 }
 
-# Install /etc/sudoers.d/open-bastion, optionally with the fresh-OTP Defaults.
-#
-# sudo caches its own credential (timestamp_timeout, 15 min by default, idle-based
-# and rearmed on every use). While that timestamp is valid sudo skips the PAM
-# AUTH phase entirely, so pam_openbastion never runs and no LLNG one-time token
-# is asked for -- a user who keeps sudoing is never prompted again (#178).
-#
-# What that does NOT weaken: authorization is re-checked live on every sudo (the
-# account phase always runs), so an LLNG-side revocation takes effect at once,
-# and each OTP is single-use on the portal. What it does weaken is the Mode E
-# claim that every elevation is backed by a *fresh* SSO authentication.
-#
-# --enable-sudo-fresh-otp scopes timestamp_timeout=0 to the SSO group, so those
-# users present a token on every sudo while local break-glass admins keep normal
-# sudo behaviour. It is opt-in: turning it on by default would start prompting
-# on every sudo across an upgraded fleet, including inside scripts.
+# For --enable-sudo-fresh-otp, see doc/pam-modes.rst.
 write_open_bastion_sudoers() {
     local sudoers_file="$1" header="$2"
     local tmp_sudoers rendered
@@ -1628,15 +1315,14 @@ write_open_bastion_sudoers() {
     rendered=$(render_open_bastion_sudoers "$header")
 
     if [ -f "$sudoers_file" ]; then
-        # Never rewrite an operator's file behind their back; only add the
-        # Defaults line they explicitly asked for, and only if it is missing.
+        # Never rewrite an existing file; only add the requested Defaults line.
         if [ "$SUDO_FRESH_OTP" != "true" ] \
            || grep -q '^Defaults:%open-bastion-sudo[[:space:]].*timestamp_timeout=0' "$sudoers_file"; then
             return 0
         fi
         tmp_sudoers=$(mktemp)
         {
-            printf '%s\n' "# --enable-sudo-fresh-otp: no sudo credential caching for SSO users (#178)"
+            printf '%s\n' "# --enable-sudo-fresh-otp: no sudo credential caching for SSO users"
             printf '%s\n' "Defaults:%open-bastion-sudo timestamp_timeout=0"
             cat "$sudoers_file"
         } > "$tmp_sudoers"
@@ -1654,15 +1340,10 @@ write_open_bastion_sudoers() {
         return 0
     fi
 
-    # Write to a temp file and validate with visudo before installing, so a
-    # malformed drop-in can never break sudo on the host.
     tmp_sudoers=$(mktemp)
     printf '%s\n' "$rendered" > "$tmp_sudoers"
     if visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
-        # Ensure the drop-in directory exists (created 0750 root:root only when
-        # missing, so we never relax an existing one), then install and CHECK the
-        # result -- otherwise a failed install would leave sudo broken while we
-        # log success.
+        # Only when missing: never relax an existing directory.
         [ -d /etc/sudoers.d ] || install -d -m 0750 -o root -g root /etc/sudoers.d
         if install -m 0440 -o root -g root "$tmp_sudoers" "$sudoers_file"; then
             info "Created $sudoers_file"
@@ -1677,14 +1358,8 @@ write_open_bastion_sudoers() {
     rm -f "$tmp_sudoers"
 }
 
-# Ensure /etc/nsswitch.conf has a usable "<db>: files openbastion ..." line.
-# Handles three cases:
-#   1. Active line already includes "openbastion" → noop.
-#   2. Active line exists without openbastion → insert openbastion after the
-#      first source token (files / compat / etc.), preserving everything else.
-#   3. No active line (missing or commented out) → APPEND a fresh
-#      "<db>: files openbastion systemd" line. Crucial fix: previously the
-#      script silently no-op'd here, leaving NSS unable to resolve any user.
+# Some minimal images ship nsswitch.conf with passwd:/group: commented out:
+# append a full line then.
 nss_configure_db() {
     local db="$1"
     local file="$2"
@@ -1696,7 +1371,6 @@ nss_configure_db() {
     fi
 
     if grep -qE "^${db}:" "$file"; then
-        # Active line present — insert openbastion after the first source token.
         if grep -qE "^${db}:[[:space:]]+files" "$file"; then
             sed -i -E "s/^(${db}:[[:space:]]+files)/\\1 openbastion/" "$file"
         elif grep -qE "^${db}:[[:space:]]+compat" "$file"; then
@@ -1706,22 +1380,17 @@ nss_configure_db() {
         fi
         info "Added openbastion to $db in $file"
     else
-        # No active "<db>:" line — append a complete one. This fixes systems
-        # where nsswitch.conf ships with passwd:/group: commented out (some
-        # minimal images and "Example configuration" templates).
         warn "$file has no active '$db:' line; appending: $default_line"
         printf '%s\n' "$default_line" >> "$file"
         info "Appended new $db line to $file"
     fi
 
-    # Sanity check: an active "<db>:" line containing openbastion must now exist.
     if ! grep -qE "^${db}:.*[[:space:]]openbastion([[:space:]]|\$)" "$file"; then
         error "Failed to add openbastion to $db in $file — please edit manually."
         return 1
     fi
 }
 
-# Configure NSS for user/group resolution via LLNG
 configure_nss() {
     step "Configuring NSS for user/group resolution..."
 
@@ -1735,7 +1404,6 @@ configure_nss() {
     nss_configure_db passwd "$NSSWITCH_CONF" "passwd:         files openbastion systemd" || return 1
     nss_configure_db group  "$NSSWITCH_CONF" "group:          files openbastion systemd" || return 1
 
-    # Create NSS configuration
     # shellcheck disable=SC2155
     local nss_content="# LemonLDAP::NG NSS module configuration
 # Generated by $PROG_NAME on $(date)
@@ -1767,9 +1435,6 @@ home_base = /home
     info "Created $NSS_OB_CONF"
 }
 
-# Install one hardening template by absolute source/destination path,
-# creating the destination directory if missing and backing up any
-# existing file. Mode 0644 root:root.
 install_hardening_file() {
     local src="$1"
     local dst="$2"
@@ -1792,9 +1457,7 @@ install_hardening_file() {
     info "Installed $dst"
 }
 
-# Conditionally drop a *.allow whitelist if absent, keeping any
-# pre-existing admin file untouched. We only warn — overwriting an
-# admin-managed file silently would be hostile.
+# Never overwrite an admin-managed allowlist: only warn.
 install_hardening_allowlist() {
     local src="$1"
     local dst="$2"
@@ -1810,8 +1473,6 @@ install_hardening_allowlist() {
         else
             warn "$dst already exists with custom content — leaving untouched"
             warn "Review it manually against $src to ensure containment is preserved"
-            # The shipped allow-list was NOT applied; containment may be weaker
-            # than intended, so the overall hardening outcome is only partial.
             HARDENING_RESULT="partial"
         fi
         return 0
@@ -1826,33 +1487,24 @@ install_hardening_allowlist() {
     info "Created $dst"
 }
 
-# Detect non-root users that have `loginctl enable-linger` set.
-# A lingering user keeps a per-user systemd manager running after
-# logout, which lets them schedule deferred work via
-#   systemd-run --user --on-active=…
-# That bypasses both KillUserProcesses=yes and the at/cron allowlists.
-# This function prints offending "<user>:<uid>" lines to stdout (one
-# per line, empty if none) and returns 0. It returns 1 only when
-# loginctl is missing — callers should treat that as "skip with a
-# warning" since a host without systemd cannot enable linger anyway.
+# Prints "<user>:<uid>" for each lingering non-root user; returns 1 only
+# when loginctl is missing.
 detect_lingering_users() {
     if ! command -v loginctl >/dev/null 2>&1; then
         return 1
     fi
 
     local users_raw
-    # `loginctl list-users --no-legend` prints "<uid> <user> [..]" per row.
-    # Some versions trail a header/legend even with --no-legend on older
-    # systemd; we filter defensively by requiring a leading numeric uid.
+    # Older systemd may print a legend despite --no-legend: require a uid.
     users_raw=$(loginctl list-users --no-legend 2>/dev/null || true)
     [ -n "$users_raw" ] || return 0
 
     local uid user linger
     while read -r uid user _rest; do
         case "$uid" in
-            ''|*[!0-9]*) continue ;;     # skip non-numeric rows / headers
+            ''|*[!0-9]*) continue ;;
         esac
-        [ "$uid" = "0" ] && continue     # root is allowed to linger
+        [ "$uid" = "0" ] && continue
         [ -n "$user" ] || continue
         linger=$(loginctl show-user "$user" --property=Linger --value 2>/dev/null || echo "")
         if [ "$linger" = "yes" ]; then
@@ -1863,8 +1515,7 @@ detect_lingering_users() {
     return 0
 }
 
-# Configure host-level session containment. All steps are pure system
-# config — no setuid binary is added. See doc/hardening.rst for rationale.
+# See doc/hardening.rst.
 setup_hardening() {
     step "Applying session containment hardening..."
 
@@ -1875,12 +1526,8 @@ setup_hardening() {
         return 1
     fi
 
-    # Pre-flight: refuse to harden if any non-root user has linger
-    # enabled. Such a user could schedule jobs via `systemd-run --user`
-    # that survive logout, defeating both KillUserProcesses=yes and the
-    # at/cron allow-lists. This is a security gate, not a UX one — we
-    # fail even in --yes mode. In --dry-run, only log so operators can
-    # discover the problem before committing.
+    # Lingering users can run `systemd-run --user` jobs past logout, defeating
+    # the containment: a security gate, so refuse even with --yes.
     local linger_offenders
     if linger_offenders=$(detect_lingering_users); then
         if [ -n "$linger_offenders" ]; then
@@ -1917,13 +1564,9 @@ setup_hardening() {
         return 0
     fi
 
-    # Optimistic: assume each sub-step will succeed; downgrade to
-    # "partial" on any failure that we choose to recover from rather
-    # than abort. Final state is reported by print_summary and by the
-    # closing log line below.
+    # Downgraded to "partial" by any failure recovered from below.
     HARDENING_RESULT="applied"
 
-    # 1. logind: KillUserProcesses=yes
     if ! install_hardening_file \
             "$HARDENING_TEMPLATE_DIR/logind.conf.d/open-bastion.conf" \
             "$HARDENING_LOGIND_DST"; then
@@ -1931,7 +1574,6 @@ setup_hardening() {
         HARDENING_RESULT="partial"
     fi
 
-    # 2. limits.d: nproc cap
     if ! install_hardening_file \
             "$HARDENING_TEMPLATE_DIR/security/limits.d/open-bastion.conf" \
             "$HARDENING_LIMITS_DST"; then
@@ -1939,7 +1581,6 @@ setup_hardening() {
         HARDENING_RESULT="partial"
     fi
 
-    # 3. at.allow / cron.allow — never overwrite an admin-managed file
     if ! install_hardening_allowlist \
             "$HARDENING_TEMPLATE_DIR/at.allow" \
             "$HARDENING_AT_ALLOW"; then
@@ -1954,16 +1595,7 @@ setup_hardening() {
         HARDENING_RESULT="partial"
     fi
 
-    # No Open Bastion job runs from cron any more: the KRL refresh and the
-    # audit rotation are systemd timers (#281). cron.allow therefore only
-    # decides which USERS may schedule deferred work, which is the point of
-    # this step, and it needs no entry for us -- in particular 'root' no
-    # longer has to be listed for Mode E to keep refreshing its KRL.
-
-    # 4. Mask atd if it exists. cron is NOT masked, although nothing of ours
-    #    needs it: other jobs on the host (a distribution's cron.daily scripts,
-    #    the administrator's own) may, and cron.allow above already keeps
-    #    non-root users from adding any.
+    # cron is not masked: other jobs on the host may need it.
     if systemctl list-unit-files atd.service 2>/dev/null | grep -q '^atd\.service'; then
         if [ "$DRY_RUN" = "true" ]; then
             info "[DRY-RUN] Would systemctl mask atd && systemctl stop atd"
@@ -1980,20 +1612,10 @@ setup_hardening() {
         info "atd.service not present, nothing to mask"
     fi
 
-    # 5. Reload logind so KillUserProcesses=yes takes effect.
-    #    `systemctl reload` (SIGHUP) is non-disruptive: logind re-reads
-    #    its drop-ins without restarting and without killing active
-    #    sessions. KillUserProcesses=yes is consulted at session-end
-    #    cleanup, so the new behaviour applies to existing sessions
-    #    when they eventually log out, while currently-connected admins
-    #    keep their shells. Avoid `reload-or-restart` here: a fallback
-    #    to restart would terminate every user session, including the
-    #    admin running this setup.
+    # Reload, never restart: a restart kills every session, including the
+    # admin's running this setup.
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would systemctl reload systemd-logind (SIGHUP, non-disruptive)"
-        # In dry-run, nothing was actually written; report as such so
-        # the operator doesn't read "applied" and assume the host is
-        # configured.
         HARDENING_RESULT="dry-run"
     else
         info "Reloading systemd-logind (SIGHUP, no session disruption)"
@@ -2020,20 +1642,10 @@ setup_hardening() {
     esac
 }
 
-# Configure primary audit trace via auditd (opt-in).
-# Goal: tamper-evident syscall-level evidence of non-sudo user activity,
-# independent of the pty session recording (which a malicious user could
-# wipe or bypass via setsid/at/cron). Targets auid >= 1000.
-#
-# Caller decides whether this runs (see ENABLE_AUDIT_TRACE in main()).
-# This function never tries to install the auditd package itself: it only
-# *configures* an auditd that is already present (Recommends in packaging).
+# Configures an already installed auditd, never installs it. See doc/audit.rst.
 setup_audit_trace() {
     step "Configuring primary audit trace (auditd)..."
 
-    # 1. Sanity: auditd must be installed. We don't try to be clever — both
-    #    `auditctl` (the CLI) and `augenrules` (the rules.d compiler) are
-    #    needed at runtime. systemctl probe is an additional belt-and-braces.
     local auditd_ok=true
     if ! command -v auditctl >/dev/null 2>&1; then
         auditd_ok=false
@@ -2050,7 +1662,6 @@ setup_audit_trace() {
         return 0
     fi
 
-    # 2. Templates must be deployed (CMake installs them under datarootdir).
     local rules_template="$AUDIT_TEMPLATE_DIR/rules.d/open-bastion.rules"
     if [ ! -f "$rules_template" ]; then
         error "Audit rules template not found: $rules_template"
@@ -2063,9 +1674,6 @@ setup_audit_trace() {
         return 1
     fi
 
-    # 3. Confirmation: this deploys a rules.d entry and the rotation timer and
-    #    restarts auditd. Default-OFF policy applies. /etc/audit/auditd.conf is
-    #    NOT touched — see rationale below.
     if ! confirm "Enable primary audit trace? Installs rules.d + a daily rotation timer and restarts auditd."; then
         info "Audit trace setup skipped by user."
         AUDIT_RESULT="declined"
@@ -2083,10 +1691,7 @@ setup_audit_trace() {
         return 0
     fi
 
-    # 4. The rotation, first: if it cannot be armed, stop before auditd is
-    #    touched rather than leave a trace that grows without bound. A 0.6
-    #    /etc/cron.daily (or cron.weekly) rotation is replaced on the same
-    #    schedule, and removed only once the timer runs.
+    # The rotation first: if it cannot be armed, auditd is left untouched.
     # shellcheck disable=SC2034  # read by ob-timers-lib.sh, sourced above
     OB_TIMERS_DRY_RUN=false
     if ! ob_audit_timer_setup; then
@@ -2097,12 +1702,7 @@ setup_audit_trace() {
     fi
     report_timers ""
 
-    # 5. Install rules template into /etc/audit/rules.d/.
-    #    auditd's default rules.d entries (e.g. audit.rules) ship as 0640
-    #    root:root on Debian; we match that.
-    #    Guard against `set -e` aborting the whole setup run if
-    #    /etc/audit/rules.d/ is missing, RO, or perms-denied — return 1
-    #    instead so main() catches it via `setup_audit_trace || warn …`.
+    # 0640 like auditd's own rules.d entries.
     if ! install -o root -g root -m 0640 "$rules_template" "$AUDIT_RULES_FILE"; then
         error "Failed to install $AUDIT_RULES_FILE"
         AUDIT_RESULT="failed"
@@ -2110,28 +1710,17 @@ setup_audit_trace() {
     fi
     info "Installed $AUDIT_RULES_FILE"
 
-    # /etc/audit/auditd.conf is intentionally NOT modified. It is a single
-    # admin-tunable file owned by the audit distro package. Drop-in mechanisms
-    # (rules.d/, a timer) are used where they exist; auditd.conf is left
-    # for the administrator to tune manually (see doc/audit.rst).
     info "Audit trace deployed. /etc/audit/auditd.conf is intentionally NOT modified."
     info "For ~1 week retention, set num_logs=7 max_log_file=50 max_log_file_action=ROTATE in /etc/audit/auditd.conf manually (see doc/audit.rst)."
 
-    # 6. Compile + load rules. augenrules merges everything under
-    #    /etc/audit/rules.d/*.rules into /etc/audit/audit.rules and tells
-    #    auditctl to load them. A non-zero exit usually means a bad rule
-    #    (e.g. arch mismatch on 32-bit kernel) — surface it but don't abort:
-    #    the rotation timer is still in effect.
+    # Not fatal: usually one bad rule (e.g. arch mismatch on a 32-bit kernel).
     if augenrules --load >/dev/null 2>&1; then
         info "auditd rules loaded via augenrules"
     else
         warn "augenrules --load failed; check 'augenrules --check' output."
     fi
 
-    # 7. Restart auditd to activate the new rules.d entries.
-    #    auditd does not honour SIGHUP for rules.d changes — restart is the
-    #    documented way. Unlike logind, restarting auditd does NOT terminate
-    #    SSH sessions, so this is safe to run on a live host.
+    # auditd ignores SIGHUP for rules.d; unlike logind, a restart keeps sessions.
     if systemctl is-active --quiet auditd 2>/dev/null; then
         if systemctl restart auditd 2>/dev/null; then
             info "Restarted auditd.service"
@@ -2145,12 +1734,9 @@ setup_audit_trace() {
     AUDIT_RESULT="applied"
 }
 
-# Pre-flight: verify the portal's Device Authorization endpoint is reachable
-# BEFORE applying any SSH/PAM lockdown. Without this check, a failed
-# enrollment could leave the host in a state where no one can log in
-# (PasswordAuthentication disabled + no certs because no enrollment).
+# Runs before any SSH/PAM lockdown: a failed enrollment after it would lock
+# everyone out.
 preflight_check_portal() {
-    # If user provided a pre-shared token, no portal contact is needed.
     if [ -n "$SERVER_TOKEN" ]; then
         return 0
     fi
@@ -2161,9 +1747,7 @@ preflight_check_portal() {
     step "Pre-flight: checking Device Authorization endpoint reachability..."
 
     build_curl_opts
-    # POST with no body. Any HTTP status (even 400/401/405) means the endpoint
-    # exists. A network failure (curl exit != 22 typically yields "000" via -w).
-    # We strip "-f" so we get the HTTP code instead of curl returning non-zero on 4xx.
+    # Without -f: any HTTP status means the endpoint exists; 000 means unreachable.
     local opts=()
     local opt
     for opt in "${CURL_OPTS[@]}"; do
@@ -2196,10 +1780,6 @@ preflight_check_portal() {
     return 0
 }
 
-# Abort if the saved server token has no refresh_token. Without an offline
-# refresh token the short-lived access token cannot be renewed, and SSO/NSS
-# lookups (getent passwd <user>) stop working ~1h after setup. A missing
-# refresh_token means the OIDC client does not grant offline access.
 require_refresh_token() {
     [ -s "$OB_TOKEN" ] || return 0
     local rt
@@ -2218,14 +1798,10 @@ require_refresh_token() {
     return 0
 }
 
-# Enroll server with LLNG. Sets ENROLL_RESULT and returns 0 on success,
-# 1 on failure. Callers must inspect the return code to decide whether to
-# proceed with SSH/PAM lockdown.
 enroll_server() {
     step "Enrolling server with LLNG..."
 
     if [ -n "$SERVER_TOKEN" ]; then
-        # Token provided directly
         if [ "$DRY_RUN" = "true" ]; then
             info "[DRY-RUN] Would save provided server token"
             ENROLL_RESULT="dry-run"
@@ -2239,13 +1815,7 @@ enroll_server() {
         return 0
     fi
 
-    # Reuse an existing token instead of re-enrolling. A prior ob-enroll run
-    # (e.g. the installer's separate enrollment step, or a previous setup)
-    # may already have written the canonical token file. Re-running the
-    # device-authorization flow would force a second browser approval and,
-    # in --non-interactive mode, fail outright ("requires --token-file").
-    # If the token file exists and is non-empty, adopt it. Delete it first
-    # if you deliberately want to re-enroll.
+    # Re-enrolling would need a second browser approval, and fail under --yes.
     if [ -s "$OB_TOKEN" ]; then
         info "Existing server token found at $OB_TOKEN — reusing it (no re-enrollment)."
         require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
@@ -2280,8 +1850,7 @@ enroll_server() {
         enroll_opts+=("-c" "$CLIENT_ID")
     fi
 
-    # Pass the secret via env var (not CLI) to keep it out of /proc/<pid>/cmdline.
-    # ob-enroll honours OB_CLIENT_SECRET with highest priority (see ob-enroll).
+    # Env, not argv: keeps the secret out of /proc/<pid>/cmdline.
     if [ -n "$CLIENT_SECRET" ]; then
         if OB_CLIENT_SECRET="$CLIENT_SECRET" /usr/sbin/ob-enroll "${enroll_opts[@]}"; then
             require_refresh_token || { ENROLL_RESULT="failed"; return 1; }
@@ -2300,12 +1869,6 @@ enroll_server() {
     return 1
 }
 
-# Prompt for required settings (SERVER_GROUP and CLIENT_ID) before any
-# system change. No silent defaults: misconfiguring either makes the host
-# unusable, and the user should see exactly what is going to LLNG. In
-# non-interactive mode (-y), missing values are fatal — the caller must
-# pass them explicitly via -g / -c. A backend is also asked for its bastion
-# allowlist.
 prompt_required_settings() {
     if [ -z "$SERVER_GROUP" ]; then
         if [ "$NON_INTERACTIVE" = "true" ]; then
@@ -2337,21 +1900,12 @@ prompt_required_settings() {
     fi
 }
 
-# Validate and normalise the bastion_id allowlist.
-#
-# Entries must match the charset LLNG guarantees for a bastion_id
-# ([A-Za-z0-9._-]) -- the same one the principals helper enforces on the id it
-# reads out of a certificate key-id. Without this, a typo would sit in the
-# allowlist matching nothing (every hop denied, with no explanation), and a
-# whitespace-only value would silently mean "any bastion" while looking set.
+# Same charset as the principals helper enforces on the certificate key-id.
 normalize_allowed_bastions() {
     local raw normalized entry had_noglob
     raw=$(printf '%s' "$BASTION_ALLOWED_IDS" | tr ',;' '  ')
-    # Splitting $raw also runs PATHNAME EXPANSION, which would defeat the
-    # validation below instead of triggering it: an entry containing a glob
-    # metacharacter that happens to match a file in the current directory is
-    # rewritten to the match ('b[1]' -> the file 'b1'), so a typo is silently
-    # accepted as a different, valid-looking id. Split with globbing off.
+    # Globbing off: 'b[1]' would otherwise become a matching file 'b1' and
+    # pass validation.
     case $- in *f*) had_noglob=1 ;; *) had_noglob=0 ;; esac
     set -f
     normalized=""
@@ -2369,25 +1923,8 @@ normalize_allowed_bastions() {
     BASTION_ALLOWED_IDS="$normalized"
 }
 
-# Ask which bastions this backend should accept hops from (#182).
-#
-# An empty allowlist means "any vouched bastion": the backend accepts a hop
-# voucher minted by any host enrolled in the project, which is exactly the
-# residual defence behind the SSO-side gap where a compromised enrolled host can
-# declare itself a bastion. Defaulting to that silently is what the issue is
-# about, so ask -- but do not make it mandatory: a single-bastion lab, and a
-# fleet whose bastions are not enrolled yet, both legitimately start empty.
-#
-# Non-interactive runs keep the empty default (an upgrade must not start
-# refusing hops that worked yesterday); they get the warning at the end of
-# install_principals_helper, and the helper logs one on every hop.
-#
-# An INTERACTIVE run is not an upgrade path, so there is nothing to preserve:
-# leaving the list empty there has to be a decision the operator took, not the
-# one they get for pressing Enter. Pressing Enter re-asks, with the exposure
-# spelled out, and only a "y" to "accept ANY bastion" leaves it empty.
-# --allow-any-bastion states that answer up front (a lab, or a host whose
-# bastion is not enrolled yet).
+# Non-interactive runs keep an empty list (an upgrade must not refuse hops
+# that worked); interactively, empty takes an explicit yes.
 prompt_allowed_bastions() {
     [ -n "$BASTION_ALLOWED_IDS" ] && return 0
     [ "$NON_INTERACTIVE" = "true" ] && return 0
@@ -2400,10 +1937,7 @@ prompt_allowed_bastions() {
     while :; do
         printf "Allowed bastion ids (comma-separated): " >&2
         IFS= read -r input
-        # Not [ -n "$input" ]: normalize_allowed_bastions collapses whitespace
-        # AND the separators to nothing, so "   ", ",," or " ; , " would all
-        # reach the empty list -- the very thing the explicit "y" below exists
-        # to gate -- while looking like an answer.
+        # Separators alone normalize to the empty list, which needs the "y".
         if [ -n "${input//[[:space:],;]/}" ]; then
             BASTION_ALLOWED_IDS="$input"
             return 0
@@ -2411,7 +1945,7 @@ prompt_allowed_bastions() {
         printf "\n" >&2
         warn "An empty list accepts a hop voucher from ANY host enrolled in the"
         warn "project that can declare itself a bastion to the SSO -- not only"
-        warn "from the bastions you operate (#182). It is the residual defence"
+        warn "from the bastions you operate. It is the residual defence"
         warn "behind an SSO-side gap, and this is the only place it gets set."
         if confirm "Accept a hop from ANY bastion?"; then
             return 0
@@ -2420,9 +1954,6 @@ prompt_allowed_bastions() {
     done
 }
 
-# Interactive prompt that asks the user for client_id and client_secret
-# when an enrollment attempt failed (typically with invalid_client). Returns 0
-# if new values were supplied, 1 if the user declined (or non-interactive).
 prompt_for_client_credentials() {
     if [ "$NON_INTERACTIVE" = "true" ]; then
         return 1
@@ -2456,7 +1987,6 @@ prompt_for_client_credentials() {
     return 0
 }
 
-# Restart SSH service
 restart_sshd() {
     step "Restarting SSH service..."
 
@@ -2477,19 +2007,8 @@ restart_sshd() {
     fi
 }
 
-# Print summary
-# The portal-side prerequisite for R-P1, printed at the end of every run.
-#
-# `pamAccessServerGroups` and `pamAccessAllowedRps` live in the LemonLDAP::NG
-# Manager, not here, and nothing on this host can read them back -- asking the
-# portal whether they are set would mean an API that publishes the project's
-# bastions and server groups, which is not something an SSO should offer. So
-# the only honest thing a setup script can do is state the requirement, every
-# time, rather than let a host come up looking finished while the gap is open.
-#
-# The text is shipped as data (share/ -> /usr/lib/open-bastion) because it is
-# printed by three setup scripts and ob-post-upgrade; a heredoc in each is how
-# the units of #254 drifted apart.
+# Printed on every run: no SSO API may reveal whether these portal settings
+# are set.
 print_portal_prerequisites() {
     local f
     f="$(_ob_data_dir)/ob-portal-prerequisites.txt"
@@ -2618,9 +2137,6 @@ print_summary() {
             echo "  ✗ Audit trace: not applied (opt-in: --enable-audit-trace)"
             ;;
     esac
-    # A change that alters sshd for every session on the host has to be visible
-    # in the record the operator keeps. Without this line a --yes run ends
-    # byte-identical whether or not the flag was given.
     if [ "$ENABLE_SERVICE_KEYS" = "true" ]; then
         echo "  ✓ Service-account SSH layer: AuthorizedKeysCommand + ExposeAuthInfo"
         if grep -qE '^[[:space:]]*(ssh_)?fingerprint_required[[:space:]]*=[[:space:]]*(1|true|yes|on)' \
@@ -2662,10 +2178,8 @@ print_summary() {
     print_portal_prerequisites
 }
 
-# Usage
 usage() {
-    # The examples below must run as shown, so they carry --node-role when the
-    # role in effect is not the one the command name implies.
+    # Examples must run as shown: add --node-role when it differs.
     local role_opt=""
     if [ "$NODE_ROLE" != "$PROG_ROLE" ]; then
         role_opt=" --node-role $NODE_ROLE"
@@ -2715,7 +2229,7 @@ Options:
                           /etc/open-bastion/service-accounts.d/<name>.pub, plus
                           ExposeAuthInfo yes so the fingerprint is verifiable.
                           Without it, service-accounts.conf alone does not let a
-                          service account log in (#263). OFF by default — it
+                          service account log in. OFF by default — it
                           changes sshd for every session on the host.
   --enable-sudo-fresh-otp Require a fresh LLNG token on EVERY sudo for SSO users
                           (writes \`Defaults:%open-bastion-sudo timestamp_timeout=0\`).
@@ -2801,7 +2315,6 @@ EOF
     exit 0
 }
 
-# Parse arguments
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -2836,8 +2349,7 @@ parse_args() {
                 shift 2
                 ;;
             --allowed-bastions)
-                # Comma/space-separated bastion_id allowlist. An explicit empty
-                # value ("") is allowed and means "any vouched bastion".
+                # An explicit "" is allowed: any vouched bastion.
                 if [ -z "${2+x}" ]; then
                     error "Option $1 requires an argument"
                     exit 1
@@ -2847,9 +2359,6 @@ parse_args() {
                 shift 2
                 ;;
             --allow-any-bastion)
-                # Say up front that the empty list is the intended answer, so an
-                # interactive run does not stop to ask. Does not change what an
-                # empty list MEANS -- only who is on record for choosing it.
                 ALLOW_ANY_BASTION=true
                 BACKEND_ONLY_OPTS+=("$1")
                 shift
@@ -2905,8 +2414,7 @@ parse_args() {
                 shift
                 ;;
             --krl-refresh-interval)
-                # Minutes, as cron's */N meant them: the timer runs at
-                # *:0/N, which only means "every N minutes" for 1..60.
+                # OnCalendar=*:0/N means "every N minutes" only for 1..60.
                 if ! [[ "${2:-}" =~ ^[1-9][0-9]?$ ]] || [ "$2" -gt 60 ]; then
                     error "Option $1 requires a number of minutes between 1 and 60"
                     exit 1
@@ -2951,8 +2459,7 @@ parse_args() {
                 shift
                 ;;
             -h|--help)
-                # Deferred: the help describes the effective role, and a
-                # --node-role later on the line changes it.
+                # Deferred: a later --node-role changes the role described.
                 SHOW_HELP=true
                 shift
                 ;;
@@ -2974,11 +2481,7 @@ parse_args() {
     check_role_options
 }
 
-# Refuse options that do not apply to the effective role. Silently ignoring
-# them would be worse than an error: --no-sudo on a bastion, or
-# --disable-session-recorder on a backend, reads like a decision the run then
-# does not carry out -- and before the two setup scripts were merged each one
-# rejected the other's options as unknown.
+# An ignored option would read like a decision the run does not carry out.
 check_role_options() {
     local opt bad=false
     if is_backend; then
@@ -3000,18 +2503,13 @@ check_role_options() {
         exit 1
     fi
 
-    # The interval is the schedule of Mode E's KRL refresh; without Mode E there
-    # is no refresh, and an accepted option that does nothing reads as done.
     if [ "$KRL_INTERVAL_GIVEN" = "true" ] && [ "$MAX_SECURITY" != "true" ]; then
         error "--krl-refresh-interval applies to --max-security (Mode E) only."
         exit 1
     fi
 
-    # --no-sudo cannot be honoured under Mode E: configure_max_security_sudo
-    # replaces /etc/pam.d/sudo with the LLNG-token-only stack whatever this
-    # flag says. Accepting both used to install that stack with no sudoers
-    # rule for the SSO group, so no SSO user could elevate while the summary
-    # reported Mode E sudo as active. Refuse the contradiction instead.
+    # Mode E installs its sudo stack regardless; with --no-sudo there would be
+    # no sudoers rule, so no SSO user could elevate.
     if is_backend && [ "$ENABLE_SUDO" != "true" ] && [ "$MAX_SECURITY" = "true" ]; then
         error "--no-sudo cannot be combined with --max-security: Mode E replaces the"
         error "sudo PAM stack with LLNG-token-only authentication (see doc/pam-modes.rst)."
@@ -3019,16 +2517,11 @@ check_role_options() {
     fi
 }
 
-# Main
 main() {
     parse_args "$@"
 
-    # A copy of the script under another name falls back to the bastion role,
-    # as ob-bastion-setup always did. Interactively the banner shows the role
-    # and asks before anything happens. Under --yes nobody reads the banner,
-    # and a renamed copy of ob-backend-setup would configure a bastion -- a
-    # principals helper that accepts direct SSO certificates -- without a word.
-    # So a non-interactive run under an unknown name must say which role.
+    # Under --yes nobody reads the banner: a renamed ob-backend-setup would
+    # silently get the bastion helper, which accepts direct SSO certificates.
     case "$PROG_NAME" in
         ob-bastion-setup | ob-backend-setup | ob-standalone-setup) ;;
         *)
@@ -3045,46 +2538,31 @@ main() {
             ;;
     esac
 
-    # Validate required parameters
     if [ -z "$PORTAL_URL" ]; then
         error "Portal URL is required (-p/--portal)"
         exit 1
     fi
 
-    # Remove trailing slash
     PORTAL_URL="${PORTAL_URL%/}"
 
-    # Validate the URL shape before it is used anywhere.
-    #
-    # PORTAL_URL is interpolated into generated artefacts -- openbastion.conf,
-    # ssh-proxy.conf -- that root programs read back, ob-krl-refresh among them
-    # (it applies the same check before writing into /etc/ssh). No privilege
-    # boundary is crossed here — this script already requires root and the
-    # value is the admin's own --portal argument — but a URL containing shell
-    # metacharacters would silently produce a broken or surprising
-    # configuration. The character class is the same one ob-builder enforces
-    # with is_valid_url(), so a portal accepted by the builder is accepted here.
+    # PORTAL_URL ends up in generated configuration that root programs read.
+    # Same character class as ob-builder's is_valid_url().
     if ! [[ "$PORTAL_URL" =~ ^https?://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]; then
         error "Invalid portal URL: $PORTAL_URL"
         error "Expected http(s)://host[:port][/path] without shell metacharacters"
         exit 1
     fi
 
-    # Pick up client_secret from env if not provided via --client-secret-file.
-    # Storing it in OB_CLIENT_SECRET keeps it out of /proc/<pid>/cmdline.
     if [ -z "$CLIENT_SECRET" ] && [ -n "${OB_CLIENT_SECRET:-}" ]; then
         CLIENT_SECRET="$OB_CLIENT_SECRET"
     fi
 
-    # Security: warn if not using HTTPS (credentials sent in clear)
     if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
         warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 
-    # Check root
     check_root
 
-    # Check dependencies
     for cmd in curl sshd sed; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             error "Required command not found: $cmd"
@@ -3094,8 +2572,7 @@ main() {
 
     preflight_sshd_config || exit 1
 
-    # Ask for server_group and client_id BEFORE printing the banner so the
-    # final summary the user confirms reflects the values that will be used.
+    # Before the banner, so the user confirms the values that will be used.
     prompt_required_settings
 
     echo ""
@@ -3130,17 +2607,11 @@ main() {
     echo ""
 
     # ── Phase 1: inert preparation (no SSH/PAM lockdown yet) ──
-    # These steps download/create files that are NOT referenced by sshd or PAM
-    # until phase 3 runs. If anything fails here, or if enrollment fails in
-    # phase 2, the system is still usable: rollback_on_failure() restores
-    # backups / removes new files and exits.
     download_ca_key || { rollback_on_failure; exit 1; }
-    # On a role switch this only records that the helper is to be replaced
-    # at the end; see prepare_principals_helper.
     prepare_principals_helper || { rollback_on_failure; exit 1; }
     configure_pam_openbastion || { rollback_on_failure; exit 1; }
     if is_backend; then
-        : # a backend records nothing: the bastion in front of it does
+        : # the bastion in front records the sessions
     elif [ "$DISABLE_SESSION_RECORDER" = "true" ]; then
         info "Session recorder disabled (--disable-session-recorder)"
     else
@@ -3148,16 +2619,11 @@ main() {
     fi
 
     # ── Phase 2: portal connectivity + enrollment ──
-    # Must succeed before we lock down SSH/PAM, otherwise the host would
-    # be unreachable (PasswordAuthentication=no + no certs because no token).
     if ! preflight_check_portal; then
         rollback_on_failure
         exit 1
     fi
 
-    # Retry loop: on enrollment failure (typically invalid_client), offer
-    # the user a chance to provide/update client_id and client_secret and
-    # retry — without restarting the whole setup.
     local max_attempts=3
     local attempt=1
     while ! enroll_server; do
@@ -3170,7 +2636,6 @@ main() {
         fi
 
         if ! prompt_for_client_credentials; then
-            # User declined / non-interactive — fall through to fatal handling.
             break
         fi
 
@@ -3196,19 +2661,12 @@ main() {
             exit 1
         fi
     else
-        # Persist any client_id/client_secret entered during retry prompts so
-        # future re-enrollments via ob-enroll alone keep working.
         refresh_openbastion_conf
     fi
 
-    # Keep the freshly enrolled token alive. Without this the timer only arms on
-    # the next reboot (ConditionPathExists was false at package-install time),
-    # and the token expires overnight -> offline fallback + sudo lockout.
     enable_heartbeat_timer
 
-    # ── Phase 3: SSH / PAM lockdown ──
-    # From this point on, a failure may require restoring files from
-    # $BACKUP_DIR by hand.
+    # ── Phase 3: SSH / PAM lockdown (no automatic rollback) ──
     configure_sshd || exit 1
     configure_service_account_keys || exit 1
     configure_pam_sshd || exit 1
@@ -3221,9 +2679,7 @@ main() {
     fi
     configure_max_security_sshd || exit 1
     configure_max_security_sudo || exit 1
-    # NSS belongs here, not in phase 1: nsswitch.conf is live for every
-    # process on the host as soon as it is written, so it is not one of the
-    # inert files rollback_on_failure can take back.
+    # Not phase 1: nsswitch.conf is live as soon as written, hence not inert.
     configure_nss || exit 1
     if [ "$ENABLE_HARDENING" = "true" ]; then
         setup_hardening || warn "Hardening step reported errors"
@@ -3232,7 +2688,6 @@ main() {
     fi
     download_krl || warn "KRL download or refresh timer failed (see above)"
 
-    # Optional primary audit trace (default OFF — modifies global system).
     if [ "$ENABLE_AUDIT_TRACE" = "true" ]; then
         setup_audit_trace || warn "Audit trace setup failed (see errors above)"
     else

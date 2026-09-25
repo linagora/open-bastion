@@ -10,12 +10,6 @@
 #   * backend  -> bastion            ob-scp user@backend:/path file
 #   * backend  <-> backend           ob-scp user@b1:/path user@b2:/path
 #
-# All transfers are forced through the bastion (scp -3). This is not just
-# convenience: the vouched certificate is pinned to the BASTION's source
-# address, so a direct backend-to-backend transfer would be rejected. Routing
-# every connection through the bastion keeps the source address matching the
-# certificate.
-#
 # Usage (on the bastion):
 #     ob-scp [scp-options] SOURCE ... DEST
 #
@@ -32,8 +26,6 @@ set -euo pipefail
 VERSION="0.2.4"
 PROG_NAME=$(basename "$0")
 
-# Source the shared cert-vouching library: the installed path first, then
-# alongside this script (running from the source tree / tests).
 _OB_LIB="${OB_CERT_LIB:-/usr/lib/open-bastion/ob-cert-lib.sh}"
 if [ ! -r "$_OB_LIB" ]; then
     _OB_LIB="$(dirname "$(readlink -f "$0")")/ob-cert-lib.sh"
@@ -131,8 +123,7 @@ main() {
         exit 1
     fi
 
-    # Walk SCP_ARGS to find the remote endpoints and their user. Options that
-    # take a separate argument must not have that argument mistaken for a path.
+    # Skip option arguments so they are not mistaken for paths.
     local default_user="${USER:-$(whoami)}"
     local resolved_user="" first_host=""
     local i=0 n=${#SCP_ARGS[@]}

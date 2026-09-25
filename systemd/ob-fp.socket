@@ -3,24 +3,18 @@ Description=Open Bastion SSH fingerprint sink socket
 Documentation=https://github.com/linagora/open-bastion
 
 [Socket]
-# The AuthorizedPrincipalsCommand helper (ob-ssh-principals, running as the
-# unprivileged AuthorizedPrincipalsCommandUser) connects here through
-# ob-fp-submit to deposit the fingerprint of the key sshd was offered.
-# Per-connection activation (Accept=yes) spawns one ob-fp@.service per deposit.
 ListenStream=/run/open-bastion/ssh-fp.sock
 # Restricted to the principals helper user, unlike ob-cert.socket: connecting
-# here is not neutral, it deposits into the spool pam_openbastion trusts. This
-# is defence in depth only -- ob-fp-daemon checks SO_PEERCRED itself and
-# derives the sshd anchor from the peer's /proc ancestry, so a loosened mode
-# here still does not let a caller write a drop for someone else's session.
-# No SocketGroup: 0600 makes the group irrelevant, and the group name differs
-# across distributions (nogroup on Debian, nobody on RHEL/Rocky) -- naming one
-# would make this unit fail to start on the other.
+# here deposits into the spool pam_openbastion trusts. Defence in depth only
+# -- ob-fp-daemon checks SO_PEERCRED itself and derives the sshd anchor from
+# the peer's /proc ancestry.
+# No SocketGroup: the group name differs across distributions (nogroup on
+# Debian, nobody on RHEL/Rocky) -- naming one would fail to start on the other.
 SocketUser=nobody
 SocketMode=0600
 Accept=yes
-# Parent /run/open-bastion is created 0711 by the package tmpfiles.d entry and
-# by ob-bastion-setup; it exists before sockets.target.
+# Parent /run/open-bastion must exist before sockets.target; created at 0711
+# by the package tmpfiles.d entry and by ob-bastion-setup.
 
 [Install]
 WantedBy=sockets.target
