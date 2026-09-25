@@ -33,12 +33,12 @@
 
 id      || fp-daemon-anchor-owner
 file    || src/ob-fp-daemon.c
-search  || if (ast.st_uid != OB_FP_PRIV_UID) {
+search  || if (owner == 0) {
 replace || if (0) {
 suite   || tests/test_ob_fp_daemon.sh
 needs   || nonroot
-why     || #249: the sshd anchor must be a root-owned process, or a local user
-why     || can put a process named sshd-session in their own ancestry and choose
+why     || #249: the sshd anchor must have real uid root, or a local user can
+why     || put a process named sshd-session in their own ancestry and choose
 why     || which drop is read.
 
 id      || service-keys-root-owner
@@ -146,6 +146,14 @@ replace || } else if (0) {
 suite   || tests/test_ob_sshd_anchor.sh
 why     || #268: only the outermost of the CONTIGUOUS run is the anchor. Climbing
 why     || past a break picks up an sshd-session belonging to another connection.
+
+id      || sshd-anchor-real-uid
+file    || src/sshd_anchor.c
+search  || return ids[0] == priv_uid ? 1 : 0;
+replace || return ids[1] == priv_uid ? 1 : 0;
+suite   || tests/test_ob_sshd_anchor.sh
+why     || #296: the anchor check must use the REAL uid. The monitor is
+why     || seteuid(nobody) while the principals helper deposits.
 
 id      || portal-prereq-bastion-setup
 file    || scripts/ob-bastion-setup

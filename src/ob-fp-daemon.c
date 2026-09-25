@@ -31,7 +31,7 @@
  *
  * A client cannot name the session it is depositing for. To place a drop on a
  * given anchor you must already be a descendant of that anchor -- and the
- * anchor must be a live, root-owned sshd-session monitor. sshd puts exactly
+ * anchor must be a live sshd-session monitor with real uid 0. sshd puts exactly
  * one unprivileged thing in that position, the principals helper. A nobody
  * daemon started from init descends from pid 1, not from an sshd-session, and
  * cannot re-parent itself into one; a logged-in user's shell IS under an
@@ -351,7 +351,7 @@ int main(void)
      * recycling. Closing that window properly would mean comparing the peer's
      * start time before and after, and it is not worth it -- to exploit the
      * race an attacker would have to get the depositing pid recycled into a
-     * process of their own, under a root-owned sshd-session, in the microseconds
+     * process of their own, under a root sshd-session, in the microseconds
      * between connect() and this read, and the drop they would win is the one
      * for the session they would already have to be inside.
      */
@@ -373,30 +373,30 @@ int main(void)
         return 1;
     }
 
-    /* The anchor must be a live root process -- sshd's per-connection monitor
-     * is, and a process a user renamed to "sshd-session" is not. */
-    char anchor_proc[64];
-    snprintf(anchor_proc, sizeof(anchor_proc), "/proc/%d", (int)anchor);
-    struct stat ast;
-    if (stat(anchor_proc, &ast) != 0) {
-        reply(0, "the sshd anchor vanished mid-deposit");
-        return 1;
-    }
     /*
      * The anchor is chosen by process NAME, and prctl(PR_SET_NAME) takes
      * fifteen characters while "sshd-session" is twelve -- so without this a
      * local user could put a process called sshd-session in their own ancestry
-     * and pick which drop gets written. Requiring the anchor to be root-owned
-     * excludes every process a user controls, because sshd's per-connection
-     * monitor is root and theirs is not.
+     * and pick which drop gets written. Requiring the anchor's REAL uid to be
+     * root excludes every process a user controls. Not its effective uid: the
+     * monitor is seteuid() to the helper user while we run; see
+     * ob_sshd_anchor_owner_ok_in().
      *
      * OB_FP_PRIV_UID is a literal 0 in the shipped binary; see its definition.
      */
-    if (ast.st_uid != OB_FP_PRIV_UID) {
+    uid_t anchor_ruid = 0;
+    int owner = ob_sshd_anchor_owner_ok(anchor, OB_FP_PRIV_UID, &anchor_ruid);
+    if (owner < 0) {
+        reply(0, (errno == ENOENT || errno == ESRCH)
+                     ? "the sshd anchor vanished mid-deposit"
+                     : "cannot read the sshd anchor's real uid: refusing");
+        return 1;
+    }
+    if (owner == 0) {
         char m[160];
         snprintf(m, sizeof(m),
-                 "sshd anchor %d is owned by uid %u, not root: refusing",
-                 (int)anchor, (unsigned)ast.st_uid);
+                 "sshd anchor %d has real uid %u, not root: refusing",
+                 (int)anchor, (unsigned)anchor_ruid);
         reply(0, m);
         return 1;
     }

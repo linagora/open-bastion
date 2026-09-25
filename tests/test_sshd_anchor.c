@@ -88,6 +88,31 @@ static pid_t anchor(pid_t from)
     return ob_find_sshd_anchor_in(root, from);
 }
 
+/* Create <root>/<pid>/status holding `uid_line` among realistic neighbours
+ * (NULL: no Uid line at all). */
+static void mkstatus(pid_t pid, const char *uid_line)
+{
+    char dir[256], path[320];
+    snprintf(dir, sizeof(dir), "%s/%d", root, (int)pid);
+    if (mkdir(dir, 0700) != 0 && access(dir, X_OK) != 0) {
+        perror("mkdir");
+        exit(2);
+    }
+    snprintf(path, sizeof(path), "%s/status", dir);
+    FILE *f = fopen(path, "w");
+    if (!f) { perror("fopen status"); exit(2); }
+    fprintf(f, "Name:\tsshd-session\nPid:\t%d\nPPid:\t1\n%s"
+               "Gid:\t0\t0\t0\t0\nFDSize:\t64\n",
+            (int)pid, uid_line ? uid_line : "");
+    fclose(f);
+}
+
+/* ob_sshd_anchor_owner_ok_in() with priv_uid 0. */
+static int owner_ok(pid_t pid, uid_t *ruid)
+{
+    return ob_sshd_anchor_owner_ok_in(root, pid, 0, ruid);
+}
+
 int main(void)
 {
     if (!mkdtemp(root)) { perror("mkdtemp"); return 2; }
@@ -190,6 +215,58 @@ int main(void)
     reset_tree();
     mkproc(970, "bash", 0);
     CHECK(anchor(970) == 0, "PPid 0 terminates the walk");
+
+    /*
+     * The anchor-owner rule: REAL uid must be root. #296: the monitor is
+     * seteuid(nobody) while the principals helper deposits.
+     */
+    printf("anchor owner (real uid):\n");
+    reset_tree();
+    uid_t ruid = 12345;
+    mkstatus(900, "Uid:\t0\t65534\t0\t65534\n");
+    CHECK(owner_ok(900, &ruid) == 1 && ruid == 0,
+          "real root, effective nobody (monitor during the helper, #296) -> ok");
+
+    mkstatus(901, "Uid:\t0\t0\t0\t0\n");
+    CHECK(owner_ok(901, NULL) == 1, "all root -> ok");
+
+    ruid = 0;
+    mkstatus(902, "Uid:\t1000\t1000\t1000\t1000\n");
+    CHECK(owner_ok(902, &ruid) == 0 && ruid == 1000,
+          "a user's process renamed sshd-session -> refused");
+
+    mkstatus(903, "Uid:\t65534\t0\t0\t0\n");
+    CHECK(owner_ok(903, NULL) == 0,
+          "real non-root, effective root (setuid) -> refused");
+
+    CHECK(ob_sshd_anchor_owner_ok_in(root, 902, 1000, NULL) == 1,
+          "priv_uid is honoured (test builds of ob-fp-daemon)");
+
+    CHECK(owner_ok(904, NULL) == -1, "missing status -> refused");
+
+    mkstatus(905, NULL);
+    CHECK(owner_ok(905, NULL) == -1, "no Uid line -> refused");
+
+    mkstatus(906, "Uid:\t0\n");
+    CHECK(owner_ok(906, NULL) == -1, "truncated Uid line -> refused");
+
+    mkstatus(907, "Uid:\tabc\t0\t0\t0\n");
+    CHECK(owner_ok(907, NULL) == -1, "non-numeric real uid -> refused");
+
+    mkstatus(908, "Uid:\t-0\t0\t0\t0\n");
+    CHECK(owner_ok(908, NULL) == -1, "signed real uid -> refused");
+
+    mkstatus(909, "Uid:\t0x\t0\t0\t0\n");
+    CHECK(owner_ok(909, NULL) == -1, "trailing garbage in a field -> refused");
+
+    mkstatus(910, "Uid:\t99999999999999999999\t0\t0\t0\n");
+    CHECK(owner_ok(910, NULL) == -1, "overflowing real uid -> refused");
+
+    mkstatus(911, "Uid:\t0\t0\t0\t0\t0\n");
+    CHECK(owner_ok(911, NULL) == -1, "extra field -> refused");
+
+    CHECK(owner_ok(0, NULL) == -1 && owner_ok(-1, NULL) == -1,
+          "non-positive pid -> refused");
 
     reset_tree();
     rmdir(root);

@@ -259,6 +259,13 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   key-id; the bastion helper, which vouches for nothing, printed the principal
   for any certificate. Reached during a backend-to-bastion switch, before sshd
   restarts, that admitted a direct SSO certificate with no recording.
+- **The SSH fingerprint is deposited again on every login** (#296).
+  `ob-fp-daemon` refused each deposit with "sshd anchor … is owned by uid
+  65534": it checked the owner of `/proc/<anchor>`, which follows the effective
+  uid, and sshd's monitor runs `seteuid(AuthorizedPrincipalsCommandUser)` while
+  the helper deposits. The daemon and `pam_openbastion` now share one check on
+  the anchor's **real** uid, which stays root there and is still the user's on
+  a renamed process.
 - **Three records that contradicted the tree** (#268): a `SECURITY.md` bullet
   still naming the removed secret store, and two treatment-plan measures (MT51,
   MT52) left "en revue"/"ouvert" with #248 and #252 merged.
