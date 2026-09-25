@@ -83,9 +83,12 @@ jobs:
           bash -n "$script"
         done
 
+    # The mutation suite replays the guarding suites for every catalogue entry;
+    # it runs once, strict and as root, in the mutation job below.
     - name: Run script unit tests
       run: |
         for test in tests/test_ob_*.sh; do
+          case "$test" in tests/test_ob_mutation.sh) continue ;; esac
           echo "Running: $test"
           bash "$test"
         done

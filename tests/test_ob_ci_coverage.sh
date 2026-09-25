@@ -44,9 +44,18 @@ loop_glob() {
     sed -n 's|.*for test in tests/\(test[A-Za-z_*]*\.sh\); do.*|\1|p' "$CI" | head -1
 }
 
+# Files the loop skips (`case "$test" in tests/a.sh|tests/b.sh) continue`).
+# They match the glob but the loop does not run them, so another job must.
+loop_skips() {
+    # shellcheck disable=SC2016  # $test is literal text in ci.yml
+    sed -n 's|.*case "\$test" in \(.*\)) continue.*|\1|p' "$CI" \
+        | tr '|' '\n' | sed 's|^ *tests/||; s| *$||'
+}
+
 test_no_orphan_shell_tests() {
-    local glob orphans="" f b
+    local glob skips orphans="" f b
     glob=$(loop_glob)
+    skips=$(loop_skips)
     if [ -z "$glob" ]; then
         fail "the workflow still loops over a tests/ glob" \
              "could not find 'for test in tests/...' in ci.yml"
@@ -55,6 +64,10 @@ test_no_orphan_shell_tests() {
     for f in "$ROOT_DIR"/tests/test_*.sh; do
         [ -f "$f" ] || continue
         b=$(basename "$f")
+        if printf '%s\n' "$skips" | grep -qxF "$b"; then
+            grep -qE "bash[[:space:]]+tests/$b" "$CI" || orphans="$orphans $b"
+            continue
+        fi
         # shellcheck disable=SC2254  # the glob is data, and must stay unquoted
         case "$b" in
             $glob) continue ;;
