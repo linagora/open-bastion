@@ -80,6 +80,7 @@ The setups own two things you may want to extend:
 
 - **``sshd`` drop-ins** under ``/etc/ssh/sshd_config.d/`` (e.g. ``00-open-bastion-*.conf``, and ``60-max-security.conf`` in Mode E). You can layer **additional** drop-ins for site policy — for example an ``AuthorizedKeysCommand`` to serve :doc:`service-account keys </service-accounts>` in Mode E, or ``AllowTcpForwarding no`` to close the port-forward channel. Mind ``sshd``'s "first value wins" rule for single-valued keywords (the ``00-`` prefix makes the Open Bastion settings win over distro drop-ins).
 - **``/etc/pam.d/sshd``** (and ``/etc/pam.d/sudo``, ``sudo-i``) — the PAM stacks that invoke ``pam_openbastion``. You can add stock PAM modules around them. Note that ``pam_systemd`` and ``pam_mkhomedir`` are **not** optional extras you may add: both setups already write them, and both are required (:ref:`full stack <pam-modes-pam-configuration-for-sshd>`). Dropping ``pam_systemd`` makes sessions invisible to ``who`` / ``w`` / ``loginctl`` and to the heartbeat's connected-users report; dropping the ``session pam_openbastion`` line breaks Mode E ``sudo``.
+- **``/etc/pam.d/systemd-user``** — unlike the files above, ``ob-bastion-setup`` does not regenerate this one (its distro ``session`` stack varies too much); it only inserts a small ``account`` bridge ahead of the distro stack so NSS-only SSO users can start ``user@.service`` (:doc:`PAM modes </pam-modes>`, #296).
 
 ..
 
