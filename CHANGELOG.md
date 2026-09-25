@@ -259,6 +259,12 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   key-id; the bastion helper, which vouches for nothing, printed the principal
   for any certificate. Reached during a backend-to-bastion switch, before sshd
   restarts, that admitted a direct SSO certificate with no recording.
+- **NSS-only SSO users can start `user@.service`** (#296). The `systemd-user`
+  PAM service runs the distro's `pam_unix` account check, which needs a shadow
+  entry an NSS-only user does not have, so the user session bus never came up.
+  `ob-bastion-setup` now inserts a small `account` bridge (`pam_localuser` +
+  `pam_unix broken_shadow`) ahead of the distro stack in
+  `/etc/pam.d/systemd-user`, without touching the rest of that file.
 - **Three records that contradicted the tree** (#268): a `SECURITY.md` bullet
   still naming the removed secret store, and two treatment-plan measures (MT51,
   MT52) left "en revue"/"ouvert" with #248 and #252 merged.

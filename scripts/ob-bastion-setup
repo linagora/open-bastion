@@ -116,6 +116,8 @@ PAM_SUDO="/etc/pam.d/sudo"
 # the distro default (common-auth/common-account = pam_unix), which cannot
 # validate NSS-only SSO users and fails with "account validation failure".
 PAM_SUDO_I="/etc/pam.d/sudo-i"
+# Patched in place, not regenerated: see configure_pam_systemd_user.
+PAM_SYSTEMD_USER="/etc/pam.d/systemd-user"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 
@@ -751,6 +753,55 @@ $session_lines
     echo "$pam_content" > "$PAM_SSHD"
     chmod 644 "$PAM_SSHD"
     info "Configured $PAM_SSHD"
+}
+
+# Marker for idempotency: a re-run is a noop instead of stacking duplicates.
+_OB_SYSTEMD_USER_MARK="# Open Bastion: NSS-only SSO account bridge for systemd-user"
+
+# The distro's account stack (pam_unix) refuses users with no shadow entry,
+# so NSS-only SSO users could not start user@.service. The bridge goes ahead
+# of it; local users are unaffected.
+configure_pam_systemd_user() {
+    step "Configuring PAM for systemd-user (NSS-only SSO users)..."
+
+    if [ ! -f "$PAM_SYSTEMD_USER" ]; then
+        info "$PAM_SYSTEMD_USER not found (non-systemd host); skipping"
+        return 0
+    fi
+
+    if grep -qF "$_OB_SYSTEMD_USER_MARK" "$PAM_SYSTEMD_USER" 2>/dev/null; then
+        info "$PAM_SYSTEMD_USER already configured for NSS-only SSO users"
+        return 0
+    fi
+
+    local line
+    line=$(grep -nE '^[[:space:]]*(account[[:space:]]|@include[[:space:]]+common-account([[:space:]]|$))' \
+           "$PAM_SYSTEMD_USER" | head -1 | cut -d: -f1)
+
+    if [ -z "$line" ]; then
+        warn "No 'account' line found in $PAM_SYSTEMD_USER; leaving it unmodified"
+        return 0
+    fi
+
+    local block="$_OB_SYSTEMD_USER_MARK
+# Local users take the stack below unchanged; others fall to pam_unix broken_shadow.
+account    [success=1 default=ignore]  pam_localuser.so
+account    sufficient                  pam_unix.so broken_shadow"
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would insert before line $line of $PAM_SYSTEMD_USER:"
+        echo "$block"
+        return 0
+    fi
+
+    backup_file "$PAM_SYSTEMD_USER"
+    local tmp
+    tmp=$(mktemp)
+    { head -n $((line - 1)) "$PAM_SYSTEMD_USER"; printf '%s\n' "$block"; tail -n +"$line" "$PAM_SYSTEMD_USER"; } > "$tmp"
+    cat "$tmp" > "$PAM_SYSTEMD_USER"
+    rm -f "$tmp"
+    chmod 644 "$PAM_SYSTEMD_USER"
+    info "Configured $PAM_SYSTEMD_USER for NSS-only SSO users"
 }
 
 # Render openbastion.conf content using current globals. Used both by
@@ -3216,6 +3267,7 @@ main() {
         configure_pam_sudo || true
         retire_bastion_services
     else
+        configure_pam_systemd_user || exit 1
         configure_ssh_proxy || exit 1
         warn_backend_sudo_left
     fi

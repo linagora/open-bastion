@@ -229,6 +229,18 @@ Line by line, and why each matters:
 
    **``ssh_cert_aware=true`` is currently a no-op.** The setup script passes it, for every role, as a module argument, but no code reads it: PAM module arguments of the form ``key=value`` are handed to ``config_parse_args()`` → ``parse_line()``, whose final branch silently ignores unknown keys (``src/config.c``). Nothing in ``src/`` mentions ``ssh_cert_aware``. Keep it or drop it as you like — it changes no behaviour today. This is tracked as a code cleanup, not a configuration knob; do not document it as one.
 
+PAM Configuration for systemd-user
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``user@.service`` authenticates through the ``systemd-user`` PAM service, whose distro ``account`` phase is ``pam_unix`` — it has no shadow entry to check for an NSS-only SSO user and refuses it. ``ob-bastion-setup`` inserts a bridge before the first ``account`` line, without regenerating the rest of the file (#296):
+
+::
+
+   account    [success=1 default=ignore]  pam_localuser.so
+   account    sufficient                  pam_unix.so broken_shadow
+
+Local users keep the unmodified distro stack; SSO users go through ``pam_unix broken_shadow``, which still requires NSS resolution.
+
 PAM Configuration for sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
