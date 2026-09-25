@@ -1,0 +1,337 @@
+/* Open-Bastion deck — Linagora-aligned palette + typography */
+
+:root {
+  /* Linagora brand — corporate blue + warm accent */
+  --ob-ink: #0a1628;
+  --ob-ink-2: #132240;
+  --ob-paper: #ffffff;
+  --ob-paper-warm: #f5f2ec;
+  --ob-paper-cool: #eef2f7;
+  --ob-rule: #d9dfe7;
+  --ob-muted: #5a6b82;
+  --ob-blue: #b8243c;       /* Linagora primary red (was blue) */
+  --ob-blue-deep: #7f1525;   /* deeper red */
+  --ob-accent: #c8304a;      /* bright red accent */
+  --ob-accent-soft: #e87a8a;
+  --ob-green: #2d7a4f;
+  --ob-red: #b23a3a;
+  --ob-code-bg: #0d1b2e;
+  --ob-code-fg: #dbe4f0;
+  --ob-code-dim: #8599b3;
+  --ob-code-accent: #f1a0ac;
+
+  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Fonts — loaded via <link> in HTML to avoid blocking @import */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  font-family: var(--font-sans);
+  color: var(--ob-ink);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Slide base */
+.slide {
+  background: var(--ob-paper);
+  color: var(--ob-ink);
+  font-family: var(--font-sans);
+  font-size: 34px;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  padding: 100px 120px 80px;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.slide--dark {
+  background: var(--ob-ink);
+  color: var(--ob-paper);
+}
+.slide--blue {
+  background: var(--ob-blue-deep);
+  color: var(--ob-paper);
+}
+.slide--warm {
+  background: var(--ob-paper-warm);
+  color: var(--ob-ink);
+}
+.slide--cool {
+  background: var(--ob-paper-cool);
+  color: var(--ob-ink);
+}
+
+/* Chrome: tiny footer bar with Linagora / slide label */
+.chrome {
+  position: absolute;
+  left: 120px;
+  right: 120px;
+  bottom: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--ob-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.slide--dark .chrome, .slide--blue .chrome { color: rgba(255,255,255,0.5); }
+
+.chrome__left { display: flex; gap: 18px; align-items: center; }
+.chrome__dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--ob-accent);
+}
+
+/* Kicker (eyebrow) */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ob-accent);
+  margin: 0 0 28px 0;
+  font-weight: 500;
+}
+.slide--dark .kicker, .slide--blue .kicker { color: var(--ob-accent-soft); }
+
+/* Titles */
+h1.title {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 96px;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin: 0 0 32px 0;
+}
+h2.title {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 72px;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  margin: 0 0 48px 0;
+}
+h3.subtitle {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 40px;
+  line-height: 1.3;
+  color: var(--ob-muted);
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+.slide--dark h3.subtitle, .slide--blue h3.subtitle { color: rgba(255,255,255,0.7); }
+
+.lead {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 44px;
+  line-height: 1.28;
+  letter-spacing: -0.005em;
+}
+
+.body { font-size: 32px; line-height: 1.4; }
+.small { font-size: 26px; line-height: 1.4; }
+
+/* Accents */
+.accent { color: var(--ob-accent); }
+.muted { color: var(--ob-muted); }
+.slide--dark .muted, .slide--blue .muted { color: rgba(255,255,255,0.6); }
+
+/* Code blocks */
+.code {
+  font-family: var(--font-mono);
+  background: var(--ob-code-bg);
+  color: var(--ob-code-fg);
+  border-radius: 14px;
+  padding: 36px 44px;
+  font-size: 26px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(10,22,40,0.15);
+}
+.code .tok-c { color: var(--ob-code-dim); font-style: italic; }  /* comment */
+.code .tok-k { color: #8fb8ff; }                                 /* keyword */
+.code .tok-s { color: #b8e0b4; }                                 /* string */
+.code .tok-n { color: var(--ob-code-accent); }                   /* num / param */
+.code .tok-p { color: #ffbd7a; font-weight: 600; }               /* highlight */
+.code .tok-d { color: var(--ob-code-fg); }                       /* default */
+
+.terminal {
+  font-family: var(--font-mono);
+  background: #0d1b2e;
+  color: #dbe4f0;
+  border-radius: 14px;
+  padding: 32px 40px;
+  font-size: 24px;
+  line-height: 1.55;
+  white-space: pre;
+  box-shadow: 0 30px 80px rgba(10,22,40,0.25);
+  position: relative;
+}
+.terminal::before {
+  content: "";
+  position: absolute;
+  top: 16px; left: 20px;
+  width: 12px; height: 12px; border-radius: 999px;
+  background: #ff5f57;
+  box-shadow: 20px 0 0 #ffbd2e, 40px 0 0 #28c840;
+}
+.terminal__header {
+  display: block;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  color: #8599b3;
+  font-size: 20px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.term-prompt { color: #8fd3a3; }
+.term-user { color: #8fb8ff; }
+.term-path { color: #e8a76a; }
+.term-ok { color: #8fd3a3; }
+.term-fail { color: #e78b8b; }
+.term-dim { color: #8599b3; }
+.term-key { color: #ffbd7a; }
+
+/* Utility */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+  align-items: start;
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 40px;
+}
+.row { display: flex; gap: 40px; }
+.col { display: flex; flex-direction: column; gap: 24px; }
+
+/* Callout card (no left-border trope — subtle paper-on-paper) */
+.card {
+  background: var(--ob-paper);
+  border: 1px solid var(--ob-rule);
+  border-radius: 16px;
+  padding: 36px 40px;
+}
+.slide--dark .card, .slide--blue .card {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 20px 8px 16px;
+  border-radius: 999px;
+  background: var(--ob-paper-warm);
+  border: 1px solid var(--ob-rule);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+.pill__dot {
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--ob-accent);
+}
+
+/* Section divider slide */
+.section-number {
+  font-family: var(--font-mono);
+  font-size: 200px;
+  font-weight: 300;
+  line-height: 1;
+  color: rgba(255,255,255,0.12);
+  letter-spacing: -0.04em;
+}
+
+/* Huge figure */
+.figure {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 280px;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+}
+
+/* Quote */
+blockquote.quote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 64px;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  margin: 0;
+  max-width: 1400px;
+}
+blockquote.quote::before { content: "\201C"; margin-right: 4px; }
+blockquote.quote::after  { content: "\201D"; }
+
+/* Lists (no bullet tropes) */
+ul.clean {
+  list-style: none;
+  padding: 0; margin: 0;
+  display: flex; flex-direction: column;
+  gap: 24px;
+}
+ul.clean li {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: baseline;
+  font-size: 32px;
+  line-height: 1.4;
+}
+ul.clean li::before {
+  content: attr(data-mark);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  color: var(--ob-accent);
+  font-weight: 500;
+}
+
+/* Diagram primitives */
+.node {
+  background: var(--ob-paper);
+  border: 1.5px solid var(--ob-ink);
+  border-radius: 12px;
+  padding: 18px 26px;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  color: var(--ob-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+.node--accent { background: var(--ob-accent); color: var(--ob-paper); border-color: var(--ob-accent); }
+.node--blue   { background: var(--ob-blue); color: var(--ob-paper); border-color: var(--ob-blue); }
+.node--ghost  { background: transparent; border-style: dashed; color: var(--ob-muted); border-color: var(--ob-muted); }
+
+/* Linagora logotype (text-based, brand-accurate proportion) */
+.linagora-mark {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.linagora-mark__dot {
+  width: 12px; height: 12px; border-radius: 999px;
+  background: var(--ob-accent);
+  display: inline-block;
+}
