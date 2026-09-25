@@ -1025,7 +1025,7 @@ e2e_run_bounded() { # $1 secs  $2 recdir  $3 sock  $4 command
     local rc=0
     timeout -s KILL "$secs" env -u SSH_TTY SSH_ORIGINAL_COMMAND="$cmd" \
         SSH_CLIENT="203.0.113.7 50000 22" HOME="$E2E_WORK/home" \
-        bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>&1 || rc=$?
+        bash -p "$E2E_WORK/recorder" </dev/null >/dev/null 2>"$recdir.stderr" || rc=$?
     # timeout -s KILL kills the recorder (bash); reap any orphaned connector or
     # `script` still holding the FIFO under this call's private dir.
     pkill -KILL -f "$recdir" 2>/dev/null || true
@@ -1037,17 +1037,29 @@ e2e_run_bounded() { # $1 secs  $2 recdir  $3 sock  $4 command
 # which it does only after the sink's ACK. A stub that closes without the ACK
 # stands for any rejection; the session must be refused and nothing recorded.
 test_e2e_no_ack_refused() {
-    local sock="$E2E_WORK/noack.sock" pid n0 rc=0
+    local sock="$E2E_WORK/noack.sock" pid n0 rc=0 ran="$E2E_WORK/noack-ran"
+    rm -f "$ran"
     pid=$(e2e_stub_sink "$sock" noack)
     for _ in $(seq 1 50); do [ -S "$sock" ] && break; sleep 0.1; done
     n0=$(e2e_session_count)
     # Refusal must be prompt: a build that ignored the missing ACK and started
     # `script` would block forever opening the FIFO (no reader). e2e_run_bounded
     # kills it after 15 s (rc 137), which counts as "not properly refused".
-    e2e_run_bounded 15 "$E2E_WORK/noack-tmp" "$sock" 'echo OB-SHOULD-NOT-""RUN' || rc=$?
+    e2e_run_bounded 15 "$E2E_WORK/noack-tmp" "$sock" "touch $(printf '%q' "$ran")" || rc=$?
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    # A non-zero exit is not enough: a build that ignored the missing ACK and
+    # started `script` can also fail fast for an unrelated reason (on
+    # util-linux 2.41, script with no terminal and no reader on its output),
+    # which looked like a refusal and let the mutant survive on Ubuntu 26.04.
+    # The refusal must be the ACK gate's own, and the command must not have run.
     if [ "$rc" -eq 0 ] || [ "$rc" -eq 137 ]; then
         fail "E2E: a session with no sink ACK was not promptly refused (rc=$rc)"
+    elif [ -e "$ran" ]; then
+        fail "E2E: a session with no sink ACK ran its command"
+    elif ! grep -q 'Session recording is required but unavailable; access refused' \
+            "$E2E_WORK/noack-tmp.stderr" 2>/dev/null; then
+        fail "E2E: a session with no sink ACK failed, but not at the ACK gate" \
+             "rc=$rc: $(tr '\n' ' ' <"$E2E_WORK/noack-tmp.stderr" 2>/dev/null | cut -c1-300)"
     elif [ "$(e2e_session_count)" -ne "$n0" ]; then
         fail "E2E: a session with no sink ACK still recorded something"
     else
