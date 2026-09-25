@@ -216,3 +216,95 @@ suite   || tests/test_ob_cache_key.sh
 why     || #268: fail-closed on any group or other bit. The security reference
 why     || (doc/security-reference.rst) documented a
 why     || `dd` recipe with no chmod, which under umask 022 yields 0644.
+
+id      || setup-node-role-drives-stack
+file    || scripts/ob-bastion-setup
+search  || is_backend() { [ "$NODE_ROLE" = "backend" ]; }
+replace || is_backend() { [ "$PROG_ROLE" = "backend" ]; }
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: --node-role must configure the role it names. Keying the stack
+why     || on the command name instead is exactly the old behaviour, where
+why     || `ob-bastion-setup --node-role backend` wrote a full bastion -- recorder,
+why     || ForceCommand, a principals helper that accepts direct SSO
+why     || certificates -- and labelled it backend.
+
+id      || setup-role-options-refused
+file    || scripts/ob-bastion-setup
+search  || \n    if [ "$bad" = "true" ]; then\n        exit 1\n    fi
+replace || \n    :
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: an option of one role given to another (--no-sudo on a bastion,
+why     || --disable-session-recorder on a backend) must stop the run, not be
+why     || silently ignored while reading like a decision that was carried out.
+
+id      || setup-other-role-dropin-removed
+file    || scripts/ob-bastion-setup
+search  || \n            rm -f "$stale"\n
+replace || \n
+suite   || tests/test_ob_setup_roles.sh
+why     || #288: re-running a host under the other role must not leave the old
+why     || drop-in behind. Both would be read, and a bastion's ForceCommand
+why     || would then apply to every session of the new backend.
+
+id      || setup-backend-vouching-token
+file    || scripts/ob-bastion-setup
+search  || principals_args="%u %f %i %t %k"
+replace || principals_args="%u %f %t %k"
+suite   || tests/test_ob_ssh_principals_spool.sh
+why     || A backend's principals helper reads the certificate key-id (%i) to
+why     || check which bastion vouched for the hop. Without it every argument
+why     || after the fingerprint shifts by one: the key type is read as the
+why     || key-id, and the vouching check no longer checks anything real.
+
+id      || principals-bastion-refuses-backend-sshd
+file    || share/ob-ssh-principals.bastion
+search  || if [ "$#" -gt 4 ]; then
+replace || if false; then
+suite   || tests/test_ob_ssh_principals_spool.sh
+why     || #290 review: while a backend is being turned into a bastion, sshd
+why     || still runs the backend configuration -- no ForceCommand -- with the
+why     || bastion helper, which vouches for nothing. It must deny rather than
+why     || admit a direct SSO certificate, unrecorded.
+
+id      || setup-backend-allowlist-installed
+file    || scripts/ob-bastion-setup
+search  || \n    if is_backend; then\n        install_allowed_bastions || return 1\n    fi\n
+replace || \n
+suite   || tests/test_ob_backend_setup.sh
+why     || #290 review: every suite stopped at --dry-run, which returns before
+why     || the allowlist is written, so removing the write left them all green.
+why     || A backend helper with no allowlist is legacy mode: it accepts a
+why     || direct SSO certificate.
+
+id      || setup-role-switch-defers-helper
+file    || scripts/ob-bastion-setup
+search  || \n    if is_role_switch; then\n        HELPER_DEFERRED=true
+replace || \n    if false; then\n        HELPER_DEFERRED=true
+suite   || tests/test_ob_setup_roles.sh
+why     || #290 review: on a role switch the new helper must not go in during
+why     || phase 1, where it meets the old role's live sshd for the length of
+why     || an enrollment.
+
+id      || setup-sshd-config-switch-refused
+file    || scripts/ob-bastion-setup
+search  || \n    error "'PermitRootLogin no'), then run this again."\n    return 1
+replace || \n    error "'PermitRootLogin no'), then run this again."\n    return 0
+suite   || tests/test_ob_setup_roles.sh
+why     || #290 review: without sshd_config.d an existing block is kept as is,
+why     || so a role switch there would leave the old role's sshd in force.
+
+id      || setup-backend-retires-cert-socket
+file    || scripts/ob-bastion-setup
+search  || for unit in ob-cert.socket ob-record.socket; do
+replace || for unit in ob-record.socket; do
+suite   || tests/test_ob_setup_roles.sh
+why     || #290 review: a backend must not keep a bastion's ob-cert.socket,
+why     || which mints hop certificates with the host's server token.
+
+id      || setup-unknown-name-needs-role
+file    || scripts/ob-bastion-setup
+search  || \n                if [ "$NON_INTERACTIVE" = "true" ]; then\n                    error "Invoked as
+replace || \n                if false; then\n                    error "Invoked as
+suite   || tests/test_ob_setup_roles.sh
+why     || A renamed copy of ob-backend-setup run with --yes would configure a
+why     || bastion, and nobody would read the banner that says so.

@@ -1,129 +1,291 @@
-.TH OB-BASTION-SETUP 8 "December 2025" "open-bastion 0.1.0" "System Administration"
+.TH OB-BASTION-SETUP 8 "September 2026" "open-bastion" "System Administration"
 .SH NAME
-ob-bastion-setup \- Configure a server as an SSH bastion with LemonLDAP::NG
+ob-bastion-setup, ob-backend-setup, ob-standalone-setup \- Configure a server as an Open Bastion node with LemonLDAP::NG
 .SH SYNOPSIS
 .B ob-bastion-setup
 .BI \-\-portal " URL"
 .RI [ OPTIONS ]
+.br
+.B ob-backend-setup
+.BI \-\-portal " URL"
+.RI [ OPTIONS ]
+.br
+.B ob-standalone-setup
+.BI \-\-portal " URL"
+.RI [ OPTIONS ]
 .SH DESCRIPTION
-.B ob-bastion-setup
-configures a Linux server as an SSH bastion host that:
-.IP \(bu 2
-Accepts SSH certificate authentication via LemonLDAP::NG CA
-.IP \(bu 2
-Records all sessions using ob-session-recorder
-.IP \(bu 2
-Authenticates users via Open Bastion PAM module
-.IP \(bu 2
-Disables password authentication
-.PP
-The script downloads the SSH CA public key from LemonLDAP::NG, configures sshd to
-trust certificates signed by that CA, and sets up session recording via
-ForceCommand.
-.PP
-The command is also installed as
-.BR ob-standalone-setup ,
-a symlink to this script. Invoked under that name it defaults
+One command configures the three Open Bastion node roles.
+.B ob-backend-setup
+and
+.B ob-standalone-setup
+are symbolic links to
+.BR ob-bastion-setup :
+the name the command is invoked under chooses the default role, and
 .B \-\-node\-role
-to
+overrides it. Every role-specific step follows the role in effect once all
+options are read, so
+.B "ob-bastion-setup \-\-node\-role backend"
+configures exactly what
+.B ob-backend-setup
+does.
+.TP
+.B bastion
+(default of
+.BR ob-bastion-setup )
+The SSH entry point. Accepts SSH certificates signed by the LemonLDAP::NG CA,
+records every session through
+.BR ob-session-recorder (8)
+(sshd
+.BR ForceCommand ),
+allows agent forwarding, and enables the
+.B ob-cert.socket
+through which
+.BR ob-ssh (1)
+obtains the hop certificate for a backend.
+.TP
 .B standalone
-(a host that is both bastion and backend); an explicit
-.B \-\-node\-role
-always overrides the default.
+(default of
+.BR ob-standalone-setup )
+A host that users log in to directly, with no backend behind it. It gets the
+bastion stack unchanged; only the role recorded in
+.I openbastion.conf
+and reported by
+.BR ob-heartbeat (8)
+differs.
+.TP
+.B backend
+(default of
+.BR ob-backend-setup )
+A server reached through a bastion. Accepts only certificates vouched by a
+bastion (the certificate key-id names it) and, when a list is configured,
+only by the bastions in
+.IR /etc/open-bastion/allowed_bastions .
+Creates Unix accounts on first login from LemonLDAP::NG attributes,
+authorizes sudo through LemonLDAP::NG rules, and records no session (the
+bastion in front of it does). Agent forwarding is disabled.
+.PP
+All roles configure PAM for authorization by LemonLDAP::NG
+(certificate-aware, authentication refused on the password path), the NSS
+module for user and group resolution, and enroll the server with
+LemonLDAP::NG unless a token is provided or already present.
 .SH OPTIONS
+.SS Common options
 .TP
 .BR \-p ", " \-\-portal " " \fIURL\fR
 LemonLDAP::NG portal URL (required).
 .TP
 .BR \-g ", " \-\-server\-group " " \fINAME\fR
-Server group name for authorization rules. Default: bastion
+Server group name; must match a group defined in LemonLDAP::NG. Prompted for
+if omitted; required with
+.BR \-\-yes .
+.TP
+.BI \-\-node\-role " ROLE"
+Role to configure:
+.BR bastion ", " standalone " or " backend .
+Defaults to the role of the command name. Written to
+.I openbastion.conf
+and reported to the SSO.
 .TP
 .BR \-t ", " \-\-token\-file " " \fIFILE\fR
-Read server token from file (use - for stdin). For non-interactive enrollment.
+Read the server token from
+.I FILE
+(\fB\-\fR for standard input) instead of enrolling.
+.TP
+.BR \-c ", " \-\-client\-id " " \fIID\fR
+OIDC client_id used for enrollment. Prompted for if omitted; required with
+.BR \-\-yes .
+.TP
+.BR \-S ", " \-\-client\-secret\-file " " \fIFILE\fR
+Read the OIDC client_secret from
+.I FILE
+(\fB\-\fR for standard input). The
+.B OB_CLIENT_SECRET
+environment variable is an alternative. Needed for a confidential client.
 .TP
 .BR \-y ", " \-\-yes
-Non-interactive mode (requires \-\-token\-file).
+Non-interactive mode. Requires
+.B \-\-token\-file
+unless a server token already exists, in which case it is reused.
 .TP
 .BR \-k ", " \-\-insecure
-Skip SSL certificate verification.
+Skip TLS certificate verification.
 .TP
-.BR \-\-enable\-audit\-trace
-Enable the optional primary audit trace based on
-.BR auditd (8).
-OFF by default. When enabled, installs
+.B \-\-max\-security
+Mode E: SSO-signed certificates only, sudo only with a LemonLDAP::NG
+temporary token, key revocation list refreshed periodically.
+.TP
+.B \-\-enable\-service\-keys
+Write the sshd drop-in that serves service-account keys from
+.I /etc/open-bastion/service-accounts.d/
+(AuthorizedKeysCommand, plus ExposeAuthInfo). Off by default; a run without
+it removes a drop-in it generated earlier.
+.TP
+.B \-\-enable\-sudo\-fresh\-otp
+Require a fresh LemonLDAP::NG token on every sudo for SSO users
+.RB ( "Defaults:%open-bastion-sudo timestamp_timeout=0" ).
+Off by default.
+.TP
+.B \-\-enable\-hardening
+Apply session containment hardening (logind KillUserProcesses, nproc limit,
+at/cron allow-lists, atd masked). Off by default.
+.TP
+.B \-\-enable\-audit\-trace
+Enable the primary audit trace based on
+.BR auditd (8):
+installs
 .I /etc/audit/rules.d/open-bastion.rules
-(targeting non-system users via auid >= 1000) and
-.I /etc/cron.daily/open-bastion-audit-rotate
-for daily log rotation, then loads the rules and restarts auditd.
+and
+.IR /etc/cron.daily/open-bastion-audit-rotate ,
+loads the rules and restarts auditd.
 .I /etc/audit/auditd.conf
-is intentionally NOT modified; tune retention manually
-(see
-.BR doc/audit.rst ,
-section "Tuning retention").
-Requires the auditd package to be installed on the host
-(Recommends, not Depends). See
-.B doc/audit.rst
-for rationale, threat model, verification, and tuning.
+is not modified. Requires the auditd package. Off by default.
 .TP
 .BR \-n ", " \-\-dry\-run
 Show what would be done without making changes.
 .TP
 .BR \-h ", " \-\-help
-Show help message and exit.
+Show the help for the role in effect and exit.
 .TP
 .BR \-V ", " \-\-version
 Show version and exit.
+.SS Bastion and standalone options
+Refused when the role is
+.BR backend .
+.TP
+.B \-\-disable\-session\-recorder
+Do not configure the session recorder and do not force it through
+.BR ForceCommand .
+Recording is on by default; use this only when sessions are recorded by
+other means.
+.SS Backend options
+Refused when the role is
+.BR bastion " or " standalone .
+.TP
+.BI \-\-allowed\-bastions " IDS"
+Comma- or space-separated list of the bastion ids (as printed by
+.BR ob-bastion-id (1)
+on each bastion) allowed to hop to this backend. Prompted for if omitted in
+an interactive run. An empty list accepts a hop from any bastion enrolled in
+the project.
+.TP
+.B \-\-allow\-any\-bastion
+Answer that prompt with "any bastion" up front. Non-interactive runs already
+default to it.
+.TP
+.B \-\-no\-sudo
+Do not configure sudo through LemonLDAP::NG. Refused together with
+.BR \-\-max\-security ,
+which always replaces the sudo PAM stack.
+.TP
+.B \-\-no\-create\-user
+Do not create Unix accounts automatically.
 .SH CONFIGURATION
-The script performs the following configuration steps:
+The script works in three phases, so that a failed enrollment never leaves
+the host locked down:
 .IP 1. 4
-Downloads SSH CA public key from LemonLDAP::NG portal (/ssh/ca endpoint).
+Inert preparation, rolled back on failure: downloads the SSH CA public key
+(/ssh/ca), installs the principals helper (and, on a backend, the
+allowed-bastions list), writes
+.IR openbastion.conf ,
+and on a bastion configures the session recorder.
 .IP 2. 4
-Creates sshd configuration with TrustedUserCAKeys.
+Checks the portal and enrolls the server.
 .IP 3. 4
-Configures PAM for Open Bastion authorization (certificate-aware mode).
-.IP 4. 4
-Enables session recording via ForceCommand.
-.IP 5. 4
-Enrolls the server with LemonLDAP::NG (unless token provided).
-.IP 6. 4
-Restarts SSH service.
+Lockdown: sshd drop-in, PAM for SSH, sudo (backend: LLNG rules; Mode E: token
+only), ob-ssh configuration (bastion), NSS, optional hardening and audit trace,
+then restarts sshd.
+.SH CHANGING A HOST'S ROLE
+Running the command under the other role switches the host between the
+bastion stack (bastion, standalone) and a backend. The other role's sshd
+drop-in is removed (backed up), and the principals helper is replaced only at
+the end of the run, right before sshd is restarted; until then either helper
+denies a login made through the other role's sshd configuration. A backend
+disables
+.B ob-cert.socket
+and
+.B ob-record.socket
+and removes
+.IR /etc/open-bastion/ssh-proxy.conf .
+A bastion leaves a backend's LLNG sudo stack
+.RI ( /etc/pam.d/sudo ", " /etc/pam.d/sudo-i ", " /etc/sudoers.d/open-bastion )
+in place and warns about it. On an sshd without
+.IR /etc/ssh/sshd_config.d ,
+where the configuration is a block appended to
+.IR sshd_config ,
+a switch is refused: remove the old block first.
+.PP
+Invoked under a name other than the three above, the command configures a
+bastion unless
+.B \-\-node\-role
+is given, and a
+.B \-\-yes
+run then requires
+.BR \-\-node\-role .
+.SH USER CREATION
+On a backend, when an authorized user does not exist locally,
+.B pam_openbastion
+creates the account from LemonLDAP::NG attributes during the PAM session:
+username from the certificate principal, GECOS, shell and group memberships
+from LemonLDAP::NG, home directory created.
 .SH FILES
 .TP
-.I /etc/ssh/llng_ca.pub
+.I /etc/ssh/open-bastion_ca.pub
 SSH CA public key downloaded from LemonLDAP::NG.
 .TP
-.I /etc/ssh/sshd_config.d/50-open-bastion.conf
-SSH configuration for bastion mode (on modern systems).
+.I /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf
+sshd configuration of a bastion or standalone host.
+.TP
+.I /etc/ssh/sshd_config.d/00-open-bastion-backend.conf
+sshd configuration of a backend. Writing either drop-in removes the other.
+.TP
+.I /usr/local/sbin/ob-ssh-principals
+AuthorizedPrincipalsCommand helper (bastion or backend variant).
+.TP
+.I /etc/open-bastion/allowed_bastions
+Backend only: bastion ids allowed to hop to this host.
 .TP
 .I /etc/pam.d/sshd
 PAM configuration for SSH.
 .TP
+.IR /etc/pam.d/sudo ", " /etc/pam.d/sudo-i ", " /etc/sudoers.d/open-bastion
+sudo configuration (backend, or any role in Mode E).
+.TP
 .I /etc/open-bastion/openbastion.conf
-PAM module configuration.
+PAM module configuration, including
+.BR node_role .
+.TP
+.IR /etc/open-bastion/nss_openbastion.conf ", " /etc/nsswitch.conf
+NSS module configuration.
+.TP
+.I /etc/open-bastion/session-recorder.conf
+Bastion only: session recorder configuration.
 .TP
 .I /var/lib/open-bastion/sessions/
-Session recordings directory.
+Bastion only: session recordings.
 .SH EXAMPLES
 .PP
-Interactive setup:
+Bastion, interactive:
 .RS
 .nf
-sudo ob-bastion-setup \-\-portal https://auth.example.com
+sudo ob-bastion-setup \-\-portal https://auth.example.com \-\-server\-group bastion
 .fi
 .RE
 .PP
-Non-interactive setup with pre-obtained token:
+Backend accepting hops from two bastions, non-interactive, with a
+pre-obtained token:
 .RS
 .nf
-sudo ob-bastion-setup \-\-portal https://auth.example.com \\
-    \-\-token "server-token-here" \-\-yes
+sudo ob-backend-setup \-\-portal https://auth.example.com \\
+    \-\-server\-group production \-\-client\-id pam\-access \\
+    \-\-allowed\-bastions bastion\-01,bastion\-02 \\
+    \-\-token\-file /root/server\-token.json \-\-yes
 .fi
 .RE
 .PP
-Dry-run to see what would be changed:
+Standalone host, dry run:
 .RS
 .nf
-sudo ob-bastion-setup \-\-portal https://auth.example.com \-\-dry-run
+sudo ob-standalone-setup \-\-portal https://auth.example.com \-\-dry\-run
 .fi
 .RE
 .SH EXIT STATUS
@@ -132,11 +294,16 @@ sudo ob-bastion-setup \-\-portal https://auth.example.com \-\-dry-run
 Setup completed successfully.
 .TP
 .B 1
-Setup failed.
+Setup failed, or an option does not apply to the role in effect.
 .SH SEE ALSO
-.BR ob-backend-setup (8),
+.BR ob-bastion-id (1),
+.BR ob-enroll (8),
+.BR ob-heartbeat (8),
+.BR ob-post-upgrade (8),
 .BR ob-session-recorder (8),
+.BR ob-ssh (1),
 .BR ob-ssh-cert (1),
+.BR nsswitch.conf (5),
 .BR sshd_config (5)
 .PP
 LemonLDAP::NG documentation: https://lemonldap-ng.org/

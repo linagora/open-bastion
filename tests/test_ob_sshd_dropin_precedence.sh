@@ -9,19 +9,47 @@
 # so the open-bastion drop-in MUST sort before 50-cloud-init.conf or its
 # `PasswordAuthentication no` loses and password auth stays enabled.
 #
-# This test extracts the drop-in file name the setup scripts actually write and
-# asserts, via a real `sshd -T`, that with a competing 50-cloud-init.conf the
-# resolved PasswordAuthentication is `no`. A negative control with the legacy
-# 50- name proves the ordering is what matters.
+# This test has the setup script write its drop-in, under each role, into a
+# scratch sshd_config.d and takes the name from there, then asserts, via a real
+# `sshd -T`, that with a competing 50-cloud-init.conf the resolved
+# PasswordAuthentication is `no`. A negative control with the legacy 50- name
+# proves the ordering is what matters.
 #
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail=0
 
-# Drop-in names the setup scripts write (so a future rename back to 50- fails here).
-bastion_dropin=$(grep -oE '[0-9]+-open-bastion-bastion\.conf' "$SCRIPT_DIR/scripts/ob-bastion-setup" | head -1)
-backend_dropin=$(grep -oE '[0-9]+-open-bastion-backend\.conf' "$SCRIPT_DIR/scripts/ob-backend-setup" | head -1)
+# shellcheck source=tests/lib_setup_script.sh
+. "$SCRIPT_DIR/tests/lib_setup_script.sh"
+
+# The drop-in name the setup script writes when invoked as $1 (so a future
+# rename back to 50- fails here). Rendered, not grepped: one script writes both
+# names and picks one at run time.
+written_dropin() {
+    local d
+    d=$(mktemp -d)
+    mkdir -p "$d/sshd_config.d" "$d/bin"
+    : > "$d/sshd_config"
+    printf '#!/bin/sh\nexit 0\n' > "$d/bin/sshd"
+    chmod +x "$d/bin/sshd"
+    (
+        load_setup_as "$1" || exit 1
+        parse_args -p https://x.example.com -g g >/dev/null 2>&1
+        SSHD_CONFIG_DIR="$d/sshd_config.d"
+        SSHD_CONFIG="$d/sshd_config"
+        BACKUP_DIR="$d/backup"
+        PATH="$d/bin:$PATH"
+        configure_sshd >/dev/null 2>&1
+    )
+    find "$d/sshd_config.d" -name '*-open-bastion-*.conf' -printf '%f\n' | head -1
+    rm -rf "$d"
+}
+
+bastion_dropin=$(written_dropin ob-bastion-setup)
+backend_dropin=$(written_dropin ob-backend-setup)
+case "$bastion_dropin" in *-open-bastion-bastion.conf) ;; *) bastion_dropin="" ;; esac
+case "$backend_dropin" in *-open-bastion-backend.conf) ;; *) backend_dropin="" ;; esac
 echo "bastion drop-in: $bastion_dropin"
 echo "backend drop-in: $backend_dropin"
 
@@ -50,7 +78,8 @@ fi
 
 # Dynamic check: real sshd -T with both drop-ins present.
 RUNNER=$(mktemp)
-trap 'rm -f "$RUNNER"' EXIT
+# Replaces lib_setup_script.sh's EXIT trap, so it takes over its directory too.
+trap 'rm -f "$RUNNER"; rm -rf "$SETUP_LINK_DIR"' EXIT
 cat > "$RUNNER" <<DRIVER
 set -e
 export DEBIAN_FRONTEND=noninteractive

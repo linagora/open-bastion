@@ -385,6 +385,14 @@ Server Token Security
 Setup Scripts
 -------------
 
+One script configures every node role. ``ob-bastion-setup`` is the program;
+``ob-backend-setup`` and ``ob-standalone-setup`` are symlinks to it, and the name
+it is invoked under chooses the default role. ``--node-role`` overrides it, and
+configures the whole stack of the role it names, not only the label. An option
+that belongs to another role (``--no-sudo`` on a bastion,
+``--disable-session-recorder`` on a backend) is refused. ``ob-bastion-setup(8)``
+and ``<command> --help`` list the options of each role.
+
 Bastion Setup
 ~~~~~~~~~~~~~
 
@@ -402,27 +410,34 @@ This script:
 - Configures PAM for LLNG authorization
 - Enrolls the server with LLNG
 
-Options: \| Option \| Description \| \|--------\|-------------\| \| ``-p, --portal URL`` \| LLNG portal URL (required) \| \| ``-g, --server-group NAME`` \| Server group (default: bastion) \| \| ``-t, --token-file FILE`` \| Read server token from file \| \| ``-k, --insecure`` \| Skip SSL verification \| \| ``-n, --dry-run`` \| Show what would be done \|
+Main options: ``-p, --portal URL`` (required), ``-g, --server-group NAME``,
+``-t, --token-file FILE``, ``-k, --insecure``, ``-n, --dry-run``, and, for a
+bastion or standalone host only, ``--disable-session-recorder``.
 
 Backend Setup
 ~~~~~~~~~~~~~
 
-Use ``ob-backend-setup`` to automate backend server configuration:
+Use ``ob-backend-setup`` (the same script, run as a backend) to automate
+backend server configuration:
 
 .. code:: bash
 
-   sudo ob-backend-setup --portal https://auth.example.com --server-group production
+   sudo ob-backend-setup --portal https://auth.example.com --server-group production \
+       --allowed-bastions bastion-01
 
 This script:
 
 - Downloads SSH CA public key from LLNG
-- Configures sshd for certificate authentication
+- Installs the backend principals helper and ``/etc/open-bastion/allowed_bastions``
+- Configures sshd to accept bastion-vouched certificates only
 - Configures PAM with automatic user creation
 - Configures sudo to use LLNG authorization
 - Configures NSS for user/group resolution
 - Enrolls the server with LLNG
 
-Options: \| Option \| Description \| \|--------\|-------------\| \| ``-p, --portal URL`` \| LLNG portal URL (required) \| \| ``-g, --server-group NAME`` \| Server group (default: default) \| \| ``-t, --token-file FILE`` \| Read server token from file \| \| ``--no-sudo`` \| Don't configure sudo \| \| ``--no-create-user`` \| Disable auto user creation \| \| ``-k, --insecure`` \| Skip SSL verification \| \| ``-n, --dry-run`` \| Show what would be done \|
+Main options: the common ones above, and for a backend only
+``--allowed-bastions IDS``, ``--allow-any-bastion``, ``--no-sudo`` (refused
+with ``--max-security``) and ``--no-create-user``.
 
 SSH Certificates
 ----------------

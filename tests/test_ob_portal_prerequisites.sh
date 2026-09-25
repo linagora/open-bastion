@@ -83,7 +83,7 @@ test_text_is_packaged() {
 # the script MENTIONS the file passes just as well when the call site is gone.
 test_setup_scripts_print_it() {
     local bad="" s out
-    for s in ob-bastion-setup ob-backend-setup ob-desktop-setup; do
+    for s in ob-bastion-setup ob-desktop-setup; do
         local f="$ROOT_DIR/scripts/$s"
         if ! grep -q '^print_portal_prerequisites() {' "$f"; then
             bad="$bad no-function-in:$s"
@@ -106,9 +106,9 @@ test_setup_scripts_print_it() {
             || bad="$bad not-called-in:$s"
     done
     if [ -z "$bad" ]; then
-        pass "the three setup scripts print the prerequisite"
+        pass "the setup scripts (all roles, and desktop) print the prerequisite"
     else
-        fail "the three setup scripts print the prerequisite" "$bad"
+        fail "the setup scripts (all roles, and desktop) print the prerequisite" "$bad"
     fi
 }
 

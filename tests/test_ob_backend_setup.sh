@@ -1,10 +1,15 @@
 #!/bin/bash
+# test_ob_backend_setup.sh -- the backend role of the setup script.
+#
+# ob-backend-setup is a symlink to scripts/ob-bastion-setup, which takes its
+# default role from the name it is invoked under (#288). Everything here goes
+# through that name, exactly as an admin runs it: the script is loaded or run
+# as "ob-backend-setup", never as ob-bastion-setup with the role patched in.
 set -uo pipefail
 
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
-SCRIPT_DIR="$(cd "$(dirname "$0")/../scripts" && pwd)"
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); echo "  PASS: $1"; }
@@ -13,19 +18,16 @@ run_test() { TESTS_RUN=$((TESTS_RUN + 1)); "$@"; }
 
 # shellcheck source=tests/lib_pam_stack.sh
 . "$TESTS_DIR/lib_pam_stack.sh"
+# shellcheck source=tests/lib_setup_script.sh
+. "$TESTS_DIR/lib_setup_script.sh"
 
-source_script() {
-    local script="$1"
-    local content
-    content=$(cat "$SCRIPT_DIR/$script")
-    content="${content%main \"\$@\"}"
-    content=$(echo "$content" | sed -E 's/^set -e(uo pipefail)?$//')
-    eval "$content"
-}
+# The command under test, and its definitions loaded under the same name.
+BACKEND=$(setup_command ob-backend-setup)
+source_script() { load_setup_as "$1"; }
 
 # ── Test 1: Syntax check ──
 test_syntax() {
-    if bash -n "$SCRIPT_DIR/ob-backend-setup" 2>/dev/null; then
+    if bash -n "$BACKEND" 2>/dev/null; then
         pass "Syntax check"
     else
         fail "Syntax check"
@@ -35,7 +37,7 @@ test_syntax() {
 # ── Test 2: --version / --help ──
 test_version() {
     local out
-    out=$(bash "$SCRIPT_DIR/ob-backend-setup" --version 2>&1)
+    out=$(bash "$BACKEND" --version 2>&1)
     if echo "$out" | grep -q "version"; then
         pass "--version outputs version"
     else
@@ -45,7 +47,7 @@ test_version() {
 
 test_help() {
     local out
-    out=$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)
+    out=$(bash "$BACKEND" --help 2>&1)
     if echo "$out" | grep -q "Usage"; then
         pass "--help outputs usage"
     else
@@ -55,7 +57,7 @@ test_help() {
 
 # ── Test 3: Unknown option rejected ──
 test_unknown_option() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" --bogus 2>/dev/null; then
+    if bash "$BACKEND" --bogus 2>/dev/null; then
         fail "Unknown option rejected"
     else
         pass "Unknown option rejected"
@@ -64,7 +66,7 @@ test_unknown_option() {
 
 # ── Test 4: Missing portal URL exits with error ──
 test_missing_portal() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" -g mygroup 2>/dev/null; then
+    if bash "$BACKEND" -g mygroup 2>/dev/null; then
         fail "Missing portal URL exits with error"
     else
         pass "Missing portal URL exits with error"
@@ -73,7 +75,7 @@ test_missing_portal() {
 
 # ── Test 5: Missing server-group exits with error ──
 test_missing_server_group() {
-    if bash "$SCRIPT_DIR/ob-backend-setup" -p "https://x" 2>/dev/null; then
+    if bash "$BACKEND" -p "https://x" 2>/dev/null; then
         fail "Missing server-group exits with error"
     else
         pass "Missing server-group exits with error"
@@ -146,6 +148,125 @@ test_no_sudo_skips_sudoers() {
         fail "--no-sudo must not provision a sudoers rule" "$out"
     else
         pass "--no-sudo skips the sudoers rule"
+    fi
+}
+
+# ── Test 7d: Mode E provisions the sudoers rule itself ──
+# The Mode E sudo stack is useless to an SSO user without the group and its
+# sudoers rule. On a backend configure_pam_sudo happened to create them first;
+# Mode E must not depend on that ordering, as it does not on a bastion.
+test_max_security_sudo_provisions_sudoers() {
+    local out
+    out=$(
+        source_script "ob-backend-setup"
+        parse_args -p "https://x" -g "g" --max-security --dry-run
+        configure_max_security_sudo 2>&1
+    )
+    if grep -q "Would create group open-bastion-sudo" <<<"$out" \
+       && grep -q "/etc/sudoers.d/open-bastion" <<<"$out"; then
+        pass "Mode E sudo provisions the open-bastion-sudo group + sudoers rule"
+    else
+        fail "Mode E sudo provisions the open-bastion-sudo group + sudoers rule" "$out"
+    fi
+}
+
+# ── Test 7e: --no-sudo and --max-security are refused together ──
+# Mode E rewrites /etc/pam.d/sudo whatever --no-sudo says, so the pair cannot
+# both be honoured; the run must stop before touching anything.
+test_no_sudo_conflicts_with_max_security() {
+    local out rc
+    out=$(bash "$BACKEND" -p "https://x.example.com" -g g \
+              --no-sudo --max-security --dry-run --yes 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ] && grep -q -- "--no-sudo cannot be combined with --max-security" <<<"$out"; then
+        pass "--no-sudo with --max-security is refused"
+    else
+        fail "--no-sudo with --max-security is refused" "rc=$rc $out"
+    fi
+}
+
+# ── Test 7f: NSS is configured with the lockdown, not before enrollment ──
+# Phase 1 is for files nothing reads until sshd/PAM are switched over, because
+# those are what rollback_on_failure takes back when enrollment fails.
+# nsswitch.conf is live the moment it is written and was never restored, so a
+# rolled-back backend kept "openbastion" in it with its config file deleted.
+test_nss_not_in_rollback_phase() {
+    local body enroll nss
+    body=$(sed -n '/^main() {/,/^}/p' "$SETUP_SCRIPT")
+    enroll=$(grep -n 'while ! enroll_server' <<<"$body" | cut -d: -f1)
+    nss=$(grep -n '^[[:space:]]*configure_nss ' <<<"$body" | cut -d: -f1)
+    if [ -n "$enroll" ] && [ -n "$nss" ] && [ "$(wc -l <<<"$nss")" -eq 1 ] \
+       && [ "$nss" -gt "$enroll" ] \
+       && ! grep -q 'configure_nss.*rollback_on_failure' <<<"$body"; then
+        pass "NSS is configured after enrollment, outside the rollback phase"
+    else
+        fail "NSS is configured after enrollment, outside the rollback phase" \
+             "enroll@${enroll:-?} nss@${nss:-?}"
+    fi
+}
+
+# ── Test 7g: install_principals_helper, for real (#288 review) ──
+# Every other test stops at --dry-run, which returns before the allowlist is
+# written: replacing the call to install_allowed_bastions with `:` left the
+# whole suite green. This runs the real path with `install` and `systemctl`
+# stubbed and the allowlist redirected, and pins what matters: the backend
+# helper is the one installed, the allowlist is written first (the backend
+# helper with no allowlist accepts direct SSO certificates), and a failed
+# write stops the step instead of being ignored under a suspended errexit.
+test_install_helper_real_path() {
+    local tmp out rc bad=""
+    tmp=$(mktemp -d)
+    # The run; $1 is where the allowlist goes.
+    run_install() {
+        (
+            load_setup_as ob-backend-setup || exit 99
+            parse_args -p "https://x" -g g --allowed-bastions "b1, b2" >/dev/null 2>&1 || exit 98
+            normalize_allowed_bastions
+            OB_ALLOWED_BASTIONS_FILE="$1"
+            BACKUP_DIR="$tmp/backup"
+            OB_DATA_DIR="$(cd "$TESTS_DIR/../share" && pwd)"
+            export OB_DATA_DIR
+            install() {
+                case "$*" in
+                    *ob-ssh-principals.*)
+                        if [ -f "$OB_ALLOWED_BASTIONS_FILE" ]; then
+                            echo "allowlist-before-helper" >> "$tmp/install.log"
+                        fi ;;
+                esac
+                printf '%s\n' "$*" >> "$tmp/install.log"
+            }
+            systemctl() { :; }
+            install_principals_helper >/dev/null 2>&1
+        )
+    }
+
+    run_install "$tmp/etc/open-bastion/allowed_bastions"
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad rc=$rc"
+    [ "$(cat "$tmp/etc/open-bastion/allowed_bastions" 2>/dev/null)" = "b1 b2" ] \
+        || bad="$bad allowlist-content"
+    [ "$(stat -c %a "$tmp/etc/open-bastion/allowed_bastions" 2>/dev/null)" = 644 ] \
+        || bad="$bad allowlist-mode"
+    [ "$(stat -c %a "$tmp/etc/open-bastion" 2>/dev/null)" = 711 ] || bad="$bad dir-mode"
+    grep -q 'ob-ssh-principals\.backend /usr/local/sbin/ob-ssh-principals$' "$tmp/install.log" \
+        || bad="$bad backend-helper"
+    grep -q '^allowlist-before-helper$' "$tmp/install.log" || bad="$bad order"
+
+    # The allowlist cannot be written (its directory is a file): the step fails
+    # and the helper is never installed.
+    rm -f "$tmp/install.log"
+    : > "$tmp/not-a-dir"
+    run_install "$tmp/not-a-dir/allowed_bastions"
+    rc=$?
+    [ "$rc" -ne 0 ] || bad="$bad failed-write-ignored"
+    grep -q 'ob-ssh-principals\.' "$tmp/install.log" 2>/dev/null \
+        && bad="$bad helper-installed-without-allowlist"
+
+    rm -rf "$tmp"
+    if [ -z "$bad" ]; then
+        pass "install_principals_helper writes the allowlist first, then the backend helper"
+    else
+        fail "install_principals_helper writes the allowlist first, then the backend helper" "$bad"
     fi
 }
 
@@ -313,7 +434,7 @@ test_sudo_fresh_otp_optin() {
         || { ok=0; echo "    (--enable-sudo-fresh-otp did not scope timestamp_timeout=0)"; }
     grep -q '^%open-bastion-sudo ALL=(ALL) ALL$' <<<"$on" \
         || { ok=0; echo "    (opt-in drop-in lost its sudo rule)"; }
-    grep -q 'enable-sudo-fresh-otp' <<<"$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)" \
+    grep -q 'enable-sudo-fresh-otp' <<<"$(bash "$BACKEND" --help 2>&1)" \
         || { ok=0; echo "    (not documented in --help)"; }
 
     if command -v visudo >/dev/null 2>&1; then
@@ -501,7 +622,7 @@ test_allowed_bastions_empty_is_explicit() {
 
     # Both options must be discoverable, since the prompt now depends on them.
     local help
-    help=$(bash "$SCRIPT_DIR/ob-backend-setup" --help 2>&1)
+    help=$(bash "$BACKEND" --help 2>&1)
     grep -q -- '--allowed-bastions' <<<"$help" \
         || { ok=0; echo "    (--allowed-bastions missing from --help)"; }
     grep -q -- '--allow-any-bastion' <<<"$help" \
@@ -554,6 +675,10 @@ run_test test_parse_args_sets_variables
 run_test test_no_sudo
 run_test test_sudo_creates_sudoers_rule
 run_test test_no_sudo_skips_sudoers
+run_test test_max_security_sudo_provisions_sudoers
+run_test test_no_sudo_conflicts_with_max_security
+run_test test_nss_not_in_rollback_phase
+run_test test_install_helper_real_path
 run_test test_no_create_user
 run_test test_dry_run
 run_test test_confirm_noninteractive

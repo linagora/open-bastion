@@ -45,7 +45,10 @@ fail() { TESTS_FAILED=$((TESTS_FAILED + 1)); echo "  FAIL: $1${2:+ - $2}"; }
 run_test() { TESTS_RUN=$((TESTS_RUN + 1)); "$@"; }
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=tests/lib_setup_script.sh
+. "$ROOT_DIR/tests/lib_setup_script.sh"
+# Replaces lib_setup_script.sh's EXIT trap, so it takes over its directory too.
+trap 'rm -rf "$TMP" "$SETUP_LINK_DIR"' EXIT
 
 SPOOL="$TMP/spool"
 CONF_DIR="$TMP/etc"
@@ -250,6 +253,37 @@ test_backend_vouched() {
     fi
 }
 
+# ── Test 7b: a helper that does not match the live sshd denies (#288) ──
+# A role switch replaces the helper and the sshd drop-in, but sshd only takes
+# the new drop-in when it is restarted at the end of the run. Until then -- or
+# for good, if the run is interrupted -- one role's sshd calls the other role's
+# helper. Both mismatches must deny. The dangerous one is a backend's sshd
+# (no ForceCommand, %i passed) reaching the bastion helper, which does no
+# vouching: it would admit a direct SSO certificate, unrecorded.
+test_role_mismatch_denied() {
+    local out bad=""
+    reset_spool
+    printf 'bastion1\n' > "$CONF_DIR/allowed_bastions"
+    # Control: the bastion helper, called the bastion's way, admits the user.
+    out=$(run_helper "$BASTION_HELPER" "$USER_NAME" "$FP" "ssh-ed25519" "$BLOB")
+    [ "$out" = "$USER_NAME" ] || bad="$bad control-bastion('$out')"
+    # A backend's sshd line (%u %f %i %t %k) calling the bastion helper.
+    out=$(run_helper "$BASTION_HELPER" "$USER_NAME" "$FP" \
+            "user=$USER_NAME" "ssh-ed25519" "$BLOB")
+    [ -z "$out" ] || bad="$bad bastion-helper-under-backend-sshd('$out')"
+    out=$(run_helper "$BASTION_HELPER" "$USER_NAME" "$FP" \
+            "bastion=bastion1;user=$USER_NAME;target=host" "ssh-ed25519" "$BLOB")
+    [ -z "$out" ] || bad="$bad bastion-helper-vouched-form('$out')"
+    # A bastion's sshd line (%u %f %t %k) calling the backend helper.
+    out=$(run_helper "$BACKEND_HELPER" "$USER_NAME" "$FP" "ssh-ed25519" "$BLOB")
+    [ -z "$out" ] || bad="$bad backend-helper-under-bastion-sshd('$out')"
+    if [ -z "$bad" ]; then
+        pass "Either helper under the other role's sshd line denies"
+    else
+        fail "Either helper under the other role's sshd line denies" "$bad"
+    fi
+}
+
 # ── Test 8: backend helper still denies an unvouched cert ──
 test_backend_unvouched_denied() {
     reset_spool
@@ -352,11 +386,22 @@ test_backend_legacy_mode_warns() {
 }
 
 # ── Test 10: both sshd_config templates pass %t and %k ──
+# The drop-in is rendered, not grepped: one script writes both, and which line
+# a role gets is decided at run time. Each role is reached by its command name.
+sshd_principals_line() {
+    local out
+    out=$(
+        load_setup_as "$1" || exit 1
+        parse_args -p https://x.example.com -g g --dry-run >/dev/null 2>&1
+        configure_sshd 2>/dev/null
+    )
+    grep -m1 '^AuthorizedPrincipalsCommand ' <<<"$out"
+}
 test_sshd_config_tokens() {
     # The sshd_config template lives in the setup script, not in the helper.
     local bastion_line backend_line
-    bastion_line=$(grep -m1 '^AuthorizedPrincipalsCommand ' "$ROOT_DIR/scripts/ob-bastion-setup")
-    backend_line=$(grep -m1 '^AuthorizedPrincipalsCommand ' "$ROOT_DIR/scripts/ob-backend-setup")
+    bastion_line=$(sshd_principals_line ob-bastion-setup)
+    backend_line=$(sshd_principals_line ob-backend-setup)
     if [ "$bastion_line" = "AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k" ] \
        && [ "$backend_line" = "AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k" ]; then
         pass "sshd_config templates pass %t and %k to the helper"
@@ -387,6 +432,7 @@ run_test test_bad_keytype_filtered
 run_test test_bad_blob_filtered
 run_test test_legacy_invocation
 run_test test_backend_vouched
+run_test test_role_mismatch_denied
 run_test test_backend_unvouched_denied
 run_test test_backend_wrong_bastion_denied
 run_test test_backend_empty_allowlist_warns

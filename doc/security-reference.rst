@@ -214,7 +214,7 @@ This writes ``/etc/open-bastion/allowed_bastions`` (0644 inside a 0711 directory
 
    **Legacy mode is not a quieter version of this.** With ``/etc/open-bastion/allowed_bastions`` *absent* — a backend set up by a version that predates vouching and never re-run — the helper skips vouching entirely and accepts a direct SSO certificate, which is broader than an empty list. That path also logs an ``authpriv.warning`` on every accepted connection; the fix is to re-run ``ob-backend-setup``.
 
-   A **standalone** host (its own bastion, ``--node-role standalone``) legitimately has nothing to list, so it will warn on every hop. Either accept the log volume or pass its own id from ``ob-bastion-id``; a lab is the one place where ``--allow-any-bastion`` is the honest answer.
+   A **standalone** host (``ob-standalone-setup``, or ``--node-role standalone``) has no allowlist: it runs the bastion stack, whose principals helper does no vouching because nothing hops to it, and the setup refuses ``--allowed-bastions`` and ``--allow-any-bastion`` for that role. The list only exists on a backend. On a backend, a lab is the one place where ``--allow-any-bastion`` is the honest answer.
 
 Required sshd settings (no ``AcceptEnv`` needed):
 

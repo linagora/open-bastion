@@ -369,7 +369,7 @@ test_sudo_fresh_otp_optin() {
 # -- Test 19: sudoers drop-in is validated before it is installed --
 # A malformed /etc/sudoers.d/open-bastion breaks sudo host-wide, so the rule is
 # written to a temp file, checked with visudo -cf, and only then installed 0440
-# -- the same sequence ob-backend-setup uses.
+# -- one function, used by every role.
 test_sudoers_validated_before_install() {
     local body ok=1
     body=$(sed -n '/^write_open_bastion_sudoers()/,/^}/p' "$SCRIPT_DIR/ob-bastion-setup")

@@ -153,7 +153,7 @@ test_exposeauthinfo_is_always_guarded() {
     # early-return" and "is there at least one write somewhere". Deleting the
     # ExposeAuthInfo line from the Mode E heredoc left the suite green while
     # doc/service-accounts.rst's claim about Mode E became false.
-    for f in ob-bastion-setup ob-backend-setup; do
+    for f in ob-bastion-setup; do  # every role: ob-backend-setup is a link to it
         local src="$ROOT_DIR/scripts/$f"
         local fn flag
         for fn in configure_max_security_sshd:MAX_SECURITY \
@@ -343,7 +343,7 @@ test_keys_dir_is_shipped() {
 # believes the host is untouched.
 test_service_keys_flag() {
     local bad="" f
-    for f in ob-bastion-setup ob-backend-setup; do
+    for f in ob-bastion-setup; do  # every role: ob-backend-setup is a link to it
         local src="$ROOT_DIR/scripts/$f"
         grep -q 'ENABLE_SERVICE_KEYS=false' "$src" || bad="$bad $f(not-default-off)"
         grep -q -- '--enable-service-keys)' "$src" || bad="$bad $f(no-flag)"

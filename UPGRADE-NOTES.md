@@ -83,6 +83,61 @@ Until you do, desktop-SSO users need one online re-authentication each: the
 existing offline cache entries can no longer be read. No lockout, nothing to
 clean up. The rejection is logged to syslog with that same command.
 
+### A4. Before re-running a setup script with `--node-role`
+
+Only if your automation passes `--node-role`, or you run a setup script again
+later. `ob-backend-setup` is now a symlink to `ob-bastion-setup` (#288), and
+**`--node-role` configures the role it names** instead of only writing it into
+`openbastion.conf`. Until now, `ob-bastion-setup --node-role backend` produced
+a bastion labelled `backend`, and `ob-backend-setup --node-role bastion` or
+`--node-role standalone` a backend labelled otherwise. Re-running such a
+command now turns the host into what the label says.
+
+Check that the label and the configuration agree:
+
+```sh
+grep '^node_role' /etc/open-bastion/openbastion.conf
+ls /etc/ssh/sshd_config.d/*-open-bastion-*.conf   # -bastion.conf or -backend.conf
+```
+
+A `-backend.conf` drop-in goes with `node_role = backend`; a `-bastion.conf`
+one with `bastion` or `standalone`. If they disagree, fix the command before
+the next run — the drop-in says what the host really is — or the run will
+switch the host's role.
+
+**What a role switch does, and does not do.** It is supported between a
+bastion (or standalone host) and a backend, in both directions:
+
+- The sshd drop-in of the old role is removed (backed up) and the new one
+  written. On an sshd **without `/etc/ssh/sshd_config.d`**, where the setup
+  appends a block to `sshd_config` and never rewrites one, a switch is refused
+  before anything is touched: remove the old block by hand, then run again.
+- The principals helper is replaced at the end of the run, right before sshd is
+  restarted, not before enrollment. In between, and if sshd is not restarted,
+  either helper **denies** a login made through the other role's sshd
+  configuration — a certificate login fails rather than bypasses the vouching
+  or the recording. Restart sshd if the setup could not.
+- **Bastion → backend:** `ob-cert.socket` (hop-certificate minting with this
+  host's token) and `ob-record.socket` are disabled, and
+  `/etc/open-bastion/ssh-proxy.conf` is removed. Left in place:
+  `session-recorder.conf`, the recordings under `/var/lib/open-bastion/sessions`
+  and `ob-session-prune.timer`, which keeps expiring them.
+- **Backend → bastion:** the backend's LLNG sudo stack is **left in place**:
+  `/etc/pam.d/sudo`, `/etc/pam.d/sudo-i` and `/etc/sudoers.d/open-bastion`. SSO
+  users LLNG authorizes for sudo can still elevate on the bastion. The run warns
+  about it; if they must not, restore your distribution's two PAM files and
+  delete the sudoers drop-in. (With `--max-security` the sudo stack is rewritten
+  anyway.) `/etc/open-bastion/allowed_bastions` is also left; a bastion does
+  not read it.
+
+Three command lines that used to be accepted are now refused, before anything
+is touched: `ob-backend-setup --no-sudo --max-security` (Mode E rewrites the
+sudo stack regardless, and the run left SSO users with no sudoers rule); any
+option of one role combined with `--node-role` naming the other, such as
+`ob-backend-setup --node-role standalone --allowed-bastions ...`; and a `--yes`
+run of a copy of the script under a name other than `ob-bastion-setup`,
+`ob-backend-setup` or `ob-standalone-setup`, unless it passes `--node-role`.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0

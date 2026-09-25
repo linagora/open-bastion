@@ -316,7 +316,10 @@ test_main_gates_audit_trace() {
     fi
 }
 
-# ── Test 11: print_summary distinguishes applied vs not applied ──
+# ── Test 11: print_summary reports what happened, not what was asked ──
+# The summary used to key on ENABLE_AUDIT_TRACE, so a run whose audit step was
+# skipped (auditd missing), declined at the prompt or failed still printed
+# "applied". It now reports AUDIT_RESULT, which setup_audit_trace sets.
 test_summary_distinguishes_state() {
     (
         source_script "ob-bastion-setup"
@@ -325,21 +328,55 @@ test_summary_distinguishes_state() {
         SERVER_GROUP="bastion"
         SSH_CA_FILE="/tmp/ca"
         BACKUP_DIR="/tmp/backup"
-        ENABLE_AUDIT_TRACE=false
-        local out_off
-        out_off=$(print_summary 2>&1)
-        ENABLE_AUDIT_TRACE=true
-        local out_on
-        out_on=$(print_summary 2>&1)
-        echo "$out_off" | grep -qi "audit trace" || exit 1
-        echo "$out_off" | grep -qi "not applied" || exit 1
-        echo "$out_on" | grep -qi "applied" || exit 1
+        local state out
+        for state in not-applied applied skipped declined dry-run failed; do
+            AUDIT_RESULT="$state"
+            ENABLE_AUDIT_TRACE=true
+            [ "$state" = "not-applied" ] && ENABLE_AUDIT_TRACE=false
+            out=$(print_summary 2>&1)
+            out=$(grep -i 'audit trace' <<<"$out")
+            case "$state" in
+                not-applied) grep -q 'not applied (opt-in' <<<"$out" || exit 1 ;;
+                applied)     grep -q 'Audit trace: applied' <<<"$out" || exit 1 ;;
+                skipped)     grep -q 'NOT applied (auditd not installed)' <<<"$out" || exit 1 ;;
+                declined)    grep -q 'NOT applied (declined' <<<"$out" || exit 1 ;;
+                dry-run)     grep -q 'dry-run' <<<"$out" || exit 1 ;;
+                failed)      grep -q 'FAILED' <<<"$out" || exit 1 ;;
+            esac
+            # Only a real success may claim it.
+            if [ "$state" != "applied" ] && grep -q 'Audit trace: applied' <<<"$out"; then
+                exit 1
+            fi
+        done
         exit 0
     )
     if [ $? -eq 0 ]; then
-        pass "print_summary reports audit-trace state"
+        pass "print_summary reports the audit-trace outcome, not the flag"
     else
-        fail "print_summary reports audit-trace state"
+        fail "print_summary reports the audit-trace outcome, not the flag"
+    fi
+}
+
+# ── Test 12: a skipped audit step is recorded as skipped ──
+# setup_audit_trace returns 0 when auditd is missing (the run goes on), so the
+# only trace of the skip is AUDIT_RESULT, which the summary reads.
+test_skip_is_recorded() {
+    local tmpdir rc
+    tmpdir=$(mktemp -d)
+    (
+        source_script "ob-bastion-setup"
+        # A PATH with no auditctl/augenrules at all.
+        export PATH="$tmpdir"
+        NON_INTERACTIVE=true
+        setup_audit_trace >/dev/null 2>&1
+        [ "$AUDIT_RESULT" = "skipped" ]
+    )
+    rc=$?
+    rm -rf "$tmpdir"
+    if [ $rc -eq 0 ]; then
+        pass "a missing auditd leaves AUDIT_RESULT=skipped"
+    else
+        fail "a missing auditd leaves AUDIT_RESULT=skipped"
     fi
 }
 
@@ -356,6 +393,7 @@ run_test test_rules_template_content
 run_test test_cron_template_content
 run_test test_main_gates_audit_trace
 run_test test_summary_distinguishes_state
+run_test test_skip_is_recorded
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="
