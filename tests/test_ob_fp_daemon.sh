@@ -26,7 +26,7 @@
 #   - a malformed algorithm/blob degrades to .fp only, it does not fail
 #   - the daemon re-asserts 0700 on the spool directory it is handed
 #   - a deposit from a uid that does not own the socket is refused
-#   - an anchor that is not root-owned is refused (strict-uid build)
+#   - an anchor whose real uid is not root is refused (strict-uid build)
 #   - neither shipped helper writes the spool directly any more
 #
 # The daemon is normally socket-activated by systemd with Accept=yes, which
@@ -318,11 +318,11 @@ PY_EOF
     fi
 }
 
-# ── 5c. The anchor must be root-owned ────────────────────────────────────────
+# ── 5c. The anchor's real uid must be root ───────────────────────────────────
 # The anchor is chosen by process NAME, and prctl(PR_SET_NAME) takes fifteen
 # characters while "sshd-session" is twelve -- so a local user can put a process
 # called sshd-session in their own ancestry. Requiring the anchor to be
-# root-owned is what excludes it.
+# real-uid root is what excludes it.
 #
 # Every other test here drives the relaxed build, whose fake anchor is owned by
 # the user running the suite and therefore satisfies that check either way:
@@ -368,9 +368,9 @@ PY_EOF
     rm -f "$sock"
 
     if [ "$rc" != "0" ] && printf '%s' "$err" | grep -q "not root: refusing"; then
-        pass "an anchor that is not root-owned is refused"
+        pass "an anchor whose real uid is not root is refused"
     else
-        fail "an anchor that is not root-owned is refused" \
+        fail "an anchor whose real uid is not root is refused" \
              "rc=$rc err=$(printf '%s' "$err" | tr '\n' ' ')"
     fi
 }

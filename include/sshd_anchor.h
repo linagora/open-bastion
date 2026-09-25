@@ -53,4 +53,26 @@ pid_t ob_find_sshd_anchor(pid_t pid);
  */
 pid_t ob_find_sshd_anchor_in(const char *proc_root, pid_t pid);
 
+/*
+ * Whether the anchor `pid` is privileged: its REAL uid (first field of the
+ * "Uid:" line of <proc_root>/<pid>/status) equals `priv_uid`. Shared by
+ * ob-fp-daemon and pam_openbastion so both apply one rule.
+ *
+ * Real uid, not the effective one nor the owner of /proc/<pid>: while it runs
+ * the Authorized{Principals,Keys}Command, the monitor seteuid()s to the helper
+ * user (OpenSSH temporarily_use_uid()) -- exactly when the helper deposits.
+ * Its real uid stays 0. A process a user renamed to "sshd-session"
+ * still has the user's real uid, even when setuid-root.
+ *
+ * Returns 1 if privileged, 0 if not, -1 if the status cannot be read or parsed
+ * (errno ENOENT/ESRCH when the process is gone, EINVAL when malformed): callers
+ * must treat -1 as a refusal. `ruid_out`, if non-NULL, receives the real uid
+ * whenever it was parsed.
+ */
+int ob_sshd_anchor_owner_ok_in(const char *proc_root, pid_t pid,
+                               uid_t priv_uid, uid_t *ruid_out);
+
+/* ob_sshd_anchor_owner_ok_in() against /proc. */
+int ob_sshd_anchor_owner_ok(pid_t pid, uid_t priv_uid, uid_t *ruid_out);
+
 #endif /* OB_SSHD_ANCHOR_H */

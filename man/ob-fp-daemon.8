@@ -72,9 +72,12 @@ ancestry \(em it is never taken from the request. A client therefore cannot
 name the session it deposits for.
 .PP
 To place a drop on a given anchor you must already be a descendant of that
-anchor, and the anchor must be a live, root-owned
+anchor, and the anchor must be a live
 .B sshd-session
-monitor. sshd puts exactly one unprivileged thing in that position: the
+monitor whose
+.B real
+uid is root. The effective uid is not used: sshd switches it to the helper user
+while the principals command runs, which is when the deposit happens. sshd puts exactly one unprivileged thing in that position: the
 principals helper. A daemon started from init descends from pid 1, not from an
 .BR sshd-session ,
 and cannot re-parent itself into one; a logged-in user's shell is under an
