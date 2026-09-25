@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 Read this first. Follow it exactly. Skipping steps will break CI,
 block merges, corrupt the codebase or make the maintainers unhappy.
