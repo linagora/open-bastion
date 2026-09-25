@@ -525,6 +525,20 @@ jobs:
       run: bash tests/test_integration_token_svc.sh
       timeout-minutes: 15
 
+    # Needs docker, so not in the build job's test_ob_* loop; a SKIP is an error.
+    - name: Nothing of the user's runs before the session recorder
+      run: |
+        set +e
+        out=$(bash tests/test_login_shell_e2e.sh 2>&1); rc=$?
+        echo "$out"
+        case "$out" in
+          *SKIP*)
+            echo "::error::tests/test_login_shell_e2e.sh skipped; it must run here"
+            exit 1 ;;
+        esac
+        exit "$rc"
+      timeout-minutes: 15
+
     - name: Show container logs on failure
       if: failure()
       run: |

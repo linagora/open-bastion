@@ -19,8 +19,14 @@ verify_ssl = true
 # Cache TTL in seconds (how long to cache user info)
 cache_ttl = 300
 
-# Default shell for users without loginShell attribute
+# Default shell for users without loginShell attribute. With force_shell, the
+# shell of the recorded session.
 default_shell = /bin/bash
+
+# Login shell of every user this module resolves, whatever the portal supplies.
+# Set on hosts that record sessions, never on a backend; see ob-login-shell(8).
+# A value that is not a plain absolute path forces /usr/sbin/ob-login-shell.
+#force_shell = /usr/sbin/ob-login-shell
 
 # Base directory for home directories
 default_home_base = /home

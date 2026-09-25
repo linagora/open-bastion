@@ -343,6 +343,12 @@ in that section below; it is in 0.7.0 too, and is not listed twice.
   `MaxConnections` above the systemd default of 64 and adds
   `MaxConnectionsPerSource`, so a local user cannot hold the world-connectable
   socket's connection slots open and block every login.
+- **Nothing of a user's runs before the session recorder any more** (#293): on
+  a recording host, SSO users log in through `ob-login-shell`(8), not a shell
+  reading `~/.bashrc` or `~/.zshenv`. The portal's per-user shell and `Match`
+  exemptions from recording no longer apply to them there. See the login shell
+  in [doc/session-recording.rst](doc/session-recording.rst) and
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A7).
 - **R-P1 is now a release prerequisite, not an assumption** (#268). With
   `pamAccessServerGroups` empty — the shipped default, and what
   `doc/bastion-architecture.md` used to recommend — `server_group` is read from

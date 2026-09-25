@@ -50,6 +50,12 @@ case "$1" in
         ;;
 esac
 
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    if [ ! -e /usr/sbin/ob-login-shell ]; then
+        remove-shell /usr/sbin/ob-login-shell 2>/dev/null || true
+    fi
+fi
+
 #DEBHELPER#
 
 exit 0

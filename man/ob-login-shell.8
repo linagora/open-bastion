@@ -1,0 +1,196 @@
+.TH OB-LOGIN-SHELL 8 "September 2026" "open-bastion" "System Administration"
+.SH NAME
+ob-login-shell \- login shell of SSO users on a host that records sessions
+.SH SYNOPSIS
+.B ob-login-shell
+.RB [ \-l | \-\-login | \-i ]
+.RB [ \-c
+.IR COMMAND ]
+.SH DESCRIPTION
+.B ob-login-shell
+is the login shell that
+.B libnss_openbastion
+hands out to every user it resolves on a bastion or standalone host that
+records sessions (the
+.B force_shell
+key of
+.IR nss_openbastion.conf ,
+written by
+.BR ob-bastion-setup (8)
+and
+.BR ob-post-upgrade (8)).
+It is not meant to be run by hand.
+.PP
+sshd never executes a
+.B ForceCommand
+itself: it runs it through the user's login shell, as
+.IB "shell " "\-c '/usr/sbin/ob-session-recorder'" .
+A shell reads startup files before it runs that command, and some belong to
+the user: Debian's
+.BR bash (1)
+sources
+.I ~/.bashrc
+for
+.B bash \-c
+whenever
+.B SSH_CLIENT
+is set, and
+.BR zsh (1)
+reads
+.I ~/.zshenv
+for every invocation. With such a login shell, whatever those files hold runs
+before the session recorder, and is not recorded.
+.PP
+.B ob-login-shell
+reads no file the user controls and starts no shell. It has one way out: it
+executes
+.BR ob-session-recorder (8),
+in the same process, with an environment it builds itself. The recorder then
+starts the user's real shell inside
+.BR script (1),
+where reading
+.I ~/.bashrc
+is harmless: it is recorded.
+.SH INVOCATIONS
+.TP
+.BI \-c " /usr/sbin/ob-session-recorder " \fR[\fIOPTIONS\fR]
+sshd running the
+.BR ForceCommand .
+The recorder is executed with those options, and
+.B SSH_ORIGINAL_COMMAND
+(the command the client asked for) is passed on. The options must be plain
+words (letters, digits and
+.BR "_ . / = : , + \-" );
+a
+.B ForceCommand
+with quoting or shell syntax is not recognised, and is handled as the next
+case.
+.TP
+.BI \-c " COMMAND"
+Anything else asking the login shell to run a command:
+.BI "su \-c " COMMAND\fR,
+.BI "sudo \-i \-u " "USER COMMAND" \fR,
+an sshd with no
+.B ForceCommand
+for this user.
+.I COMMAND
+is
+.B not
+run. It becomes
+.B SSH_ORIGINAL_COMMAND
+and the recorder runs it, recorded.
+.TP
+no argument, \fB\-l\fR, \fB\-\-login\fR, \fB\-i\fR
+An interactive login: the console,
+.BR "su \-" ,
+.BR "sudo \-i" .
+The recorder starts the real shell, recorded. An
+.B SSH_ORIGINAL_COMMAND
+inherited from the caller is not passed on.
+.PP
+Any other invocation (another option, arguments after
+.BI \-c " COMMAND"\fR)
+is refused and nothing runs. Every accepted path ends in the recorder: there
+is no way through this program that is not recorded.
+.SH ENVIRONMENT
+The recorder does not inherit the caller's environment. It gets:
+.TP
+.BR USER ", " LOGNAME ", " HOME
+from the passwd entry of the real uid, not from the variables of the same
+names;
+.TP
+.B SHELL
+the shell the recorder starts for the session (see
+.BR FILES );
+.TP
+.B PATH
+.IR /usr/local/bin:/usr/bin:/bin:/usr/games ;
+.TP
+.BR TERM ", " SSH_CLIENT ", " SSH_CONNECTION ", " SSH_TTY ", " SSH_AUTH_SOCK
+when present and well-formed;
+.TP
+.BR LANG ", " LANGUAGE ", " LC_*
+when they name a locale; a locale named by a path, which glibc would load from
+that path, is dropped;
+.TP
+.BR XDG_RUNTIME_DIR ", " XDG_SESSION_ID ", " XDG_SESSION_TYPE ", " XDG_SESSION_CLASS
+when well-formed (the runtime directory only as
+.IR /run/user/UID );
+.TP
+.B SSH_ORIGINAL_COMMAND
+as described under
+.BR INVOCATIONS .
+.PP
+Everything else is dropped:
+.BR BASH_ENV ,
+.BR ENV ,
+.BR SHELLOPTS ,
+exported functions,
+.BR LD_* ,
+.BR OB_* ,
+.BR LOCPATH ,
+.BR GCONV_PATH ,
+.BR TMPDIR ,
+.BR TZ ,
+and the rest.
+.SH FILES
+.TP
+.I /etc/open-bastion/nss_openbastion.conf
+.B default_shell
+is the shell the recorder starts for the session (last occurrence wins,
+surrounding quotes removed). The file is ignored unless it is a regular file
+owned by root and writable by nobody else. Without it, or without the key,
+.I /bin/bash
+is used. A value that is not a plain absolute path to an executable file, or
+that is
+.B ob-login-shell
+itself or the recorder (the recorder would start itself inside its own
+recording, forever), is refused with a syslog warning and
+.I /bin/bash
+is used instead.
+.TP
+.I /usr/sbin/ob-session-recorder
+The only program this one executes.
+.TP
+.I /etc/shells
+Lists
+.I /usr/sbin/ob-login-shell
+(the package and the setup add it), so that
+.BR pam_shells (8)
+and other checks of "a valid login shell" accept it.
+.SH EXIT STATUS
+On success it does not return: it becomes the recorder.
+.TP
+.B 1
+The account could not be resolved, no usable shell exists for the session, or
+the recorder could not be executed. The session is refused.
+.TP
+.B 2
+Unsupported invocation. Nothing was run.
+.SH NOTES
+A backend has no
+.B ForceCommand
+and records nothing, and
+.B ob-bastion-setup \-\-disable\-session\-recorder
+installs no recorder: on those hosts
+.B force_shell
+is not set and SSO users keep an ordinary shell.
+.PP
+Local accounts in
+.I /etc/passwd
+are not resolved by
+.BR libnss_openbastion ,
+and keep the shell the administrator gave them. On a recording host, an
+account that logs in over SSH goes through the same
+.B ForceCommand
+and has the same exposure; give it this shell with
+.BR "chsh \-s /usr/sbin/ob-login-shell " \fIUSER\fR.
+.SH SEE ALSO
+.BR ob-session-recorder (8),
+.BR ob-bastion-setup (8),
+.BR ob-post-upgrade (8),
+.BR sshd_config (5),
+.BR nsswitch.conf (5),
+.BR shells (5)
+.SH AUTHOR
+Linagora
