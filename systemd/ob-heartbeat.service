@@ -10,7 +10,6 @@ ExecStart=/usr/sbin/ob-heartbeat
 User=root
 Group=root
 
-# Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -23,12 +22,8 @@ RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
-# ob-heartbeat refreshes the access token, rewriting it atomically (mktemp +
-# rename). The token now lives under /var/lib/open-bastion (runtime state, FHS)
-# — already writable below — so /etc stays fully read-only under
-# ProtectSystem=strict (config is read-only at runtime, as it should be).
-# openbastion.conf is read from the read-only /etc; nothing in /etc is written.
+# The token lives under /var/lib/open-bastion (runtime state); /etc, including
+# openbastion.conf, stays fully read-only under ProtectSystem=strict.
 ReadWritePaths=/var/lib/open-bastion
 
-# Network access required
 PrivateNetwork=no

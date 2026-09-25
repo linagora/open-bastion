@@ -3,21 +3,18 @@ Description=Open Bastion SSH fingerprint sink (per-deposit)
 Documentation=https://github.com/linagora/open-bastion
 
 [Service]
-# One short-lived instance per deposit. systemd passes the connected socket as
-# stdin AND stdout; the daemon reads the three-line request from fd 0 and
-# writes its one-line verdict to fd 1.
+# systemd passes the connected socket as stdin AND stdout; the daemon reads
+# the three-line request from fd 0 and writes its one-line verdict to fd 1.
 ExecStart=/usr/sbin/ob-fp-daemon
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal
-# Root is the point of this unit (#249): it owns /run/open-bastion/ssh-fp at
-# 0700 so the shared `nobody` account can no longer read other sessions'
-# fingerprints or forge a drop. It writes that directory and reads /proc; no
-# capabilities beyond that are needed.
+# Owns /run/open-bastion/ssh-fp at 0700, so the shared `nobody` account cannot
+# read other sessions' fingerprints or forge a drop.
 User=root
 
-# Hardening. It talks to no network at all -- AF_UNIX for the activation
-# socket, and that is the whole list.
+# No network at all -- AF_UNIX for the activation socket, and that is the
+# whole list.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
@@ -33,10 +30,9 @@ MemoryDenyWriteExecute=true
 UMask=0077
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# The spool is the only thing it writes. ProtectSystem=strict makes everything
-# else read-only, so this line is what grants the one path it needs.
+# The one exception to ProtectSystem=strict: the spool is the only thing it writes.
 ReadWritePaths=/run/open-bastion
-# It must see the real process tree to derive the sshd anchor from the peer's
+# Must see the real process tree to derive the sshd anchor from the peer's
 # ancestry, so /proc cannot be hidden or subset'd here.
 ProcSubset=all
 ProtectProc=default

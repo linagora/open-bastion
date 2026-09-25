@@ -15,9 +15,8 @@ override_dh_auto_configure:
 
 override_dh_auto_install:
 	dh_auto_install
-	# Stage the admin-builder tree so debian/open-bastion-builder.install
-	# can pick it up. The builder is a pure-bash tool that CMake does not
-	# need to compile; we install it from source directly.
+	# Stages the admin-builder tree so debian/open-bastion-builder.install can
+	# pick it up: CMake does not build this pure-bash tool.
 	install -Dm 0755 admin-builder/ob-builder debian/tmp/usr/bin/ob-builder
 	install -dm 0755 debian/tmp/usr/share/open-bastion-builder/lib
 	install -dm 0755 debian/tmp/usr/share/open-bastion-builder/templates
@@ -27,34 +26,28 @@ override_dh_auto_install:
 	cp -a admin-builder/keyrings/.  debian/tmp/usr/share/open-bastion-builder/keyrings/
 	install -Dm 0644 admin-builder/man/ob-builder.1 debian/tmp/usr/share/man/man1/ob-builder.1
 
-# NSS and PAM modules need ldconfig but no development symlinks
+# -X/security/: NSS and PAM modules need ldconfig but no development symlinks.
 override_dh_makeshlibs:
 	dh_makeshlibs -X/security/
 
-# Install systemd units for each package
 override_dh_installsystemd:
 	dh_installsystemd -popen-bastion --name=ob-heartbeat ob-heartbeat.timer
-	# Session-recording retention timer: enabled and started at install (no
-	# ConditionPathExists gate, unlike ob-heartbeat.timer, so it actually arms).
-	# It bounds recording disk usage and no-ops on hosts without recordings.
+	# No ConditionPathExists gate, unlike ob-heartbeat.timer: enabled and
+	# started at install so it actually arms and bounds recording disk usage.
 	dh_installsystemd -popen-bastion --name=ob-session-prune ob-session-prune.timer
-	# Mode E KRL refresh and auditd rotation (#281). Not enabled/started at
-	# install: ob-bastion-setup enables the first under --max-security and the
-	# second under --enable-audit-trace; ob-post-upgrade moves a 0.6 host off
-	# the cron jobs they replace.
+	# Not enabled at install: ob-bastion-setup enables the first under
+	# --max-security and the second under --enable-audit-trace.
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-krl-refresh ob-krl-refresh.timer
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-audit-rotate ob-audit-rotate.timer
-	# Cert minting socket. The unit FILES all come from systemd/ via
-	# debian/open-bastion.install (#254); dh_installsystemd finds them already
-	# staged in the package tree and only generates the enable/cleanup
-	# maintainer-script blocks. Not enabled/started at install — ob-bastion-setup
-	# activates it (bastion/standalone only).
+	# Unit files come from systemd/ via debian/open-bastion.install;
+	# dh_installsystemd finds them already staged and only generates the
+	# enable/cleanup maintainer-script blocks. Not enabled/started at install
+	# -- ob-bastion-setup activates it (bastion/standalone only).
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-cert ob-cert.socket
-	# Session-recording sink socket (same arrangement).
+	# Same arrangement as ob-cert.socket.
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-record ob-record.socket
-	# SSH fingerprint sink socket (#249; same arrangement). Not enabled at install:
-	# only a bastion or a backend runs an AuthorizedPrincipalsCommand, so
-	# ob-bastion-setup / ob-backend-setup activate it, and the postinst re-asserts
-	# it on upgrade.
+	# Same arrangement. Not enabled at install: only a bastion or backend runs
+	# an AuthorizedPrincipalsCommand, so ob-bastion-setup / ob-backend-setup
+	# activate it, and the postinst re-asserts it on upgrade.
 	dh_installsystemd -popen-bastion --no-enable --no-start --name=ob-fp ob-fp.socket
 	dh_installsystemd -popen-bastion-desktop --name=ob-session-monitor ob-session-monitor.service

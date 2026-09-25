@@ -3,7 +3,6 @@ set -e
 
 case "$1" in
     configure)
-        # Create theme metadata if not exists
         if [ ! -f /usr/share/lightdm-webkit/themes/open-bastion/index.theme ]; then
             cat > /usr/share/lightdm-webkit/themes/open-bastion/index.theme << 'EOF'
 [theme]
@@ -14,7 +13,6 @@ description=Open Bastion Desktop SSO greeter for LightDM
 EOF
         fi
 
-        # Create cache directory for offline credentials
         mkdir -p /var/cache/open-bastion/credentials
         chmod 0700 /var/cache/open-bastion/credentials
 

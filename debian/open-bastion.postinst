@@ -8,7 +8,6 @@ BACKUP_DIR="/var/backups/open-bastion"
 PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
 
-# Backup a PAM file if not already backed up
 backup_pam_file() {
     file="$1"
     name="$2"
@@ -18,13 +17,9 @@ backup_pam_file() {
     fi
 }
 
-# Warn when a certificate-only PAM mode is installed while sshd still accepts
-# passwords (#180).
-#
-# We deliberately do NOT edit sshd_config here. Disabling password
-# authentication from a package postinst can lock out an administrator who is
-# connected over a password session, and this project's convention is that
-# intrusive hardening is opt-in. ob-bastion-setup writes the
+# We deliberately do NOT edit sshd_config here: disabling password
+# authentication from a package postinst can lock out an administrator
+# connected over a password session. ob-bastion-setup writes the
 # `PasswordAuthentication no` drop-in, and it is run deliberately.
 #
 # The generated PAM stack already denies (auth required pam_deny.so), so a
@@ -34,13 +29,10 @@ backup_pam_file() {
 warn_if_sshd_accepts_passwords() {
     _mode="$1"
 
-    # mode-c ONLY. It is the one mode whose generated stack refuses passwords
-    # (auth required pam_deny.so). mode-d is "All methods (SSH keys, Open
-    # Bastion tokens, Unix passwords)" per debian/open-bastion.templates, and
-    # generate_pam_sshd gives mode-b and mode-d the same stack, with
-    # `auth sufficient pam_unix.so` -- passwords are accepted there by design.
-    # Warning on mode-d would state three false things and advise turning off a
-    # method the administrator explicitly chose.
+    # mode-c ONLY: the one mode whose generated stack refuses passwords.
+    # mode-b and mode-d both accept `auth sufficient pam_unix.so` by design,
+    # so warning there would advise turning off a method the administrator
+    # explicitly chose.
     case "$_mode" in
         mode-c) ;;
         *) return 0 ;;
@@ -48,12 +40,10 @@ warn_if_sshd_accepts_passwords() {
 
     command -v sshd >/dev/null 2>&1 || return 0
 
-    # Effective configuration, comments and drop-ins resolved by sshd itself.
     # Deliberately without -C: a connection spec would need a user, host and
-    # address we do not have at install time. The cost is that `Match` blocks
-    # are not evaluated, so a Match that re-enables PasswordAuthentication is
-    # not seen and this check stays silent. Best-effort by design -- it reports
-    # a mismatch it can see, and never claims the absence of one.
+    # address we do not have at install time. `Match` blocks are therefore not
+    # evaluated, so a Match that re-enables PasswordAuthentication is not seen
+    # and this check stays silent -- best-effort, never claims an absence.
     _eff=$(sshd -T 2>/dev/null) || return 0
     [ -n "$_eff" ] || return 0
 
@@ -78,7 +68,6 @@ warn_if_sshd_accepts_passwords() {
     return 0
 }
 
-# Generate PAM configuration for sshd
 generate_pam_sshd() {
     mode="$1"
     server_group="$2"
@@ -126,7 +115,6 @@ session    required     pam_unix.so
 EOF
 }
 
-# Generate PAM configuration for sudo
 generate_pam_sudo() {
     mode="$1"
     server_group="$2"
@@ -180,7 +168,6 @@ session    required     pam_unix.so
 EOF
 }
 
-# Generate openbastion.conf
 generate_openbastion_conf() {
     portal_url="$1"
     client_id="$2"
@@ -223,7 +210,6 @@ EOF
 
 case "$1" in
     configure)
-        # Create required directories
         mkdir -p /etc/open-bastion
         chmod 755 /etc/open-bastion
         mkdir -p /var/cache/open-bastion
@@ -232,35 +218,31 @@ case "$1" in
         chmod 711 /var/lib/open-bastion
         # NSS cross-process passwd cache (libnss_openbastion). 0711 = traversable
         # but NOT listable: entries stay 0644 so an unprivileged getpwnam()/
-        # getpwuid() can read its own record from inside its own process, but no
-        # local account can readdir() the directory and enumerate the SSO user
-        # directory wholesale. That matters most for byname/, whose filenames are
-        # the login names themselves. Refs #189. The module re-asserts these
-        # modes at runtime; setting them here closes the gap on upgrade from a
-        # version that shipped them 0755.
+        # getpwuid() can read its own record, but no local account can readdir()
+        # the directory and enumerate the SSO user directory wholesale -- this
+        # matters most for byname/, whose filenames are the login names
+        # themselves. The module re-asserts these modes at runtime; setting them
+        # here closes the gap on upgrade from a version that shipped them 0755.
         mkdir -p /var/cache/nss_llng/byname
         chmod 711 /var/cache/nss_llng /var/cache/nss_llng/byname
-        # Create ob-sessions group for session recording privilege separation
         groupadd --system ob-sessions 2>/dev/null || true
-        # Create open-bastion-sudo group for defense-in-depth sudo authorization (Mode E)
         groupadd --system open-bastion-sudo 2>/dev/null || true
         mkdir -p /var/lib/open-bastion/sessions
         # Tamper-evident layout: root:ob-sessions 0750. Recordings are written by
         # the root sink (ob-record-sink) and are unreadable/undeletable by the
         # recorded user (NOT in ob-sessions); auditors in ob-sessions can read.
-        # Replaces the old 3771 setgid+sticky+o+x layout (user-traversable, with
-        # user-owned per-user dirs). ob-bastion-setup re-asserts this and migrates
-        # any legacy user-owned subdirs.
+        # ob-bastion-setup re-asserts this and migrates any legacy user-owned
+        # subdirs.
         chown root:ob-sessions /var/lib/open-bastion/sessions
         chmod 0750 /var/lib/open-bastion/sessions
-        # Remove the obsolete setgid recorder wrapper if a prior version left it.
+        # Removes the setgid recorder wrapper if a prior version left it: the
+        # current layout above no longer uses it.
         rm -f /usr/sbin/ob-session-recorder-wrapper
 
         db_get open-bastion/pam-mode
         MODE="$RET"
 
         if [ "$MODE" != "none" ] && [ -n "$MODE" ]; then
-            # Get debconf values
             db_get open-bastion/portal-url
             PORTAL_URL="$RET"
             db_get open-bastion/client-id
@@ -276,47 +258,39 @@ case "$1" in
             db_get open-bastion/create-user
             CREATE_USER="$RET"
 
-            # Use main server group for sudo if not specified
             if [ -z "$SUDO_SERVER_GROUP" ]; then
                 SUDO_SERVER_GROUP="$SERVER_GROUP"
             fi
 
-            # Generate openbastion.conf if portal URL is provided
             if [ -n "$PORTAL_URL" ]; then
                 generate_openbastion_conf "$PORTAL_URL" "$CLIENT_ID" "$CLIENT_SECRET" "$SERVER_GROUP" "$CREATE_USER" > "$CONF_FILE"
                 chmod 600 "$CONF_FILE"
                 chown root:root "$CONF_FILE"
             fi
 
-            # Backup and configure sshd
             backup_pam_file "$PAM_SSHD" "sshd"
             generate_pam_sshd "$MODE" "$SERVER_GROUP" > "$PAM_SSHD"
             warn_if_sshd_accepts_passwords "$MODE"
 
-            # Configure sudo if requested
             if [ "$CONFIGURE_SUDO" = "true" ]; then
                 backup_pam_file "$PAM_SUDO" "sudo"
                 generate_pam_sudo "$MODE" "$SUDO_SERVER_GROUP" > "$PAM_SUDO"
             fi
 
-            # Create cache directory
             mkdir -p /var/cache/open-bastion
             chmod 700 /var/cache/open-bastion
 
-            # Create state directory. Mode 711 (NOT 700): the session recorder
-            # runs as the connecting user (the wrapper drops its ob-sessions gid
-            # before exec) and must traverse this directory to reach its own
-            # subdir under sessions/. Secrets here stay protected by their own
-            # modes (token is 600 root), so o+x exposes only traversal, not
-            # listing. 700 here silently re-breaks session recording.
+            # Mode 711 (NOT 700): the session recorder runs as the connecting
+            # user and must traverse this directory to reach its own subdir
+            # under sessions/. Secrets here stay protected by their own modes
+            # (token is 600 root), so o+x exposes only traversal, not listing.
             mkdir -p /var/lib/open-bastion
             chmod 711 /var/lib/open-bastion
 
-            # Migrate the server token from its legacy /etc location (config) to
-            # /var/lib (runtime state — FHS). The token is rewritten every few
-            # minutes by ob-heartbeat; keeping it in /etc forced the heartbeat
-            # service's ProtectSystem=strict sandbox to leave /etc writable.
-            # Relocating it lets /etc go back to read-only. Idempotent.
+            # Migrates the server token from its legacy /etc location to
+            # /var/lib (runtime state): it is rewritten every few minutes by
+            # ob-heartbeat, whose ProtectSystem=strict sandbox needs /etc to
+            # stay read-only. Idempotent.
             if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then
                 mv /etc/open-bastion/token /var/lib/open-bastion/token
                 chown root:root /var/lib/open-bastion/token
@@ -333,12 +307,9 @@ case "$1" in
 
         fi
 
-        # Clear the OIDC client secret from the debconf database, ALWAYS.
-        #
-        # This used to sit inside the `if [ "$MODE" != "none" ]` block above, so
-        # an admin who answered pam-mode=none left the secret sitting in
-        # /var/cache/debconf/passwords.dat forever — exactly the case where it is
-        # never used for anything.
+        # ALWAYS clear the OIDC client secret from the debconf database, even
+        # when pam-mode is "none" -- otherwise it would sit unused forever in
+        # /var/cache/debconf/passwords.dat.
         #
         # db_reset, not `db_set ""`: db_set leaves the question flagged as seen
         # with an empty answer, so a later reconfigure silently reuses the blank
@@ -358,32 +329,29 @@ esac
 
 #DEBHELPER#
 
-# ── Upgrade safety: re-assert bastion socket activation ──────────────────────
 # ob-cert.socket (hop-certificate minting) and ob-record.socket (the session-
 # recording sink) ship --no-enable/--no-start: the package can't know a host's
 # role, so ob-bastion-setup is what enables them. A plain `apt upgrade` would
-# therefore leave them inactive on an already configured bastion — and since
-# recording is fail-closed, EVERY login is then refused ("recording sink
-# unreachable; access refused"). Re-enable them here, idempotently, but ONLY
-# when this host is already a bastion: the sshd drop-in that ob-bastion-setup
-# writes is the role marker. This never enables them on a backend or an
-# unconfigured host. Runs after the debhelper-generated section so the unit
-# files are registered and daemon-reload has happened. Failures are non-fatal
-# (ob-bastion-setup only warns too); the admin can always re-run it.
+# therefore leave them inactive on an already configured bastion -- and since
+# recording is fail-closed, every login is then refused. Re-enable them here,
+# idempotently, but ONLY when this host is already a bastion: the sshd drop-in
+# that ob-bastion-setup writes is the role marker. Runs after the
+# debhelper-generated section so the unit files are registered and
+# daemon-reload has happened. Failures are non-fatal; the admin can re-run
+# ob-bastion-setup.
 #
-# NOTE: never write the literal debhelper substitution token in a comment here.
-# debhelper replaces that token wherever it appears, including inside comments,
-# which splits the comment across the expansion and leaves the trailing words as
-# a stray command (the "so: not found" / exit 127 regression in 0.6.1).
+# NOTE: never write the literal debhelper substitution token in a comment
+# here -- debhelper replaces that token wherever it appears, including inside
+# comments, which splits the comment and leaves the trailing words as a stray
+# command.
 if [ "$1" = configure ] \
     && [ -d /run/systemd/system ] \
     && command -v systemctl >/dev/null 2>&1; then
     for _ob_dropin in /etc/ssh/sshd_config.d/*-open-bastion-bastion.conf; do
         [ -f "$_ob_dropin" ] || continue
-        # Bastion role → hop-certificate minting socket (ob-ssh / ob-scp).
         systemctl enable --now ob-cert.socket >/dev/null 2>&1 || true
-        # Recording sink, only when recording is enabled (the ForceCommand is
-        # absent under ob-bastion-setup --disable-session-recorder).
+        # Only when recording is enabled (the ForceCommand is absent under
+        # ob-bastion-setup --disable-session-recorder).
         if grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+.*ob-session-recorder' "$_ob_dropin"; then
             systemctl enable --now ob-record.socket >/dev/null 2>&1 || true
         fi
@@ -391,13 +359,11 @@ if [ "$1" = configure ] \
     done
 fi
 
-# ── Upgrade safety: the SSH fingerprint sink (#249) ──────────────────────────
 # ob-fp.socket ships --no-enable/--no-start like the other sockets, but unlike
 # ob-cert.socket it is needed on BOTH roles: a backend runs an
 # AuthorizedPrincipalsCommand too. Enable it wherever either sshd drop-in
 # exists. Without it the principals helper has nowhere to deposit and the
-# fingerprint binding disappears with no error at login time -- the module logs
-# the missing drop, but the login still succeeds, so nobody notices.
+# fingerprint binding disappears with no error at login time.
 if [ "$1" = configure ] \
     && [ -d /run/systemd/system ] \
     && command -v systemctl >/dev/null 2>&1; then
@@ -409,14 +375,7 @@ if [ "$1" = configure ] \
     done
 fi
 
-# ── The 0.6 cron jobs, now systemd timers (#281) ─────────────────────────────
-# Up to 0.6 ob-bastion-setup wrote /etc/cron.d/open-bastion-krl (Mode E KRL
-# refresh, running a generated /usr/local/bin/open-bastion-refresh-krl) and
-# /etc/cron.daily/open-bastion-audit-rotate (--enable-audit-trace). Both keep
-# working after this upgrade, so nothing stops -- but they are not moved here:
-# /usr/local is not this package's, a job may have been edited, and the
-# replacement must keep the interval the job had. ob-post-upgrade does it, and
-# removes each job only once its timer runs. Say so, and only when it applies.
+# Legacy cron jobs keep working until ob-post-upgrade replaces them with timers.
 if [ "$1" = configure ] \
     && { [ -e /etc/cron.d/open-bastion-krl ] \
          || [ -e /etc/cron.daily/open-bastion-audit-rotate ] \
@@ -426,15 +385,14 @@ if [ "$1" = configure ] \
     echo "  with ob-krl-refresh.timer / ob-audit-rotate.timer, same schedule." >&2
 fi
 
-# ── Upgrade safety: SSH key policy needs the v1 principals helper ────────────
-# pam_openbastion enforces ssh_key_policy_* FAIL-CLOSED (issue #181): with the
-# policy enabled, a key whose type/size cannot be determined is DENIED. The key
-# type and the key blob reach the module through the v1 key-metadata drop
-# written by /usr/local/sbin/ob-ssh-principals — and that helper is (re)written
-# only by ob-bastion-setup / ob-backend-setup, never by this package. A plain
-# upgrade therefore leaves a NEW module next to an OLD helper. Warn loudly here
-# instead of letting the admin find out at the next login. Hosts that never
-# enabled the policy (the default) are not concerned and print nothing.
+# pam_openbastion enforces ssh_key_policy_* fail-closed: with the policy
+# enabled, a key whose type/size cannot be determined is DENIED. The key type
+# reaches the module through the v1 key-metadata drop written by
+# /usr/local/sbin/ob-ssh-principals -- and that helper is (re)written only by
+# ob-bastion-setup / ob-backend-setup, never by this package. A plain upgrade
+# therefore leaves a NEW module next to an OLD helper. Warn loudly here instead
+# of letting the admin find out at the next login. Hosts that never enabled the
+# policy (the default) are not concerned and print nothing.
 _ob_conf=/etc/open-bastion/openbastion.conf
 _ob_helper=/usr/local/sbin/ob-ssh-principals
 if [ "$1" = configure ] && [ -f "$_ob_conf" ] && [ -f "$_ob_helper" ] \

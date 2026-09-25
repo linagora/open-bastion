@@ -4,18 +4,15 @@ project(open-bastion VERSION 0.6.3 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Options
 option(BUILD_TESTING "Build tests" ON)
 option(INSTALL_SYSTEMD "Install systemd unit files" ON)
 option(INSTALL_DESKTOP "Install Desktop SSO components (LightDM greeter)" OFF)
 
-# Find required packages
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(JSON_C REQUIRED json-c)
 pkg_check_modules(OPENSSL REQUIRED openssl)
 
-# Find PAM
 find_path(PAM_INCLUDE_DIR security/pam_modules.h
     PATHS /usr/include /usr/local/include
 )
@@ -27,7 +24,6 @@ if(NOT PAM_INCLUDE_DIR OR NOT PAM_LIBRARY)
     message(FATAL_ERROR "PAM library not found")
 endif()
 
-# Source files
 set(PAM_MODULE_SOURCES
     src/pam_openbastion.c
     src/ob_client.c
@@ -48,22 +44,18 @@ set(PAM_MODULE_SOURCES
 )
 
 # Desktop SSO components (offline credential cache, OAuth2 introspection)
-# When INSTALL_DESKTOP=OFF, none of this code is compiled into pam_openbastion.so.
-# This ensures the core SSH module has zero desktop code paths.
 if(INSTALL_DESKTOP)
     list(APPEND PAM_MODULE_SOURCES src/offline_cache.c)
     add_definitions(-DENABLE_DESKTOP_SSO)
 endif()
 
 if(INSTALL_DESKTOP)
-    # Optional libsodium for Argon2id (preferred) - fallback to OpenSSL 3.0+
     option(USE_LIBSODIUM "Use libsodium for Argon2id (recommended)" OFF)
 
     if(USE_LIBSODIUM)
         pkg_check_modules(SODIUM REQUIRED libsodium)
         add_definitions(-DHAVE_LIBSODIUM)
     else()
-        # Check OpenSSL version >= 3.0 for Argon2id support
         include(CheckCSourceCompiles)
         set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIRS})
         check_c_source_compiles("
@@ -84,10 +76,9 @@ if(INSTALL_DESKTOP)
     endif()
 endif()
 
-# Build the PAM module as a shared library
 add_library(pam_openbastion SHARED ${PAM_MODULE_SOURCES})
 
-# Set output name without "lib" prefix
+# PAM modules are loaded by basename; keep the conventional lib-less name.
 set_target_properties(pam_openbastion PROPERTIES
     PREFIX ""
     OUTPUT_NAME "pam_openbastion"
@@ -95,7 +86,6 @@ set_target_properties(pam_openbastion PROPERTIES
     SOVERSION 1
 )
 
-# Include directories
 target_include_directories(pam_openbastion PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${PAM_INCLUDE_DIR}
@@ -105,7 +95,6 @@ target_include_directories(pam_openbastion PRIVATE
     $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
 )
 
-# Link libraries
 target_link_libraries(pam_openbastion
     ${PAM_LIBRARY}
     ${CURL_LIBRARIES}
@@ -114,40 +103,33 @@ target_link_libraries(pam_openbastion
     $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
 )
 
-# Compiler flags
 target_compile_options(pam_openbastion PRIVATE
     -Wall -Wextra -Werror
     -fPIC
     -D_GNU_SOURCE
-    # Security hardening flags
-    -fstack-protector-strong      # Stack buffer overflow protection
-    -Wformat -Wformat-security    # Format string vulnerability detection
-    -fvisibility=hidden           # Hide internal symbols, reduce attack surface
-    # Link-Time Optimization for Release builds
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    -fvisibility=hidden
     $<$<CONFIG:Release>:-flto>
 )
 
-# Note: _FORTIFY_SOURCE is set by distribution build systems (Debian hardening)
-# Do not set it here to avoid redefinition warnings with -Werror
+# _FORTIFY_SOURCE is set by distribution build systems (Debian hardening);
+# setting it here too triggers a redefinition warning under -Werror.
 
-# Linker security flags (Full RELRO = relro + now)
+# -z,relro and -z,now together give Full RELRO; either alone is partial.
 target_link_options(pam_openbastion PRIVATE
-    -Wl,-z,relro                  # RELRO (with -z,now = Full RELRO)
-    -Wl,-z,now                    # Resolve symbols at load time (completes Full RELRO)
-    -Wl,-z,noexecstack            # Non-executable stack
-    # Link-Time Optimization for Release builds
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
     $<$<CONFIG:Release>:-flto>
 )
 
-# Installation
 include(GNUInstallDirs)
 
-# Install PAM module
 install(TARGETS pam_openbastion
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/security
 )
 
-# Install configuration files
 install(FILES ${CMAKE_SOURCE_DIR}/config/openbastion.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
     RENAME openbastion.conf.example
@@ -156,16 +138,11 @@ install(FILES ${CMAKE_SOURCE_DIR}/config/service-accounts.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Install documentation
 install(FILES ${CMAKE_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
-# ── HTML documentation (Sphinx) ──────────────────────────────────────────────
-# doc/ is a Sphinx project: the English technical documentation plus the French
-# EBIOS study under doc/security/. Off by default so the ordinary build needs
-# no Python; debian/rules turns it on to fill the open-bastion-doc package.
-# CI builds it with -W separately -- a warning must fail review, not a release.
+# Off by default so the ordinary build needs no Python; debian/rules enables it.
 option(BUILD_DOC "Build the HTML documentation with Sphinx" OFF)
 
 if(BUILD_DOC)
@@ -184,8 +161,7 @@ if(BUILD_DOC)
         VERBATIM
     )
 
-    # -d keeps the doctree cache out of the tree being installed; .buildinfo
-    # is a build-time artefact of no use to a reader.
+    # .buildinfo and _sources are Sphinx build artefacts, not doc content.
     install(DIRECTORY ${DOC_HTML_DIR}/
         DESTINATION ${CMAKE_INSTALL_DOCDIR}/html
         PATTERN ".buildinfo" EXCLUDE
@@ -193,70 +169,51 @@ if(BUILD_DOC)
     )
 endif()
 
-# Install enrollment script
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-enroll
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install heartbeat script
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-heartbeat
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install session recorder script
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-recorder
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install session-recording retention script (run by ob-session-prune.timer)
+# Run by ob-session-prune.timer.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-prune
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install the Mode E key revocation list refresh (run by ob-krl-refresh.timer)
+# Run by ob-krl-refresh.timer.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-krl-refresh
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# NOTE: the old setgid ob-session-recorder-wrapper has been removed. Recordings
-# are now streamed to the root ob-record-sink (socket-activated), which owns the
-# files; the recorder no longer needs an elevated gid or a per-user dir, so the
-# wrapper (and its setgid bit) is gone. See
-# doc/design/tamper-evident-session-recording.rst.
-
-# Install session recorder config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/session-recorder.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Shared cert-vouching library, sourced by ob-ssh / ob-scp / ob-sftp. Installed
-# to a fixed (non-multiarch) /usr/lib/open-bastion path that the scripts look up.
+# Fixed (non-multiarch) path: ob-ssh / ob-scp / ob-sftp source it from there.
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-cert-lib.sh
     DESTINATION lib/open-bastion
 )
 
-# Shared request-signing library, sourced by every shell caller of a /pam/
-# endpoint (ob-heartbeat, ob-bastion-id, ob-enroll, ob-session-monitor). Same
-# fixed path as ob-cert-lib.sh, which the scripts look up.
+# Same fixed path as ob-cert-lib.sh; sourced by every shell caller of a
+# /pam/ endpoint (ob-heartbeat, ob-bastion-id, ob-enroll, ob-session-monitor).
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-sign-lib.sh
     DESTINATION lib/open-bastion
 )
 
-# The timers that replaced the KRL and audit cron jobs, and the migration from
-# those jobs (#281). Sourced by the setup script and by ob-post-upgrade, which
-# must migrate a host the same way. Same fixed path as the two libraries above.
+# Same fixed path; sourced by the setup script and ob-post-upgrade.
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ob-timers-lib.sh
     DESTINATION lib/open-bastion
 )
 
-# The generated sshd principals helper, and the tmpfiles rule that recreates its
-# spool at boot. One copy, installed as data: ob-bastion-setup, ob-backend-setup
-# and ob-post-upgrade all read these rather than each carrying a heredoc (#254).
-#
 # Plain lib/, not CMAKE_INSTALL_LIBDIR: that expands to the multiarch
-# lib/x86_64-linux-gnu on Debian, and both the .install file and the scripts'
-# OB_DATA_DIR default name /usr/lib/open-bastion. Same as the two libraries
-# above.
+# lib/x86_64-linux-gnu on Debian, but the .install file and the scripts'
+# OB_DATA_DIR default both name /usr/lib/open-bastion.
 install(FILES
     ${CMAKE_SOURCE_DIR}/share/ob-ssh-principals.bastion
     ${CMAKE_SOURCE_DIR}/share/ob-ssh-principals.backend
@@ -276,26 +233,23 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-sftp
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Bastion identity helper (used when configuring backend whitelists)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-id
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# sshd AuthorizedKeysCommand helper for service accounts: serves the account's
-# public key from /etc/open-bastion/service-accounts.d/<name>.pub without the
-# Unix account having to exist yet. Not packaged until #263.
+# sshd AuthorizedKeysCommand helper: serves a service account's public key
+# without the Unix account having to exist yet.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-service-account-keys
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# ...and the directory it reads: 0755 root:root, traversable and readable by the
-# AuthorizedKeysCommandUser (nobody). Without it the helper is inert.
+# Must be readable/traversable by AuthorizedKeysCommandUser (nobody), or the
+# helper above is inert.
 #
 # Absolute, not ${CMAKE_INSTALL_SYSCONFDIR}: under CMAKE_INSTALL_PREFIX=/usr
-# GNUInstallDirs leaves SYSCONFDIR relative, so that form lands in /usr/etc/.
-# The cost of an absolute DESTINATION is that `cmake --install --prefix <dir>`
-# ignores it and would touch the real /etc; DESTDIR staging (what the .deb and
-# .rpm use) is unaffected.
+# GNUInstallDirs leaves SYSCONFDIR relative, landing this in /usr/etc/ instead.
+# `cmake --install --prefix <dir>` therefore ignores this DESTINATION and would
+# touch the real /etc; DESTDIR staging (.deb/.rpm builds) is unaffected.
 install(DIRECTORY
     DESTINATION /etc/open-bastion/service-accounts.d
     DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -309,16 +263,13 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-post-upgrade
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install SSH proxy config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
 
-# Bastion certificate minting: socket-activated daemon + unprivileged client.
-# Replaces the old `sudo ob-bastion-cert-helper` bridge. ob-cert-daemon (root,
-# socket-activated) holds the server token and derives the certificate's user
-# from the connection's SO_PEERCRED; ob-cert-request is the unprivileged client
-# that ob-ssh / ob-scp / ob-sftp invoke — no sudo, no setuid.
+# ob-cert-daemon (root, socket-activated) holds the server token; ob-cert-request
+# is the unprivileged client ob-ssh / ob-scp / ob-sftp invoke -- no sudo, no
+# setuid. See doc/design/bastion-cert-vouching.rst.
 add_executable(ob-cert-daemon
     src/ob-cert-daemon.c
     src/ob_cert_proto.c
@@ -371,10 +322,8 @@ install(TARGETS ob-cert-request
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# SSH fingerprint spool: socket-activated root sink + unprivileged client (#249).
-# Moves the trust root of the fingerprint binding off the shared `nobody`
-# account. ob-fp-daemon (root) owns a 0700 spool and derives the sshd anchor
-# from the depositing process's own /proc ancestry; ob-fp-submit is what the
+# ob-fp-daemon (root) owns a 0700 spool and derives the sshd anchor from the
+# depositing process's own /proc ancestry; ob-fp-submit is what the
 # AuthorizedPrincipalsCommand helper pipes to -- no sudo, no setuid.
 add_executable(ob-fp-daemon src/ob-fp-daemon.c src/sshd_anchor.c)
 target_include_directories(ob-fp-daemon PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -413,10 +362,9 @@ install(TARGETS ob-fp-submit
     RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Request signing for the shell callers of /pam/* (ob-heartbeat, ob-bastion-id).
-# Root-only: it reads request_signing_secret out of openbastion.conf, which is
-# why the secret never has to appear in an `openssl dgst -hmac` command line
-# where /proc/<pid>/cmdline would publish it. See src/ob-sign-request.c.
+# Root-only: reads request_signing_secret from openbastion.conf so callers
+# never pass it on an `openssl dgst -hmac` command line, where
+# /proc/<pid>/cmdline would expose it.
 add_executable(ob-sign-request
     src/ob-sign-request.c
     src/ob_sign.c
@@ -446,13 +394,8 @@ install(TARGETS ob-sign-request
     RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# client_secret_jwt assertions for ob-enroll (#256). Same reason as
-# ob-sign-request above, for the other secret: `openssl dgst -hmac "$secret"`
-# publishes the OIDC client secret through /proc/<pid>/cmdline, once per poll of
-# the device-grant loop. The secret arrives on stdin instead -- ob-enroll may
-# hold it from the environment, from --client-secret or from a config file that
-# does not exist yet, so it is ob-enroll that decides, not this helper. The
-# signing is the same generate_client_jwt() the PAM module uses.
+# Same /proc/<pid>/cmdline concern as ob-sign-request, for the OIDC client
+# secret: it arrives on stdin, never as a command-line argument.
 add_executable(ob-client-jwt
     src/ob-client-jwt.c
     src/jwt_utils.c
@@ -483,11 +426,8 @@ install(TARGETS ob-client-jwt
     RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Tamper-evident session recording: socket-activated root sink + unprivileged
-# connector. ob-record-sink (root, socket-activated) writes recordings root-owned
-# under /var/lib/open-bastion/sessions/<user>/ (the recorded user cannot touch
-# them); ob-record-connect is the unprivileged connector the recorder execs to
-# stream into the socket. See doc/design/tamper-evident-session-recording.rst.
+# ob-record-sink (root, socket-activated) writes recordings root-owned so the
+# recorded user cannot touch them. See doc/design/tamper-evident-session-recording.rst.
 add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
 target_include_directories(ob-record-sink PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -531,14 +471,11 @@ install(TARGETS ob-record-connect
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Install SSH certificate tool (user-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Install hardening templates (session containment - PR1)
-# These are deployed by ob-bastion-setup into /etc/{systemd/logind.conf.d,security/limits.d,at.allow,cron.allow}
-# See doc/hardening.rst for rationale.
+# Deployed by ob-bastion-setup; see doc/hardening.rst.
 install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/logind.conf.d/open-bastion.conf
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening/logind.conf.d
 )
@@ -552,18 +489,16 @@ install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/cron.allow
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening
 )
 
-# Install setup scripts (admin-facing)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-setup
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# ob-standalone-setup and ob-backend-setup are symlinks to ob-bastion-setup,
-# which serves all three node roles: the name it is invoked under chooses the
-# default role (--node-role overrides it), so each role has a self-documenting
-# command and there is one implementation to maintain (#288).
+# ob-standalone-setup and ob-backend-setup are symlinks to ob-bastion-setup:
+# the name it is invoked under chooses the default node role.
+#
 # The links are made in the build tree and installed like any other file, so
-# they follow the install-time prefix: cpack installs under /usr, not the
-# configure-time /usr/local a CMAKE_INSTALL_FULL_* path would bake in.
+# they follow the install-time prefix rather than baking in a configure-time
+# CMAKE_INSTALL_FULL_* path.
 foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
     execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
         ob-bastion-setup "${CMAKE_BINARY_DIR}/${_ob_setup_alias}")
@@ -572,29 +507,21 @@ foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
     )
 endforeach()
 
-# Install auditd templates (consumed by `ob-bastion-setup --enable-audit-trace`).
-# Read-only templates under /usr/share/open-bastion/audit/. The setup function
-# copies them into /etc/audit/rules.d/ at deployment time, and enables
-# ob-audit-rotate.timer for the daily rotation (a /etc/cron.daily script until
-# 0.7.0, #281). These are NOT dpkg conffiles / rpm config(noreplace) — see
-# doc/audit.rst.
+# Read-only templates, not dpkg conffiles / rpm config(noreplace); consumed by
+# `ob-bastion-setup --enable-audit-trace`. See doc/audit.rst.
 install(FILES ${CMAKE_SOURCE_DIR}/config/audit/rules.d/open-bastion.rules
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/audit/rules.d
 )
 
-# logrotate template for the JSON audit log (audit_log_file). Same arrangement
-# as the auditd templates above: a read-only template the admin copies into
-# /etc/logrotate.d/, NOT a conffile, because the log path is configurable.
+# NOT a conffile: the log path (audit_log_file) is configurable.
 install(FILES ${CMAKE_SOURCE_DIR}/config/logrotate/open-bastion
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/logrotate
 )
 
-# Install cache admin tool (useful for both SSH and Desktop offline modes)
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install man pages (section 8 - admin commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-enroll.8
     ${CMAKE_SOURCE_DIR}/man/ob-heartbeat.8
@@ -622,7 +549,6 @@ foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
     )
 endforeach()
 
-# Install man pages (section 1 - user commands)
 install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
     ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
@@ -634,7 +560,7 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )
 
-# Install systemd units (disabled for Debian packaging which uses dh_installsystemd)
+# Disabled for Debian packaging, which uses dh_installsystemd instead.
 if(INSTALL_SYSTEMD)
     install(FILES
         ${CMAKE_SOURCE_DIR}/systemd/ob-heartbeat.timer
@@ -653,7 +579,6 @@ if(INSTALL_SYSTEMD)
         ${CMAKE_SOURCE_DIR}/systemd/ob-audit-rotate.service
         DESTINATION lib/systemd/system
     )
-    # Desktop-specific systemd service
     if(INSTALL_DESKTOP)
         install(FILES
             ${CMAKE_SOURCE_DIR}/systemd/ob-session-monitor.service
@@ -662,69 +587,52 @@ if(INSTALL_SYSTEMD)
     endif()
 endif()
 
-# Desktop SSO components (LightDM greeter, session monitor)
 if(INSTALL_DESKTOP)
-    # Install session monitor script
     install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-session-monitor
         DESTINATION ${CMAKE_INSTALL_SBINDIR}
     )
 
-    # Install desktop setup script
     install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
         DESTINATION ${CMAKE_INSTALL_SBINDIR}
     )
 
-    # Install LightDM greeter theme to standard lightdm-webkit theme location
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/lightdm/greeter/
         DESTINATION ${CMAKE_INSTALL_DATADIR}/lightdm-webkit/themes/open-bastion
     )
 
-    # Install LightDM configuration example
     install(FILES ${CMAKE_SOURCE_DIR}/lightdm/config/lightdm-openbastion.conf
         DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
         RENAME lightdm-openbastion.conf.example
     )
 endif()
 
-# Build NSS module
 add_subdirectory(nss)
 
-# Tests
 if(BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-# Package configuration
 set(CPACK_PACKAGE_NAME "open-bastion")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open Bastion - Secure SSH bastion with PAM/NSS modules")
 set(CPACK_PACKAGE_VENDOR "Linagora")
 set(CPACK_PACKAGE_CONTACT "Open Bastion team <open-bastion@linagora.com>")
 
-# Debian package
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libpam0g, libcurl4, libjson-c5 | libjson-c5t64, libssl3 | libssl3t64, libkeyutils1, curl, jq")
 set(CPACK_DEBIAN_PACKAGE_SECTION "admin")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
-# RPM package
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
 include(CPack)
 
-# ── open-bastion-builder package ────────────────────────────────────────────
-# The builder is an admin workstation tool: pure bash, no dependency on the
-# open-bastion runtime package. It is packaged separately so it can be
-# installed on machines that never run the PAM/NSS module.
-#
-# We deliberately avoid CPACK_DEB_COMPONENT_INSTALL here because enabling it
-# would rename every existing install() destination to *-unspecified, breaking
-# the main open-bastion package. Instead we stage the builder files into the
-# build tree and invoke dpkg-deb (Debian) / rpmbuild (RPM) directly via a
-# custom target.
-# ────────────────────────────────────────────────────────────────────────────
+# open-bastion-builder is packaged separately (no dependency on the runtime
+# package) via dpkg-deb/rpmbuild directly, not CPACK_DEB_COMPONENT_INSTALL:
+# that would rename every existing install() destination to *-unspecified,
+# breaking the main open-bastion package.
 option(BUILD_BUILDER "Build the open-bastion-builder package" ON)
 
 # Auto-disable when the admin-builder/ tree is absent — typical for Docker
@@ -739,38 +647,24 @@ if(BUILD_BUILDER)
     set(BUILDER_PKG_VERSION ${PROJECT_VERSION})
     set(BUILDER_STAGE_DIR "${CMAKE_BINARY_DIR}/builder-pkg")
 
-    # ── Debian package ───────────────────────────────────────────────────
-    # Stage directory mirrors the final filesystem layout:
-    #   usr/bin/ob-builder
-    #   usr/share/open-bastion-builder/lib/*.sh
-    #   usr/share/open-bastion-builder/templates/...
-    #   DEBIAN/control
-    #   DEBIAN/postinst
-
     set(BUILDER_DEB_DIR "${BUILDER_STAGE_DIR}/deb")
     set(BUILDER_DEB_ROOT "${BUILDER_DEB_DIR}/root")
 
-    # CMake's configure_file does create missing parent directories on
-    # recent versions, but be explicit: ensures correctness on older
-    # CMake and silences static-analysis tooling that flags the implicit
-    # behaviour.
     file(MAKE_DIRECTORY "${BUILDER_DEB_ROOT}/DEBIAN")
 
-    # Generate DEBIAN/control with the real version substituted
     configure_file(
         "${CMAKE_SOURCE_DIR}/admin-builder/debian/control"
         "${BUILDER_DEB_ROOT}/DEBIAN/control"
         @ONLY
     )
 
-    # Copy postinst verbatim; chmod 0755 is applied by the custom command below
+    # chmod 0755 is applied by the custom command below.
     configure_file(
         "${CMAKE_SOURCE_DIR}/admin-builder/debian/postinst"
         "${BUILDER_DEB_ROOT}/DEBIAN/postinst"
         COPYONLY
     )
 
-    # Produce the .deb via a custom target (requires dpkg-deb at build time)
     set(BUILDER_DEB_OUTPUT
         "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}_${BUILDER_PKG_VERSION}_all.deb")
 
@@ -779,7 +673,6 @@ if(BUILD_BUILDER)
         message(STATUS "dpkg-deb not found — skipping open-bastion-builder DEB target")
     else()
     add_custom_target(builder-deb ALL
-        # Install the main script
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/bin"
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -788,39 +681,34 @@ if(BUILD_BUILDER)
         COMMAND chmod 0755
             "${BUILDER_DEB_ROOT}/usr/bin/ob-builder"
 
-        # Install lib scripts
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/lib"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/admin-builder/lib"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/lib"
 
-        # Install templates
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/templates"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/admin-builder/templates"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/templates"
 
-        # Install bundled GPG keyrings (default = Linagora)
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/admin-builder/keyrings"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
 
-        # Install man page
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/share/man/man1"
         COMMAND ${CMAKE_COMMAND} -E copy
             "${CMAKE_SOURCE_DIR}/admin-builder/man/ob-builder.1"
             "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1"
 
-        # Fix permissions: DEBIAN scripts must be 0755
+        # DEBIAN maintainer scripts must be 0755.
         COMMAND chmod 0755
             "${BUILDER_DEB_ROOT}/DEBIAN/postinst"
 
-        # Build the .deb
         COMMAND dpkg-deb --build --root-owner-group
             "${BUILDER_DEB_ROOT}"
             "${BUILDER_DEB_OUTPUT}"
@@ -830,21 +718,18 @@ if(BUILD_BUILDER)
     )
     endif()
 
-    # ── RPM package ──────────────────────────────────────────────────────
-    # Only attempted when rpmbuild is available; silently skipped otherwise.
     find_program(RPMBUILD_EXECUTABLE rpmbuild)
     if(RPMBUILD_EXECUTABLE)
         set(BUILDER_RPM_OUTPUT
             "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1.noarch.rpm")
 
-        # Generate the spec from the .in template
         configure_file(
             "${CMAKE_SOURCE_DIR}/admin-builder/rpm/open-bastion-builder.spec.in"
             "${CMAKE_BINARY_DIR}/open-bastion-builder.spec"
             @ONLY
         )
 
-        # rpmbuild needs a proper SOURCES tree; we build a tarball of the admin-builder dir
+        # rpmbuild requires a SOURCES tarball, not a plain directory tree.
         set(BUILDER_RPM_TARBALL "${CMAKE_BINARY_DIR}/builder-pkg/rpm/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}.tar.gz")
         add_custom_target(builder-rpm ALL
             COMMAND ${CMAKE_COMMAND} -E make_directory

@@ -12,11 +12,9 @@ RestartSec=30
 User=root
 Group=root
 
-# Security hardening
 NoNewPrivileges=yes
-# /usr, /boot, /efi and /etc read-only except for the paths re-opened below.
 # NOT ProtectSystem=strict: the monitor legitimately writes (and CREATES)
-# /etc/open-bastion/force_online, and /var, /run must stay writable.
+# /etc/open-bastion/force_online, so /etc cannot be made fully read-only.
 ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes
@@ -27,21 +25,15 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 
-# Requires read access to config and write access to runtime dir.
-#
-# The force_online file must be listed as its DIRECTORY, not as the file:
-#  - the monitor appends with `>>`, which CREATES the file when it is missing,
-#    and creating an entry needs the parent directory writable — a per-file
-#    exception under a read-only /etc yields EROFS;
-#  - systemd refuses to set up the namespace at all when a ReadWritePaths=
-#    entry does not exist, so naming the file made the unit fail to start on
-#    every host that had never gone offline.
-# openbastion.conf stays read-only: ReadOnlyPaths= is applied after
-# ReadWritePaths=, so the more specific entry wins.
+# force_online is listed as its DIRECTORY, not the file: the monitor appends
+# with `>>`, CREATING the file when missing, which needs the parent directory
+# writable -- and systemd refuses to start the unit if a ReadWritePaths= entry
+# names a path that does not yet exist.
+# ReadOnlyPaths= is applied after ReadWritePaths=, so openbastion.conf stays
+# read-only despite the broader entry above.
 ReadWritePaths=/run/open-bastion /etc/open-bastion
 ReadOnlyPaths=/etc/open-bastion/openbastion.conf
 
-# Network access required
 PrivateNetwork=no
 
 [Install]

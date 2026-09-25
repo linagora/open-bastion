@@ -75,10 +75,9 @@ ctest --output-on-failure --verbose
 %install
 %cmake_install
 
-# NSS cross-process passwd cache (libnss_openbastion). debian/open-bastion.dirs
-# provisions the same two directories on the Debian side; without this the fix
-# would be Debian-only and an RPM host would keep hitting LLNG over HTTPS for
-# every getpwnam() from a short-lived process.
+# debian/open-bastion.dirs provisions the same two directories on the Debian
+# side; without this an RPM host would keep hitting LLNG over HTTPS for every
+# getpwnam() from a short-lived process.
 mkdir -p %{buildroot}/var/cache/nss_llng/byname
 
 %files
@@ -94,8 +93,8 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-enroll
 %{_sbindir}/ob-heartbeat
 %{_sbindir}/ob-session-recorder
-# One setup script; the other two names are symlinks to it made by CMake,
-# which choose the default node role (#288).
+# ob-standalone-setup and ob-backend-setup are symlinks to this script, made
+# by CMake, which choose the default node role.
 %{_sbindir}/ob-bastion-setup
 %{_sbindir}/ob-standalone-setup
 %{_sbindir}/ob-backend-setup
@@ -125,11 +124,10 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_prefix}/lib/open-bastion/ob-ssh-principals.backend
 %{_prefix}/lib/open-bastion/ob-fp-spool.tmpfiles
 %{_prefix}/lib/open-bastion/ob-portal-prerequisites.txt
-# 0711 = traversable but NOT listable. Entries under these directories are 0644
-# so an unprivileged getpwnam()/getpwuid() can read its own record (an NSS
-# module runs inside the calling process), but no local account can readdir()
-# them and enumerate the SSO user directory wholesale - which matters most for
-# byname/, whose filenames are the login names themselves. Refs #189.
+# 0711 = traversable but NOT listable. Entries are 0644 so an unprivileged
+# getpwnam()/getpwuid() can read its own record, but no local account can
+# readdir() and enumerate the SSO user directory wholesale -- matters most for
+# byname/, whose filenames are the login names themselves.
 %attr(0711,root,root) %dir /var/cache/nss_llng
 %attr(0711,root,root) %dir /var/cache/nss_llng/byname
 %config(noreplace) %{_sysconfdir}/open-bastion/session-recorder.conf.example
@@ -138,8 +136,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %dir %{_datadir}/open-bastion/audit
 %dir %{_datadir}/open-bastion/audit/rules.d
 %{_datadir}/open-bastion/audit/rules.d/open-bastion.rules
-# logrotate template for the JSON audit log (the admin copies it into
-# /etc/logrotate.d/; not %config, since audit_log_file is configurable)
+# Not %config: audit_log_file is configurable.
 %dir %{_datadir}/open-bastion/logrotate
 %{_datadir}/open-bastion/logrotate/open-bastion
 %{_unitdir}/ob-heartbeat.service
@@ -178,7 +175,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man1/ob-sftp.1*
 %{_mandir}/man1/ob-cert-request.1*
 %{_mandir}/man1/ob-record-connect.1*
-# Hardening templates (session containment - deployed by ob-bastion-setup)
+# Deployed by ob-bastion-setup.
 %dir %{_datadir}/open-bastion
 %dir %{_datadir}/open-bastion/hardening
 %dir %{_datadir}/open-bastion/hardening/logind.conf.d
@@ -204,37 +201,32 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_unitdir}/ob-session-monitor.service
 
 %pre
-# Create ob-sessions group for session recording privilege separation
 getent group ob-sessions >/dev/null 2>&1 || groupadd --system ob-sessions
-# Create open-bastion-sudo group for defense-in-depth sudo authorization (Mode E)
 getent group open-bastion-sudo >/dev/null 2>&1 || groupadd --system open-bastion-sudo
 
 %post
 %systemd_post ob-heartbeat.timer
 %systemd_post ob-session-prune.timer
-# Create required directories
 mkdir -p /etc/open-bastion
 chmod 755 /etc/open-bastion
 mkdir -p /var/cache/open-bastion
 chmod 700 /var/cache/open-bastion
 mkdir -p /var/lib/open-bastion
 chmod 711 /var/lib/open-bastion
-# NSS passwd cache: re-assert 0711 on upgrade from a version that shipped it
-# 0755 (the module also does this at runtime on its next write).
+# Re-assert 0711 on upgrade from a version that shipped it 0755 (the module
+# also does this at runtime on its next write).
 mkdir -p /var/cache/nss_llng/byname
 chmod 711 /var/cache/nss_llng /var/cache/nss_llng/byname
 mkdir -p /var/lib/open-bastion/sessions
 # Tamper-evident layout: root:ob-sessions 0750. The recorded user is NOT in
-# ob-sessions, so o-rwx means it has no access to any recording (incl. its own);
-# recordings are written by the root sink (ob-record-sink). Auditors in
-# ob-sessions get group read. ob-bastion-setup re-asserts this and migrates any
-# legacy user-owned per-user subdirs.
+# ob-sessions, so it has no access to any recording (incl. its own); auditors
+# in ob-sessions get group read. ob-bastion-setup re-asserts this and migrates
+# any legacy user-owned per-user subdirs.
 chown root:ob-sessions /var/lib/open-bastion/sessions
 chmod 0750 /var/lib/open-bastion/sessions
-# Remove the obsolete setgid recorder wrapper if upgrading from an older version.
 rm -f %{_sbindir}/ob-session-recorder-wrapper
-# Migrate the server token out of /etc (config) into /var/lib (runtime state,
-# FHS) so the heartbeat sandbox can keep /etc read-only. Idempotent.
+# Migrates the server token out of /etc into /var/lib (runtime state) so the
+# heartbeat sandbox can keep /etc read-only. Idempotent.
 if [ -f /etc/open-bastion/token ] && [ ! -e /var/lib/open-bastion/token ]; then
     mv /etc/open-bastion/token /var/lib/open-bastion/token
     chown root:root /var/lib/open-bastion/token
@@ -244,49 +236,40 @@ for _cf in /etc/open-bastion/openbastion.conf /etc/open-bastion/nss_openbastion.
     [ -f "$_cf" ] && sed -i 's#^\([[:space:]]*server_token_file[[:space:]]*=[[:space:]]*\)/etc/open-bastion/token#\1/var/lib/open-bastion/token#' "$_cf"
 done
 [ -f /etc/open-bastion/ssh-proxy.conf ] && sed -i 's#^\([[:space:]]*SERVER_TOKEN_FILE=\)"\{0,1\}/etc/open-bastion/token"\{0,1\}#\1"/var/lib/open-bastion/token"#' /etc/open-bastion/ssh-proxy.conf
-# Arm the recording-retention timer on first install (enabled by default; it has
-# no ConditionPathExists gate and no-ops on hosts without recordings). The
-# explicit enable guarantees it regardless of the distro's systemd preset
-# policy; on upgrade ($1 > 1) we respect the admin's choice and leave it alone.
+# Enabled by default with no ConditionPathExists gate; the explicit enable
+# guarantees it regardless of the distro's systemd preset policy. On upgrade
+# ($1 > 1) we respect the admin's choice and leave it alone.
 if [ $1 -eq 1 ]; then
     systemctl --no-reload enable ob-session-prune.timer >/dev/null 2>&1 || :
     systemctl start ob-session-prune.timer >/dev/null 2>&1 || :
 fi
-# Re-assert bastion socket activation, mirroring the Debian postinst.
+# Repair/migration parity with the Debian postinst: nothing in these
+# scriptlets disables the sockets on upgrade, and there is no RPM analogue of
+# the deb-systemd-helper state layer that dropped them on Debian, so a host
+# whose ob-cert.socket or ob-record.socket ended up inactive is repaired by
+# reinstalling or upgrading the package.
 #
-# This is repair/migration parity, not a fix for an RPM regression: nothing in
-# these scriptlets disables the sockets on upgrade (%systemd_preun is a no-op
-# while $1 >= 1), and there is no RPM analogue of the deb-systemd-helper state
-# layer that dropped them on Debian. What this does buy is the same
-# self-healing behaviour on both distros — a host whose ob-cert.socket or
-# ob-record.socket ended up inactive (manual disable, a restored image, a
-# half-finished setup run) is repaired by reinstalling or upgrading the
-# package, instead of requiring a full ob-bastion-setup re-run.
-#
-# ob-cert.socket (hop-certificate minting) and ob-record.socket (session-
-# recording sink) are deliberately not enabled at install: the package cannot
-# know a host's role, so ob-bastion-setup is what enables them. We therefore
-# only act when this host is ALREADY a bastion — the sshd drop-in written by
-# ob-bastion-setup is the role marker. This never enables anything on a backend
-# or an unconfigured host. Failures are non-fatal.
+# ob-cert.socket and ob-record.socket are deliberately not enabled at
+# install: the package cannot know a host's role, so ob-bastion-setup is what
+# enables them. Act only when this host is ALREADY a bastion -- the sshd
+# drop-in written by ob-bastion-setup is the role marker. Failures are
+# non-fatal.
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     for _ob_dropin in /etc/ssh/sshd_config.d/*-open-bastion-bastion.conf; do
         [ -f "$_ob_dropin" ] || continue
-        # Bastion role -> hop-certificate minting socket (ob-ssh / ob-scp).
         systemctl enable --now ob-cert.socket >/dev/null 2>&1 || :
-        # Recording sink, only when recording is enabled (the ForceCommand is
-        # absent under ob-bastion-setup --disable-session-recorder).
+        # Only when recording is enabled (the ForceCommand is absent under
+        # ob-bastion-setup --disable-session-recorder).
         if grep -Eq '^[[:space:]]*ForceCommand[[:space:]]+.*ob-session-recorder' "$_ob_dropin"; then
             systemctl enable --now ob-record.socket >/dev/null 2>&1 || :
         fi
         break
     done
 fi
-# SSH fingerprint sink (#249), needed on BOTH roles: a backend runs an
-# AuthorizedPrincipalsCommand too, so this gets its own loop rather than
-# riding along with the bastion-only block above. Without it the principals
-# helper has nowhere to deposit and the fingerprint binding disappears with no
-# error at login time.
+# Needed on BOTH roles: a backend runs an AuthorizedPrincipalsCommand too, so
+# this gets its own loop rather than riding along with the bastion-only block
+# above. Without it the principals helper has nowhere to deposit and the
+# fingerprint binding disappears with no error at login time.
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     for _ob_role in /etc/ssh/sshd_config.d/*-open-bastion-bastion.conf \
                     /etc/ssh/sshd_config.d/*-open-bastion-backend.conf; do
@@ -296,10 +279,7 @@ if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     done
 fi
 
-# The 0.6 cron jobs (KRL refresh, audit rotation) are now timers (#281). They
-# keep working after the upgrade, and are not moved here: /usr/local is not the
-# package's, a job may have been edited, and the timer must keep its interval.
-# ob-post-upgrade does it; say so when it applies. Same as the Debian postinst.
+# Legacy cron jobs keep working until ob-post-upgrade replaces them with timers.
 if [ -e /etc/cron.d/open-bastion-krl ] \
    || [ -e /etc/cron.daily/open-bastion-audit-rotate ] \
    || [ -e /etc/cron.weekly/open-bastion-audit-rotate ]; then
@@ -311,8 +291,7 @@ fi
 %preun
 %systemd_preun ob-heartbeat.timer
 %systemd_preun ob-session-prune.timer
-# The Mode E KRL refresh and the auditd rotation (#281) are enabled by
-# ob-bastion-setup, not at install; disable them on removal.
+# Enabled by ob-bastion-setup (not at install); disable on removal.
 %systemd_preun ob-krl-refresh.timer
 %systemd_preun ob-audit-rotate.timer
 # Cert/record sockets are enabled by ob-bastion-setup (not at install); disable
@@ -332,7 +311,6 @@ fi
 
 %post desktop
 %systemd_post ob-session-monitor.service
-# Create cache directory for offline credentials
 mkdir -p /var/cache/open-bastion/credentials
 chmod 0700 /var/cache/open-bastion/credentials
 
@@ -341,7 +319,7 @@ chmod 0700 /var/cache/open-bastion/credentials
 
 %postun desktop
 %systemd_postun_with_restart ob-session-monitor.service
-# Clean up cache and runtime directories on purge
+# $1 = 0 means final removal (purge), not a mere upgrade.
 if [ "$1" = "0" ]; then
     rm -rf /var/cache/open-bastion/credentials
     rm -rf /run/open-bastion/offline_sessions

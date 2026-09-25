@@ -1,24 +1,18 @@
-# Open Bastion base package
-
-# PAM module
 usr/lib/*/security/pam_openbastion.so*
 
-# NSS module
 usr/lib/*/libnss_openbastion.so*
 
-# Configuration files
 etc/open-bastion/openbastion.conf.example
 etc/open-bastion/nss_openbastion.conf.example
 etc/open-bastion/service-accounts.conf.example
 etc/open-bastion/session-recorder.conf.example
 etc/open-bastion/ssh-proxy.conf.example
 
-# Admin scripts
 usr/sbin/ob-enroll
 usr/sbin/ob-heartbeat
 usr/sbin/ob-session-recorder
-# One setup script; the other two names are symlinks to it made by CMake,
-# which choose the default node role (#288).
+# ob-standalone-setup and ob-backend-setup are symlinks to this script, made
+# by CMake, which choose the default node role.
 usr/sbin/ob-bastion-setup
 usr/sbin/ob-standalone-setup
 usr/sbin/ob-backend-setup
@@ -34,7 +28,6 @@ usr/sbin/ob-cache-admin
 usr/sbin/ob-session-prune
 usr/sbin/ob-krl-refresh
 
-# Shared cert-vouching library (sourced by ob-ssh / ob-scp / ob-sftp)
 usr/lib/open-bastion/ob-cert-lib.sh
 usr/lib/open-bastion/ob-sign-lib.sh
 usr/lib/open-bastion/ob-timers-lib.sh
@@ -43,7 +36,6 @@ usr/lib/open-bastion/ob-ssh-principals.backend
 usr/lib/open-bastion/ob-fp-spool.tmpfiles
 usr/lib/open-bastion/ob-portal-prerequisites.txt
 
-# User scripts
 usr/bin/ob-ssh-cert
 usr/bin/ob-ssh
 usr/bin/ob-scp
@@ -52,7 +44,6 @@ usr/bin/ob-bastion-id
 usr/bin/ob-cert-request
 usr/bin/ob-record-connect
 
-# Man pages
 usr/share/man/man1/ob-ssh-cert.1
 usr/share/man/man1/ob-ssh.1
 usr/share/man/man1/ob-scp.1
@@ -76,53 +67,40 @@ usr/share/man/man8/ob-sign-request.8
 usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
 
-# Audit trace templates (deployed by `ob-bastion-setup --enable-audit-trace`)
+# Deployed by `ob-bastion-setup --enable-audit-trace`.
 usr/share/open-bastion/audit/rules.d/open-bastion.rules
 
-# logrotate template for the JSON audit log (copied to /etc/logrotate.d/ by the
-# admin; not a conffile, since audit_log_file is configurable)
+# NOT a conffile: audit_log_file is configurable.
 usr/share/open-bastion/logrotate/open-bastion
 
-# Hardening templates (deployed by `ob-bastion-setup --enable-hardening`)
+# Deployed by `ob-bastion-setup --enable-hardening`.
 usr/share/open-bastion/hardening/logind.conf.d/open-bastion.conf
 usr/share/open-bastion/hardening/security/limits.d/open-bastion.conf
 usr/share/open-bastion/hardening/at.allow
 usr/share/open-bastion/hardening/cron.allow
 
-# Documentation
 usr/share/doc/open-bastion/README.md
 
-# Heartbeat systemd timer and service (not installed by cmake when INSTALL_SYSTEMD=OFF)
+# Not installed by cmake when INSTALL_SYSTEMD=OFF, so listed explicitly here.
 systemd/ob-heartbeat.timer lib/systemd/system/
 systemd/ob-heartbeat.service lib/systemd/system/
 
-# Session-recording retention timer and service. Enabled at install time by
-# dh_installsystemd (see debian/rules); no ConditionPathExists gate, so it arms
-# immediately and no-ops on hosts without recordings.
+# No ConditionPathExists gate: it arms immediately and no-ops on hosts
+# without recordings.
 systemd/ob-session-prune.timer lib/systemd/system/
 systemd/ob-session-prune.service lib/systemd/system/
 
-# Mode E key revocation list refresh, and the auditd rotation of
-# --enable-audit-trace: the two cron jobs of 0.6, as timers (#281). NOT enabled
-# at install time (see debian/rules): the package cannot know whether a host is
-# in Mode E or has the audit trace, and the setup enables each where it applies.
+# Not enabled at install (see debian/rules): the setup enables each where it
+# applies.
 systemd/ob-krl-refresh.timer lib/systemd/system/
 systemd/ob-krl-refresh.service lib/systemd/system/
 systemd/ob-audit-rotate.timer lib/systemd/system/
 systemd/ob-audit-rotate.service lib/systemd/system/
 
-# Socket-activated units, sockets and their @.service templates alike, installed
-# from systemd/ like every other unit in this package (#254).
-#
-# The .socket files used to come from debian/open-bastion.ob-<name>.socket
-# instead -- a second copy of the same content, which drifted: the hardening
-# added to systemd/ in a9a28d8 never reached them. dh_installsystemd finds a
-# unit already staged in the package tree (that is how ob-heartbeat.timer has
-# always worked), so it still generates the enable/cleanup blocks from
-# debian/rules; it just no longer needs its own copy of the file.
-#
-# The @.service templates are never "enabled" -- the .socket spawns instances --
-# but must be present, or the socket cannot start one ("Connection refused").
+# dh_installsystemd finds each unit already staged here and still generates
+# the enable/cleanup blocks from debian/rules for it. The @.service templates
+# are never "enabled" -- the .socket spawns instances -- but must be present,
+# or the socket cannot start one ("Connection refused").
 systemd/ob-cert.socket usr/lib/systemd/system/
 systemd/ob-cert@.service usr/lib/systemd/system/
 systemd/ob-record.socket usr/lib/systemd/system/
