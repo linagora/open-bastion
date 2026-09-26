@@ -932,6 +932,28 @@ Re-running ``ob-bastion-setup`` / ``ob-backend-setup`` is the supported way to p
 
 Re-running a setup does **not** re-enrol the host and does not change its ``bastion_id``. Only ``ob-enroll`` does that.
 
+Uninstalling / decommissioning a host
+-------------------------------------
+
+On a host set up by ``ob-bastion-setup`` (any role), do not start with ``apt purge open-bastion`` or ``dnf remove open-bastion``: removing the package leaves sshd and PAM pointing at files it deleted, and every SSH login is then refused. Un-configure the host first with ``ob-uninstall``; what it changes, keeps and refuses is described in ``ob-uninstall(8)``.
+
+#. If you will need the host's device id in the LLNG Manager, note it now with ``ob-bastion-id``: it needs the server token, which ``ob-uninstall`` deletes.
+#. Log in with a **local** account and keep console access at hand. Afterwards LemonLDAP::NG certificates are no longer trusted and SSO users no longer resolve; ``ob-uninstall`` refuses to run for an invoker who looks like an SSO user.
+#. Review the plan, then run it:
+
+   .. code:: bash
+
+      sudo ob-uninstall --dry-run
+      sudo ob-uninstall
+
+   Without ``sudo`` the dry run cannot read every file it needs and says its plan is partial.
+#. Exit status ``2`` means a stack under ``/etc/pam.d`` still loads ``pam_openbastion``, typically a display manager configured by ``ob-desktop-setup``. Fix the listed files by hand.
+#. Session recordings under ``/var/lib/open-bastion/sessions`` are kept, but ``apt purge`` deletes ``/var/lib/open-bastion``: move them first if you need them.
+#. Remove the package: ``apt purge open-bastion`` or ``dnf remove open-bastion``.
+#. In the LLNG Manager, delete the host's device entry. Leave ``pamAccessServerGroups`` alone: it is keyed by the project's ``client_id``, which every host of the project shares, so removing that entry would cut off all of them.
+#. When decommissioning a bastion, remove its id from ``/etc/open-bastion/allowed_bastions`` on every backend.
+#. SSO users' home directories under ``/home`` are kept: archive or delete them. So is ``/var/backup/open-bastion-uninstall-<timestamp>/``, which holds everything the command removed or rewrote; the summary also lists older setup backups that keep the client secret in clear, to ``shred``.
+
 Troubleshooting
 ---------------
 
@@ -1168,6 +1190,8 @@ Commands
 | ``ob-scp SRC DEST``     | Copy files to/from/between backends via bastion      |
 +-------------------------+------------------------------------------------------+
 | ``ob-sftp HOST``        | SFTP session to a backend via bastion ephemeral cert |
++-------------------------+------------------------------------------------------+
+| ``ob-uninstall``        | Un-configure the host before removing the package    |
 +-------------------------+------------------------------------------------------+
 
 CrowdSec Integration

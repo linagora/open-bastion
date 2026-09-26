@@ -1,0 +1,331 @@
+.TH OB-UNINSTALL 8 "September 2026" "open-bastion" "System Administration"
+.SH NAME
+ob-uninstall \- take Open Bastion off this host, ready for package removal
+.SH SYNOPSIS
+.B ob-uninstall
+.RB [ \-n | \-\-dry\-run ]
+.RB [ \-y | \-\-yes ]
+.RB [ \-\-no\-revoke ]
+.RB [ \-\-force ]
+.SH DESCRIPTION
+.B ob-uninstall
+un\-configures a host set up by
+.BR ob-bastion-setup (8)
+under any of its names and roles
+.RB ( ob\-bastion\-setup ,
+.BR ob\-standalone\-setup ,
+.BR ob\-backend\-setup ),
+and leaves it ready for
+.B apt purge open\-bastion
+or
+.BR "dnf remove open\-bastion" .
+.PP
+Removing the package alone is not a way back. It does not know about the
+setup's backups, so on a set\-up host it leaves the sshd drop\-in, whose
+.B ForceCommand
+names a session recorder that no longer exists, and a PAM stack that
+.I requires
+a module that no longer exists: every SSH login is refused. It also leaves
+the NSS source, the sudoers rule, the KRL and audit schedules and a server
+token that the portal still honours.
+.PP
+.B ob-uninstall
+first prints what it is going to do, then asks. It decides everything before
+changing anything, so a run that has to refuse does so before its first
+write.
+.SH WHAT IT UNDOES
+In this order. The point of the order is that at no moment is an LLNG
+certificate accepted without the checks that normally vet it: sshd stops
+trusting the certificate authority
+.I before
+the PAM stack stops asking the portal.
+.TP
+.B 1. sshd
+.IR sshd_config.d/00\-open\-bastion\-bastion.conf ,
+.IR 00\-open\-bastion\-backend.conf ,
+their legacy
+.I 50\-
+names;
+.I 09\-open\-bastion\-service\-keys.conf
+and
+.I 60\-max\-security.conf
+only when they carry the Open Bastion header. On a host without
+.IR sshd_config.d ,
+where the setup appended its blocks to
+.IR sshd_config ,
+that file is restored from the oldest setup backup that does not contain
+them; failing that (a single Mode E run keeps only a copy that already has
+the first block), the blocks are cut out along the exact lines the setup
+wrote, and the rest of the file is kept. If a block does not have the
+expected shape, or anything of Open Bastion's remains once they are cut, the
+command refuses. Then
+.BR "sshd \-t" :
+if sshd rejects its configuration, the sshd files are put back and the
+command stops with everything else untouched. Otherwise the CA key and
+.I /usr/local/sbin/ob\-ssh\-principals
+are removed (each only when no remaining sshd file refers to it) and sshd is
+reloaded, with
+.BR reload\-or\-restart ;
+existing sessions survive.
+.TP
+.B 2. PAM
+.IR /etc/pam.d/sshd ,
+.IR sudo ,
+.IR sudo\-i ,
+when they load
+.B pam_openbastion
+(or
+.BR pam_llng ):
+restored from the oldest copy that does not, taken from
+.I /var/backups/open\-bastion/<name>.orig
+(debconf) and then
+.I /var/backup/open\-bastion\-setup\-<timestamp>/
+in chronological order. With no such copy, a generic stack for the
+distribution family is written (Debian:
+.BR common\-* ;
+RHEL:
+.BR password\-auth ,
+.BR system\-auth ),
+marked
+.IR "# Restored by ob-uninstall" .
+A
+.I sudo\-i
+that the setup created is removed instead. A debconf
+.I .orig
+that itself loads the module is removed, or the package's purge would copy it
+back. On a dpkg host whose debconf
+.B open\-bastion/pam\-mode
+is not
+.BR none ,
+it is set to
+.BR none :
+otherwise the next
+.B dpkg \-\-configure
+of the package writes the module back into
+.IR /etc/pam.d/sshd .
+The previous value is saved in the backup as
+.IR debconf\-selections .
+.TP
+.B 3. sudo
+.I /etc/sudoers.d/open\-bastion
+(only if it contains one of the two headers the setup writes: Mode E's, or
+the backend's LLNG sudo rule), the
+legacy
+.IR ob\-bastion\-cert\-helper ,
+and the group
+.BR open\-bastion\-sudo .
+.TP
+.B 4. NSS
+the
+.B openbastion
+source is removed from the
+.BR passwd ,
+.B group
+and
+.B shadow
+lines of
+.I /etc/nsswitch.conf
+\(em an edit, not a restore, so later changes survive \(em and
+.I nss_openbastion.conf
+is removed. On an authselect host, where the setup had replaced the symlink
+with a file, the symlink is put back instead when its target exists.
+.TP
+.B 5. units
+.BR ob\-heartbeat.timer ,
+.BR ob\-cert.socket ,
+.BR ob\-record.socket ,
+.BR ob\-fp.socket ,
+.BR ob\-session\-prune.timer ,
+.BR ob\-krl\-refresh.timer ,
+.B ob\-audit\-rotate.timer
+are disabled and stopped. The timers' schedule drop\-ins the setup wrote,
+.IR /etc/systemd/system/<timer>.d/schedule.conf ,
+are removed \(em only when their first line is
+.IR "# Open Bastion timer schedule" ;
+an administrator's drop\-in stays \(em and systemd is reloaded.
+.TP
+.B 6. opt\-in features
+Hardening: the logind and limits drop\-ins;
+.I /etc/at.allow
+and
+.I /etc/cron.allow
+only if byte\-identical to the shipped templates; atd is unmasked if masked
+(there is no telling whether an administrator masked it too); systemd\-logind
+is reloaded, never restarted. Audit trace: the rules, then
+.BR "augenrules \-\-load" .
+Mode E:
+.I /etc/ssh/revoked_keys
+when nothing left in the sshd configuration refers to it. On a host still
+running the KRL and audit cron jobs instead of the timers (see
+.BR ob-post-upgrade (8)):
+.IR /etc/cron.d/open\-bastion\-krl ,
+.I /etc/cron.daily/open\-bastion\-audit\-rotate
+(or its
+.I cron.weekly
+copy), and
+.I /usr/local/bin/open\-bastion\-refresh\-krl
+when it is the script the setup generated.
+.TP
+.B 7. generated files
+The tmpfiles rule,
+.IR openbastion.conf ,
+.IR ssh\-proxy.conf ,
+.IR session\-recorder.conf ,
+.IR allowed_bastions ;
+the contents of
+.I /var/cache/open\-bastion
+and
+.IR /var/cache/nss_llng .
+.TP
+.B 8. server token
+Its refresh token and its access token are revoked at the portal's
+.I /oauth2/revoke
+endpoint, then the token file is deleted. A confidential client authenticates
+with a
+.B client_secret_jwt
+assertion built by
+.BR ob-client-jwt (8);
+the client secret itself is never sent, and when that helper is missing the
+tokens are not revoked rather than sent without it. A public client sends its
+client_id alone. Nothing sensitive is put on a command line. The portal
+answers 200 even for a token it does not know, so success means the request
+was accepted. Revocation is best effort: when it fails, the command says so
+and carries on.
+.SH SAFETY
+.TP
+.B Everything it touches is backed up first
+to
+.IR /var/backup/open\-bastion\-uninstall\-<timestamp>/ ,
+mode 0700, under each file's full path. The uninstall can be undone by copying
+the tree back. Two exceptions: the caches (derived data, holding encrypted
+credentials) and the server token (a live credential), which are deleted
+without a copy.
+.TP
+.B Session recordings are never deleted.
+.I /var/lib/open\-bastion/sessions
+is left as it is and its location printed at the end. Note that
+.B apt purge open\-bastion
+currently deletes
+.I /var/lib/open\-bastion
+with the recordings in it: move them first if you need them.
+.TP
+.B It refuses to lock you out.
+Run through
+.BR sudo (8)
+by a user who looks like an SSO user of the host, it refuses unless
+.B \-\-force
+is given, and says which of these matched: not in
+.IR /etc/passwd ;
+a uid inside the NSS module's range
+.RB ( min_uid .. max_uid
+in
+.IR nss_openbastion.conf ,
+10000..60000 by default), which is where
+.B create_user
+puts SSO users it writes into
+.IR /etc/passwd ;
+a member of
+.BR open\-bastion\-sudo ;
+or no usable password in
+.I /etc/shadow
+and no
+.IR ~/.ssh/authorized_keys .
+Whoever runs it: afterwards, LemonLDAP::NG certificates are no longer
+trusted and only local accounts can log in, through
+.I authorized_keys
+or a password as the restored sshd defaults allow. Keep console access.
+.TP
+.B The client secret is not copied.
+The backup copy of
+.I openbastion.conf
+has its secrets (\fBclient_secret\fR and the other secret keys) replaced by
+.IR "<redacted by ob-uninstall>" :
+the client secret is the project's, shared by every host. The setup's
+own backups keep it in clear; the summary lists them so they can be shredded.
+.SH WHAT IT DOES NOT DO
+It does not delete recordings,
+.I service\-accounts.conf
+or
+.I service\-accounts.d/
+(operator data, inert once sshd and PAM are restored), SSO users' home
+directories, or the package. It does not revert
+.BR ob-desktop-setup :
+a display\-manager stack that still loads
+.B pam_openbastion
+is listed and the exit status is 2. It does not touch the LemonLDAP::NG
+Manager: delete the host's device entry there. Leave
+.B pamAccessServerGroups
+alone: it is keyed by the project's client_id, which every host of the project
+shares. On a bastion, remove its id from the backends'
+.IR allowed_bastions .
+.SH OPTIONS
+.TP
+.B \-n, \-\-dry\-run
+Print the plan and change nothing. Reports the same refusals a real run would
+hit. It runs without root, but then cannot read
+.IR openbastion.conf ,
+the sudoers drop\-in, the token or
+.IR /etc/shadow ;
+it lists what it could not read and says the plan is partial. Use
+.B sudo ob\-uninstall \-\-dry\-run
+for the full plan.
+.TP
+.B \-y, \-\-yes
+Do not ask for confirmation.
+.TP
+.B \-\-no\-revoke
+Do not contact the portal. The token file is still deleted; revoke it, or
+delete the host, in the LLNG Manager.
+.TP
+.B \-\-force
+Proceed even when invoked by an SSO\-only user.
+.TP
+.B \-h, \-\-help
+Usage.
+.TP
+.B \-V, \-\-version
+Version.
+.SH EXIT STATUS
+.TP
+.B 0
+done, or nothing to do (the host was never set up)
+.TP
+.B 1
+refused, aborted, or failed; the reason is on standard error
+.TP
+.B 2
+done, but a stack under
+.I /etc/pam.d
+still loads
+.B pam_openbastion
+.SH FILES
+.TP
+.I /var/backup/open\-bastion\-uninstall\-<timestamp>/
+this command's backup
+.TP
+.I /var/backup/open\-bastion\-setup\-<timestamp>/
+the setup's backups (basenames only), read to restore the PAM stacks,
+.I sshd_config
+and the authselect symlink
+.TP
+.I /var/backups/open\-bastion/*.orig
+the debconf backups of the PAM stacks
+.SH ENVIRONMENT
+.TP
+.B OB_ROOT
+For the test suite only: a directory prepended to every path, so a real
+uninstall can run against a fake root. Setting it also skips the root check,
+and keeps the caller's
+.B PATH
+(so the tests can substitute sshd, systemctl and the rest). Without it,
+.B PATH
+is set to
+.IR /usr/sbin:/usr/bin:/sbin:/bin .
+.SH SEE ALSO
+.BR ob-bastion-setup (8),
+.BR ob-post-upgrade (8),
+.BR ob-krl-refresh (8),
+.BR ob-bastion-id (1),
+.BR ob-client-jwt (8)
+.SH AUTHOR
+Linagora
