@@ -19,6 +19,10 @@ here.
 
 ### Added
 
+- **`ob-uninstall`(8)** un-configures a bastion, standalone host or backend
+  before the package is removed. Removing the package alone left sshd and PAM
+  pointing at deleted files, which refused every SSH login. See "Uninstalling /
+  decommissioning a host" in [doc/admin-guide.rst](doc/admin-guide.rst).
 - **`ob-post-upgrade`(8)**: finishes a package upgrade with no arguments
   (principals helper, tmpfiles rule, sockets, spool ownership). It does not
   enrol and does not touch the server token, `sshd_config` or PAM stacks.

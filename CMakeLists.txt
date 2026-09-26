@@ -263,6 +263,11 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-post-upgrade
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-uninstall
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
+# Install SSH proxy config example
 install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
 )
@@ -536,6 +541,7 @@ install(FILES
     ${CMAKE_SOURCE_DIR}/man/ob-sign-request.8
     ${CMAKE_SOURCE_DIR}/man/ob-client-jwt.8
     ${CMAKE_SOURCE_DIR}/man/ob-post-upgrade.8
+    ${CMAKE_SOURCE_DIR}/man/ob-uninstall.8
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
 )
 

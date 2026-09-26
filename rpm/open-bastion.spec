@@ -104,6 +104,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-sign-request
 %{_sbindir}/ob-client-jwt
 %{_sbindir}/ob-post-upgrade
+%{_sbindir}/ob-uninstall
 %{_sbindir}/ob-service-account-keys
 %{_sbindir}/ob-record-sink
 %{_sbindir}/ob-cache-admin
@@ -170,6 +171,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-sign-request.8*
 %{_mandir}/man8/ob-client-jwt.8*
 %{_mandir}/man8/ob-post-upgrade.8*
+%{_mandir}/man8/ob-uninstall.8*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
 %{_mandir}/man1/ob-sftp.1*

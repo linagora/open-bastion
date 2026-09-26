@@ -22,6 +22,7 @@ usr/sbin/ob-fp-submit
 usr/sbin/ob-sign-request
 usr/sbin/ob-client-jwt
 usr/sbin/ob-post-upgrade
+usr/sbin/ob-uninstall
 usr/sbin/ob-service-account-keys
 usr/sbin/ob-record-sink
 usr/sbin/ob-cache-admin
@@ -66,6 +67,7 @@ usr/share/man/man8/ob-record-sink.8
 usr/share/man/man8/ob-sign-request.8
 usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
+usr/share/man/man8/ob-uninstall.8
 
 # Deployed by `ob-bastion-setup --enable-audit-trace`.
 usr/share/open-bastion/audit/rules.d/open-bastion.rules

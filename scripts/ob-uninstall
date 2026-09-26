@@ -1,0 +1,1378 @@
+#!/bin/bash
+#
+# ob-uninstall - take Open Bastion off this host, ready for package removal
+#
+# Copyright (C) 2026 Linagora
+# License: AGPL-3.0
+#
+# Undoes what ob-bastion-setup wrote, for any role; see ob-uninstall(8).
+# Every file removed or rewritten is backed up first.
+
+set -euo pipefail
+
+VERSION="1.0.0"
+PROG_NAME=$(basename "$0")
+
+# Setup backup dirs (open-bastion-setup-%Y%m%d-%H%M%S) must glob in
+# chronological order.
+export LC_ALL=C
+
+# Test suite only: every absolute path goes through P, so a real run can
+# target a fake root. OB_ROOT also skips the root check and keeps PATH.
+OB_ROOT="${OB_ROOT:-}"
+P() { printf '%s%s' "$OB_ROOT" "$1"; }
+
+# Running as root: never trust an inherited PATH.
+if [ -z "$OB_ROOT" ]; then
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    export PATH
+fi
+
+SSHD_CONFIG="/etc/ssh/sshd_config"
+SSHD_CONFIG_DIR="/etc/ssh/sshd_config.d"
+SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
+SSH_REVOKED_KEYS="/etc/ssh/revoked_keys"
+PAM_DIR="/etc/pam.d"
+OB_ETC="/etc/open-bastion"
+OB_CONF="$OB_ETC/openbastion.conf"
+NSS_OB_CONF="$OB_ETC/nss_openbastion.conf"
+NSSWITCH_CONF="/etc/nsswitch.conf"
+SUDOERS_FILE="/etc/sudoers.d/open-bastion"
+SUDOERS_LEGACY="/etc/sudoers.d/ob-bastion-cert-helper"
+SUDO_GROUP="open-bastion-sudo"
+DEFAULT_TOKEN="/var/lib/open-bastion/token"
+SESSIONS_DIR="/var/lib/open-bastion/sessions"
+DEBCONF_BACKUP_DIR="/var/backups/open-bastion"
+SETUP_BACKUP_PARENT="/var/backup"
+HARDENING_TEMPLATE_DIR="/usr/share/open-bastion/hardening"
+HARDENING_LOGIND="/etc/systemd/logind.conf.d/open-bastion.conf"
+HARDENING_LIMITS="/etc/security/limits.d/open-bastion.conf"
+AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
+# Cron jobs left on hosts never migrated to the timers.
+AUDIT_CRON_FILES=("/etc/cron.daily/open-bastion-audit-rotate" "/etc/cron.weekly/open-bastion-audit-rotate")
+KRL_CRON="/etc/cron.d/open-bastion-krl"
+KRL_REFRESH="/usr/local/bin/open-bastion-refresh-krl"
+TIMER_UNITS=(ob-krl-refresh.timer ob-audit-rotate.timer)
+SYSTEMD_UNIT_DIR="/etc/systemd/system"
+# First line of the timers' schedule drop-ins written by ob-timers-lib.sh;
+# a drop-in without it is an administrator's.
+TIMERS_MARK="# Open Bastion timer schedule"
+PRINCIPALS_HELPER="/usr/local/sbin/ob-ssh-principals"
+TMPFILES_CONF="/etc/tmpfiles.d/open-bastion-ssh-fp.conf"
+CACHE_DIRS=("/var/cache/open-bastion" "/var/cache/nss_llng")
+UNITS=(ob-heartbeat.timer ob-cert.socket ob-record.socket ob-fp.socket ob-session-prune.timer
+       "${TIMER_UNITS[@]}")
+
+# Headers that tell our sshd drop-ins from an administrator's.
+SVC_KEYS_MARK="# Open Bastion service-account SSH layer"
+MAXSEC_MARK="Open Bastion Maximum Security"
+GENERIC_MARK="# Restored by ob-uninstall (no pre-Open-Bastion backup found)"
+
+STAMP=$(date +%Y%m%d-%H%M%S)
+
+DRY_RUN=false
+ASSUME_YES=false
+NO_REVOKE=false
+FORCE=false
+CHANGED=0
+
+if [ -t 1 ]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+    BLUE=$'\033[0;34m'; NC=$'\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
+fi
+
+info()  { echo "${BLUE}[INFO]${NC} $*"; }
+ok()    { echo "${GREEN}[ OK ]${NC} $*"; }
+warn()  { echo "${YELLOW}[WARN]${NC} $*" >&2; }
+error() { echo "${RED}[FAIL]${NC} $*" >&2; }
+act()   { CHANGED=$((CHANGED + 1)); echo "${GREEN}[DONE]${NC} $*"; }
+
+usage() {
+    cat <<EOF
+Usage: $PROG_NAME [-n|--dry-run] [-y|--yes] [--no-revoke] [--force]
+
+Un-configures a host set up by ob-bastion-setup (any role) so that the
+open-bastion package can be removed. Prints the plan, then asks.
+
+Everything removed or rewritten is backed up first, under
+$SETUP_BACKUP_PARENT/open-bastion-uninstall-<timestamp>/. Session recordings
+are kept. Afterwards only local accounts can log in: keep console access.
+
+Options:
+  -n, --dry-run   Print the plan and change nothing (partial without root)
+  -y, --yes       Do not ask for confirmation
+      --no-revoke Do not revoke the server token at the portal
+      --force     Run even when the invoking user looks like an SSO user
+  -h, --help      This message
+  -V, --version   Version
+
+Exit status:
+  0  done, or nothing to do
+  1  refused, aborted, or failed; the reason is on stderr
+  2  done, but a PAM stack under /etc/pam.d still loads pam_openbastion
+
+See ob-uninstall(8).
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|--dry-run) DRY_RUN=true; shift ;;
+        -y|--yes)     ASSUME_YES=true; shift ;;
+        --no-revoke)  NO_REVOKE=true; shift ;;
+        --force)      FORCE=true; shift ;;
+        -h|--help)    usage; exit 0 ;;
+        -V|--version) echo "$PROG_NAME $VERSION"; exit 0 ;;
+        *) error "Unknown option: $1"; usage >&2; exit 1 ;;
+    esac
+done
+
+if [ -z "$OB_ROOT" ] && [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" != "true" ]; then
+    error "$PROG_NAME must run as root (use --dry-run to see the plan)"
+    exit 1
+fi
+
+# Temporary files live next to their destination, so the final mv is
+# atomic: a PAM stack is never seen half-written.
+TMP_FILES=()
+# Exit 2 means PAM residue only: any unplanned status (grep's is 2)
+# becomes 1.
+EXECUTING=false
+RESIDUAL_EXIT=false
+BACKUP_DIR_L="$SETUP_BACKUP_PARENT/open-bastion-uninstall-$STAMP"
+cleanup() {
+    local rc=$? f
+    for f in "${TMP_FILES[@]}"; do rm -f "$f"; done
+    [ "$rc" -eq 0 ] && return 0
+    [ "$rc" -eq 2 ] && [ "$RESIDUAL_EXIT" = "true" ] && return 0
+    if [ "$EXECUTING" = "true" ]; then
+        error "$PROG_NAME stopped part-way (status $rc). Every file it had removed or"
+        error "rewritten so far is in $BACKUP_DIR_L (full paths)."
+    fi
+    exit 1
+}
+trap cleanup EXIT
+
+# Same rules as config.c: the last value wins, one quote layer is stripped,
+# an inline comment is dropped except from client_secret.
+read_conf_file() {
+    local file="$1" key="$2" line val
+    [ -r "$file" ] || return 0
+    line=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null | tail -1) || true
+    [ -n "$line" ] || return 0
+    val="${line#*=}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    case "$val" in
+        \"*) val="${val#\"}"; val="${val%\"*}" ;;
+        \'*) val="${val#\'}"; val="${val%\'*}" ;;
+        \#*) [ "$key" = "client_secret" ] || val="" ;;
+        *)
+            if [ "$key" != "client_secret" ]; then
+                val="${val%%[[:space:]]#*}"
+                val="${val%"${val##*[![:space:]]}"}"
+            fi
+            ;;
+    esac
+    printf '%s' "$val"
+}
+read_conf() { read_conf_file "$(P "$OB_CONF")" "$1"; }
+
+sshd_main_is_ours() {
+    grep -qE "TrustedUserCAKeys[[:space:]].*open-bastion|$MAXSEC_MARK" "$1" 2>/dev/null
+}
+
+is_configured() {
+    local f
+    [ -e "$(P "$OB_CONF")" ] && return 0
+    for f in "$(P "$SSHD_CONFIG_DIR")"/*-open-bastion-bastion.conf \
+             "$(P "$SSHD_CONFIG_DIR")"/*-open-bastion-backend.conf; do
+        [ -f "$f" ] && return 0
+    done
+    grep -qsE 'pam_(openbastion|llng)' "$(P "$PAM_DIR/sshd")" && return 0
+    sshd_main_is_ours "$(P "$SSHD_CONFIG")" && return 0
+    return 1
+}
+
+if ! is_configured; then
+    ok "Open Bastion is not configured on this host: nothing to do."
+    exit 0
+fi
+
+detect_role() {
+    local f
+    for f in "$(P "$SSHD_CONFIG_DIR")"/*-open-bastion-backend.conf; do
+        [ -f "$f" ] && { echo backend; return; }
+    done
+    for f in "$(P "$SSHD_CONFIG_DIR")"/*-open-bastion-bastion.conf; do
+        [ -f "$f" ] && { echo bastion; return; }
+    done
+    local role
+    role=$(read_conf node_role)
+    echo "${role:-unknown}"
+}
+ROLE=$(detect_role)
+
+# Every refusal is decided here, before the first write, so --dry-run
+# reports what a real run would refuse.
+PLAN=()
+REFUSALS=()
+plan()   { PLAN+=("$(printf '  %-9s %s' "$1" "$2")"); }
+refuse() { REFUSALS+=("$*"); }
+
+# Setup backups keep only the basename: `sshd` is /etc/pam.d/sshd,
+# `sshd_config` is /etc/ssh/sshd_config.
+setup_backups_of() {
+    local name="$1" d
+    for d in "$(P "$SETUP_BACKUP_PARENT")"/open-bastion-setup-*/; do
+        [ -f "$d$name" ] && printf '%s\n' "$d$name"
+    done
+    return 0
+}
+
+first_clean() {
+    local dirty="$1" c
+    shift
+    for c in "$@"; do
+        [ -f "$c" ] && [ -r "$c" ] || continue
+        "$dirty" "$c" && continue
+        printf '%s' "$c"
+        return 0
+    done
+    return 1
+}
+
+# pam_llng is the module's former name.
+PAM_MODULE_RE='pam_(openbastion|llng)'
+pam_dirty() { grep -qE "$PAM_MODULE_RE" "$1" 2>/dev/null; }
+
+SSHD_REMOVE=()          # logical paths
+SSHD_MAIN_RESTORE=""    # physical path of the backup to restore sshd_config from
+
+plan_sshd() {
+    local d f name
+    d=$(P "$SSHD_CONFIG_DIR")
+    # 50-*: the legacy names of the same drop-ins.
+    for name in 00-open-bastion-bastion.conf 00-open-bastion-backend.conf \
+                50-open-bastion-bastion.conf 50-open-bastion-backend.conf; do
+        if [ -f "$d/$name" ]; then
+            SSHD_REMOVE+=("$SSHD_CONFIG_DIR/$name")
+            plan remove "$SSHD_CONFIG_DIR/$name"
+        fi
+    done
+
+    f="$SSHD_CONFIG_DIR/09-open-bastion-service-keys.conf"
+    if [ -f "$(P "$f")" ]; then
+        if grep -qxF "$SVC_KEYS_MARK" "$(P "$f")"; then
+            SSHD_REMOVE+=("$f")
+            plan remove "$f"
+        else
+            plan keep "$f (no '$SVC_KEYS_MARK' header: not ours)"
+        fi
+    fi
+
+    f="$SSHD_CONFIG_DIR/60-max-security.conf"
+    if [ -f "$(P "$f")" ]; then
+        if grep -qF "$MAXSEC_MARK" "$(P "$f")"; then
+            SSHD_REMOVE+=("$f")
+            plan remove "$f"
+        else
+            plan keep "$f (not the Open Bastion Mode E drop-in)"
+        fi
+    fi
+
+    # Without sshd_config.d the setup appends its blocks to sshd_config. The
+    # oldest backup without them wins; a Mode E run backs the file up twice,
+    # keeping only a dirty copy, so the blocks are then cut out instead.
+    f=$(P "$SSHD_CONFIG")
+    if [ -f "$f" ] && sshd_main_is_ours "$f"; then
+        local cands=() stripped
+        mapfile -t cands < <(setup_backups_of sshd_config)
+        if SSHD_MAIN_RESTORE=$(first_clean sshd_main_is_ours "${cands[@]}"); then
+            plan restore "$SSHD_CONFIG <- ${SSHD_MAIN_RESTORE#"$OB_ROOT"}"
+            plan note "  (any edit made to $SSHD_CONFIG since then is lost; the"
+            plan note "   current file is kept in the uninstall backup)"
+        else
+            SSHD_MAIN_RESTORE=""
+            stripped=$(mktemp)
+            TMP_FILES+=("$stripped")
+            if strip_appended_blocks "$f" > "$stripped" \
+               && ! grep -qE "$SSHD_OURS_RE" "$stripped"; then
+                SSHD_MAIN_RESTORE="$stripped"
+                plan edit "$SSHD_CONFIG (cut out the appended Open Bastion blocks; the rest is kept)"
+            else
+                refuse "$SSHD_CONFIG carries the Open Bastion block (TrustedUserCAKeys ...open-bastion" \
+                       "or the Mode E section), appended by a setup run on a host without" \
+                       "$SSHD_CONFIG_DIR. No copy of it in" \
+                       "$SETUP_BACKUP_PARENT/open-bastion-setup-*/sshd_config is free of that block" \
+                       "(a single Mode E run keeps only the copy taken after the first block), and" \
+                       "the block could not be cut out safely: its end line was not found, or" \
+                       "something of Open Bastion's is still there once it is removed." \
+                       "Remove it by hand (it starts at '# LemonLDAP::NG Bastion Configuration'," \
+                       "'# LemonLDAP::NG Backend Configuration' or '# Open Bastion Maximum" \
+                       "Security Configuration (Mode E)'), check \`sshd -t\`, and run" \
+                       "$PROG_NAME again. Nothing was changed."
+            fi
+        fi
+    fi
+
+    # Refused now: nothing could validate the result later.
+    if { [ "${#SSHD_REMOVE[@]}" -gt 0 ] || [ -n "$SSHD_MAIN_RESTORE" ]; } \
+       && ! command -v sshd >/dev/null 2>&1; then
+        refuse "The sshd configuration has to change, and there is no sshd binary to" \
+               "validate the result with (\`sshd -t\`). Refusing to edit a configuration" \
+               "that cannot be checked. Nothing was changed."
+    fi
+}
+
+SSHD_OURS_RE='open-bastion|ob-session-recorder|ob-ssh-principals|ob-service-account-keys|LemonLDAP::NG|Open Bastion'
+
+# Each appended block is exactly: an empty line (`echo ""`), the header, the
+# lines up to its last one (`PermitRootLogin no`, or `ExposeAuthInfo yes`
+# for Mode E), then one empty line (the content's own newline plus echo's).
+# Blank lines inside belong to the block; Mode E blocks may repeat. Exit 3
+# if a header has no end line: that shape is not ours.
+strip_appended_blocks() {
+    awk -v h1="# LemonLDAP::NG Bastion Configuration" \
+        -v h2="# LemonLDAP::NG Backend Configuration" \
+        -v h3="# Open Bastion Maximum Security Configuration (Mode E)" '
+        # One empty line is held back: it may be the `echo ""` before a header.
+        function out(l) { if (held) { print ""; held = 0 } print l }
+        {
+            if (state == 1) { if ($0 ~ endre) state = 2; next }
+            if (state == 2) { state = 0; if ($0 == "") next }
+            if ($0 == h1 || $0 == h2) { held = 0; state = 1; endre = "^PermitRootLogin no$"; next }
+            if ($0 == h3)             { held = 0; state = 1; endre = "^ExposeAuthInfo yes$"; next }
+            if ($0 == "") { if (held) print ""; held = 1; next }
+            out($0)
+        }
+        END { if (held) print ""; if (state == 1) exit 3 }' "$1"
+}
+
+# Removed before the reload (see do_sshd), and only if no kept sshd
+# file still names them.
+SSHD_ASIDE=()
+plan_sshd_aside() {
+    if [ -e "$(P "$SSH_CA_FILE")" ]; then
+        if sshd_still_refs "^[[:space:]]*TrustedUserCAKeys[[:space:]].*open-bastion_ca\\.pub"; then
+            plan keep "$SSH_CA_FILE (still referenced by sshd configuration)"
+        else
+            SSHD_ASIDE+=("$SSH_CA_FILE")
+            plan remove "$SSH_CA_FILE (before the reload: sshd stops trusting LLNG certificates)"
+        fi
+    fi
+    if [ -e "$(P "$PRINCIPALS_HELPER")" ]; then
+        if sshd_still_refs "^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]].*$PRINCIPALS_HELPER"; then
+            plan keep "$PRINCIPALS_HELPER (still referenced by sshd configuration)"
+        else
+            SSHD_ASIDE+=("$PRINCIPALS_HELPER")
+            plan remove "$PRINCIPALS_HELPER"
+        fi
+    fi
+    if [ "${#SSHD_REMOVE[@]}" -gt 0 ] || [ -n "$SSHD_MAIN_RESTORE" ]; then
+        plan reload "sshd, now: before any PAM stack changes (existing sessions survive)"
+    fi
+    return 0
+}
+
+sshd_still_refs() {
+    local re="$1" main f r
+    main=$(P "$SSHD_CONFIG")
+    [ -n "$SSHD_MAIN_RESTORE" ] && main="$SSHD_MAIN_RESTORE"
+    if [ -f "$main" ] && grep -qiE "$re" "$main" 2>/dev/null; then
+        return 0
+    fi
+    for f in "$(P "$SSHD_CONFIG_DIR")"/*.conf; do
+        [ -f "$f" ] || continue
+        for r in "${SSHD_REMOVE[@]}"; do
+            [ "$f" = "$(P "$r")" ] && continue 2
+        done
+        grep -qiE "$re" "$f" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+declare -A PAM_ACTION=() PAM_SRC=() PAM_FAMILY=()
+DEBCONF_DIRTY=()        # logical paths of debconf .orig files that are ours
+
+pam_family() {
+    if [ -f "$(P "$PAM_DIR/common-auth")" ]; then
+        echo debian
+        return 0
+    fi
+    case "$1" in
+        sshd) [ -f "$(P "$PAM_DIR/password-auth")" ] && { echo rhel; return 0; } ;;
+        *)    [ -f "$(P "$PAM_DIR/system-auth")" ]   && { echo rhel; return 0; } ;;
+    esac
+    return 1
+}
+
+render_generic_pam() {
+    local family="$1" name="$2"
+    printf '#%%PAM-1.0\n%s\n' "$GENERIC_MARK"
+    printf '# Generic %s stack for %s, written by %s on %s.\n' \
+        "$family" "$name" "$PROG_NAME" "$(date)"
+    case "$family:$name" in
+        debian:sshd)
+            printf '%s\n' "@include common-auth" \
+                "account    required     pam_nologin.so" \
+                "@include common-account" \
+                "session    required     pam_loginuid.so" \
+                "@include common-session" \
+                "session    required     pam_limits.so" \
+                "@include common-password"
+            ;;
+        rhel:sshd)
+            printf '%s\n' "auth       substack     password-auth" \
+                "account    required     pam_nologin.so" \
+                "account    include      password-auth" \
+                "password   include      password-auth" \
+                "session    required     pam_loginuid.so" \
+                "session    include      password-auth"
+            ;;
+        debian:*)
+            printf '%s\n' "@include common-auth" \
+                "@include common-account" \
+                "@include common-session-noninteractive"
+            ;;
+        rhel:*)
+            printf '%s\n' "auth       include      system-auth" \
+                "account    include      system-auth" \
+                "password   include      system-auth" \
+                "session    include      system-auth"
+            ;;
+    esac
+}
+
+# The setup backs up sudo and sudo-i together, copying only existing files:
+# a sudo-i absent from the OLDEST backup holding sudo did not exist before.
+sudo_i_created_by_setup() {
+    local d
+    for d in "$(P "$SETUP_BACKUP_PARENT")"/open-bastion-setup-*/; do
+        [ -f "${d}sudo" ] || continue
+        [ -e "${d}sudo-i" ] && return 1
+        return 0
+    done
+    return 1
+}
+
+plan_pam() {
+    local name f c family cands
+    for name in sshd sudo sudo-i; do
+        f=$(P "$PAM_DIR/$name")
+        if [ ! -f "$f" ] || ! pam_dirty "$f"; then
+            PAM_ACTION[$name]=keep
+            continue
+        fi
+        # Oldest first: debconf's .orig, then the setup backups.
+        cands=()
+        [ -f "$(P "$DEBCONF_BACKUP_DIR/$name.orig")" ] \
+            && cands+=("$(P "$DEBCONF_BACKUP_DIR/$name.orig")")
+        mapfile -t -O "${#cands[@]}" cands < <(setup_backups_of "$name")
+
+        if c=$(first_clean pam_dirty "${cands[@]}"); then
+            PAM_ACTION[$name]=restore
+            PAM_SRC[$name]="$c"
+            plan restore "$PAM_DIR/$name <- ${c#"$OB_ROOT"}"
+        elif [ "$name" = "sudo-i" ] && sudo_i_created_by_setup; then
+            PAM_ACTION[$name]=remove
+            plan remove "$PAM_DIR/$name (created by the setup; there was none before)"
+        elif family=$(pam_family "$name"); then
+            PAM_ACTION[$name]=generic
+            PAM_FAMILY[$name]="$family"
+            plan write "$PAM_DIR/$name (generic $family stack: no pre-Open-Bastion backup)"
+        else
+            refuse "$PAM_DIR/$name loads pam_openbastion, no backup of it predates" \
+                   "Open Bastion, and this is neither a Debian-family host" \
+                   "($PAM_DIR/common-auth) nor a RHEL-family one ($PAM_DIR/password-auth," \
+                   "$PAM_DIR/system-auth), so there is no generic stack to fall back to." \
+                   "Write $PAM_DIR/$name by hand without pam_openbastion, then run" \
+                   "$PROG_NAME again. Nothing was changed."
+        fi
+    done
+
+    # postrm purge would copy a dirty .orig back over the restored stack.
+    for name in sshd sudo; do
+        f="$DEBCONF_BACKUP_DIR/$name.orig"
+        if [ -f "$(P "$f")" ] && pam_dirty "$(P "$f")"; then
+            DEBCONF_DIRTY+=("$f")
+            plan remove "$f (loads pam_openbastion; postrm would restore it on purge)"
+        fi
+    done
+}
+
+# The postinst rewrites the PAM stacks on every configure while pam-mode is
+# not none.
+DEBCONF_MODE=""
+plan_debconf() {
+    local mode=""
+    command -v debconf-set-selections >/dev/null 2>&1 || return 0
+    if command -v debconf-show >/dev/null 2>&1; then
+        mode=$(debconf-show open-bastion 2>/dev/null \
+               | sed -n 's|^[* ] open-bastion/pam-mode:[[:space:]]*||p' | head -1)
+    elif command -v debconf-get-selections >/dev/null 2>&1; then
+        mode=$(debconf-get-selections 2>/dev/null \
+               | awk '$1 == "open-bastion" && $2 == "open-bastion/pam-mode" { print $4; exit }')
+    fi
+    case "$mode" in
+        ""|none) return 0 ;;
+    esac
+    DEBCONF_MODE="$mode"
+    plan debconf "open-bastion/pam-mode: $mode -> none (else dpkg --configure rewrites the PAM stacks)"
+}
+
+SUDOERS_REMOVE=false
+GROUP_DEL=false
+
+# Anywhere in the file: --enable-sudo-fresh-otp prepends a Defaults line.
+SUDOERS_MARK_RE='# Open Bastion( Mode E)?: defense-in-depth sudo authorization'
+plan_sudo() {
+    if [ -f "$(P "$SUDOERS_FILE")" ]; then
+        if [ ! -r "$(P "$SUDOERS_FILE")" ]; then
+            plan unknown "$SUDOERS_FILE (unreadable without root: cannot tell whether it is ours)"
+        elif grep -qxE "$SUDOERS_MARK_RE" "$(P "$SUDOERS_FILE")"; then
+            SUDOERS_REMOVE=true
+            plan remove "$SUDOERS_FILE"
+        else
+            plan keep "$SUDOERS_FILE (no Open Bastion header: not ours)"
+        fi
+    fi
+    [ -e "$(P "$SUDOERS_LEGACY")" ] && plan remove "$SUDOERS_LEGACY (legacy)"
+    if grep -q "^${SUDO_GROUP}:" "$(P /etc/group)" 2>/dev/null; then
+        GROUP_DEL=true
+        plan delete "group $SUDO_GROUP"
+    fi
+    return 0
+}
+
+NSS_EDIT=false
+NSS_RE='^(passwd|group|shadow):.*[[:space:]]openbastion([[:space:]]|$)'
+
+# authselect's nsswitch.conf is a symlink; the setup's `sed -i` replaced it
+# with a file, and its backup (`cp -a`) kept the link.
+NSS_LINK=""             # link target to restore, if any
+nss_original_link() {
+    local d f t
+    for d in "$(P "$SETUP_BACKUP_PARENT")"/open-bastion-setup-*/; do
+        f="${d}nsswitch.conf"
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        [ -L "$f" ] || return 1
+        t=$(readlink "$f")
+        case "$t" in
+            /*) [ -f "$(P "$t")" ] || return 1 ;;
+            *)  [ -f "$(P "/etc/$t")" ] || return 1 ;;
+        esac
+        printf '%s' "$t"
+        return 0
+    done
+    return 1
+}
+
+plan_nss() {
+    local f raw abs
+    f=$(P "$NSSWITCH_CONF")
+    if [ -f "$f" ] && [ ! -L "$f" ] && raw=$(nss_original_link); then
+        # The target must not load openbastion either.
+        case "$raw" in /*) abs="$raw" ;; *) abs="/etc/$raw" ;; esac
+        if ! grep -qE "$NSS_RE" "$(P "$abs")" 2>/dev/null; then
+            NSS_LINK="$raw"
+            plan restore "$NSSWITCH_CONF -> $NSS_LINK (the symlink authselect owns)"
+        fi
+    fi
+    if [ -z "$NSS_LINK" ] && grep -qE "$NSS_RE" "$f" 2>/dev/null; then
+        NSS_EDIT=true
+        plan edit "$NSSWITCH_CONF (drop the 'openbastion' source from passwd/group/shadow)"
+    fi
+    [ -e "$(P "$NSS_OB_CONF")" ] && plan remove "$NSS_OB_CONF"
+    return 0
+}
+
+HARDENING=false
+ALLOW_REMOVE=()
+
+plan_hardening() {
+    local f t
+    if [ -e "$(P "$HARDENING_LOGIND")" ] || [ -e "$(P "$HARDENING_LIMITS")" ]; then
+        HARDENING=true
+    else
+        return 0
+    fi
+    for f in "$HARDENING_LOGIND" "$HARDENING_LIMITS"; do
+        [ -e "$(P "$f")" ] && plan remove "$f"
+    done
+    # Only a byte-identical copy of the template is ours.
+    for f in /etc/at.allow /etc/cron.allow; do
+        [ -e "$(P "$f")" ] || continue
+        t="$HARDENING_TEMPLATE_DIR/$(basename "$f")"
+        if [ ! -f "$(P "$t")" ]; then
+            plan keep "$f (template $t missing: cannot tell it is ours)"
+        elif cmp -s "$(P "$t")" "$(P "$f")"; then
+            ALLOW_REMOVE+=("$f")
+            plan remove "$f (identical to the shipped template)"
+        else
+            plan keep "$f (differs from $t: an administrator's file)"
+        fi
+    done
+    plan unmask "atd, if masked (the setup masks it; we cannot tell whether you did too)"
+    plan reload "systemd-logind (reload only: a restart would end every session)"
+}
+
+AUDIT_REMOVE=()
+KRL_REMOVE=()
+GEN_REMOVE=()
+LEGACY_CRON_REMOVE=()
+
+TIMER_DROPINS=()
+plan_timer_dropins() {
+    local u f
+    for u in "${TIMER_UNITS[@]}"; do
+        f="$SYSTEMD_UNIT_DIR/$u.d/schedule.conf"
+        [ -e "$(P "$f")" ] || continue
+        if head -n 1 "$(P "$f")" 2>/dev/null | grep -qxF "$TIMERS_MARK"; then
+            TIMER_DROPINS+=("$f")
+            plan remove "$f (then systemctl daemon-reload)"
+        else
+            plan keep "$f (no '$TIMERS_MARK' first line: not ours)"
+        fi
+    done
+    return 0
+}
+
+plan_files() {
+    local f
+    if [ -e "$(P "$AUDIT_RULES_FILE")" ]; then
+        AUDIT_REMOVE+=("$AUDIT_RULES_FILE")
+        plan remove "$AUDIT_RULES_FILE"
+        plan reload "audit rules (augenrules --load, restart auditd)"
+    fi
+    for f in "${AUDIT_CRON_FILES[@]}" "$KRL_CRON"; do
+        [ -e "$(P "$f")" ] && { LEGACY_CRON_REMOVE+=("$f"); plan remove "$f (legacy cron job)"; }
+    done
+    # In /usr/local, only the generated script is ours (same test as
+    # ob_krl_remove_legacy).
+    if [ -e "$(P "$KRL_REFRESH")" ]; then
+        if grep -q '/ssh/revoked' "$(P "$KRL_REFRESH")" 2>/dev/null; then
+            LEGACY_CRON_REMOVE+=("$KRL_REFRESH")
+            plan remove "$KRL_REFRESH (legacy KRL refresh script)"
+        else
+            plan keep "$KRL_REFRESH (not the script the setup generated)"
+        fi
+    fi
+    if [ -e "$(P "$SSH_REVOKED_KEYS")" ]; then
+        if sshd_still_refs "^[[:space:]]*RevokedKeys[[:space:]]+\"?$SSH_REVOKED_KEYS"; then
+            plan keep "$SSH_REVOKED_KEYS (still referenced by sshd configuration)"
+        else
+            KRL_REMOVE+=("$SSH_REVOKED_KEYS")
+            plan remove "$SSH_REVOKED_KEYS"
+        fi
+    fi
+
+    for f in "$TMPFILES_CONF" "$OB_ETC/ssh-proxy.conf" \
+             "$OB_ETC/session-recorder.conf" "$OB_ETC/allowed_bastions" "$OB_CONF"; do
+        [ -e "$(P "$f")" ] && GEN_REMOVE+=("$f")
+    done
+    for f in "${GEN_REMOVE[@]}"; do plan remove "$f"; done
+    for f in "${CACHE_DIRS[@]}"; do
+        [ -d "$(P "$f")" ] && plan purge "$f/* (derived cache: not backed up)"
+    done
+
+    # Kept sshd files naming our files break once the package is gone; they
+    # are the administrator's, so only report them.
+    local hits=""
+    for f in "$(P "$SSHD_CONFIG")" "$(P "$SSHD_CONFIG_DIR")"/*.conf; do
+        [ -f "$f" ] || continue
+        case " ${SSHD_REMOVE[*]:-} " in *" ${f#"$OB_ROOT"} "*) continue ;; esac
+        [ "${f#"$OB_ROOT"}" = "$SSHD_CONFIG" ] && [ -n "$SSHD_MAIN_RESTORE" ] && continue
+        if grep -qE '^[^#]*(ob-session-recorder|ob-service-account-keys|ob-ssh-principals|open-bastion)' "$f" 2>/dev/null; then
+            hits="$hits ${f#"$OB_ROOT"}"
+        fi
+    done
+    SSHD_FOREIGN_REFS="${hits# }"
+    return 0
+}
+SSHD_FOREIGN_REFS=""
+
+# Read now: openbastion.conf is removed before the revocation.
+TOKEN_FILE_L=""
+PORTAL_URL=""
+CLIENT_ID=""
+CLIENT_SECRET=""
+VERIFY_SSL=true
+REVOKE_PLAN=""
+
+plan_token() {
+    local v
+    TOKEN_FILE_L=$(read_conf server_token_file)
+    TOKEN_FILE_L="${TOKEN_FILE_L:-$DEFAULT_TOKEN}"
+    PORTAL_URL=$(read_conf portal_url)
+    PORTAL_URL="${PORTAL_URL%/}"
+    CLIENT_ID=$(read_conf client_id)
+    CLIENT_ID="${CLIENT_ID:-pam-access}"
+    CLIENT_SECRET=$(read_conf client_secret)
+    v=$(read_conf verify_ssl)
+    case "$v" in false|no|0|off) VERIFY_SSL=false ;; esac
+
+    if [ ! -e "$(P "$TOKEN_FILE_L")" ]; then
+        REVOKE_PLAN="no server token on this host"
+        return 0
+    fi
+    if [ "$NO_REVOKE" = "true" ]; then
+        REVOKE_PLAN="skipped (--no-revoke)"
+    elif [ -z "$PORTAL_URL" ]; then
+        REVOKE_PLAN="impossible: no portal_url in $OB_CONF"
+    elif ! command -v jq >/dev/null 2>&1; then
+        REVOKE_PLAN="impossible: jq is not installed"
+    elif ! command -v curl >/dev/null 2>&1; then
+        REVOKE_PLAN="impossible: curl is not installed"
+    elif [ -n "$CLIENT_SECRET" ] && ! command -v ob-client-jwt >/dev/null 2>&1; then
+        REVOKE_PLAN="impossible: ob-client-jwt is missing (the client secret is never sent as is)"
+    elif [ ! -r "$(P "$TOKEN_FILE_L")" ]; then
+        REVOKE_PLAN="would revoke at $PORTAL_URL/oauth2/revoke (token unreadable here: not root)"
+    else
+        REVOKE_PLAN="revoke the refresh and access tokens at $PORTAL_URL/oauth2/revoke (client_id $CLIENT_ID, $([ -n "$CLIENT_SECRET" ] && echo client_secret_jwt || echo public client))"
+    fi
+    plan revoke "$REVOKE_PLAN"
+    plan delete "$TOKEN_FILE_L (a live credential: NOT copied to the backup)"
+}
+
+# Refused unless --force: an invoker who only gets in through Open Bastion.
+# create_user writes SSO users into /etc/passwd with a locked password, so
+# absence from /etc/passwd is not the only sign.
+INVOKER="${SUDO_USER:-}"
+if [ -z "$INVOKER" ]; then
+    INVOKER=$(logname 2>/dev/null || true)
+fi
+
+nss_uid_bound() {
+    local key="$1" def="$2" v
+    v=$(read_conf_file "$(P "$NSS_OB_CONF")" "$key")
+    [ -n "$v" ] || v=$(read_conf "$key")
+    case "$v" in ''|*[!0-9]*) v="$def" ;; esac
+    printf '%s' "$v"
+}
+
+lockout_check() {
+    local entry uid home min max members pw why=()
+    [ -n "$INVOKER" ] && [ "$INVOKER" != "root" ] || return 0
+
+    entry=$(awk -F: -v u="$INVOKER" '$1 == u { print; exit }' "$(P /etc/passwd)" 2>/dev/null || true)
+    if [ -z "$entry" ]; then
+        why+=("'$INVOKER' is not in /etc/passwd: it exists only through the openbastion NSS source")
+    else
+        uid=$(printf '%s' "$entry" | cut -d: -f3)
+        home=$(printf '%s' "$entry" | cut -d: -f6)
+        min=$(nss_uid_bound min_uid 10000)
+        max=$(nss_uid_bound max_uid 60000)
+        if [ "$uid" -ge "$min" ] 2>/dev/null && [ "$uid" -le "$max" ] 2>/dev/null; then
+            why+=("'$INVOKER' has uid $uid, inside the Open Bastion range $min..$max (min_uid/max_uid): an account pam_openbastion created (create_user)")
+        fi
+        members=$(awk -F: -v g="$SUDO_GROUP" '$1 == g { print $4; exit }' "$(P /etc/group)" 2>/dev/null || true)
+        case ",$members," in
+            *",$INVOKER,"*)
+                why+=("'$INVOKER' is a member of $SUDO_GROUP, the group pam_openbastion manages for SSO users") ;;
+        esac
+        if [ -r "$(P /etc/shadow)" ]; then
+            pw=$(awk -F: -v u="$INVOKER" '$1 == u { print $2; exit }' "$(P /etc/shadow)" 2>/dev/null || true)
+            case "$pw" in
+                ""|"!"*|"*"*)
+                    if [ ! -s "$(P "$home/.ssh/authorized_keys")" ]; then
+                        why+=("'$INVOKER' has no usable password (shadow field '${pw:-<empty>}') and no $home/.ssh/authorized_keys: nothing to log in with once the SSO is gone")
+                    fi ;;
+            esac
+        fi
+    fi
+    [ "${#why[@]}" -gt 0 ] || return 0
+
+    local w
+    if [ "$FORCE" = "true" ]; then
+        warn "You ('$INVOKER') look like an SSO user of this host:"
+        for w in "${why[@]}"; do warn "  - $w"; done
+        warn "Continuing because of --force: once this completes, '$INVOKER' may"
+        warn "neither log in nor sudo on this host again."
+        return 0
+    fi
+    refuse "You ('$INVOKER') look like an SSO user of this host:"
+    for w in "${why[@]}"; do refuse "  - $w"; done
+    refuse "That account is admitted by the openbastion NSS source, the Open Bastion" \
+           "PAM stack and the LLNG certificate authority -- exactly what this command" \
+           "removes. Your current session would survive; your next login and your" \
+           "next sudo would not." \
+           "Run it as a local account (console, or a local admin with a password or" \
+           "an authorized_keys entry), or pass --force if you have another way in."
+}
+
+lockout_check
+plan_sshd
+plan_sshd_aside
+plan_pam
+plan_debconf
+plan_sudo
+plan_nss
+plan stop "${UNITS[*]} (disable --now)"
+plan_timer_dropins
+plan_hardening
+plan_files
+plan_token
+
+echo
+echo "Open Bastion uninstall — role: $ROLE"
+[ "$DRY_RUN" = "true" ] && info "dry run: nothing will be changed"
+echo
+PARTIAL=()
+if [ "$DRY_RUN" = "true" ] && [ "$(id -u)" -ne 0 ]; then
+    for f in "$OB_CONF" "$SUDOERS_FILE" "$TOKEN_FILE_L" /etc/shadow; do
+        [ -e "$(P "$f")" ] && [ ! -r "$(P "$f")" ] && PARTIAL+=("$f")
+    done
+fi
+partial_notice() {
+    [ "${#PARTIAL[@]}" -gt 0 ] || return 0
+    warn "PARTIAL PLAN: not running as root, so these could not be read:"
+    for f in "${PARTIAL[@]}"; do warn "    $f"; done
+    warn "What depends on them is missing or marked 'unknown' above. For the full"
+    warn "plan, run:  sudo $PROG_NAME --dry-run"
+}
+partial_notice
+echo "Plan:"
+for line in "${PLAN[@]}"; do echo "$line"; done
+echo "  backup    every file above, before it is touched -> $BACKUP_DIR_L/"
+if [ -d "$(P "$SESSIONS_DIR")" ]; then
+    echo "  keep      $SESSIONS_DIR (session recordings are never deleted)"
+fi
+if [ -e "$(P "$OB_ETC/service-accounts.conf")" ] || [ -d "$(P "$OB_ETC/service-accounts.d")" ]; then
+    echo "  keep      $OB_ETC/service-accounts.conf, service-accounts.d/ (operator data; inert once sshd and PAM are restored)"
+fi
+echo
+
+if [ -n "$SSHD_FOREIGN_REFS" ]; then
+    warn "These sshd files are not ours and still mention Open Bastion:"
+    warn "    $SSHD_FOREIGN_REFS"
+    warn "They are left as they are. Fix them before removing the package, or"
+    warn "sshd will point at files that no longer exist."
+fi
+
+warn "After this, LemonLDAP::NG certificates are no longer trusted and SSO users"
+warn "no longer resolve. Only LOCAL accounts can log in: through ~/.ssh/authorized_keys"
+warn "or a password, as the restored sshd and PAM defaults allow. Make sure one"
+warn "works, and keep console access at hand."
+if [ -e "$(P "$TOKEN_FILE_L")" ]; then
+    info "If you need this host's device id for the LLNG Manager clean-up, run"
+    info "ob-bastion-id now: it needs the server token, which is about to go."
+fi
+
+if [ "${#REFUSALS[@]}" -gt 0 ]; then
+    echo
+    for line in "${REFUSALS[@]}"; do error "$line"; done
+    exit 1
+fi
+
+if [ "$DRY_RUN" = "true" ]; then
+    echo
+    partial_notice
+    info "dry run complete — nothing was changed"
+    exit 0
+fi
+
+if [ "$ASSUME_YES" != "true" ]; then
+    printf '%s' "Un-configure Open Bastion on this host? [y/N] "
+    answer=""
+    read -r answer || true
+    case "$answer" in
+        y|Y|yes|YES|Yes) ;;
+        *) info "Aborted: nothing was changed."; exit 1 ;;
+    esac
+fi
+echo
+
+BACKUP_DIR=$(P "$BACKUP_DIR_L")
+if [ -e "$BACKUP_DIR" ]; then
+    BACKUP_DIR_L="$BACKUP_DIR_L-$$"
+    BACKUP_DIR=$(P "$BACKUP_DIR_L")
+fi
+
+# config.c's key_holds_opaque_secret(), minus the public cert_pin.
+SECRET_KEYS_RE='client_secret|notify_secret|webhook_secret|request_signing_secret|crowdsec_bouncer_key|crowdsec_password'
+
+# 0700: the tree holds /etc/gshadow. openbastion.conf is copied with its
+# secrets redacted: client_secret is shared by every host of the project.
+backup_path() {
+    local src dst
+    src=$(P "$1")
+    dst="$BACKUP_DIR$1"
+    [ -e "$src" ] || [ -L "$src" ] || return 0
+    [ -d "$BACKUP_DIR" ] || install -d -m 0700 "$BACKUP_DIR" || return 1
+    mkdir -p "$(dirname "$dst")" || return 1
+    # Contents, not the link: authselect makes nsswitch.conf a symlink.
+    if [ -L "$src" ] && [ -e "$src" ]; then
+        cp -aL "$src" "$dst" || return 1
+    else
+        cp -a "$src" "$dst" || return 1
+    fi
+    if [ "$1" = "$OB_CONF" ] && [ -f "$dst" ] && [ ! -L "$dst" ]; then
+        sed -i -E "s/^([[:space:]]*($SECRET_KEYS_RE)[[:space:]]*=).*/\\1 <redacted by $PROG_NAME>/" "$dst" \
+            || return 1
+    fi
+}
+
+must_backup() {
+    backup_path "$1" || {
+        error "Could not back up $1 to $BACKUP_DIR_L; stopping before touching it."
+        exit 1
+    }
+}
+
+remove_file() {
+    local f
+    f=$(P "$1")
+    [ -e "$f" ] || [ -L "$f" ] || return 0
+    must_backup "$1"
+    rm -f "$f"
+    act "removed $1${2:+ ($2)}"
+}
+
+replace_file() {
+    local dst="$1" src="$2" mode="${3:-}" tmp
+    tmp=$(mktemp "$(P "$dst").ob-uninstall.XXXXXX")
+    TMP_FILES+=("$tmp")
+    cat "$src" > "$tmp"
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$tmp"
+    else
+        chmod --reference="$src" "$tmp"
+    fi
+    must_backup "$dst"
+    mv -f "$tmp" "$(P "$dst")"
+    if [ -z "$OB_ROOT" ] && command -v restorecon >/dev/null 2>&1; then
+        restorecon "$dst" 2>/dev/null || true
+    fi
+}
+
+have_systemctl() { command -v systemctl >/dev/null 2>&1; }
+
+rollback_sshd() {
+    local p
+    for p in "${SSHD_REMOVE[@]}" "$SSHD_CONFIG"; do
+        [ -e "$BACKUP_DIR$p" ] || continue
+        [ "$p" = "$SSHD_CONFIG" ] && [ -z "$SSHD_MAIN_RESTORE" ] && continue
+        cp -a "$BACKUP_DIR$p" "$(P "$p")" && info "restored $p"
+    done
+}
+
+do_sshd() {
+    local p out
+    for p in "${SSHD_REMOVE[@]}"; do remove_file "$p"; done
+    if [ -n "$SSHD_MAIN_RESTORE" ]; then
+        # The current mode: a stripped copy is a 0600 mktemp file.
+        replace_file "$SSHD_CONFIG" "$SSHD_MAIN_RESTORE" "$(stat -c %a "$(P "$SSHD_CONFIG")")"
+        case "$SSHD_MAIN_RESTORE" in
+            "$(P "$SETUP_BACKUP_PARENT")"/*)
+                act "restored $SSHD_CONFIG from ${SSHD_MAIN_RESTORE#"$OB_ROOT"}" ;;
+            *)
+                act "cut the appended Open Bastion blocks out of $SSHD_CONFIG" ;;
+        esac
+    fi
+    # No sshd file touched: sshd -t's verdict is not ours to act on.
+    if [ "${#SSHD_REMOVE[@]}" -eq 0 ] && [ -z "$SSHD_MAIN_RESTORE" ]; then
+        for p in "${SSHD_ASIDE[@]}"; do remove_file "$p"; done
+        return 0
+    fi
+    # If sshd rejects the result, put its files back and stop: nothing else
+    # has been touched yet.
+    if ! out=$(sshd -t 2>&1); then
+        error "sshd rejects its configuration once the Open Bastion files are gone:"
+        while IFS= read -r line; do error "    $line"; done <<< "$out"
+        rollback_sshd
+        error "The sshd files were put back; PAM, NSS, sudo and everything else"
+        error "are untouched. Fix what \`sshd -t\` reports, then run $PROG_NAME again."
+        error "Backup: $BACKUP_DIR_L"
+        exit 1
+    fi
+    ok "sshd -t accepts the configuration"
+
+    # Before any PAM change: while sshd trusts the CA, pam_openbastion's
+    # /pam/authorize (and the backend helper's voucher check) is what vets a
+    # certificate. Removing the CA and the helper first also covers an sshd
+    # that cannot be reloaded.
+    for p in "${SSHD_ASIDE[@]}"; do remove_file "$p"; done
+    do_reload_sshd
+}
+
+do_pam() {
+    local name gen p
+    for name in sshd sudo sudo-i; do
+        case "${PAM_ACTION[$name]}" in
+            keep) ;;
+            restore)
+                replace_file "$PAM_DIR/$name" "${PAM_SRC[$name]}" 0644
+                act "restored $PAM_DIR/$name from ${PAM_SRC[$name]#"$OB_ROOT"}" ;;
+            remove)
+                remove_file "$PAM_DIR/$name" "created by the setup" ;;
+            generic)
+                gen=$(mktemp)
+                TMP_FILES+=("$gen")
+                render_generic_pam "${PAM_FAMILY[$name]}" "$name" > "$gen"
+                replace_file "$PAM_DIR/$name" "$gen" 0644
+                act "wrote a generic ${PAM_FAMILY[$name]} stack to $PAM_DIR/$name" ;;
+        esac
+    done
+    for p in "${DEBCONF_DIRTY[@]}"; do remove_file "$p" "would be restored by postrm"; done
+    do_debconf
+    return 0
+}
+
+do_debconf() {
+    [ -n "$DEBCONF_MODE" ] || return 0
+    [ -d "$BACKUP_DIR" ] || install -d -m 0700 "$BACKUP_DIR"
+    # The form debconf-set-selections takes, to undo this by hand.
+    printf 'open-bastion open-bastion/pam-mode select %s\n' "$DEBCONF_MODE" \
+        > "$BACKUP_DIR/debconf-selections"
+    if echo 'open-bastion open-bastion/pam-mode select none' | debconf-set-selections 2>/dev/null; then
+        act "set debconf open-bastion/pam-mode to none (was $DEBCONF_MODE; saved in $BACKUP_DIR_L/debconf-selections)"
+    else
+        warn "Could not reset debconf open-bastion/pam-mode (currently $DEBCONF_MODE)."
+        warn "The next dpkg --configure of open-bastion will rewrite /etc/pam.d/sshd with"
+        warn "pam_openbastion. Run:  dpkg-reconfigure open-bastion  and choose 'none'."
+    fi
+}
+
+do_sudo() {
+    local out
+    [ "$SUDOERS_REMOVE" = "true" ] && remove_file "$SUDOERS_FILE"
+    remove_file "$SUDOERS_LEGACY" "legacy"
+    if [ -f "$(P /etc/sudoers)" ] && command -v visudo >/dev/null 2>&1; then
+        if ! out=$(visudo -c -f "$(P /etc/sudoers)" 2>&1); then
+            warn "visudo -c reports a problem (not caused by removing a drop-in):"
+            while IFS= read -r line; do warn "    $line"; done <<< "$out"
+        fi
+    fi
+    if [ "$GROUP_DEL" = "true" ]; then
+        # groupdel rewrites these.
+        must_backup /etc/group
+        [ -r "$(P /etc/gshadow)" ] && must_backup /etc/gshadow
+        if out=$(groupdel "$SUDO_GROUP" 2>&1); then
+            act "deleted group $SUDO_GROUP"
+        else
+            warn "could not delete group $SUDO_GROUP: $out"
+        fi
+    fi
+    return 0
+}
+
+# An edit, not a restore: the administrator's later edits must survive.
+# --follow-symlinks keeps an authselect symlink a symlink.
+do_nss() {
+    local f
+    f=$(P "$NSSWITCH_CONF")
+    if [ -n "$NSS_LINK" ]; then
+        local tmp
+        must_backup "$NSSWITCH_CONF"
+        tmp="$f.ob-uninstall.$$"
+        TMP_FILES+=("$tmp")
+        ln -s "$NSS_LINK" "$tmp"
+        mv -Tf "$tmp" "$f"
+        act "restored $NSSWITCH_CONF as the symlink to $NSS_LINK (authselect's)"
+    fi
+    if [ "$NSS_EDIT" = "true" ]; then
+        must_backup "$NSSWITCH_CONF"
+        sed -i --follow-symlinks -E \
+            -e '/^(passwd|group|shadow):/{' \
+            -e ':a' \
+            -e 's/([[:space:]]+)openbastion([[:space:]]+|$)/\1/' \
+            -e 'ta' \
+            -e 's/[[:space:]]+$//' \
+            -e 's/^(passwd|group|shadow):$/\1: files/' \
+            -e '}' "$f"
+        if grep -qE "$NSS_RE" "$f"; then
+            error "Could not remove 'openbastion' from $NSSWITCH_CONF; edit it by hand."
+            exit 1
+        fi
+        act "removed the openbastion source from $NSSWITCH_CONF"
+    fi
+    remove_file "$NSS_OB_CONF"
+}
+
+do_reload_sshd() {
+    local svc
+    if ! have_systemctl; then
+        warn "systemctl not available: reload sshd yourself"
+        return 0
+    fi
+    for svc in ssh sshd; do
+        if systemctl is-active --quiet "$svc" 2>/dev/null; then
+            if systemctl reload-or-restart "$svc" 2>/dev/null; then
+                act "reloaded $svc.service (existing sessions are kept)"
+            else
+                warn "could not reload $svc.service: run 'systemctl reload $svc'"
+            fi
+            return 0
+        fi
+    done
+    warn "No active ssh/sshd service: the new configuration applies when sshd"
+    warn "next starts (at once, per connection, on a socket-activated sshd)."
+}
+
+do_units() {
+    local u out f
+    have_systemctl || { warn "systemctl not available: disable ${UNITS[*]} yourself"; return 0; }
+    for u in "${UNITS[@]}"; do
+        if out=$(systemctl disable --now "$u" 2>&1); then
+            act "disabled and stopped $u"
+        else
+            case "$out" in
+                *"not found"*|*"does not exist"*|*"No such file"*|*"not loaded"*) ;;
+                *) warn "could not disable $u: $out" ;;
+            esac
+        fi
+    done
+    [ "${#TIMER_DROPINS[@]}" -gt 0 ] || return 0
+    for f in "${TIMER_DROPINS[@]}"; do
+        remove_file "$f"
+        rmdir "$(dirname "$(P "$f")")" 2>/dev/null || true
+    done
+    if systemctl daemon-reload 2>/dev/null; then
+        act "reloaded systemd (the timers' schedule drop-ins are gone)"
+    else
+        warn "systemctl daemon-reload failed: run it yourself"
+    fi
+}
+
+do_hardening() {
+    local f state
+    [ "$HARDENING" = "true" ] || return 0
+    remove_file "$HARDENING_LOGIND"
+    remove_file "$HARDENING_LIMITS"
+    for f in "${ALLOW_REMOVE[@]}"; do remove_file "$f" "identical to the template"; done
+    have_systemctl || { warn "systemctl not available: unmask atd and reload systemd-logind yourself"; return 0; }
+    state=$(systemctl is-enabled atd 2>/dev/null || true)
+    if [ "$state" = "masked" ]; then
+        if systemctl unmask atd >/dev/null 2>&1; then
+            act "unmasked atd (setup_hardening masks it; if you had masked it yourself, mask it again)"
+            if systemctl is-enabled --quiet atd 2>/dev/null; then
+                systemctl start atd 2>/dev/null || warn "could not start atd"
+            fi
+        else
+            warn "could not unmask atd: run 'systemctl unmask atd'"
+        fi
+    fi
+    # Never restart logind: it would end every session, this one included.
+    if systemctl reload systemd-logind 2>/dev/null; then
+        act "reloaded systemd-logind"
+    else
+        warn "could not reload systemd-logind: run 'systemctl reload systemd-logind'"
+    fi
+}
+
+do_audit() {
+    local f
+    [ "${#AUDIT_REMOVE[@]}" -gt 0 ] || return 0
+    for f in "${AUDIT_REMOVE[@]}"; do remove_file "$f"; done
+    if command -v augenrules >/dev/null 2>&1; then
+        if augenrules --load >/dev/null 2>&1; then
+            act "reloaded the audit rules"
+        else
+            warn "augenrules --load failed; check 'augenrules --check'"
+        fi
+    else
+        warn "augenrules not found: reload the audit rules yourself"
+    fi
+    if have_systemctl && systemctl is-active --quiet auditd 2>/dev/null; then
+        systemctl restart auditd 2>/dev/null || warn "could not restart auditd"
+    fi
+    return 0
+}
+
+# Caches are purged, not backed up: derived data, and the offline cache
+# holds credentials. Their directories stay; some belong to the package.
+do_files() {
+    local f d
+    for f in "${LEGACY_CRON_REMOVE[@]}"; do remove_file "$f" "legacy cron job"; done
+    for f in "${KRL_REMOVE[@]}"; do remove_file "$f"; done
+    for f in "${GEN_REMOVE[@]}"; do remove_file "$f"; done
+    for d in "${CACHE_DIRS[@]}"; do
+        [ -d "$(P "$d")" ] || continue
+        if [ -n "$(find "$(P "$d")" -mindepth 1 ! -type d -print -quit 2>/dev/null)" ]; then
+            find "$(P "$d")" -mindepth 1 ! -type d -delete
+            act "purged $d"
+        fi
+    done
+}
+
+REVOKE_RESULT=""
+REVOKE_CODE=""
+
+# The tokens and the client secret never reach a command line (/proc is
+# world-readable): printf is a builtin, the rest goes through pipes. The
+# secret is never sent: a confidential client uses a client_secret_jwt
+# assertion (aud = the token endpoint; LLNG only checks aud is present).
+# LLNG reads token_hint, RFC 7009 says token_type_hint. The portal answers
+# 200 even for a token it does not know.
+REVOKE_OK=0
+REVOKE_FAIL=0
+
+client_assertion() {
+    printf '%s' "$CLIENT_SECRET" \
+        | ob-client-jwt --client-id "$CLIENT_ID" --audience "$PORTAL_URL/oauth2/token"
+}
+
+revoke_one() {
+    local token="$1" hint="$2" url="$PORTAL_URL/oauth2/revoke" jwt="" code
+    local -a opts
+    if [ -n "$CLIENT_SECRET" ]; then
+        jwt=$(client_assertion) || return 1
+        [ -n "$jwt" ] || return 1
+    fi
+    opts=(-sS -f --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}'
+          -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @-)
+    [ "$VERIFY_SSL" = "false" ] && opts+=(-k)
+    code=$(printf '%s\n%s\n%s\n%s\n' "$token" "$hint" "$CLIENT_ID" "$jwt" \
+           | jq -R -r -j -n '[inputs] as [$t, $h, $c, $a]
+               | "token=\($t | @uri)&token_hint=\($h)&token_type_hint=\($h)"
+                 + "&client_id=\($c | @uri)"
+                 + (if ($a // "") != "" then
+                      "&client_assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer"
+                      + "&client_assertion=\($a | @uri)"
+                    else "" end)' \
+           | curl "${opts[@]}" "$url" 2>/dev/null) || { REVOKE_CODE="${code:-none}"; return 1; }
+    REVOKE_CODE="$code"
+}
+
+revoke_tokens() {
+    local tok rt at part
+    tok=$(P "$TOKEN_FILE_L")
+    if [ -n "$CLIENT_SECRET" ] && ! command -v ob-client-jwt >/dev/null 2>&1; then
+        REVOKE_RESULT="not revoked: ob-client-jwt is missing (the client secret is never sent as is)"
+        return 1
+    fi
+    rt=$(jq -r '.refresh_token // empty' "$tok" 2>/dev/null || true)
+    at=$(jq -r '.access_token // empty' "$tok" 2>/dev/null || true)
+    if [ -z "$rt" ] && [ -z "$at" ]; then
+        REVOKE_RESULT="not revoked: no refresh_token or access_token in $TOKEN_FILE_L"
+        return 1
+    fi
+    REVOKE_RESULT=""
+    for part in "refresh_token:$rt" "access_token:$at"; do
+        [ -n "${part#*:}" ] || continue
+        if revoke_one "${part#*:}" "${part%%:*}"; then
+            REVOKE_OK=$((REVOKE_OK + 1))
+            REVOKE_RESULT="$REVOKE_RESULT ${part%%:*}: request accepted (HTTP $REVOKE_CODE);"
+        else
+            REVOKE_FAIL=$((REVOKE_FAIL + 1))
+            REVOKE_RESULT="$REVOKE_RESULT ${part%%:*}: FAILED (HTTP $REVOKE_CODE);"
+        fi
+    done
+    REVOKE_RESULT="${REVOKE_RESULT# }"
+    REVOKE_RESULT="${REVOKE_RESULT%;}"
+    [ "$REVOKE_FAIL" -eq 0 ]
+}
+
+do_token() {
+    local tok
+    tok=$(P "$TOKEN_FILE_L")
+    if [ ! -e "$tok" ]; then
+        REVOKE_RESULT="no server token on this host"
+        return 0
+    fi
+    if [ "$NO_REVOKE" = "true" ]; then
+        REVOKE_RESULT="not revoked (--no-revoke)"
+    elif [ -z "$PORTAL_URL" ]; then
+        REVOKE_RESULT="not revoked: no portal_url was configured"
+    elif ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+        REVOKE_RESULT="not revoked: jq or curl is missing"
+    elif revoke_tokens; then
+        act "revocation $REVOKE_RESULT"
+        info "The portal answers 200 even for a token it does not know: this confirms"
+        info "the request was accepted, not that a live token was dropped."
+    fi
+    if [ "$REVOKE_OK" -eq 0 ] || [ "$REVOKE_FAIL" -gt 0 ]; then
+        warn "Server token revocation: $REVOKE_RESULT."
+        warn "It is deleted locally below but may still be valid at the portal:"
+        warn "revoke it, or delete this host's device entry, in the LLNG Manager."
+    fi
+    # Never backed up: a live credential would outlive the host in the backup.
+    rm -f "$tok"
+    act "deleted $TOKEN_FILE_L (not backed up: it is a credential)"
+}
+
+EXECUTING=true
+do_sshd
+do_pam
+do_sudo
+do_nss
+do_units
+do_hardening
+do_audit
+do_files
+do_token
+
+# A stack still loading the module refuses every login once the package
+# is gone.
+RESIDUAL=()
+for f in "$(P "$PAM_DIR")"/*; do
+    [ -f "$f" ] || continue
+    pam_dirty "$f" && RESIDUAL+=("${f#"$OB_ROOT"}")
+done
+
+echo
+echo "Open Bastion has been removed from this host's configuration ($CHANGED change(s))."
+echo
+echo "  Backup of everything removed or rewritten: $BACKUP_DIR_L"
+if [ -d "$(P "$SESSIONS_DIR")" ]; then
+    echo "  Session recordings (kept):                 $SESSIONS_DIR"
+fi
+echo "  Server token:                              $REVOKE_RESULT"
+remaining=$(cd "$(P "$OB_ETC")" 2>/dev/null \
+            && find . -mindepth 1 -maxdepth 1 ! -name '*.example' -printf '%P ' 2>/dev/null || true)
+if [ -n "$remaining" ]; then
+    echo "  Left in $OB_ETC:                   ${remaining% }"
+fi
+# The setup's backups keep openbastion.conf in clear: report, never delete.
+SECRET_BACKUPS=()
+for f in "$(P "$SETUP_BACKUP_PARENT")"/open-bastion-setup-*/openbastion.conf; do
+    [ -f "$f" ] || continue
+    grep -qE "^[[:space:]]*($SECRET_KEYS_RE)[[:space:]]*=[[:space:]]*[^[:space:]]" "$f" 2>/dev/null \
+        && SECRET_BACKUPS+=("${f#"$OB_ROOT"}")
+done
+
+echo
+echo "Still to do by hand:"
+echo "  - In the LLNG Manager: delete this host's device entry. Leave"
+echo "    pamAccessServerGroups alone: it is keyed by the project's client_id,"
+echo "    which every host of the project shares."
+case "$ROLE" in
+    bastion|standalone)
+        echo "  - On every backend: remove this bastion's id from"
+        echo "    $OB_ETC/allowed_bastions." ;;
+esac
+echo "  - SSO users' home directories under /home were kept; archive or delete them."
+if [ "${#SECRET_BACKUPS[@]}" -gt 0 ]; then
+    echo "  - These setup backups still hold the project's client secret in clear;"
+    echo "    shred them once you no longer need them (shred -u <file>):"
+    for f in "${SECRET_BACKUPS[@]}"; do echo "      $f"; done
+fi
+echo "  - Check that a local account can log in (console at hand) before closing"
+echo "    this session."
+if [ -d "$(P "$SESSIONS_DIR")" ]; then
+    echo
+    warn "\`apt purge open-bastion\` currently deletes /var/lib/open-bastion, recordings"
+    warn "included. Move $SESSIONS_DIR somewhere safe first if you need it."
+fi
+echo
+echo "Then remove the package:"
+if [ -d "$(P /var/lib/dpkg)" ] || command -v dpkg >/dev/null 2>&1; then
+    echo "    apt purge open-bastion"
+else
+    echo "    dnf remove open-bastion"
+fi
+
+if [ "${#RESIDUAL[@]}" -gt 0 ]; then
+    echo
+    error "These PAM stacks still load pam_openbastion and were not reverted:"
+    for f in "${RESIDUAL[@]}"; do error "    $f"; done
+    error "They will refuse every login once the package is removed. A display"
+    error "manager configured by ob-desktop-setup is the usual cause: restore"
+    error "its stack by hand before removing the package."
+    RESIDUAL_EXIT=true
+    exit 2
+fi
+exit 0

@@ -583,3 +583,55 @@ suite   || tests/test_ob_record_sink.sh
 why     || #287: the ACK read must have a deadline; the transfer path runs the
 why     || connector synchronously, so a sink that accepts but never answers
 why     || would hang the transfer forever.
+
+id      || uninstall-sshd-rollback
+file    || scripts/ob-uninstall
+search  || rollback_sshd\n        error "The sshd files were put back
+replace || :\n        error "The sshd files were put back
+suite   || tests/test_ob_uninstall.sh
+why     || #298: when sshd rejects its configuration without our drop-ins, they
+why     || must go back before anything else is touched. Otherwise the next
+why     || reload leaves a host that refuses every SSH connection.
+
+id      || uninstall-lockout-guard
+file    || scripts/ob-uninstall
+search  || lockout_check\nplan_sshd
+replace || plan_sshd
+suite   || tests/test_ob_uninstall.sh
+why     || #298: an SSO-only user running the command through sudo removes the
+why     || only things that let them back in (NSS source, PAM stack, trusted CA).
+
+id      || uninstall-secret-off-argv
+file    || scripts/ob-uninstall
+search  || -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @-)
+replace || -H 'Content-Type: application/x-www-form-urlencoded' -H "X-Leak: $CLIENT_SECRET" --data-binary @-)
+suite   || tests/test_ob_uninstall.sh
+why     || #298, #256: the token revocation must send the client secret and the
+why     || refresh token on curl's stdin; argv is world-readable in /proc.
+
+id      || uninstall-lockout-create-user-range
+file    || scripts/ob-uninstall
+search  || if [ "$uid" -ge "$min" ] 2>/dev/null && [ "$uid" -le "$max" ] 2>/dev/null; then
+replace || if false; then
+suite   || tests/test_ob_uninstall.sh
+why     || #298: on a backend, create_user writes SSO users into
+why     || /etc/passwd with a locked password. "Not in /etc/passwd" misses them;
+why     || the NSS uid range is what gives them away.
+
+id      || uninstall-sshd-before-pam
+file    || scripts/ob-uninstall
+search  || do_sshd\ndo_pam\n
+replace || do_pam\ndo_sshd\n
+suite   || tests/test_ob_uninstall.sh
+why     || #298: sshd must stop trusting the LLNG CA (drop-ins gone, CA
+why     || key removed, reload) before the PAM stack stops calling /pam/authorize,
+why     || or an SSO certificate is accepted with no authorization check at all.
+
+id      || uninstall-sudoers-header-anywhere
+file    || scripts/ob-uninstall
+search  || elif grep -qxE "$SUDOERS_MARK_RE" "$(P "$SUDOERS_FILE")"; then
+replace || elif head -n 1 "$(P "$SUDOERS_FILE")" | grep -qxE "$SUDOERS_MARK_RE"; then
+suite   || tests/test_ob_uninstall.sh
+why     || #298: a --enable-sudo-fresh-otp re-run prepends its Defaults
+why     || line, so our header is no longer on line 1 and the rule granting
+why     || %open-bastion-sudo would outlive the uninstall.
