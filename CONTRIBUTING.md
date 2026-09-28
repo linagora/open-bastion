@@ -14,6 +14,20 @@ The HTML documentation builds with `-DBUILD_DOC=ON` and the `doc` target.
 [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for what
 CI runs.
 
+To build Debian packages from the working tree, use `scripts/build-dev-deb`
+(it passes its arguments to `dpkg-buildpackage`, default `-us -uc -b`). The
+packages get the version `0.<build time>~<git describe>`, for example
+`0.1790323200~0.6.3.200.ge546ab3`, with a `.dirty` suffix when the tree has
+uncommitted changes. Two dev builds, or a dev build and a release, can then be
+told apart in `dpkg -l`, and a newer build installs as an upgrade.
+`debian/changelog` is modified only during the build and restored afterwards,
+including on failure. Release packages are still built with a plain
+`dpkg-buildpackage` and keep the `debian/changelog` version.
+
+Until 1.0, a dev build sorts above every release: `apt upgrade` does not bring
+a host back from a dev build to a release. Force it with
+`apt install open-bastion=<version> --allow-downgrades`.
+
 ## Code comments
 
 - Comment only unconventional or tricky code: a non-obvious

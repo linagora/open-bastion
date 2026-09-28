@@ -1,0 +1,39 @@
+#!/bin/bash
+#
+# build-dev-deb - build the Debian packages from the working tree with a
+# development version, 0.<build time>~<git describe>. See CONTRIBUTING.md.
+#
+# Usage: scripts/build-dev-deb [dpkg-buildpackage options]
+#        (default options: -us -uc -b)
+
+set -euo pipefail
+
+root=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
+cd "$root"
+
+# Before debian/changelog is touched, or every build would be "dirty".
+describe=$(git describe --tags --always --dirty)
+describe=${describe#v}
+describe=$(printf '%s' "$describe" | tr -c 'A-Za-z0-9.+~' '.' | tr 'A-Z' 'a-z')
+version="0.$(date +%s)~$describe"
+
+source=$(dpkg-parsechangelog -S Source)
+maintainer=$(dpkg-parsechangelog -S Maintainer)
+
+# A copy, not "git checkout": uncommitted edits to the changelog survive.
+backup=$(mktemp)
+cp -p debian/changelog "$backup"
+trap 'cp -p "$backup" debian/changelog; rm -f "$backup"' EXIT
+trap 'exit 1' HUP INT TERM
+
+{
+    printf '%s (%s) UNRELEASED; urgency=medium\n\n' "$source" "$version"
+    printf '  * Development build from %s.\n\n' "$describe"
+    printf ' -- %s  %s\n\n' "$maintainer" "$(date -R)"
+    cat "$backup"
+} > debian/changelog
+
+[ $# -gt 0 ] || set -- -us -uc -b
+echo "Building $source $version"
+dpkg-buildpackage "$@"
+echo "Built $source $version in $(dirname "$root")"
