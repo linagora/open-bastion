@@ -229,6 +229,31 @@ Line by line, and why each matters:
 
    **``ssh_cert_aware=true`` is currently a no-op.** The setup script passes it, for every role, as a module argument, but no code reads it: PAM module arguments of the form ``key=value`` are handed to ``config_parse_args()`` → ``parse_line()``, whose final branch silently ignores unknown keys (``src/config.c``). Nothing in ``src/`` mentions ``ssh_cert_aware``. Keep it or drop it as you like — it changes no behaviour today. This is tracked as a code cleanup, not a configuration knob; do not document it as one.
 
+PAM Configuration for systemd-user
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``user@.service`` authenticates through the ``systemd-user`` PAM service, whose distro ``account`` phase is ``pam_unix`` — it has no shadow entry to check for an NSS-only SSO user and refuses it. ``ob-bastion-setup`` inserts a bridge before the first ``account`` line, without regenerating the rest of the file (#296):
+
+::
+
+   account    [success=1 default=ignore]  pam_localuser.so
+   account    sufficient                  pam_unix.so broken_shadow
+
+Local users keep the unmodified distro stack; SSO users go through ``pam_unix broken_shadow``, which still requires NSS resolution.
+
+Since Debian trixie, systemd ships this file only as ``/usr/lib/pam.d/systemd-user`` (the Linux-PAM vendor directory, read when ``/etc/pam.d`` has no file of that name). There, ``ob-bastion-setup`` creates ``/etc/pam.d/systemd-user`` holding the bridge followed by an ``include`` of the vendor file for each module type, so later systemd updates to the vendor file still take effect:
+
+::
+
+   account    [success=1 default=ignore]  pam_localuser.so
+   account    sufficient                  pam_unix.so broken_shadow
+   account    include                     /usr/lib/pam.d/systemd-user
+   auth       include                     /usr/lib/pam.d/systemd-user
+   password   include                     /usr/lib/pam.d/systemd-user
+   session    include                     /usr/lib/pam.d/systemd-user
+
+The per-type ``include`` form is portable; ``@include`` is a Debian-only extension. Deleting ``/etc/pam.d/systemd-user`` restores the vendor stack.
+
 PAM Configuration for sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

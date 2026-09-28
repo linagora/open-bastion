@@ -105,6 +105,11 @@ here.
 
 ### Fixed
 
+- **NSS-only SSO users can start `user@.service`** (#296).  The user session
+  bus never came up since systemd-user PAM service expects a shadow
+  entry an NSS-only SSO user didn't have. `ob-bastion-setup` now inserts
+  a small `account` bridge ahead of the distro stack in
+  `/etc/pam.d/systemd-user`.
 - **The SSH fingerprint is deposited again on every login** (#296).
   `ob-fp-daemon` refused each deposit with "sshd anchor … is owned by uid
   65534". The daemon and `pam_openbastion` now share one check on
