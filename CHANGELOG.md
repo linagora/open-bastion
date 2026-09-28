@@ -105,6 +105,11 @@ here.
 
 ### Fixed
 
+- **The SSH fingerprint is deposited again on every login** (#296).
+  `ob-fp-daemon` refused each deposit with "sshd anchor … is owned by uid
+  65534". The daemon and `pam_openbastion` now share one check on
+  the anchor's **real** uid, which stays root there and is still the user's on
+  a renamed process.
 - **Setup script** (#288):
   - the audit-trace summary reports what was actually applied;
   - a backend configures NSS with the lockdown, so a rolled-back run no longer

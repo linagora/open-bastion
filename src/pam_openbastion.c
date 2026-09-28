@@ -1813,8 +1813,10 @@ static char *read_spool_drop(pam_handle_t *pamh, const char *suffix,
      * can set its own name: prctl(PR_SET_NAME) takes 15 characters and
      * "sshd-session" is twelve. So a local user can put a process called
      * sshd-session in the ancestry of their own sudo and choose which drop
-     * this code reads. Require the anchor to be a live process owned by root,
-     * which sshd's per-connection monitor is and a user's own process is not.
+     * this code reads. Require the anchor's REAL uid to be root, which sshd's
+     * per-connection monitor's is and a user's own process's is not. Same
+     * rule, same function as ob-fp-daemon (not the effective uid: see
+     * ob_sshd_anchor_owner_ok_in()).
      *
      * This does not make the spool trustworthy on its own -- see the comment
      * on the directory ownership below -- but it removes the half of the forge
@@ -1822,16 +1824,24 @@ static char *read_spool_drop(pam_handle_t *pamh, const char *suffix,
      */
     char anchor_path[64];
     snprintf(anchor_path, sizeof(anchor_path), "/proc/%d", (int)anchor);
-    struct stat anchor_st;
+    struct stat anchor_st;  /* its mtime dates the anchor, for the stale check */
     if (stat(anchor_path, &anchor_st) != 0) {
         OB_LOG_DEBUG(pamh, "SSH fp spool: anchor %d is gone", (int)anchor);
         return NULL;
     }
-    if (anchor_st.st_uid != 0) {
+    uid_t anchor_ruid = 0;
+    int owner = ob_sshd_anchor_owner_ok(anchor, 0, &anchor_ruid);
+    if (owner < 0) {
         OB_LOG_ERR(pamh,
-                   "SSH fp spool: anchor %d is owned by uid %u, not root — "
+                   "SSH fp spool: cannot read the real uid of anchor %d — "
+                   "refusing to read a drop keyed on it", (int)anchor);
+        return NULL;
+    }
+    if (owner == 0) {
+        OB_LOG_ERR(pamh,
+                   "SSH fp spool: anchor %d has real uid %u, not root — "
                    "refusing to read a drop keyed on it",
-                   (int)anchor, (unsigned)anchor_st.st_uid);
+                   (int)anchor, (unsigned)anchor_ruid);
         return NULL;
     }
 

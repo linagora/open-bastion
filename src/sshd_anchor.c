@@ -9,6 +9,7 @@
  * program rather than of two comments.
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,4 +92,63 @@ pid_t ob_find_sshd_anchor_in(const char *proc_root, pid_t pid)
 pid_t ob_find_sshd_anchor(pid_t pid)
 {
     return ob_find_sshd_anchor_in("/proc", pid);
+}
+
+/* One decimal uid at *p, advancing past it. Strict: no sign, no overflow. */
+static int parse_uid_field(const char **p, uid_t *out)
+{
+    const char *s = *p;
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s < '0' || *s > '9') return -1;
+    errno = 0;
+    char *end;
+    unsigned long v = strtoul(s, &end, 10);
+    if (errno != 0 || (uid_t)v != v || (uid_t)v == (uid_t)-1) return -1;
+    *out = (uid_t)v;
+    *p = end;
+    return 0;
+}
+
+int ob_sshd_anchor_owner_ok_in(const char *proc_root, pid_t pid,
+                               uid_t priv_uid, uid_t *ruid_out)
+{
+    char path[ANCHOR_PATH_MAX], line[256];
+    int n = snprintf(path, sizeof(path), "%s/%d/status", proc_root, (int)pid);
+    if (pid <= 0 || n < 0 || n >= (int)sizeof(path)) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;  /* errno from fopen: ENOENT/ESRCH when gone */
+
+    /* Real, effective, saved, filesystem: all four must parse. */
+    uid_t ids[4];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Uid:", 4) != 0) continue;
+        const char *p = line + 4;
+        found = 1;
+        for (int i = 0; i < 4; i++) {
+            if (parse_uid_field(&p, &ids[i]) != 0) {
+                found = 0;
+                break;
+            }
+        }
+        if (found && *p != '\n' && *p != '\0') found = 0;
+        break;
+    }
+    fclose(f);
+    if (!found) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ruid_out) *ruid_out = ids[0];
+    return ids[0] == priv_uid ? 1 : 0;
+}
+
+int ob_sshd_anchor_owner_ok(pid_t pid, uid_t priv_uid, uid_t *ruid_out)
+{
+    return ob_sshd_anchor_owner_ok_in("/proc", pid, priv_uid, ruid_out);
 }
