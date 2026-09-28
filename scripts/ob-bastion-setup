@@ -77,6 +77,8 @@ PAM_SUDO="/etc/pam.d/sudo"
 PAM_SUDO_I="/etc/pam.d/sudo-i"
 # Patched in place, not regenerated: see configure_pam_systemd_user.
 PAM_SYSTEMD_USER="/etc/pam.d/systemd-user"
+# Where systemd ships it since Debian trixie; /etc/pam.d/systemd-user overrides it.
+PAM_SYSTEMD_USER_VENDOR="/usr/lib/pam.d/systemd-user"
 NSSWITCH_CONF="/etc/nsswitch.conf"
 NSS_OB_CONF="/etc/open-bastion/nss_openbastion.conf"
 SHELLS_FILE="/etc/shells"
@@ -621,12 +623,22 @@ _OB_SYSTEMD_USER_MARK="# Open Bastion: NSS-only SSO account bridge for systemd-u
 # The distro's account stack (pam_unix) refuses users with no shadow entry,
 # so NSS-only SSO users could not start user@.service. The bridge goes ahead
 # of it; local users are unaffected.
+#
+# Since Debian trixie, systemd ships the file only in the vendor directory
+# (/usr/lib/pam.d), which Linux-PAM reads when /etc/pam.d has no file of that
+# name. There the bridge goes into a new /etc/pam.d file that includes the
+# vendor one by absolute path, so later systemd updates still apply. The
+# per-type "include" form is used because "@include" is a Debian-only patch.
 configure_pam_systemd_user() {
     step "Configuring PAM for systemd-user (NSS-only SSO users)..."
 
+    local src="$PAM_SYSTEMD_USER"
     if [ ! -f "$PAM_SYSTEMD_USER" ]; then
-        info "$PAM_SYSTEMD_USER not found (non-systemd host); skipping"
-        return 0
+        if [ ! -f "$PAM_SYSTEMD_USER_VENDOR" ]; then
+            info "Neither $PAM_SYSTEMD_USER nor $PAM_SYSTEMD_USER_VENDOR found (non-systemd host); skipping"
+            return 0
+        fi
+        src="$PAM_SYSTEMD_USER_VENDOR"
     fi
 
     if grep -qF "$_OB_SYSTEMD_USER_MARK" "$PAM_SYSTEMD_USER" 2>/dev/null; then
@@ -636,10 +648,10 @@ configure_pam_systemd_user() {
 
     local line
     line=$(grep -nE '^[[:space:]]*(account[[:space:]]|@include[[:space:]]+common-account([[:space:]]|$))' \
-           "$PAM_SYSTEMD_USER" | head -1 | cut -d: -f1)
+           "$src" | head -1 | cut -d: -f1)
 
     if [ -z "$line" ]; then
-        warn "No 'account' line found in $PAM_SYSTEMD_USER; leaving it unmodified"
+        warn "No 'account' line found in $src; leaving it unmodified"
         return 0
     fi
 
@@ -647,6 +659,23 @@ configure_pam_systemd_user() {
 # Local users take the stack below unchanged; others fall to pam_unix broken_shadow.
 account    [success=1 default=ignore]  pam_localuser.so
 account    sufficient                  pam_unix.so broken_shadow"
+
+    if [ "$src" = "$PAM_SYSTEMD_USER_VENDOR" ]; then
+        local t
+        for t in account auth password session; do
+            block="$block
+$(printf '%-10s include                     %s' "$t" "$PAM_SYSTEMD_USER_VENDOR")"
+        done
+        if [ "$DRY_RUN" = "true" ]; then
+            info "[DRY-RUN] Would create $PAM_SYSTEMD_USER (overriding $PAM_SYSTEMD_USER_VENDOR):"
+            echo "$block"
+            return 0
+        fi
+        printf '%s\n' "$block" > "$PAM_SYSTEMD_USER"
+        chmod 644 "$PAM_SYSTEMD_USER"
+        info "Created $PAM_SYSTEMD_USER for NSS-only SSO users (includes $PAM_SYSTEMD_USER_VENDOR)"
+        return 0
+    fi
 
     if [ "$DRY_RUN" = "true" ]; then
         info "[DRY-RUN] Would insert before line $line of $PAM_SYSTEMD_USER:"

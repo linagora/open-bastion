@@ -54,6 +54,7 @@ test_insert_before_debian_include() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user 2>&1
     )
     local rc=$?
@@ -86,6 +87,7 @@ test_insert_before_rhel_account_line() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user 2>&1
     )
     local rc=$?
@@ -117,6 +119,7 @@ test_idempotent_second_run() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user >/dev/null 2>&1
         configure_pam_systemd_user >/dev/null 2>&1
     )
@@ -129,6 +132,7 @@ test_idempotent_second_run() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user 2>&1
     )
 
@@ -150,15 +154,19 @@ test_missing_file_skipped() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/does-not-exist"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user 2>&1
     )
     local rc=$?
 
+    local created=false
+    [ -e "$sandbox/does-not-exist" ] && created=true
+
     rm -rf "$sandbox"
-    if [ $rc -eq 0 ] && echo "$out" | grep -qi "not found"; then
-        pass "configure_pam_systemd_user skips a missing systemd-user file"
+    if [ $rc -eq 0 ] && ! $created && echo "$out" | grep -qi "non-systemd host"; then
+        pass "configure_pam_systemd_user skips when neither /etc nor vendor file exists"
     else
-        fail "configure_pam_systemd_user skips a missing systemd-user file" "rc=$rc out=$out"
+        fail "configure_pam_systemd_user skips when neither /etc nor vendor file exists" "rc=$rc created=$created out=$out"
     fi
 }
 
@@ -175,6 +183,7 @@ test_no_account_line_unchanged() {
         DRY_RUN=false
         BACKUP_DIR="$sandbox/backup"
         PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
         configure_pam_systemd_user 2>&1
     )
     local rc=$?
@@ -188,6 +197,118 @@ test_no_account_line_unchanged() {
     fi
 }
 
+# Vendor file as shipped by systemd on Debian trixie (/usr/lib/pam.d).
+VENDOR_SAMPLE='# This file is part of systemd.
+@include common-account
+
+session  required pam_limits.so
+@include common-session-noninteractive
+session  optional pam_systemd.so
+'
+
+# ── Test 6: only the vendor file exists -> /etc override includes it ──
+test_vendor_only_creates_override() {
+    local sandbox out
+    sandbox=$(mktemp -d)
+    printf '%s' "$VENDOR_SAMPLE" > "$sandbox/vendor-systemd-user"
+
+    out=$(
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        BACKUP_DIR="$sandbox/backup"
+        PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
+        configure_pam_systemd_user 2>&1
+    )
+    local rc=$?
+
+    local ok=true vendor_after
+    vendor_after=$(cat "$sandbox/vendor-systemd-user")
+    [ "$vendor_after" = "${VENDOR_SAMPLE%$'\n'}" ] || ok=false
+    local f="$sandbox/systemd-user"
+    [ -f "$f" ] || ok=false
+    # Bridge first, then one include of the vendor file per module type,
+    # by absolute path ("@include" is Debian-only).
+    local bridge_line include_line t
+    bridge_line=$(grep -n "pam_unix.so broken_shadow" "$f" | head -1 | cut -d: -f1)
+    include_line=$(grep -nE "^account +include +$sandbox/vendor-systemd-user\$" "$f" | head -1 | cut -d: -f1)
+    [ -n "$bridge_line" ] && [ -n "$include_line" ] && [ "$bridge_line" -lt "$include_line" ] || ok=false
+    for t in account auth password session; do
+        [ "$(grep -cE "^$t +include +$sandbox/vendor-systemd-user\$" "$f")" -eq 1 ] || ok=false
+    done
+    grep -q '@include' "$f" && ok=false
+    [ "$(stat -c %a "$f")" = "644" ] || ok=false
+
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ] && $ok; then
+        pass "configure_pam_systemd_user creates an /etc override including the vendor file"
+    else
+        fail "configure_pam_systemd_user creates an /etc override including the vendor file" "rc=$rc out=$out"
+    fi
+}
+
+# ── Test 7: vendor-only case is idempotent (override not stacked) ──
+test_vendor_only_idempotent() {
+    local sandbox out2
+    sandbox=$(mktemp -d)
+    printf '%s' "$VENDOR_SAMPLE" > "$sandbox/vendor-systemd-user"
+
+    (
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        BACKUP_DIR="$sandbox/backup"
+        PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
+        configure_pam_systemd_user >/dev/null 2>&1
+    )
+    local before
+    before=$(cat "$sandbox/systemd-user")
+
+    out2=$(
+        source_script "ob-bastion-setup"
+        DRY_RUN=false
+        BACKUP_DIR="$sandbox/backup"
+        PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
+        configure_pam_systemd_user 2>&1
+    )
+    local after
+    after=$(cat "$sandbox/systemd-user")
+
+    rm -rf "$sandbox"
+    if [ "$before" = "$after" ] && echo "$out2" | grep -qi "already configured"; then
+        pass "configure_pam_systemd_user vendor-only case is idempotent"
+    else
+        fail "configure_pam_systemd_user vendor-only case is idempotent" "out2=$out2"
+    fi
+}
+
+# ── Test 8: dry-run on vendor-only host writes nothing ──
+test_vendor_only_dry_run() {
+    local sandbox out
+    sandbox=$(mktemp -d)
+    printf '%s' "$VENDOR_SAMPLE" > "$sandbox/vendor-systemd-user"
+
+    out=$(
+        source_script "ob-bastion-setup"
+        DRY_RUN=true
+        BACKUP_DIR="$sandbox/backup"
+        PAM_SYSTEMD_USER="$sandbox/systemd-user"
+        PAM_SYSTEMD_USER_VENDOR="$sandbox/vendor-systemd-user"
+        configure_pam_systemd_user 2>&1
+    )
+    local rc=$?
+    local created=false
+    [ -e "$sandbox/systemd-user" ] && created=true
+
+    rm -rf "$sandbox"
+    if [ $rc -eq 0 ] && ! $created && echo "$out" | grep -q "Would create"; then
+        pass "configure_pam_systemd_user dry-run writes no override"
+    else
+        fail "configure_pam_systemd_user dry-run writes no override" "rc=$rc created=$created out=$out"
+    fi
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-bastion-setup systemd-user PAM bridge (#296) ==="
 run_test test_insert_before_debian_include
@@ -195,6 +316,9 @@ run_test test_insert_before_rhel_account_line
 run_test test_idempotent_second_run
 run_test test_missing_file_skipped
 run_test test_no_account_line_unchanged
+run_test test_vendor_only_creates_override
+run_test test_vendor_only_idempotent
+run_test test_vendor_only_dry_run
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

@@ -241,6 +241,19 @@ PAM Configuration for systemd-user
 
 Local users keep the unmodified distro stack; SSO users go through ``pam_unix broken_shadow``, which still requires NSS resolution.
 
+Since Debian trixie, systemd ships this file only as ``/usr/lib/pam.d/systemd-user`` (the Linux-PAM vendor directory, read when ``/etc/pam.d`` has no file of that name). There, ``ob-bastion-setup`` creates ``/etc/pam.d/systemd-user`` holding the bridge followed by an ``include`` of the vendor file for each module type, so later systemd updates to the vendor file still take effect:
+
+::
+
+   account    [success=1 default=ignore]  pam_localuser.so
+   account    sufficient                  pam_unix.so broken_shadow
+   account    include                     /usr/lib/pam.d/systemd-user
+   auth       include                     /usr/lib/pam.d/systemd-user
+   password   include                     /usr/lib/pam.d/systemd-user
+   session    include                     /usr/lib/pam.d/systemd-user
+
+The per-type ``include`` form is portable; ``@include`` is a Debian-only extension. Deleting ``/etc/pam.d/systemd-user`` restores the vendor stack.
+
 PAM Configuration for sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -105,7 +105,6 @@ here.
 
 ### Fixed
 
-
 - **NSS-only SSO users can start `user@.service`** (#296).  The user session
   bus never came up since systemd-user PAM service expects a shadow
   entry an NSS-only SSO user didn't have. `ob-bastion-setup` now inserts
