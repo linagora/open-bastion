@@ -19,6 +19,14 @@
 #   2. after ob-post-upgrade, it is not: root owns the spool, the helper
 #      deposits through ob-fp-submit, and nothing in openbastion.conf moved.
 #
+# The staged host records sessions, as a bastion set up by v0.6.2 does, which
+# is what #293 is about: its SSO users log in through bash, which reads their
+# own ~/.bashrc before the recorder. The package does not switch the users'
+# shell; ob-post-upgrade does, adding force_shell and nothing else to
+# nss_openbastion.conf. (What the postinst says about it is tested in
+# tests/test_ob_setup_login_shell.sh: this container has no package lists, so
+# the package is unpacked with `dpkg -i` and its postinst does not run here.)
+#
 # The old artefacts are not imitations: they are extracted from the v0.6.2 tag,
 # so the test keeps describing the version people are actually upgrading from.
 
@@ -97,6 +105,21 @@ chmod 0600 /run/open-bastion/ssh-fp/4242.fp
 chown -R nobody:nogroup /run/open-bastion/ssh-fp
 chmod 0700 /run/open-bastion/ssh-fp
 sha256sum /etc/open-bastion/openbastion.conf > /tmp/conf.sha
+# A recording bastion (#293): the ForceCommand in its drop-in (only that line:
+# the old AuthorizedPrincipalsCommand would make ob-post-upgrade stop), and the
+# NSS configuration v0.6.2 wrote, which hands SSO users bash.
+mkdir -p /etc/ssh/sshd_config.d
+printf 'ForceCommand /usr/sbin/ob-session-recorder\n' \
+    > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf
+cat > /etc/open-bastion/nss_openbastion.conf <<'NSS'
+portal_url = https://sso.example.com
+server_token_file = /var/lib/open-bastion/token
+cache_ttl = 300
+default_shell = /bin/bash
+home_base = /home
+NSS
+chmod 644 /etc/open-bastion/nss_openbastion.conf
+cp /etc/open-bastion/nss_openbastion.conf /tmp/nss.orig
 STAGE
 
 cat > "$WORK/run.sh" <<'RUNNER'
@@ -116,6 +139,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/new.deb >/dev/null 2>
 # 1. The package alone must NOT have migrated the host.
 echo "### after-package-owner: $(stat -c '%U' /run/open-bastion/ssh-fp)"
 echo "### after-package-helper-uses-sink: $(grep -c ob-fp-submit /usr/local/sbin/ob-ssh-principals || true)"
+echo "### after-package-force-shell: $(grep -c '^force_shell' /etc/open-bastion/nss_openbastion.conf || true)"
 
 # 2. Now the command.
 ob-post-upgrade >/tmp/opu.log 2>&1
@@ -127,6 +151,9 @@ echo "### after-opu-helper-uses-sink: $(grep -c ob-fp-submit /usr/local/sbin/ob-
 echo "### backup-kept: $(ls /usr/local/sbin/ | grep -c 'ob-ssh-principals.bak-' || true)"
 echo "### conf-unchanged: $(sha256sum -c /tmp/conf.sha >/dev/null 2>&1 && echo yes || echo NO)"
 echo "### old-drop-still-there: $([ -f /run/open-bastion/ssh-fp/4242.fp ] && echo yes || echo no)"
+echo "### after-opu-force-shell: $(sed -n 's/^force_shell = //p' /etc/open-bastion/nss_openbastion.conf)"
+echo "### nss-rest-kept: $(head -c "$(stat -c %s /tmp/nss.orig)" /etc/open-bastion/nss_openbastion.conf | cmp -s - /tmp/nss.orig && echo yes || echo NO)"
+echo "### login-shell-installed: $([ -x /usr/sbin/ob-login-shell ] && echo yes || echo no)"
 
 # 3. Idempotent.
 ob-post-upgrade >/tmp/opu2.log 2>&1
@@ -193,6 +220,21 @@ test_keeps_config_and_backup() {
     fi
 }
 
+# ── 4b. The SSO login shell of a recording bastion (#293) ───────────────────
+test_login_shell_switched() {
+    local bad=""
+    [ "$(field login-shell-installed)" = "yes" ]  || bad="$bad launcher-not-installed"
+    [ "$(field after-package-force-shell)" = "0" ] || bad="$bad package-switched-it-alone"
+    [ "$(field after-opu-force-shell)" = "/usr/sbin/ob-login-shell" ] \
+        || bad="$bad force_shell='$(field after-opu-force-shell)'"
+    [ "$(field nss-rest-kept)" = "yes" ]          || bad="$bad rest-of-nss-conf-changed"
+    if [ -z "$bad" ]; then
+        pass "a recording bastion: the package leaves the users' shell, ob-post-upgrade forces ob-login-shell"
+    else
+        fail "a recording bastion gets ob-login-shell as its SSO users' login shell" "$bad"
+    fi
+}
+
 # ── 5. Running it again changes nothing ─────────────────────────────────────
 test_idempotent() {
     if [ "$(field second-run-noop)" != "0" ]; then
@@ -230,6 +272,7 @@ run_test test_staged_host_is_old
 run_test test_package_alone_does_not_migrate
 run_test test_post_upgrade_migrates
 run_test test_keeps_config_and_backup
+run_test test_login_shell_switched
 run_test test_idempotent
 run_test test_legacy_portal_is_pinned
 

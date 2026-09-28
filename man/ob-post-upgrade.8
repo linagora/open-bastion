@@ -29,6 +29,28 @@ for exactly one value \(em
 .B node_role
 \(em to choose the bastion or the backend helper, and writes nothing to it.
 .PP
+On a bastion whose sshd forces sessions through
+.BR ob-session-recorder (8)
+(the
+.B ForceCommand
+of the setup's drop-in), it also makes
+.BR ob-login-shell (8)
+the login shell of SSO users: it adds
+.B force_shell = /usr/sbin/ob-login-shell
+to
+.I /etc/open-bastion/nss_openbastion.conf
+when that key is missing, lists the launcher in
+.IR /etc/shells ,
+and restarts
+.BR nscd (8)
+if it runs. Without it, sshd runs the recorder through bash or zsh, which read
+the user's own startup files first. Nothing else in that file changes, and a
+.B force_shell
+set to another value is left alone, with a warning. This too is derived from
+the host: the
+.B ForceCommand
+says it records.
+.PP
 It is idempotent. Run it as often as you like; on a host that is already
 current it reports that and changes nothing.
 .SH CRON JOBS OF 0.6
@@ -84,7 +106,9 @@ not the server token, not
 not any PAM stack. Those carry decisions \(em a server group, a mode, an
 .BI \-\-enable\- *
 flag \(em and a command that cannot know them must not guess. To change a
-decision, run the setup script.
+decision, run the setup script. The one key it may add to
+.I nss_openbastion.conf
+is described above.
 .SH OPTIONS
 .TP
 .B \-n, \-\-dry\-run
@@ -119,6 +143,7 @@ proves nothing.
 .BR ob-backend-setup (8),
 .BR ob-krl-refresh (8),
 .BR ob-fp-daemon (8),
-.BR ob-fp-submit (8)
+.BR ob-fp-submit (8),
+.BR ob-login-shell (8)
 .SH AUTHOR
 Linagora

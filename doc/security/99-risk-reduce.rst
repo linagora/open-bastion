@@ -318,6 +318,8 @@ Pistes pour réduire I à 1 :
 R-S21 *(P=1, I=2 si PR2 activée, sinon P=2, I=3)* - Action non capturée
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+**Livré (#293, MT23) — rien de l'utilisateur avant l'enregistreur.** sshd fait exécuter le ``ForceCommand`` par le shell de connexion, et ``bash`` (``SSH_SOURCE_BASHRC``) ou ``zsh`` lisaient les fichiers de démarrage de l'utilisateur avant l'enregistreur. Sur un hôte qui enregistre, le shell de connexion des utilisateurs SSO est désormais ``ob-login-shell``, qui ne lit rien de l'utilisateur et exécute directement l'enregistreur ; celui-ci lance ensuite le shell réel, enregistré. Voir la fiche R-S21 de :doc:`/security/02-ssh-connection`. Cette mesure ferme un vecteur ; elle ne change pas le score, qui porte sur les actions **pendant** la session.
+
 Pistes pour réduire I à 1 :
 
 1. **Forwarding remote-syslog des logs auditd** : ``audisp-syslog`` ou ``audisp-remote`` poussent les événements auditd vers un collecteur central (rsyslog, journald-remote, SIEM). Préserve la trace même en cas de compromission root du bastion. **Recommandation prioritaire** sur tout déploiement réel : sans collecteur distant, un attaquant root local peut effacer ``/var/log/audit/`` après ses méfaits.

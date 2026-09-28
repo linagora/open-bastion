@@ -275,6 +275,13 @@ NSS Configuration
    # default_gid with a syslog warning.
    min_gid = 1000
    max_gid = 65533
+   # On a host that records sessions (bastion, standalone): the login shell of
+   # every SSO user, whatever the portal supplies. default_shell is then the
+   # shell of the recorded session.
+   default_shell = /bin/bash
+   force_shell = /usr/sbin/ob-login-shell
+
+``force_shell`` exists because sshd runs the ``ForceCommand`` through the login shell, and bash or zsh read the user's own startup files before the recorder starts. ``ob-login-shell`` reads none and execs the recorder; see :ref:`the login shell <session-recording-login-shell>`. A backend records nothing and does not set it.
 
 Automatic Account Creation
 --------------------------
