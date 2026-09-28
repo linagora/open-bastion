@@ -80,7 +80,7 @@ PACKAGE_VERSION=
 BASE_IMAGE=${BASE_IMAGE:-"debian:trixie-slim"}
 
 IMAGE_STEM="open-bastion-sbom"
-IMAGE_WITH_PACKAGE="${IMAGE_STEM}-with-package"
+IMAGE_WITH_PACKAGE="${IMAGE_STEM}-with-package:$(mktemp -u XXXXXX)"
 
 cleanup_resources() {
     docker rmi --force "${IMAGE_WITH_PACKAGE}" > /dev/null 2>&1
@@ -113,7 +113,7 @@ check_environment() {
         fi
     done
 
-    WORKDIR=$(mktemp --directory --suffix=open-bastion-sbom)
+    WORKDIR=$(mktemp --directory --suffix=-open-bastion-sbom)
     if [ ! -d "${WORKDIR}" ]; then
         error "Failed to create work directory."
         exit 1
@@ -127,31 +127,36 @@ check_environment() {
 
 parse_package_path() {
     local after_first_underscore
+    local base_image_escaped
 
     if [[ -z "${PACKAGE_PATH}" || ! -f "${PACKAGE_PATH}" ]]; then
         error "Missing package."
         exit 1
     fi
     PACKAGE="${PACKAGE_PATH##*/}"
-    # shellcheck disable=SC2034
-    PACKAGE_PARENT_PATH="${PACKAGE_PATH%/*}"
+    PACKAGE_PARENT_PATH="$(dirname "${PACKAGE_PATH}")"
     PACKAGE_NAME="${PACKAGE%%_*}"
     after_first_underscore="${PACKAGE#*_}"
     PACKAGE_VERSION=${after_first_underscore%%_*}
-    BASE_IMAGE_ESCAPED=${BASE_IMAGE/:/_}
-    SBOM="${OUTDIR}/${PACKAGE}-${BASE_IMAGE_ESCAPED}-cyclonedx.json"
+    base_image_escaped="${BASE_IMAGE//[\/:]/_}"
+    SBOM="${OUTDIR%/}/${PACKAGE}-${base_image_escaped}-cyclonedx.json"
 }
 
 build_docker_image() {
     local dockerfile
+    local escaped_base
 
     step "Building Docker image based on ${BASE_IMAGE}…"
 
     dockerfile="${WORKDIR}/Dockerfile"
-    sed "s/@BASE_IMAGE@/${BASE_IMAGE}/g" ./docker-sbom/Dockerfile.in \
+    escaped_base="${BASE_IMAGE//|/\\|}"
+    # sed will use the alternate delimiter | since BASE_IMAGE can
+    # contain slash; the delimiter needs to be escaped.
+    sed "s|@BASE_IMAGE@|${escaped_base}|g" ./docker-sbom/Dockerfile.in \
 	> "${dockerfile}"
 
     if ! docker build --target=with-package \
+	              --pull --no-cache \
                       --build-arg=PACKAGE="${PACKAGE}" \
                       --tag="${IMAGE_WITH_PACKAGE}" \
                       --file="${dockerfile}" \
@@ -180,6 +185,7 @@ collect_installed_components() {
 
 generate_sbom() {
     local components
+    local edge_list
     local dependencies
     local dependencies_resolved
     local deps_graph
@@ -199,7 +205,7 @@ generate_sbom() {
            2> /dev/null
 
     alternatives="${WORKDIR}/alternatives.json"
-    awk -f docker-sbom/build_alternatives_map "${deps_graph}" > "${alternatives}"
+    awk -f docker-sbom/build_alternatives_map.awk "${deps_graph}" > "${alternatives}"
 
     # identify virtual packages and the corresponding installed package
     virtuals="${WORKDIR}/virtuals.json"
@@ -221,19 +227,21 @@ generate_sbom() {
          > "${deps_graph}.filtered"
 
     # edges of the dependency graph as JSON array
-    dependencies="${WORKDIR}/dependencies.json"
-    echo "[" > "${dependencies}"
-    dot -Tplain "${deps_graph}.filtered" \
+    edge_list=$(dot -Tplain "${deps_graph}.filtered" \
         | grep '^edge' \
         | awk '{
                 gsub(/"/, "", $2); gsub(/"/, "", $3);
-                line = "{\"ref\": \"" $2 "\", \"dependsOn\": [\"" $3 "\"]}";
-                if (NR > 1) print prev ",";
-                prev = line
-               }
-               END { if (prev != "") print prev }' \
-        >> "${dependencies}"
-    echo "]" >> "${dependencies}"
+                printf "{\"ref\": \"%s\", \"dependsOn\": [\"%s\"]}", $2, $3
+               }')
+    dependencies="${WORKDIR}/dependencies.json"
+    printf '%s\n' "${edge_list}" |
+    jq -s '
+        group_by(.ref) |
+        map({
+            ref: .[0].ref,
+            dependsOn: (map(.dependsOn[]) | unique)
+        })
+    ' > "${dependencies}"
 
     # resolve dependencies according to virtual package map then
     # alternative maps (somewhat fragile since not recursive)
@@ -252,7 +260,6 @@ generate_sbom() {
        --slurpfile deps "${dependencies_resolved}" \
        --arg alt_map "${alternatives}" \
        --arg root_name "${PACKAGE_NAME}" \
-       --arg root "${PACKAGE_NAME}@${PACKAGE_VERSION}" \
        --arg name "${PACKAGE_NAME}" \
        --arg version "${PACKAGE_VERSION}" '
   # collect all references to later filter components
@@ -260,8 +267,7 @@ generate_sbom() {
 
   # pre-build a name to bom-ref mapping (and insert root package which
   # is not in components.json)
-  | ( $comp[0] | map({(.name): (."bom-ref" // .purl)}) | add // {} ) as $base_map
-  | ( $base_map + {($root_name): $root} ) as $name_map
+  | ( $comp[0] | map({(.name): (."bom-ref" // .purl)}) | add // {} ) as $name_map
 
   # components filtering
   | ( $comp[0] | map(select(.name as $n | $referenced | index($n))) ) as $used_components
@@ -270,7 +276,7 @@ generate_sbom() {
   | {
       bomFormat: "CycloneDX",
       specVersion: "1.6",
-      serialNumber: "urn:uuid:'"$(uuidgen)"'",
+      serialNumber: "urn:uuid:'"$(cat /proc/sys/kernel/random/uuid)"'",
       version: 1,
       metadata:
       {
@@ -278,7 +284,7 @@ generate_sbom() {
         component:
         {
           type: "application",
-          "bom-ref": $root,
+          "bom-ref": $name_map[$name],
           name: $name,
           version: $version
         },

@@ -33,7 +33,7 @@ hand-made SBOM to fullfill all internal references.
 ## Validation
 
 ``` sh
-$ SBOM=./build/open-bastion_0.6.2_amd64.deb-cyclonedx.json
+$ SBOM=./build/open-bastion_0.6.3_amd64.deb-debian_trixie-slim-cyclonedx.json
 $ docker run \
 	-v ${SBOM}:/src/cyclonedx.json \
 	cyclonedx/cyclonedx-cli validate \
@@ -45,6 +45,6 @@ $ docker run \
 One can use [grype](https://github.com/anchore/grype) to collect CVEs:
 
 ``` sh
-$ SBOM=./build/open-bastion_0.6.2_amd64.deb-cyclonedx.json
+$ SBOM=./build/open-bastion_0.6.3_amd64.deb-debian_trixie-slim-cyclonedx.json
 $ grype sbom:${SBOM}
 ```
