@@ -115,6 +115,10 @@ here.
   65534". The daemon and `pam_openbastion` now share one check on
   the anchor's **real** uid, which stays root there and is still the user's on
   a renamed process.
+- **`ob-bastion-setup` refuses an `http://` portal without `-k/--insecure`**
+  (#286). It only warned, then wrote a configuration that the PAM module
+  rejects (HTTPS is required while `verify_ssl` is on), so every SSO login
+  failed. It now stops before changing anything and names `--insecure`.
 - **Setup script** (#288):
   - the audit-trace summary reports what was actually applied;
   - a backend configures NSS with the lockdown, so a rolled-back run no longer
