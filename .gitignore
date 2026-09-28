@@ -32,6 +32,7 @@ debian/open-bastion/
 debian/open-bastion-desktop/
 debian/open-bastion-dbgsym/
 debian/open-bastion-builder/
+debian/open-bastion-doc/
 debian/*.debhelper.log
 debian/*.substvars
 debian/*.postinst.debhelper

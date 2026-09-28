@@ -400,8 +400,16 @@ jobs:
       run: |
         sudo apt-get install -y devscripts equivs
         sudo mk-build-deps -ir -t "apt-get -y --no-install-recommends" debian/control
-        dpkg-buildpackage -us -uc -b
+        # The dev wrapper, so its artifacts cannot pass for a release.
+        scripts/build-dev-deb
+        git diff --exit-code debian/changelog
         mkdir -p debs && mv ../*.deb debs/
+        version=$(dpkg-deb -f debs/open-bastion_*_amd64.deb Version)
+        echo "version: $version"
+        [[ "$version" =~ ^0\.[0-9]{10}~[0-9a-z.]+$ ]] || {
+          echo "::error::unexpected dev build version: $version"
+          exit 1
+        }
         deb=$(ls debs/open-bastion-doc_*_all.deb)
         echo "built: $deb"
         dpkg -c "$deb" | grep -q 'usr/share/doc/open-bastion-doc/html/index.html' || {
