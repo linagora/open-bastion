@@ -34,32 +34,32 @@ usage() {
 
 while getopts "h-:" opt; do
     case $opt in
-	h) usage
-	   exit 0
-	   ;;
-	-)
-	    case "${OPTARG}" in
-		help)
-		    usage
-		    exit 0
-		    ;;
-		base-image)
-		    BASE_IMAGE="${*:$OPTIND:1}"
-		    ((OPTIND++))
-		    ;;
-		keep-workdir)
-		    KEEP_WORKDIR=
-		    ;;
-		*) echo "Unknown option --${OPTARG}"
-		   usage
-		   exit 1
-		   ;;
-	    esac
-	    ;;
-	*) echo "Unknown option -${opt}"
-	   usage
-	   exit 1
-	   ;;
+        h) usage
+           exit 0
+           ;;
+        -)
+            case "${OPTARG}" in
+                help)
+                    usage
+                    exit 0
+                    ;;
+                base-image)
+                    BASE_IMAGE="${*:$OPTIND:1}"
+                    ((OPTIND++))
+                    ;;
+                keep-workdir)
+                    KEEP_WORKDIR=
+                    ;;
+                *) echo "Unknown option --${OPTARG}"
+                   usage
+                   exit 1
+                   ;;
+            esac
+            ;;
+        *) echo "Unknown option -${opt}"
+           usage
+           exit 1
+           ;;
     esac
 done
 
@@ -153,10 +153,10 @@ build_docker_image() {
     # sed will use the alternate delimiter | since BASE_IMAGE can
     # contain slash; the delimiter needs to be escaped.
     sed "s|@BASE_IMAGE@|${escaped_base}|g" ./docker-sbom/Dockerfile.in \
-	> "${dockerfile}"
+        > "${dockerfile}"
 
     if ! docker build --target=with-package \
-	              --pull --no-cache \
+                      --pull --no-cache \
                       --build-arg=PACKAGE="${PACKAGE}" \
                       --tag="${IMAGE_WITH_PACKAGE}" \
                       --file="${dockerfile}" \
@@ -212,8 +212,8 @@ generate_sbom() {
     echo "{" > "${virtuals}"
     awk '
         /^[[:space:]]*.+\[dir=back,arrowtail=inv,color=green];$/ {
- 	  gsub(/"/, "", $1); gsub(/"/, "", $3);
- 	  line = "\"" $1 "\": \"" $3 "\"";
+          gsub(/"/, "", $1); gsub(/"/, "", $3);
+          line = "\"" $1 "\": \"" $3 "\"";
           if (prev != "") print prev ",";
           prev = line
         }
@@ -222,8 +222,8 @@ generate_sbom() {
 
     # remove dependencies to uninstalled alternative packages
     grep -v -e 'color="\?red"\?' \
-	 -e 'color="\?green"\?' \
-	 "${deps_graph}" \
+         -e 'color="\?green"\?' \
+         "${deps_graph}" \
          > "${deps_graph}.filtered"
 
     # edges of the dependency graph as JSON array
@@ -250,8 +250,8 @@ generate_sbom() {
        --slurpfile virt_map "${virtuals}" -r '
   [ .[] | { ref: .ref,
             dependsOn: ( .dependsOn
-	    	         | map($virt_map[0][.] // .)
-			 | map($alt_map[0][.] // .))
+                         | map($virt_map[0][.] // .)
+                         | map($alt_map[0][.] // .))
   } ]' "${dependencies}" > "${dependencies_resolved}"
 
     # build SBOM
@@ -288,7 +288,7 @@ generate_sbom() {
           name: $name,
           version: $version
         },
-	timestamp: "'"$(date --iso-8601=seconds --utc)"'"
+        timestamp: "'"$(date --iso-8601=seconds --utc)"'"
       },
       components: $used_components,
       dependencies: ($deps[0] | map(
@@ -310,8 +310,8 @@ quality_check() {
 
     unresolved=${unresolved/${PACKAGE_NAME}@${PACKAGE_VERSION}/}
     if [[ -n "${unresolved}" ]]; then
-	warn "Found unresolved references: "
-	warn "${unresolved}"
+        warn "Found unresolved references: "
+        warn "${unresolved}"
     fi
 }
 
