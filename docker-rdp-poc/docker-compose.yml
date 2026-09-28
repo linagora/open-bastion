@@ -1,0 +1,64 @@
+services:
+  sso:
+    build:
+      context: ./sso
+      dockerfile: Dockerfile
+    image: llng-rdp-sso
+    container_name: llng-rdp-sso
+    ports:
+      - "80:8080"
+    volumes:
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/PamAccess.pm:ro
+      - ../llng-plugin/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:/usr/share/perl5/Lemonldap/NG/Portal/Plugins/OIDCDeviceAuthorization.pm:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/pamaccess.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:/usr/share/lemonldap-ng/portal/templates/bootstrap/device.tpl:ro
+      - ../llng-plugin/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:/usr/share/lemonldap-ng/portal/htdocs/static/common/js/pamaccess.js:ro
+      - ./lmConf-1.json:/var/lib/lemonldap-ng/conf/lmConf-1.json:ro
+      # Shared with rdp-proxy: both containers read/write the same recordings volume.
+      - rdp-recordings:/var/lib/llng-sessions/rdp
+    environment:
+      - SSODOMAIN=example.com
+      - PORTAL=http://localhost
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      llng-rdp-net:
+        aliases:
+          - sso
+          - auth.example.com
+
+  rdp-proxy:
+    build:
+      context: ./redemption
+      dockerfile: Dockerfile
+    image: llng-rdp-proxy
+    container_name: llng-rdp-proxy
+    ports:
+      - "3389:3389"
+    depends_on:
+      sso:
+        condition: service_healthy
+    environment:
+      - LLNG_PORTAL_URL=http://sso:8080
+      - LLNG_SERVER_TOKEN=${LLNG_SERVER_TOKEN:?Set LLNG_SERVER_TOKEN from enrollment}
+      - LLNG_SERVER_GROUP=rdp-proxy
+      # passthrough.py falls back to this host when the client did not request one.
+      - DEFAULT_TARGET_HOST=${WINDOWS_TARGET_HOST:-192.168.1.100}
+      - DEFAULT_TARGET_PORT=3389
+    volumes:
+      - ./redemption/config/rdpproxy.ini:/etc/rdpproxy/rdpproxy.ini:ro
+      - ./redemption/config/passthrough.py:/etc/rdpproxy/passthrough.py:ro
+      - rdp-recordings:/var/lib/llng-sessions/rdp
+    networks:
+      - llng-rdp-net
+
+volumes:
+  rdp-recordings:
+    driver: local
+
+networks:
+  llng-rdp-net:
+    driver: bridge

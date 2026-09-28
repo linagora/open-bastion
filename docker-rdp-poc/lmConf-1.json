@@ -1,0 +1,146 @@
+{
+  "cfgNum": "1",
+  "cfgAuthor": "docker-compose",
+  "cfgDate": 1734400000,
+  "cfgVersion": "2.20.0",
+
+  "authentication": "Demo",
+  "userDB": "Same",
+  "passwordDB": "Demo",
+  "registerDB": "Demo",
+
+  "portal": "http://localhost/",
+  "domain": "",
+  "cookieName": "lemonldap",
+  "securedCookie": 0,
+  "https": 0,
+  "timeout": 72000,
+  "whatToTrace": "uid",
+
+  "demoExportedVars": {
+    "cn": "cn",
+    "mail": "mail",
+    "uid": "uid"
+  },
+
+  "globalStorage": "Apache::Session::File",
+  "globalStorageOptions": {
+    "Directory": "/var/lib/lemonldap-ng/sessions",
+    "LockDirectory": "/var/lib/lemonldap-ng/sessions/lock",
+    "generateModule": "Lemonldap::NG::Common::Apache::Session::Generate::SHA256"
+  },
+
+  "localSessionStorage": "Cache::FileCache",
+  "localSessionStorageOptions": {
+    "cache_root": "/tmp",
+    "namespace": "lemonldap-ng-sessions",
+    "default_expires_in": 600
+  },
+
+  "locationRules": {
+    "auth.example.com": {
+      "^/device": "$uid eq 'dwho'",
+      "default": "accept"
+    },
+    "localhost": {
+      "^/device": "$uid eq 'dwho'",
+      "default": "accept"
+    },
+    "sso": {
+      "^/device": "$uid eq 'dwho'",
+      "default": "accept"
+    }
+  },
+
+  "portalSkin": "bootstrap",
+  "loginHistoryEnabled": 0,
+  "restSessionServer": 1,
+
+  "issuerDBOpenIDConnectActivation": 1,
+  "oidcServiceMetaDataAuthorizeURI": "authorize",
+  "oidcServiceMetaDataTokenURI": "token",
+  "oidcServiceMetaDataUserInfoURI": "userinfo",
+  "oidcServiceMetaDataJWKSURI": "jwks",
+  "oidcServiceMetaDataEndSessionURI": "logout",
+  "oidcServiceMetaDataIntrospectionURI": "introspect",
+  "oidcServiceMetaDataRegistrationURI": "register",
+  "oidcServiceMetaDataCheckSessionURI": "check_session",
+  "oidcServiceMetaDataRevokeURI": "revoke",
+  "oidcServiceAllowHybridFlow": 1,
+  "oidcServiceAllowImplicitFlow": 1,
+  "oidcServiceAllowAuthorizationCodeFlow": 1,
+
+  "oidcServicePrivateKeySig": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAs2jsmIoFuWzMkilJaA8//5/T30cnuzX9GImXUrFR2k9EKTMt\nGMHCdKlWOl3BV+BTAU9TLz7Jzd/iJ5GJ6B8TrH1PHFmHpy8/qE/S5OhinIpIi7eb\nABqnoVcwDdCa8ugzq8k8SWxhRNXfVIlwz4NH1caJ8lmiERFj7IvNKqEhzAk0pyDr\n8hubveTC39xREujKlsqutpPAFPJ3f2ybVsdykX5rx0h5SslG3jVWYhZ/SOb2aIzO\nr0RMjhQmsYRwbpt3anjlBZ98aOzg7GAkbO8093X5VVk9vaPRg0zxJQ0Do0YLyzkR\nisSAIFb0tdKuDnjRGK6y/N2j6At2HjkxntbtGQIDAQABAoIBADYq6LxJd977LWy3\n0HT9nboFPIf+SM2qSEc/S5Po+6ipJBA4ZlZCMf7dHa6znet1TDpqA9iQ4YcqIHMH\n6xZNQ7hhgSAzG9TrXBHqP+djDlrrGWotvjuy0IfS9ixFnnLWjrtAH9afRWLuG+a/\nNHNC1M6DiiTE0TzL/lpt/zzut3CNmWzH+t19X6UsxUg95AzooEeewEYkv25eumWD\nmfQZfCtSlIw1sp/QwxeJa/6LJw7KcPZ1wXUm1BN0b9eiKt9Cmni1MS7elgpZlgGt\nxtfGTZtNLQ7bgDiM8MHzUfPBhbceNSIx2BeCuOCs/7eaqgpyYHBbAbuBQex2H61l\nLcc3Tz0CgYEA4Kx/avpCPxnvsJ+nHVQm5d/WERuDxk4vH1DNuCYBvXTdVCGADf6a\nF5No1JcTH3nPTyPWazOyGdT9LcsEJicLyD8vCM6hBFstG4XjqcAuqG/9DRsElpHQ\nyi1zc5DNP7Vxmiz9wII0Mjy0abYKtxnXh9YK4a9g6wrcTpvShhIcIb8CgYEAzGzG\nlorVCfX9jXULIznnR/uuP5aSnTEsn0xJeqTlbW0RFWLdj8aIL1peirh1X89HroB9\nGeTNqEJXD+3CVL2cx+BRggMDUmEz4hR59meZCDGUyT5fex4LIsceb/ESUl2jo6Sw\nHXwWbN67rQ55N4oiOcOppsGxzOHkl5HdExKidycCgYEAr5Qev2tz+fw65LzfzHvH\nKj4S/KuT/5V6He731cFd+sEpdmX3vPgLVAFPG1Q1DZQT/rTzDDQKK0XX1cGiLG63\nNnaqOye/jbfzOF8Z277kt51NFMDYhRLPKDD82IOA4xjY/rPKWndmcxwdob8yAIWh\nefY76sMz6ntCT+xWSZA9i+ECgYBWMZM2TIlxLsBfEbfFfZewOUWKWEGvd9l5vV/K\nD5cRIYivfMUw5yPq2267jPUolayCvniBH4E7beVpuPVUZ7KgcEvNxtlytbt7muil\n5Z6X3tf+VodJ0Swe2NhTmNEB26uwxzLe68BE3VFCsbSYn2y48HAq+MawPZr18bHG\nZfgMxwKBgHHRg6HYqF5Pegzk1746uH2G+OoCovk5ylGGYzcH2ghWTK4agCHfBcDt\nEYqYAev/l82wi+OZ5O8U+qjFUpT1CVeUJdDs0o5u19v0UJjunU1cwh9jsxBZAWLy\nPAGd6SWf4S3uQCTw6dLeMna25YIlPh5qPA6I/pAahe8e3nSu2ckl\n-----END RSA PRIVATE KEY-----",
+  "oidcServicePublicKeySig": "-----BEGIN CERTIFICATE-----\nMIIC/zCCAeegAwIBAgIUYFySF9bmkPZK1u+wdkwTSS9bxnMwDQYJKoZIhvcNAQEL\nBQAwDzENMAsGA1UEAwwEVGVzdDAeFw0yMjExMjkxNDI2MTFaFw00MjAxMjgxNDI2\nMTFaMA8xDTALBgNVBAMMBFRlc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEK\nAoIBAQCzaOyYigW5bMySKUloDz//n9PfRye7Nf0YiZdSsVHaT0QpMy0YwcJ0qVY6\nXcFX4FMBT1MvPsnN3+InkYnoHxOsfU8cWYenLz+oT9Lk6GKcikiLt5sAGqehVzAN\n0Jry6DOryTxJbGFE1d9UiXDPg0fVxonyWaIREWPsi80qoSHMCTSnIOvyG5u95MLf\n3FES6MqWyq62k8AU8nd/bJtWx3KRfmvHSHlKyUbeNVZiFn9I5vZojM6vREyOFCax\nhHBum3dqeOUFn3xo7ODsYCRs7zT3dflVWT29o9GDTPElDQOjRgvLORGKxIAgVvS1\n0q4OeNEYrrL83aPoC3YeOTGe1u0ZAgMBAAGjUzBRMB0GA1UdDgQWBBS/LX4E0Ipq\nh/4wcxNIXvoksj4vizAfBgNVHSMEGDAWgBS/LX4E0Ipqh/4wcxNIXvoksj4vizAP\nBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQAZk2m++tQ/FkZedpoA\nBlbRjvWjQ8u6qH5zaqS5oxnNX/JfJEFOsqL2n37g/0wuu6HhSYh2vD+zc4KfVMrj\nv6wzzmspJaZnACQLlEoB+ZKC1P+a8R95BK8iL1Dp1Iy0SC8CR6ZvQDEHNGWm8SAC\nK/cm2ee4wv4obg336SjXZ+Wid8lmdKDpJ7/XjiK2NQuvDLw6Jt7QpItKqwajEcJ/\nBOYQi7AAYtRBfi0v99nm3L2XF2ijTsIHDGhQqliFTXYwKO6ErCevEpDfDF28txqT\nR333fBH0ADco70lNPVTfOtpfdTjKvJ3N9SmU9V0BbhtegzMeung3QBmtMxApt8++\nLcJp\n-----END CERTIFICATE-----",
+
+  "oidcServiceDeviceAuthorizationExpiration": 600,
+  "oidcServiceDeviceAuthorizationPollingInterval": 5,
+  "oidcServiceDeviceAuthorizationUserCodeLength": 8,
+
+  "oidcRPMetaDataExportedVars": {
+    "pam-access": {
+      "email": "mail",
+      "name": "cn",
+      "groups": "groups",
+      "uid": "uid"
+    }
+  },
+
+  "oidcRPMetaDataOptions": {
+    "pam-access": {
+      "oidcRPMetaDataOptionsDisplayName": "PAM Access",
+      "oidcRPMetaDataOptionsClientID": "pam-access",
+      "oidcRPMetaDataOptionsClientSecret": "pamsecret",
+      "oidcRPMetaDataOptionsClientAuthenticationMethod": "client_secret_jwt",
+      "oidcRPMetaDataOptionsAccessTokenExpiration": 86400,
+      "oidcRPMetaDataOptionsRefreshToken": 1,
+      "oidcRPMetaDataOptionsAllowDeviceAuthorizationGrant": 1
+    }
+  },
+
+  "oidcRPMetaDataScopeRules": {
+    "pam-access": {
+      "pam": "1",
+      "pam:server": "1"
+    }
+  },
+
+  "oidcOPMetaDataOptions": {},
+  "oidcOPMetaDataJSON": {},
+  "oidcOPMetaDataJWKS": {},
+
+  "customPlugins": "::Plugins::PamAccess ::Plugins::OIDCDeviceAuthorization",
+
+  "portalDisplayPamAccess": 1,
+  "pamAccessActivation": 1,
+  "pamAccessTokenDuration": 600,
+  "pamAccessMaxDuration": 3600,
+  "pamAccessRp": "pam-access",
+  "pamAccessHeartbeatInterval": 300,
+
+  "pamAccessExportedVars": {
+    "uid": "uid",
+    "cn": "cn",
+    "mail": "mail",
+    "gecos": "cn"
+  },
+
+  "pamAccessSshRules": {
+    "default": "1",
+    "rdp-proxy": "$uid eq 'dwho' or $uid eq 'rtyler' or $uid eq 'msmith'"
+  },
+
+  "pamAccessSudoRules": {
+    "default": "0",
+    "rdp-proxy": "0"
+  },
+
+  "pamAccessOfflineEnabled": "1",
+  "pamAccessOfflineTtl": 86400,
+
+  "macros": {
+    "groups": "'users'"
+  },
+
+  "groups": {}
+}
