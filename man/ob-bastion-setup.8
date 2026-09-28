@@ -108,7 +108,10 @@ Non-interactive mode. Requires
 unless a server token already exists, in which case it is reused.
 .TP
 .BR \-k ", " \-\-insecure
-Skip TLS certificate verification.
+Skip TLS certificate verification. Required for an
+.B http://
+portal: without it the setup refuses such a portal, which the PAM module
+would reject with TLS verification on. Test setups only.
 .TP
 .B \-\-max\-security
 Mode E: SSO-signed certificates only, sudo only with a LemonLDAP::NG

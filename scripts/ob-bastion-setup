@@ -2694,7 +2694,18 @@ main() {
         CLIENT_SECRET="$OB_CLIENT_SECRET"
     fi
 
-    if [[ "$PORTAL_URL" != https://* ]] && [[ "$VERIFY_SSL" != "false" ]]; then
+    # The PAM module refuses an http:// portal_url while verify_ssl is on
+    # (config.c), so going on would leave a config that locks everyone out
+    # (#286). Stop before anything is written.
+    if [[ "$PORTAL_URL" != https://* ]]; then
+        if [ "$VERIFY_SSL" != "false" ]; then
+            error "PORTAL_URL does not use HTTPS: $PORTAL_URL"
+            error "With TLS verification on (the default), the PAM module refuses"
+            error "a non-HTTPS portal and SSO logins would all fail."
+            error "Use an https:// portal, or re-run with -k/--insecure if you"
+            error "accept sending credentials in clear text (test setups only)."
+            exit 1
+        fi
         warn "PORTAL_URL does not use HTTPS - credentials will be sent in clear text"
     fi
 

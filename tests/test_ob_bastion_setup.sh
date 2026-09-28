@@ -319,6 +319,41 @@ test_portal_url_accepts_normal() {
     fi
 }
 
+# -- Test 19: an http:// portal needs -k/--insecure (#286) --
+# The PAM module refuses a non-HTTPS portal_url while verify_ssl is on, so a
+# setup that went on would lock every SSO user out. It must stop before
+# check_root, i.e. before anything is written.
+test_http_portal_requires_insecure() {
+    local out rc
+    out=$(bash "$SCRIPT_DIR/ob-bastion-setup" -p "http://192.168.122.1" \
+        -g bastion --dry-run --yes 2>&1)
+    rc=$?
+    if [ $rc -ne 0 ] && grep -q -- "--insecure" <<<"$out" \
+        && ! grep -q "must be run as root" <<<"$out"; then
+        pass "http:// portal without --insecure is refused before any change"
+    else
+        fail "http:// portal without --insecure is refused before any change" "rc=$rc: $out"
+    fi
+}
+
+test_http_portal_insecure_accepted() {
+    local url out failed=0
+    for url in "http://192.168.122.1 -k" "https://auth.example.com"; do
+        # shellcheck disable=SC2086 # word-split the optional -k on purpose
+        out=$(bash "$SCRIPT_DIR/ob-bastion-setup" -p $url -g bastion \
+            --dry-run --yes 2>&1)
+        if grep -q "Use an https:// portal" <<<"$out"; then
+            failed=1
+            echo "    (wrongly refused: $url)"
+        fi
+    done
+    if [ "$failed" -eq 0 ]; then
+        pass "http:// portal with --insecure, and https://, are accepted"
+    else
+        fail "http:// portal with --insecure, and https://, are accepted"
+    fi
+}
+
 # -- The fresh-OTP opt-in (#178) --
 #
 # sudo caches its own credential (timestamp_timeout, 15 min, idle-based and
@@ -467,6 +502,8 @@ run_test test_node_role_invalid
 run_test test_node_role_default
 run_test test_portal_url_rejects_metacharacters
 run_test test_portal_url_accepts_normal
+run_test test_http_portal_requires_insecure
+run_test test_http_portal_insecure_accepted
 run_test test_sudo_fresh_otp_optin
 run_test test_sudoers_validated_before_install
 run_test test_sudoers_rule_is_valid
