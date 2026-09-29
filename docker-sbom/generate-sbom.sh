@@ -207,18 +207,19 @@ generate_sbom() {
     jq -n \
        --slurpfile comp "${components}" \
        --slurpfile deps "${dependencies}" \
-       --arg root_name "${PACKAGE_NAME}" \
-       --arg name "${PACKAGE_NAME}" \
-       --arg version "${PACKAGE_VERSION}" '
+       --arg name "${PACKAGE_NAME}" '
   # collect all references to later filter components
   ( $deps[0] | map([.ref] + .dependsOn) | flatten | unique ) as $referenced
 
-  # pre-build a name to bom-ref mapping (and insert root package which
-  # is not in components.json)
+  # pre-build a name to bom-ref mapping
   | ( $comp[0] | map({(.name): (."bom-ref" // .purl)}) | add // {} ) as $name_map
 
+  # hold reference on our root component
+  | ($comp[0] | map(select(.name == $name)) | first) as $root_component
+
   # components filtering
-  | ( $comp[0] | map(select(.name as $n | $referenced | index($n))) ) as $used_components
+  | ( $comp[0] | map(select(.name as $n | $referenced |
+      index($n) and $n != $name))) as $used_components
 
   # object to output
   | {
@@ -229,13 +230,7 @@ generate_sbom() {
       metadata:
       {
         lifecycles: [{ phase: "post-build" }],
-        component:
-        {
-          type: "application",
-          "bom-ref": $name_map[$name],
-          name: $name,
-          version: $version
-        },
+        component: $root_component,
         timestamp: "'"$(date --iso-8601=seconds --utc)"'"
       },
       components: $used_components,
