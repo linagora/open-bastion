@@ -30,6 +30,7 @@ usage() {
     echo
     echo "Options:"
     echo " --base-image NAME   Docker base image: debian:trixie-slim (default), ubuntu:noble, etc."
+    echo " --keep-workdir      Don't remove the working directory"
 }
 
 while getopts "h-:" opt; do
@@ -219,7 +220,7 @@ generate_sbom() {
 
   # components filtering
   | ( $comp[0] | map(select(.name as $n | $referenced |
-      index($n) and $n != $name))) as $used_components
+      index($n) and $n != $name)) | unique_by(."bom-ref") | sort_by(."bom-ref")) as $used_components
 
   # object to output
   | {
@@ -238,7 +239,7 @@ generate_sbom() {
       {
         ref: ($name_map[.ref] // .ref),
         dependsOn: (.dependsOn | map($name_map[.] // .))
-      }))
+      }) | sort_by(."ref"))
     }' > "${SBOM}"
 }
 
@@ -251,7 +252,6 @@ quality_check() {
   | ([.ref] + .dependsOn)[]
   | select(startswith("pkg:") | not)' "${SBOM}" | sort -u)
 
-    unresolved=${unresolved/${PACKAGE_NAME}@${PACKAGE_VERSION}/}
     if [[ -n "${unresolved}" ]]; then
         warn "Found unresolved references: "
         warn "${unresolved}"
