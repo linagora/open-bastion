@@ -106,7 +106,7 @@ check_environment() {
         exit 1
     fi
 
-    for cmd in syft jq docker dot; do
+    for cmd in syft jq docker awk; do
         if [ ! "$(command -v "$cmd")" ]; then
             error "This script depends on ${cmd}."
             exit 1
@@ -185,80 +185,28 @@ collect_installed_components() {
 
 generate_sbom() {
     local components
-    local edge_list
     local dependencies
-    local dependencies_resolved
-    local deps_graph
-    local alternatives
-    local virtuals
+    local installed_packages
 
     step "SBOM Generation…"
 
     components="${WORKDIR}/components.json"
-
-    deps_graph="${WORKDIR}/deps_graph.dot"
-    docker run --rm "${IMAGE_WITH_PACKAGE}" \
-           debtree --no-recommends \
-                   --show-installed \
-           "${PACKAGE_NAME}" \
-           > "${deps_graph}" \
-           2> /dev/null
-
-    alternatives="${WORKDIR}/alternatives.json"
-    awk -f docker-sbom/build_alternatives_map.awk "${deps_graph}" > "${alternatives}"
-
-    # identify virtual packages and the corresponding installed package
-    virtuals="${WORKDIR}/virtuals.json"
-    echo "{" > "${virtuals}"
-    awk '
-        /^[[:space:]]*.+\[dir=back,arrowtail=inv,color=green];$/ {
-          gsub(/"/, "", $1); gsub(/"/, "", $3);
-          line = "\"" $1 "\": \"" $3 "\"";
-          if (prev != "") print prev ",";
-          prev = line
-        }
-        END { if (prev != "") print prev }' "${deps_graph}" >> "${virtuals}"
-    echo "}" >> "${virtuals}"
-
-    # remove dependencies to uninstalled alternative packages
-    grep -v -e 'color="\?red"\?' \
-         -e 'color="\?green"\?' \
-         "${deps_graph}" \
-         > "${deps_graph}.filtered"
-
-    # edges of the dependency graph as JSON array
-    edge_list=$(dot -Tplain "${deps_graph}.filtered" \
-        | grep '^edge' \
-        | awk '{
-                gsub(/"/, "", $2); gsub(/"/, "", $3);
-                printf "{\"ref\": \"%s\", \"dependsOn\": [\"%s\"]}", $2, $3
-               }')
+    installed_packages="${WORKDIR}/installed-packages.tsv"
     dependencies="${WORKDIR}/dependencies.json"
-    printf '%s\n' "${edge_list}" |
-    jq -s '
-        group_by(.ref) |
-        map({
-            ref: .[0].ref,
-            dependsOn: (map(.dependsOn[]) | unique)
-        })
-    ' > "${dependencies}"
 
-    # resolve dependencies according to virtual package map then
-    # alternative maps (somewhat fragile since not recursive)
-    dependencies_resolved="${WORKDIR}/dependencies_resolved.json"
-    jq --slurpfile alt_map "${alternatives}" \
-       --slurpfile virt_map "${virtuals}" -r '
-  [ .[] | { ref: .ref,
-            dependsOn: ( .dependsOn
-                         | map($virt_map[0][.] // .)
-                         | map($alt_map[0][.] // .))
-  } ]' "${dependencies}" > "${dependencies_resolved}"
+    docker run --rm "${IMAGE_WITH_PACKAGE}" \
+           dpkg-query -W -f '${Package}\t${db:Status-Status}\t${Pre-Depends}\t${Depends}\t${Provides}\n' \
+           > "${installed_packages}"
+
+    awk -v root="${PACKAGE_NAME}" \
+        -f docker-sbom/build_dependency_graph.awk \
+        "${installed_packages}" \
+        > "${dependencies}"
 
     # build SBOM
     jq -n \
        --slurpfile comp "${components}" \
-       --slurpfile deps "${dependencies_resolved}" \
-       --arg alt_map "${alternatives}" \
+       --slurpfile deps "${dependencies}" \
        --arg root_name "${PACKAGE_NAME}" \
        --arg name "${PACKAGE_NAME}" \
        --arg version "${PACKAGE_VERSION}" '
