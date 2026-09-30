@@ -1,7 +1,7 @@
 Security features
 =================
 
-Security Considerations
+Security considerations
 -----------------------
 
 1. **Protect configuration files**: ``/etc/open-bastion/openbastion.conf`` and ``token`` should be readable only by root
@@ -11,7 +11,7 @@ Security Considerations
 
 .. _security-ssh-key-policy:
 
-SSH Key Policy
+SSH key policy
 --------------
 
 Open Bastion can optionally restrict which SSH key types and sizes are allowed for authentication. This is useful for enforcing security policies that require modern key types or minimum key sizes.
@@ -33,7 +33,7 @@ Configuration
    # Require at least P-384 for ECDSA (if ECDSA is allowed)
    ssh_key_min_ecdsa_bits = 384
 
-Allowed Key Types
+Allowed key types
 ~~~~~~~~~~~~~~~~~
 
 =========== =====================================
@@ -47,7 +47,7 @@ Type        Description
 ``all``     All types except DSA
 =========== =====================================
 
-Example Policies
+Example policies
 ~~~~~~~~~~~~~~~~
 
 **Strict Modern (Ed25519 only):**
@@ -73,7 +73,7 @@ Example Policies
    ssh_key_policy_enabled = true
    ssh_key_allowed_types = ed25519,ecdsa,sk
 
-Configuration Options
+Configuration options
 ~~~~~~~~~~~~~~~~~~~~~
 
 ========================== ========= =================================
@@ -100,11 +100,11 @@ The check is **fail-closed**: with ``ssh_key_policy_enabled = true``, a key whos
 - ``ssh_key_min_rsa_bits`` is enforced from the RSA modulus decoded out of the key blob. An RSA key whose size cannot be measured is rejected.
 - With the policy disabled (the default), none of this runs and behaviour is unchanged.
 
-``ExposeAuthInfo yes`` in ``sshd_config`` remains useful as a fallback for sshd variants that do propagate the information, and is required for :doc:`Service Accounts </service-accounts>` fingerprint validation.
+``ExposeAuthInfo yes`` in ``sshd_config`` remains useful as a fallback for sshd variants that do propagate the information, and is required for :doc:`Service accounts </service-accounts>` fingerprint validation.
 
 .. _security-cache-brute-force-protection:
 
-Cache Brute-Force Protection
+Cache brute-force protection
 ----------------------------
 
 When the LLNG server is unavailable, Open Bastion uses cached authorization data (offline mode). This feature adds rate limiting to cache lookups to prevent brute-force attacks against the cache.
@@ -128,7 +128,7 @@ Configuration
    # Maximum lockout: 1 hour
    cache_rate_limit_max_lockout_sec = 3600
 
-How It Works
+How it works
 ~~~~~~~~~~~~
 
 1. When the LLNG server is unreachable, cache lookups are attempted
@@ -139,7 +139,7 @@ How It Works
 
 .. _security-configuration-options-1:
 
-Configuration Options
+Configuration options
 ~~~~~~~~~~~~~~~~~~~~~
 
 +--------------------------------------+-----------+--------------------------------------+
@@ -156,7 +156,7 @@ Configuration Options
 
 .. _security-rate-limiting:
 
-Rate Limiting
+Rate limiting
 -------------
 
 Open Bastion includes rate limiting to protect against brute-force attacks:
@@ -171,7 +171,7 @@ Open Bastion includes rate limiting to protect against brute-force attacks:
 
 After ``max_attempts`` failed authentication attempts, the user is locked out. The lockout duration uses exponential backoff, starting at ``initial_lockout`` seconds and doubling up to ``max_lockout`` seconds.
 
-Audit Logging
+Audit logging
 -------------
 
 Structured JSON audit logging with correlation IDs:
@@ -203,7 +203,7 @@ The module does not rotate the log itself: every ``sshd`` and ``sudo`` process o
    sudo cp /usr/share/open-bastion/logrotate/open-bastion /etc/logrotate.d/open-bastion
    # then adjust the path inside it if audit_log_file is not the default
 
-Webhook Notifications
+Webhook notifications
 ---------------------
 
 Get notified of security events:
@@ -218,7 +218,7 @@ Get notified of security events:
 
 .. _security-dos-prevention-via-crowdsec-whitelist:
 
-DoS Prevention via Crowdsec Whitelist
+DoS prevention via CrowdSec whitelist
 -------------------------------------
 
 **Problem**: When multiple users share a single public IP (e.g., corporate VPN exit node, NAT gateway), legitimate authentication failures from different users can trigger CrowdSec's auto-ban, effectively causing a Denial of Service for all users behind that IP.
@@ -237,7 +237,7 @@ DoS Prevention via Crowdsec Whitelist
 3. Consider using ``crowdsec_action = warn`` instead of whitelist for partial protection
 4. Document whitelisted IPs and review periodically
 
-Fail-Open vs Fail-Closed
+Fail-open vs fail-closed
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``crowdsec_fail_open`` setting determines behavior when CrowdSec LAPI is unavailable:

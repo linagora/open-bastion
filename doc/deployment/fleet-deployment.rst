@@ -20,11 +20,11 @@ Prerequisites
 - The Open Bastion ``.deb``/``.rpm`` reachable by the targets from an APT/YUM repo (the default is the Linagora repo; override with ``--apt-url``).
 - SSO reachable from your workstation (for the build-time OIDC discovery) **and** from the targets (at run time, for enrolment).
 - SSH access from your workstation to each target as a user that can ``sudo``.
-- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG Configuration → Create the OIDC Relying Party <llng-configuration-creation-of-the-oidc-relying-party>`.
+- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`llng-configuration-creation-of-the-oidc-relying-party`.
 
 .. _shell-quickstart-step-1--generate-the-installers:
 
-Step 1 — Generate the installers
+Step 1 — generate the installers
 --------------------------------
 
 Just run ``ob-builder`` and answer the questions. Do it **once per role** — a bastion and a backend differ only by a couple of answers (target role, and the backend's "accept only this bastion" allowlist).
@@ -59,7 +59,7 @@ Each ``bootstrap-*.sh`` is self-contained: it embeds the SSO CA key, the scenari
 
 .. _shell-quickstart-step-2--deploy-the-bastion:
 
-Step 2 — Deploy the bastion
+Step 2 — deploy the bastion
 ---------------------------
 
 Copy the bastion installer to the bastion host and run it as root. ``--yes`` answers every prompt (so enrolment **and** setup run unattended); the OIDC client secret is asked once on the target (if you chose the ``prompt`` secret mode):
@@ -83,7 +83,7 @@ Re-enrolling this bastion changes the value; update every backend's ``/etc/open-
 
 .. _shell-quickstart-step-3--deploy-the-backends:
 
-Step 3 — Deploy the backends
+Step 3 — deploy the backends
 ----------------------------
 
 Copy the backend installer to each backend and run it the same way. Because you answered ``ob-bastion`` to the allowed-bastions prompt, each backend will only accept certificates vouched by that bastion:

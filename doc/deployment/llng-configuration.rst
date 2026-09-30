@@ -4,8 +4,8 @@ LLNG configuration
 
 .. _llng-configuration-creation-of-the-oidc-relying-party:
 
-Step1: Creation of the OIDC Relying Party
------------------------------------------
+Step 1: creation of the OIDC relying party
+------------------------------------------
 
 The *OIDC Relying Party* (OIDC RP) is what the servers (bastion or
 backends) enroll against. One OIDC RP can carry a whole fleet, or
@@ -35,7 +35,7 @@ In the LLNG Manager, create a new OIDC Relying Party:
    - ``oidcRPMetaDataOptionsDeviceOwnership`` = ``organization``
    - ``oidcRPMetaDataOptionsAllowOffline`` = ``1``.
 
-Step 2: Plugins activation
+Step 2: plugins activation
 --------------------------
 
 Each plugin loads automatically as soon as its activation condition is
@@ -60,7 +60,7 @@ setup.
 
 .. _llng-configuration-restrict-device-and-the-ssh-ca-admin-routes-required:
 
-Step 3: Restrict ``/device`` and the SSH CA admin routes
+Step 3: restrict ``/device`` and the SSH CA admin routes
 --------------------------------------------------------
 
 Two sets of portal routes decide who may approve a host enrolment and
@@ -137,12 +137,12 @@ Three details that are easy to get wrong
 
 The shipped ``docker-demo-cert`` and ``docker-demo-maxsec`` configurations carry the vhost rules and ``sshCaAdminRule``, scoped to the demo user ``dwho``, as a working example on both plugin versions.
 
-Step 4: Generate and Import the SSH CA Key (optional)
+Step 4: generate and import the SSH CA key (optional)
 -----------------------------------------------------
 
 If you're using the SSH CA plugin for key-based authentication, you need to generate a CA key pair and import it into LemonLDAP::NG.
 
-Generate the SSH CA Key Pair
+Generate the SSH CA key pair
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -164,7 +164,7 @@ Alternatively, for compatibility with older systems, use RSA:
    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out ssh-ca.key
    openssl pkey -in ssh-ca.key -pubout -out ssh-ca.pub
 
-Import the Key into LLNG
+Import the key into LLNG
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. _llng-configuration-via-manager-lemonldapng--222:
@@ -208,7 +208,7 @@ Create directories for SSH CA state files
 
 These directories store the certificate serial number counter and the Key Revocation List (KRL).
 
-Step 5: Restart LemonLDAP::NG
+Step 5: restart LemonLDAP::NG
 -----------------------------
 
 .. code:: bash
@@ -219,7 +219,7 @@ Step 5: Restart LemonLDAP::NG
 
 .. _llng-configuration-server-groups:
 
-Server Groups
+Server groups
 -------------
 
 Server groups allow different authorization rules for different server categories.
@@ -269,7 +269,7 @@ Access **rules** are keyed by server group and hold a Perl expression:
 
    Full list, and the residual defence on the hosts (``allowed_bastions``), in `UPGRADE-NOTES.md <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__, B0.
 
-Configure on Each Server
+Configure on each server
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 In ``/etc/open-bastion/openbastion.conf``:
@@ -286,7 +286,7 @@ Or during enrollment:
 
 .. _llng-configuration-group-synchronization:
 
-Group Synchronization
+Group synchronization
 ---------------------
 
 The group synchronization feature (#38) allows LemonLDAP::NG to manage Unix supplementary groups on target servers. When a user connects via SSH, their Unix groups are synchronized with the groups defined in LLNG.
@@ -310,7 +310,7 @@ In ``lemonldap-ng.ini``, configure which groups LLNG should manage for each serv
 - Users are removed from managed groups they're no longer assigned to in LLNG
 - Groups NOT in ``pamAccessManagedGroups`` are never modified (local groups are preserved)
 
-How It Works
+How it works
 ~~~~~~~~~~~~
 
 .. mermaid::
@@ -327,7 +327,7 @@ How It Works
        Note over Server: Sync groups:<br/>• Add user to "dev", "docker"<br/>• Remove from "qa" (managed but not assigned)
        Server-->>Client: Session established
 
-Security Considerations
+Security considerations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Principle of least privilege**: Don't include privileged groups (sudo, wheel, admin) in ``managed_groups``
@@ -335,7 +335,7 @@ Security Considerations
 - **Offline behavior**: Group sync uses cached group information when LLNG is unreachable
 - **File protection**: Group modifications use system tools (``groupadd``, ``gpasswd``) which handle ``/etc/group`` and ``/etc/gshadow`` atomically
 
-Local Whitelist (Defense-in-Depth)
+Local whitelist (defense-in-depth)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Administrators can optionally configure a local whitelist of groups allowed to be managed on each server. This provides defense-in-depth by restricting which groups LLNG can actually modify, regardless of what ``managed_groups`` it sends.
@@ -359,7 +359,7 @@ When configured:
 - Allow different group policies per server even within the same server group
 - Provide a safety net against misconfigured LLNG policies
 
-Example: Per-Environment Groups
+Example: per-environment groups
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: perl

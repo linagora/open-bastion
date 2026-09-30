@@ -57,7 +57,7 @@ Server-side (LemonLDAP::NG)
 - DesktopLogin plugin installed and configured
 - OIDC Relying Party for desktop SSO
 
-Client-side (Workstation)
+Client-side (workstation)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Linux with LightDM display manager
@@ -67,7 +67,7 @@ Client-side (Workstation)
 Installation
 ------------
 
-Quick Setup
+Quick setup
 ~~~~~~~~~~~
 
 The ``ob-desktop-setup`` script automates the installation process:
@@ -82,7 +82,7 @@ For offline mode support:
 
    sudo ob-desktop-setup -p https://auth.example.com --offline
 
-Manual Installation
+Manual installation
 ~~~~~~~~~~~~~~~~~~~
 
 .. _desktop-sso-1-install-lightdm-and-webkit2-greeter:
@@ -214,10 +214,10 @@ Create ``/etc/open-bastion/openbastion.conf``:
    systemctl enable lightdm
    systemctl disable gdm  # or sddm, etc.
 
-LemonLDAP::NG Configuration
+LemonLDAP::NG configuration
 ---------------------------
 
-Enable DesktopLogin Plugin
+Enable DesktopLogin plugin
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add the plugin to your LLNG configuration:
@@ -228,7 +228,7 @@ Add the plugin to your LLNG configuration:
    [portal]
    plugins = DesktopLogin
 
-Configure the Desktop SSO Relying Party
+Configure the desktop SSO relying party
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In the LLNG Manager, create a new OIDC Relying Party:
@@ -238,7 +238,7 @@ In the LLNG Manager, create a new OIDC Relying Party:
 3. **Redirect URIs:** ``http://localhost/*``
 4. **Allowed Scopes:** ``openid desktop pam``
 
-Plugin Configuration
+Plugin configuration
 ~~~~~~~~~~~~~~~~~~~~
 
 Set these parameters in the Manager:
@@ -253,10 +253,10 @@ Set these parameters in the Manager:
 | ``desktopLoginAllowedCallbacks`` | Allowed callback URLs      | ``["http://localhost/*"]`` |
 +----------------------------------+----------------------------+----------------------------+
 
-How It Works
+How it works
 ------------
 
-Authentication Flow
+Authentication flow
 ~~~~~~~~~~~~~~~~~~~
 
 1. **User Initiates Login**
@@ -298,7 +298,7 @@ Authentication Flow
    - PAM returns success
    - LightDM starts the user's desktop session
 
-Security Considerations
+Security considerations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Token Minimum TTL:** Tokens expiring within ``oauth2_token_min_ttl`` seconds are rejected to prevent login with nearly-expired credentials
@@ -306,12 +306,12 @@ Security Considerations
 - **Iframe Security:** Only localhost callbacks are allowed by default
 - **Token Scope:** Desktop tokens have limited ``desktop pam`` scope
 
-Multi-Factor Authentication (2FA)
+Multi-factor authentication (2FA)
 ---------------------------------
 
 Desktop SSO fully supports LLNG's multi-factor authentication. Since the login happens inside an iframe displaying the full LLNG portal, all 2FA methods configured in LLNG work seamlessly.
 
-Supported 2FA Methods
+Supported 2FA methods
 ~~~~~~~~~~~~~~~~~~~~~
 
 +-----------------------------+-----------------+----------------------------------------+
@@ -328,7 +328,7 @@ Supported 2FA Methods
 | SSL client certificates     | Supported       | Requires PKCS#11 configuration         |
 +-----------------------------+-----------------+----------------------------------------+
 
-WebAuthn/FIDO2 Configuration
+WebAuthn/FIDO2 configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 WebAuthn (hardware security keys like YubiKey) requires the iframe to have the ``publickey-credentials-get`` permission. This is already configured in the Open Bastion greeter:
@@ -345,7 +345,7 @@ WebAuthn (hardware security keys like YubiKey) requires the iframe to have the `
 
 If you're customizing the greeter, ensure this ``allow`` attribute is present.
 
-SSL Client Certificates (Smart Cards)
+SSL client certificates (smart cards)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For smart card authentication:
@@ -369,7 +369,7 @@ The WebKitGTK engine used by lightdm-webkit2-greeter will automatically present 
 
 .. _desktop-sso-2fa-flow:
 
-2FA Flow
+2FA flow
 ~~~~~~~~
 
 ::
@@ -398,7 +398,7 @@ The WebKitGTK engine used by lightdm-webkit2-greeter will automatically present 
 
 .. _desktop-sso-2fa-and-offline-mode:
 
-2FA and Offline Mode
+2FA and offline mode
 ~~~~~~~~~~~~~~~~~~~~
 
 When using offline mode (cached credentials), 2FA is **bypassed** because:
@@ -409,17 +409,17 @@ When using offline mode (cached credentials), 2FA is **bypassed** because:
 
 **Security consideration**: If 2FA is critical for your environment, you may want to disable offline mode or set a very short ``offline_cache_ttl``.
 
-Offline Mode
+Offline mode
 ------------
 
 When the LLNG server is unreachable, the greeter can fall back to offline authentication using cached credentials. See :doc:`/offline-mode` for details.
 
-Screen Unlock Token Refresh
+Screen unlock token refresh
 ---------------------------
 
 When a user locks their screen, the OAuth2 access token may expire before they return (default TTL: 8 hours). The greeter handles this gracefully:
 
-Refresh Flow
+Refresh flow
 ~~~~~~~~~~~~
 
 1. **Token still valid**: Greeter reuses the existing access token (seamless)
@@ -429,7 +429,7 @@ Refresh Flow
 
 .. _desktop-sso-how-it-works-1:
 
-How It Works
+How it works
 ~~~~~~~~~~~~
 
 The greeter stores three pieces of state from the initial SSO login:
@@ -440,7 +440,7 @@ The greeter stores three pieces of state from the initial SSO login:
 
 On screen unlock (greeter re-initialization), before loading the SSO iframe, the greeter checks whether a token refresh is needed. If the access token expires within 5 minutes, it calls ``/desktop/refresh`` to obtain a fresh token. Token rotation is supported — the refresh token is updated if the server provides a new one.
 
-PAM-Level Revalidation
+PAM-level revalidation
 ~~~~~~~~~~~~~~~~~~~~~~
 
 At the PAM level, when a user enters their password to unlock and an offline session marker exists, the PAM module transparently attempts online LLNG authentication with the entered password. This:
@@ -453,7 +453,7 @@ At the PAM level, when a user enters their password to unlock and an offline ses
 Troubleshooting
 ---------------
 
-Greeter Doesn't Load
+Greeter doesn't load
 ~~~~~~~~~~~~~~~~~~~~
 
 1. Check LightDM configuration:
@@ -474,7 +474,7 @@ Greeter Doesn't Load
 
       ls /usr/share/lightdm-webkit/themes/open-bastion/
 
-SSO Iframe Doesn't Load
+SSO iframe doesn't load
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Verify network connectivity:
@@ -487,7 +487,7 @@ SSO Iframe Doesn't Load
 
 3. Verify CORS settings on LLNG server
 
-Authentication Fails
+Authentication fails
 ~~~~~~~~~~~~~~~~~~~~
 
 1. Check PAM configuration:
@@ -516,7 +516,7 @@ Authentication Fails
         -d "token=YOUR_TOKEN" \
         -d "client_id=desktop-sso"
 
-Log Files
+Log files
 ~~~~~~~~~
 
 - LightDM: ``/var/log/lightdm/lightdm.log``

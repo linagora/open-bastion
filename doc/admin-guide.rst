@@ -1,9 +1,9 @@
-Administrator Guide
+Administrator guide
 ===================
 
 This guide explains how to configure Linux servers to authenticate and authorize users via LemonLDAP::NG.
 
-Server Types
+Server types
 ------------
 
 There are three typical deployment scenarios:
@@ -21,14 +21,14 @@ There are three typical deployment scenarios:
 Prerequisites
 -------------
 
-On All Servers
+On all servers
 ~~~~~~~~~~~~~~
 
 1. Install the PAM module package
 2. Network access to LLNG portal (HTTPS)
 3. Root access for configuration
 
-On LLNG Portal
+On LLNG portal
 ~~~~~~~~~~~~~~
 
 1. PAM Access plugin enabled
@@ -37,7 +37,7 @@ On LLNG Portal
 
 --------------
 
-Standalone Server Configuration
+Standalone server configuration
 -------------------------------
 
 A standalone server authenticates users directly with LLNG, without going through a bastion.
@@ -48,7 +48,7 @@ A standalone server authenticates users directly with LLNG, without going throug
        User -->|SSH| Standalone[Standalone Server]
        Standalone -->|Verify| LLNG[LLNG Portal]
 
-Step 1: Install Packages
+Step 1: install packages
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -59,7 +59,7 @@ Step 1: Install Packages
    # RHEL/Rocky
    dnf install open-bastion
 
-Step 2: Create Configuration
+Step 2: create configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -95,7 +95,7 @@ Step 2: Create Configuration
 
    chmod 600 /etc/open-bastion/openbastion.conf
 
-Step 3: Enroll Server
+Step 3: enroll server
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -104,7 +104,7 @@ Step 3: Enroll Server
 
 Follow the instructions to approve the server in LLNG.
 
-Step 4: Configure PAM
+Step 4: configure PAM
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -123,7 +123,7 @@ Step 4: Configure PAM
    session    required     pam_unix.so
    EOF
 
-Step 5: Configure SSH
+Step 5: configure SSH
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -139,7 +139,7 @@ Step 5: Configure SSH
 
    systemctl restart sshd
 
-Step 6: Test
+Step 6: test
 ~~~~~~~~~~~~
 
 .. code:: bash
@@ -150,7 +150,7 @@ Step 6: Test
 
 --------------
 
-Bastion Configuration
+Bastion configuration
 ---------------------
 
 A bastion is a hardened jump host that:
@@ -168,7 +168,7 @@ A bastion is a hardened jump host that:
 
 .. _admin-guide-step-1-install-packages-1:
 
-Step 1: Install Packages
+Step 1: install packages
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -181,7 +181,7 @@ Step 1: Install Packages
 
 .. _admin-guide-step-2-create-configuration-1:
 
-Step 2: Create Configuration
+Step 2: create configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -219,7 +219,7 @@ Step 2: Create Configuration
 
    chmod 600 /etc/open-bastion/openbastion.conf
 
-Step 3: Configure Session Recording
+Step 3: configure session recording
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -248,17 +248,17 @@ Step 3: Configure Session Recording
    # Enable the recording socket (must be done before first use):
    systemctl enable --now ob-record.socket
 
-Step 4: Enroll Server
+Step 4: enroll server
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
 
    ob-enroll -g bastion
 
-Step 5: Configure PAM
+Step 5: configure PAM
 ~~~~~~~~~~~~~~~~~~~~~
 
-   **This section describes a token-authenticated bastion (PAM :ref:`Mode A <pam-modes-mode-a-llng-token-only-strictest>`), not Mode E.** Steps 5 and 6 deliberately enable ``PasswordAuthentication`` / ``KbdInteractiveAuthentication`` so that sshd prompts for the LLNG token as a "password". A **Mode E** bastion authenticates with SSO certificates instead and must have both of those set to ``no``; do not copy this PAM stack or this ``sshd_config`` drop-in onto a Mode E host. For Mode E, skip to :ref:`Mode E: Maximum Security Deployment <admin-guide-mode-e-maximum-security-deployment>`, which runs ``ob-bastion-setup --max-security`` and writes both files for you.
+   **This section describes a token-authenticated bastion (PAM :ref:`Mode A <pam-modes-mode-a-llng-token-only-strictest>`), not Mode E.** Steps 5 and 6 deliberately enable ``PasswordAuthentication`` / ``KbdInteractiveAuthentication`` so that sshd prompts for the LLNG token as a "password". A **Mode E** bastion authenticates with SSO certificates instead and must have both of those set to ``no``; do not copy this PAM stack or this ``sshd_config`` drop-in onto a Mode E host. For Mode E, skip to :ref:`Mode E: maximum security deployment <admin-guide-mode-e-maximum-security-deployment>`, which runs ``ob-bastion-setup --max-security`` and writes both files for you.
 
 .. code:: bash
 
@@ -275,7 +275,7 @@ Step 5: Configure PAM
    session    required     pam_unix.so
    EOF
 
-Step 6: Configure SSH with Recording
+Step 6: configure SSH with recording
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -298,7 +298,7 @@ Step 6: Configure SSH with Recording
 
    systemctl restart sshd
 
-Step 7: Configure SSH Proxy for Backend Access
+Step 7: configure SSH proxy for backend access
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The SSH proxy uses certificate-based vouching to authenticate to backends. Certificate requests are handled by ``ob-cert-daemon`` (socket-activated systemd service running as root), which derives the caller's user via kernel ``SO_PEERCRED`` from the Unix socket connection (no sudo or setuid needed). Configure the proxy:
@@ -366,7 +366,7 @@ Then simply ``ssh backend-server``.
 
    **Recording retention is automatic.** The package installs and enables ``ob-session-prune.timer``, which daily compresses and expires recordings under ``/var/lib/open-bastion/sessions``. Tune ``recording_compress_after_days`` / ``recording_retention_days`` in ``/etc/open-bastion/session-recorder.conf``. Do **not** add a ``logrotate`` rule for the recordings tree — it would rename root-owned recordings and break the tamper-evident layout. See :doc:`/ssh-session-recording` and ``ob-session-prune(8)``.
 
-Step 8: Test
+Step 8: test
 ~~~~~~~~~~~~
 
 .. code:: bash
@@ -382,7 +382,7 @@ Step 8: Test
 
 --------------
 
-Backend Server Configuration
+Backend server configuration
 ----------------------------
 
 Backend servers are internal servers accessed through the bastion. They auto-create Unix accounts for LLNG users.
@@ -396,7 +396,7 @@ Backend servers are internal servers accessed through the bastion. They auto-cre
 
 .. _admin-guide-step-1-install-packages-2:
 
-Step 1: Install Packages
+Step 1: install packages
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -407,7 +407,7 @@ Step 1: Install Packages
    # RHEL/Rocky
    dnf install open-bastion
 
-Step 2: Create PAM Configuration
+Step 2: create PAM configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -457,7 +457,7 @@ Step 2: Create PAM Configuration
 
    chmod 600 /etc/open-bastion/openbastion.conf
 
-Step 3: Create NSS Configuration
+Step 3: create NSS configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -617,7 +617,7 @@ There is no stock type that ``sshd_t``, ``sudo_t`` and ``crond_t`` may all write
 
 Confirm against the real denials with ``ausearch -m avc -ts recent | audit2allow`` rather than trusting the sketch. ``setenforce 0`` is a diagnostic, not a fix. Shipping such a module from the RPM is the correct long-term answer; the RPM does not ship one yet.
 
-Step 4: Configure NSS
+Step 4: configure NSS
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -643,14 +643,14 @@ Step 4: Configure NSS
    # database this module does not implement.
    # See "NSS cache and LLNG outages" below for the cache_ttl trade-off.
 
-Step 5: Enroll Server
+Step 5: enroll server
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
 
    ob-enroll -g production
 
-Step 6: Configure PAM
+Step 6: configure PAM
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -670,7 +670,7 @@ Step 6: Configure PAM
    session    required     pam_unix.so
    EOF
 
-Step 7: Configure SSH
+Step 7: configure SSH
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -705,7 +705,7 @@ Step 7: Configure SSH
 
    systemctl restart sshd
 
-Step 8: Firewall (Optional but Recommended)
+Step 8: firewall (optional but recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -715,7 +715,7 @@ Step 8: Firewall (Optional but Recommended)
    ufw deny 22
    ufw enable
 
-Step 10: Test
+Step 10: test
 ~~~~~~~~~~~~~
 
 .. code:: bash
@@ -737,12 +737,12 @@ Step 10: Test
 
 .. _admin-guide-mode-e-maximum-security-deployment:
 
-Mode E: Maximum Security Deployment
+Mode E: maximum security deployment
 -----------------------------------
 
 Mode E uses LLNG-signed SSH certificates for access and LLNG temporary tokens for sudo. All users exist only in NSS (not in ``/etc/passwd``). This section describes the tested deployment flow.
 
-Step 1 (optional, site-specific): Bootstrap package
+Step 1 (optional, site-specific): bootstrap package
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
    **Not part of Open Bastion.** ``open-bastion-linagora`` is an internal site-preparation package built from a private tree (``local/``, which is gitignored). It is **not in this repository and not in the public repositories** — ``apt install open-bastion-linagora`` will fail for anyone outside Linagora. Mode E does not depend on it: skip straight to Step 2.
@@ -759,14 +759,14 @@ Everything it does is a site convention you can reproduce by hand. What actually
 
    apt install open-bastion-linagora   # Linagora-internal repositories only
 
-Step 2: Install Open Bastion
+Step 2: install Open Bastion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
 
    apt install open-bastion uuid-runtime jq
 
-Step 3: Run ob-bastion-setup
+Step 3: run ob-bastion-setup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``ob-bastion-setup --max-security`` is the single command that configures everything:
@@ -795,7 +795,7 @@ It performs all of the following automatically:
 - Downloads the initial KRL to ``/etc/ssh/revoked_keys`` with ``ob-krl-refresh``, and enables ``ob-krl-refresh.timer`` to refresh it every 30 minutes (``--krl-refresh-interval`` to change it)
 - Creates ``/etc/sudoers.d/open-bastion`` for sudo authorization
 
-Step 4: Verify
+Step 4: verify
 ~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -812,7 +812,7 @@ Step 4: Verify
 
 --------------
 
-Server Groups Reference
+Server groups reference
 -----------------------
 
 The per-group SSH/sudo access rules (``server_group → rule``) go in ``pamAccessSshRules`` / ``pamAccessSudoRules``, in ``/etc/lemonldap-ng/lemonldap-ng.ini``, section ``[portal]``:
@@ -853,7 +853,7 @@ Example configuration:
 | ``default``     | ``0``                                   | Deny by default                      |
 +-----------------+-----------------------------------------+--------------------------------------+
 
-LLNG OIDC Client Security Settings
+LLNG OIDC client security settings
 ----------------------------------
 
 Configure security options for the ``pam-access`` OIDC client in LLNG Manager:
@@ -862,7 +862,7 @@ Configure security options for the ``pam-access`` OIDC client in LLNG Manager:
 
    LLNG Manager → OIDC → Relying Parties → pam-access → Options
 
-Refresh Token Inactivity Timeout
+Refresh token inactivity timeout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Automatically revoke refresh tokens that haven't been used within a specified period:
@@ -884,7 +884,7 @@ This setting protects against:
 
    systemctl enable --now ob-heartbeat.timer
 
-Other Recommended Security Settings
+Other recommended security settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: yaml
@@ -957,7 +957,7 @@ On a host set up by ``ob-bastion-setup`` (any role), do not start with ``apt pur
 Troubleshooting
 ---------------
 
-Server Enrollment Issues
+Server enrollment issues
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -969,7 +969,7 @@ Server Enrollment Issues
    rm /var/lib/open-bastion/token
    ob-enroll -g <server_group>
 
-Authentication Failures
+Authentication failures
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -987,7 +987,7 @@ Authentication Failures
      -u "pam-access:secret" \
      -d "token=<user_token>"
 
-NSS Issues
+NSS issues
 ~~~~~~~~~~
 
 .. code:: bash
@@ -1001,7 +1001,7 @@ NSS Issues
    # Check NSS logs
    journalctl | grep nss_openbastion
 
-User Creation Issues
+User creation issues
 ~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -1016,7 +1016,7 @@ User Creation Issues
    grep username /etc/passwd
    ls -la /home/username
 
-SSH Key Policy
+SSH key policy
 --------------
 
 Open Bastion can enforce restrictions on SSH key types and minimum key sizes. This helps ensure users connect with cryptographically strong keys, preventing the use of weak or deprecated algorithms.
@@ -1056,7 +1056,7 @@ It matters more than a hardening knob usually would. The fingerprint reaches Lem
 
 With ``fingerprint_required = true`` the session is refused at login, with an audited reason, instead of proceeding unbound. From plugin 0.6.0 the portal gains the matching half (``pamAccessRequireFingerprint``, and a 15-minute cap on unbound vouchers), which turns the same drift into onward-hop failures a quarter of an hour into a session — visible, but much further from the cause. See `UPGRADE-NOTES.md <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__.
 
-Key Type Aliases
+Key type aliases
 ~~~~~~~~~~~~~~~~
 
 The following aliases are recognized:
@@ -1072,7 +1072,7 @@ Alias          Key Types Included
 ``sk-ed25519`` sk-ssh-ed25519 (FIDO2)
 ============== ===============================
 
-SSH Server Requirement
+SSH server requirement
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The module identifies the presented key through the ``ob-ssh-principals`` helper installed by ``ob-bastion-setup`` / ``ob-backend-setup``, which sshd calls with the key type and key blob:
@@ -1097,7 +1097,7 @@ The module identifies the presented key through the ``ob-ssh-principals`` helper
 
 ``ssh_key_min_rsa_bits`` is enforced from the RSA modulus decoded out of the key blob, so it is a real check and not only documentation.
 
-Example Configurations
+Example configurations
 ~~~~~~~~~~~~~~~~~~~~~~
 
 **High Security (Ed25519 and FIDO2 only):**
@@ -1145,12 +1145,12 @@ If users are rejected due to key policy:
 
 --------------
 
-Quick Reference
+Quick reference
 ---------------
 
 The full, authoritative list of paths, systemd unit names and package names is in :doc:`/references/reference-paths`.
 
-File Locations
+File locations
 ~~~~~~~~~~~~~~
 
 +---------------------------------------------+------------------------------------------------------------------------+

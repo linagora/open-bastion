@@ -1,4 +1,4 @@
-Open Bastion Documentation
+Open Bastion documentation
 ==========================
 
 Open Bastion provides centralized SSH and ``sudo`` access control with
@@ -21,7 +21,7 @@ SSO integration.
    security
    ssh-session-recording
    Primary audit trace <audit>
-   Crowdsec integration <crowdsec>
+   CrowdSec integration <crowdsec>
    troubleshooting
    competitors
 

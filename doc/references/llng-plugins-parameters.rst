@@ -5,7 +5,7 @@ Optional parameters for the Open Bastion LLNG plugins, inserted into ``lemonldap
 
    **Indicative only.** Names and defaults below are provided for convenience and may lag behind the plugins. The **authoritative** reference is each plugin's own documentation in the `lemonldap-ng-plugins <https://github.com/linagora/lemonldap-ng-plugins/tree/main/plugins>`__ repository (see the per-plugin links at the bottom) — defer to it in case of any doubt or discrepancy.
 
-General Parameters
+General parameters
 ------------------
 
 +---------------------------------------------------+----------------+----------------------------------------------------------------------------------------------------------------------------+
@@ -39,12 +39,12 @@ General Parameters
 +---------------------------------------------------+----------------+----------------------------------------------------------------------------------------------------------------------------+
 | ``pamAccessHeartbeatInterval``                    | ``300`` (5mn)  | Heartbeat interval                                                                                                         |
 +---------------------------------------------------+----------------+----------------------------------------------------------------------------------------------------------------------------+
-| ``pamAccessManagedGroups``                        | ``{}``         | Unix groups managed by LLNG per server group (see :ref:`Group Synchronization <llng-configuration-group-synchronization>`) |
+| ``pamAccessManagedGroups``                        | ``{}``         | Unix groups managed by LLNG per server group (see :ref:`Group synchronization <llng-configuration-group-synchronization>`) |
 +---------------------------------------------------+----------------+----------------------------------------------------------------------------------------------------------------------------+
 
 .. _llng-plugin-parameters-per-rp-device-authorization-parameters:
 
-Per-RP Device Authorization Parameters
+Per-RP device authorization parameters
 --------------------------------------
 
 These are set in the LLNG Manager on each OIDC Relying Party:
@@ -59,7 +59,7 @@ These are set in the LLNG Manager on each OIDC Relying Party:
 | ``oidcRPMetaDataOptionsAllowOffline``             | ``0``   | Set to ``1`` to issue an **offline refresh token** so ``ob-heartbeat`` can renew the server's access token. **Required** for server enrollment (with the ``offline_access`` scope and ``oidc-device-organization`` >= 0.3.3). |
 +---------------------------------------------------+---------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 
-Organizational Device Enrollment
+Organizational device enrollment
 --------------------------------
 
 When ``oidcRPMetaDataOptionsDeviceOwnership`` is set to ``organization`` on an RP, the **OIDCDeviceOrganization** plugin changes the device authorization behavior:
@@ -71,9 +71,9 @@ When ``oidcRPMetaDataOptionsDeviceOwnership`` is set to ``organization`` on an R
 
 This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
 
-For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the critical note under :ref:`Step 2 <llng-configuration-creation-of-the-oidc-relying-party>`.
+For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the critical note under :ref:`Step 1 <llng-configuration-creation-of-the-oidc-relying-party>`.
 
-Device Authorization Security Features
+Device authorization security features
 --------------------------------------
 
 - **CSRF protection**: the ``/device`` verification form uses a one-time token
@@ -82,9 +82,9 @@ Device Authorization Security Features
 - **Per-RP access rules**: ``AllowDeviceAuthorization`` accepts boolean expressions to restrict which users can approve devices
 - **CrowdSec integration**: invalid user_code attempts are reported to CrowdSec (scenario ``llng/device-auth-bruteforce``)
 
-When offline mode is enabled, the server-side cache is protected by :ref:`Cache Brute-Force Protection <security-cache-brute-force-protection>`.
+When offline mode is enabled, the server-side cache is protected by :ref:`Cache brute-force protection <security-cache-brute-force-protection>`.
 
-SSH CA Parameters (optional)
+SSH CA parameters (optional)
 ----------------------------
 
 +---------------------------+--------------+-------------------------------------------+

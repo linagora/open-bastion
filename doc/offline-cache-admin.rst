@@ -67,7 +67,7 @@ The offline cache can be enabled/disabled per PAM service via module arguments:
 
 Or via the configuration file with ``offline_cache_enabled = true``.
 
-Directory Permissions
+Directory permissions
 ~~~~~~~~~~~~~~~~~~~~~
 
 The cache directory should have restricted permissions:
@@ -78,7 +78,7 @@ The cache directory should have restricted permissions:
    chmod 700 /var/cache/open-bastion/credentials
    chown root:root /var/cache/open-bastion/credentials
 
-Encryption Key
+Encryption key
 ~~~~~~~~~~~~~~
 
 For maximum security, generate a dedicated key file:
@@ -90,7 +90,7 @@ For maximum security, generate a dedicated key file:
 
 The ``ob-desktop-setup --offline`` script generates this automatically.
 
-Administration Tool
+Administration tool
 -------------------
 
 The ``ob-cache-admin`` command-line tool provides administrative functions for managing the cache. All commands require root.
@@ -103,7 +103,7 @@ The tool is installed to ``/usr/sbin/ob-cache-admin`` with the ``open-bastion`` 
 Commands
 ~~~~~~~~
 
-List Cached Entries
+List cached entries
 ^^^^^^^^^^^^^^^^^^^
 
 .. code:: bash
@@ -124,7 +124,7 @@ Output:
    Note: Filenames are SHA256 hashes of usernames.
    Use 'ob-cache-admin show <username>' to check a specific user.
 
-Show Statistics
+Show statistics
 ^^^^^^^^^^^^^^^
 
 .. code:: bash
@@ -148,7 +148,7 @@ Output:
    Oldest entry:    2025-06-14 14:00:45
    Newest entry:    2025-06-15 09:30:12
 
-Show User Details
+Show user details
 ^^^^^^^^^^^^^^^^^
 
 Check if a specific user has cached credentials:
@@ -157,7 +157,7 @@ Check if a specific user has cached credentials:
 
    sudo ob-cache-admin show johndoe
 
-Invalidate User Cache
+Invalidate user cache
 ^^^^^^^^^^^^^^^^^^^^^
 
 Remove cached credentials for a specific user (uses ``shred`` for secure deletion):
@@ -166,7 +166,7 @@ Remove cached credentials for a specific user (uses ``shred`` for secure deletio
 
    sudo ob-cache-admin invalidate johndoe
 
-Invalidate All
+Invalidate all
 ^^^^^^^^^^^^^^
 
 Remove all cached credentials (requires typing "yes" to confirm):
@@ -177,7 +177,7 @@ Remove all cached credentials (requires typing "yes" to confirm):
 
 This also removes the salt file, forcing new key derivation.
 
-Unlock User
+Unlock user
 ^^^^^^^^^^^
 
 Reset failed attempts for a locked user. Since cache files are encrypted, the tool cannot modify them directly and offers alternatives:
@@ -215,7 +215,7 @@ Option                    Description
 ``-h, --help``            Show help message
 ========================= ===========================
 
-Environment Variables
+Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
 ================== ===================================
@@ -225,7 +225,7 @@ Variable           Description
 ``OB_CONFIG_FILE`` Override default configuration file
 ================== ===================================
 
-Cache File Format
+Cache file format
 -----------------
 
 Cache files are named by a SHA256 hash of the username and stored with a ``.cred`` extension:
@@ -239,7 +239,7 @@ Cache files are named by a SHA256 hash of the username and stored with a ``.cred
 
 The filename hash is computed as: ``SHA256("cred:<username>")`` truncated to 32 hex characters.
 
-File Structure
+File structure
 ~~~~~~~~~~~~~~
 
 Each ``.cred`` file has the format:
@@ -272,7 +272,7 @@ Lockout state (``failed_attempts``, ``locked_until``) is stored inside the encry
 Monitoring
 ----------
 
-Log Messages
+Log messages
 ~~~~~~~~~~~~
 
 Offline authentication events are logged to syslog with the ``auth`` facility:
@@ -296,7 +296,7 @@ For monitoring systems, consider tracking:
 Troubleshooting
 ---------------
 
-User Cannot Login Offline
+User cannot login offline
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Check if offline cache is enabled:
@@ -323,7 +323,7 @@ User Cannot Login Offline
 
       sudo ob-cache-admin unlock username
 
-Cache Not Working
+Cache not working
 ~~~~~~~~~~~~~~~~~
 
 1. Verify directory exists with correct permissions:
@@ -344,7 +344,7 @@ Cache Not Working
 
       journalctl | grep pam_openbastion
 
-Credentials Not Caching
+Credentials not caching
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Credentials are only cached after a successful online authentication. Ensure:
@@ -354,10 +354,10 @@ Credentials are only cached after a successful online authentication. Ensure:
 3. The cache directory is writable by root
 4. The key file exists (``/etc/open-bastion/cache.key``)
 
-Security Considerations
+Security considerations
 -----------------------
 
-Risk Assessment
+Risk assessment
 ~~~~~~~~~~~~~~~
 
 +-----------------+-----------------------------------------------------------------------+
@@ -387,7 +387,7 @@ Recommendations
 
 6. **Audit trail**: Review auth logs for offline authentication patterns
 
-Compliance Notes
+Compliance notes
 ~~~~~~~~~~~~~~~~
 
 - Cached credentials are hashed with Argon2id, not stored in plaintext
@@ -395,7 +395,7 @@ Compliance Notes
 - No credentials are transmitted or stored externally
 - Cache can be cleared instantly with ``ob-cache-admin invalidate-all``
 
-Session Monitoring
+Session monitoring
 ------------------
 
 The ``ob-session-monitor`` systemd service provides automatic session revalidation for offline-authenticated users. When the LLNG portal becomes reachable again:
@@ -404,4 +404,4 @@ The ``ob-session-monitor`` systemd service provides automatic session revalidati
 - Users with revoked accounts have their sessions terminated
 - Users with old cached credentials are prompted for online re-authentication
 
-See :ref:`Offline Mode - Network Revalidation <offline-mode-network-revalidation>` for configuration details.
+See :ref:`Offline mode - network revalidation <offline-mode-network-revalidation>` for configuration details.

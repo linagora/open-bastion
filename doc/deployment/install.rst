@@ -40,7 +40,9 @@ Rocky Linux / RHEL (DNF)
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Supported distributions:
+
 * Rocky Linux 9 / RHEL 9 / AlmaLinux 9
+
 * Rocky Linux 10 / RHEL 10 / AlmaLinux 10
 
 Import the GPG key, add the repository and install:

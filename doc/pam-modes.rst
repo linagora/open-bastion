@@ -1,4 +1,4 @@
-PAM Authentication Modes
+PAM authentication modes
 ========================
 
 Open Bastion supports several PAM configurations depending on your security requirements.
@@ -7,7 +7,7 @@ Open Bastion supports several PAM configurations depending on your security requ
 
 .. _pam-modes-mode-a-llng-token-only-strictest:
 
-Mode A: LLNG Token Only (Strictest)
+Mode A: LLNG token only (strictest)
 -----------------------------------
 
 **Only LLNG tokens are accepted as passwords. Unix passwords are rejected.**
@@ -31,7 +31,7 @@ This is the most secure mode: users must authenticate via LemonLDAP::NG.
 
    session    required     pam_unix.so
 
-Mode B: LLNG Token or Unix Password (Fallback)
+Mode B: LLNG token or Unix password (fallback)
 ----------------------------------------------
 
 **Both LLNG tokens AND traditional Unix passwords are accepted.**
@@ -56,14 +56,14 @@ Useful for transition periods or when some users don't have LLNG accounts.
 
    session    required     pam_unix.so
 
-Mode C: SSH Key with LLNG Authorization
+Mode C: SSH key with LLNG authorization
 ---------------------------------------
 
    **Offline behaviour differs from the certificate modes.** Because Mode C does not set ``AuthorizedKeysFile none``, ``sshd`` still honours ``~/.ssh/authorized_keys`` — which makes a personal key an *opt-in* fallback during a portal outage, with trade-offs worth knowing before relying on it. See :ref:`what works offline <offline-mode-what-works-offline-and-what-needs-the-portal>`.
 
 **SSH key authentication only, but LLNG checks if user is authorized.**
 
-Users authenticate with SSH keys. PAM doesn't handle password authentication, but LLNG verifies the user has permission to access this server. You can restrict allowed key types with :ref:`SSH Key Policy <security-ssh-key-policy>`.
+Users authenticate with SSH keys. PAM doesn't handle password authentication, but LLNG verifies the user has permission to access this server. You can restrict allowed key types with :ref:`SSH key policy <security-ssh-key-policy>`.
 
 ::
 
@@ -96,7 +96,7 @@ For this mode, configure ``/etc/ssh/sshd_config``:
 
    Set ``PasswordAuthentication no`` and ``KbdInteractiveAuthentication no`` anyway, so sshd never prompts in the first place. ``ob-bastion-setup`` / ``ob-backend-setup`` write both; the Debian package's ``pam-mode`` debconf prompt writes the PAM stack but does **not** touch ``sshd_config``, so set the sshd options yourself if you install that way.
 
-Mode D: All Methods with LLNG Authorization (Most Flexible)
+Mode D: all methods with LLNG authorization (most flexible)
 -----------------------------------------------------------
 
 **SSH keys, LLNG tokens, AND Unix passwords all accepted. LLNG authorization required.**
@@ -125,7 +125,7 @@ Maximum flexibility: any authentication method works, but users must be authoriz
 
 .. _pam-modes-mode-e-sso-certificates--sudo-pam-access-maximum-security:
 
-Mode E: SSO Certificates + sudo PAM-access (Maximum Security)
+Mode E: SSO certificates + sudo PAM-access (maximum security)
 -------------------------------------------------------------
 
 **SSH: only via certificates signed by the LLNG CA. sudo: only via LLNG temporary token.**
@@ -169,7 +169,7 @@ Configuration sshd
 
 .. _pam-modes-pam-configuration-for-sshd:
 
-PAM Configuration for sshd
+PAM configuration for sshd
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is what ``ob-bastion-setup`` writes (from v0.6.3 — see #220). Reproduce it exactly if you configure PAM by hand: every line below is load-bearing.
@@ -229,7 +229,7 @@ Line by line, and why each matters:
 
    **``ssh_cert_aware=true`` is currently a no-op.** The setup script passes it, for every role, as a module argument, but no code reads it: PAM module arguments of the form ``key=value`` are handed to ``config_parse_args()`` → ``parse_line()``, whose final branch silently ignores unknown keys (``src/config.c``). Nothing in ``src/`` mentions ``ssh_cert_aware``. Keep it or drop it as you like — it changes no behaviour today. This is tracked as a code cleanup, not a configuration knob; do not document it as one.
 
-PAM Configuration for systemd-user
+PAM configuration for systemd-user
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``user@.service`` authenticates through the ``systemd-user`` PAM service, whose distro ``account`` phase is ``pam_unix`` — it has no shadow entry to check for an NSS-only SSO user and refuses it. ``ob-bastion-setup`` inserts a bridge before the first ``account`` line, without regenerating the rest of the file (#296):
@@ -254,7 +254,7 @@ Since Debian trixie, systemd ships this file only as ``/usr/lib/pam.d/systemd-us
 
 The per-type ``include`` form is portable; ``@include`` is a Debian-only extension. Deleting ``/etc/pam.d/systemd-user`` restores the vendor stack.
 
-PAM Configuration for sudo
+PAM configuration for sudo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
@@ -280,7 +280,7 @@ PAM Configuration for sudo
 
 ``ob-bastion-setup --max-security`` creates ``/etc/sudoers.d/open-bastion`` with ``%open-bastion-sudo ALL=(ALL) ALL`` and a system group ``open-bastion-sudo``. The PAM module dynamically manages group membership during SSH session setup based on the ``sudo_allowed`` flag from the SSO portal. This provides **defense in depth**: even if the PAM module fails during sudo authentication, users without group membership are blocked by sudoers before PAM is invoked.
 
-Security Model
+Security model
 ~~~~~~~~~~~~~~
 
 ::
@@ -415,7 +415,7 @@ Operational requirements
 - ``ExposeAuthInfo yes`` is **not** required for the fingerprint binding itself (the helper + spool are self-sufficient); it remains useful for session auditing.
 - The ``fingerprint`` field is optional on the LLNG side, so bastions running on older portals that lack PamAccess 0.1.16 remain fully compatible — the portal simply ignores it.
 
-Summary Table
+Summary table
 -------------
 
 ================ ============= ========== ========== ==================
@@ -430,12 +430,12 @@ E - Max Security Disabled      sudo only  Cert only  Required
 
 \* SSH key authentication depends on ``PubkeyAuthentication`` in sshd_config
 
-SSH Server Configuration
+SSH server configuration
 ------------------------
 
 Edit ``/etc/ssh/sshd_config`` according to your chosen mode:
 
-For Mode A or B (Password/Token authentication)
+For Mode A or B (password/token authentication)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
@@ -446,7 +446,7 @@ For Mode A or B (Password/Token authentication)
    PubkeyAuthentication yes          # Optional: also allow SSH keys
    PermitEmptyPasswords no
 
-For Mode C (SSH Key only)
+For Mode C (SSH key only)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
@@ -457,7 +457,7 @@ For Mode C (SSH Key only)
    PubkeyAuthentication yes          # SSH keys required
    PermitEmptyPasswords no
 
-For Mode D (All methods)
+For Mode D (all methods)
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
@@ -470,7 +470,7 @@ For Mode D (All methods)
 
 .. _pam-modes-for-mode-e-certificate--sudo-token:
 
-For Mode E (Certificate + sudo token)
+For Mode E (certificate + sudo token)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::

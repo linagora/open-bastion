@@ -1309,7 +1309,7 @@ R-S18 - Effacement des enregistrements de session par un utilisateur
 
 **Cadre — l'enregistreur est sur le bastion :** l'enregistrement se fait au **bastion**, point de passage obligé. Une session vers un backend transite par le pty du bastion ; **être root sur un backend ne permet donc ni d'échapper à l'enregistrement ni d'atteindre les fichiers** (qui sont sur le bastion, root-owned, hors d'atteinte d'un root de backend). Seul root **sur le bastion lui-même** (hôte d'audit, de confiance) pourrait altérer les traces.
 
-**Remédiation en place (PR #157, ``ob-record-sink``) :** le recording est streamé vers un **puits root activé par socket** ; le recorder n'écrit plus aucun fichier. Voir :doc:`/design/tamper-evident-session-recording`.
+**Remédiation en place (PR #157, ``ob-record-sink``) :** le recording est streamé vers un **puits root activé par socket** ; le recorder n'écrit plus aucun fichier. Voir :doc:`/references/tamper-evident-session-recording`.
 
 1. **Puits root ``ob-record-sink``** (socket-activé). Le recorder (uid utilisateur) streame le typescript via ``ob-record-connect`` ; le sink (root) écrit les fichiers. L'utilisateur enregistré est dérivé de ``SO_PEERCRED`` (vérifié par le noyau, jamais de l'en-tête).
 2. **Fichiers root-owned** : ``root:ob-sessions 0640`` dans une arborescence ``root:ob-sessions 0750``. L'utilisateur enregistré n'étant pas membre de ``ob-sessions``, il n'a **aucun** droit (lister/lire/``unlink``/tronquer) — c'est une frontière d'uid noyau (DAC).

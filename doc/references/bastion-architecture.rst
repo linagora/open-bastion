@@ -53,7 +53,7 @@ Overview
 Components
 ----------
 
-LemonLDAP::NG Portal
+LemonLDAP::NG portal
 ~~~~~~~~~~~~~~~~~~~~
 
 Central identity and access management:
@@ -64,7 +64,7 @@ Central identity and access management:
 - **Server enrollment**: Device Authorization Grant (RFC 8628)
 - **Audit logging**: Centralized access logs
 
-Bastion Hosts
+Bastion hosts
 ~~~~~~~~~~~~~
 
 Jump servers that users connect to first:
@@ -81,7 +81,7 @@ Jump servers that users connect to first:
 | SSH CA                    | Optional: sign user certificates                              |
 +---------------------------+---------------------------------------------------------------+
 
-Backend Servers
+Backend servers
 ~~~~~~~~~~~~~~~
 
 Internal servers accessed through bastions:
@@ -96,12 +96,12 @@ Internal servers accessed through bastions:
 | Standard SSH              | Accept connections through bastion (cert vouching)          |
 +---------------------------+-------------------------------------------------------------+
 
-Authentication Flow
+Authentication flow
 -------------------
 
 .. _bastion-architecture-1-user-obtains-pam-token:
 
-1. User Obtains PAM Token
+1. User obtains PAM token
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -118,7 +118,7 @@ Authentication Flow
 
 .. _bastion-architecture-2-user-connects-to-bastion:
 
-2. User Connects to Bastion
+2. User connects to bastion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -139,7 +139,7 @@ Authentication Flow
 
 .. _bastion-architecture-3-user-jumps-to-backend-certificate-vouching:
 
-3. User Jumps to Backend (Certificate Vouching)
+3. User jumps to backend (certificate vouching)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The bastion vouches for the user by obtaining a short-lived LLNG-signed SSH certificate bound to that specific hop. The previous ``LLNG_BASTION_JWT`` / ``SendEnv`` approach was structurally broken: ``SendEnv``/``AcceptEnv`` populate only the child-process environment, never the PAM environment that ``pam_getenv`` reads at any stage, so a backend with ``bastion_jwt_required=true`` rejected every session.
@@ -187,7 +187,7 @@ The ephemeral certificate carries:
 
 The voucher is reusable for the duration of the user's SSO session (up to ``pamAccessBastionVoucherTtl``, default 12 h, capped by the user's SSO cert expiry). On expiry ``ob-ssh`` exits with a clear error and the user reconnects to the bastion to obtain a fresh voucher (fail-closed; no silent re-vouching).
 
-Server Groups
+Server groups
 -------------
 
 Server groups let you apply different access rules per environment. The per-group SSH/sudo rules (``server_group → rule``) live in ``pamAccessSshRules`` / ``pamAccessSudoRules``, configured in ``/etc/lemonldap-ng/lemonldap-ng.ini``, section ``[portal]``:
@@ -222,7 +222,7 @@ Each server enrolls with its server_group:
    # On bastions
    ob-enroll -g bastion
 
-NSS Integration
+NSS integration
 ---------------
 
 The NSS module (``libnss_openbastion``) enables user resolution before account creation:
@@ -255,7 +255,7 @@ nsswitch.conf
    group:  files
    shadow: files
 
-NSS Configuration
+NSS configuration
 ~~~~~~~~~~~~~~~~~
 
 ``/etc/open-bastion/nss_openbastion.conf``:
@@ -283,7 +283,7 @@ NSS Configuration
 
 ``force_shell`` exists because sshd runs the ``ForceCommand`` through the login shell, and bash or zsh read the user's own startup files before the recorder starts. ``ob-login-shell`` reads none and execs the recorder; see :ref:`the login shell <ssh-session-recording-login-shell>`. A backend records nothing and does not set it.
 
-Automatic Account Creation
+Automatic account creation
 --------------------------
 
 When a user connects for the first time:
@@ -313,7 +313,7 @@ In ``/etc/pam.d/sshd``:
    session required pam_openbastion.so
    session required pam_unix.so
 
-Session Recording
+Session recording
 -----------------
 
 All sessions through bastions are recorded:
@@ -337,10 +337,10 @@ sshd_config
 
 See :doc:`/ssh-session-recording` for details.
 
-Security Model
+Security model
 --------------
 
-Defense in Depth
+Defense in depth
 ~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -372,7 +372,7 @@ Defense in Depth
 
        L1 --> L2 --> L3 --> L4 --> L5 --> L6
 
-Token Security
+Token security
 ~~~~~~~~~~~~~~
 
 - **Short-lived**: PAM tokens expire in 5-60 minutes
@@ -381,7 +381,7 @@ Token Security
 - **Rate limiting**: Exponential backoff on failures
 - **SSH key binding**: When the SSH session is authenticated with a CA-signed certificate, the PAM module extracts the SHA256 fingerprint of the user's SSH key from ``SSH_USER_AUTH`` and forwards it to LLNG in **both** ``/pam/authorize`` (PAM ``account`` phase, at every SSH connection) and ``/pam/verify`` (token verification, used for sudo and re-authentication). LLNG checks that the fingerprint is present in the user's persistent session (``_sshCerts``), is not revoked and is not expired. If the check fails, LLNG refuses authorization (so the SSH session cannot open) and rejects token verification (so sudo cannot elevate). This binds both the SSH session and the PAM token to the specific SSH certificate registered in LLNG, even when the local ``sshd`` KRL is stale or not enforced.
 
-Server Token Security
+Server token security
 ~~~~~~~~~~~~~~~~~~~~~
 
 - **Automatic rotation**: Refresh tokens rotate server credentials
@@ -389,7 +389,7 @@ Server Token Security
 - **Per-server**: Each server has unique credentials
 - **Revocable**: Admin can revoke server access in LLNG
 
-Setup Scripts
+Setup scripts
 -------------
 
 One script configures every node role. ``ob-bastion-setup`` is the program;
@@ -400,7 +400,7 @@ that belongs to another role (``--no-sudo`` on a bastion,
 ``--disable-session-recorder`` on a backend) is refused. ``ob-bastion-setup(8)``
 and ``<command> --help`` list the options of each role.
 
-Bastion Setup
+Bastion setup
 ~~~~~~~~~~~~~
 
 Use ``ob-bastion-setup`` to automate bastion configuration:
@@ -421,7 +421,7 @@ Main options: ``-p, --portal URL`` (required), ``-g, --server-group NAME``,
 ``-t, --token-file FILE``, ``-k, --insecure``, ``-n, --dry-run``, and, for a
 bastion or standalone host only, ``--disable-session-recorder``.
 
-Backend Setup
+Backend setup
 ~~~~~~~~~~~~~
 
 Use ``ob-backend-setup`` (the same script, run as a backend) to automate
@@ -446,7 +446,7 @@ Main options: the common ones above, and for a backend only
 ``--allowed-bastions IDS``, ``--allow-any-bastion``, ``--no-sudo`` (refused
 with ``--max-security``) and ``--no-create-user``.
 
-SSH Certificates
+SSH certificates
 ----------------
 
 Users can obtain SSH certificates from LLNG using ``ob-ssh-cert``:
@@ -457,10 +457,10 @@ Users can obtain SSH certificates from LLNG using ``ob-ssh-cert``:
 
 This uses the Device Authorization Grant to authenticate and sign the user's public key.
 
-Deployment Checklist
+Deployment checklist
 --------------------
 
-LLNG Portal
+LLNG portal
 ~~~~~~~~~~~
 
 - ☐ PAM Access plugin enabled
@@ -471,7 +471,7 @@ LLNG Portal
 
 .. _bastion-architecture-bastion-hosts-1:
 
-Bastion Hosts
+Bastion hosts
 ~~~~~~~~~~~~~
 
 .. code:: bash
@@ -489,7 +489,7 @@ Or manually:
 
 .. _bastion-architecture-backend-servers-1:
 
-Backend Servers
+Backend servers
 ~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -508,12 +508,12 @@ Or manually:
 - ☐ ``/etc/open-bastion/allowed_bastions`` written (0644)
 - ☐ ``bastion_jwt_*`` keys and ``AcceptEnv LLNG_BASTION_JWT`` removed from existing configs
 
-Certificate Vouching (Bastion→Backend)
+Certificate vouching (bastion→backend)
 --------------------------------------
 
 Certificate vouching provides cryptographic assurance that SSH connections to backend servers originate from an authorized bastion and that the user genuinely connected to that bastion.
 
-Why Certificate Vouching?
+Why certificate vouching?
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The previous mechanism (``LLNG_BASTION_JWT`` passed via ``SendEnv``/``AcceptEnv``) was structurally broken: ``SendEnv``/``AcceptEnv`` populate only the SSH child-process environment, never the PAM environment that ``pam_getenv`` reads (at account or session stage, with or without a PTY). A ``pam_exec.so`` probe confirms the variable is always unset in the PAM context. Consequently, any backend configured with ``bastion_jwt_required=true`` rejected every session. All ``bastion_jwt_*`` config keys and ``AcceptEnv LLNG_BASTION_JWT`` have been removed.
@@ -558,7 +558,7 @@ Architecture
        proxy -->|8. ssh -i eph -o CertificateFile=cert| sshd
        sshd -->|9. check key-id + allowed_bastions| principals
 
-How the Voucher Reaches ``ob-ssh``
+How the voucher reaches ``ob-ssh``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When the user SSHes to the bastion, ``pam_openbastion`` (account stage) calls ``POST /pam/authorize``. LLNG mints a reusable voucher bound to ``(bastion_id, user)``, stores it in the user's persistent LLNG session, and returns it in the authorize response. ``pam_openbastion`` calls ``pam_putenv("LLNG_BASTION_VOUCHER=...")``. Because the bastion runs ``UsePAM yes``, sshd merges the PAM environment into the session via ``pam_getenvlist``, so ``ob-ssh`` inherits the variable directly — no cross-host transport, no ``SendEnv``.
@@ -577,7 +577,7 @@ Configuration
 
 .. _bastion-architecture-on-bastion-no-change-to-openbastionconf-needed:
 
-On Bastion (no change to ``openbastion.conf`` needed)
+On bastion (no change to ``openbastion.conf`` needed)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code:: bash
@@ -588,7 +588,7 @@ On Bastion (no change to ``openbastion.conf`` needed)
    SERVER_GROUP=bastion
    TARGET_GROUP=backend
 
-On Backend
+On backend
 ^^^^^^^^^^
 
 Run ``ob-backend-setup`` with the ``--allowed-bastions`` option to configure backend enforcement. The server token is never exposed over the network; instead, the daemon keeps it in memory and POSTs it over HTTPS with the voucher and ephemeral public key.
@@ -611,7 +611,7 @@ This writes ``/etc/open-bastion/allowed_bastions`` (world-readable 0644 in a 071
 
 ``ob-ssh-principals`` emits the username as principal only when the cert key-id matches ``bastion=<id>;user=<u>;...``, the user ``<u>`` equals the login user, and ``<id>`` is listed in ``/etc/open-bastion/allowed_bastions`` (empty file = accept any vouched bastion; absent file = legacy non-enforcing mode; present-but-unreadable = fail closed). A direct user SSO cert (no ``bastion=`` key-id prefix) is rejected before PAM runs.
 
-LLNG Portal (``pam-access`` plugin)
+LLNG portal (``pam-access`` plugin)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 +--------------------------------+-------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -632,7 +632,7 @@ Because it is server-assigned, the only way to learn it is to ask the portal: ru
 
 PAM server groups provide finer-grained policy *within* a project. The cert-minting security rests on the voucher, not on the group — see :doc:`/security/00-architecture`.
 
-Ephemeral Certificate Fields
+Ephemeral certificate fields
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 +--------------------+--------------------------------------------------------------------+
