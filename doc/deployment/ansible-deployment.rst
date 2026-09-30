@@ -1,27 +1,45 @@
-Deploy with Ansible
-===================
+Ansible Deployment
+==================
 
-This guide takes you from nothing to a working bastion + backends fleet using ``ob-builder`` to generate the Ansible artefacts and a single ``ansible-playbook`` run to apply them.
+This guide takes you from nothing to a working bastion and backends
+fleet using ``ob-builder`` to generate Ansible artefacts and a
+single ``ansible-playbook`` run to apply them.
 
 The flow is always the same three steps:
 
-1. **Generate** the role(s) with ``ob-builder`` (one questionnaire / config per role).
-2. **Declare your hosts** (and their IPs) in an inventory.
-3. **Apply** with ``ansible-playbook``.
+1. Generate the roles with ``ob-builder`` (one questionnaire / config per role).
 
-..
+2. Declare your hosts (and their IPs) in an inventory.
 
-   ``ob-builder`` runs **once on your workstation**. It talks to the SSO portal to fetch the SSH CA public key and JWKS, then bakes them — plus your scenario, client_id and APT repo — into a self-contained Ansible role. The role is then pushed to the fleet; the targets never contact your workstation again.
+3. Apply with ``ansible-playbook``.
+
+
+``ob-builder`` runs once on your workstation. It talks to the SSO
+portal to fetch the SSH CA public key and JWKS, then bakes them — plus
+your scenario, ``client_id`` and package repository — into a single,
+portable Bash script, the self extracting installer. The latter is
+then copied to the target and run there; the targets never contact
+your workstation again.
 
 Prerequisites
 -------------
 
-- ``ob-builder`` on your workstation (ships in the ``open-bastion-builder`` package).
-- ``ansible`` on your workstation.
-- The Open Bastion ``.deb``/``.rpm`` reachable by the targets from an APT/YUM repo (the default is the Linagora repo; override with ``--apt-url``).
-- SSO reachable from your workstation (for the build-time OIDC discovery) **and** from the targets (at run time, for enrolment).
-- SSH access from your workstation to each target as a user that can ``sudo``.
-- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG configuration → create the OIDC relying party <llng-configuration-step-2-create-the-oidc-relying-party>`.
+- ``ob-builder`` on your Ansible control node (ships in the
+  ``open-bastion-builder`` package).
+
+- A package repository (APT or YUM/DNF repository) containing
+  `open-bastion` package must be reachable by the targets.
+
+- SSO reachable from your Ansible control node (at build-time, for
+  OIDC discovery) and from the managed nodes (at run time, for
+  enrollment).
+
+- The ``pam-access`` OIDC Relying Party configured on the LLNG portal
+  for device enrollment — in particular *Allow Device Authorization*,
+  *Device ownership* = ``organization``, and *Allow offline access*
+  (with ``oidc-device-organization`` 0.3.3 or newer). See
+  :ref:`LemonLDAP::NG configuration
+  <llng-configuration-creation-of-the-oidc-relying-party>`..
 
 .. _ansible-quickstart-step-1--generate-the-roles:
 

@@ -57,7 +57,7 @@ In the platform one can identify:
     per-server-group)
 
   - Bastion and backend enrollment (through "device enrollment" as
-    specified by `RFC8628 <https://www.rfc-editor.org/info/rfc8628/>`_)
+    specified by `RFC8628 <https://www.rfc-editor.org/info/rfc8628/>`__)
 
   - Centralized access logs
 
@@ -92,7 +92,7 @@ via OIDC— Open Bastion is feature rich. It provides:
 * :doc:`crowdsec`:
   Pre-authentication IP blocking and post-authentication failure
   reporting, with auto-ban and `Crowdsieve
-  <https://github.com/linagora/crowdsieve>`_ support for centralized
+  <https://github.com/linagora/crowdsieve>`__ support for centralized
   alerts
 
 * Monitoring: Server heartbeat and statistics reporting to LLNG portal

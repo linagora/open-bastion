@@ -64,6 +64,7 @@ html_theme = "sphinx_rtd_theme" if _rtd else "alabaster"
 html_theme_options = {
     "collapse_navigation": False,
     "navigation_depth": 3,
+    "prev_next_buttons_location": "bottom"
 } if _rtd else {}
 
 html_title = "Open Bastion %s" % version if version else "Open Bastion"

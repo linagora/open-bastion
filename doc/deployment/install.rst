@@ -91,7 +91,7 @@ Mandatory LLNG plugins
 
 The portal side of Open Bastion is provided by four LLNG plugins
 available from `Linagora's plugins store
-<https://github.com/linagora/lemonldap-ng-plugins>`_.
+<https://github.com/linagora/lemonldap-ng-plugins>`__.
 
 Install via Linagora's plugins store
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

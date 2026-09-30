@@ -44,7 +44,7 @@ truthy, thanks to LLNG's Autoloader.
 For the plugins ``OIDCDeviceAuthorization`` and
 ``OIDCDeviceOrganization`` the activation condition have been set
 while `creating the OIDC Relying Party
-<#llng-configuration-creation-of-the-oidc-relying-party>`_.
+<#llng-configuration-creation-of-the-oidc-relying-party>`__.
 
 For the other two plugins, use LLNG Manager to set
 ``pamAccessActivation = 1`` and ``sshCaActivation = 1`` as activation

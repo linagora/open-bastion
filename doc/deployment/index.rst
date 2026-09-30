@@ -8,7 +8,7 @@ Deployment
    llng-configuration
    bastion-configuration
    backend-configuration
-   fleet-deployment
+   self-extracting-installer
    ansible-deployment
 
 The deployment of Open Bastion starts with standard :doc:`installation
@@ -37,11 +37,11 @@ must be followed by configuration steps:
    If you find the deployment process tedious, we have good news for
    you!
 
-   Two ways to automate the deployment proces, based on a shell tool
-   or the `Ansible Automation Platform
-   <https://github.com/ansible/ansible>`_ are supported:
+   Two ways to automate the deployment proces, based on
+   self-extracting installers or the `Ansible Automation Platform
+   <https://github.com/ansible/ansible>`__ are supported:
    
-   * :doc:`/deployment/fleet-deployment`
+   * :doc:`/deployment/self-extracting-installer`
    
    * :doc:`/deployment/ansible-deployment`
    
