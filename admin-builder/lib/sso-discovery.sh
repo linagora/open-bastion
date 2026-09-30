@@ -7,9 +7,9 @@
 #   sso_fetch_krl URL OUTFILE     → best-effort; returns 1 silently if unavailable
 #   sso_fetch_jwks URL OUTFILE    → writes JWKS JSON; returns non-zero on failure
 #
-# All fetches honour the OB_BUILDER_INSECURE env var (skip TLS verification)
-# and OB_BUILDER_ALLOW_HTTP (controls protocol enforcement upstream — this
-# module does no protocol check itself; the entrypoint does that).
+# All fetches honour the OB_BUILDER_INSECURE env var (skip TLS verification,
+# set by --insecure). This module does no protocol check itself: the
+# entrypoint refuses http:// unless --insecure was given.
 
 if [ -n "${_OB_BUILDER_SSO_SOURCED:-}" ]; then
     return 0

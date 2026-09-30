@@ -10,26 +10,39 @@ _OB_BUILDER_PROMPTS_SOURCED=1
 
 # Prompts read from /dev/tty when available so that piping config into
 # ob-builder via stdin (e.g. for the YAML loader) does not swallow prompts.
+# "Available" means openable: without a controlling terminal /dev/tty exists
+# but cannot be opened, and stdin is used instead.
+_ob_has_tty() {
+    { : < /dev/tty; } 2>/dev/null
+}
+
+# EOF on input: fatal (else retry loops spin forever). Inside $(...) this
+# only leaves the subshell; callers abort on its non-zero status.
+_ob_eof() {
+    log_error "No more input (EOF) while prompting"
+    exit 1
+}
+
 _ob_read_line() {
     local __var="$1"
-    if [ -r /dev/tty ]; then
+    if _ob_has_tty; then
         # shellcheck disable=SC2229
-        IFS= read -r "$__var" < /dev/tty
+        IFS= read -r "$__var" < /dev/tty || _ob_eof
     else
         # shellcheck disable=SC2229
-        IFS= read -r "$__var"
+        IFS= read -r "$__var" || _ob_eof
     fi
 }
 
 _ob_read_secret() {
     local __var="$1"
-    if [ -r /dev/tty ]; then
+    if _ob_has_tty; then
         # shellcheck disable=SC2229
-        IFS= read -rs "$__var" < /dev/tty
+        IFS= read -rs "$__var" < /dev/tty || _ob_eof
         printf '\n' >&2
     else
         # shellcheck disable=SC2229
-        IFS= read -rs "$__var"
+        IFS= read -rs "$__var" || _ob_eof
     fi
 }
 
@@ -155,4 +168,31 @@ ask_secret() {
     printf '%s: ' "$question" >&2
     _ob_read_secret answer
     printf '%s\n' "$answer"
+}
+
+# ask_secret_confirm "Question"
+# Like ask_secret, but asks twice and repeats until both entries match and
+# are non-empty. Echoes the secret on stdout.
+ask_secret_confirm() {
+    local question="$1"
+    local first second
+
+    if [ "${OB_BUILDER_NON_INTERACTIVE:-}" = "1" ]; then
+        log_error "Non-interactive mode: cannot prompt for secret '$question'"
+        exit 1
+    fi
+
+    while :; do
+        printf '%s: ' "$question" >&2
+        _ob_read_secret first
+        if [ -z "$first" ]; then
+            printf '  Empty value, try again.\n' >&2
+            continue
+        fi
+        printf 'Confirm %s: ' "$question" >&2
+        _ob_read_secret second
+        [ "$first" = "$second" ] && break
+        printf '  Entries do not match, try again.\n' >&2
+    done
+    printf '%s\n' "$first"
 }

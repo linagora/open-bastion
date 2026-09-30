@@ -33,6 +33,7 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 | -------------------------- | ------------------------------------------------------------------------------------------------ |
 | `ob_portal_url`            | LLNG portal URL (required)                                                                       |
 | `ob_client_id`             | OIDC client_id for enrollment                                                                    |
+| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false` |
 | `ob_client_secret`         | OIDC client secret — use ansible-vault                                                           |
 | `ob_server_group`          | Server group name (set per-host for fleet deployments)                                           |
 | `ob_role`                  | `bastion`, `backend`, or `standalone`                                                            |

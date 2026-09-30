@@ -50,6 +50,10 @@ AUTO_ENROLL_SETUP="@@AUTO_ENROLL_SETUP@@"
 # Self-delete after success: yes | no
 SELF_DELETE_DEFAULT="@@SELF_DELETE@@"
 
+# yes = built with ob-builder --insecure (plain-http or self-signed portal):
+# --insecure is then on by default (verify_ssl = false, ob-enroll/setup -k).
+INSECURE_DEFAULT="@@INSECURE_DEFAULT@@"
+
 # Optional opt-in features passed through to ob-{bastion,backend}-setup
 # (yes | no). Hardening and audit-trace are intrusive and default to no.
 # DISABLE_SESSION_RECORDER=yes opts out of session recording on a
@@ -86,20 +90,25 @@ OPT_DRY_RUN=false
 OPT_FORCE=false
 OPT_NON_INTERACTIVE=false
 OPT_INSECURE=false
+if [ "${INSECURE_DEFAULT}" = "yes" ]; then
+    OPT_INSECURE=true
+fi
 OPT_SELF_DELETE=""   # "", "yes" or "no" — empty means honour SELF_DELETE_DEFAULT
 
 DISTRO=""  # debian | rhel
+ENROLL_DONE=false
+SETUP_DONE=false
 
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
 
 if [ -t 1 ]; then
-    _RED='\033[0;31m'
-    _GREEN='\033[0;32m'
-    _YELLOW='\033[1;33m'
-    _BLUE='\033[0;34m'
-    _NC='\033[0m'
+    _RED=$'\033[0;31m'
+    _GREEN=$'\033[0;32m'
+    _YELLOW=$'\033[1;33m'
+    _BLUE=$'\033[0;34m'
+    _NC=$'\033[0m'
 else
     _RED=''
     _GREEN=''
@@ -140,7 +149,9 @@ Options:
   --dry-run                 Print actions without executing them
   --force                   Overwrite existing /etc/open-bastion (normally refused)
   --non-interactive         Fail instead of prompting (for CI)
-  --insecure                Disable TLS verification (debug only)
+  --insecure                Disable TLS verification: verify_ssl = false and
+                            ob-enroll/setup -k (test setups only; built-in
+                            default: ${INSECURE_DEFAULT})
   --self-delete             Remove this installer from disk after success
                             (overrides the built-in default: ${SELF_DELETE_DEFAULT})
   --no-self-delete          Keep the installer on disk after success
@@ -151,6 +162,7 @@ Embedded metadata:
   Role:       ${TARGET_ROLE}
   SSO portal: ${PORTAL_URL_DEFAULT}
   CA SHA256:  ${CA_SSH_FINGERPRINT}
+  TLS verify: $([ "${INSECURE_DEFAULT}" = "yes" ] && echo "disabled (built with --insecure)" || echo "enabled")
 
 EOF
     exit 0
@@ -222,6 +234,7 @@ cmd_info() {
     echo "  Secret mode:     ${CLIENT_SECRET_MODE}"
     echo "  Auto enroll:     ${AUTO_ENROLL_SETUP}"
     echo "  CA fingerprint:  ${CA_SSH_FINGERPRINT}"
+    echo "  TLS verify:      $([ "${INSECURE_DEFAULT}" = "yes" ] && echo "disabled (built with --insecure)" || echo "enabled")"
     exit 0
 }
 
@@ -317,9 +330,22 @@ resolve_client_secret() {
         if [ "${OPT_NON_INTERACTIVE}" = "true" ]; then
             die "client_secret required but not provided (pass --client-secret-file or set OB_CLIENT_SECRET)"
         fi
-        printf "client_secret for OIDC RP (input hidden): " >&2
-        IFS= read -rs CLIENT_SECRET < /dev/tty
-        echo "" >&2
+        # Asked twice: a typo here only shows up later as a failed enrollment.
+        local _confirm
+        while :; do
+            printf "client_secret for OIDC RP (input hidden): " >&2
+            IFS= read -rs CLIENT_SECRET < /dev/tty
+            echo "" >&2
+            if [ -z "${CLIENT_SECRET}" ]; then
+                log_warn "Empty client_secret, try again."
+                continue
+            fi
+            printf "Confirm client_secret: " >&2
+            IFS= read -rs _confirm < /dev/tty
+            echo "" >&2
+            [ "${CLIENT_SECRET}" = "${_confirm}" ] && break
+            log_warn "Entries do not match, try again."
+        done
     fi
 }
 
@@ -450,11 +476,18 @@ step_config() {
     resolve_server_group
     resolve_client_secret
 
+    # pam_openbastion refuses an http portal while verify_ssl is on.
+    local _verify_ssl=true
+    if [ "${OPT_INSECURE}" = "true" ]; then
+        _verify_ssl=false
+    fi
+
     if [ "${OPT_DRY_RUN}" = "true" ]; then
         log_info "[DRY-RUN] Would create /etc/open-bastion (0700)"
         log_info "[DRY-RUN] Would write /etc/open-bastion/openbastion.conf (0600)"
         log_info "[DRY-RUN]   client_id    = ${CLIENT_ID}"
         log_info "[DRY-RUN]   server_group = ${SERVER_GROUP}"
+        log_info "[DRY-RUN]   verify_ssl   = ${_verify_ssl}"
         log_info "[DRY-RUN]   client_secret= <$([ -n "${CLIENT_SECRET}" ] && echo 'set' || echo 'empty')>"
         if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
             log_info "[DRY-RUN] Would write /etc/open-bastion/service-accounts.conf (0600)"
@@ -487,9 +520,10 @@ step_config() {
 @@OPENBASTION_CONF_TEMPLATE@@
 OB_CONF_EOF
 )
-    _conf_content="${_conf_template//##CLIENT_ID##/${CLIENT_ID}}"
-    _conf_content="${_conf_content//##SERVER_GROUP##/${SERVER_GROUP}}"
-    _conf_content="${_conf_content//##CLIENT_SECRET##/${CLIENT_SECRET}}"
+    _conf_content="${_conf_template//##CLIENT_ID##/"${CLIENT_ID}"}"
+    _conf_content="${_conf_content//##SERVER_GROUP##/"${SERVER_GROUP}"}"
+    _conf_content="${_conf_content//##CLIENT_SECRET##/"${CLIENT_SECRET}"}"
+    _conf_content="${_conf_content//##VERIFY_SSL##/"${_verify_ssl}"}"
 
     # Atomic write at 0600 root:root.
     local _conf_tmp
@@ -693,6 +727,7 @@ step_enroll() {
     # Pass secret via env var, not CLI (keeps it out of /proc/<pid>/cmdline)
     if OB_CLIENT_SECRET="${CLIENT_SECRET}" /usr/sbin/ob-enroll "${_enroll_opts[@]}"; then
         log_info "Enrollment complete"
+        ENROLL_DONE=true
     else
         log_error "ob-enroll failed — check portal connectivity and credentials"
         log_error "You can retry manually: OB_CLIENT_SECRET=<secret> ob-enroll -g '${SERVER_GROUP}'"
@@ -771,6 +806,7 @@ step_setup() {
                 return 1
             fi
             OB_CLIENT_SECRET="${CLIENT_SECRET}" /usr/sbin/ob-bastion-setup "${_setup_opts[@]}"
+            SETUP_DONE=true
             ;;
         backend)
             # Backends never record sessions, so --disable-session-recorder is
@@ -811,6 +847,23 @@ step_setup() {
 # Final summary
 # ---------------------------------------------------------------------------
 
+# Bastion ID (what backends list in allowed_bastions). Best effort: needs
+# the portal, so any failure just points at the manual command.
+print_bastion_id() {
+    case "${TARGET_ROLE}" in bastion|standalone) ;; *) return 0 ;; esac
+    [ "${OPT_DRY_RUN}" = "true" ] && return 0
+    [ "${ENROLL_DONE}" = "true" ] || [ "${SETUP_DONE}" = "true" ] || return 0
+    local _bin _bid=""
+    _bin=$(command -v ob-bastion-id 2>/dev/null || true)
+    if [ -z "${_bin}" ] && [ -x /usr/sbin/ob-bastion-id ]; then
+        _bin=/usr/sbin/ob-bastion-id
+    fi
+    [ -n "${_bin}" ] || return 0
+    _bid=$("${_bin}" -q 2>/dev/null) || _bid=""
+    echo "  Bastion ID:  ${_bid:-<unavailable, run: sudo ob-bastion-id>}"
+    return 0
+}
+
 print_summary() {
     echo ""
     echo "┌─────────────────────────────────────────────────────────┐"
@@ -825,6 +878,7 @@ print_summary() {
     echo "  Server grp:  ${SERVER_GROUP}"
     echo "  CA key:      /etc/ssh/open-bastion_ca.pub"
     echo "  CA SHA256:   ${CA_SSH_FINGERPRINT}"
+    print_bastion_id
     if [ "${OPT_DRY_RUN}" = "true" ]; then
         echo ""
         echo "  [DRY-RUN] No changes were made to this system."
@@ -891,6 +945,10 @@ main() {
     echo ""
     if [ "${OPT_DRY_RUN}" = "true" ]; then
         log_warn "DRY-RUN MODE — no changes will be made"
+        echo ""
+    fi
+    if [ "${OPT_INSECURE}" = "true" ]; then
+        log_warn "TLS verification DISABLED (verify_ssl = false, ob-enroll/setup -k) — test setups only"
         echo ""
     fi
 

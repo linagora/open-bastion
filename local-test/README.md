@@ -113,8 +113,9 @@ harness, not in what `ob-builder` produced.
   production**: the public-repo `.deb` is built per-distro in CI and already
   depends on the matching libsodium.
 - **Plain-http SSO** → `pam_openbastion` refuses an http portal unless
-  `verify_ssl=false`. Ansible sets `ob_verify_ssl: false` (which makes the role
-  pass `--insecure`); the shell installer is run with `--insecure`.
+  `verify_ssl=false`. The harness builds with `ob-builder --insecure`, so the
+  role defaults to `ob_verify_ssl: false` and the shell installer to
+  `--insecure` (both also set explicitly by the harness).
 - **Split-horizon approval** → the control node can't resolve
   `auth.example.com`, so Ansible sets `ob_approve_base_url`/`ob_approve_host` to
   reach the SSO at the gateway; the shell path approves the device code from the

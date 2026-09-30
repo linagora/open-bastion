@@ -17,7 +17,7 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 # (the shim self-locates its dummy CA via readlink, so the symlink is enough).
 SHIMBIN="$WORK/shimbin"; mkdir -p "$SHIMBIN"
 ln -sf "$SSO_DIR/ob-builder-curl-shim.sh" "$SHIMBIN/curl"
-obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --allow-http; }
+obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --insecure; }
 
 # Common lab-only inventory vars (kept out of the generated role).
 _inv_vars(){ cat <<EOF

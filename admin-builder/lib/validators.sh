@@ -17,7 +17,7 @@ is_valid_slug() {
 # Accepts http:// or https://. Excludes shell metacharacters ($, `, ", ', \)
 # so the URL can be safely embedded as a bash double-quoted literal in the
 # generated installer.sh — preventing command-substitution at install time.
-# The caller decides whether to refuse http based on --allow-http.
+# The caller decides whether to refuse http based on --insecure.
 is_valid_url() {
     [[ "$1" =~ ^https?://[A-Za-z0-9._:/?#@!()*+,\;=~%-]+$ ]]
 }
