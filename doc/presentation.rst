@@ -30,7 +30,7 @@ Manage your Linux administrators as easily as your SSO users, with **LemonLDAP::
 
    <!-- end_slide -->
 
-Two Components
+Two components
 ==============
 
 .. _presentation-1-server-side-llng:
@@ -51,10 +51,10 @@ C PAM module (``pam_openbastion.so``)
 
    <!-- end_slide -->
 
-Key Security Feature
+Key security feature
 ====================
 
-One-Time Tokens (PAMTOKEN)
+One-time tokens (PAMTOKEN)
 --------------------------
 
 .. raw:: html
@@ -91,7 +91,7 @@ One-Time Tokens (PAMTOKEN)
 
    <!-- end_slide -->
 
-Architecture Overview
+Architecture overview
 =====================
 
 ::
@@ -122,7 +122,7 @@ Architecture Overview
 
    <!-- end_slide -->
 
-LLNG Portal Endpoints
+LLNG portal endpoints
 =====================
 
 ======================= =================================
@@ -141,10 +141,10 @@ Endpoint                Purpose
 
    <!-- end_slide -->
 
-Server Enrollment (RFC 8628)
+Server enrollment (RFC 8628)
 ============================
 
-Device Authorization Grant
+Device authorization grant
 --------------------------
 
 One-time setup per Linux server:
@@ -157,7 +157,7 @@ One-time setup per Linux server:
 
    <!-- pause -->
 
-Enrollment Flow
+Enrollment flow
 ---------------
 
 1. Script contacts ``/oauth2/device``
@@ -170,10 +170,10 @@ Enrollment Flow
 
    <!-- end_slide -->
 
-Authentication Flow
+Authentication flow
 ===================
 
-Token-Based SSH Login
+Token-based SSH login
 ---------------------
 
 ::
@@ -199,10 +199,10 @@ Token-Based SSH Login
 
    <!-- end_slide -->
 
-SSH Key Authentication
+SSH key authentication
 ======================
 
-Authorization-Only Mode
+Authorization-only mode
 -----------------------
 
 When using SSH keys, PAM only checks authorization:
@@ -229,10 +229,10 @@ When using SSH keys, PAM only checks authorization:
 
    <!-- end_slide -->
 
-NSS Module: libnss_openbastion
+NSS module: libnss_openbastion
 ==============================
 
-The Problem
+The problem
 -----------
 
 SSH checks if user exists in ``/etc/passwd`` **BEFORE** calling PAM
@@ -241,7 +241,7 @@ SSH checks if user exists in ``/etc/passwd`` **BEFORE** calling PAM
 
    <!-- pause -->
 
-The Solution
+The solution
 ------------
 
 ``libnss_openbastion`` queries LLNG for unknown users
@@ -268,10 +268,10 @@ Flow
 
    <!-- end_slide -->
 
-Automatic User Creation
+Automatic user creation
 =======================
 
-First Login Provisioning
+First login provisioning
 ------------------------
 
 PAM can automatically create Unix accounts on first connection
@@ -296,7 +296,7 @@ Configuration
 
    <!-- pause -->
 
-LLNG Exported Attributes
+LLNG exported attributes
 ------------------------
 
 ::
@@ -310,12 +310,12 @@ LLNG Exported Attributes
 
    <!-- end_slide -->
 
-Heartbeat Monitoring
+Heartbeat monitoring
 ====================
 
 .. _presentation-server-registration--health-checks:
 
-Server Registration & Health Checks
+Server registration & health checks
 -----------------------------------
 
 .. code:: bash
@@ -338,7 +338,7 @@ Benefits
 
    <!-- pause -->
 
-Heartbeat Payload
+Heartbeat payload
 -----------------
 
 .. code:: json
@@ -356,10 +356,10 @@ Heartbeat Payload
 
 .. _presentation-server-groups--authorization:
 
-Server Groups & Authorization
+Server groups & authorization
 =============================
 
-LLNG Manager Configuration
+LLNG Manager configuration
 --------------------------
 
 .. code:: perl
@@ -374,7 +374,7 @@ LLNG Manager Configuration
 
    <!-- pause -->
 
-Per-Server Configuration
+Per-server configuration
 ------------------------
 
 .. code:: ini
@@ -392,10 +392,10 @@ Only members of ``ops`` group can access production servers!
 
    <!-- end_slide -->
 
-Security Features
+Security features
 =================
 
-PAM Module Security
+PAM module security
 -------------------
 
 - **AES-256-GCM** encryption for secrets
@@ -420,10 +420,10 @@ Communications
 
    <!-- end_slide -->
 
-Token Rotation
+Token rotation
 ==============
 
-Detecting Token Theft
+Detecting token theft
 ---------------------
 
 Refresh token rotation is enabled via:
@@ -436,7 +436,7 @@ Refresh token rotation is enabled via:
 
    <!-- pause -->
 
-How It Works
+How it works
 ------------
 
 1. New refresh token generated on each renewal
@@ -447,7 +447,7 @@ How It Works
 
    <!-- pause -->
 
-Theft Detection
+Theft detection
 ---------------
 
 If attacker uses stolen token:
@@ -460,10 +460,10 @@ If attacker uses stolen token:
 
    <!-- end_slide -->
 
-PAM Configuration Modes
+PAM configuration modes
 =======================
 
-Mode A: LLNG Token Only
+Mode A: LLNG token only
 -----------------------
 
 ::
@@ -476,7 +476,7 @@ Mode A: LLNG Token Only
 
    <!-- pause -->
 
-Mode B: LLNG Token OR Unix Password
+Mode B: LLNG token OR Unix password
 -----------------------------------
 
 ::
@@ -491,7 +491,7 @@ Mode B: LLNG Token OR Unix Password
 
 .. _presentation-mode-c-ssh-key--llng-authorization:
 
-Mode C: SSH Key + LLNG Authorization
+Mode C: SSH key + LLNG authorization
 ------------------------------------
 
 ::
@@ -519,7 +519,7 @@ Debian/Ubuntu
 
    sudo apt install open-bastion
 
-From Source
+From source
 -----------
 
 .. code:: bash
@@ -534,7 +534,7 @@ From Source
 
    <!-- end_slide -->
 
-Quick Setup
+Quick setup
 ===========
 
 .. _presentation-1-configure:
@@ -610,7 +610,7 @@ Logs
 
    <!-- pause -->
 
-Debug Mode
+Debug mode
 ----------
 
 .. code:: ini
@@ -637,7 +637,7 @@ Re-enrollment
 Summary
 =======
 
-Key Benefits
+Key benefits
 ------------
 
 - **Single Sign-On** for Linux servers
@@ -671,7 +671,7 @@ Component                 Function
 
    <!-- jump_to_middle -->
 
-Thank You!
+Thank you!
 ==========
 
 .. raw:: html

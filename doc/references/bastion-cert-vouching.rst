@@ -51,7 +51,7 @@ Same vouching gates as today's ``bastionToken`` (grant_type=device_code, server_
 - custom extension ``bastion-id@open-bastion = <bastion_id>`` (+ optional ``user-groups``);
 - optional ``source-address`` critical option = the bastion's IP (``$req->address``). Kept ``/pam/bastion-token`` for backward-compat at the time; upstream removed it in plugins 0.6.0 (lemonldap-ng-plugins#86), replacing its ``probe: true`` mode — the only part still in use, and the only part worth keeping — with ``POST /pam/whoami`` (lemonldap-ng-plugins#94).
 
-open-bastion changes
+Open Bastion changes
 ~~~~~~~~~~~~~~~~~~~~
 
 - ``scripts/ob-ssh``: ephemeral keypair → ``/pam/bastion-cert`` → ``CertificateFile`` connect; drop ``SendEnv=LLNG_BASTION_JWT``.

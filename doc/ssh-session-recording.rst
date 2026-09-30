@@ -295,7 +295,7 @@ identifier:
    systemctl status ob-record.socket
    journalctl -t ob-session-recorder
 
-Common Issues
+Common issues
 ~~~~~~~~~~~~~
 
 .. list-table:: Troubleshooting session recording

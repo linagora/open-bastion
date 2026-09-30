@@ -3,7 +3,7 @@ Service accounts
 
 Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, without OIDC authentication. They are defined in a local configuration file on each server.
 
-Why Service Accounts?
+Why service accounts?
 ---------------------
 
 Some accounts don't correspond to real users and can't authenticate via OIDC:
@@ -61,7 +61,7 @@ Create ``/etc/open-bastion/service-accounts.conf``:
 - Permissions 0600
 - Not a symlink
 
-**SSH server requirement:** The SSH server must have ``ExposeAuthInfo yes`` in ``/etc/ssh/sshd_config`` for fingerprint validation to work. This allows the PAM module to verify that the SSH key used matches the configured fingerprint. See also :ref:`SSH Key Policy <security-ssh-key-policy>` for restricting allowed key types.
+**SSH server requirement:** The SSH server must have ``ExposeAuthInfo yes`` in ``/etc/ssh/sshd_config`` for fingerprint validation to work. This allows the PAM module to verify that the SSH key used matches the configured fingerprint. See also :ref:`SSH key policy <security-ssh-key-policy>` for restricting allowed key types.
 
 .. code:: bash
 
@@ -80,7 +80,7 @@ Get the SSH key fingerprint:
    # Output: 256 SHA256:abc123def456 user@host (ED25519)
    # Use the "SHA256:abc123def456" part
 
-Configuration Options
+Configuration options
 ---------------------
 
 +---------------------+----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -94,7 +94,7 @@ Configuration Options
 +---------------------+----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``sudo_allowed``    | No       | Allow sudo access (default: false)                                                                                                                                                   |
 +---------------------+----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``sudo_nopasswd``   | No       | Sudo without re-proving the key (default: false) — see :ref:`Sudo and the key check <service-accounts-sudo-and-the-key-check>`                                                       |
+| ``sudo_nopasswd``   | No       | Sudo without re-proving the key (default: false) — see :ref:`sudo and the key check <service-accounts-sudo-and-the-key-check>`                                                       |
 +---------------------+----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | ``gecos``           | No       | User description                                                                                                                                                                     |
 +---------------------+----------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -109,7 +109,7 @@ Configuration Options
 
 † Not required by the file format, but one of the two is what makes the account usable: without a key the bundle deploys no ``.pub`` and ``sshd`` has nothing to offer.
 
-How It Works
+How it works
 ------------
 
 1. Service account connects via SSH with its configured key
@@ -257,7 +257,7 @@ Service accounts authenticate by **direct SSH key**, independently of the bastio
 
 .. _service-accounts-sudo-and-the-key-check:
 
-Sudo and the key check
+sudo and the key check
 ----------------------
 
 With ``sudo_nopasswd = false``, a service account's ``sudo`` must re-prove the SSH key that opened the session. That check reads the fingerprint from the principals spool (``/run/open-bastion/ssh-fp``), which the account's SSH session populated and which ``sudo`` inherits through the process tree.
@@ -266,12 +266,12 @@ Until 0.6.2 it read ``SSH_USER_AUTH`` only. That variable does not exist in a ``
 
 ``sudo_nopasswd = false`` requires the host to run the ``AuthorizedPrincipalsCommand`` helper (the certificate modes), since that is what writes the spool. On a host without it there is no fingerprint to recover in either context, and a service account's ``sudo`` is refused.
 
-Sudo bypasses the SSO token (including in Mode E)
+sudo bypasses the SSO token (including in Mode E)
 -------------------------------------------------
 
 A service account's sudo rights come **entirely** from ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``): ``pam_openbastion`` grants them locally and returns success **without any LLNG call** — even in Mode E, where human users must present a fresh LLNG token to use sudo. A service key with ``sudo_allowed`` (especially ``sudo_nopasswd``) is therefore a **standing local privilege that escapes the SSO-gated sudo model**. Grant it sparingly, prefer no sudo or tightly-scoped ``sudoers`` rules, and rotate/inventory these keys like any other long-lived credential. (You still need a ``sudoers`` entry permitting the account; PAM authorizes the *attempt*, ``sudoers`` authorizes *which commands*.)
 
-Per-Server Control
+Per-server control
 ------------------
 
 Since the configuration file is local to each server, you control which service accounts can access which servers:
@@ -282,7 +282,7 @@ Since the configuration file is local to each server, you control which service 
 
 Use configuration management (Ansible, Puppet) to deploy the appropriate configuration to each server.
 
-Specifying the Configuration File
+Specifying the configuration file
 ---------------------------------
 
 In ``/etc/open-bastion/openbastion.conf``:

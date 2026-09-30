@@ -98,7 +98,7 @@ A question that comes up on every deployment: can a user keep a **personal SSH k
 
    **Validation status.** The matrix above and the Mode E answer are derived from the code and the generated ``sshd`` configurations. The key-mode path has **not yet been validated end to end in a lab** (portal up, then portal down, cached authorization still admitting the key). Until it has, treat the key-mode rows as analysis rather than as a tested procedure — see issue #165.
 
-Use Cases
+Use cases
 ---------
 
 +------------------------+-----------------------------------------------------+
@@ -113,10 +113,10 @@ Use Cases
 | **LightDM desktop**    | Workstation login when SSO portal is unavailable    |
 +------------------------+-----------------------------------------------------+
 
-How It Works
+How it works
 ------------
 
-Credential Storage
+Credential storage
 ~~~~~~~~~~~~~~~~~~
 
 When a user successfully authenticates online, their credentials are cached:
@@ -126,7 +126,7 @@ When a user successfully authenticates online, their credentials are cached:
 3. **Key derivation**: Encryption key derived via PBKDF2-SHA256 from a root-only key file (``/etc/open-bastion/cache.key``) or ``/etc/machine-id``
 4. **Storage**: Encrypted entry saved to ``/var/cache/open-bastion/credentials/``
 
-Offline Authentication
+Offline authentication
 ~~~~~~~~~~~~~~~~~~~~~~
 
 When the LLNG portal is unreachable:
@@ -139,7 +139,7 @@ When the LLNG portal is unreachable:
 6. If match → authenticate user with cached attributes
 7. If mismatch → increment failure counter, check lockout
 
-Cache Refresh
+Cache refresh
 ~~~~~~~~~~~~~
 
 - Credentials are refreshed on every successful online login
@@ -149,7 +149,7 @@ Cache Refresh
 Configuration
 -------------
 
-Enable Offline Mode
+Enable offline mode
 ~~~~~~~~~~~~~~~~~~~
 
 Add to ``/etc/open-bastion/openbastion.conf``:
@@ -177,7 +177,7 @@ Or via PAM module arguments:
 
    auth sufficient pam_openbastion.so oauth2_token_auth offline_cache
 
-Disable Offline Mode
+Disable offline mode
 ~~~~~~~~~~~~~~~~~~~~
 
 .. code:: ini
@@ -191,12 +191,12 @@ Or via PAM module arguments:
 
    auth sufficient pam_openbastion.so oauth2_token_auth no_offline_cache
 
-LightDM Desktop Integration
+LightDM desktop integration
 ---------------------------
 
 The LightDM greeter automatically detects when the SSO portal is unreachable and switches to offline mode.
 
-Visual Indicators
+Visual indicators
 ~~~~~~~~~~~~~~~~~
 
 ===================== ============================================
@@ -207,7 +207,7 @@ Element               Description
 **Lockout countdown** Shows remaining time when account is locked
 ===================== ============================================
 
-User Experience
+User experience
 ~~~~~~~~~~~~~~~
 
 1. Greeter attempts to load SSO iframe
@@ -220,7 +220,7 @@ User Experience
 3. Greeter periodically retries connection
 4. When online again, user can switch back to SSO
 
-Greeter Configuration
+Greeter configuration
 ~~~~~~~~~~~~~~~~~~~~~
 
 Edit ``/etc/lightdm/lightdm-webkit2-greeter.conf``:
@@ -243,7 +243,7 @@ Edit ``/etc/lightdm/lightdm-webkit2-greeter.conf``:
 Administration
 --------------
 
-Cache Management Tool
+Cache management tool
 ~~~~~~~~~~~~~~~~~~~~~
 
 Use ``ob-cache-admin`` to manage the offline cache (requires root):
@@ -271,7 +271,7 @@ Use ``ob-cache-admin`` to manage the offline cache (requires root):
    # Remove invalid/orphaned cache files
    ob-cache-admin cleanup
 
-Example Output
+Example output
 ~~~~~~~~~~~~~~
 
 ::
@@ -307,10 +307,10 @@ Example Output
 
 See :doc:`Cache Administration </offline-cache-admin>` for full documentation.
 
-Security Considerations
+Security considerations
 -----------------------
 
-Cryptographic Protections
+Cryptographic protections
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 +----------------+---------------+---------------------------------------------------------+
@@ -325,7 +325,7 @@ Cryptographic Protections
 | Filename       | SHA-256       | Prevent user enumeration                                |
 +----------------+---------------+---------------------------------------------------------+
 
-Argon2id Parameters
+Argon2id parameters
 ~~~~~~~~~~~~~~~~~~~
 
 =========== ======== =========================
@@ -340,7 +340,7 @@ Salt length 16 bytes Unique per user, random
 
 These parameters follow OWASP recommendations for password storage.
 
-File System Security
+File system security
 ~~~~~~~~~~~~~~~~~~~~
 
 =============== =========== ====================
@@ -353,7 +353,7 @@ Key file        0600        Root read/write only
 
 .. _offline-mode-machine-id--key-file-dependency:
 
-Machine-ID / Key File Dependency
+Machine-ID / key file dependency
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The encryption key is derived from a root-only key file (``/etc/open-bastion/cache.key``) or falls back to ``/etc/machine-id``. This means:
@@ -371,7 +371,7 @@ System reinstall  All caches invalid Users re-authenticate online
 Key file rotation All caches invalid Users re-authenticate online
 ================= ================== =================================
 
-Brute-Force Protection
+Brute-force protection
 ~~~~~~~~~~~~~~~~~~~~~~
 
 After 5 failed password attempts, the account is locked for 5 minutes. These are compile-time constants defined in ``offline_cache.h`` (``OFFLINE_CACHE_MAX_FAILED_ATTEMPTS`` and ``OFFLINE_CACHE_LOCKOUT_DURATION``). They can also be configured at runtime via ``offline_cache_max_failures`` and ``offline_cache_lockout`` in the configuration file.
@@ -381,7 +381,7 @@ Lockout state is stored encrypted within the cache entry, preventing bypass by f
 Troubleshooting
 ---------------
 
-User Cannot Login Offline
+User cannot login offline
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:** User sees "User not found in cache"
@@ -398,7 +398,7 @@ User Cannot Login Offline
 2. Check cache TTL: ``grep offline_cache_ttl /etc/open-bastion/openbastion.conf``
 3. Verify user exists: ``sudo ob-cache-admin show username``
 
-Account Locked
+Account locked
 ~~~~~~~~~~~~~~
 
 **Symptom:** User sees "Account temporarily locked"
@@ -416,7 +416,7 @@ Account Locked
 
 Note: The unlock command cannot modify the encrypted lockout state directly. It offers to invalidate the cache entry instead, requiring the user to authenticate online next time. Alternatively, wait for the lockout to expire (5 minutes by default).
 
-Cache Not Working
+Cache not working
 ~~~~~~~~~~~~~~~~~
 
 **Symptom:** Offline mode always fails
@@ -437,7 +437,7 @@ Cache Not Working
    # Check syslog for errors
    journalctl | grep pam_openbastion
 
-Machine-ID or Key File Changed
+Machine-ID or key file changed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Symptom:** All users get decryption errors
@@ -449,10 +449,10 @@ Machine-ID or Key File Changed
 1. All users must re-authenticate online
 2. Clear the invalid cache: ``sudo ob-cache-admin invalidate-all``
 
-Best Practices
+Best practices
 --------------
 
-For Desktop Workstations
+For desktop workstations
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Enable offline mode** for laptop users who may travel
@@ -461,7 +461,7 @@ For Desktop Workstations
 4. **Train users** to login online periodically to refresh cache
 5. **Monitor lockouts** via ``ob-cache-admin stats``
 
-For Servers
+For servers
 ~~~~~~~~~~~
 
 1. **Disable offline mode** if not needed (reduces attack surface)
@@ -469,7 +469,7 @@ For Servers
 3. **Enable audit logging** to track offline authentications
 4. **Regular cleanup** of expired entries via cron
 
-For High-Security Environments
+For high-security environments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Consider **disabling offline mode entirely**
@@ -477,10 +477,10 @@ For High-Security Environments
 3. **Monitor** for unusual offline authentication patterns
 4. **Alert** on repeated lockouts (possible attack indicator)
 
-Monitoring and Alerts
+Monitoring and alerts
 ---------------------
 
-Syslog Messages
+Syslog messages
 ~~~~~~~~~~~~~~~
 
 The PAM module logs offline events to syslog (``auth`` facility):
@@ -499,7 +499,7 @@ The PAM module logs offline events to syslog (``auth`` facility):
    # Fallback to offline
    pam_openbastion[1237]: LLNG unreachable, switching to offline mode
 
-Metrics to Monitor
+Metrics to monitor
 ~~~~~~~~~~~~~~~~~~
 
 ================== =============== ====================
@@ -522,14 +522,14 @@ Limitations
 
 .. _offline-mode-network-revalidation:
 
-Network Revalidation
+Network revalidation
 --------------------
 
 When a user authenticates offline and the network later returns, the system revalidates the session to ensure the user's account is still valid on LLNG.
 
 .. _offline-mode-how-it-works-1:
 
-How It Works
+How it works
 ~~~~~~~~~~~~
 
 Three complementary mechanisms provide revalidation:
@@ -540,7 +540,7 @@ Three complementary mechanisms provide revalidation:
 
 3. **Background monitor (ob-session-monitor)**: A systemd service that polls the LLNG portal. When connectivity returns, it checks all offline sessions against LLNG's ``/pam/userinfo`` endpoint. Revoked users have their sessions terminated. Users with old caches are forced to re-authenticate online on next unlock.
 
-Anti-Firewall-Bypass Protection
+Anti-firewall-bypass protection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If a malicious user blocks the SSO portal with a local firewall rule while maintaining general network access, ``ob-session-monitor`` detects this condition. After a configurable timeout (``offline_max_sso_unreachable``, default 1 hour), all offline sessions are terminated.
@@ -570,7 +570,7 @@ Configuration
    # Max SSO unreachable time before terminating sessions (default: 1 hour)
    offline_max_sso_unreachable = 3600
 
-``ob-session-monitor`` Service
+``ob-session-monitor`` service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash

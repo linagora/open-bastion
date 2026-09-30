@@ -1,4 +1,4 @@
-CrowdSec Integration
+CrowdSec integration
 ====================
 
 Open Bastion can integrate with `CrowdSec
@@ -62,7 +62,7 @@ and/or:
    crowdsec_block_delay = 180        # time window in seconds
    crowdsec_ban_duration = 4h        # ban duration
 
-Configuration Options
+Configuration options
 ---------------------
 
 +------------------------------+-----------------------------------+----------------------------------------+
@@ -99,7 +99,7 @@ Configuration Options
 
 .. _crowdsec-ip-whitelist:
 
-IP Whitelist
+IP whitelist
 ------------
 
 The ``crowdsec_whitelist`` option allows you to specify IPs and
@@ -126,7 +126,7 @@ Example:
 
    crowdsec_whitelist = 10.0.0.0/8, 192.168.1.0/24, 172.16.0.0/12, ::1, 2001:db8::/32
 
-Security Considerations
+Security considerations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. warning::

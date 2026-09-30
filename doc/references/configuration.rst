@@ -39,7 +39,7 @@ Keys exempt from inline-comment stripping (their value is an opaque secret or ha
 
 For any other key, put the value in double quotes if it must contain a ``#`` preceded by a space.
 
-Main Configuration File
+Main configuration file
 -----------------------
 
 .. _configuration-etcopen-bastionopenbastionconf:
@@ -116,10 +116,10 @@ The value is taken literally, ``#`` included (see the comment rules above).
 
 For detailed documentation on specific features:
 
-- :ref:`Cache Brute-Force Protection <security-cache-brute-force-protection>`
-- :ref:`Rate Limiting <security-rate-limiting>`
+- :ref:`Cache brute-force protection <security-cache-brute-force-protection>`
+- :ref:`Rate limiting <security-rate-limiting>`
 
-PAM Module Arguments
+PAM module arguments
 --------------------
 
 Arguments can be passed directly in PAM configuration:
@@ -143,7 +143,7 @@ Argument               Description
 ``no_bind_ip``         Disable IP binding for tokens
 ====================== ======================================
 
-Server Enrollment Script
+Server enrollment script
 ------------------------
 
 The ``ob-enroll`` script automates the Device Authorization Grant flow.
@@ -197,7 +197,7 @@ Examples
    # Enroll with custom token file location
    sudo ob-enroll -t /var/lib/open-bastion/server.token
 
-Manual Enrollment (Without Script)
+Manual enrollment (without script)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you prefer manual enrollment:

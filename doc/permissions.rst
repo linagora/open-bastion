@@ -1,6 +1,6 @@
 .. _permissions-access--permissions-what-you-can-control-and-where:
 
-Access & Permissions: what you can control, and where
+Access & permissions: what you can control, and where
 =====================================================
 
 Open Bastion enforces access on **two layers**. Knowing which layer owns a given decision is the key to operating it well:

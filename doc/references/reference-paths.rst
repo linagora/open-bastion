@@ -167,7 +167,7 @@ Commands
 | ``ob-record-connect``               | ``/usr/bin``  | recorder→sink connector                                                                                    |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 
-Recordings File Permissions
+Recordings file permissions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Sessions directory: mode ``0750``, owned ``root:ob-sessions``

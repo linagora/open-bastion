@@ -3,7 +3,7 @@ Competitors and alternatives
 
 This document compares LLNG-PAM-MODULE with alternative solutions for SSH authentication, authorization, and session management.
 
-Solution Categories
+Solution categories
 -------------------
 
 There are two distinct meanings of "PAM" in the security industry:
@@ -15,7 +15,7 @@ LLNG-PAM-MODULE addresses both: it's a Linux PAM module that, combined with Lemo
 
 --------------
 
-Direct Competitors: PAM Modules for SSO
+Direct competitors: PAM modules for SSO
 ---------------------------------------
 
 These are alternative PAM modules for centralizing SSH authentication:
@@ -34,7 +34,7 @@ These are alternative PAM modules for centralizing SSH authentication:
 | **pam_oauth2**     | OAuth2         | Modern protocol                      | Community-maintained, limited features |
 +--------------------+----------------+--------------------------------------+----------------------------------------+
 
-LLNG-PAM-MODULE Advantages
+LLNG-PAM-MODULE advantages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Unified web SSO and system authentication
@@ -45,7 +45,7 @@ LLNG-PAM-MODULE Advantages
 
 --------------
 
-IAM/SSO Solutions Comparison
+IAM/SSO solutions comparison
 ----------------------------
 
 Complete Identity and Access Management solutions with system integration:
@@ -64,7 +64,7 @@ Complete Identity and Access Management solutions with system integration:
 | **Apereo CAS**                 | Open source | pam_cas         | ✅      | ❌                |
 +--------------------------------+-------------+-----------------+---------+-------------------+
 
-Key Differentiators
+Key differentiators
 ~~~~~~~~~~~~~~~~~~~
 
 LemonLDAP::NG with LLNG-PAM-MODULE is unique in providing:
@@ -76,7 +76,7 @@ LemonLDAP::NG with LLNG-PAM-MODULE is unique in providing:
 
 --------------
 
-Privileged Access Management (PAM) Solutions
+Privileged access management (PAM) solutions
 --------------------------------------------
 
 Enterprise solutions focused on privileged access control and session recording:
@@ -95,7 +95,7 @@ Enterprise solutions focused on privileged access control and session recording:
 | **Delinea (Thycotic)** | Proprietary | €€€  | ❌      | ✅                | ✅       |
 +------------------------+-------------+------+---------+-------------------+----------+
 
-Feature Comparison with Wallix
+Feature comparison with Wallix
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Wallix is a French company whose Wallix Bastion product is often considered in the same market. Here's a detailed comparison:
@@ -115,7 +115,7 @@ Feature                         LLNG + Bastion    Wallix Bastion
 **Typical Cost**                Free              50-100€/user/year
 =============================== ================= =================
 
-When to Choose LLNG
+When to choose LLNG
 ~~~~~~~~~~~~~~~~~~~
 
 Choose LemonLDAP::NG + PAM Module when you need:
@@ -126,7 +126,7 @@ Choose LemonLDAP::NG + PAM Module when you need:
 - **SSH-focused** privileged access management
 - **Custom integration** capabilities
 
-When to Consider Wallix/CyberArk
+When to consider Wallix/CyberArk
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Consider commercial PAM solutions when you need:
@@ -138,7 +138,7 @@ Consider commercial PAM solutions when you need:
 
 --------------
 
-Migration Paths
+Migration paths
 ---------------
 
 From pam_ldap or pam_krb5
@@ -150,7 +150,7 @@ From pam_ldap or pam_krb5
 4. Gradually migrate users to LLNG authentication
 5. Remove legacy PAM modules
 
-From Commercial PAM Solutions
+From commercial PAM solutions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Assess current session recording requirements

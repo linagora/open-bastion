@@ -21,11 +21,11 @@ Prerequisites
 - The Open Bastion ``.deb``/``.rpm`` reachable by the targets from an APT/YUM repo (the default is the Linagora repo; override with ``--apt-url``).
 - SSO reachable from your workstation (for the build-time OIDC discovery) **and** from the targets (at run time, for enrolment).
 - SSH access from your workstation to each target as a user that can ``sudo``.
-- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG Configuration → Create the OIDC Relying Party <llng-configuration-step-2-create-the-oidc-relying-party>`.
+- The **``pam-access`` OIDC Relying Party** configured on the portal for device enrollment — in particular *Allow Device Authorization*, *Device ownership* = ``organization``, and **Allow offline access** (with ``oidc-device-organization`` 0.3.3 or newer), otherwise enrollment gets a non-renewable token and ``ob-bastion-setup`` aborts in Mode E. See :ref:`LemonLDAP::NG configuration → create the OIDC relying party <llng-configuration-step-2-create-the-oidc-relying-party>`.
 
 .. _ansible-quickstart-step-1--generate-the-roles:
 
-Step 1 — Generate the roles
+Step 1 — generate the roles
 ---------------------------
 
 A bastion and a backend differ only by ``target_role`` (and the backend's "accept only this bastion" allowlist). You can generate them in **two runs**, or in **one run** with ``--bundle`` so both share the exact same CA / JWKS.
@@ -90,7 +90,7 @@ The default is ``prompt``, which keeps the OIDC client secret out of every gener
 
 .. _ansible-quickstart-step-2--declare-your-hosts-and-their-ips:
 
-Step 2 — Declare your hosts and their IPs
+Step 2 — declare your hosts and their IPs
 -----------------------------------------
 
 **This is where the IPs of the machines you are building go.** Create an ``inventory.yml`` next to the role and list every target under the right group — the bastion(s) under ``bastions``, every backend under ``backends``. The address of each machine is the ``ansible_host`` line:
@@ -146,7 +146,7 @@ A matching ``playbook.yml`` is trivial — apply the one role to everyone and le
 
 .. _ansible-quickstart-step-3--apply:
 
-Step 3 — Apply
+Step 3 — apply
 --------------
 
 If you enabled ``ansible_auto_approve: yes``, fetch a short-lived LLNG session cookie (it auto-approves the device-code enrolment for the whole fleet — no browser needed) and pass it at run time. The ``llng`` CLI comes from `simple-oidc-client <https://github.com/linagora/simple-oidc-client>`__:

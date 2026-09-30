@@ -5,7 +5,7 @@ Every security control Open Bastion implements: what it defends against, how it 
 
 To **report a vulnerability**, see `SECURITY.md <https://github.com/linagora/open-bastion/blob/main/SECURITY.md>`__ instead. For a shorter, task-oriented tour of the same ground, see :doc:`Security features </security>` and :doc:`Session containment hardening </hardening>`.
 
-Token Verification
+Token verification
 ------------------
 
 .. mermaid::
@@ -26,10 +26,10 @@ Token Verification
 3. Token is consumed *(single-use)* and cannot be replayed
 4. Server returns user attributes and authorization status
 
-Transport Security
+Transport security
 ------------------
 
-TLS Configuration
+TLS configuration
 ~~~~~~~~~~~~~~~~~
 
 =================== ============ =======================================
@@ -49,7 +49,7 @@ Setting             Default      Description
    min_tls_version = 13
    cert_pin = sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
-Request Signing (Optional)
+Request signing (optional)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When ``request_signing_secret`` is configured, requests include:
@@ -72,7 +72,7 @@ Every caller signs: the PAM module (``/pam/verify``, ``/pam/authorize``, ``/pam/
 
 The shell callers sign through ``ob-sign-request``, never through ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL takes the HMAC key on the command line and offers no form that reads it from a file or the environment; ``/proc/<pid>/cmdline`` is world-readable, so on a bastion that one-liner would hand the fleet-wide signing secret to every user with a shell, every few minutes, forever. ``ob-sign-request`` reads the secret from the root-only configuration file and takes the body on stdin — which matters too, since ``ob-heartbeat`` signs a body carrying the host's ``refresh_token``.
 
-Server Authentication
+Server authentication
 ---------------------
 
 The PAM module authenticates to the LLNG server using:
@@ -89,7 +89,7 @@ The PAM module authenticates to the LLNG server using:
 
 The server token should be stored in a file with restricted permissions (0600) owned by root.
 
-OAuth2 Client Authentication
+OAuth2 client authentication
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For OAuth2 token introspection and refresh operations, the module uses **JWT Client Assertion** (RFC 7523) instead of HTTP Basic Authentication. This provides enhanced security:
@@ -99,12 +99,12 @@ For OAuth2 token introspection and refresh operations, the module uses **JWT Cli
 - JWT contains: ``iss``, ``sub``, ``aud``, ``exp``, ``iat``, and unique ``jti`` (UUID v4)
 - JWT validity is 5 minutes to prevent replay attacks
 
-Automatic Token Rotation
+Automatic token rotation
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 When ``token_rotate_refresh = true`` (default), the module automatically rotates the refresh token after each successful token refresh. This limits the window of opportunity if a token is compromised, as stolen tokens become invalid after the next legitimate use.
 
-Bastion-to-Backend Authentication (Certificate Vouching)
+Bastion-to-backend authentication (certificate vouching)
 --------------------------------------------------------
 
 In bastion/backend architectures, the PAM module supports cryptographic verification that SSH connections to backends originate from authorized bastion servers. This is implemented via **LLNG-signed ephemeral SSH certificates** — not JWTs — because the JWT/``SendEnv`` approach was structurally broken (``SendEnv``/``AcceptEnv`` populate only the child-process environment, never the PAM environment that ``pam_getenv`` reads).
@@ -157,7 +157,7 @@ Flow
 4. ``ob-ssh`` connects to the backend: ``ssh -i <ephkey> -o CertificateFile=<cert> -o IdentitiesOnly=yes``. Temp files are wiped afterwards.
 5. Backend ``sshd`` validates the certificate natively (CA signature, validity window, ``principal``, ``source-address``). ``AuthorizedPrincipalsCommand ob-ssh-principals`` checks the ``key-id`` field against ``/etc/open-bastion/allowed_bastions``. ``pam_openbastion`` runs the normal ``/pam/authorize`` user-authorization call unchanged.
 
-Security Benefits
+Security benefits
 ~~~~~~~~~~~~~~~~~
 
 +---------------------------+--------------------------------+-------------------------------------------+
@@ -174,7 +174,7 @@ Security Benefits
 | Voucher theft by user     | N/A                            | Useless without root-only server token    |
 +---------------------------+--------------------------------+-------------------------------------------+
 
-Certificate Key-ID Fields
+Certificate Key-ID fields
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``key-id`` field of the ephemeral cert carries structured audit and enforcement data:
@@ -193,7 +193,7 @@ Full key-id example: ``bastion=bastion-01;user=alice;target=db-server``
 
 The ``source-address`` critical option is set to the bastion's IP, so sshd refuses the cert from any other origin at the protocol level.
 
-Configuration (Backend)
+Configuration (backend)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Backend configuration is managed via ``ob-backend-setup``:
@@ -230,7 +230,7 @@ Required sshd settings (no ``AcceptEnv`` needed):
 
 Direct user SSO certs that do not carry a ``bastion=`` key-id field are denied before PAM runs when an ``allowed_bastions`` file is present.
 
-Voucher Lifecycle
+Voucher lifecycle
 ~~~~~~~~~~~~~~~~~
 
 +----------+---------------------------------------------------------------------------------+
@@ -247,14 +247,14 @@ Voucher Lifecycle
 | Renewal  | User reconnects to the bastion; no silent re-vouching                           |
 +----------+---------------------------------------------------------------------------------+
 
-Authorization Cache Security
+Authorization cache security
 ----------------------------
 
 The **authorization cache** (``auth_cache``) is the only PAM-side cache in the module. It stores the result of a successful ``/pam/authorize`` call so that an already-authorized user can still log in while the LLNG portal is unreachable. It never caches credentials, tokens, or password material — only an authorization verdict and the account attributes that come with it.
 
 Entries are written only by builds that include the Desktop SSO components (``-DINSTALL_DESKTOP=ON``, which is what the ``.deb`` and ``.rpm`` packages use). An SSH-only build reads the cache but never populates it.
 
-Encryption at Rest
+Encryption at rest
 ~~~~~~~~~~~~~~~~~~
 
 Cache entries are always encrypted — there is no plaintext mode:
@@ -278,12 +278,12 @@ Cache entries are always encrypted — there is no plaintext mode:
 
 The plaintext expiration header allows quick expiry checks and cleanup without decrypting the payload. It is authenticated with an HMAC-SHA256 over the timestamp, keyed with the same derived key, so an attacker cannot extend cache validity by editing it: a header that fails HMAC verification is ignored and the entry falls through to a full authenticated decrypt.
 
-Fail-Closed Key Derivation
+Fail-closed key derivation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``auth_cache_init()`` returns ``NULL`` if key derivation fails. There is no unencrypted fallback: if the cache cannot be encrypted, it is not used at all and authorization falls back to the online path.
 
-Cache Isolation
+Cache isolation
 ~~~~~~~~~~~~~~~
 
 - Entries are keyed on ``(user, server_group, host)`` and stored one per file
@@ -292,19 +292,19 @@ Cache Isolation
 - Files are written to a temporary path and renamed atomically
 - Reads use ``O_NOFOLLOW``; a symlink in place of a cache file is deleted, not followed
 
-TTL and Invalidation
+TTL and invalidation
 ~~~~~~~~~~~~~~~~~~~~
 
 The TTL is not a local setting — it comes from the server, in the ``offline.ttl`` field of the ``/pam/authorize`` response, and the entry is only written when the server explicitly enables offline mode for that user. Expired entries are removed on access and by ``auth_cache_cleanup()``.
 
 Set ``auth_cache_enabled = false`` to disable the cache entirely; touching the ``auth_cache_force_online`` file (``/etc/open-bastion/force_online`` by default) forces every authorization online without a configuration change.
 
-Brute-Force Protection
+Brute-force protection
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Because a cached verdict can be replayed offline, cache lookups are rate limited independently of the online path (``cache_rate_limit_*``). Both hits and misses count towards the lockout, so an attacker cannot probe for which usernames have a cache entry without incurring the penalty.
 
-Rate Limiting
+Rate limiting
 -------------
 
 Protection against brute-force attacks:
@@ -321,12 +321,12 @@ Setting                        Default Description
 
 Lockout state is stored per-user in ``rate_limit_state_dir``.
 
-Auto-Create User Security
+Auto-create user security
 -------------------------
 
 When ``create_user_enabled = true``, users can be automatically created on first login.
 
-Path Validation
+Path validation
 ~~~~~~~~~~~~~~~
 
 All paths are validated before use:
@@ -350,7 +350,7 @@ All paths are validated before use:
 - No symlinks in path components
 - No dangerous patterns
 
-UID Generation
+UID generation
 ~~~~~~~~~~~~~~
 
 - UIDs are generated deterministically from username hash
@@ -358,7 +358,7 @@ UID Generation
 - **Collision handling**: If UID exists, operation fails safely *(returns 0)*
 - No fallback to random UIDs that could cause unpredictable behavior
 
-NSS Module Security
+NSS module security
 ~~~~~~~~~~~~~~~~~~~
 
 The NSS module (``libnss_openbastion.so``) provides user resolution:
@@ -369,7 +369,7 @@ The NSS module (``libnss_openbastion.so``) provides user resolution:
 - **GID policy enforcement**: A server-provided primary GID must be within the configured ``min_gid``/``max_gid`` range (default ``[1000, 65533]``, the Debian/RHEL system-group vs. user-group boundary). ``gid 0`` and ``nogroup`` are refused unconditionally, so a compromised or misconfigured portal cannot hand SSO users a root-equivalent primary group (``root``, ``sudo``, ``wheel``, ``shadow``, ``docker``). An out-of-policy GID falls back to ``default_gid`` and is logged to syslog (falling back rather than failing the lookup: a bad GID must not turn into a host-wide NSS lockout)
 - **Fail-safe**: Returns appropriate error codes on any failure; invalid paths fall back to defaults
 
-Direct /etc/passwd and /etc/shadow Manipulation
+Direct /etc/passwd and /etc/shadow manipulation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 User accounts are created by directly writing to ``/etc/passwd`` and ``/etc/shadow`` rather than using external tools like ``useradd``. This design choice was made for:
@@ -393,7 +393,7 @@ User accounts are created by directly writing to ``/etc/passwd`` and ``/etc/shad
 - If ``/etc/shadow`` write fails after ``/etc/passwd`` succeeds, rollback is attempted via ``userdel``
 - TOCTOU protection: user existence is re-checked after acquiring locks
 
-Audit Logging
+Audit logging
 -------------
 
 When ``audit_enabled = true``:
@@ -413,7 +413,7 @@ Audit events include:
 - Rate limit triggers
 - User creation events
 
-Webhook Notifications
+Webhook notifications
 ---------------------
 
 For real-time security monitoring:
@@ -426,17 +426,17 @@ Setting            Description
 ``notify_secret``  HMAC secret for webhook signatures
 ================== ==================================
 
-Configuration Security
+Configuration security
 ----------------------
 
-Secrets Management
+Secrets management
 ~~~~~~~~~~~~~~~~~~
 
 Secrets in ``openbastion.conf`` — ``client_secret``, ``notify_secret``, ``crowdsec_password`` — are **not** encrypted at rest. They are protected by file permissions alone: the module refuses to read the file unless it is a regular file owned by root with no group or other access (``0600``). Keep it that way, and prefer a deployment that never writes the secret to disk on the host at all (``client_secret_mode: prompt`` in an ``ob-builder`` bundle, or an ``ansible-vault``-held value).
 
 The ``secrets_encrypted`` setting documented here until 0.6.2 never did anything: it fed a ``secret_store`` module that had no callers. Both were removed.
 
-File Permissions
+File permissions
 ~~~~~~~~~~~~~~~~
 
 Recommended permissions:
@@ -450,10 +450,10 @@ Cache directory                        0700        root
 Rate limit state dir                   0700        root
 ====================================== =========== =====
 
-Operational Security Considerations
+Operational security considerations
 -----------------------------------
 
-Debug Logging Warning
+Debug logging warning
 ~~~~~~~~~~~~~~~~~~~~~
 
 **CRITICAL: Never enable debug logging in production environments.**
@@ -476,7 +476,7 @@ When ``log_level = debug``, the module may log sensitive information to syslog:
 - If debug logging is temporarily needed, ensure syslog access is restricted
 - Rotate and purge logs containing debug output promptly
 
-Machine-ID Stability Requirement
+Machine-ID stability requirement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The encryption key for the authorization cache and the desktop offline credential cache is derived from ``/etc/machine-id`` — combined with ``/etc/open-bastion/cache.key``, for the offline cache, when one is present.
@@ -510,12 +510,12 @@ The encryption key for the authorization cache and the desktop offline credentia
    # 2. Re-run enrollment
    ob-enroll --portal https://auth.example.com --client-id pam-access
 
-Service Accounts Security
+Service accounts security
 -------------------------
 
 Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, bypassing OIDC authentication. They are defined in a local configuration file.
 
-Configuration File Security
+Configuration file security
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 =========== ==========================================================
@@ -527,7 +527,7 @@ Symlinks    File must not be a symlink (O_NOFOLLOW)
 Location    ``/etc/open-bastion/service-accounts.conf`` (configurable)
 =========== ==========================================================
 
-Account Validation
+Account validation
 ~~~~~~~~~~~~~~~~~~
 
 Service accounts are validated against the same security rules as regular users:
@@ -546,7 +546,7 @@ Service accounts are validated against the same security rules as regular users:
 | ``uid``/``gid``     | Must be in valid range (0-65534)                                 |
 +---------------------+------------------------------------------------------------------+
 
-SSH Server Requirement
+SSH server requirement
 ~~~~~~~~~~~~~~~~~~~~~~
 
 **Important:** The SSH server must have ``ExposeAuthInfo yes`` in ``/etc/ssh/sshd_config``:
@@ -560,7 +560,7 @@ This setting allows the PAM module to access the SSH key fingerprint via the ``S
 
 On OpenSSH >= 9.8 ``ExposeAuthInfo`` is not sufficient on its own: sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``. ``ob-bastion-setup`` / ``ob-backend-setup`` therefore also install the ``ob-ssh-principals`` helper as ``AuthorizedPrincipalsCommand ... %u %f %t %k``, which spools the fingerprint, the key type and the key blob under ``/run/open-bastion/ssh-fp/``. That spool is what feeds both the fingerprint binding and the optional SSH key policy (``ssh_key_policy_enabled``, see :doc:`doc/security.rst </security>`); the key policy is enforced fail-closed and denies a login whose key cannot be identified.
 
-Authentication Flow
+Authentication flow
 ~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -589,7 +589,7 @@ Authentication Flow
 
 .. _security-reference-security-benefits-1:
 
-Security Benefits
+Security benefits
 ~~~~~~~~~~~~~~~~~
 
 +---------------------+-------------------------------------------------------+
@@ -617,7 +617,7 @@ Manual key rotation       Implement key rotation procedures
 Local file dependency     Monitor file integrity with AIDE/Tripwire
 ========================= ==============================================
 
-Example Configuration
+Example configuration
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: ini
@@ -632,12 +632,12 @@ Example Configuration
 
 .. _security-reference-offline-credential-cache-security:
 
-Offline Credential Cache Security
+Offline credential cache security
 ---------------------------------
 
 The offline cache enables Desktop SSO authentication when the LLNG server is unreachable. This section describes the security architecture and considerations.
 
-Cryptographic Design
+Cryptographic design
 ~~~~~~~~~~~~~~~~~~~~
 
 **Password Hashing (Argon2id):**
@@ -677,7 +677,7 @@ These parameters follow OWASP guidelines for high-security password storage.
 
 **GCM authentication** ensures any tampering (bit flips, truncation) is detected and the entry is rejected.
 
-Machine Binding
+Machine binding
 ~~~~~~~~~~~~~~~
 
 The encryption key is derived from a root-only key file or ``/etc/machine-id``, ensuring:
@@ -692,7 +692,7 @@ The encryption key is derived from a root-only key file or ``/etc/machine-id``, 
 - Users must authenticate online to re-cache credentials
 - No security risk (encrypted data remains encrypted)
 
-Cache Entry Lifecycle
+Cache entry lifecycle
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -708,7 +708,7 @@ Cache Entry Lifecycle
        Expired --> [*]: Entry removed
        Verified --> [*]: User authenticated
 
-Brute Force Mitigation
+Brute force mitigation
 ~~~~~~~~~~~~~~~~~~~~~~
 
 +--------------------------+------------------------------------------------------------------------+
@@ -729,7 +729,7 @@ Brute Force Mitigation
 
 Lockout state is stored within the encrypted cache entry, ensuring it cannot be reset by file manipulation.
 
-Error Codes
+Error codes
 ~~~~~~~~~~~
 
 The greeter and PAM module communicate via structured error codes (must match ``include/offline_cache.h``):
@@ -750,7 +750,7 @@ Code Constant                   Meaning
 
 The PAM module sends structured messages (``OFFLINE_ERROR:code[:locktime]``) via PAM conversation so the greeter can display appropriate feedback.
 
-File System Security
+File system security
 ~~~~~~~~~~~~~~~~~~~~
 
 ===================== ===============================================
@@ -764,7 +764,7 @@ Filename              SHA-256("cred:username") to prevent enumeration
 Secure deletion       ``shred`` used by admin tool
 ===================== ===============================================
 
-Security Boundaries
+Security boundaries
 ~~~~~~~~~~~~~~~~~~~
 
 +----------------------+--------------------------------------------------------+
@@ -787,7 +787,7 @@ Security Boundaries
 | User enumeration     | SHA-256 hashed filenames                               |
 +----------------------+--------------------------------------------------------+
 
-Operational Considerations
+Operational considerations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **When to enable offline mode:**
@@ -815,7 +815,7 @@ Operational Considerations
    # Complete cache flush
    ob-cache-admin invalidate-all
 
-Administrative Controls
+Administrative controls
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``ob-cache-admin`` tool provides secure cache management:
@@ -847,7 +847,7 @@ The ``ob-cache-admin`` tool provides secure cache management:
 - Uses ``shred`` for secure file deletion
 - Unlock cannot modify encrypted lockout state directly; offers invalidation instead
 
-Audit and Monitoring
+Audit and monitoring
 ~~~~~~~~~~~~~~~~~~~~
 
 Offline authentication events are logged to:
@@ -876,7 +876,7 @@ Recommendations
 
 6. **Disable when not needed**: Set ``auth_cache_enabled = false`` to eliminate the attack surface entirely
 
-Network Revalidation
+Network revalidation
 ~~~~~~~~~~~~~~~~~~~~
 
 When a user authenticates offline and the network returns, the system revalidates the session via three mechanisms:
@@ -893,7 +893,7 @@ When a user authenticates offline and the network returns, the system revalidate
 
 **Anti-firewall-bypass protection**: If the SSO portal is unreachable despite network being available (possible local firewall manipulation), all offline sessions are terminated after ``offline_max_sso_unreachable`` seconds (default: 1h).
 
-Threat Mitigations
+Threat mitigations
 ------------------
 
 +---------------------------+----------------------------------------------------------------------------------------+
@@ -934,7 +934,7 @@ Threat Mitigations
 | Stale offline credentials | Configurable TTL (default 7 days)                                                      |
 +---------------------------+----------------------------------------------------------------------------------------+
 
-Security Best Practices
+Security best practices
 -----------------------
 
 When deploying Open Bastion:

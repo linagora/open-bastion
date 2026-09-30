@@ -14,8 +14,8 @@ Deployment
 The deployment of Open Bastion starts with standard :doc:`installation
 steps </deployment/install>`:
 
-* :ref:`Installations of Open Bastion <open_bastion_installation>` (on the
-  bastion itself and on each backend server)
+* :ref:`Installations of Open Bastions <open_bastion_installation>`
+  for the bastion itself and on each backend server
 
 * :ref:`Installation of LLNG plugins <mandatory-lemonldap-ng-plugins>`
 
