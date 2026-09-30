@@ -22,6 +22,7 @@ SSO integration.
    ssh-session-recording
    Primary audit trace <audit>
    CrowdSec integration <crowdsec>
+   other-uses-cases
    troubleshooting
    competitors
 

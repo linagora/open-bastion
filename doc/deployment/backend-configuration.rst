@@ -4,8 +4,8 @@ Backend configuration
 When Open Bastion is installed, the ``ob-backend-setup`` command is
 added to the administrator's path, typically ``/usr/sbin/``.
 
-Configuration script
---------------------
+The ``ob-backend-setup`` command
+--------------------------------
 
 Use ``ob-backend-setup`` to automate backend server configuration: A
 typical call looks like:

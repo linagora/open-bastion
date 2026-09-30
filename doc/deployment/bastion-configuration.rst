@@ -4,6 +4,9 @@ Bastion configuration
 When Open Bastion is installed, the ``ob-bastion-setup`` command is
 added to the administrator's path, typically ``/usr/sbin/``.
 
+The ``ob-bastion-setup`` command
+--------------------------------
+
 Use ``ob-bastion-setup`` to automate bastion configuration. A typical
 call looks like:
 
