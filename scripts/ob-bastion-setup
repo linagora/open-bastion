@@ -1396,7 +1396,7 @@ render_open_bastion_sudoers() {
     printf '%s\n' "%open-bastion-sudo ALL=(ALL) ALL"
 }
 
-# For --enable-sudo-fresh-otp, see doc/pam-modes.rst.
+# For --enable-sudo-fresh-otp, see doc/references/maximum-security.rst.
 write_open_bastion_sudoers() {
     local sudoers_file="$1" header="$2"
     local tmp_sudoers rendered

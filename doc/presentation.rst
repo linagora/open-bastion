@@ -460,11 +460,11 @@ If attacker uses stolen token:
 
    <!-- end_slide -->
 
-PAM configuration modes
-=======================
+Security scenarios
+==================
 
-Mode A: LLNG token only
------------------------
+Token only
+----------
 
 ::
 
@@ -476,8 +476,8 @@ Mode A: LLNG token only
 
    <!-- pause -->
 
-Mode B: LLNG token OR Unix password
------------------------------------
+Token + Unix password
+---------------------
 
 ::
 
@@ -489,10 +489,10 @@ Mode B: LLNG token OR Unix password
 
    <!-- pause -->
 
-.. _presentation-mode-c-ssh-key--llng-authorization:
+.. _presentation-ssh-keys-llng-authorization:
 
-Mode C: SSH key + LLNG authorization
-------------------------------------
+SSH keys + LLNG authorization
+-----------------------------
 
 ::
 

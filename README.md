@@ -52,7 +52,7 @@ then deploy:
 | **[Deploy with a shell installer](doc/shell-quickstart.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.         |
 
 For the underlying concepts and per-step manual configuration, see
-[PAM Authentication Modes](doc/pam-modes.rst), the
+[Security scenario](doc/pam-modes.rst), the
 [Configuration Reference](doc/configuration.rst), and the
 [Admin Guide](doc/admin-guide.rst).
 
@@ -190,7 +190,7 @@ them pointing at files that are not there.
 The full, theme-organized index is in **[doc/index.rst](doc/index.rst)**. Highlights:
 
 - **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/shell-quickstart.rst) / [Ansible](doc/ansible-quickstart.rst) quick-starts · [Admin guide](doc/admin-guide.rst)
-- **Connections & architecture** — [Bastion architecture](doc/bastion-architecture.rst) · [PAM modes](doc/pam-modes.rst) · [LLNG configuration](doc/llng-configuration.rst)
+- **Connections & architecture** — [Bastion architecture](doc/bastion-architecture.rst) · [Security scenario](doc/pam-modes.rst) · [LLNG configuration](doc/llng-configuration.rst)
 - **Access & permissions** — [Access & Permissions](doc/permissions.rst) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.rst)
 - **Recording & audit** — [Session recording](doc/session-recording.rst) · [Audit trace](doc/audit.rst)
 - **Offline & resilience** — [Offline mode](doc/offline-mode.rst) · [Cache administration](doc/offline-cache-admin.rst)

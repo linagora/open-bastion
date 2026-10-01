@@ -148,7 +148,7 @@ Step 4: enroll server
 Step 5: configure PAM
 ~~~~~~~~~~~~~~~~~~~~~
 
-   **This section describes a token-authenticated bastion (PAM :ref:`Mode A <pam-modes-mode-a-llng-token-only-strictest>`), not Mode E.** Steps 5 and 6 deliberately enable ``PasswordAuthentication`` / ``KbdInteractiveAuthentication`` so that sshd prompts for the LLNG token as a "password". A **Mode E** bastion authenticates with SSO certificates instead and must have both of those set to ``no``; do not copy this PAM stack or this ``sshd_config`` drop-in onto a Mode E host. For Mode E, skip to :ref:`Mode E: maximum security deployment <admin-guide-mode-e-maximum-security-deployment>`, which runs ``ob-bastion-setup --max-security`` and writes both files for you.
+   **This section describes a token-authenticated bastion (:ref:`token only <pam-modes-mode-a-llng-token-only-strictest>`), not maximum security.** Steps 5 and 6 deliberately enable ``PasswordAuthentication`` / ``KbdInteractiveAuthentication`` so that sshd prompts for the LLNG token as a "password". A **maximum security** bastion authenticates with SSO certificates instead and must have both of those set to ``no``; do not copy this PAM stack or this ``sshd_config`` drop-in onto such a host. For maximum security, skip to :ref:`maximum security deployment <admin-guide-maximum-security-deployment>`, which runs ``ob-bastion-setup --max-security`` and writes both files for you.
 
 .. code:: bash
 
@@ -625,17 +625,17 @@ Step 10: test
 
 --------------
 
-.. _admin-guide-mode-e-maximum-security-deployment:
+.. _admin-guide-maximum-security-deployment:
 
-Mode E: maximum security deployment
------------------------------------
+Maximum security deployment
+---------------------------
 
-Mode E uses LLNG-signed SSH certificates for access and LLNG temporary tokens for sudo. All users exist only in NSS (not in ``/etc/passwd``). This section describes the tested deployment flow.
+This scenario uses LLNG-signed SSH certificates for access and LLNG temporary tokens for sudo. All users exist only in NSS (not in ``/etc/passwd``). This section describes the tested deployment flow.
 
 Step 1 (optional, site-specific): bootstrap package
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   **Not part of Open Bastion.** ``open-bastion-linagora`` is an internal site-preparation package built from a private tree (``local/``, which is gitignored). It is **not in this repository and not in the public repositories** — ``apt install open-bastion-linagora`` will fail for anyone outside Linagora. Mode E does not depend on it: skip straight to Step 2.
+   **Not part of Open Bastion.** ``open-bastion-linagora`` is an internal site-preparation package built from a private tree (``local/``, which is gitignored). It is **not in this repository and not in the public repositories** — ``apt install open-bastion-linagora`` will fail for anyone outside Linagora. Maximum security does not depend on it: skip straight to Step 2.
 
 Where it is available, it prepares the system before the main package is installed and provides:
 
@@ -643,7 +643,7 @@ Where it is available, it prepares the system before the main package is install
 - A pre-hardening sshd snippet (``40-pre-hardening.conf``) that sets conservative defaults so sshd is not locked out during setup
 - A dedicated service account used for initial enrollment
 
-Everything it does is a site convention you can reproduce by hand. What actually matters for Mode E is the warning repeated below: keep a working management session (serial console, or an already open SSH session) while ``ob-bastion-setup`` locks port 22 down to SSO certificates.
+Everything it does is a site convention you can reproduce by hand. What actually matters for maximum security is the warning repeated below: keep a working management session (serial console, or an already open SSH session) while ``ob-bastion-setup`` locks port 22 down to SSO certificates.
 
 .. code:: bash
 
@@ -679,7 +679,7 @@ It performs all of the following automatically:
   - ``PermitRootLogin no``
   - ``ExposeAuthInfo yes``
 
-- Writes ``/etc/pam.d/sshd`` and ``/etc/pam.d/sudo`` for Mode E
+- Writes ``/etc/pam.d/sshd`` and ``/etc/pam.d/sudo`` for maximum security
 - Configures NSS: adds ``openbastion`` to ``passwd`` and ``group`` in ``/etc/nsswitch.conf``
 - Runs ``ob-enroll`` to obtain ``/var/lib/open-bastion/token``
 - Downloads the initial KRL to ``/etc/ssh/revoked_keys`` with ``ob-krl-refresh``, and enables ``ob-krl-refresh.timer`` to refresh it every 30 minutes (``--krl-refresh-interval`` to change it)
