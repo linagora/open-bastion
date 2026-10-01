@@ -347,4 +347,4 @@ Notes:
 - Deletion drops audit evidence, so every run that deletes anything is logged at ``notice`` level (``journalctl -t ob-session-prune``). The retention default is deliberately long; in a regulated context (e.g. SecNumCloud) set ``recording_retention_days`` to match your log-retention obligation, or ``0`` to never auto-delete and rely on capacity planning / archival instead.
 - The job runs as root from a sandboxed oneshot service and only writes under ``/var/lib/open-bastion/sessions``, preserving the tamper-evident layout.
 
-See ` <https://github.com/linagora/open-bastion/blob/main/man/ob-session-prune.8>`__.
+See :doc:`ob-session-prune(8) </references/man/ob-session-prune>`.

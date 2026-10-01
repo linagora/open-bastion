@@ -198,8 +198,8 @@ stay uncompressed, so you can still search them with ``grep``.
    Do not manage the recordings directory with ``logrotate``: Renaming
    recordings may break their coherence.
 
-For details, see `ob-session-prune(8)
-<https://github.com/linagora/open-bastion/blob/main/man/ob-session-prune.8>`__.
+For details, see :doc:`ob-session-prune(8)
+</references/man/ob-session-prune>`.
 
 File transfers
 --------------

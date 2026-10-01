@@ -93,9 +93,8 @@ with your slug):
 
      ob-builder --config build.yml --output-shell …
 
-See `ob-builder man page
-<https://github.com/linagora/open-bastion/blob/main/admin-builder/man/ob-builder.1>`__
-for full command manual.
+See :doc:`ob-builder(1) </references/man/ob-builder>` for the full command
+manual.
 
 .. _shell-quickstart-step-2--deploy-the-bastion:
 

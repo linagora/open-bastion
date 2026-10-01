@@ -207,6 +207,9 @@ sudo apt install open-bastion-doc   # /usr/share/doc/open-bastion-doc/html/index
 
 # or from a checkout
 sphinx-build -b html doc build/doc/html
+
+# the man pages come from the same sources
+sphinx-build -b man doc build/man
 ```
 
 ## Troubleshooting
