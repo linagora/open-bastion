@@ -1,15 +1,15 @@
 Deployment
 ==========
+
 .. toctree::
    :maxdepth: 2
    :hidden:
 
    install
    llng-configuration
-   bastion-configuration
-   backend-configuration
-   self-extracting-installer
    ansible-deployment
+   self-extracting-installer
+   manual-configuration
 
 The deployment of Open Bastion starts with standard :doc:`installation
 steps </deployment/install>`:
@@ -21,27 +21,29 @@ steps </deployment/install>`:
 
 Since Open Bastion has a policy of not modifying global system state
 without an explicit administrator decision, the installation steps
-must be followed by configuration steps:
+must be followed by configuration steps. The first of them is on the
+portal:
 
 * :doc:`Configuration of LLNG and its plugins
   </deployment/llng-configuration>`
 
-* :doc:`Configuration and enrollment of the bastion
-  </deployment/bastion-configuration>`
+Then configure the hosts. One questionnaire to ``ob-builder`` produces the
+whole deployment — the security scenario, the OIDC client, the package
+repository and the SSH CA key are asked once — and what applies it to the
+targets is what you choose here:
 
-* :doc:`Configuration and enrollement of backend servers
-  </deployment/backend-configuration>`
-	    
-.. tip::
+* :doc:`Ansible deployment </deployment/ansible-deployment>` — generate an
+  Ansible role, declare the hosts, apply with one ``ansible-playbook`` run.
+  The path to a fleet.
 
-   If you find the deployment process tedious, we have good news for
-   you!
+* :doc:`Self-extracting installer </deployment/self-extracting-installer>` —
+  the same answers, applied by one generated script per target, for hosts
+  with no Ansible control node.
 
-   Two ways to automate the deployment proces, based on
-   self-extracting installers or the `Ansible Automation Platform
-   <https://github.com/ansible/ansible>`__ are supported:
-   
-   * :doc:`/deployment/self-extracting-installer`
-   
-   * :doc:`/deployment/ansible-deployment`
-   
+Both end in the same setup commands on each host. To run them yourself, or
+to know what they change before they do it:
+
+* :doc:`Manual configuration </deployment/manual-configuration>`
+
+Whichever route you take, the hosts end up in the same state; the
+:doc:`security scenario </pam-modes>` you chose decides how strict it is.

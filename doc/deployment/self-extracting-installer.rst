@@ -1,12 +1,13 @@
 Self-extracting installer
 =========================
 
-This guide takes you from nothing to a working bastion and backends
-fleet thanks to self-extracting installers.
+This is the same deployment as :doc:`Ansible deployment
+</deployment/ansible-deployment>`, for when there is no Ansible control node:
+``ob-builder`` runs once on your workstation and emits one self-extracting
+installer per role, which you copy to each target and run there. The tool,
+its questionnaire and the ``build.yml`` file that replaces it are described
+on that page; this one covers what differs.
 
-It uses the ``ob-builder`` command to generate one self-extracting
-installer per role that administrators run on each target, bastion or
-the backends host. No Ansible, no control node.
 The flow is always the same three steps:
 
 1. Generate one self-extracting installer per role — bastion or
@@ -16,60 +17,22 @@ backend — with ``ob-builder``.
 
 3. Run the installer on the targets.
 
-``ob-builder`` runs once on your workstation. It talks to the SSO
-portal to fetch the SSH CA public key and JWKS, then bakes them — plus
-your scenario, ``client_id`` and package repository — into a single,
-portable Bash script, the self extracting installer. The latter is
-then copied to the target and run there; the targets never contact
-your workstation again.
-
-.. note::
-
-   Looking for prefer fleet-wide, declarative deployments? Use the
-   :doc:`Ansible deployment guide </deployment/ansible-deployment>`
-   instead — same ``ob-builder``, same two-phase logic, driven from
-   one inventory.
-
 Prerequisites
 -------------
 
-- ``ob-builder`` on your workstation (ships in the
-  ``open-bastion-builder`` package).
-
-- A package repository (APT or YUM/DNF repository) containing
-  `open-bastion` package must be reachable by the targets.
-
-- SSO reachable from your workstation (at build-time, for OIDC
-  discovery) and from the targets (at run time, for enrollment).
-
-- SSH access from your workstation to each target as a user that can
-  run ``sudo`` to obtain root privileges.
-
-- The ``pam-access`` OIDC Relying Party configured on the LLNG portal
-  for device enrollment — in particular *Allow Device Authorization*,
-  *Device ownership* = ``organization``, and *Allow offline access*
-  (with ``oidc-device-organization`` 0.3.3 or newer). See
-  :ref:`LemonLDAP::NG configuration
-  <llng-configuration-creation-of-the-oidc-relying-party>`..
+Those of the :doc:`Ansible path </deployment/ansible-deployment>` apply, with
+one difference: there is no control node to prepare, and you need SSH access
+from your workstation to each target, as a user that can run ``sudo``.
 
 .. _shell-quickstart-step-1--generate-the-installers:
 
 Step 1 — generate the installers
 --------------------------------
 
-Just run ``ob-builder`` and answer the questions.
-
-The questionnaire asks for a deployment slug used to name artefacts;
-this documentation uses ``acme``. Then it asks for the artefacts
-to generate answer `shell` (the default).
-
-The questionnaire will also asks for: the security scenario, the URL
-of the SSO portal, the OIDC ``client_id``, the ``client_secret`` mode,
-the server group, and the target roles to generate (answer
-``bastion`` then ``backend``).
-
-When a self-extracting installer is requested for the backend role,
-one extra prompt requests the ids of the bastion allowd to reach
+Just run ``ob-builder`` and answer the questions. Two answers are specific to
+the shell artefacts: at the artefacts question, answer ``shell`` (the
+default), and, when a self-extracting installer is requested for the backend
+role, one extra prompt requests the ids of the bastions allowed to reach
 backend. These only exist after the bastion is enrolled: the usual
 order is to leave the prompt empty (any vouched bastion in the same
 server group is then accepted). It will be set later by editing
@@ -87,7 +50,9 @@ with your slug):
 .. tip::
 
    Instead of answering prompts you can pass every answer through a
-   YAML file and generate installers non-interactively:
+   YAML file and generate installers non-interactively, with the same
+   ``build.yml`` as the :ref:`Ansible path
+   <ansible-deployment-option-a--bundle-recommended-bastion--backend-share-one-ca>`:
 
    .. code:: bash
 
