@@ -12,7 +12,8 @@ SSO integration.
    overview
    deployment/index
    Admin guide<admin-guide>
-   PAM authentication modes <pam-modes>
+   Security scenario <pam-modes>
+   Other security scenarios <other-security-scenarios>
    Permissions <permissions>
    service-accounts
    offline-mode
@@ -35,6 +36,7 @@ SSO integration.
    references/configuration
    references/llng-plugins-parameters
    references/security-reference
+   references/maximum-security
    references/reference-paths
    references/bastion-architecture
    references/bastion-cert-vouching

@@ -221,6 +221,7 @@ for f in docker-demo-cert/bastion/Dockerfile \
          docker-demo-maxsec/backend/Dockerfile \
          docker-demo-maxsec/backend/entrypoint.sh \
          doc/pam-modes.rst \
+         doc/other-security-scenarios.rst \
          doc/admin-guide.rst \
          doc/presentation.rst \
          docker-demo-cert/README.md; do

@@ -93,7 +93,7 @@ Optional features
    :header-rows: 1
    :widths: 30 12 12 46
 
-   * - Maximum security mode (Mode E)
+   * - Maximum security scenario
      - Optional
      - No
      - Enable with ``--max-security``: certificates only, key revocation
@@ -102,7 +102,7 @@ Optional features
    * - Sudo through LLNG
      - Optional
      - No
-     - Only configured in Mode E (``--max-security``).
+     - Only configured under maximum security (``--max-security``).
 
    * - Fresh LLNG token on every sudo
      - Optional

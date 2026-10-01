@@ -68,7 +68,7 @@ Create ``/etc/open-bastion/service-accounts.conf``:
    # /etc/ssh/sshd_config
    ExposeAuthInfo yes
 
-**Mode E compatibility:** In Mode E deployments (``AuthorizedKeysFile none``) an ``authorized_keys`` file is never consulted, so the key has to reach sshd some other way — through the ``AuthorizedKeysCommand`` helper described below. Set that up first; the rest of this section assumes it.
+**Maximum security compatibility:** where ``AuthorizedKeysFile none`` is set, an ``authorized_keys`` file is never consulted, so the key has to reach sshd some other way — through the ``AuthorizedKeysCommand`` helper described below. Set that up first; the rest of this section assumes it.
 
 Once sshd has accepted the key, the PAM module **re-validates** its SHA256 fingerprint against ``service-accounts.conf``, using ``SSH_USER_AUTH`` (which needs ``ExposeAuthInfo yes``). That check is a second gate, not the first one: it can refuse a key sshd accepted, but it cannot make sshd accept a key it has no record of. Without the helper, sshd rejects at the protocol layer and ``pam_openbastion`` is never reached (#263).
 
@@ -170,9 +170,9 @@ Authorizing the public key at the SSH layer
 
 ``pam_openbastion`` validates the fingerprint **after** ``sshd`` has already accepted the public key. So ``sshd`` must be told the key is acceptable, by one of:
 
-- **``authorized_keys`` (PAM modes A–D).** Put the public key in ``~<name>/.ssh/authorized_keys`` (mode ``0600``, owned by the account). Because the service account is auto-created only on first login, you must **pre-create the account and its ``~/.ssh/authorized_keys``** (e.g. ``useradd -m``, then drop the key) — there is no home directory to read the file from otherwise.
+- **``authorized_keys`` (every scenario but maximum security).** Put the public key in ``~<name>/.ssh/authorized_keys`` (mode ``0600``, owned by the account). Because the service account is auto-created only on first login, you must **pre-create the account and its ``~/.ssh/authorized_keys``** (e.g. ``useradd -m``, then drop the key) — there is no home directory to read the file from otherwise.
 
-- **``AuthorizedKeysCommand`` (required for Mode E, works in all modes).** Mode E sets ``AuthorizedKeysFile none``, so ``authorized_keys`` is ignored. Use the ``ob-service-account-keys`` helper — shipped at ``/usr/sbin/ob-service-account-keys`` since #263 — which serves a public key from ``/etc/open-bastion/service-accounts.d/<name>.pub`` (``root:root 0644``) and does **not** depend on the account already existing:
+- **``AuthorizedKeysCommand`` (required for maximum security, works in every scenario).** Maximum security sets ``AuthorizedKeysFile none``, so ``authorized_keys`` is ignored. Use the ``ob-service-account-keys`` helper — shipped at ``/usr/sbin/ob-service-account-keys`` since #263 — which serves a public key from ``/etc/open-bastion/service-accounts.d/<name>.pub`` (``root:root 0644``) and does **not** depend on the account already existing:
 
   ::
 
@@ -228,7 +228,7 @@ So on such a host an orphan ``.pub`` is accepted by ``sshd`` and **not** rejecte
 The setup scripts write both of the sshd settings above, but only when asked:
 
 - ``ob-bastion-setup --enable-service-keys`` (same flag on ``ob-backend-setup``) writes the whole drop-in — ``AuthorizedKeysCommand``, ``AuthorizedKeysCommandUser`` and ``ExposeAuthInfo yes`` — and creates ``service-accounts.d``. This is the flag to use; it exists because #263 showed the manual assembly is easy to get half-right.
-- ``--max-security`` (Mode E) writes ``ExposeAuthInfo yes`` on its own, but **not** the ``AuthorizedKeysCommand``. Mode E alone therefore still leaves a service account unable to log in.
+- ``--max-security`` writes ``ExposeAuthInfo yes`` on its own, but **not** the ``AuthorizedKeysCommand``. Maximum security alone therefore still leaves a service account unable to log in.
 
 Neither is on by default: both change sshd for every session on the host, and this project's convention is that such changes are opted into. On a host set up without either, write the drop-in above by hand.
 
@@ -266,10 +266,10 @@ Until 0.6.2 it read ``SSH_USER_AUTH`` only. That variable does not exist in a ``
 
 ``sudo_nopasswd = false`` requires the host to run the ``AuthorizedPrincipalsCommand`` helper (the certificate modes), since that is what writes the spool. On a host without it there is no fingerprint to recover in either context, and a service account's ``sudo`` is refused.
 
-sudo bypasses the SSO token (including in Mode E)
--------------------------------------------------
+sudo bypasses the SSO token (including under maximum security)
+--------------------------------------------------------------
 
-A service account's sudo rights come **entirely** from ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``): ``pam_openbastion`` grants them locally and returns success **without any LLNG call** — even in Mode E, where human users must present a fresh LLNG token to use sudo. A service key with ``sudo_allowed`` (especially ``sudo_nopasswd``) is therefore a **standing local privilege that escapes the SSO-gated sudo model**. Grant it sparingly, prefer no sudo or tightly-scoped ``sudoers`` rules, and rotate/inventory these keys like any other long-lived credential. (You still need a ``sudoers`` entry permitting the account; PAM authorizes the *attempt*, ``sudoers`` authorizes *which commands*.)
+A service account's sudo rights come **entirely** from ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``): ``pam_openbastion`` grants them locally and returns success **without any LLNG call** — even under maximum security, where human users must present a fresh LLNG token to use sudo. A service key with ``sudo_allowed`` (especially ``sudo_nopasswd``) is therefore a **standing local privilege that escapes the SSO-gated sudo model**. Grant it sparingly, prefer no sudo or tightly-scoped ``sudoers`` rules, and rotate/inventory these keys like any other long-lived credential. (You still need a ``sudoers`` entry permitting the account; PAM authorizes the *attempt*, ``sudoers`` authorizes *which commands*.)
 
 Per-server control
 ------------------

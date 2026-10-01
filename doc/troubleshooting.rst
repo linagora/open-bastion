@@ -1,7 +1,7 @@
 Troubleshooting
 ===============
 
-Common checks and fixes when SSH/sudo access or enrollment misbehaves. See also the :doc:`Configuration Reference </configuration>`, :doc:`PAM modes </pam-modes>` and :doc:`Access & Permissions </permissions>`.
+Common checks and fixes when SSH/sudo access or enrollment misbehaves. See also the :doc:`Configuration Reference </configuration>`, :doc:`Security scenario </pam-modes>` and :doc:`Access & Permissions </permissions>`.
 
 Check logs
 ----------

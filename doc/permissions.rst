@@ -6,7 +6,7 @@ Access & permissions: what you can control, and where
 Open Bastion enforces access on **two layers**. Knowing which layer owns a given decision is the key to operating it well:
 
 - **SSO side (LemonLDAP::NG)** — *who* may connect to which servers and *who* may ``sudo``, driven by **groups**. Centralized, applies fleet-wide, changes take effect in minutes.
-- **Open Bastion side (per server)** — *how* authentication and authorization are enforced locally: the PAM mode, the sudo policy, key-only service accounts, user provisioning, containment hardening, and any ``sshd``/PAM tweaks.
+- **Open Bastion side (per server)** — *how* authentication and authorization are enforced locally: the security scenario, the sudo policy, key-only service accounts, user provisioning, containment hardening, and any ``sshd``/PAM tweaks.
 
 The recommended posture is **"the SSO decides"**: keep per-server files minimal and drive everything from LLNG groups. But every local knob below remains available for defense-in-depth or for hosts that need a local exception (see :ref:`Dual management <permissions-dual-management>`).
 
@@ -22,11 +22,11 @@ Quick map — "I want to control X. Where?"
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Who can ``sudo``                                | **SSO** (+local) | LLNG group → sudo authorization; optionally local ``sudoers``                                                                                                                                   |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Make ``sudo`` require a fresh SSO token         | **OB**           | :doc:`PAM Mode E </pam-modes>` (max-security); see :ref:`sudo's timestamp cache <pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache>` for how often a prompt is actually shown |
+| Make ``sudo`` require a fresh SSO token         | **OB**           | :doc:`maximum security </pam-modes>`; see :ref:`sudo's timestamp cache <pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache>` for how often a prompt is actually shown          |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Which SSH **key types/sizes** are allowed       | **OB**           | ``ssh_key_policy_enabled``, ``ssh_key_allowed_types`` (:ref:`security <security-ssh-key-policy>`)                                                                                               |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Auth method (token / SSH key / password)        | **OB**           | :doc:`PAM mode A–E </pam-modes>`                                                                                                                                                                |
+| Auth method (token / SSH key / password)        | **OB**           | :doc:`Security scenarios </other-security-scenarios>`                                                                                                                                           |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Non-SSO automation logins (ansible, backup, CI) | **OB**           | :doc:` </service-accounts>`                                                                                                                                                                     |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -63,8 +63,8 @@ Open Bastion side (per server)
 
 Written into ``/etc/open-bastion/`` by ``ob-bastion-setup`` / ``ob-backend-setup`` / ``ob-standalone-setup`` (or the `ob-builder <https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__ artefacts).
 
-- **PAM mode (A–E)** — the strictness of authentication and whether ``sudo`` is token-gated. Mode E (max-security) accepts only SSO-signed certs, requires a fresh LLNG token for ``sudo``, and enforces a KRL. See :doc:`PAM Authentication Modes </pam-modes>`.
-- **sudo policy** — token-gated via ``pam_openbastion`` (Mode E), and/or a local rule: the setups create the ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A host can also keep its own classic ``sudoers`` in parallel.
+- **Security scenario** — the strictness of authentication and whether ``sudo`` is token-gated. The default, :doc:`maximum security </pam-modes>`, accepts only SSO-signed certificates, requires a fresh LLNG token for ``sudo``, and enforces a KRL; the :doc:`other scenarios </other-security-scenarios>` trade that for compatibility.
+- **sudo policy** — token-gated via ``pam_openbastion`` in maximum security, and/or a local rule: the setups create the ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A host can also keep its own classic ``sudoers`` in parallel.
 - **Service accounts** — key-only local accounts that bypass OIDC, with a local sudo grant. Powerful and local: see the trade-offs (sudo without token, reachability requirements) in :doc:`Service Accounts </service-accounts>`.
 - **User provisioning** — shell, home, UID/GID ranges, skeleton dir, plus the ``approved_shells`` / ``approved_home_prefixes`` allow-lists that bound what a provisioned (or service) account may use. See :doc:`Configuration </configuration>`.
 - **Group-sync whitelist** — ``allowed_managed_groups`` limits which LLNG-managed groups may be created/modified locally (defense-in-depth); groups outside the pool are never touched. See :doc:`Configuration </configuration>`.
@@ -78,9 +78,9 @@ Tuning the generated ``sshd`` / PAM configuration
 
 The setups own two things you may want to extend:
 
-- **``sshd`` drop-ins** under ``/etc/ssh/sshd_config.d/`` (e.g. ``00-open-bastion-*.conf``, and ``60-max-security.conf`` in Mode E). You can layer **additional** drop-ins for site policy — for example an ``AuthorizedKeysCommand`` to serve :doc:`service-account keys </service-accounts>` in Mode E, or ``AllowTcpForwarding no`` to close the port-forward channel. Mind ``sshd``'s "first value wins" rule for single-valued keywords (the ``00-`` prefix makes the Open Bastion settings win over distro drop-ins).
-- **``/etc/pam.d/sshd``** (and ``/etc/pam.d/sudo``, ``sudo-i``) — the PAM stacks that invoke ``pam_openbastion``. You can add stock PAM modules around them. Note that ``pam_systemd`` and ``pam_mkhomedir`` are **not** optional extras you may add: both setups already write them, and both are required (:ref:`full stack <pam-modes-pam-configuration-for-sshd>`). Dropping ``pam_systemd`` makes sessions invisible to ``who`` / ``w`` / ``loginctl`` and to the heartbeat's connected-users report; dropping the ``session pam_openbastion`` line breaks Mode E ``sudo``.
-- **``/etc/pam.d/systemd-user``** — unlike the files above, ``ob-bastion-setup`` does not regenerate this one (its distro ``session`` stack varies too much); it only inserts a small ``account`` bridge ahead of the distro stack so NSS-only SSO users can start ``user@.service`` (:doc:`PAM modes </pam-modes>`, #296). Where the distro ships only ``/usr/lib/pam.d/systemd-user`` (Debian trixie onwards), the setup creates the ``/etc`` file with the bridge and an ``include`` of the vendor one.
+- **``sshd`` drop-ins** under ``/etc/ssh/sshd_config.d/`` (e.g. ``00-open-bastion-*.conf``, and ``60-max-security.conf`` under maximum security). You can layer **additional** drop-ins for site policy — for example an ``AuthorizedKeysCommand`` to serve :doc:`service-account keys </service-accounts>` when certificates are the only accepted key, or ``AllowTcpForwarding no`` to close the port-forward channel. Mind ``sshd``'s "first value wins" rule for single-valued keywords (the ``00-`` prefix makes the Open Bastion settings win over distro drop-ins).
+- **``/etc/pam.d/sshd``** (and ``/etc/pam.d/sudo``, ``sudo-i``) — the PAM stacks that invoke ``pam_openbastion``. You can add stock PAM modules around them. Note that ``pam_systemd`` and ``pam_mkhomedir`` are **not** optional extras you may add: both setups already write them, and both are required (:ref:`full stack <pam-modes-pam-configuration-for-sshd>`). Dropping ``pam_systemd`` makes sessions invisible to ``who`` / ``w`` / ``loginctl`` and to the heartbeat's connected-users report; dropping the ``session pam_openbastion`` line breaks ``sudo`` under maximum security.
+- **``/etc/pam.d/systemd-user``** — unlike the files above, ``ob-bastion-setup`` does not regenerate this one (its distro ``session`` stack varies too much); it only inserts a small ``account`` bridge ahead of the distro stack so NSS-only SSO users can start ``user@.service`` (:doc:`Security scenario </pam-modes>`, #296). Where the distro ships only ``/usr/lib/pam.d/systemd-user`` (Debian trixie onwards), the setup creates the ``/etc`` file with the bridge and an ``include`` of the vendor one.
 
 ..
 
@@ -94,12 +94,13 @@ Dual management
 The two layers are complementary, not exclusive:
 
 - **SSO-only (recommended)** — no local sudoers, no service accounts; every decision comes from LLNG groups. Simplest to reason about and audit.
-- **SSO + local** — keep specific local exceptions alongside the SSO: a break-glass :doc:`service account </service-accounts>`, a host-local ``sudoers`` rule, or a stricter PAM mode on a sensitive host. Local grants are **not** visible to the SSO, so inventory and review them deliberately (see the EBIOS risks for service accounts in :doc:`risk reduction </security/99-risk-reduce>`).
+- **SSO + local** — keep specific local exceptions alongside the SSO: a break-glass :doc:`service account </service-accounts>`, a host-local ``sudoers`` rule, or a stricter security scenario on a sensitive host. Local grants are **not** visible to the SSO, so inventory and review them deliberately (see the EBIOS risks for service accounts in :doc:`risk reduction </security/99-risk-reduce>`).
 
 See also
 --------
 
-- :doc:`PAM Authentication Modes </pam-modes>` — the A–E matrix
+- :doc:`Security scenario </pam-modes>` — maximum security, the default
+- :doc:`Other security scenarios </other-security-scenarios>` — the four alternatives
 - :doc:`LemonLDAP::NG Configuration </llng-configuration>` — server-side setup
 - :doc:`Configuration Reference </configuration>` — every ``openbastion.conf`` key
 - :doc:`Service Accounts </service-accounts>` — key-only local accounts
