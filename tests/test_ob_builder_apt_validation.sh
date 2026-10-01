@@ -77,7 +77,7 @@ run_validate() {
         ALLOWED_BASTIONS=""
         AUTO_ENROLL_SETUP="no"
         SELF_DELETE="no"
-        ALLOW_HTTP=0
+        INSECURE=0
         APT_URL="https://linagora.github.io/open-bastion"
         APT_SUITE="trixie"
         APT_COMPONENT="main"

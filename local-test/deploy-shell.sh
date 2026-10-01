@@ -17,7 +17,7 @@ set -uo pipefail
 
 SHIMBIN="$WORK/shimbin"; mkdir -p "$SHIMBIN"
 ln -sf "$SSO_DIR/ob-builder-curl-shim.sh" "$SHIMBIN/curl"
-obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --allow-http; }
+obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --insecure; }
 
 # Standalone host: only the harness wires it in (lib.sh keeps it out of the
 # shared VM set). Same as deploy-ansible.sh — append it here so it is recreated,

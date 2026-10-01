@@ -15,7 +15,7 @@ client_secret = {{ ob_client_secret }}
 server_group = {{ ob_server_group }}
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
-verify_ssl = true
+verify_ssl = {{ 'true' if (ob_verify_ssl | default(true) | bool) else 'false' }}
 {% if ob_min_tls_version is defined %}
 min_tls_version = {{ ob_min_tls_version }}
 {% endif %}

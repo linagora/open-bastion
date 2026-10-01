@@ -68,8 +68,14 @@ APT_SUITE="$DEFAULT_APT_SUITE"
 APT_COMPONENT="$DEFAULT_APT_COMPONENT"
 APT_URL="$DEFAULT_APT_URL"
 SIGN_WITH=""
-ALLOW_HTTP=0
-# shellcheck disable=SC2034  # set via --insecure for future-summary use; env var is the active one
+# Set when given on the CLI, so the questionnaire does not ask again.
+REPO_KEYRING_SET=0
+APT_URL_SET=0
+APT_SUITE_SET=0
+APT_COMPONENT_SET=0
+SIGN_WITH_SET=0
+# --insecure: allow an http:// portal AND skip TLS verification, both for the
+# builder's own fetches and in the generated artefacts (verify_ssl = false).
 INSECURE=0
 DRY_RUN=0
 BUNDLE=0
@@ -85,6 +91,9 @@ EMBEDDED_CLIENT_SECRET=""
 SERVER_GROUP=""
 SERVER_GROUP_POLICY=""
 TARGET_ROLE=""
+# Every role to generate artefacts for (interactive mode may pick several).
+# TARGET_ROLE stays the first one.
+TARGET_ROLES=()
 AUTO_ENROLL_SETUP=""
 # Pass --enable-service-keys through to the setup script the bundle runs.
 #
@@ -153,13 +162,16 @@ USAGE:
   $PROG_NAME [OPTIONS]
 
 INPUT MODES:
-  (no args)                  Fully interactive questionnaire
+  (no args)                  Fully interactive questionnaire (asks for the
+                             outputs too, and may target several roles)
   --config FILE              Non-interactive, read all answers from a YAML file
   --bundle                   Generate paired bastion + backend artefacts in one run
 
-OUTPUTS (at least one of --output-shell or --output-ansible is required):
+OUTPUTS (with --config, at least one of them is required):
   --output-shell PATH        Write self-extracting shell installer here
   --output-ansible PATH      Write Ansible role tree here (directory)
+                             With several roles, each artefact gets the role
+                             as suffix (bootstrap-x-bastion.sh, role-backend)
 
 REPO / SIGNING:
   --repo-keyring PATH        Path to a local GPG keyring (.gpg) for the APT
@@ -174,22 +186,28 @@ REPO / SIGNING:
   --sign-with KEYID          GPG-sign the shell output with this key (.sig sidecar)
 
 OTHER:
-  --allow-http               Allow http:// SSO URL (default: refuse non-TLS)
-  --insecure                 Skip TLS verification when fetching from SSO (debug only)
+  --insecure                 Allow an http:// SSO URL and skip TLS verification,
+                             both here and on the targets (verify_ssl = false,
+                             ob-enroll/setup -k). Test setups only.
+  --allow-http               Deprecated alias of --insecure
   --dry-run                  Print what would be generated, do not write any files
   -h, --help                 Show this help
   -V, --version              Print version
 
-QUESTIONNAIRE (asked when no --config is given):
+QUESTIONNAIRE (asked when no --config is given; CLI values are not re-asked):
   1. Deployment slug (filesystem-safe)
-  2. Security scenario: token-only | token+unix | keys+llng | mixed | max-security
-  3. SSO portal URL (OIDC discovery is performed to validate it)
-  4. OIDC client_id + policy (fixed | modifiable)
-  5. OIDC client_secret mode (none | prompt)
-  6. Server group + policy (fixed | modifiable)
-  7. Target role: bastion | standalone | backend
-  8. Service accounts (SSH-key-only local accounts: ansible, backup, …)
-  9. Auto-launch enroll/setup on the target? (yes | no | prompt)
+  2. Artefacts to generate (shell | ansible | both) and their paths
+  3. Security scenario: token-only | token+unix | keys+llng | mixed | max-security
+  4. SSO portal URL (OIDC discovery is performed to validate it; an http://
+     URL offers to switch to --insecure)
+  5. OIDC client_id + policy (fixed | modifiable)
+  6. OIDC client_secret mode (none | prompt | embedded)
+  7. Server group + policy (fixed | modifiable)
+  8. Target role(s): bastion | standalone | backend (one or more)
+  9. Allowed bastions (backend), hardening, audit trace, session recording
+ 10. Service accounts (SSH-key-only local accounts: ansible, backup, …)
+ 11. Auto-launch enroll/setup on the target? (yes | no | prompt), self-delete
+ 12. APT repository (URL, suite, component, keyring) and GPG signing key
 
 SERVICE ACCOUNTS (--config YAML):
   Declare SSH-key-only local accounts under a 'service_accounts:' list. They are
@@ -225,7 +243,10 @@ SERVICE ACCOUNTS (--config YAML):
   a fixed uid+gid, or the account is dropped / unreachable. See doc/service-accounts.rst.
 
 EXAMPLES:
-  # Fully interactive bastion bootstrap (default Linagora APT keyring)
+  # Fully interactive (outputs, roles and repository are asked for)
+  $PROG_NAME
+
+  # Interactive, shell installer path given up front
   $PROG_NAME --output-shell /tmp/bootstrap-mybastion.sh
 
   # Replayable build from YAML config (e.g. for CI)
@@ -265,27 +286,27 @@ parse_args() {
                 ;;
             --repo-keyring)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
-                REPO_KEYRING="$2"; shift 2
+                REPO_KEYRING="$2"; REPO_KEYRING_SET=1; shift 2
                 ;;
             --apt-url)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
-                APT_URL="$2"; shift 2
+                APT_URL="$2"; APT_URL_SET=1; shift 2
                 ;;
             --apt-suite)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
-                APT_SUITE="$2"; shift 2
+                APT_SUITE="$2"; APT_SUITE_SET=1; shift 2
                 ;;
             --apt-component)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
-                APT_COMPONENT="$2"; shift 2
+                APT_COMPONENT="$2"; APT_COMPONENT_SET=1; shift 2
                 ;;
             --sign-with)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
-                SIGN_WITH="$2"; shift 2
+                SIGN_WITH="$2"; SIGN_WITH_SET=1; shift 2
                 ;;
             --bundle)        BUNDLE=1; shift ;;
-            --allow-http)    ALLOW_HTTP=1; shift ;;
-            --insecure)
+            --insecure|--allow-http)
+                [ "$1" = "--allow-http" ] && log_warn "--allow-http is deprecated, use --insecure (same effect)"
                 INSECURE=1
                 export OB_BUILDER_INSECURE=1
                 shift
@@ -956,6 +977,19 @@ EOF
         DEPLOYMENT_SLUG=""
     done
 
+    # q1b. Outputs, unless one was given on the CLI.
+    if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
+        explain "A shell installer is one self-extracting script to run on each target. An Ansible role deploys a fleet from a playbook. With several target roles (asked below), each file gets the role as suffix."
+        local _kind
+        _kind=$(ask_choice "Artefacts to generate" "shell|ansible|both" "shell")
+        case "$_kind" in
+            shell|both) OUTPUT_SHELL=$(ask "Shell installer path" "./bootstrap-${DEPLOYMENT_SLUG}.sh") ;;
+        esac
+        case "$_kind" in
+            ansible|both) OUTPUT_ANSIBLE=$(ask "Ansible role directory" "./ansible-${DEPLOYMENT_SLUG}") ;;
+        esac
+    fi
+
     # q2. Scenario
     while :; do
         if [ -z "$SCENARIO" ]; then
@@ -986,10 +1020,15 @@ EOF
             PORTAL_URL=""
             continue
         fi
-        if [[ "$PORTAL_URL" != https://* ]] && [ "$ALLOW_HTTP" -ne 1 ]; then
-            log_error "Non-HTTPS portal URL is refused; use --allow-http to override (debug only)"
-            PORTAL_URL=""
-            continue
+        if [[ "$PORTAL_URL" != https://* ]] && [ "$INSECURE" -ne 1 ]; then
+            explain "This portal is plain HTTP. The targets can only use it with TLS verification disabled (verify_ssl = false, ob-enroll/setup -k), exactly as with --insecure. Never do this in production."
+            if ask_yesno "Use plain HTTP and disable TLS verification on targets? (test setups only)" "n"; then
+                INSECURE=1
+                export OB_BUILDER_INSECURE=1
+            else
+                PORTAL_URL=""
+                continue
+            fi
         fi
         break
     done
@@ -1019,8 +1058,7 @@ EOF
             if [ -z "$EMBEDDED_CLIENT_SECRET" ]; then
                 log_warn "Embedding the client_secret in the artefact in clear text."
                 log_warn "Anyone with read access to the artefact can read this secret."
-                EMBEDDED_CLIENT_SECRET=$(ask_secret "OIDC client_secret to embed")
-                [ -n "$EMBEDDED_CLIENT_SECRET" ] || die "Embedded client_secret cannot be empty"
+                EMBEDDED_CLIENT_SECRET=$(ask_secret_confirm "OIDC client_secret to embed")
             fi
             ;;
         *) die "Invalid client_secret_mode: $CLIENT_SECRET_MODE" ;;
@@ -1044,18 +1082,23 @@ EOF
         die "server_group_policy=fixed requires a non-empty server_group"
     fi
 
-    # q7. Target role
-    while :; do
-        if [ -z "$TARGET_ROLE" ]; then
-            explain "Pick what this artefact configures: a bastion (jump host accepting SSH from users), a backend (server reached only through a bastion), or a standalone host (isolated server with no bastion in front)."
-            TARGET_ROLE=$(ask_choice "Target role" "bastion|standalone|backend" "bastion")
-        fi
-        if is_valid_target_role "$TARGET_ROLE"; then
-            break
-        fi
-        log_warn "Invalid target role: $TARGET_ROLE"
-        TARGET_ROLE=""
-    done
+    # q7. Target role(s). A preset role (config) or --bundle keeps a single one.
+    if [ -n "$TARGET_ROLE" ] || [ "$BUNDLE" = "1" ]; then
+        while :; do
+            if [ -z "$TARGET_ROLE" ]; then
+                explain "Pick what this artefact configures: a bastion (jump host accepting SSH from users), a backend (server reached only through a bastion), or a standalone host (isolated server with no bastion in front)."
+                TARGET_ROLE=$(ask_choice "Target role" "bastion|standalone|backend" "bastion")
+            fi
+            if is_valid_target_role "$TARGET_ROLE"; then
+                break
+            fi
+            log_warn "Invalid target role: $TARGET_ROLE"
+            TARGET_ROLE=""
+        done
+        TARGET_ROLES=("$TARGET_ROLE")
+    else
+        collect_target_roles_interactive
+    fi
 
     # q7b. (backend only) Allowed bastions whitelist
     # The bastion JWT is signed by the LLNG SSO itself, so the SSO identity is
@@ -1063,7 +1106,7 @@ EOF
     # enforce is which specific bastion(s) (sub claim / bastion_id) are
     # permitted to forward sessions to it. Empty = accept any LLNG-enrolled
     # bastion in the same group.
-    if [ "$TARGET_ROLE" = "backend" ] && [ -z "${ALLOWED_BASTIONS-}" ]; then
+    if _has_role backend && [ -z "${ALLOWED_BASTIONS-}" ]; then
         explain "Optional whitelist of bastion identifiers (the 'bastion_id' claim LLNG embeds in each bastion's JWT) that are allowed to reach this backend. Comma-separated, e.g. 'bastion-01,bastion-02'. Leave empty to accept any bastion enrolled in the same LLNG server group as this backend. You don't pick this value — LLNG assigns it at enrollment. To discover it: deploy the bastion first, then run 'sudo ob-bastion-id' on it (or check the LLNG Manager). You can also leave this empty now and tighten it later by editing /etc/open-bastion/openbastion.conf on the backend."
         ALLOWED_BASTIONS=$(ask "Allowed bastion ids (empty = any)" "")
     fi
@@ -1082,7 +1125,7 @@ EOF
         explain "Audit trace installs auditd rules and a daily rotation timer on the target (requires the auditd package). OFF by default."
         ENABLE_AUDIT_TRACE=$(ask_choice "Enable primary audit trace via auditd (--enable-audit-trace)?" "yes|no" "no")
     fi
-    if [ "$TARGET_ROLE" != "backend" ] && [ -z "$DISABLE_SESSION_RECORDER" ]; then
+    if _has_non_backend_role && [ -z "$DISABLE_SESSION_RECORDER" ]; then
         explain "A bastion records every session by default (sshd ForceCommand -> ob-session-recorder). Disable this only when session capture is handled by another mechanism — turning it off weakens the audit guarantee. Backends never record sessions, so this does not apply to them."
         DISABLE_SESSION_RECORDER=$(ask_choice "Disable session recording on this bastion/standalone (--disable-session-recorder)?" "yes|no" "no")
     fi
@@ -1124,6 +1167,102 @@ EOF
         explain "When enabled, the generated Ansible role can approve the device code automatically by POSTing to LLNG with a session cookie. The cookie is asked for at every play run (vars_prompt) and never stored. Disable if you prefer manual browser approval, or if your operators don't have permission to run the LLNG verification endpoint."
         ANSIBLE_AUTO_APPROVE=$(ask_choice "Enable Ansible auto-approval via LLNG cookie?" "yes|no" "no")
     fi
+
+    # q11. Package repository and signing, unless given on the CLI.
+    collect_repo_options_interactive
+}
+
+# True when role $1 is among TARGET_ROLES.
+_has_role() {
+    local r
+    for r in "${TARGET_ROLES[@]}"; do
+        [ "$r" = "$1" ] && return 0
+    done
+    return 1
+}
+
+# True when at least one role records sessions (bastion or standalone).
+_has_non_backend_role() {
+    local r
+    for r in "${TARGET_ROLES[@]}"; do
+        [ "$r" != "backend" ] && return 0
+    done
+    return 1
+}
+
+# Interactively pick one or more target roles into TARGET_ROLES.
+collect_target_roles_interactive() {
+    local r
+    explain "Pick what this artefact configures: a bastion (jump host accepting SSH from users), a backend (server reached only through a bastion), or a standalone host (isolated server with no bastion in front)."
+    TARGET_ROLE=$(ask_choice "Target role" "bastion|standalone|backend" "bastion")
+    TARGET_ROLES=("$TARGET_ROLE")
+    explain "Other roles can be generated in the same run, sharing every other answer. Each gets its own artefact, suffixed with the role."
+    while [ "${#TARGET_ROLES[@]}" -lt 3 ]; do
+        r=$(ask "Another target role (bastion|standalone|backend, empty to finish)" "")
+        [ -z "$r" ] && break
+        if ! is_valid_target_role "$r"; then
+            log_warn "Invalid target role: $r"
+        elif _has_role "$r"; then
+            log_warn "Role '$r' already selected"
+        else
+            TARGET_ROLES+=("$r")
+        fi
+    done
+    return 0
+}
+
+# Interactively ask the APT repository and signing options still at their
+# defaults (i.e. not given on the CLI).
+collect_repo_options_interactive() {
+    local v
+    if [ "$APT_URL_SET" = 0 ] || [ "$APT_SUITE_SET" = 0 ] || [ "$APT_COMPONENT_SET" = 0 ] || [ "$REPO_KEYRING_SET" = 0 ]; then
+        explain "Targets install the open-bastion package from this APT repository. Keep the defaults unless you publish the packages from your own mirror."
+    fi
+    if [ "$APT_URL_SET" = 0 ]; then
+        while :; do
+            v=$(ask "APT repository URL" "$APT_URL")
+            v="${v%/}"
+            is_valid_url "$v" && break
+            log_warn "Invalid URL: $v"
+        done
+        APT_URL="$v"
+    fi
+    if [ "$APT_SUITE_SET" = 0 ]; then
+        while :; do
+            v=$(ask "APT suite" "$APT_SUITE")
+            is_valid_apt_suite "$v" && break
+            log_warn "Invalid suite (letters, digits, '.', '_', '-' and '/' only): $v"
+        done
+        APT_SUITE="$v"
+    fi
+    if [ "$APT_COMPONENT_SET" = 0 ]; then
+        while :; do
+            v=$(ask "APT component" "$APT_COMPONENT")
+            is_valid_apt_component "$v" && break
+            log_warn "Invalid component (space-separated names of letters, digits, '.', '_', '-'): $v"
+        done
+        APT_COMPONENT="$v"
+    fi
+    if [ "$REPO_KEYRING_SET" = 0 ]; then
+        while :; do
+            v=$(ask "APT repository keyring (.gpg)" "${REPO_KEYRING:-$DEFAULT_REPO_KEYRING}")
+            [ -f "$v" ] && break
+            log_warn "Keyring not found: $v"
+        done
+        REPO_KEYRING="$v"
+    fi
+    # Signing applies to the shell installer only.
+    if [ "$SIGN_WITH_SET" = 0 ] && [ -n "$OUTPUT_SHELL" ]; then
+        explain "Optionally GPG-sign the shell installer (writes a .sig next to it) so targets can verify it before running it."
+        while :; do
+            v=$(ask "GPG key id to sign with (empty = no signature)" "")
+            [ -z "$v" ] && break
+            command -v gpg >/dev/null 2>&1 && gpg --list-secret-keys -- "$v" >/dev/null 2>&1 && break
+            log_warn "No usable GPG secret key '$v' on this host"
+        done
+        SIGN_WITH="$v"
+    fi
+    return 0
 }
 
 # Validate / normalise after either YAML or questionnaire so behaviour is
@@ -1139,8 +1278,8 @@ validate_inputs() {
     [ -n "$PORTAL_URL" ]         || die "portal_url is required"
     PORTAL_URL="${PORTAL_URL%/}"
     is_valid_url "$PORTAL_URL"   || die "Invalid portal_url: $PORTAL_URL"
-    if [[ "$PORTAL_URL" != https://* ]] && [ "$ALLOW_HTTP" -ne 1 ]; then
-        die "Refusing non-HTTPS portal URL (use --allow-http to override)"
+    if [[ "$PORTAL_URL" != https://* ]] && [ "$INSECURE" -ne 1 ]; then
+        die "Refusing non-HTTPS portal URL (use --insecure for a test setup)"
     fi
 
     : "${CLIENT_ID_POLICY:=modifiable}"
@@ -1166,8 +1305,13 @@ validate_inputs() {
         die "server_group_policy=fixed requires a non-empty server_group"
     fi
 
-    [ -n "$TARGET_ROLE" ]        || die "target_role is required"
-    is_valid_target_role "$TARGET_ROLE" || die "Invalid target_role: $TARGET_ROLE"
+    [ "${#TARGET_ROLES[@]}" -gt 0 ] || TARGET_ROLES=("$TARGET_ROLE")
+    local _role
+    for _role in "${TARGET_ROLES[@]}"; do
+        [ -n "$_role" ]              || die "target_role is required"
+        is_valid_target_role "$_role" || die "Invalid target_role: $_role"
+    done
+    TARGET_ROLE="${TARGET_ROLES[0]}"
 
     # apt_url / apt_suite / apt_component are concatenated into the
     # "deb [signed-by=...] URL SUITE COMPONENT" line and interpolated verbatim
@@ -1217,8 +1361,7 @@ validate_inputs() {
     case "$ENABLE_AUDIT_TRACE" in yes|no) ;; *) die "Invalid enable_audit_trace: $ENABLE_AUDIT_TRACE" ;; esac
     : "${DISABLE_SESSION_RECORDER:=no}"
     case "$DISABLE_SESSION_RECORDER" in yes|no) ;; *) die "Invalid disable_session_recorder: $DISABLE_SESSION_RECORDER" ;; esac
-    # Session recording does not exist on a backend; never emit the opt-out for it.
-    [ "$TARGET_ROLE" = "backend" ] && DISABLE_SESSION_RECORDER="no"
+    # (Backend artefacts never carry the opt-out: see build_placeholder_map.)
 
     : "${ANSIBLE_AUTO_APPROVE:=no}"
     case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
@@ -1246,16 +1389,51 @@ validate_inputs() {
         fi
     fi
     [ -f "$REPO_KEYRING" ] || die "Repo keyring not found: $REPO_KEYRING"
-    # (output-target presence is checked fail-fast in main(), before this.)
+    # (Outputs: checked fail-fast in main() with --config, asked otherwise.)
+}
+
+# Artefacts to produce, as parallel arrays (one entry per role). A single role
+# uses the paths as given; several roles get the role as suffix. --bundle adds
+# its companion role the same way it always did.
+_PLAN_ROLES=()
+_PLAN_SHELL=()
+_PLAN_ANSIBLE=()
+build_output_plan() {
+    local r sh an n="${#TARGET_ROLES[@]}"
+    _PLAN_ROLES=(); _PLAN_SHELL=(); _PLAN_ANSIBLE=()
+    for r in "${TARGET_ROLES[@]}"; do
+        sh="$OUTPUT_SHELL"; an="$OUTPUT_ANSIBLE"
+        if [ "$n" -gt 1 ]; then
+            [ -n "$sh" ] && sh=$(_pair_path "$OUTPUT_SHELL" "$r")
+            [ -n "$an" ] && an="${OUTPUT_ANSIBLE%/}-${r}"
+        fi
+        _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
+    done
+    if [ "$BUNDLE" = "1" ]; then
+        # Companion of the primary role.
+        r="backend"
+        [ "$TARGET_ROLE" = "backend" ] && r="bastion"
+        sh=""; an=""
+        [ -n "$OUTPUT_SHELL" ]   && sh=$(_pair_path "$OUTPUT_SHELL" "$r")
+        [ -n "$OUTPUT_ANSIBLE" ] && an="${OUTPUT_ANSIBLE%/}-${r}"
+        _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
+    fi
+    return 0
 }
 
 # Print a recap before doing any work — last chance for the admin to bail.
 print_recap() {
+    local i r rec="n/a (backend role)" nb=0
+    # Bundle: the companion bastion is in _PLAN_ROLES, not TARGET_ROLES
+    for r in "${_PLAN_ROLES[@]}"; do [ "$r" != "backend" ] && nb=1; done
+    if [ "$nb" = 1 ]; then
+        [ "$DISABLE_SESSION_RECORDER" = "yes" ] && rec="disabled (opt-out)" || rec="enabled"
+    fi
     log_step "Build summary"
     cat << EOF
   Deployment slug:     $DEPLOYMENT_SLUG
   Scenario:            $SCENARIO  (PAM mode $PAM_MODE)
-  Target role:         $TARGET_ROLE
+  Target role(s):      ${TARGET_ROLES[*]}
   Portal URL:          $PORTAL_URL
   client_id:           ${CLIENT_ID:-<empty>}  (policy: $CLIENT_ID_POLICY)
   client_secret_mode:  $CLIENT_SECRET_MODE
@@ -1264,20 +1442,24 @@ print_recap() {
   Self-delete (shell): $SELF_DELETE
   Hardening:           $ENABLE_HARDENING
   Audit trace:         $ENABLE_AUDIT_TRACE
-  Session recording:   $([ "$TARGET_ROLE" = "backend" ] && echo "n/a (backend role)" || { [ "$DISABLE_SESSION_RECORDER" = "yes" ] && echo "disabled (opt-out)" || echo "enabled"; })
+  Session recording:   $rec
   Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
-  Output shell:        ${OUTPUT_SHELL:-<none>}
-  Output ansible:      ${OUTPUT_ANSIBLE:-<none>}
   Sign with:           ${SIGN_WITH:-<none>}
   Bundle:              $([ "$BUNDLE" = 1 ] && echo yes || echo no)
   Dry-run:             $([ "$DRY_RUN" = 1 ] && echo yes || echo no)
   TLS verification:    $([ "$INSECURE" = 1 ] && echo "DISABLED (--insecure)" || echo enabled)
-  Allow http://:       $([ "$ALLOW_HTTP" = 1 ] && echo yes || echo no)
 EOF
+    for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
+        printf '  %-21sshell=%s  ansible=%s\n' "Output (${_PLAN_ROLES[$i]}):" \
+            "${_PLAN_SHELL[$i]:-<none>}" "${_PLAN_ANSIBLE[$i]:-<none>}"
+    done
+    if [ "$INSECURE" = "1" ]; then
+        log_warn "TLS verification is disabled: targets get verify_ssl = false and run ob-enroll/setup with -k."
+    fi
     if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
         log_warn "Embedded client_secret will be written in clear text into every generated artefact."
         log_warn "Treat the resulting files as confidential — anyone who reads them reads the secret."
@@ -1289,7 +1471,7 @@ EOF
 # Files produced:
 #   $WORK_DIR/ca.pub
 #   $WORK_DIR/krl       (empty if not fetched)
-#   $WORK_DIR/jwks.json (only for backend mode)
+#   $WORK_DIR/jwks.json (only when a backend artefact is produced)
 # ─────────────────────────────────────────────────────────────────────────
 fetch_sso_assets() {
     WORK_DIR=$(mktemp_dir)
@@ -1309,7 +1491,7 @@ fetch_sso_assets() {
         : > "$WORK_DIR/krl"
     fi
 
-    if [ "$TARGET_ROLE" = "backend" ] || [ "$BUNDLE" = "1" ]; then
+    if _has_role backend || [ "$BUNDLE" = "1" ]; then
         if ! sso_fetch_jwks "$PORTAL_URL" "$WORK_DIR/jwks.json"; then
             die "JWKS fetch failed; backend artefacts require it."
         fi
@@ -1359,7 +1541,7 @@ render_template() {
         k="${_PH_KEYS[$i]}"
         v="${_PH_VALS[$i]}"
         # shellcheck disable=SC2295  # @@${k}@@ is a literal pattern, not a glob
-        content="${content//@@${k}@@/$v}"
+        content="${content//@@${k}@@/"$v"}"
     done
 
     if [ "$DRY_RUN" = "1" ]; then
@@ -1379,7 +1561,6 @@ _mode_settings_conf() {
         A)
             cat << 'MODE'
 # Mode A — LLNG token only
-verify_ssl = true
 cache_enabled = true
 cache_ttl = 300
 MODE
@@ -1387,7 +1568,6 @@ MODE
         B)
             cat << 'MODE'
 # Mode B — LLNG token with Unix password fallback
-verify_ssl = true
 cache_enabled = true
 cache_ttl = 300
 MODE
@@ -1395,7 +1575,6 @@ MODE
         C)
             cat << 'MODE'
 # Mode C — SSH key with LLNG authorization
-verify_ssl = true
 cache_enabled = true
 cache_ttl = 300
 ssh_key_policy_enabled = true
@@ -1405,7 +1584,6 @@ MODE
         D)
             cat << 'MODE'
 # Mode D — all methods accepted, LLNG authorization
-verify_ssl = true
 cache_enabled = true
 cache_ttl = 300
 MODE
@@ -1413,7 +1591,6 @@ MODE
         E)
             cat << 'MODE'
 # Mode E — maximum security (SSO certs only, sudo via LLNG token, KRL)
-verify_ssl = true
 min_tls_version = 13
 cache_enabled = true
 cache_ttl = 60
@@ -1475,7 +1652,7 @@ build_placeholder_map() {
     local role="$1"
     local pam_mode bastion_backend_block bastion_allowlist_yaml ca_b64 krl_b64 gpg_b64 apt_sources
     local mode_settings mode_settings_yaml max_security_bool
-    local auto_enroll_bool auto_setup_bool
+    local auto_enroll_bool auto_setup_bool insecure_default verify_ssl_bool norec
 
     pam_mode=$(scenario_to_pam_mode "$SCENARIO")
 
@@ -1511,6 +1688,17 @@ build_placeholder_map() {
         no)     auto_enroll_bool="false"; auto_setup_bool="false" ;;
         prompt|*) auto_enroll_bool="false"; auto_setup_bool="false" ;;
     esac
+
+    # --insecure makes the artefacts default to verify_ssl = false / -k.
+    if [ "$INSECURE" = "1" ]; then
+        insecure_default="yes"; verify_ssl_bool="false"
+    else
+        insecure_default="no";  verify_ssl_bool="true"
+    fi
+
+    # Session recording does not exist on a backend; never emit the opt-out for it.
+    norec="$DISABLE_SESSION_RECORDER"
+    [ "$role" = "backend" ] && norec="no"
 
     # Base64-encode the binary blobs that will be embedded in artefacts.
     ca_b64=$(base64_file "$WORK_DIR/ca.pub")
@@ -1560,16 +1748,18 @@ build_placeholder_map() {
     ph_set MAX_SECURITY_BOOL     "$max_security_bool"
     ph_set AUTO_ENROLL_BOOL      "$auto_enroll_bool"
     ph_set AUTO_SETUP_BOOL       "$auto_setup_bool"
+    ph_set INSECURE_DEFAULT      "$insecure_default"
+    ph_set VERIFY_SSL_BOOL       "$verify_ssl_bool"
 
     # Optional opt-in features. Shell installer consumes the yes/no strings;
     # the Ansible role consumes the true/false boolean variants.
     local _harden_bool="false" _audit_bool="false" _norec_bool="false"
     [ "$ENABLE_HARDENING" = "yes" ]         && _harden_bool="true"
     [ "$ENABLE_AUDIT_TRACE" = "yes" ]       && _audit_bool="true"
-    [ "$DISABLE_SESSION_RECORDER" = "yes" ] && _norec_bool="true"
+    [ "$norec" = "yes" ]                    && _norec_bool="true"
     ph_set ENABLE_HARDENING              "$ENABLE_HARDENING"
     ph_set ENABLE_AUDIT_TRACE            "$ENABLE_AUDIT_TRACE"
-    ph_set DISABLE_SESSION_RECORDER      "$DISABLE_SESSION_RECORDER"
+    ph_set DISABLE_SESSION_RECORDER      "$norec"
     ph_set ENABLE_HARDENING_BOOL         "$_harden_bool"
     ph_set ENABLE_AUDIT_TRACE_BOOL       "$_audit_bool"
     ph_set DISABLE_SESSION_RECORDER_BOOL "$_norec_bool"
@@ -1721,7 +1911,7 @@ render_shell_installer() {
             k="${_PH_KEYS[$i]}"
             v="${_PH_VALS[$i]}"
             # shellcheck disable=SC2295
-            conf_content="${conf_content//@@${k}@@/$v}"
+            conf_content="${conf_content//@@${k}@@/"$v"}"
         done
     fi
     ph_set OPENBASTION_CONF_TEMPLATE "$conf_content"
@@ -1898,6 +2088,7 @@ ob_scenario: $SCENARIO
 ob_pam_mode: $pam_mode
 ob_role: $role
 ob_portal_url: $PORTAL_URL
+ob_verify_ssl: $([ "$INSECURE" = 1 ] && echo false || echo true)
 ob_client_id: ${CLIENT_ID:-}
 ob_client_id_policy: $CLIENT_ID_POLICY
 ob_client_secret_mode: $CLIENT_SECRET_MODE
@@ -2003,20 +2194,19 @@ main() {
 
     parse_args "$@"
 
-    # Fail fast: ob-builder produces nothing without an output target. Check
-    # this BEFORE the interactive questionnaire / config load so the admin is
-    # not made to answer every question only to be rejected at the end.
-    if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
-        die "At least one of --output-shell or --output-ansible is required (nothing to produce otherwise). See --help."
-    fi
-
     if [ -n "$CONFIG_FILE" ]; then
+        # Fail fast: nothing to produce without an output target. The
+        # questionnaire asks for them instead.
+        if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
+            die "At least one of --output-shell or --output-ansible is required (nothing to produce otherwise). See --help."
+        fi
         load_config "$CONFIG_FILE"
     else
         run_questionnaire
     fi
 
     validate_inputs
+    build_output_plan
 
     # If --bundle is set, we will fetch JWKS regardless of primary role.
     print_recap
@@ -2027,27 +2217,25 @@ main() {
 
     fetch_sso_assets
 
-    # Primary artefact: the role the admin selected.
-    run_outputs_for_role "$TARGET_ROLE" "$OUTPUT_SHELL" "$OUTPUT_ANSIBLE"
-
-    # Bundle: also produce the companion role.
-    if [ "$BUNDLE" = "1" ]; then
-        local pair_role
-        if [ "$TARGET_ROLE" = "backend" ]; then
-            pair_role="bastion"
-        else
-            pair_role="backend"
+    # One pass per role; with --bundle the last entry is the companion role.
+    local i sh an
+    for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
+        if [ "$BUNDLE" = "1" ] && [ "$i" -gt 0 ]; then
+            log_step "Bundle: also generating ${_PLAN_ROLES[$i]} artefact"
         fi
-        log_step "Bundle: also generating $pair_role artefact"
-        local pair_shell="" pair_ansible=""
-        [ -n "$OUTPUT_SHELL" ]   && pair_shell=$(_pair_path "$OUTPUT_SHELL" "$pair_role")
-        [ -n "$OUTPUT_ANSIBLE" ] && pair_ansible="${OUTPUT_ANSIBLE%/}-${pair_role}"
-        run_outputs_for_role "$pair_role" "$pair_shell" "$pair_ansible"
-    fi
+        run_outputs_for_role "${_PLAN_ROLES[$i]}" "${_PLAN_SHELL[$i]}" "${_PLAN_ANSIBLE[$i]}"
+    done
 
     log_step "Done"
-    [ -n "$OUTPUT_SHELL" ]   && log_info "Shell installer:  $OUTPUT_SHELL"
-    [ -n "$OUTPUT_ANSIBLE" ] && log_info "Ansible role:     $OUTPUT_ANSIBLE"
+    for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
+        sh="${_PLAN_SHELL[$i]}"; an="${_PLAN_ANSIBLE[$i]}"
+        if [ -n "$sh" ]; then
+            log_info "[${_PLAN_ROLES[$i]}] Shell installer:  $sh"
+            [ -n "$SIGN_WITH" ] && log_info "[${_PLAN_ROLES[$i]}] Signature:        ${sh}.sig"
+            log_info "[${_PLAN_ROLES[$i]}] Portal checklist: $(dirname -- "$sh")/PORTAL-CHECKLIST-${_PLAN_ROLES[$i]}.md"
+        fi
+        [ -n "$an" ] && log_info "[${_PLAN_ROLES[$i]}] Ansible role:     $an"
+    done
     return 0
 }
 

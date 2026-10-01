@@ -814,7 +814,7 @@ self_delete: no
 EOF
 
     local rc=0
-    "$builder" --config "$cfg" --output-shell "$artefact" --allow-http --insecure \
+    "$builder" --config "$cfg" --output-shell "$artefact" --insecure \
         >"${workdir}/builder.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
         local size
@@ -1081,7 +1081,7 @@ target_role: ${role}
 auto_enroll_setup: no
 self_delete: no
 EOF
-            if ! "$builder" --config "$cfg" --output-shell "$out" --allow-http --insecure \
+            if ! "$builder" --config "$cfg" --output-shell "$out" --insecure \
                    > "${matrix_dir}/${slug}.log" 2>&1; then
                 failures=$((failures + 1))
                 details="${details}- $scenario/$role: ob-builder failed (see ${matrix_dir}/${slug}.log)"$'\n'
@@ -1197,7 +1197,7 @@ self_delete: no
 ansible_auto_approve: yes
 EOF
 
-    if ! "$builder" --config "$cfg" --output-ansible "${outdir}/role" --allow-http --insecure \
+    if ! "$builder" --config "$cfg" --output-ansible "${outdir}/role" --insecure \
            > "${outdir}/builder.log" 2>&1; then
         fail "ob-builder failed to render Ansible role" "$(cat "${outdir}/builder.log")"
         rm -rf "$outdir"

@@ -29,11 +29,9 @@
 
 - name: "Start ob-enroll asynchronously (device code published to /run/open-bastion/enroll-state.json)"
   ansible.builtin.command:
-    argv:
-      - /usr/sbin/ob-enroll
-      - -g
-      - "{{ ob_server_group }}"
-      - --quiet
+    argv: >-
+      {{ ['/usr/sbin/ob-enroll', '-g', ob_server_group, '--quiet']
+         + ([] if (ob_verify_ssl | default(true) | bool) else ['-k']) }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
     OB_ENROLL_STATE_FILE: /run/open-bastion/enroll-state.json
@@ -83,6 +81,7 @@
     return_content: true
     follow_redirects: all
     status_code: [200]
+    validate_certs: "{{ ob_verify_ssl | default(true) | bool }}"
   delegate_to: localhost
   become: false
   register: _ob_verify_page
@@ -128,6 +127,7 @@
     headers: "{{ {'Cookie': ob_llng_cookie} | combine({'Host': ob_approve_host} if (ob_approve_host | default('')) | length > 0 else {}) }}"
     follow_redirects: none
     status_code: [200, 302]
+    validate_certs: "{{ ob_verify_ssl | default(true) | bool }}"
   delegate_to: localhost
   become: false
   register: _ob_approve_result
@@ -155,11 +155,9 @@
 # ── Manual branch (original behaviour) ───────────────────────────────────────
 - name: "Enroll {{ ob_role }} with LLNG (ob-enroll)"
   ansible.builtin.command:
-    argv:
-      - /usr/sbin/ob-enroll
-      - -g
-      - "{{ ob_server_group }}"
-      - --quiet
+    argv: >-
+      {{ ['/usr/sbin/ob-enroll', '-g', ob_server_group, '--quiet']
+         + ([] if (ob_verify_ssl | default(true) | bool) else ['-k']) }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
   when: not _ob_use_auto_approve

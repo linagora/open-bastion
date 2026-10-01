@@ -13,6 +13,10 @@ client_secret = ##CLIENT_SECRET##
 # Server group (must match a group defined in LLNG pamAccessServerGroups)
 server_group = ##SERVER_GROUP##
 
+# TLS verification of the portal (false only with the installer's --insecure,
+# for a plain-http or self-signed test portal)
+verify_ssl = ##VERIFY_SSL##
+
 # Mode-specific settings — scenario: @@SCENARIO@@ (PAM Mode @@PAM_MODE@@)
 @@MODE_SETTINGS@@
 

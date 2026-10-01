@@ -11,10 +11,13 @@ deployment artefact (a self-extracting shell installer and/or an Ansible
 role) that a target server can later execute to install and configure
 Open Bastion against a LemonLDAP::NG SSO.
 .PP
-The builder asks a short questionnaire (security scenario, SSO URL,
-OIDC client_id and client_secret handling, target role, server group,
-auto-launch policy, optional bastion whitelist for backends, and optional
-service accounts) and then
+Without
+.BR \-\-config ,
+the builder asks a questionnaire covering every option not given on the
+command line (artefacts to generate and their paths, security scenario, SSO
+URL, OIDC client_id and client_secret handling, server group, one or more
+target roles, optional bastion whitelist for backends, optional features,
+service accounts, auto-launch policy, APT repository and signing key) and then
 fetches the SSH CA public key and JWKS from the chosen SSO. The generated
 artefacts deposit
 .IR /etc/open-bastion/openbastion.conf ,
@@ -37,6 +40,13 @@ Write a self-extracting shell installer to \fIPATH\fR.
 .TP
 .B \-\-output\-ansible \fIPATH\fR
 Write an Ansible role tree to \fIPATH\fR (a directory).
+.IP
+With
+.BR \-\-config ,
+at least one output is required; the questionnaire asks for them otherwise
+(default \fI./bootstrap\-<slug>.sh\fR and \fI./ansible\-<slug>\fR). When
+several target roles are chosen interactively, each artefact gets the role as
+suffix (\fIbootstrap\-<slug>\-bastion.sh\fR, \fIansible\-<slug>\-backend\fR).
 .TP
 .B \-\-bundle
 Generate paired bastion + backend artefacts in one run, sharing the
@@ -59,11 +69,14 @@ APT component. Default: \fImain\fR.
 .B \-\-sign\-with \fIKEYID\fR
 GPG-sign the shell output with this key (produces a \fI.sig\fR sidecar).
 .TP
-.B \-\-allow\-http
-Allow an \fIhttp://\fR SSO URL (default is to refuse non-TLS portals).
-.TP
 .B \-\-insecure
-Skip TLS verification when fetching from the SSO. Debug only.
+Allow an \fIhttp://\fR SSO URL and skip TLS verification, both when fetching
+from the SSO and in the generated artefacts: the target configuration gets
+\fBverify_ssl = false\fR and \fBob-enroll\fR / \fBob-*-setup\fR run with
+\fB\-k\fR (\fBob_verify_ssl: false\fR in the Ansible role). Test setups only.
+.TP
+.B \-\-allow\-http
+Deprecated alias of \fB\-\-insecure\fR.
 .TP
 .B \-\-dry\-run
 Print the actions that would be taken without writing any files.
@@ -113,7 +126,13 @@ or backslash cannot break out of the generated literal. The
 default is automatically enabled when the embedded client_secret mode is
 chosen, so the installer removes itself from disk after a successful run.
 .SH EXAMPLES
-Interactive run targeting the Linagora SSO:
+Fully interactive run:
+.PP
+.RS
+ob-builder
+.RE
+.PP
+Interactive run with the shell installer path given up front:
 .PP
 .RS
 ob-builder --output-shell /tmp/bootstrap.sh

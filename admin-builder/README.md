@@ -14,24 +14,36 @@ Each artifact is self-contained: it embeds the SSO CA key, includes pre-validate
 ## Quick Start (Interactive)
 
 ```bash
-ob-builder --output-shell /tmp/bootstrap-mybastion.sh
+ob-builder
 ```
 
 By default the builder uses the Linagora APT repo keyring shipped with the
 package. Override with `--repo-keyring /path/to/your.gpg` if you publish
 Open Bastion packages from your own mirror.
 
-This launches an interactive questionnaire:
+This launches an interactive questionnaire covering every option (values
+given on the command line, e.g. `--output-shell` or `--apt-url`, are not
+asked again):
 
 1. Deployment slug (name used for the generated script)
-2. Security scenario (`token-only`, `token+unix`, `keys+llng`, `mixed`, `max-security`)
-3. SSO portal URL (validated via OIDC discovery)
-4. OIDC client_id and policy (`fixed` or `modifiable`)
-5. OIDC client_secret mode (`none`, `prompt`, or `embedded`)
-6. Server group and policy
-7. Target role (`bastion`, `standalone`, or `backend`)
-8. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
-9. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`)
+2. Artefacts to generate (`shell`, `ansible` or `both`) and their paths
+   (default `./bootstrap-<slug>.sh` and `./ansible-<slug>`)
+3. Security scenario (`token-only`, `token+unix`, `keys+llng`, `mixed`, `max-security`)
+4. SSO portal URL (validated via OIDC discovery). An `http://` URL offers to
+   switch to `--insecure` (test setups only)
+5. OIDC client_id and policy (`fixed` or `modifiable`)
+6. OIDC client_secret mode (`none`, `prompt`, or `embedded`; an embedded
+   secret is typed twice)
+7. Server group and policy
+8. Target role(s): `bastion`, `standalone`, `backend` — one or more. With
+   several roles, each artefact is suffixed with the role
+   (`bootstrap-<slug>-bastion.sh`, `ansible-<slug>-backend`, …)
+9. Allowed bastions (backend), hardening, audit trace, session recording
+10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
+11. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`), self-delete
+12. APT repository (URL, suite, component, keyring) and optional GPG signing key
+
+With `--config`, at least one of `--output-shell` / `--output-ansible` is required.
 
 ## Quick Start (Non-Interactive with Config File)
 
@@ -103,6 +115,7 @@ The script performs:
 - Deployment of Open Bastion configuration to `/etc/open-bastion/openbastion.conf`
 - Installation of the `open-bastion` package
 - Optionally, automatic enrollment via `ob-enroll` and service setup via `ob-bastion-setup` or `ob-backend-setup`
+- On a bastion/standalone, a final summary with its bastion ID (`ob-bastion-id`), the value backends list in `allowed_bastions`
 
 Run with `./bootstrap-prod-backend.sh info` to inspect embedded metadata (scenario, SSO URL, CA fingerprint) without making changes.
 
@@ -165,6 +178,7 @@ The generated shell installer accepts CLI flags to override embedded defaults. P
 | `--dry-run`                 | -                       | Print actions without executing them                                         |
 | `--force`                   | -                       | Overwrite existing `/etc/open-bastion` (normally refused)                    |
 | `--non-interactive`         | -                       | Fail instead of prompting (for CI strict mode)                               |
+| `--insecure`                | -                       | `verify_ssl = false`, `ob-enroll`/setup `-k` (default when built with `--insecure`) |
 | `-h, --help`                | -                       | Show help and embedded scenario details                                      |
 
 Example: deploy with a secret from a file and auto-enroll:
@@ -197,7 +211,7 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 
 ## Security Notes
 
-- **TLS 1.3 enforced**: The builder refuses `http://` SSO URLs by default (use `--allow-http` only for testing).
+- **TLS enforced**: The builder refuses `http://` SSO URLs by default. `--insecure` (test setups only; `--allow-http` is a deprecated alias) allows them and disables TLS verification both in the builder and in the generated artefacts: `verify_ssl = false` in `openbastion.conf`, `ob-enroll`/`ob-*-setup` run with `-k`, `ob_verify_ssl: false` in the Ansible role. Without it, `pam_openbastion` refuses an `http://` portal and nobody can log in.
 - **Client secret handling**: Three modes are supported. With `none` the relying party is public (no secret). With `prompt` the secret is asked for at install time on the target (recommended). With `embedded` the secret is baked into the artifact in clear text — convenient but the artifact must then be treated as confidential; the generated installer defaults to `--self-delete` so the script removes itself from disk after a successful run.
 - **GPG signatures**: Use `--sign-with KEYID` to GPG-sign the shell installer; targets can verify with `gpg --verify bootstrap-<slug>.sh.sig bootstrap-<slug>.sh` before execution.
 - **Repository keyring**: Defaults to the Linagora keyring shipped with the builder package (`/usr/share/open-bastion-builder/keyrings/open-bastion-linagora.gpg`). Override via `--repo-keyring` or the `repo_keyring` config key when targeting a different APT mirror.

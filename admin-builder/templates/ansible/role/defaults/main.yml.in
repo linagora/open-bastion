@@ -20,10 +20,11 @@ ob_max_security: @@MAX_SECURITY_BOOL@@  # true when ob_pam_mode == E
 ob_portal_url: "@@PORTAL_URL@@"
 ob_client_id: "@@CLIENT_ID@@"
 # Verify the portal's TLS certificate. Keep true in production (HTTPS portal).
-# Set false ONLY for a plain-http or self-signed test portal: it makes
-# ob-*-setup pass --insecure and writes verify_ssl=false so pam_openbastion
-# accepts the non-HTTPS portal (it refuses http unless verify_ssl is false).
-ob_verify_ssl: true
+# false ONLY for a plain-http or self-signed test portal (set when built with
+# ob-builder --insecure): ob-enroll/ob-*-setup then run with -k/--insecure and
+# openbastion.conf gets verify_ssl = false, so pam_openbastion accepts the
+# non-HTTPS portal (it refuses http unless verify_ssl is false).
+ob_verify_ssl: @@VERIFY_SSL_BOOL@@
 # ob_client_secret — provided at runtime when client_secret_mode=prompt
 # (use ansible-vault), or baked here when client_secret_mode=embedded.
 # Embedded mode trades convenience for risk: anyone with read access to this
