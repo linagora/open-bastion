@@ -44,6 +44,16 @@ SSO integration.
    
 
 .. toctree::
+   :caption: Command reference
+   :hidden:
+   :maxdepth: 2
+
+   references/man/end-user-commands
+   references/man/administrator-commands
+   references/man/internal-commands
+
+
+.. toctree::
    :caption: Security Analysis (EBIOS RM)
    :hidden:
    :maxdepth: 2

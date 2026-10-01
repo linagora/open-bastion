@@ -45,7 +45,8 @@ jobs:
           socat \
           rsync \
           openssh-client \
-          openssh-sftp-server
+          openssh-sftp-server \
+          python3-sphinx
 
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON -DINSTALL_DESKTOP=ON
@@ -167,7 +168,8 @@ jobs:
           libcurl4-openssl-dev \
           libjson-c-dev \
           libpam0g-dev \
-          libsodium-dev
+          libsodium-dev \
+          python3-sphinx
 
     - name: Configure CMake with Debug and Sanitizers
       run: |
@@ -222,7 +224,8 @@ jobs:
           libcurl4-openssl-dev \
           libjson-c-dev \
           libpam0g-dev \
-          libsodium-dev
+          libsodium-dev \
+          python3-sphinx
 
     - name: Configure and build
       run: |
@@ -239,6 +242,18 @@ jobs:
           echo "::error::cpack reported install errors; the package is incomplete"
           exit 1
         fi
+
+    # The man pages are generated from doc/ at build time now, so a package
+    # can be valid and still ship none of them.
+    - name: The package ships the man pages
+      run: |
+        deb=$(ls build/open-bastion_*_amd64.deb | head -1)
+        pages=$(dpkg-deb -c "$deb" | grep -c 'usr/share/man/')
+        echo "$pages man pages in $deb"
+        [ "$pages" -ge 24 ] || {
+          echo "::error::only $pages man pages in $deb; the man build produced next to nothing"
+          exit 1
+        }
 
     # Upgrades a host staged from the v0.6.2 tag and checks it converges.
     # It needs docker and a package, which only this job has; on the build jobs
@@ -294,7 +309,8 @@ jobs:
           openssl-devel \
           libsodium-devel \
           rpm-build \
-          systemd-rpm-macros
+          systemd-rpm-macros \
+          python3-sphinx
 
     - name: Build RPM
       run: |

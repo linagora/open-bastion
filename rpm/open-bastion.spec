@@ -17,6 +17,8 @@ BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig(libsodium)
 BuildRequires:  pkgconfig
 BuildRequires:  systemd-rpm-macros
+# Generates the man pages from doc/references/man/ (see the `man` target).
+BuildRequires:  python3-sphinx
 
 Requires:       pam
 Requires:       libcurl

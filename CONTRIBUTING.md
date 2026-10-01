@@ -11,6 +11,9 @@ for t in tests/test_ob_*.sh; do bash "$t"; done
 ```
 
 The HTML documentation builds with `-DBUILD_DOC=ON` and the `doc` target.
+The man pages build by default, from the same sources, with the `man` target;
+both need `sphinx-build` (`python3-sphinx`), and configuring with
+`-DBUILD_MAN=OFF` skips the man pages entirely.
 [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for what
 CI runs.
 
@@ -54,8 +57,10 @@ a host back from a dev build to a release. Force it with
   commits.
 - Elsewhere, reference that document rather than repeating its content.
 - Executables exposed to end-users and administrators are documented in
-  man pages, see the `man` folder. It's the right place to document
-  command line options.
+  reStructuredText under `doc/references/man/`. It's the right place to
+  document command line options. The troff man pages the packages install
+  are generated from those documents by the build (`-DBUILD_MAN=ON`), never
+  edited directly.
 
 ## Specific files
 

@@ -44,7 +44,6 @@ COPY scripts/ /src/open-bastion/scripts/
 COPY share/ /src/open-bastion/share/
 COPY config/ /src/open-bastion/config/
 COPY README.md /src/open-bastion/README.md
-COPY man/ /src/open-bastion/man/
 WORKDIR /src/open-bastion
 # `make install` with CMAKE_INSTALL_PREFIX=/usr puts every ob-* script at the
 # same path the production .deb does (/usr/sbin/ob-enroll, /usr/bin/ob-ssh-cert,
@@ -56,6 +55,7 @@ RUN mkdir -p build && cd build && \
           -DINSTALL_SYSTEMD=OFF \
           -DINSTALL_DESKTOP=OFF \
           -DBUILD_BUILDER=OFF \
+          -DBUILD_MAN=OFF \
           .. && \
     make -j$(nproc) && \
     make install && \
