@@ -1,59 +1,47 @@
-Ansible Deployment
+Ansible deployment
 ==================
 
-This guide takes you from nothing to a working bastion and backends
-fleet using ``ob-builder`` to generate Ansible artefacts and a
-single ``ansible-playbook`` run to apply them.
+This guide takes a fleet from nothing to a working bastion and backends,
+driven from an Ansible control node: ``ob-builder`` generates a role from one
+questionnaire, and one ``ansible-playbook`` run applies it to every host.
 
-The flow is always the same three steps:
+The other two deployment paths drive the same tool with the same answers and
+end in the same setup commands:
 
-1. Generate the roles with ``ob-builder`` (one questionnaire / config per role).
+* the :doc:`self-extracting installer </deployment/self-extracting-installer>`
+  for hosts with no control node;
+* :doc:`manual configuration </deployment/manual-configuration>` where you
+  would rather run the setup commands yourself.
 
-2. Declare your hosts (and their IPs) in an inventory.
+``ob-builder``
+--------------
 
-3. Apply with ``ansible-playbook``.
+``ob-builder`` ships in the ``open-bastion-builder`` package and runs once on
+your workstation. It talks to the SSO portal to fetch the SSH CA public key
+and the JWKS, then bakes them — plus your security scenario, your OIDC
+``client_id`` and the package repository — into the artefacts you ask for: an
+Ansible role, a self-extracting shell installer, or both. The targets run
+those artefacts and never contact your workstation again.
 
+Run it without arguments for the questionnaire. It asks, in order: the
+deployment slug used to name the artefacts; which artefacts to generate; the
+:doc:`security scenario </pam-modes>`; the SSO portal URL (validated through
+OIDC discovery); the OIDC ``client_id`` and whether it may be changed at
+deployment time; how the ``client_secret`` is supplied; the server group; the
+target roles; the optional features (bastion allowlist, hardening, audit
+trace, session recording); and the package repository. Every answer can also
+be given on the command line or in a YAML file, which is what makes a
+deployment reproducible. :doc:`ob-builder(1) </references/man/ob-builder>`
+documents them all.
 
-``ob-builder`` runs once on your workstation. It talks to the SSO
-portal to fetch the SSH CA public key and JWKS, then bakes them — plus
-your scenario, ``client_id`` and package repository — into a single,
-portable Bash script, the self extracting installer. The latter is
-then copied to the target and run there; the targets never contact
-your workstation again.
+Non-interactive: ``build.yml``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Prerequisites
--------------
-
-- ``ob-builder`` on your Ansible control node (ships in the
-  ``open-bastion-builder`` package).
-
-- A package repository (APT or YUM/DNF repository) containing
-  `open-bastion` package must be reachable by the targets.
-
-- SSO reachable from your Ansible control node (at build-time, for
-  OIDC discovery) and from the managed nodes (at run time, for
-  enrollment).
-
-- The ``pam-access`` OIDC Relying Party configured on the LLNG portal
-  for device enrollment — in particular *Allow Device Authorization*,
-  *Device ownership* = ``organization``, and *Allow offline access*
-  (with ``oidc-device-organization`` 0.3.3 or newer). See
-  :ref:`LemonLDAP::NG configuration
-  <llng-configuration-creation-of-the-oidc-relying-party>`..
-
-.. _ansible-quickstart-step-1--generate-the-roles:
-
-Step 1 — generate the roles
----------------------------
-
-A bastion and a backend differ only by ``target_role`` (and the backend's "accept only this bastion" allowlist). You can generate them in **two runs**, or in **one run** with ``--bundle`` so both share the exact same CA / JWKS.
-
-.. _ansible-quickstart-option-a--bundle-recommended-bastion--backend-share-one-ca:
-
-Option A — bundle (recommended: bastion + backend share one CA)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Write one ``build.yml`` describing the deployment, then let ``--bundle`` emit the matched pair:
+A bastion and a backend differ only by ``target_role`` (and the backend's
+"accept only this bastion" allowlist). You can generate them in **two runs**,
+or in **one run** with ``--bundle`` so both share the exact same CA and JWKS.
+Write one ``build.yml`` describing the deployment, then let ``--bundle`` emit
+the matched pair:
 
 .. code:: yaml
 
@@ -77,7 +65,59 @@ Write one ``build.yml`` describing the deployment, then let ``--bundle`` emit th
 
    ob-builder --config build.yml --bundle --output-ansible ./roles-acme/
 
-.. _ansible-quickstart-option-b--two-independent-runs:
+With ``client_secret_mode: embedded``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The default is ``prompt``, which keeps the OIDC client secret out of every generated file.
+``embedded`` bakes it in clear text into ``defaults/main.yml`` and into the shell installer, so the
+bundle becomes a credential:
+
+- ``ob-builder`` restricts those two files to the building user (``0600`` and ``0700``) and drops
+  a ``.gitignore`` at the root of the bundle so a ``git add -A`` in a surrounding working tree
+  cannot publish it;
+- treat the directory as secret material — do not copy it into a repository, an attachment or a
+  shared drive;
+- to version it anyway, delete that ``.gitignore``, rebuild with ``client_secret_mode: prompt``,
+  and supply the secret with ``ansible-vault encrypt_string 's3cr3t' --name ob_client_secret``;
+- if a bundle has already been shared, rotate the client secret in the LLNG portal: it is a bearer
+  credential for the deployment's OIDC client.
+
+Prerequisites
+-------------
+
+- ``ob-builder`` on your Ansible control node (ships in the
+  ``open-bastion-builder`` package). This is what distinguishes this path from
+  the :doc:`self-extracting installer </deployment/self-extracting-installer>`,
+  which needs no control node.
+
+- A package repository (APT or YUM/DNF repository) containing
+  `open-bastion` package must be reachable by the targets.
+
+- SSO reachable from your Ansible control node (at build-time, for
+  OIDC discovery) and from the managed nodes (at run time, for
+  enrollment).
+
+- The ``pam-access`` OIDC Relying Party configured on the LLNG portal
+  for device enrollment — in particular *Allow Device Authorization*,
+  *Device ownership* = ``organization``, and *Allow offline access*
+  (with ``oidc-device-organization`` 0.3.3 or newer). See
+  :ref:`LemonLDAP::NG configuration
+  <llng-configuration-creation-of-the-oidc-relying-party>`.
+
+.. _ansible-deployment-step-1--generate-the-roles:
+
+Step 1 — generate the roles
+---------------------------
+
+.. _ansible-deployment-option-a--bundle-recommended-bastion--backend-share-one-ca:
+
+Option A — bundle (recommended: bastion + backend share one CA)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``build.yml`` above, with ``--bundle --output-ansible``, emits both roles
+from one portal conversation.
+
+.. _ansible-deployment-option-b--two-independent-runs:
 
 Option B — two independent runs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -96,17 +136,7 @@ Generate the bastion role:
 
 The generated tree contains ``defaults/main.yml`` (all the baked-in ``ob_*`` values), ``tasks/``, ``templates/`` and a ``files/`` directory holding the SSH CA public key fetched from the portal. See ` <https://github.com/linagora/open-bastion/blob/main/admin-builder/templates/ansible/role/README.md>`__ for the full list of ``ob_*`` variables.
 
-If you build with ``client_secret_mode: embedded``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The default is ``prompt``, which keeps the OIDC client secret out of every generated file. ``embedded`` bakes it in clear text into ``defaults/main.yml`` and into the shell installer, so the bundle becomes a credential:
-
-- ``ob-builder`` restricts those two files to the building user (``0600`` and ``0700``) and drops a ``.gitignore`` at the root of the bundle so a ``git add -A`` in a surrounding working tree cannot publish it;
-- treat the directory as secret material — do not copy it into a repository, an attachment or a shared drive;
-- to version it anyway, delete that ``.gitignore``, rebuild with ``client_secret_mode: prompt``, and supply the secret with ``ansible-vault encrypt_string 's3cr3t' --name ob_client_secret``;
-- if a bundle has already been shared, rotate the client secret in the LLNG portal: it is a bearer credential for the deployment's OIDC client.
-
-.. _ansible-quickstart-step-2--declare-your-hosts-and-their-ips:
+.. _ansible-deployment-step-2--declare-your-hosts-and-their-ips:
 
 Step 2 — declare your hosts and their IPs
 -----------------------------------------
@@ -162,7 +192,7 @@ A matching ``playbook.yml`` is trivial — apply the one role to everyone and le
      roles:
        - role: open-bastion
 
-.. _ansible-quickstart-step-3--apply:
+.. _ansible-deployment-step-3--apply:
 
 Step 3 — apply
 --------------
@@ -201,7 +231,7 @@ What the play does on each host
 1. Configures the APT/YUM repo and installs the ``open-bastion`` package.
 2. Writes ``/etc/open-bastion/openbastion.conf`` from the baked-in scenario.
 3. Runs ``ob-enroll`` (Device Authorization Grant) to obtain the server's long-lived **offline** token; ``ob-heartbeat.timer`` then keeps the short-lived access token fresh.
-4. Runs ``ob-bastion-setup`` / ``ob-backend-setup``, which locks SSH down to SSO-issued certificates and — on backends — enforces the ``allowed_bastions`` policy (a backend accepts only certificates vouched by a listed bastion).
+4. Runs ``ob-bastion-setup`` / ``ob-backend-setup``, which locks SSH down to SSO-issued certificates and — on backends — enforces the ``allowed_bastions`` policy. What those commands change is described in :doc:`manual configuration </deployment/manual-configuration>`.
 
 After the play, users connect with their SSO certificate to a bastion, then hop to any backend with ``ob-ssh <backend>`` (or transfer files with ``ob-scp`` / ``ob-sftp``); the bastion mints a short-lived, CA-signed certificate for each hop. No user key ever lands on the bastion or the backends.
 
