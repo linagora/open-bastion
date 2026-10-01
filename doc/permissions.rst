@@ -36,7 +36,7 @@ Quick map — "I want to control X. Where?"
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Process containment (kill on logout, at/cron)   | **OB**           | :doc:` </hardening>`                                                                                                                                                                            |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Bastion → backend connection trust              | **both**         | LLNG signs the hop cert; backend ``allowed_bastions`` (:doc:`architecture </bastion-architecture>`)                                                                                             |
+| Bastion → backend connection trust              | **both**         | LLNG signs the hop cert; backend ``allowed_bastions`` (:doc:`architecture </references/bastion-architecture>`)                                                                                  |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Revoke an admin everywhere                      | **SSO**          | remove from the group / close the account (see below)                                                                                                                                           |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -46,11 +46,11 @@ Quick map — "I want to control X. Where?"
 SSO side (LemonLDAP::NG)
 ------------------------
 
-Configured once in the portal, applied to the whole fleet. See :doc:`LemonLDAP::NG Configuration </llng-configuration>` for the setup.
+Configured once in the portal, applied to the whole fleet. See :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>` for the setup.
 
 - **Server groups** — tag each enrolled server with a group; access rules are written per group, not per host. See :ref:`Server groups <llng-configuration-server-groups>`.
 - **Access rules (``pam-access``)** — for a given server group, decide which LLNG user groups may open an SSH session and which may ``sudo``. This is the primary "who can do what, where" control.
-- **SSH CA (``ssh-ca``)** — LLNG signs users' SSH certificates (validity window, principals). Users self-serve a cert with ``ob-ssh-cert``; closing their account or letting the cert expire removes access. See the SSH CA section of :doc:`llng-configuration </llng-configuration>`.
+- **SSH CA (``ssh-ca``)** — LLNG signs users' SSH certificates (validity window, principals). Users self-serve a cert with ``ob-ssh-cert``; closing their account or letting the cert expire removes access. See the SSH CA section of :doc:`llng-configuration </deployment/llng-configuration>`.
 - **Group synchronization** — LLNG advertises a user's ``managed_groups``; the PAM module maps them to Unix supplementary groups on login (creating groups when needed). Pair with the local whitelist below.
 - **Lifecycle**
 
@@ -66,8 +66,8 @@ Written into ``/etc/open-bastion/`` by ``ob-bastion-setup`` / ``ob-backend-setup
 - **Security scenario** — the strictness of authentication and whether ``sudo`` is token-gated. The default, :doc:`maximum security </pam-modes>`, accepts only SSO-signed certificates, requires a fresh LLNG token for ``sudo``, and enforces a KRL; the :doc:`other scenarios </other-security-scenarios>` trade that for compatibility.
 - **sudo policy** — token-gated via ``pam_openbastion`` in maximum security, and/or a local rule: the setups create the ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A host can also keep its own classic ``sudoers`` in parallel.
 - **Service accounts** — key-only local accounts that bypass OIDC, with a local sudo grant. Powerful and local: see the trade-offs (sudo without token, reachability requirements) in :doc:`Service Accounts </service-accounts>`.
-- **User provisioning** — shell, home, UID/GID ranges, skeleton dir, plus the ``approved_shells`` / ``approved_home_prefixes`` allow-lists that bound what a provisioned (or service) account may use. See :doc:`Configuration </configuration>`.
-- **Group-sync whitelist** — ``allowed_managed_groups`` limits which LLNG-managed groups may be created/modified locally (defense-in-depth); groups outside the pool are never touched. See :doc:`Configuration </configuration>`.
+- **User provisioning** — shell, home, UID/GID ranges, skeleton dir, plus the ``approved_shells`` / ``approved_home_prefixes`` allow-lists that bound what a provisioned (or service) account may use. See :doc:`Configuration </references/configuration>`.
+- **Group-sync whitelist** — ``allowed_managed_groups`` limits which LLNG-managed groups may be created/modified locally (defense-in-depth); groups outside the pool are never touched. See :doc:`Configuration </references/configuration>`.
 - **Offline resilience** — ``auth_cache_enabled`` turns the authorization cache on or off, and ``auth_cache_force_online`` forces every check online; how long a cached authorization survives an SSO outage is decided by the server. See :doc:`Offline mode </offline-mode>` and :doc:`cache administration </offline-cache-admin>`.
 - **Containment hardening** — opt-in ``--enable-hardening`` adds logind ``KillUserProcesses``, an ``nproc`` cap and ``at``/``cron`` allow-lists. See :doc:`Hardening </hardening>`.
 
@@ -101,7 +101,7 @@ See also
 
 - :doc:`Security scenario </pam-modes>` — maximum security, the default
 - :doc:`Other security scenarios </other-security-scenarios>` — the four alternatives
-- :doc:`LemonLDAP::NG Configuration </llng-configuration>` — server-side setup
-- :doc:`Configuration Reference </configuration>` — every ``openbastion.conf`` key
+- :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>` — server-side setup
+- :doc:`Configuration Reference </references/configuration>` — every ``openbastion.conf`` key
 - :doc:`Service Accounts </service-accounts>` — key-only local accounts
-- :doc:`Bastion Architecture </bastion-architecture>` — bastion→backend trust
+- :doc:`Bastion Architecture </references/bastion-architecture>` — bastion→backend trust

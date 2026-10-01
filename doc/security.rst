@@ -247,6 +247,8 @@ The ``crowdsec_fail_open`` setting determines behavior when CrowdSec LAPI is una
 
 **Recommendation**: Use ``fail_open = true`` for most deployments to avoid self-inflicted DoS when CrowdSec is temporarily unavailable. Use ``fail_open = false`` only in high-security environments where blocking access is preferable to allowing potentially malicious IPs.
 
+.. _preventing-recording-bypass:
+
 Preventing recording bypass
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

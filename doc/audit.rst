@@ -9,7 +9,7 @@ Rationale
 Session recording (``ob-session-recorder``) gives you a faithful, replayable view of what a user did inside their pty: keystrokes, screen output, timing. This is invaluable for incident review — but it is **not** an independent audit trail:
 
 - Recordings only cover what happens **inside the recorded pty**. Since 0.5.0 the files themselves are out of the user's reach — ``ob-record-sink`` runs as root, derives the user from ``SO_PEERCRED``, and writes ``/var/lib/open-bastion/sessions/<user>/`` as ``root:ob-sessions`` ``0750`` with ``0640`` files, so a recorded user cannot list, read, unlink or truncate any recording, including their own (#151). Tampering is not the gap; coverage is.
-- A determined user can attempt to bypass the pty entirely: ``setsid``, ``at``, ``cron``, jobs spawned through systemd ``--user``, daemons launched with ``nohup``. Containment (:ref:`Session Containment <session-recording-session-containment>` in PR1) closes most of these paths, but not all.
+- A determined user can attempt to bypass the pty entirely: ``setsid``, ``at``, ``cron``, jobs spawned through systemd ``--user``, daemons launched with ``nohup``. Containment (:ref:`Session Containment <preventing-recording-bypass>` in PR1) closes most of these paths, but not all.
 - A coredump, a panic, or an out-of-disk event mid-session can leave a partial recording.
 
 ``auditd`` solves a different problem: it records **every syscall** of interest, at the kernel level, into an append-only log under ``/var/log/audit/``. Rules filter on ``auid`` (the audit user id, which is set at login by PAM and **does not change** across ``setuid``/``setgid`` transitions). This means:
