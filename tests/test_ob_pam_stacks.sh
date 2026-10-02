@@ -116,7 +116,6 @@ test_all_generated_stacks() {
         "docker-demo-maxsec/backend/entrypoint.sh"
         "doc/security-scenarios/max-security-scenario.rst"
         "doc/security-scenarios/other-security-scenarios.rst"
-        "doc/admin-guide.rst"
         "doc/presentation.rst"
         "docker-demo-cert/README.md"
     )

@@ -824,7 +824,7 @@ if(BUILD_BUILDER)
                 -C "${CMAKE_SOURCE_DIR}"
                 --transform "s|^admin-builder|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}|"
                 admin-builder
-                -C "${MAN_OUT_DIR}"
+                -C "${CMAKE_BINARY_DIR}"
                 --transform "s|^man/ob-builder\.1|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}/man/ob-builder.1|"
                 man/ob-builder.1
             COMMAND ${RPMBUILD_EXECUTABLE}

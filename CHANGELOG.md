@@ -15,14 +15,14 @@ here.
 
 > **Known issue.** The on-disk NSS cache is untested under SELinux `enforcing`
 > (Rocky/RHEL/AlmaLinux) and may silently never populate there; no policy
-> module ships. See the check in [doc/admin-guide.rst](doc/admin-guide.rst).
+> module ships. See the check in [doc/offline-mode/index.rst](doc/offline-mode/index.rst).
 
 ### Added
 
 - **`ob-uninstall`(8)** un-configures a bastion, standalone host or backend
   before the package is removed. Removing the package alone left sshd and PAM
-  pointing at deleted files, which refused every SSH login. See "Uninstalling /
-  decommissioning a host" in [doc/admin-guide.rst](doc/admin-guide.rst).
+  pointing at deleted files, which refused every SSH login. See
+  [doc/references/man/ob-uninstall.rst](doc/references/man/ob-uninstall.rst).
 - **`ob-post-upgrade`(8)**: finishes a package upgrade with no arguments
   (principals helper, tmpfiles rule, sockets, spool ownership). It does not
   enrol and does not touch the server token, `sshd_config` or PAM stacks.
@@ -88,7 +88,7 @@ here.
   exists.
 - **NSS outage buffer is `cache_ttl`** (default 300 s), no longer `nscd`: the
   cache never serves stale data, so `getent` fails about that long after the
-  last successful lookup. Trade-off in [doc/admin-guide.rst](doc/admin-guide.rst).
+  last successful lookup. Trade-off in [doc/offline-mode/index.rst](doc/offline-mode/index.rst).
 - **Only root refills the NSS cache**: in a session idle past `cache_ttl`, `id`
   fails and outgoing `ssh` says `You don't exist, go away!` until any root-side
   lookup repairs it.
@@ -151,7 +151,7 @@ here.
   with a pre-v1 principals helper.
 - **Service-account `sudo` with `sudo_nopasswd = false` works** (#194).
 - **`fingerprint_required` also covers service accounts**; see
-  [doc/admin-guide.rst](doc/admin-guide.rst).
+  [doc/service-accounts.rst](doc/service-accounts.rst).
 - **A rejected `/pam/verify` token fails with `PAM_AUTH_ERR`** and its reason,
   instead of `PAM_AUTHINFO_UNAVAIL` falling through to `pam_unix`.
 - **A missing `.key` spool drop is logged at DEBUG**, not as a missing binding
