@@ -236,19 +236,10 @@ On the bastion, run ``ob-ssh`` directly:
 
    ob-ssh backend-server
 
-For a one-command jump straight from your **workstation** — it lands on the bastion (where the session is recorded) and hops to the backend — add a host to your **local** ``~/.ssh/config`` using ``RemoteCommand``:
-
-.. code:: text
-
-   Host backend-server
-       HostName bastion.example.com
-       User alice
-       IdentityFile ~/.ssh/id_llng    # your LLNG-signed key/cert
-       IdentitiesOnly yes
-       RequestTTY yes
-       RemoteCommand ob-ssh backend-server
-
-Then simply ``ssh backend-server``.
+From a workstation, the same jump is a ``~/.ssh/config`` entry whose
+``RemoteCommand`` is ``ob-ssh`` — it lands on the bastion (where the session
+is recorded) and hops to the backend. The entries to copy are in
+:doc:`Using Open Bastion </using-open-bastion>`.
 
    **Why not ``ProxyJump`` / ``ProxyCommand``?** ``ob-ssh`` re-originates a full interactive SSH session from the bastion using a freshly vouched certificate; it is **not** a ``-W`` stdio forwarder, so it cannot be used as a ``ProxyCommand``. A plain ``ProxyJump bastion`` from the workstation would also bypass the vouched certificate and the session recording, and the backend — which only accepts a bastion-vouched certificate pinned to the bastion's source address — would reject it. ``RemoteCommand`` (or running ``ob-ssh`` on the bastion) is the supported path.
 

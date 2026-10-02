@@ -33,6 +33,8 @@ Prerequisites
 * ``ob-ssh-cert`` deployed on user workstations, and one certificate per
   user.
 
+.. _what-the-setup-scripts-write:
+
 What the setup scripts write
 ----------------------------
 
@@ -132,20 +134,12 @@ Selecting it
 ------------
 
 ``ob-builder`` proposes maximum security as the default answer to its
-"Security scenario" question, and bakes it into the generated installer
-and Ansible role. On a single host:
+"Security scenario" question, and bakes it into the Ansible role and
+generated self-extracting installer.
+
+When configuring a bastion manually:
 
 .. code:: bash
 
    sudo ob-bastion-setup --portal https://auth.example.com \
         --server-group bastion --max-security
-
-Learn more
-----------
-
-* :doc:`/references/maximum-security` — the security model, the ``sshd``
-  drop-in, the fingerprint binding, the revocation list and ``sudo``'s
-  timestamp cache.
-* :doc:`/admin-guide` — the deployment procedure, step by step.
-* :doc:`/security` — the controls this scenario relies on, and what they
-  do not cover.

@@ -3,7 +3,8 @@ End user commands
 
 The commands a user runs from their workstation, or from a bastion session
 to reach a backend. Each has a man page of the same name, installed by the
-``open-bastion`` package.
+``open-bastion`` package. For the whole of it in one page, see
+:doc:`Using Open Bastion </using-open-bastion>`.
 
 .. list-table::
    :header-rows: 1
@@ -20,8 +21,8 @@ to reach a backend. Each has a man page of the same name, installed by the
    * - :doc:`ob-sftp(1) <ob-sftp>`
      - The same for interactive SFTP transfers.
    * - :doc:`ob-ssh-cert(1) <ob-ssh-cert>`
-     - Fetch the user's SSH certificate from LemonLDAP::NG, typically once a
-       day, and install it in the local SSH agent.
+     - Ask the portal to sign your SSH key, and install the certificate in
+       your SSH agent or next to the key.
 
 .. toctree::
    :hidden:
