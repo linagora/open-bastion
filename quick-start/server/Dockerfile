@@ -34,7 +34,7 @@ COPY scripts/ /src/open-bastion/scripts/
 COPY share/ /src/open-bastion/share/
 WORKDIR /src/open-bastion
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TESTING=OFF .. && \
+    cmake -DBUILD_TESTING=OFF -DBUILD_MAN=OFF -DBUILD_BUILDER=OFF .. && \
     make -j$(nproc) && \
     MULTIARCH="$(gcc -print-multiarch)" && \
     mkdir -p "/usr/lib/${MULTIARCH}/security" "/lib/${MULTIARCH}" && \

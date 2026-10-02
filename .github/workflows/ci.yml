@@ -475,7 +475,8 @@ jobs:
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
           build-essential cmake pkg-config git jq curl python3 openssh-client \
           socat util-linux systemd rsync openssh-sftp-server \
-          libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev
+          libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev \
+          python3-sphinx
 
     # The suites the catalogue drives must be able to RUN here: one that skips
     # for a missing dependency is green before and after the mutation, and the
