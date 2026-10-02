@@ -35,6 +35,19 @@ In the LLNG Manager, create a new OIDC Relying Party:
    - ``oidcRPMetaDataOptionsDeviceOwnership`` = ``organization``
    - ``oidcRPMetaDataOptionsAllowOffline`` = ``1``.
 
+4. Harden the client itself:
+
+   - ``oidcRPMetaDataOptionsRequirePKCE`` = ``1``
+   - ``oidcRPMetaDataOptionsClientAuthenticationMethod`` =
+     ``client_secret_jwt``: the module already signs its requests this
+     way, and the secret stops travelling in a Basic header
+   - ``oidcRPMetaDataOptionsRefreshTokenRotation`` = ``1``
+   - ``oidcRPMetaDataOptionsRtActivity`` = ``2592000``: revoke the
+     refresh token of a server that has not used it for 30 days. A
+     decommissioned host, a forgotten enrolment and a token lifted from
+     an old backup all stop being usable. Keep ``ob-heartbeat.timer``
+     running — it is what keeps an active server's token alive.
+
 Step 2: plugins activation
 --------------------------
 

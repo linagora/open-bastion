@@ -11,6 +11,14 @@ Deployment
    self-extracting-installer
    manual-configuration
 
+A host takes one of three roles. A standalone server authenticates its
+users directly with LLNG, with no jump host in front of it. A bastion
+records the sessions opened through it and hops to the servers behind.
+A backend accepts connections only from its bastions. The three are
+described in :doc:`Other use cases </other-uses-cases>` (standalone) and
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>` (all
+three).
+
 The deployment of Open Bastion starts with standard :doc:`installation
 steps </deployment/install>`:
 
