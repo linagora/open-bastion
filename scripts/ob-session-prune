@@ -2,7 +2,7 @@
 #
 # ob-session-prune - compress and expire recorded SSH sessions
 #
-# Run daily by ob-session-prune.timer; see doc/session-recording.rst.
+# Run daily by ob-session-prune.timer; see doc/ssh-session-recording.rst.
 #
 # Copyright (C) 2025 Linagora
 # License: AGPL-3.0

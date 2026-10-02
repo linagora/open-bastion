@@ -558,7 +558,7 @@ SSH server requirement
 
 This setting allows the PAM module to access the SSH key fingerprint via the ``SSH_USER_AUTH`` environment variable, which is required for fingerprint validation.
 
-On OpenSSH >= 9.8 ``ExposeAuthInfo`` is not sufficient on its own: sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``. ``ob-bastion-setup`` / ``ob-backend-setup`` therefore also install the ``ob-ssh-principals`` helper as ``AuthorizedPrincipalsCommand ... %u %f %t %k``, which spools the fingerprint, the key type and the key blob under ``/run/open-bastion/ssh-fp/``. That spool is what feeds both the fingerprint binding and the optional SSH key policy (``ssh_key_policy_enabled``, see :doc:`doc/security.rst </security>`); the key policy is enforced fail-closed and denies a login whose key cannot be identified.
+On OpenSSH >= 9.8 ``ExposeAuthInfo`` is not sufficient on its own: sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``. ``ob-bastion-setup`` / ``ob-backend-setup`` therefore also install the ``ob-ssh-principals`` helper as ``AuthorizedPrincipalsCommand ... %u %f %t %k``, which spools the fingerprint, the key type and the key blob under ``/run/open-bastion/ssh-fp/``. That spool is what feeds both the fingerprint binding and the optional SSH key policy (``ssh_key_policy_enabled``, see :doc:`/security`); the key policy is enforced fail-closed and denies a login whose key cannot be identified.
 
 Authentication flow
 ~~~~~~~~~~~~~~~~~~~

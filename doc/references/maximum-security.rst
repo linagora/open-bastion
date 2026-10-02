@@ -1,7 +1,7 @@
 Maximum security
 ================
 
-What the :doc:`default scenario </pam-modes>` relies on underneath: the
+What the :doc:`default scenario </security-scenarios/index>` relies on underneath: the
 security model, the ``sshd`` drop-in it writes, the revocation list, the
 fingerprint binding, and what ``sudo``'s timestamp cache means in practice.
 
@@ -77,7 +77,7 @@ packaged file.
 How often you are actually prompted: sudo's timestamp cache
 -----------------------------------------------------------
 
-The :doc:`scenario </pam-modes>` promises a fresh SSO re-authentication
+The :doc:`scenario </security-scenarios/index>` promises a fresh SSO re-authentication
 for each ``sudo``. That claim holds **at the SSO layer**, and it is worth
 being precise about what an operator sees, because the two are not the
 same thing.

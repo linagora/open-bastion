@@ -225,5 +225,5 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 ## See Also
 
 - [`doc/admin-guide.rst`](../doc/admin-guide.rst) — General administrative procedures for Open Bastion
-- [`doc/pam-modes.rst`](../doc/pam-modes.rst) — Detailed explanation of the security scenario and its alternatives
+- [`doc/security-scenarios/index.rst`](../doc/security-scenarios/index.rst) — Detailed explanation of the security scenario and its alternatives
 - [`templates/ansible/role/README.md`](templates/ansible/role/README.md) — Ansible role variables and usage

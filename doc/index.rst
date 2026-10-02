@@ -31,8 +31,8 @@ If you administer Open Bastion or plan to, read these in order:
   installation, and supported configuration methods (Ansible based,
   self-extracting installers or manual).
 
-* :doc:`/pam-modes` and :doc:`/other-security-scenarios` for an
-  overview of the possible security scenarios.
+* :doc:`/security-scenarios/index` for the five security scenarios — what a host accepts,
+  what ``sudo`` asks for — and how one is chosen.
 
 * :doc:`Permissions </permissions>` and :doc:`/service-accounts` for
   who may do what.
@@ -75,8 +75,7 @@ formal analysis of the maximum security target.
    :maxdepth: 2
 
    deployment/index
-   Security scenario <pam-modes>
-   Other security scenarios <other-security-scenarios>
+   Security scenarios <security-scenarios/index>
    Permissions <permissions>
    service-accounts
    offline-mode

@@ -243,7 +243,7 @@ PYEOF
 # checklist would have gone green.
 test_documented() {
     local ok=1 f
-    local guide="$ROOT_DIR/doc/llng-configuration.rst"
+    local guide="$ROOT_DIR/doc/deployment/llng-configuration.rst"
 
     grep -q '\^/device' "$guide" || { ok=0; echo "    (no ^/device rule documented)"; }
     grep -q 'admin|certs|revoke' "$guide" || { ok=0; echo "    (no ^/ssh admin rule documented)"; }
@@ -253,7 +253,7 @@ test_documented() {
     # No copy may show an end-anchored /device rule as a rule. Matched on the
     # quoted JSON key form so the prose explaining WHY it is wrong -- which has
     # to name `^/device$` -- does not trip the check.
-    for f in doc/llng-configuration.rst doc/security/01-enrollment.rst \
+    for f in doc/deployment/llng-configuration.rst doc/security/01-enrollment.rst \
              doc/security/02-ssh-connection.rst CHANGELOG.md; do
         if grep -qE '"\^/device[^"]*\$"' "$ROOT_DIR/$f"; then
             ok=0; echo "    ($f shows an end-anchored ^/device rule)"
@@ -265,7 +265,7 @@ test_documented() {
     # here: the JSON form `(\?|/|$)` and the Markdown table form
     # `(\?\|/\|$)`, whose pipes are escaped for the cell separator, so the
     # tail of either is matched as a fixed string.
-    for f in doc/llng-configuration.rst doc/security/01-enrollment.rst \
+    for f in doc/deployment/llng-configuration.rst doc/security/01-enrollment.rst \
              doc/security/02-ssh-connection.rst CHANGELOG.md; do
         if grep -q 'admin|certs|revoke' "$ROOT_DIR/$f" \
            && ! grep -qF -e '|/|$)' -e '\|/\|$)' "$ROOT_DIR/$f"; then

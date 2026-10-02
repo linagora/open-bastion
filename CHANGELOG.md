@@ -31,7 +31,7 @@ here.
   stdin (see Security).
 - **`--enable-sudo-fresh-otp`** on the setup script (#178): sets
   `timestamp_timeout=0` for the SSO group so every `sudo` re-authenticates.
-  Opt-in; limits in [doc/pam-modes.rst](doc/pam-modes.rst).
+  Opt-in; limits in [doc/security-scenarios/index.rst](doc/security-scenarios/index.rst).
 - **The postinst warns when a mode-c host's sshd still accepts passwords**
   (#180), louder under `UsePAM no`. It reports only; it changes nothing.
 - **`min_gid` / `max_gid`**: server-supplied GIDs are checked against their own
@@ -50,7 +50,7 @@ here.
   replaces `/etc/ssh/revoked_keys` atomically and fails its unit on error,
   keeping the current list. It runs sandboxed from `ob-krl-refresh.timer`,
   every 30 minutes; **`--krl-refresh-interval`** (1 to 60 minutes) changes
-  that. See [doc/pam-modes.rst](doc/pam-modes.rst).
+  that. See [doc/security-scenarios/index.rst](doc/security-scenarios/index.rst).
 
 ### Changed
 
@@ -65,7 +65,7 @@ here.
   package (APT and GitHub release). References to `doc/*.md` now name `.rst`
   files.
 - **`SECURITY.md` is a reporting policy only** (#276); the product security
-  description moved to [doc/security-reference.rst](doc/security-reference.rst).
+  description moved to [doc/references/security-reference.rst](doc/references/security-reference.rst).
 - **`ob-bastion-id` uses `POST /pam/whoami`** (#246), falling back to the legacy
   `/pam/bastion-token` probe for older portals. The device id is unchanged.
   Exit 2 means failed or refused, 3 means no identity in the answer.
@@ -73,7 +73,7 @@ here.
   unsigned, except in `ob-session-monitor` (#247).
 - **Unknown keys in `openbastion.conf` are logged** (key only, never the value)
   and still ignored (#229). The authorization cache has no local TTL setting;
-  see [doc/configuration.rst](doc/configuration.rst).
+  see [doc/references/configuration.rst](doc/references/configuration.rst).
 - **The PAM module invalidates the NSS file cache directly**, so user and group
   changes are visible at once; `nscd --invalidate` is still called where `nscd`
   exists.
@@ -156,7 +156,7 @@ here.
   gave an unrecorded shell. Only the exact commands genuine clients send now
   skip the terminal recording, run without a shell from a fixed path; a session
   with a terminal is never a transfer. **rsync with `--secluded-args` now
-  fails.** See [doc/session-recording.rst](doc/session-recording.rst) and
+  fails.** See [doc/ssh-session-recording.rst](doc/ssh-session-recording.rst) and
   [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A6).
 - **`max_duration` ends the session** (#287); it never fired. **Sessions on a
   bastion set up by `ob-bastion-setup` are now cut after 8 hours** (24 without
@@ -178,13 +178,13 @@ here.
   a recording host, SSO users log in through `ob-login-shell`(8), not a shell
   reading `~/.bashrc` or `~/.zshenv`. The portal's per-user shell and `Match`
   exemptions from recording no longer apply to them there. See the login shell
-  in [doc/session-recording.rst](doc/session-recording.rst) and
+  in [doc/ssh-session-recording.rst](doc/ssh-session-recording.rst) and
   [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A7).
 - **`ob-record.socket` bounds concurrency** (#287): `MaxConnections=1024` and
   `MaxConnectionsPerSource=16`, so one local user cannot hold every slot and
   block logins; a user's 17th concurrent recorded session is refused. The
   per-user limit needs systemd 256 or newer; see
-  [doc/session-recording.rst](doc/session-recording.rst).
+  [doc/ssh-session-recording.rst](doc/ssh-session-recording.rst).
 - **R-P1 is a release prerequisite** (#268): without `pamAccessServerGroups`
   (the default), any compromised enrolled host can pose as a bastion and obtain
   hop vouchers. `pamAccessServerGroups`, `pamAccessAllowedRps` and a non-empty
@@ -231,7 +231,7 @@ here.
   (#203).
 - **Portal `locationRules` for `/device` and the SSH CA admin routes** are
   documented for both plugin generations (#195), in
-  [doc/llng-configuration.rst](doc/llng-configuration.rst).
+  [doc/deployment/llng-configuration.rst](doc/deployment/llng-configuration.rst).
 
 ## [0.6.3] - 2026-09-21
 
@@ -269,7 +269,7 @@ each account's public key; a bundle built by `ob-builder` does both.
   paths — not CMake, not the `.deb`, not the RPM — so there was no copy on a
   host to point `AuthorizedKeysCommand` at, and everyone who needed one
   installed their own under `/usr/local`.
-- **`doc/service-accounts.md` no longer implies the SSH layer is optional.**
+- **`doc/service-accounts.rst` no longer implies the SSH layer is optional.**
   `service-accounts.conf` alone never sufficed: without an authorized key sshd
   refuses at the protocol layer and `pam_openbastion` never runs, so the
   fingerprint check it describes is a re-validation, not an authorisation — and
@@ -357,12 +357,12 @@ progressive-discovery documentation reorganization.
   role carries them as `ob_service_accounts_content` (overridable per
   host/group). `service_accounts_file` is set in the generated
   `openbastion.conf`. No PAM-module change — `src/service_account.c` already
-  parses that file. See `doc/service-accounts.md` and `ob-builder(1)`.
+  parses that file. See `doc/service-accounts.rst` and `ob-builder(1)`.
   Validated end-to-end on a Mode E VM (`local-test/deploy-shell.sh`). ob-builder
   warns when an account would be unusable on the target: a `home`/`shell` outside
   the approved lists (silently dropped by the PAM module) or a missing fixed
   `uid`/`gid` (NSS cannot resolve it for sshd's pre-auth lookup, so it is
-  unreachable over SSH unless it already exists locally). `doc/service-accounts.md`
+  unreachable over SSH unless it already exists locally). `doc/service-accounts.rst`
   documents these requirements (including not reusing a system username).
 - **Session-recording retention (`ob-session-prune`).** A new daily timer
   (`ob-session-prune.timer`, enabled at install) bounds the recordings store,
@@ -374,7 +374,7 @@ progressive-discovery documentation reorganization.
   logged at `notice` level since it drops audit evidence. Runs as root from a
   sandboxed oneshot service and only writes under
   `/var/lib/open-bastion/sessions`, preserving the tamper-evident layout. See
-  `doc/session-recording.md` and `ob-session-prune(8)`.
+  `doc/ssh-session-recording.rst` and `ob-session-prune(8)`.
 
 ### Fixed
 
@@ -465,7 +465,7 @@ its own session recordings — plus `sudo -i` and backend `sudo` fixes.
   session is refused rather than falling back to a user-deletable file.
   Because the recorder runs on the bastion, a user who is root on a backend does
   not escape recording. New units `ob-record.socket` / `ob-record@.service`.
-  Drops R-S18 to P=1 (see `doc/security/99-risk-reduce.md`).
+  Drops R-S18 to P=1 (see `doc/security/99-risk-reduce.rst`).
 
 ### Changed
 
@@ -604,7 +604,7 @@ deploy fix surfaced while validating the above on a full VM lab.
 ### Documentation
 
 - Documented the full **`pam-access` OIDC Relying Party** setup in
-  `doc/llng-configuration.md`: the required options
+  `doc/deployment/llng-configuration.rst`: the required options
   (`AllowDeviceAuthorization`, `DeviceOwnership = organization`,
   **`AllowOffline = 1`**), the `offline_access` scope, and the
   offline-refresh-token gotcha (needs `oidc-device-organization` >= 0.3.3, or
@@ -685,8 +685,8 @@ artefacts (Ansible role and shell installer) deploy fully unattended.
   LLNG CA (`TrustedUserCAKeys`) and refuses it off-bastion (source-address),
   while an `AuthorizedPrincipalsCommand` enforces the `allowed_bastions`
   allowlist from the cert key-id. No agent forwarding and no user key on the
-  bastion are required. See `doc/bastion-architecture.md` and
-  `doc/design/bastion-cert-vouching.md`.
+  bastion are required. See `doc/references/bastion-architecture.rst` and
+  `doc/references/bastion-cert-vouching.rst`.
 - **`ob-scp`**: bastion file-copy counterpart of `ob-ssh`. Copies files
   bastion→backend, backend→bastion, or backend↔backend using a short-lived
   vouched certificate. All transfers are forced through the bastion (`scp -3`)
@@ -694,7 +694,7 @@ artefacts (Ansible role and shell installer) deploy fully unattended.
   (a direct backend-to-backend transfer would be rejected). All remote
   endpoints must share the same remote user (one vouched certificate = one
   principal).
-- **Ansible quick-start guide** (`doc/ansible-quickstart.md`): generate the
+- **Ansible quick-start guide** (`doc/deployment/ansible-deployment.rst`): generate the
   bastion + backend roles with `ob-builder`, declare hosts and their IPs in an
   inventory, and apply with `ansible-playbook` (including unattended
   device-code auto-approval via an LLNG cookie). Linked from the main README,
@@ -1078,7 +1078,7 @@ never published; its contents are folded into v0.2.0.)
   - Templates ship under `/usr/share/open-bastion/hardening/` (read
     only; deployment artefacts in `/etc/` are written by
     `ob-bastion-setup`, not by dpkg/rpm).
-  - New `doc/hardening.md` and `tests/test_ob_bastion_setup_hardening.sh`
+  - New `doc/hardening.rst` and `tests/test_ob_bastion_setup_hardening.sh`
     (20 tests).
 
 - **Primary audit trace via auditd** (`ob-bastion-setup
@@ -1100,13 +1100,13 @@ never published; its contents are folded into v0.2.0.)
     so the rest of `ob-bastion-setup` continues normally.
   - `auditd` is declared as `Recommends:` (Debian) /
     `Recommends:` (RPM) — never installed silently.
-  - New `doc/audit.md` and `tests/test_ob_bastion_setup_audit.sh`
+  - New `doc/audit.rst` and `tests/test_ob_bastion_setup_audit.sh`
     (11 tests).
 
 ### Changed
 
-- **Security analysis updated** (`doc/security/02-ssh-connection.md`,
-  `doc/security/99-risk-reduce.md`):
+- **Security analysis updated** (`doc/security/02-ssh-connection.rst`,
+  `doc/security/99-risk-reduce.rst`):
   - **R-S18 corrected** — the previous claim that the setgid wrapper
     - sticky bit prevented users from deleting their own recordings
       was inaccurate: the per-user subdirectory is
@@ -1374,9 +1374,9 @@ never published; its contents are folded into v0.2.0.)
   certificate-only auth, unsigned key rejection, KRL configuration, sudo PAM
   hardening, and password authentication is disabled
 - **EBIOS security study refactored** for maximum security target:
-  - `doc/security/00-architecture.md` translated to French with Mode E introduction
-  - `doc/security/02-ssh-connection.md` simplified to single architecture (Mode E)
-  - `doc/security/03-offboarding.md` simplified to Mode E offboarding procedure
+  - `doc/security/00-architecture.rst` translated to French with Mode E introduction
+  - `doc/security/02-ssh-connection.rst` simplified to single architecture (Mode E)
+  - `doc/security/03-offboarding.rst` simplified to Mode E offboarding procedure
   - New risks R-S15 (stale KRL) and R-S16 (sudo escalation) documented
 
 ### Fixed
