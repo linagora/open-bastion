@@ -1245,7 +1245,7 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 
    Hors Mode E (modes « clé »), c'est techniquement possible et cela déplace le risque plutôt qu'il ne le réduit : une clé privée de longue durée réside alors sur le bastion, non bornée par un TTL de certificat et non révocable par le portail, et le rebond cesse d'être vouché (``allowed_bastions``, épinglage d'adresse source et TTL de voucher ne s'y appliquent plus). La traçabilité, elle, survit : un ``ssh`` lancé **depuis une session de bastion enregistrée** est capturé par l'enregistreur de pty — ce qui ne l'est pas, c'est un ``ssh -J bastion`` depuis le poste de travail (canal ``direct-tcpip``, cf. R-S25).
 
-   Les deux mesures conçues pour cette panne restent le **compte de service de secours** et l'**accès console hors-bande** ci-dessus. Voir :doc:`/offline-mode` pour la matrice complète de ce qui fonctionne hors ligne.
+   Les deux mesures conçues pour cette panne restent le **compte de service de secours** et l'**accès console hors-bande** ci-dessus. Voir :doc:`/offline-mode/index` pour la matrice complète de ce qui fonctionne hors ligne.
 
 **Remédiation infrastructure :**
 

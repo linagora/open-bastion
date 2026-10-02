@@ -50,7 +50,9 @@ What it does not cover
 Activation
 ----------
 
-The audit trace is opt-in and off by default, like the hardening:
+The audit trace is opt-in and off by default, like the hardening. It is
+the ``--enable-audit-trace`` option of
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`:
 
 .. code:: bash
 
@@ -181,8 +183,9 @@ Upgrading from the cron.daily script
 
 Up to 0.6 the rotation was a ``/etc/cron.daily/open-bastion-audit-rotate``
 script that the package had copied there, and that copy keeps working
-after an upgrade. ``ob-post-upgrade`` (or a new ``--enable-audit-trace``
-run) replaces it with the timer, at the same daily or weekly schedule, and
+after an upgrade. :doc:`ob-post-upgrade(8) </references/man/ob-post-upgrade>`
+(or a new ``--enable-audit-trace`` run) replaces it with the timer, at the
+same daily or weekly schedule, and
 deletes the script once the timer is active. A script without its
 ``Installed by ob-bastion-setup`` marker line is treated as yours and left
 in place, with a warning: until it is removed, the log rotates twice.

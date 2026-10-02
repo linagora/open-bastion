@@ -29,13 +29,14 @@ from your workstation to each target, as a user that can run ``sudo``.
 Step 1 — generate the installers
 --------------------------------
 
-Just run ``ob-builder`` and answer the questions. Two answers are specific to
-the shell artefacts: at the artefacts question, answer ``shell`` (the
-default), and, when a self-extracting installer is requested for the backend
-role, one extra prompt requests the ids of the bastions allowed to reach
-backend. These only exist after the bastion is enrolled: the usual
-order is to leave the prompt empty (any vouched bastion in the same
-server group is then accepted). It will be set later by editing
+Just run ``ob-builder`` and answer the questions. Two answers are
+specific to the shell artefacts: at the artefacts question, answer
+``shell`` (the default), and, when a self-extracting installer is
+requested for the backend role, one extra prompt requests the ids of
+the bastions allowed to reach the backend. Those ids only exist after
+the bastion is enrolled: the usual order is to leave the prompt empty
+(any vouched bastion in the same server group is then accepted). The
+list can be set later by editing
 ``/etc/open-bastion/allowed_bastions`` on the backends.
 
 The generated scripts are self-contained: they embed the SSO CA key,
@@ -52,7 +53,7 @@ with your slug):
    Instead of answering prompts you can pass every answer through a
    YAML file and generate installers non-interactively, with the same
    ``build.yml`` as the :ref:`Ansible path
-   <ansible-deployment-option-a--bundle-recommended-bastion--backend-share-one-ca>`:
+   <ansible-deployment-option-a--bundle>`:
 
    .. code:: bash
 
@@ -77,16 +78,19 @@ root. For a bastion host named `bastion-1`:
 The installer configures the package repository and installs
 ``open-bastion``, writes ``/etc/open-bastion/openbastion.conf``.
 
-Then it runs ``ob-enroll`` which prints a URL and code to approve the
-host enrollment in your browser (Device Authorization Grant flow).
+Then it runs :doc:`ob-enroll(8) </references/man/ob-enroll>`, which
+prints a URL and code to approve the host enrollment in your browser
+(Device Authorization Grant flow).
 
-Finally, it runs ``ob-bastion-setup`` which locks SSH down to
-SSO-issued certificates.
+Finally, it runs
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`, which
+locks SSH down to SSO-issued certificates.
 
 Collect the ``bastion_id`` — a synthetic per-device identity assigned
 by the portal at enrollment — from the ``ob-bastion-setup`` final
-output. It may use it during backends configuration to limit the
-accepted bastions.
+output, or later with
+:doc:`ob-bastion-id(1) </references/man/ob-bastion-id>`. You may need
+it when configuring the backends, to limit the accepted bastions.
 
 .. code:: bash
 
@@ -94,14 +98,15 @@ accepted bastions.
 
 .. warning::
 
-   Unless you are a confirmed user, make sure you have console access
-   to the target and login with an account with root privileges before
-   you run the installer. The setup step lock port 22 down to SSO
-   certificates, so the local admin account can no longer access
-   through SSH without a signed certificate atferwards.
+   Unless you are an experienced user, make sure you have console
+   access to the target and log in with an account with root
+   privileges before you run the installer. The setup step locks port
+   22 down to SSO certificates, so the local admin account can no
+   longer access it through SSH without a signed certificate
+   afterwards.
 
-   You can also split the deployment in multiple steps, eg to inspect
-   the host, see :ref:`usefull_installer_flags`.
+   You can also split the deployment in multiple steps, e.g. to
+   inspect the host, see :ref:`usefull_installer_flags`.
 
 .. _shell-quickstart-step-3--deploy-the-backends:
 
@@ -122,27 +127,32 @@ Copy the backend installer to each backend host and run it there.
 Useful installer flags
 ----------------------
 
-The self-extracting installer accepts the following options (see ``--help`` / ``info``):
+The self-extracting installer accepts the following options (see
+``--help`` / ``info``):
 
-+--------------------------+------------------------------------------------------------------------+
-| Flag                     | Effect                                                                 |
-+==========================+========================================================================+
-| ``-y``, ``--yes``        | answer Y to all prompts — enrol and setup run automatically            |
-+--------------------------+------------------------------------------------------------------------+
-| ``--skip-enroll``        | skip ``ob-enroll``; install and write config only                      |
-+--------------------------+------------------------------------------------------------------------+
-| ``--skip-setup``         | enrol but skip ``ob-{bastion,backend,standalone}-setup``               |
-+--------------------------+------------------------------------------------------------------------+
-| ``--skip-install``       | assume the package is already installed                                |
-+--------------------------+------------------------------------------------------------------------+
-| ``--client-id ID``       | override the ``client_id``                                             |
-+--------------------------+------------------------------------------------------------------------+
-| ``--server-group GROUP`` | override the ``server_group``                                          |
-+--------------------------+------------------------------------------------------------------------+
-| ``--force``              | overwrite an existing ``/etc/open-bastion`` (normally refused)         |
-+--------------------------+------------------------------------------------------------------------+
-| ``--insecure``           | skip TLS verification — **debug/test only**, never against prod SSO    |
-+--------------------------+------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Flag
+     - Effect
+   * - ``-y``, ``--yes``
+     - answer Y to all prompts — enrol and setup run automatically
+   * - ``--skip-enroll``
+     - skip ``ob-enroll``; install and write config only
+   * - ``--skip-setup``
+     - enrol but skip ``ob-{bastion,backend,standalone}-setup``
+   * - ``--skip-install``
+     - assume the package is already installed
+   * - ``--client-id ID``
+     - override the ``client_id``
+   * - ``--server-group GROUP``
+     - override the ``server_group``
+   * - ``--force``
+     - overwrite an existing ``/etc/open-bastion`` (normally refused)
+   * - ``--insecure``
+     - skip TLS verification — debug/test only, never against prod
+       SSO
 
 Splitting enrolment and setup is handy when you want to inspect the
 host before locking SSH: ``--skip-setup`` first, verify, then re-run

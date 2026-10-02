@@ -177,6 +177,8 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-post-upgrade.8*
 %{_mandir}/man8/ob-uninstall.8*
 %{_mandir}/man8/ob-ssh-cert.8*
+%{_mandir}/man8/ob-cache-admin.8*
+%{_mandir}/man8/ob-desktop-setup.8*
 %{_mandir}/man5/openbastion.conf.5*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*

@@ -1,18 +1,19 @@
 Session containment hardening
 =============================
 
-When :doc:`ssh-session-recording` is enabled, an authenticated user
-can still step out of the recorded session when he detach a process
-from the pty (``setsid nohup … &``), or queue work with ``at`` or
-``cron``, or fork-bomb the host.
+When :doc:`ssh-session-recording` is enabled, an authenticated user can
+still step out of the recorded session: detach a process from the pty
+(``setsid nohup … &``), queue work with ``at`` or ``cron``, or fork-bomb
+the host.
 
-With ``ob-bastion-setup --enable-hardening``, one closes those three
-channels with plain system configuration: no setuid binary, no patch
+The ``--enable-hardening`` option of
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>` closes those
+three channels with plain system configuration: no setuid binary, no patch
 to PAM or ``sshd``.
 
 It is opt-in, because it changes global system behaviour (``logind``,
 ``at``, ``cron``, process limits), which a setup script must not do
-silently.  Recommended on a dedicated bastion; leave it off on a
+silently. Recommended on a dedicated bastion; leave it off on a
 multi-purpose host.
 
 What it deploys

@@ -1,12 +1,12 @@
 Cache administration
 ====================
 
-The credential cache lets a desktop user authenticate while the LLNG portal
-is unreachable: the PAM module stores what it needs at the last successful
-online login, encrypted, and verifies it locally during the outage.
-:doc:`Offline mode </offline-mode/index>` covers what else survives an
-outage; this page covers the cache itself and the ``ob-cache-admin`` tool
-that administers it.
+The credential cache lets a user log in with their password while the LLNG
+portal is unreachable: the PAM module stores what it needs at the last
+successful online login, encrypted, and verifies it locally during the
+outage. :doc:`Offline mode </offline-mode/index>` covers what else survives
+an outage; this page covers the cache itself and the ``ob-cache-admin``
+tool that administers it.
 
 What an entry holds, and how it is protected
 --------------------------------------------
@@ -93,8 +93,8 @@ hash and salt, and the account attributes. The format is internal: use
 Administration
 --------------
 
-``ob-cache-admin`` (``/usr/sbin``, from the ``open-bastion`` package)
-administers the cache. All commands need root:
+:doc:`ob-cache-admin(8) </references/man/ob-cache-admin>` administers the
+cache. All commands need root:
 
 .. list-table::
    :header-rows: 1

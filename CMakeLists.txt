@@ -614,6 +614,8 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-post-upgrade.8
         ${MAN_OUT_DIR}/ob-uninstall.8
         ${MAN_OUT_DIR}/ob-ssh-cert.8
+        ${MAN_OUT_DIR}/ob-cache-admin.8
+        ${MAN_OUT_DIR}/ob-desktop-setup.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
 

@@ -14,7 +14,7 @@ Deployment
 The deployment of Open Bastion starts with standard :doc:`installation
 steps </deployment/install>`:
 
-* :ref:`Installations of Open Bastions <open_bastion_installation>`
+* :ref:`Installation of Open Bastion <open_bastion_installation>`
   for the bastion itself and on each backend server
 
 * :ref:`Installation of LLNG plugins <mandatory-lemonldap-ng-plugins>`
@@ -27,10 +27,11 @@ portal:
 * :doc:`Configuration of LLNG and its plugins
   </deployment/llng-configuration>`
 
-Then configure the hosts. One questionnaire to ``ob-builder`` produces the
-whole deployment — the security scenario, the OIDC client, the package
-repository and the SSH CA key are asked once — and what applies it to the
-targets is what you choose here:
+Then configure the hosts. One questionnaire to
+:doc:`ob-builder(1) </references/man/ob-builder>` produces the whole
+deployment — the security scenario, the OIDC client, the package
+repository and the SSH CA key are asked once — and what applies it to
+the targets is what you choose here:
 
 * :doc:`Ansible deployment </deployment/ansible-deployment>` — generate an
   Ansible role, declare the hosts, apply with one ``ansible-playbook`` run.
@@ -46,4 +47,5 @@ to know what they change before they do it:
 * :doc:`Manual configuration </deployment/manual-configuration>`
 
 Whichever route you take, the hosts end up in the same state; the
-:doc:`security scenarios </security-scenarios/index>` you chose decides how strict it is.
+:doc:`security scenario </security-scenarios/index>` you chose decides
+how strict it is.

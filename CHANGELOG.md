@@ -42,7 +42,7 @@ here.
   homologation dossier and LLNG portal sheets, with matrices checked against
   the sheets in CI. Owner, date and acceptance fields are left `À COMPLÉTER`.
   Start at [doc/security/index.rst](doc/security/index.rst).
-- **Portal-outage matrix** in [doc/offline-mode.rst](doc/offline-mode.rst)
+- **Portal-outage matrix** in [doc/offline-mode/index.rst](doc/offline-mode/index.rst)
   (#165), including when a personal SSH key is a usable fallback.
 - **`ob-krl-refresh`(8)**: the Mode E KRL refresh, packaged. It reads the
   portal settings from `openbastion.conf` at every run, installs only a list

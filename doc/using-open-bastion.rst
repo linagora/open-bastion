@@ -159,9 +159,9 @@ When a connection is refused
   :doc:`ob-ssh(1) </references/man/ob-ssh>` reports what it tried.
 
 - **The bastion refuses you while your certificate is still valid** — the
-  portal may be unreachable, which also stops a hop to a backend. Waiting for
-  the portal to come back is enough; see :doc:`/offline-mode` for what keeps
-  working meanwhile.
+  portal may be unreachable, which also stops a hop to a backend. Waiting
+  for the portal to come back is enough; see :doc:`/offline-mode/index`
+  for what keeps working meanwhile.
 
 - **``sudo`` refuses you** — either the portal does not grant you
   ``sudo`` on this host, which is your administrator's call, or the

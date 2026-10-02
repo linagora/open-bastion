@@ -15,7 +15,7 @@ given decision is the key to operating it well:
 
 .. tip::
 
-   **The recommended posture is "the SSO decides"**. Keep per-server
+   The recommended posture is "the SSO decides". Keep per-server
    files minimal and drive everything from LLNG groups. But every
    local knob below remains available for defense-in-depth or for
    hosts that need a local exception — see :ref:`Dual management
@@ -24,33 +24,60 @@ given decision is the key to operating it well:
 What you can control and where
 ------------------------------
 
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Goal                                            | Layer            | How                                                                                                                                                                                             |
-+=================================================+==================+=================================================================================================================================================================================================+
-| Who can SSH into which servers                  | **SSO**          | Through :ref:`Server groups <llng-configuration-server-groups>` and :ref:`LLNG pamAccessSSHRules <llng-configuration-configure-in-lemonldap-ngini>`                                             |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Who can ``sudo``                                | **SSO** (+local) | Through :ref:`LLNG pamAccessSudoRules <llng-configuration-configure-in-lemonldap-ngini>`, and optionally a local ``sudoers`` policy                                                             |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Make ``sudo`` require a fresh SSO token         | **OB**           | See :doc:`maximum security </security-scenarios/max-security-scenario>` and :ref:`pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache`                                          |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Which SSH **key types/sizes** are allowed       | **OB**           | See ``ssh_key_policy_enabled`` and ``ssh_key_allowed_types`` in :ref:`the SSH key policy <security-ssh-key-policy>`                                                                             |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Auth method (token / SSH key / password)        | **OB**           | Through :doc:`/security-scenarios/index`                                                                                                                                                        |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Non-SSO automation logins (ansible, backup, CI) | **OB**           | See :doc:`/service-accounts`                                                                                                                                                                    |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Auto-created home / shell / UID/GID range       | **OB**           | Provisioning keys in :doc:`/references/configuration`                                                                                                                                           |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Which Unix groups are synced from LLNG          | **Both**         | Through :ref:`LLNG pamAccessManagedGroups <llng-configuration-group-synchronization>` and :ref:`local whitelist <local-whitelist-defense-in-depth>`                                             |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Process containment (kill on logout, at/cron)   | **OB**           | See :doc:`/hardening`                                                                                                                                                                           |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Bastion-to-backend connection trust             | **Both**         | LLNG signs the hop cert; backend ``allowed_bastions``, see :doc:`architecture </references/bastion-architecture>`                                                                               |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Revoke admin access                             | **SSO**          | Remove from the group / close the account (see below)                                                                                                                                           |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Onboard an admin                                | **SSO**          | Add to the right group; they self-serve their SSH certificate                                                                                                                                   |
-+-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 16 52
+
+   * - Goal
+     - Layer
+     - How
+   * - Who can SSH into which servers
+     - **SSO**
+     - Through :ref:`Server groups <llng-configuration-server-groups>`
+       and :ref:`LLNG pamAccessSSHRules
+       <llng-configuration-configure-in-lemonldap-ngini>`
+   * - Who can ``sudo``
+     - **SSO** (+local)
+     - Through :ref:`LLNG pamAccessSudoRules
+       <llng-configuration-configure-in-lemonldap-ngini>`, and optionally
+       a local ``sudoers`` policy
+   * - Make ``sudo`` require a fresh SSO token
+     - **OB**
+     - See :doc:`maximum security
+       </security-scenarios/max-security-scenario>` and
+       :ref:`the sudo timestamp cache
+       <pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache>`
+   * - Which SSH key types/sizes are allowed
+     - **OB**
+     - See ``ssh_key_policy_enabled`` and ``ssh_key_allowed_types`` in
+       :ref:`the SSH key policy <security-ssh-key-policy>`
+   * - Auth method (token / SSH key / password)
+     - **OB**
+     - Through :doc:`/security-scenarios/index`
+   * - Non-SSO automation logins (ansible, backup, CI)
+     - **OB**
+     - See :doc:`/service-accounts`
+   * - Auto-created home / shell / UID/GID range
+     - **OB**
+     - Provisioning keys in :doc:`/references/configuration`
+   * - Which Unix groups are synced from LLNG
+     - **Both**
+     - Through :ref:`LLNG pamAccessManagedGroups
+       <llng-configuration-group-synchronization>` and :ref:`local
+       whitelist <local-whitelist-defense-in-depth>`
+   * - Process containment (kill on logout, at/cron)
+     - **OB**
+     - See :doc:`/hardening`
+   * - Bastion-to-backend connection trust
+     - **Both**
+     - LLNG signs the hop cert; backend ``allowed_bastions``, see
+       :doc:`architecture </references/bastion-architecture>`
+   * - Revoke admin access
+     - **SSO**
+     - Remove from the group / close the account (see below)
+   * - Onboard an admin
+     - **SSO**
+     - Add to the right group; they self-serve their SSH certificate
 
 SSO side
 --------
@@ -59,44 +86,47 @@ Configured once in the portal, applied to the whole fleet. See
 :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>`
 for the setup.
 
-- **Server groups** — tag each enrolled server with a group; access
+- Server groups — tag each enrolled server with a group; access
   rules are written per group, not per host. See :ref:`Server groups
   <llng-configuration-server-groups>`.
 
-- **Access rules (``pam-access``)** — for a given server group, decide
+- Access rules (``pam-access``) — for a given server group, decide
   which LLNG user groups may open an SSH session and which may
   ``sudo``. This is the primary "who can do what, where" control.
 
-- **SSH CA (``ssh-ca``)** — LLNG signs users' SSH certificates,
+- SSH CA (``ssh-ca``) — LLNG signs users' SSH certificates,
   deciding their validity window and principals. Users self-serve a
   certificate from the portal's ``/ssh`` page; closing their account or
   letting the certificate expire removes access. See the SSH CA section
   of :doc:`llng-configuration </deployment/llng-configuration>`.
 
-- **Group synchronization** — LLNG advertises a user's
+- Group synchronization — LLNG advertises a user's
   ``managed_groups``; the PAM module maps them to Unix supplementary
   groups on login (creating groups when needed). Pair with the local
   whitelist below.
 
-- **Lifecycle**
+- Lifecycle
 
   - Onboarding: add the user to a group → rights apply on next login.
 
   - Role change: change their groups → old rights drop and new ones
     apply within minutes (bounded by the :doc:`offline cache
-    </offline-mode>` TTL).
+    </offline-mode/index>` TTL).
 
   - Offboarding: remove from the group or close the SSO account.
 
 Open Bastion side (per server)
 ------------------------------
 
-Set up by ``ob-bastion-setup`` / ``ob-backend-setup`` /
-``ob-standalone-setup`` — or by the `ob-builder
+Set up by :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`,
+:doc:`ob-backend-setup(8) </references/man/ob-bastion-setup>` or
+:doc:`ob-standalone-setup(8) </references/man/ob-bastion-setup>` — or by
+the :doc:`ob-builder(1) </references/man/ob-builder>` artefacts, whose
+`README
 <https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__
-artefacts:
+documents the questionnaire.
 
-- **Security scenario** — the strictness of authentication and whether
+- Security scenario — the strictness of authentication and whether
   ``sudo`` is token-gated. The default, :doc:`maximum security
   </security-scenarios/max-security-scenario>`, accepts only
   SSO-signed certificates, requires a fresh LLNG token for ``sudo``,
@@ -104,33 +134,33 @@ artefacts:
   </security-scenarios/other-security-scenarios>` trade that for
   compatibility.
 
-- **sudo policy** — token-gated via ``pam_openbastion`` in maximum
+- sudo policy — token-gated via ``pam_openbastion`` in maximum
   security, and/or a local rule: the setups create the
   ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A
   host can also keep its own classic ``sudoers`` in parallel.
 
-- **Service accounts** — key-only local accounts that bypass OIDC,
+- Service accounts — key-only local accounts that bypass OIDC,
   with a local sudo grant. Powerful and local: see the trade-offs
   (sudo without token, reachability requirements) in :doc:`Service
   Accounts </service-accounts>`.
 
-- **User provisioning** — shell, home, UID/GID ranges, skeleton
+- User provisioning — shell, home, UID/GID ranges, skeleton
   directory, plus the ``approved_shells`` / ``approved_home_prefixes``
   allow-lists that bound what a provisioned (or service) account may
   use. See :doc:`Configuration </references/configuration>`.
 
-- **Group-sync whitelist** — ``allowed_managed_groups`` limits which
+- Group-sync whitelist — ``allowed_managed_groups`` limits which
   LLNG-managed groups may be created/modified locally
   (defense-in-depth); groups outside it are never touched.
 
-- **Offline resilience** — ``auth_cache_enabled`` turns the
+- Offline resilience — ``auth_cache_enabled`` turns the
   authorization cache on or off, and ``auth_cache_force_online``
   forces every check online; how long a cached authorization survives
   an SSO outage is decided by the server. See :doc:`Offline mode
-  </offline-mode>` and :doc:`cache administration
-  </offline-cache-admin>`.
+  </offline-mode/index>` and :doc:`cache administration
+  </offline-mode/cache>`.
 
-- **Containment hardening** — opt-in ``--enable-hardening`` adds
+- Containment hardening — opt-in ``--enable-hardening`` adds
   logind ``KillUserProcesses``, an ``nproc`` cap and ``at``/``cron``
   allow-lists. See :doc:`Hardening </hardening>`.
 
@@ -139,9 +169,9 @@ Tuning the generated ``sshd`` / PAM configuration
 
 The setups own three things you may want to extend:
 
-- **``sshd`` drop-ins** under ``/etc/ssh/sshd_config.d/``
+- ``sshd`` drop-ins under ``/etc/ssh/sshd_config.d/``
   (e.g. ``00-open-bastion-*.conf``, and ``60-max-security.conf`` under
-  maximum security). You can layer **additional** drop-ins for site
+  maximum security). You can layer additional drop-ins for site
   policy — for example an ``AuthorizedKeysCommand`` to serve
   :doc:`service-account keys </service-accounts>` when certificates
   are the only accepted key, or ``AllowTcpForwarding no`` to close the
@@ -149,17 +179,14 @@ The setups own three things you may want to extend:
   single-valued keywords (the ``00-`` prefix makes the Open Bastion
   settings win over distro drop-ins).
 
-- **``/etc/pam.d/sshd``** (and ``/etc/pam.d/sudo``, ``/etc/pam.d/sudo-i``)
+- ``/etc/pam.d/sshd`` (and ``/etc/pam.d/sudo``, ``/etc/pam.d/sudo-i``)
   — the PAM stacks that invoke ``pam_openbastion``. You can add stock
-  PAM modules around them. Note that ``pam_systemd`` and
-  ``pam_mkhomedir`` are **not** optional extras you may add: the setups
-  already write them, and both are required (:ref:`full stack
-  <pam-modes-pam-configuration-for-sshd>`). Dropping ``pam_systemd``
-  makes sessions invisible to ``who`` / ``w`` / ``loginctl`` and to
-  the heartbeat's connected-users report; dropping the ``session
-  pam_openbastion`` line breaks ``sudo`` under maximum security.
+  PAM modules around them. ``pam_systemd`` and ``pam_mkhomedir`` are not
+  optional extras you may add: the setups already write them, and both
+  are required (:ref:`full stack
+  <pam-modes-pam-configuration-for-sshd>`).
 
-- **``/etc/pam.d/systemd-user``** — unlike the files above,
+- ``/etc/pam.d/systemd-user`` — unlike the files above,
   ``ob-bastion-setup`` does not regenerate this one (its distro
   ``session`` stack varies too much); it only inserts a small
   ``account`` bridge ahead of the distro stack so NSS-only SSO users
@@ -185,11 +212,11 @@ Dual management
 
 The two layers are complementary, not exclusive:
 
-- **SSO-only (recommended)** — no local sudoers, no service accounts;
+- SSO-only (recommended) — no local sudoers, no service accounts;
   every decision comes from LLNG groups. Simplest to reason about and
   audit.
 
-- **SSO + local** — keep specific local exceptions alongside the SSO:
+- SSO + local — keep specific local exceptions alongside the SSO:
   a break-glass :doc:`service account </service-accounts>`, a
   host-local ``sudoers`` rule, or a stricter security scenario on a
   sensitive host. Local grants are not visible to the SSO, so

@@ -1,9 +1,11 @@
 Other security scenarios
 ========================
 
-The four scenarios other than :doc:`the default </security-scenarios/max-security-scenario>`.
-None of them is covered by the :doc:`security study </security/index>`, and
-:doc:`/security-scenarios/index` compares all five and tells how one is selected.
+The four scenarios other than :doc:`the default
+</security-scenarios/max-security-scenario>`. None of them is covered by
+the :doc:`security study </security/index>`, and
+:doc:`/security-scenarios/index` compares all five and tells how one is
+selected.
 
 .. _pam-modes-mode-a-llng-token-only-strictest:
 
@@ -92,7 +94,7 @@ scenario <pam-modes-pam-configuration-for-sshd>`.
 Unlike maximum security, this scenario leaves ``AuthorizedKeysFile``
 alone, so ``~/.ssh/authorized_keys`` still authenticates its owner — an
 opt-in fallback while the portal is unreachable, with the trade-offs
-described in :doc:`/offline-mode`.
+described in :doc:`/offline-mode/index`.
 
 ``sudo`` asks for no password here: the SSH key is the only control, and
 the stack the package writes permits elevation.

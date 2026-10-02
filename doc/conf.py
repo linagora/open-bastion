@@ -94,6 +94,8 @@ man_pages = [
      "Configure a server as an Open Bastion node with LemonLDAP::NG", "", 8),
     ("references/man/ob-builder", "ob-builder",
      "Generate Open Bastion deployment artefacts", "", 1),
+    ("references/man/ob-cache-admin", "ob-cache-admin",
+     "Administer the offline credential cache", "", 8),
     ("references/man/ob-cert-daemon", "ob-cert-daemon",
      "Privileged bastion hop-certificate minting service", "", 8),
     ("references/man/ob-cert-request", "ob-cert-request",
@@ -101,6 +103,8 @@ man_pages = [
     ("references/man/ob-client-jwt", "ob-client-jwt",
      "Print a client_secret_jwt assertion without putting the secret on a "
      "command line", "", 8),
+    ("references/man/ob-desktop-setup", "ob-desktop-setup",
+     "Configure a workstation to log in through LemonLDAP::NG", "", 8),
     ("references/man/ob-enroll", "ob-enroll",
      "Enroll a server with LemonLDAP::NG for PAM authentication", "", 8),
     ("references/man/ob-fp-daemon", "ob-fp-daemon",
@@ -140,7 +144,27 @@ man_pages = [
      "Configuration file of the Open Bastion PAM module", "", 5),
 ]
 
+def _drop_uri_less_reference_targets(app, doctree, docname):
+    """Keep the man pages free of empty link targets.
+
+    A reference whose target is another document resolves to no URI at all
+    in the man builder, and the man writer then prints its target as an
+    empty ``<>`` after the link text — "ob-bastion-setup(8) <>". Removing
+    the empty ``refuri`` leaves the link text alone. External targets, such
+    as the ``:manpage:`` URLs, are kept and printed as before.
+    """
+    if app.builder.format != "man":
+        return
+
+    from docutils import nodes
+    for node in doctree.findall(nodes.reference):
+        if not node.get("refuri"):
+            node.attributes.pop("refuri", None)
+
+
 def setup(app):
+    app.connect("doctree-resolved", _drop_uri_less_reference_targets)
+
     if _mermaid:
         return
 

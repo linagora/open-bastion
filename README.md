@@ -91,7 +91,7 @@ See [Bastion Architecture](doc/references/bastion-architecture.rst) and the
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
-- **[Offline mode](doc/offline-mode.rst)**:
+- **[Offline mode](doc/offline-mode/index.rst)**:
   - Encrypted authorization cache _(AES-256-GCM)_
   - Continue SSH key authentication when LLNG server is unavailable
   - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
@@ -194,7 +194,7 @@ The full, theme-organized index is in **[doc/index.rst](doc/index.rst)**. Highli
 - **Connections & architecture** — [Bastion architecture](doc/references/bastion-architecture.rst) · [Security scenarios](doc/security-scenarios/index.rst) · [LLNG configuration](doc/deployment/llng-configuration.rst)
 - **Access & permissions** — [Access & Permissions](doc/permissions.rst) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.rst)
 - **Recording & audit** — [Session recording](doc/ssh-session-recording.rst) · [Audit trace](doc/audit.rst)
-- **Offline & resilience** — [Offline mode](doc/offline-mode.rst) · [Cache administration](doc/offline-cache-admin.rst)
+- **Offline & resilience** — [Offline mode](doc/offline-mode/index.rst) · [Cache administration](doc/offline-mode/cache.rst)
 - **Security & hardening** — [Security features](doc/security.rst) · [Hardening](doc/hardening.rst) · [CrowdSec](doc/crowdsec.rst)
 - **Reference** — [Canonical names & paths](doc/references/reference-paths.rst) · [Configuration](doc/references/configuration.rst) · [Troubleshooting](doc/troubleshooting.rst) · [Desktop SSO](doc/desktop-sso.rst) _(experimental/alpha)_ · [Competitors](doc/competitors.rst)
 - **Security analysis (EBIOS RM)** — [full risk study](doc/security/index.rst) _(French)_ · [conditions of use before deploying](doc/security/08-dossier-homologation.rst#2-conditions-demploi)
@@ -260,7 +260,7 @@ sudo ob-desktop-setup -p https://auth.example.com --offline
 ### Documentation
 
 - [Desktop SSO Guide](doc/desktop-sso.rst) - Complete setup and configuration
-- [Offline Mode](doc/offline-mode.rst) - Cached credential authentication
+- [Offline Mode](doc/offline-mode/index.rst) - Cached credential authentication
 - [Security reference](doc/references/security-reference.rst#offline-credential-cache-security) - Security details
 
 ### Cache Management

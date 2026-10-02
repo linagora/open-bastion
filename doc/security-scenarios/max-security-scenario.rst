@@ -1,11 +1,13 @@
 Maximum security
 ================
 
-**Maximum security** is what Open Bastion deploys by default: SSH access
+Maximum security is what Open Bastion deploys by default: SSH access
 uses certificates signed by the LLNG SSH CA, and ``sudo`` requires a
 temporary LLNG token. It is the scenario the :doc:`security study
-</security/index>` covers, and the default answer of the ``ob-builder``
-questionnaire. :doc:`/security-scenarios/index` compares it with the four other scenarios.
+</security/index>` covers, and the default answer of the
+:doc:`ob-builder(1) </references/man/ob-builder>` questionnaire.
+:doc:`/security-scenarios/index` compares it with the four other
+scenarios.
 
 In short
 --------
@@ -19,8 +21,6 @@ In short
   30 minutes.
 * Each bastion-to-backend hop uses a short-lived certificate vouched by
   the bastion, so a backend accepts only the bastion's connections.
-* It is the default answer to ``ob-builder``'s "Security scenario"
-  question, and ``--max-security`` on a single host.
 
 Prerequisites
 -------------
@@ -28,15 +28,18 @@ Prerequisites
 * The ``ssh-ca`` and ``pam-access`` plugins enabled on the LLNG portal.
 * A key revocation list configured in LLNG (``/ssh/admin``).
 * One certificate per user, self-served from the portal's ``/ssh`` page —
-  or with ``ob-ssh-cert`` on hosts that have the packages.
+  or with :doc:`ob-ssh-cert(8) </references/man/ob-ssh-cert>` on hosts
+  that have the packages.
 
 .. _what-the-setup-scripts-write:
 
 What the setup scripts write
 ----------------------------
 
-``ob-bastion-setup --max-security`` — and ``ob-backend-setup`` on a
-backend — configure everything. Besides enrolling the host with LLNG:
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`
+``--max-security`` — and :doc:`ob-backend-setup(8)
+</references/man/ob-bastion-setup>` on a backend — configure everything.
+Besides enrolling the host with LLNG:
 
 * ``/etc/ssh/sshd_config.d/60-max-security.conf`` — the ``sshd`` drop-in
   that restricts SSH to certificates, requires the revocation list and
@@ -47,7 +50,8 @@ backend — configure everything. Besides enrolling the host with LLNG:
 * ``/etc/pam.d/sudo`` — LLNG token only.
 * ``/etc/sudoers.d/open-bastion`` — the ``open-bastion-sudo`` group and
   its rights.
-* ``/etc/ssh/revoked_keys``, refreshed by ``ob-krl-refresh.timer``.
+* ``/etc/ssh/revoked_keys``, refreshed by the
+  :doc:`ob-krl-refresh(8) </references/man/ob-krl-refresh>` timer.
 * ``/usr/local/sbin/ob-ssh-principals`` — the
   ``AuthorizedPrincipalsCommand`` helper behind the :ref:`SSH fingerprint
   binding <pam-modes-ssh-fingerprint-binding-on-pamauthorize-and-pamverify>`.

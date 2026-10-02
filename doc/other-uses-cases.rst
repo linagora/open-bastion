@@ -21,12 +21,13 @@ Deploying one
 
 Everything in :doc:`/deployment/index` applies; only the role changes:
 
-- with ``ob-builder``, answer ``standalone`` to the target-role question,
-  or set ``target_role: standalone`` in the ``--config`` file, and run the
-  installer or the Ansible role it generates on the host;
+- with :doc:`ob-builder(1) </references/man/ob-builder>`, answer
+  ``standalone`` to the target-role question, or set ``target_role:
+  standalone`` in the ``--config`` file, and run the installer or the
+  Ansible role it generates on the host;
 
-- by hand, run ``ob-standalone-setup`` — a symlink to
-  ``ob-bastion-setup``.
+- by hand, run :doc:`ob-standalone-setup(8)
+  </references/man/ob-bastion-setup>` — a symlink to ``ob-bastion-setup``.
 
 Users then log in with their SSO certificate exactly as they would on a
 bastion; they simply have nowhere to hop afterwards.
@@ -34,5 +35,5 @@ bastion; they simply have nowhere to hop afterwards.
 .. warning::
 
    Setup rewrites ``sshd``, PAM and, under maximum security, the way
-   ``sshd`` accepts keys. Run it from through console access, never
-   from the one you are about to reconfigure.
+   ``sshd`` accepts keys. Run it from a console session, never from the
+   one you are about to reconfigure.
