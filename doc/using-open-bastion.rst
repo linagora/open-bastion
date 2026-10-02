@@ -32,20 +32,6 @@ your private key: the file ``id_ed25519-cert.pub`` next to
 whole of the configuration it needs. Ask for a validity that covers
 the work ahead; the portal caps it.
 
-.. note::
-
-   Where ``ob-ssh-cert`` is installed — it ships with the servers, not
-   with every workstation — the same signature can be obtained from a
-   terminal:
-
-   .. code:: bash
-
-      ob-ssh-cert --portal https://sso.example.com --validity 480
-
-   It prints a code to approve on the portal and, by default, signs
-   the key held in your SSH agent and puts the certificate there, so
-   there is nothing to save yourself.
-
 Connecting to the bastion
 -------------------------
 

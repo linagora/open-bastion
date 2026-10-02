@@ -133,7 +133,7 @@ man_pages = [
     ("references/man/ob-ssh", "ob-ssh",
      "Bastion-to-backend SSH connector with LLNG certificate vouching", "", 1),
     ("references/man/ob-ssh-cert", "ob-ssh-cert",
-     "Obtain SSH certificates from LemonLDAP::NG", "", 1),
+     "Obtain an SSH certificate from LemonLDAP::NG without a browser", "", 8),
     ("references/man/ob-uninstall", "ob-uninstall",
      "Take Open Bastion off this host, ready for package removal", "", 8),
 ]

@@ -27,8 +27,8 @@ Prerequisites
 
 * The ``ssh-ca`` and ``pam-access`` plugins enabled on the LLNG portal.
 * A key revocation list configured in LLNG (``/ssh/admin``).
-* ``ob-ssh-cert`` deployed on user workstations, and one certificate per
-  user.
+* One certificate per user, self-served from the portal's ``/ssh`` page —
+  or with ``ob-ssh-cert`` on hosts that have the packages.
 
 .. _what-the-setup-scripts-write:
 

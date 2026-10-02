@@ -74,12 +74,19 @@ Flux complet
 1. Obtention du certificat (1x/an)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code:: bash
+L'utilisateur ouvre la page ``/ssh`` du portail LLNG, y colle sa clé
+publique et enregistre le certificat signé à côté de sa clé privée :
 
-   # Sur le poste client : obtenir un certificat signé par la CA LLNG
-   ob-ssh-cert --portal https://auth.example.com
+.. code:: text
+
+   # Sur le poste client : https://auth.example.com/ssh
    # → Certificat stocké dans ~/.ssh/id_ed25519-cert.pub (validité 1 an)
    # → La clé privée ~/.ssh/id_ed25519 ne change pas
+
+Sur un hôte où le paquet est installé et où aucun navigateur n'est
+disponible (poste d'administration, conteneur), ``ob-ssh-cert --portal
+https://auth.example.com`` obtient le même certificat en ligne de
+commande ; il n'est utilisé par aucun composant d'Open Bastion.
 
 .. _security-02-ssh-connection-2-connexion-ssh-via-bastion:
 
@@ -94,7 +101,7 @@ Flux complet
        participant Backend as Backend<br/>(TrustedCA + KRL + cert éphémère)
        participant LLNG as Portail LLNG
 
-       Note over Client: 1x/an : ob-ssh-cert<br/>→ certificat signé CA
+       Note over Client: 1x/an : page /ssh du portail<br/>→ certificat signé CA
 
        Client->>Bastion: 1. ssh dwho@bastion<br/>(présente certificat)
        Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
@@ -257,7 +264,7 @@ Une durée **longue (1 an)** est acceptable car :
 2. **``/pam/authorize`` est vérifié à chaque connexion** : un certificat valide ne suffit pas
 3. **La KRL via ``/ssh/admin``** permet la révocation immédiate du certificat si nécessaire
 4. **``AuthorizedKeysFile none``** : les utilisateurs ne peuvent pas contourner en ajoutant leur clé dans ``~/.ssh/authorized_keys``
-5. **UX optimale** : l'utilisateur obtient son certificat une fois par an via ``ob-ssh-cert``
+5. **UX optimale** : l'utilisateur obtient son certificat une fois par an depuis la page ``/ssh`` du portail
 
 Workflow utilisateur
 ^^^^^^^^^^^^^^^^^^^^
@@ -268,7 +275,7 @@ Workflow utilisateur
    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
 
    # Une fois par an : renouveler le certificat via LLNG
-   ob-ssh-cert --portal https://auth.example.com
+   # → https://auth.example.com/ssh : y coller ~/.ssh/id_ed25519.pub
    # → ~/.ssh/id_ed25519-cert.pub mis à jour
    # → ssh-agent n'a pas besoin d'être rechargé
 
@@ -1650,8 +1657,8 @@ CA SSH et certificats
 - ☐ ``TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub`` configuré sur bastion et backends
 - ☐ ``AuthorizedKeysFile none`` sur bastion et backends
 - ☐ ``ExposeAuthInfo yes`` dans sshd_config
-- ☐ Certificats émis pour tous les utilisateurs (validité 1 an)
-- ☐ ``ob-ssh-cert`` déployé sur les postes clients
+- ☐ Certificats émis pour tous les utilisateurs (validité 1 an), depuis la page ``/ssh`` du portail
+- ☐ ``ob-ssh-cert`` disponible sur les hôtes qui ont le paquet, pour les postes sans navigateur
 
 .. _security-02-ssh-connection-krl-key-revocation-list-1:
 
