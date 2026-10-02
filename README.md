@@ -65,7 +65,8 @@ artefacts), which is also what assigns its server group. See the
 for the enrollment step. Once enrolled:
 
 1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
-   password)_ or an **SSO-signed SSH certificate** _(self-served via `ob-ssh-cert`)_.
+   password)_ or an **SSO-signed SSH certificate** _(self-served from the
+   portal's `/ssh` page)_.
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
    server group, and `sudo` is gated the same way; an encrypted local cache keeps
    this working during an SSO outage.

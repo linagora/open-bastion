@@ -18,7 +18,7 @@ Key property (Xavier): **the user needs no key on the bastion and no agent forwa
 Flow
 ~~~~
 
-1. User SSHes to the bastion with their SSO-issued cert (``ssh-ca`` / ``ob-ssh-cert``). ``pam_openbastion`` on the bastion authorizes them and stamps ``_pamSeen`` (already done).
+1. User SSHes to the bastion with their SSO-issued cert (signed by the LLNG ``ssh-ca`` plugin, self-served from the portal). ``pam_openbastion`` on the bastion authorizes them and stamps ``_pamSeen`` (already done).
 2. ``ob-ssh <backend>`` on the bastion: a. generates an **ephemeral** keypair in tmpfs (private key never leaves the bastion); b. ``POST /pam/bastion-cert`` to LLNG, **Bearer = the bastion's device-grant server token**, body ``{ user, target_host, target_group, public_key, voucher }`` (the ``voucher`` proves this user really connected to this bastion — see below); c. receives a signed certificate; writes ephemeral key + cert to tmpfs; d. ``ssh -i <ephkey> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>`` (or ``-W`` in ProxyCommand mode); wipes the temp files afterwards.
 3. Backend sshd (``TrustedUserCAKeys`` = LLNG CA, already configured) validates the cert natively: CA signature, validity window, ``principal == login user``, and the ``source-address`` critical option (if set, sshd itself refuses the cert unless the connection comes from the vouching bastion). ``pam_openbastion`` (``acct_mgmt``) reads the cert from ``SSH_USER_AUTH`` — it **already parses SSH certs** — extracts ``bastion_id`` from the cert key-id/extension and enforces ``allowed_bastions``. The existing ``/pam/authorize`` user-authorization call is unchanged.
 

@@ -11,17 +11,25 @@ Synopsis
 Description
 -----------
 
-``ob-ssh-cert`` allows users to obtain signed SSH certificates from
-LemonLDAP::NG, enabling passwordless SSH authentication to servers that
-trust the LLNG CA.
+``ob-ssh-cert`` asks LemonLDAP::NG to sign an SSH public key, producing a
+certificate accepted by servers that trust the LLNG CA. It runs on a host
+that has the Open Bastion packages installed — a bastion, a build host, an
+administrator's workstation. Users without them get the same signature
+from the portal's ``/ssh`` page in a browser.
 
-The script uses the Device Authorization Grant (RFC 8628) to
-authenticate the user. A verification code is displayed that must be
+No Open Bastion component calls it: the certificate a bastion mints for a
+backend hop comes from :doc:`ob-cert-daemon(8) <ob-cert-daemon>`. Reasons
+to run it by hand are to test certificate authentication from such a host,
+to sign a key where no browser is available (the device code still needs
+one to be approved), or to pass ``-t`` an access token when even that is
+out of reach.
+
+The script uses the Device Authorization Grant (RFC 8628) to authenticate
+the person running it. A verification code is displayed that must be
 entered on the LemonLDAP::NG portal.
 
-Once authenticated, the user's public key is signed by the
-LemonLDAP::NG SSH CA, creating a certificate that can be used for SSH
-authentication.
+Once authenticated, the public key is signed by the LemonLDAP::NG SSH CA,
+creating a certificate that can be used for SSH authentication.
 
 Options
 -------
@@ -120,7 +128,8 @@ See also
 
 :manpage:`ssh(1)`,
 :manpage:`ssh-add(1)`,
-:doc:`ob-bastion-setup(8) <ob-bastion-setup>`
+:doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
+:doc:`ob-cert-daemon(8) <ob-cert-daemon>`
 
 LemonLDAP::NG documentation: https://lemonldap-ng.org/
 

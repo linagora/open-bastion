@@ -69,9 +69,9 @@ for the setup.
 
 - **SSH CA (``ssh-ca``)** — LLNG signs users' SSH certificates,
   deciding their validity window and principals. Users self-serve a
-  certificate with ``ob-ssh-cert``; closing their account or letting
-  the certificate expire removes access. See the SSH CA section of
-  :doc:`llng-configuration </deployment/llng-configuration>`.
+  certificate from the portal's ``/ssh`` page; closing their account or
+  letting the certificate expire removes access. See the SSH CA section
+  of :doc:`llng-configuration </deployment/llng-configuration>`.
 
 - **Group synchronization** — LLNG advertises a user's
   ``managed_groups``; the PAM module maps them to Unix supplementary

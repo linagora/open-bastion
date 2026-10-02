@@ -20,9 +20,6 @@ to reach a backend. Each has a man page of the same name, installed by the
      - Copy files to, from or between backends, over the same vouched hop.
    * - :doc:`ob-sftp(1) <ob-sftp>`
      - The same for interactive SFTP transfers.
-   * - :doc:`ob-ssh-cert(1) <ob-ssh-cert>`
-     - Ask the portal to sign your SSH key, and install the certificate in
-       your SSH agent or next to the key.
 
 .. toctree::
    :hidden:
@@ -30,4 +27,3 @@ to reach a backend. Each has a man page of the same name, installed by the
    ob-ssh
    ob-scp
    ob-sftp
-   ob-ssh-cert

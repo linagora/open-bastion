@@ -449,13 +449,16 @@ with ``--max-security``) and ``--no-create-user``.
 SSH certificates
 ----------------
 
-Users can obtain SSH certificates from LLNG using ``ob-ssh-cert``:
+Users obtain their SSH certificates from the portal (``/ssh``), which signs
+the public key they paste. ``ob-ssh-cert``, shipped with the packages, does
+the same from the command line on a host that has them:
 
 .. code:: bash
 
    ob-ssh-cert --portal https://auth.example.com --validity 60
 
-This uses the Device Authorization Grant to authenticate and sign the user's public key.
+It uses the Device Authorization Grant to authenticate the person and sign
+their public key.
 
 Deployment checklist
 --------------------

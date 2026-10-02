@@ -1,10 +1,18 @@
 Internal commands
 =================
 
-The commands Open Bastion starts itself: ``sshd`` runs some as a login shell,
-a forced command or a principals helper, ``systemd`` runs the daemons from a
-socket. They are not meant to be run by hand; their man pages are here to
-read a log line, audit what a unit does or check an option.
+The commands Open Bastion uses behind the scenes: ``sshd`` runs some as a
+login shell, a forced command or a principals helper, ``systemd`` runs the
+daemons from a socket. They are not meant to be run by hand; their man pages
+are here to read a log line, audit what a unit does or check an option.
+``ob-ssh-cert`` is the exception: it belongs to no machinery. It is the
+terminal equivalent of the portal's ``/ssh`` page, signing a key with the
+identity of whoever runs it, and no Open Bastion component calls it — the
+certificate of an :doc:`ob-ssh(1) <ob-ssh>` hop comes from
+:doc:`ob-cert-daemon(8) <ob-cert-daemon>`. Run it by hand to test
+certificate authentication from a host that has the packages, or to sign a
+key where there is no browser; the :doc:`end user guide
+</using-open-bastion>` sends users to the portal instead.
 
 .. list-table::
    :header-rows: 1
@@ -39,6 +47,11 @@ read a log line, audit what a unit does or check an option.
    * - :doc:`ob-sign-request(8) <ob-sign-request>`
      - Computes the signing headers of a ``/pam/`` call, with the secret on
        stdin.
+   * - :doc:`ob-ssh-cert(8) <ob-ssh-cert>`
+     - Asks the portal to sign an SSH key over the Device Authorization
+       Grant, and installs the certificate in the SSH agent or next to the
+       key. The terminal equivalent of the portal's ``/ssh`` page; not used
+       by any component.
 
 .. toctree::
    :hidden:
@@ -53,3 +66,4 @@ read a log line, audit what a unit does or check an option.
    ob-fp-submit
    ob-client-jwt
    ob-sign-request
+   ob-ssh-cert

@@ -613,11 +613,11 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-client-jwt.8
         ${MAN_OUT_DIR}/ob-post-upgrade.8
         ${MAN_OUT_DIR}/ob-uninstall.8
+        ${MAN_OUT_DIR}/ob-ssh-cert.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
 
     install(FILES
-        ${MAN_OUT_DIR}/ob-ssh-cert.1
         ${MAN_OUT_DIR}/ob-ssh.1
         ${MAN_OUT_DIR}/ob-scp.1
         ${MAN_OUT_DIR}/ob-sftp.1
