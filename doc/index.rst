@@ -76,7 +76,7 @@ formal analysis of the maximum security target.
 
    deployment/index
    Security scenarios <security-scenarios/index>
-   Permissions <permissions>
+   permissions
    service-accounts
    offline-mode
    offline-cache-admin
