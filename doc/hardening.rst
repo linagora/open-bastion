@@ -1,125 +1,112 @@
 Session containment hardening
 =============================
 
-   **Status: shipped in v0.2.0.** Both halves of the hardening series are implemented and opt-in: session containment via ``ob-bastion-setup --enable-hardening`` (this document) and the primary audit trace via ``ob-bastion-setup --enable-audit-trace``, documented in :doc:`Primary audit trace </audit>`.
+When :doc:`ssh-session-recording` is enabled, an authenticated user
+can still step out of the recorded session when he detach a process
+from the pty (``setsid nohup … &``), or queue work with ``at`` or
+``cron``, or fork-bomb the host.
 
-This document describes the host-level configuration deployed by ``ob-bastion-setup --enable-hardening`` to keep an authenticated user from escaping the recorded SSH session. Everything here is **pure system configuration** — no setuid binary is added.
+With ``ob-bastion-setup --enable-hardening``, one closes those three
+channels with plain system configuration: no setuid binary, no patch
+to PAM or ``sshd``.
 
-   **Opt-in only.** System-wide changes (logind ``KillUserProcesses``, masking ``atd``, ``at``/``cron`` allow-lists, ``nproc`` limits) are too invasive to apply silently on every ``ob-bastion-setup`` run. Following Debian packaging convention, a setup script must not modify global system behaviour without an explicit opt-in. On a dedicated bastion host where this script will be the primary configuration, hardening is recommended. On a multi-purpose host or for testing, leave it off and apply manually if needed.
+It is opt-in, because it changes global system behaviour (``logind``,
+``at``, ``cron``, process limits), which a setup script must not do
+silently.  Recommended on a dedicated bastion; leave it off on a
+multi-purpose host.
 
-Threat model
-------------
+What it deploys
+---------------
 
-``ob-session-recorder`` (running as the user under ``ForceCommand``) captures the pty via ``script(1)``, streaming to the root ``ob-record-sink`` over a Unix socket. Recording files are root-owned and the user has no access to alter or delete them. An authenticated user can still try to:
+.. list-table::
+   :header-rows: 1
+   :widths: 34 20 46
 
-1. **Detach a process from the pty** with ``setsid nohup … &``. The child re-parents to PID 1 and survives logout, running outside the recorded session.
-2. **Schedule deferred work** with ``at(1)`` or ``crontab(1)``. The commands run later, again outside the recorded session.
-3. **Fork bomb** the host to deny service to other users.
+   * - File or setting
+     - Written under
+     - What it closes
+   * - ``KillUserProcesses=yes``
+     - ``/etc/systemd/logind.conf.d/open-bastion.conf``
+     - ``logind`` reaps every process of a user when their last
+       session ends, children re-parented to init included: a
+       backgrounded shell does not survive ``exit``.
+   * - ``nproc`` at 256
+     - ``/etc/security/limits.d/open-bastion.conf``
+     - A fork bomb saturates the host's process table for other users.
+       Root is unlimited.
+   * - An empty allow-list
+     - ``/etc/at.allow``
+     - Non-root users cannot queue a command with ``at(1)``; it would run
+       later, outside the session.
+   * - ``root`` and nothing else
+     - ``/etc/cron.allow``
+     - The same for ``crontab(1)``. Add the admins who need it.
+   * - ``systemctl mask atd``
+     - —
+     - Takes the ``at`` daemon out of the picture, in case a distribution
+       shipped it enabled.
 
-``--enable-hardening`` closes channels (1)–(3) by configuration. ``--enable-audit-trace`` additionally logs every ``execve()`` system-wide via ``auditd``, so any attempt to bypass the recorder leaves a primary trace independent of the wrapper — see :doc:`/audit`.
+The templates are installed by the package under
+``/usr/share/open-bastion/hardening/``; the setup script reads them
+there and writes the four files above, then reloads ``logind``. The
+reload is non-disruptive: ``KillUserProcesses`` is consulted when a
+session ends, so open sessions are not touched.
 
-What ``ob-bastion-setup --enable-hardening`` deploys
-----------------------------------------------------
+The service ``cron.service`` is not masked. It's not required by Open
+Bastion but the host may have jobs of its own, and the allow-list is
+enough to keep users out.
 
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
-| Destination                                      | Source template                                           | Purpose                                                                                              |
-+==================================================+===========================================================+======================================================================================================+
-| ``/etc/systemd/logind.conf.d/open-bastion.conf`` | ``/usr/share/open-bastion/hardening/logind.conf.d/…``     | ``KillUserProcesses=yes`` — logind reaps every process owned by a user when their last session ends. |
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
-| ``/etc/security/limits.d/open-bastion.conf``     | ``/usr/share/open-bastion/hardening/security/limits.d/…`` | Caps ``nproc`` per user at 256, root unlimited. Fork-bomb guardrail.                                 |
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
-| ``/etc/at.allow``                                | ``/usr/share/open-bastion/hardening/at.allow``            | Whitelist: empty (root only by design). Non-root users cannot use ``at(1)``.                         |
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
-| ``/etc/cron.allow``                              | ``/usr/share/open-bastion/hardening/cron.allow``          | Whitelist: ``root`` only. Add admins as needed.                                                      |
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
-| ``systemctl mask atd``                           | —                                                         | Disables the at daemon entirely if it is installed.                                                  |
-+--------------------------------------------------+-----------------------------------------------------------+------------------------------------------------------------------------------------------------------+
+Linger defeats the reaping
+--------------------------
 
-The templates are installed by the package under ``/usr/share/open-bastion/hardening/``; the setup script reads them from there (``HARDENING_TEMPLATE_DIR``). In the source tree they live under ``config/hardening/``.
-
-``systemd-logind`` is reloaded at the end of the step via ``systemctl reload systemd-logind`` (SIGHUP). This is **non-disruptive**: logind re-reads ``/etc/systemd/logind.conf.d/*.conf`` without restarting and without killing active sessions. ``KillUserProcesses=yes`` is consulted when each session ends, so existing sessions stay open and the new behaviour applies to their cleanup.
-
-``cron.service`` is **not** masked. No Open Bastion job runs from cron any more — the maximum security key revocation list refresh and the audit-trace rotation are systemd timers (``ob-krl-refresh.timer``, ``ob-audit-rotate.timer``) since 0.7.0 — but other jobs on the host may still need it (the administrator's own, or a distribution's). The allowlist is sufficient: only root can submit jobs via ``crontab(1)``, and ``/etc/cron.d/`` already requires root to write.
-
-Why ``KillUserProcesses=yes``
------------------------------
-
-Without it, ``setsid nohup <reverse-shell> &`` survives ``exit``: the child detaches from the pty, re-parents to PID 1, and the wrapper never sees its output again. The session recording stops at the wrapper exit, but the process keeps running with the user's credentials. With ``KillUserProcesses=yes``, logind sends ``SIGTERM`` followed by ``SIGKILL`` to the user's slice when the last session ends, including children re-parented to init.
-
-If a legitimate user really needs to keep a long-running job, that should go through a service account (see :doc:`/service-accounts`) and a systemd unit, not a backgrounded shell on the bastion.
-
-``Linger=no`` is the implicit default per user. A user with ``Linger=yes`` (set via ``loginctl enable-linger``) can keep processes running after logout *and* schedule deferred work via ``systemd-run --user --on-active=…``, which would defeat both ``KillUserProcesses=yes`` and the ``at``/``cron`` allow-lists.
-
-``ob-bastion-setup`` therefore **refuses to apply the hardening** if any non-root user has linger enabled, and lists those users. Disable linger for each of them and re-run the setup:
+A user with ``Linger=yes`` (``loginctl enable-linger``) keeps processes
+after logout and can queue work with ``systemd-run --user --on-active=…``,
+which escapes both ``KillUserProcesses`` and the allow-lists. The setup
+therefore refuses to apply the hardening while any non-root user has
+linger enabled, and lists them:
 
 .. code:: bash
 
-   loginctl disable-linger <user>
-   ob-bastion-setup --portal https://… --enable-hardening   # re-run
+   loginctl disable-linger <user>          # for each user it listed
+   ob-bastion-setup --portal https://… --enable-hardening
 
-You can confirm the state at any time with:
+Service accounts and the nproc cap
+----------------------------------
 
-.. code:: bash
-
-   loginctl list-users
-   loginctl show-user <user> | grep -E 'Linger|State'
-
-Why allow-listing ``at`` and ``cron``
--------------------------------------
-
-``at`` and ``cron`` run a command **at a later time**, outside the SSH session and outside the wrapper. Even with ``KillUserProcesses=yes`` on the SSH session, ``atd``/``crond`` would still execute the queued command from a fresh PID 1 child. The allow-lists prevent the user from queueing in the first place.
-
-We mask ``atd`` rather than only relying on ``at.allow`` because some distros ship ``atd`` enabled by default, and a mis-edited ``at.allow`` would silently re-open the channel.
-
-   **Note on ``cron.allow``:** an existing ``/etc/cron.allow`` is never overwritten. Up to 0.6 the setup warned when it did not list ``root``, because the maximum security KRL refresh ran from ``/etc/cron.d/open-bastion-krl``; that refresh is now ``ob-krl-refresh.timer``, which cron's allow-list does not concern, so the warning is gone. List ``root`` only if you have root jobs of your own that need it.
-
-Why a ``nproc`` cap
--------------------
-
-Without it, a fork bomb (``:(){ :|:& };:``) inside the recorded session can saturate the host's PID space and deny service to other admins trying to clean it up. 256 is comfortable for interactive use and common build/test workloads; raise it in ``/etc/security/limits.d/`` with a more specific drop-in (e.g. ``99-build-agents.conf``) if a service account legitimately needs more.
-
-Service-account exemption
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Service accounts (Ansible, GitLab Runner, deploy bots — see :doc:` </service-accounts>`) often run parallel build/CI workloads (``make -j``, ``pytest -n auto``, container builds) that legitimately exceed 256 processes. The deployed ``/etc/security/limits.d/open-bastion.conf`` therefore exempts members of the ``ob-service`` group:
+Build and CI accounts routinely exceed 256 processes (``make -j``,
+``pytest -n auto``, container builds). The limits file exempts members of
+the ``ob-service`` group:
 
 ::
 
    @ob-service hard nproc unlimited
 
-The package does **not** create ``ob-service`` — it would be a footgun if it did, since an operator might unknowingly drop accounts in it later. To opt in:
+The package does not create that group on purpose — an operator might
+unknowingly add accounts to it later. To opt in:
 
 .. code:: bash
 
    groupadd --system ob-service
    gpasswd -a ansible ob-service       # repeat for each service account
 
-If the group does not exist, ``pam_limits`` silently ignores the line and the cap stays at 256 for everyone except root. To exempt a different group instead, add a more specific drop-in (sorted *after* ``open-bastion.conf`` alphabetically, e.g. ``99-ci.conf``).
+If the group does not exist, ``pam_limits`` ignores the line and everyone
+but root stays capped.
 
-Verifying after deployment
---------------------------
+Verifying
+---------
 
 .. code:: bash
 
-   # logind picked up KillUserProcesses
+   # logind picked the setting up (expect: b true)
    busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
        org.freedesktop.login1.Manager KillUserProcesses
-   # Expected: b true
 
-   # limits drop-in is parsed
-   ulimit -u   # as a non-root user on the bastion → ≤ 256
-
-   # at and cron whitelists in place, no extra users
+   ulimit -u               # as a non-root user → ≤ 256
    cat /etc/at.allow /etc/cron.allow
-
-   # atd is gone
    systemctl is-enabled atd 2>&1   # masked / not-found
+   loginctl list-users     # nobody should have Linger=yes
 
-   # No user has linger enabled
-   loginctl list-users
-   loginctl show-user <user> | grep Linger
-
-End-to-end manual check (the canonical containment acceptance test):
+The containment acceptance test, end to end:
 
 .. code:: bash
 
@@ -131,54 +118,43 @@ End-to-end manual check (the canonical containment acceptance test):
    # From root on the bastion
    ps -u user | grep sleep        # → no output
 
-If ``sleep`` is still running, either ``KillUserProcesses=yes`` was not applied (logind not reloaded?) or the user has ``Linger=yes``.
+If the process is still there, either ``logind`` was not reloaded or
+the user has linger enabled.
 
 Lifecycle of the deployed files
 -------------------------------
 
-The four files written under ``/etc/`` (``at.allow``, ``cron.allow``, ``systemd/logind.conf.d/open-bastion.conf``, ``security/limits.d/open-bastion.conf``) are **deployment artefacts of ``ob-bastion-setup --enable-hardening``**, not package-managed conffiles. The hardening step is opt-in (the operator passes ``--enable-hardening`` and confirms the prompt), so the package itself does not place these files and a plain ``ob-bastion-setup`` run never touches them.
+The four files under ``/etc/`` are deployment artefacts of
+``--enable-hardening``, not package configuration files:
 
-Practical consequences:
+- ``apt purge`` (or ``rpm -e``) does not remove them; delete them by hand
+  if you no longer want the hardening;
+- a package upgrade does not overwrite them either: re-run
+  ``--enable-hardening`` to pick up a changed template (the script backs
+  the existing file up first);
+- the templates under ``/usr/share/open-bastion/hardening/`` are
+  reinstalled on upgrade and must not be edited.
 
-- ``apt purge open-bastion`` (or ``rpm -e open-bastion``) **does not remove** ``/etc/at.allow``, ``/etc/cron.allow``, ``/etc/systemd/logind.conf.d/open-bastion.conf``, or ``/etc/security/limits.d/open-bastion.conf``. Remove them with ``rm`` if you no longer want the hardening.
-- A package upgrade **does not overwrite** them either. Re-run ``ob-bastion-setup`` after an upgrade if a template changes and you want the new content; the script backs up the existing file before replacing it.
-- The templates themselves live under ``/usr/share/open-bastion/hardening/`` and *are* reinstalled on upgrade. They are read-only references; do not edit them.
+Turning parts back on
+---------------------
 
-To reapply or update the deployed files, edit them under ``/etc/`` and either re-run the relevant step (e.g. ``systemctl reload systemd-logind`` after touching the logind drop-in) or re-run ``ob-bastion-setup --enable-hardening`` (which will back up and overwrite the logind/limits drop-ins, and warn if it finds an admin-managed ``at.allow`` or ``cron.allow``).
+Edit the deployed file in ``/etc/``, then reload what reads it:
 
-Disabling parts of the hardening
---------------------------------
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
 
-If a deployment needs a specific subsystem back, edit the deployed files in ``/etc/`` directly.
-
-+------------------------+------------------------------------------------------------------------------------------------------------------------------+
-| Re-enable              | What to do                                                                                                                   |
-+========================+==============================================================================================================================+
-| ``at(1)`` for a user   | Add the username to ``/etc/at.allow``, then ``systemctl unmask atd && systemctl enable --now atd``.                          |
-+------------------------+------------------------------------------------------------------------------------------------------------------------------+
-| ``crontab`` for a user | Add the username to ``/etc/cron.allow``. (``cron.service`` is already running.)                                              |
-+------------------------+------------------------------------------------------------------------------------------------------------------------------+
-| Background processes   | Remove ``/etc/systemd/logind.conf.d/open-bastion.conf``, then ``systemctl reload systemd-logind``. Discouraged on a bastion. |
-+------------------------+------------------------------------------------------------------------------------------------------------------------------+
-| Higher ``nproc``       | Add a more specific drop-in **after** ``open-bastion.conf`` (alphabetical order, e.g. ``99-build.conf``).                    |
-+------------------------+------------------------------------------------------------------------------------------------------------------------------+
-
-To activate the hardening at install time (opt-in, off by default):
-
-.. code:: bash
-
-   ob-bastion-setup --portal https://auth.example.com --enable-hardening
-
-What ``--enable-hardening`` does **not** cover
-----------------------------------------------
-
-- **Primary trace.** Containment alone does not log ``execve()``: if the recorder is bypassed (e.g. through a PAM mis-config), nothing else records what ran. That is what the separate ``--enable-audit-trace`` opt-in is for — it installs an ``auditd`` ruleset that records every ``execve()`` system-wide, so a process that escapes the recorder still leaves a syscall trail. See :doc:`/audit`.
-- **Container escape / kernel exploits.** Out of scope; rely on upstream kernel hardening and timely patching.
-- **``systemd-run --user`` with a service template.** Covered by ``KillUserProcesses=yes`` *only* if the user does not have linger enabled. Confirm with ``loginctl show-user``.
-
-See also
---------
-
-- :doc:` </session-recording>` — recorder and sink details
-- :doc:` </security>` — broader security policy
-- ` <https://github.com/linagora/open-bastion/blob/main/SECURITY.md>`__ — disclosure policy
+   * - To give back
+     - Do this
+   * - ``at(1)`` to a user
+     - Add the user to ``/etc/at.allow``, then
+       ``systemctl unmask atd && systemctl enable --now atd``.
+   * - ``crontab`` to a user
+     - Add the user to ``/etc/cron.allow``; ``cron.service`` is already
+       running.
+   * - Background processes
+     - Remove ``/etc/systemd/logind.conf.d/open-bastion.conf`` and
+       ``systemctl reload systemd-logind``. Discouraged on a bastion.
+   * - A higher process cap
+     - Add a drop-in that sorts after ``open-bastion.conf``
+       (e.g. ``99-build.conf``).
