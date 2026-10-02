@@ -157,7 +157,8 @@ def _drop_uri_less_reference_targets(app, doctree, docname):
         return
 
     from docutils import nodes
-    for node in doctree.findall(nodes.reference):
+    # findall() is docutils >= 0.18.1; EL9 ships an older one (Sphinx 3.4).
+    for node in getattr(doctree, "findall", doctree.traverse)(nodes.reference):
         if not node.get("refuri"):
             node.attributes.pop("refuri", None)
 
