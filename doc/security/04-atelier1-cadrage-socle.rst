@@ -40,7 +40,7 @@ Le portail et sa chaîne de plugins sont **dans** le périmètre : c'est lui qui
 Cible de sécurité étudiée
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-L'étude porte sur la **cible maximale (Mode E)** décrite en :doc:`/security/00-architecture` : certificats CA obligatoires (``AuthorizedKeysFile none``), autorisation LLNG à chaque connexion, ``sudo`` par token LLNG à usage unique, KRL obligatoire, rebond bastion→backend par certificat éphémère vouché. Les modes moins restrictifs (A à D, voir :doc:`/pam-modes`) réduisent le niveau de garantie ; ils ne sont pas la cible de cette étude et **ne sont pas homologués par elle**.
+L'étude porte sur la **cible maximale (Mode E)** décrite en :doc:`/security/00-architecture` : certificats CA obligatoires (``AuthorizedKeysFile none``), autorisation LLNG à chaque connexion, ``sudo`` par token LLNG à usage unique, KRL obligatoire, rebond bastion→backend par certificat éphémère vouché. Les modes moins restrictifs (A à D, voir :doc:`/security-scenarios/index`) réduisent le niveau de garantie ; ils ne sont pas la cible de cette étude et **ne sont pas homologués par elle**.
 
 .. _12-valeurs-métier:
 

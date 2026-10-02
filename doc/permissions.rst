@@ -22,11 +22,11 @@ Quick map — "I want to control X. Where?"
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Who can ``sudo``                                | **SSO** (+local) | LLNG group → sudo authorization; optionally local ``sudoers``                                                                                                                                   |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Make ``sudo`` require a fresh SSO token         | **OB**           | :doc:`maximum security </pam-modes>`; see :ref:`sudo's timestamp cache <pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache>` for how often a prompt is actually shown          |
+| Make ``sudo`` require a fresh SSO token         | **OB**           | :doc:`Max security </security-scenarios/index>`; see :ref:`sudo's timestamp cache <pam-modes-how-often-you-are-actually-prompted-sudos-timestamp-cache>` for how often a prompt is shown        |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Which SSH **key types/sizes** are allowed       | **OB**           | ``ssh_key_policy_enabled``, ``ssh_key_allowed_types`` (:ref:`security <security-ssh-key-policy>`)                                                                                               |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Auth method (token / SSH key / password)        | **OB**           | :doc:`Security scenarios </other-security-scenarios>`                                                                                                                                           |
+| Auth method (token / SSH key / password)        | **OB**           | :doc:`Security scenarios </security-scenarios/other-security-scenarios>`                                                                                                                        |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Non-SSO automation logins (ansible, backup, CI) | **OB**           | :doc:` </service-accounts>`                                                                                                                                                                     |
 +-------------------------------------------------+------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -63,7 +63,7 @@ Open Bastion side (per server)
 
 Written into ``/etc/open-bastion/`` by ``ob-bastion-setup`` / ``ob-backend-setup`` / ``ob-standalone-setup`` (or the `ob-builder <https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__ artefacts).
 
-- **Security scenario** — the strictness of authentication and whether ``sudo`` is token-gated. The default, :doc:`maximum security </pam-modes>`, accepts only SSO-signed certificates, requires a fresh LLNG token for ``sudo``, and enforces a KRL; the :doc:`other scenarios </other-security-scenarios>` trade that for compatibility.
+- **Security scenario** — the strictness of authentication and whether ``sudo`` is token-gated. The default, :doc:`maximum security </security-scenarios/index>`, accepts only SSO-signed certificates, requires a fresh LLNG token for ``sudo``, and enforces a KRL; the :doc:`other scenarios </security-scenarios/other-security-scenarios>` trade that for compatibility.
 - **sudo policy** — token-gated via ``pam_openbastion`` in maximum security, and/or a local rule: the setups create the ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A host can also keep its own classic ``sudoers`` in parallel.
 - **Service accounts** — key-only local accounts that bypass OIDC, with a local sudo grant. Powerful and local: see the trade-offs (sudo without token, reachability requirements) in :doc:`Service Accounts </service-accounts>`.
 - **User provisioning** — shell, home, UID/GID ranges, skeleton dir, plus the ``approved_shells`` / ``approved_home_prefixes`` allow-lists that bound what a provisioned (or service) account may use. See :doc:`Configuration </references/configuration>`.
@@ -80,7 +80,7 @@ The setups own two things you may want to extend:
 
 - **``sshd`` drop-ins** under ``/etc/ssh/sshd_config.d/`` (e.g. ``00-open-bastion-*.conf``, and ``60-max-security.conf`` under maximum security). You can layer **additional** drop-ins for site policy — for example an ``AuthorizedKeysCommand`` to serve :doc:`service-account keys </service-accounts>` when certificates are the only accepted key, or ``AllowTcpForwarding no`` to close the port-forward channel. Mind ``sshd``'s "first value wins" rule for single-valued keywords (the ``00-`` prefix makes the Open Bastion settings win over distro drop-ins).
 - **``/etc/pam.d/sshd``** (and ``/etc/pam.d/sudo``, ``sudo-i``) — the PAM stacks that invoke ``pam_openbastion``. You can add stock PAM modules around them. Note that ``pam_systemd`` and ``pam_mkhomedir`` are **not** optional extras you may add: both setups already write them, and both are required (:ref:`full stack <pam-modes-pam-configuration-for-sshd>`). Dropping ``pam_systemd`` makes sessions invisible to ``who`` / ``w`` / ``loginctl`` and to the heartbeat's connected-users report; dropping the ``session pam_openbastion`` line breaks ``sudo`` under maximum security.
-- **``/etc/pam.d/systemd-user``** — unlike the files above, ``ob-bastion-setup`` does not regenerate this one (its distro ``session`` stack varies too much); it only inserts a small ``account`` bridge ahead of the distro stack so NSS-only SSO users can start ``user@.service`` (:doc:`Security scenario </pam-modes>`, #296). Where the distro ships only ``/usr/lib/pam.d/systemd-user`` (Debian trixie onwards), the setup creates the ``/etc`` file with the bridge and an ``include`` of the vendor one.
+- **``/etc/pam.d/systemd-user``** — unlike the files above, ``ob-bastion-setup`` does not regenerate this one (its distro ``session`` stack varies too much); it only inserts a small ``account`` bridge ahead of the distro stack so NSS-only SSO users can start ``user@.service`` (:doc:`Security scenario </security-scenarios/index>`, #296). Where the distro ships only ``/usr/lib/pam.d/systemd-user`` (Debian trixie onwards), the setup creates the ``/etc`` file with the bridge and an ``include`` of the vendor one.
 
 ..
 
@@ -99,8 +99,8 @@ The two layers are complementary, not exclusive:
 See also
 --------
 
-- :doc:`Security scenario </pam-modes>` — maximum security, the default
-- :doc:`Other security scenarios </other-security-scenarios>` — the four alternatives
+- :doc:`Security scenario </security-scenarios/index>` — maximum security, the default
+- :doc:`Other security scenarios </security-scenarios/other-security-scenarios>` — the four alternatives
 - :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>` — server-side setup
 - :doc:`Configuration Reference </references/configuration>` — every ``openbastion.conf`` key
 - :doc:`Service Accounts </service-accounts>` — key-only local accounts

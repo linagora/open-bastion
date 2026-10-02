@@ -93,7 +93,7 @@ Each of these is off unless the option is given:
 
 - **Maximum security scenario** (``--max-security``) — certificates only, key
   revocation list refreshed every 30 minutes, and ``sudo`` with an LLNG token
-  only. See :doc:`/pam-modes`.
+  only. See :doc:`/security-scenarios/max-security-scenario`.
 
 - **Sudo through LLNG** — configured only under maximum security
   (``--max-security``).

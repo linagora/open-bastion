@@ -1,14 +1,11 @@
-Security scenario
-=================
+Maximum security
+================
 
-Open Bastion's default is **maximum security**: SSH access uses
-certificates signed by the LLNG SSH CA, and ``sudo`` requires a temporary
-LLNG token. It is the scenario the :doc:`security study </security/index>`
-covers, and the default answer of the ``ob-builder`` questionnaire.
-
-Four other scenarios trade strictness for compatibility — for a
-transition period, or for a host that must keep Unix passwords or bare
-SSH keys. They are described in :doc:`other-security-scenarios`.
+**Maximum security** is what Open Bastion deploys by default: SSH access
+uses certificates signed by the LLNG SSH CA, and ``sudo`` requires a
+temporary LLNG token. It is the scenario the :doc:`security study
+</security/index>` covers, and the default answer of the ``ob-builder``
+questionnaire. :doc:`/security-scenarios/index` compares it with the four other scenarios.
 
 In short
 --------

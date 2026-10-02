@@ -87,7 +87,7 @@ on its own, ahead of anything else in progress.
 This file is the reporting policy. What the product actually does is documented
 separately:
 
-- [Security reference](doc/security-reference.rst) — every control, how it is
+- [Security reference](doc/references/security-reference.rst) — every control, how it is
   configured, and what it does not cover
 - [Security features](doc/security.rst) — key policy, rate limiting, cache
   protection, audit

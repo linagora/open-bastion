@@ -25,7 +25,7 @@ those artefacts and never contact your workstation again.
 
 Run it without arguments for the questionnaire. It asks, in order: the
 deployment slug used to name the artefacts; which artefacts to generate; the
-:doc:`security scenario </pam-modes>`; the SSO portal URL (validated through
+:doc:`security scenario </security-scenarios/index>`; the SSO portal URL (validated through
 OIDC discovery); the OIDC ``client_id`` and whether it may be changed at
 deployment time; how the ``client_secret`` is supplied; the server group; the
 target roles; the optional features (bastion allowlist, hardening, audit

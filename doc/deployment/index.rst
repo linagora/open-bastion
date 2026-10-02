@@ -46,4 +46,4 @@ to know what they change before they do it:
 * :doc:`Manual configuration </deployment/manual-configuration>`
 
 Whichever route you take, the hosts end up in the same state; the
-:doc:`security scenario </pam-modes>` you chose decides how strict it is.
+:doc:`security scenarios </security-scenarios/index>` you chose decides how strict it is.
