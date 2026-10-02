@@ -51,6 +51,11 @@ here.
   keeping the current list. It runs sandboxed from `ob-krl-refresh.timer`,
   every 30 minutes; **`--krl-refresh-interval`** (1 to 60 minutes) changes
   that. See [doc/pam-modes.rst](doc/pam-modes.rst).
+- **`ob-builder --save-config FILE`** saves the questionnaire's answers, defaults
+  included, as a YAML that `--config` replays; the questionnaire offers it as
+  its last question (#311). An embedded `client_secret` is left out unless the
+  admin agrees (the file is then 0600). The config format gains `insecure` and
+  `sign_with`, and `target_role` takes several roles (`"bastion,backend"`).
 
 ### Changed
 
@@ -148,6 +153,14 @@ here.
   the legacy fallback.
 - **Lab deployment scripts stop when `ob-bastion-id` fails** instead of writing a
   bogus `ob-bastion` into `allowed_bastions` (#246).
+- **`ob-builder --config` with `yq` no longer drops a `false` value**: an
+  unquoted `self_delete: false` read as unset, so an embedded-secret build fell
+  back to `self_delete: yes`. Unquoted `true`/`false` now read as `yes`/`no`
+  with every parser. This also changes two builds: `service_keys: false` used
+  to be ignored (keys stayed on when an account had a public key), and
+  `auto_enroll_setup: false` used to fall back to `prompt`; both now apply.
+  A `sign_with` key that gpg cannot use stops the build before the SSO is
+  contacted, instead of leaving an unsigned installer behind.
 
 ### Security
 
