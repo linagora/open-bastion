@@ -136,6 +136,8 @@ man_pages = [
      "Obtain an SSH certificate from LemonLDAP::NG without a browser", "", 8),
     ("references/man/ob-uninstall", "ob-uninstall",
      "Take Open Bastion off this host, ready for package removal", "", 8),
+    ("references/man/openbastion.conf", "openbastion.conf",
+     "Configuration file of the Open Bastion PAM module", "", 5),
 ]
 
 def setup(app):

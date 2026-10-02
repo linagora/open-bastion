@@ -235,7 +235,7 @@ See also
 :manpage:`ssh(1)`,
 :manpage:`sshd_config(5)`
 
-Authors
--------
+Author
+------
 
 Xavier Guimard <xguimard@linagora.com>

@@ -106,7 +106,7 @@ See also
 :manpage:`sftp(1)`,
 :manpage:`ssh(1)`
 
-Authors
--------
+Author
+------
 
 Xavier Guimard <xguimard@linagora.com>

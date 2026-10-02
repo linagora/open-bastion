@@ -114,4 +114,4 @@ See also
 Author
 ------
 
-Open Bastion team <open-bastion@linagora.com>
+Xavier Guimard <xguimard@linagora.com>
