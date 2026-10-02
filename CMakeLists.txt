@@ -626,6 +626,11 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-record-connect.1
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
     )
+
+    install(FILES
+        ${MAN_OUT_DIR}/openbastion.conf.5
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man5
+    )
 endif()
 
 # Disabled for Debian packaging, which uses dh_installsystemd instead.

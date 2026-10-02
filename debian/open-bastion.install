@@ -72,6 +72,8 @@ usr/share/man/man8/ob-post-upgrade.8
 usr/share/man/man8/ob-uninstall.8
 usr/share/man/man8/ob-ssh-cert.8
 
+usr/share/man/man5/openbastion.conf.5
+
 # Deployed by `ob-bastion-setup --enable-audit-trace`.
 usr/share/open-bastion/audit/rules.d/open-bastion.rules
 

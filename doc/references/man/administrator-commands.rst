@@ -1,16 +1,21 @@
-Administrator commands
-======================
+Administrator man pages
+=======================
 
 The commands an administrator runs on a bastion, on a backend, or — for
 ``ob-builder`` — on a workstation, to deploy a host, operate it and take it
-out of service. Each has a man page of the same name.
+out of service, and the file the PAM module reads its settings from. Each
+has a man page of the same name.
 
 .. list-table::
    :header-rows: 1
    :widths: 24 76
 
-   * - Command
-     - What it does
+   * - Page
+     - What it documents
+   * - :doc:`openbastion.conf(5) <openbastion.conf>`
+     - Every setting of ``/etc/open-bastion/openbastion.conf``: the portal
+       and its client credentials, the authorization cache, rate limiting,
+       user creation, the SSH key policy, CrowdSec, and the rest.
    * - :doc:`ob-bastion-setup(8) <ob-bastion-setup>`
      - Configure a server as a bastion, a standalone host or a backend.
        ``ob-backend-setup`` and ``ob-standalone-setup`` are the same command
@@ -42,6 +47,7 @@ out of service. Each has a man page of the same name.
 .. toctree::
    :hidden:
 
+   openbastion.conf
    ob-bastion-setup
    ob-enroll
    ob-bastion-id

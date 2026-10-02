@@ -46,8 +46,8 @@ If you administer Open Bastion or plan to, read these in order:
 * :doc:`/troubleshooting` when something does not
   work.
 
-The :doc:`/references/man/administrator-commands` reference documents each
-command.
+The :doc:`administrator man pages </references/man/administrator-commands>`
+document each command and ``openbastion.conf``.
 
 Security review
 ~~~~~~~~~~~~~~~
@@ -106,7 +106,7 @@ formal analysis of the maximum security target.
    
 
 .. toctree::
-   :caption: Command reference
+   :caption: Man pages
    :hidden:
    :maxdepth: 2
 

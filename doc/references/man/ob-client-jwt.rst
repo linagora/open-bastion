@@ -100,4 +100,4 @@ See also
 Author
 ------
 
-Linagora
+Xavier Guimard <xguimard@linagora.com>
