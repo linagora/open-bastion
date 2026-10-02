@@ -47,25 +47,26 @@ then deploy:
 | Quick-start                                                  | Use it to…                                                                                                                                                 |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work.       |
-| **[Configure your SSO](doc/llng-configuration.rst)**          | On your real LemonLDAP::NG: install the required plugins, and create the OIDC client(s) that carry your machines — the prerequisite before any deployment. |
-| **[Deploy a fleet with Ansible](doc/ansible-quickstart.rst)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.         |
-| **[Deploy with a shell installer](doc/shell-quickstart.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.         |
+| **[Configure your SSO](doc/deployment/llng-configuration.rst)**          | On your real LemonLDAP::NG: install the required plugins, and create the OIDC client(s) that carry your machines — the prerequisite before any deployment. |
+| **[Deploy a fleet with Ansible](doc/deployment/ansible-deployment.rst)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.         |
+| **[Deploy with a shell installer](doc/deployment/self-extracting-installer.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.         |
 
 For the underlying concepts and per-step manual configuration, see
-[PAM Authentication Modes](doc/pam-modes.rst), the
-[Configuration Reference](doc/configuration.rst), and the
-[Admin Guide](doc/admin-guide.rst).
+[Security scenarios](doc/security-scenarios/index.rst), the
+[Configuration Reference](doc/references/configuration.rst), and the
+[Deployment guide](doc/deployment/index.rst).
 
 ## How it works
 
 Each server is first **enrolled** by an administrator — installing the package and
 registering the host with the SSO (`ob-enroll`, or the generated `ob-builder`
 artefacts), which is also what assigns its server group. See the
-[Admin Guide](doc/admin-guide.rst) (or the [quick-starts](doc/index.rst#start-here))
+[manual configuration guide](doc/deployment/manual-configuration.rst) (or the [quick-starts](doc/index.rst#start-here))
 for the enrollment step. Once enrolled:
 
 1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
-   password)_ or an **SSO-signed SSH certificate** _(self-served via `ob-ssh-cert`)_.
+   password)_ or an **SSO-signed SSH certificate** _(self-served from the
+   portal's `/ssh` page)_.
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
    server group, and `sudo` is gated the same way; an encrypted local cache keeps
    this working during an SSO outage.
@@ -79,18 +80,18 @@ for the enrollment step. Once enrolled:
 5. Sessions are **recorded** inside the bastion to a tamper-evident, root-owned
    store for audit.
 
-See [Bastion Architecture](doc/bastion-architecture.rst) and the
+See [Bastion Architecture](doc/references/bastion-architecture.rst) and the
 [documentation index](doc/index.rst) for the details.
 
 ## Features
 
 - Token introspection via OIDC introspection endpoint
 - Server authorization via `/pam/authorize` endpoint
-- [Server groups](doc/llng-configuration.rst#server-groups) support for granular access control
+- [Server groups](doc/deployment/llng-configuration.rst#server-groups) support for granular access control
 - Token caching to reduce server load
 - Secure communication with SSL/TLS support
 - Easy server enrollment with `ob-enroll` script
-- **[Offline mode](doc/offline-mode.rst)**:
+- **[Offline mode](doc/offline-mode/index.rst)**:
   - Encrypted authorization cache _(AES-256-GCM)_
   - Continue SSH key authentication when LLNG server is unavailable
   - Configurable cache TTL with shorter TTL for high-risk services (sudo, su)
@@ -103,7 +104,7 @@ See [Bastion Architecture](doc/bastion-architecture.rst) and the
   - Auto-create Unix accounts on first login
   - Configurable shell, home directory, UID/GID ranges
   - Skeleton directory support
-- **[Group synchronization](doc/llng-configuration.rst#group-synchronization)**:
+- **[Group synchronization](doc/deployment/llng-configuration.rst#group-synchronization)**:
   - Sync Unix supplementary groups from LLNG on each login
   - Automatic group creation if needed
   - Local whitelist for defense-in-depth _(`allowed_managed_groups`)_
@@ -113,12 +114,12 @@ See [Bastion Architecture](doc/bastion-architecture.rst) and the
   - Per-server configuration file
   - Fine-grained sudo permissions
   - Automatic account creation
-- **[Bastion-to-backend authentication](doc/bastion-architecture.rst)**:
+- **[Bastion-to-backend authentication](doc/references/bastion-architecture.rst)**:
   - Certificate-based proof of connection origin _(LLNG-signed ephemeral SSH cert, ~120 s)_
   - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)
   - No agent forwarding or user key on the bastion required
   - `ob-ssh` / `ob-scp` / `ob-sftp` scripts for seamless bastion connections and file transfers
-- **[Session recording](doc/session-recording.rst)** _(optional)_:
+- **[Session recording](doc/ssh-session-recording.rst)** _(optional)_:
   - Record all terminal I/O for audit compliance
   - Written by a root sink the recorded user cannot reach (`.typescript` +
     `.json`; asciinema and ttyrec are planned, and currently fall back to
@@ -189,13 +190,13 @@ them pointing at files that are not there.
 
 The full, theme-organized index is in **[doc/index.rst](doc/index.rst)**. Highlights:
 
-- **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/shell-quickstart.rst) / [Ansible](doc/ansible-quickstart.rst) quick-starts · [Admin guide](doc/admin-guide.rst)
-- **Connections & architecture** — [Bastion architecture](doc/bastion-architecture.rst) · [PAM modes](doc/pam-modes.rst) · [LLNG configuration](doc/llng-configuration.rst)
+- **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/deployment/self-extracting-installer.rst) / [Ansible](doc/deployment/ansible-deployment.rst) quick-starts · [Deployment guide](doc/deployment/index.rst)
+- **Connections & architecture** — [Bastion architecture](doc/references/bastion-architecture.rst) · [Security scenarios](doc/security-scenarios/index.rst) · [LLNG configuration](doc/deployment/llng-configuration.rst)
 - **Access & permissions** — [Access & Permissions](doc/permissions.rst) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.rst)
-- **Recording & audit** — [Session recording](doc/session-recording.rst) · [Audit trace](doc/audit.rst)
-- **Offline & resilience** — [Offline mode](doc/offline-mode.rst) · [Cache administration](doc/offline-cache-admin.rst)
+- **Recording & audit** — [Session recording](doc/ssh-session-recording.rst) · [Audit trace](doc/audit.rst)
+- **Offline & resilience** — [Offline mode](doc/offline-mode/index.rst) · [Cache administration](doc/offline-mode/cache.rst)
 - **Security & hardening** — [Security features](doc/security.rst) · [Hardening](doc/hardening.rst) · [CrowdSec](doc/crowdsec.rst)
-- **Reference** — [Canonical names & paths](doc/reference-paths.rst) · [Configuration](doc/configuration.rst) · [Troubleshooting](doc/troubleshooting.rst) · [Desktop SSO](doc/desktop-sso.rst) _(experimental/alpha)_ · [Competitors](doc/competitors.rst)
+- **Reference** — [Canonical names & paths](doc/references/reference-paths.rst) · [Configuration](doc/references/configuration.rst) · [Troubleshooting](doc/troubleshooting.rst) · [Desktop SSO](doc/desktop-sso.rst) _(experimental/alpha)_ · [Competitors](doc/competitors.rst)
 - **Security analysis (EBIOS RM)** — [full risk study](doc/security/index.rst) _(French)_ · [conditions of use before deploying](doc/security/08-dossier-homologation.rst#2-conditions-demploi)
 
 `doc/` is a [Sphinx](https://www.sphinx-doc.org/) project, so the same pages
@@ -207,6 +208,9 @@ sudo apt install open-bastion-doc   # /usr/share/doc/open-bastion-doc/html/index
 
 # or from a checkout
 sphinx-build -b html doc build/doc/html
+
+# the man pages come from the same sources
+sphinx-build -b man doc build/man
 ```
 
 ## Troubleshooting
@@ -256,8 +260,8 @@ sudo ob-desktop-setup -p https://auth.example.com --offline
 ### Documentation
 
 - [Desktop SSO Guide](doc/desktop-sso.rst) - Complete setup and configuration
-- [Offline Mode](doc/offline-mode.rst) - Cached credential authentication
-- [Security reference](doc/security-reference.rst#offline-credential-cache-security) - Security details
+- [Offline Mode](doc/offline-mode/index.rst) - Cached credential authentication
+- [Security reference](doc/references/security-reference.rst#offline-credential-cache-security) - Security details
 
 ### Cache Management
 

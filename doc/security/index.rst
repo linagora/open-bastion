@@ -5,7 +5,7 @@
 
 Cette étude suit la méthode **EBIOS Risk Manager** (ANSSI, 2018). Elle porte sur la cible de sécurité maximale d'Open Bastion (Mode E) et **inclut le portail LemonLDAP::NG et ses quatre plugins** dans son périmètre.
 
-Les documents sont en français ; les documentations techniques auxquelles ils renvoient (:doc:`/hardening`, :doc:`/audit`, :doc:`/pam-modes`) sont en anglais.
+Les documents sont en français ; les documentations techniques auxquelles ils renvoient (:doc:`/hardening`, :doc:`/audit`, :doc:`/security-scenarios/index`) sont en anglais.
 
 Plan de lecture
 ---------------

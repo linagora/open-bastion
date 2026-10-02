@@ -1,0 +1,486 @@
+LLNG configuration
+==================
+
+
+.. _llng-configuration-creation-of-the-oidc-relying-party:
+
+Step 1: creation of the OIDC relying party
+------------------------------------------
+
+The *OIDC Relying Party* (OIDC RP) is what the servers (bastion or
+backends) enroll against. One OIDC RP can carry a whole fleet, or
+multiple OIDC RPs can be used (e.g. one RP per protected zone).
+
+For general OIDC RP configuration, refer to the plugin documentation,
+`LemonLDAP::NG OpenID Connect
+<https://lemonldap-ng.org/documentation/latest/idpopenidconnect.html>`__;
+This documentation focuses on the options used in an Open Bastion
+deployment.
+
+In the LLNG Manager, create a new OIDC Relying Party:
+
+1. Go to OpenID Connect Relying Parties → Add
+2. Configure:
+
+   - Client ID: ``pam-access``
+   - Client secret: Generate a strong secret
+   - No scope configuration is needed (the requested ``pam:server``
+     scope is issued as-is).
+
+3. Set the options that let servers enroll with a renewable identity
+   (see :ref:`Per-RP Device Authorization Parameters
+   <llng-plugin-parameters-per-rp-device-authorization-parameters>`):
+
+   - ``oidcRPMetaDataOptionsAllowDeviceAuthorization`` = ``1``
+   - ``oidcRPMetaDataOptionsDeviceOwnership`` = ``organization``
+   - ``oidcRPMetaDataOptionsAllowOffline`` = ``1``.
+
+4. Harden the client itself:
+
+   - ``oidcRPMetaDataOptionsRequirePKCE`` = ``1``
+   - ``oidcRPMetaDataOptionsClientAuthenticationMethod`` =
+     ``client_secret_jwt``: the module already signs its requests this
+     way, and the secret stops travelling in a Basic header
+   - ``oidcRPMetaDataOptionsRefreshTokenRotation`` = ``1``
+   - ``oidcRPMetaDataOptionsRtActivity`` = ``2592000``: revoke the
+     refresh token of a server that has not used it for 30 days. A
+     decommissioned host, a forgotten enrolment and a token lifted from
+     an old backup all stop being usable. Keep ``ob-heartbeat.timer``
+     running — it is what keeps an active server's token alive.
+
+Step 2: plugins activation
+--------------------------
+
+For the ``OIDCDeviceAuthorization`` and ``OIDCDeviceOrganization``
+plugins, the activation condition is set together with the relying
+party above, see :ref:`creating the OIDC Relying Party
+<llng-configuration-creation-of-the-oidc-relying-party>`.
+
+For the ``pam-access`` and ``ssh-ca`` plugins, use LLNG Manager to set
+``pamAccessActivation = 1`` and ``sshCaActivation = 1``.
+
+Plugin parameters
+~~~~~~~~~~~~~~~~~
+
+The optional parameters for these plugins are listed in a separate
+reference page, see :doc:`LLNG Plugins Parameters
+</references/llng-plugins-parameters>`. The defaults are fine for a standard
+setup.
+
+.. _llng-configuration-restrict-device-and-the-ssh-ca-admin-routes-required:
+
+Step 3: restrict ``/device`` and the SSH CA admin routes
+--------------------------------------------------------
+
+Two sets of portal routes decide who may approve a host enrolment and
+who may revoke certificates. Depending on the plugin version, the
+configuration differs.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 42 42
+
+   * - Plugin version
+     - ``/ssh/admin``, ``/ssh/certs``, ``/ssh/revoke``
+     - If you configure nothing
+   * - ≤ ``v0.5.2``
+     - No check in the plugin. ``locationRules`` on the portal vhost
+       is the only control
+     - Any authenticated SSO user can list and revoke everyone's
+       certificates — an org-wide SSH outage
+   * - ≥ ``0.6.0``
+     - ``sshCaAdminRule`` in the plugin, fail-closed
+     - Nobody administers: all three routes return 403, including the
+       users ``locationRules`` would let through
+
+Set both. ``locationRules`` is required today and remains defence in
+depth afterwards; ``sshCaAdminRule`` is the control from ``0.6.0`` on.
+Configuring only the vhost rule leaves a ``0.6.0`` portal with no
+working admin UI — including for the operator handling an incident.
+
+``/device`` is a separate story: the ``oidc-device-authorization``
+plugin carries its own native control, with two layers doing different
+jobs.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 46 54
+
+   * - Layer
+     - What it gates
+   * - ``oidcRPMetaDataOptionsAllowDeviceAuthorization``
+     - The approval decision, per relying party. It is a
+       ``boolOrExpr``: any value other than ``1`` is compiled and
+       evaluated against the user's session
+   * - ``locationRules`` on ``^/device``
+     - The page, for every RP at once
+
+``= 1`` means "any authenticated user may approve" — an activation
+flag, not a permission. Prefer the expression form when approvers
+differ per RP (``$groups =~ /\bdeviceadmins\b/``), and keep the vhost
+rule as the outer gate.
+
+The vhost rules
+~~~~~~~~~~~~~~~
+
+In the Manager, under *Virtual Hosts → your portal host → Access
+rules*, add:
+
++----------------------------------------+------------------------------------+
+| Regexp                                 | Rule                               |
++========================================+====================================+
+| ``^/device``                           | ``$groups =~ /\bob-approvers\b/``  |
++----------------------------------------+------------------------------------+
+| ``^/ssh/(admin|certs|revoke)(\?|/|$)`` | ``$groups =~ /\bob-ssh-admins\b/`` |
++----------------------------------------+------------------------------------+
+
+``ob-approvers`` and ``ob-ssh-admins`` are placeholders: substitute
+your own groups, and check they actually appear in the session
+(*Manager → Sessions*, or ``$groups`` in a test rule). A rule naming a
+group nobody has is a rule that returns 403 for everyone, which looks
+exactly like a rule that works.
+
+Or, in ``lmConf-<n>.json``. These keys go inside the existing
+``locationRules`` object, under your portal's own vhost key — a
+``locationRules`` pasted as a second top-level key silently replaces
+the first, and your existing rules go with it:
+
+.. code:: json
+
+   {
+     "locationRules": {
+       "auth.example.com": {
+         "^/device": "$groups =~ /\\bob-approvers\\b/",
+         "^/ssh/(admin|certs|revoke)(\\?|/|$)":
+           "$groups =~ /\\bob-ssh-admins\\b/",
+         "default": "accept"
+       }
+     }
+   }
+
+And, from ``0.6.0``, the plugin-side rule (*Manager → Plugins → SSH
+CA*, or ``"sshCaAdminRule"`` in ``lmConf-<n>.json``):
+
+.. code:: json
+
+   "sshCaAdminRule": "$groups =~ /\\bob-ssh-admins\\b/"
+
+Three details that are easy to get wrong
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Do not anchor ``/device`` with ``$``. Not for the reason you might
+  expect: the approval form posts to ``PORTAL_URL/device`` with
+  ``user_code`` and ``action`` in the body, so ``REQUEST_URI`` is
+  ``/device`` and ``^/device$`` does match the decision. What it
+  misses is the page — ``/device?user_code=ABCD-EFGH`` carries a
+  query string, ``grant()`` matches against ``REQUEST_URI``, and an
+  anchored rule lets that GET through ungated. It also lets through a
+  crafted ``POST /device?user_code=…&action=approve``. Leave the rule
+  unanchored and both are covered.
+- Do not write ``^/ssh/revoke`` on its own. It also matches
+  ``/ssh/revoked``, the public KRL. This does not break fleet-wide
+  propagation — backends fetch the KRL with an anonymous ``curl``,
+  and a request with no session never reaches ``grant()`` at all: it
+  is served by the plugin's unauthenticated route. What it does break
+  is a KRL fetch made with a session — an administrator in a browser
+  gets a 403. The ``(\?|/|$)`` group above keeps the two routes
+  apart, which is the right hygiene either way.
+- Leave the user routes alone. ``/ssh/sign``, ``/ssh/mycerts``,
+  ``/ssh/myrevoke`` and ``/ssh`` are the ordinary user's own
+  certificate operations, and ``/ssh/ca`` and ``/ssh/revoked`` are
+  public by design.
+
+The shipped ``docker-demo-cert`` and ``docker-demo-maxsec``
+configurations carry the vhost rules and ``sshCaAdminRule``, scoped to
+the demo user ``dwho``, as a working example on both plugin versions.
+
+Step 4: generate and import the SSH CA key (optional)
+-----------------------------------------------------
+
+If you're using the SSH CA plugin for key-based authentication, you
+need to generate a CA key pair and import it into LemonLDAP::NG.
+
+Generate the SSH CA key pair
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: bash
+
+   # Generate Ed25519 CA key pair (recommended)
+   openssl genpkey -algorithm ed25519 -out ssh-ca.key
+   openssl pkey -in ssh-ca.key -pubout -out ssh-ca.pub
+
+   # Display keys for import into LLNG Manager
+   echo "=== Private Key (copy this) ==="
+   cat ssh-ca.key
+   echo "=== Public Key (copy this) ==="
+   cat ssh-ca.pub
+
+Alternatively, for compatibility with older systems, use RSA:
+
+.. code:: bash
+
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out ssh-ca.key
+   openssl pkey -in ssh-ca.key -pubout -out ssh-ca.pub
+
+Import the key into LLNG
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _llng-configuration-via-manager-lemonldapng--222:
+
+Via Manager (LemonLDAP::NG >= 2.22)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. Go to *General Parameters* → *Keys* → *Add a key*
+2. Set a key name (e.g., ``ssh-ca``)
+3. Paste the private key content into *Private key*
+4. Paste the public key content into *Public key*
+5. Save the configuration
+
+Then configure the SSH CA plugin to use this key inside
+``lemonldap-ng.ini``, section ``[portal]``:
+
+.. code:: ini
+
+   [portal]
+   sshCaKeyRef = ssh-ca
+
+.. _llng-configuration-via-lemonldap-ngini:
+
+Via lemonldap-ng.ini
+^^^^^^^^^^^^^^^^^^^^
+
+Insert this into ``lemonldap-ng.ini``, section ``[portal]``:
+
+.. code:: ini
+
+   [portal]
+   keys = { ssh-ca => { \
+       keyPublic  => "<public key value>", \
+       keyPrivate => "<private key value>" \
+   } }
+   sshCaKeyRef = ssh-ca
+
+Create directories for SSH CA state files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: bash
+
+   sudo mkdir -p /var/lib/lemonldap-ng/ssh
+   sudo chown www-data:www-data /var/lib/lemonldap-ng/ssh
+
+These directories store the certificate serial number counter and the
+Key Revocation List (KRL).
+
+Step 5: restart LemonLDAP::NG
+-----------------------------
+
+.. code:: bash
+
+   sudo systemctl restart lemonldap-ng-fastcgi-server
+   # or
+   sudo systemctl restart apache2  # if using mod_perl
+
+.. _llng-configuration-server-groups:
+
+Server groups
+-------------
+
+Server groups allow different authorization rules for different
+server categories.
+
+.. _llng-configuration-configure-in-lemonldap-ngini:
+
+Configure in ``lemonldap-ng.ini``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In ``/etc/lemonldap-ng/lemonldap-ng.ini``, section ``[portal]``:
+
+Access rules are keyed by server group and hold a Perl expression:
+
+.. code:: ini
+
+   [portal]
+   pamAccessSshRules = { \
+       production => '$hGroup->{ops}', \
+       staging    => '$hGroup->{ops} or $hGroup->{dev}', \
+       dev        => '$hGroup->{dev}', \
+       default    => '1' \
+   }
+   pamAccessSudoRules = { \
+       production => '$hGroup->{sre}', \
+       default    => '$hGroup->{ops}' \
+   }
+
+..
+
+   **``pamAccessServerGroups`` is a different setting — do not put
+   rules in it.** It is an optional **authority map**, keyed by OIDC
+   ``client_id``, whose value is a **server group name**:
+
+   .. code:: ini
+
+      [portal]
+      pamAccessServerGroups = { \
+          ob-bastion    => 'bastion', \
+          ob-production => 'production' \
+      }
+
+   When it is non-empty, ``/pam/authorize`` derives the host's server
+   group from its enrolled ``client_id`` instead of trusting the
+   group sent in the request, and ``/pam/whoami`` reports that mapped
+   group (and only that one — a server asking who it is is never told
+   back what it claimed about itself). ``/pam/bastion-cert`` uses no
+   group at all; it relies solely on the voucher.
+
+   **From 0.7.0 this map is required, and so is
+   ``pamAccessAllowedRps``.** Left empty, ``server_group`` is whatever
+   the caller puts in the request body, so any enrolled host of the
+   project that is compromised can declare itself a bastion and obtain
+   a hop voucher for a user — risk R-P1, and the shipped default.
+
+   This document used to say "leave it empty for the usual model of
+   one ``client_id`` per project covering several server groups". That
+   model is precisely the configuration in which the gap is
+   exploitable, so it is no longer the recommendation: **give each
+   server group its own ``client_id``**, and map them here. An
+   unmapped ``client_id`` is refused, so plan the enrolment before you
+   set this.
+
+   ``pamAccessAllowedRps`` is the second half: it lists the RPs
+   allowed on ``/pam/*``, and an empty list means "no change" for
+   upgrade compatibility — so the plugin's audience binding does
+   nothing at all until you fill it in.
+
+   Full list, and the residual defence on the hosts
+   (``allowed_bastions``), in `UPGRADE-NOTES.md
+   <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__,
+   B0.
+
+Configure on each server
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+In ``/etc/open-bastion/openbastion.conf`` (see
+:doc:`openbastion.conf(5) </references/man/openbastion.conf>`):
+
+.. code:: ini
+
+   server_group = production
+
+Or pass the group at enrollment time with
+:doc:`ob-enroll(8) </references/man/ob-enroll>`:
+
+.. code:: bash
+
+   sudo ob-enroll -g production
+
+.. _llng-configuration-group-synchronization:
+
+Group synchronization
+---------------------
+
+The group synchronization feature lets LemonLDAP::NG manage Unix
+supplementary groups on target servers. When a user connects via SSH,
+their Unix groups are synchronized with the groups defined in LLNG.
+
+Configuration
+~~~~~~~~~~~~~
+
+In ``lemonldap-ng.ini``, configure which groups LLNG should manage for
+each server group:
+
+.. code:: perl
+
+   pamAccessManagedGroups = {
+       production => 'docker,developers,readonly',
+       staging => 'developers,testers',
+       bastion => 'operators,auditors',
+       default => ''
+   }
+
+- Groups listed in ``pamAccessManagedGroups`` are created
+  automatically on the server if they don't exist
+- Users are added to groups they're assigned to in LLNG
+- Users are removed from managed groups they're no longer assigned to
+  in LLNG
+- Groups not in ``pamAccessManagedGroups`` are never modified (local
+  groups are preserved)
+
+How it works
+~~~~~~~~~~~~
+
+.. mermaid::
+
+   sequenceDiagram
+       participant Client as SSH Client
+       participant Server as Server (PAM)
+       participant LLNG as LemonLDAP::NG
+
+       Client->>Server: ssh user@server
+       Server->>LLNG: /pam/authorize
+       LLNG-->>Server: groups: ["dev", "docker"]
+       LLNG-->>Server: managed_groups: ["dev", "docker", "qa"]
+       Note over Server: Filter by local whitelist<br/>(if configured)
+       Note over Server: Sync groups:<br/>• Add user to "dev", "docker"
+       Note over Server: • Remove from "qa" (managed, not assigned)
+       Server-->>Client: Session established
+
+Security considerations
+~~~~~~~~~~~~~~~~~~~~~~~
+
+- Principle of least privilege: don't include privileged groups
+  (sudo, wheel, admin) in ``managed_groups``
+- Audit trail: all group modifications are logged with event type
+  ``GROUP_SYNC``
+- Offline behavior: group sync uses cached group information when
+  LLNG is unreachable
+- File protection: group modifications use system tools
+  (``groupadd``, ``gpasswd``) which handle ``/etc/group`` and
+  ``/etc/gshadow`` atomically
+
+.. _local-whitelist-defense-in-depth:
+
+Local whitelist (defense-in-depth)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Administrators can optionally configure a local whitelist of groups
+allowed to be managed on each server. This provides defense-in-depth
+by restricting which groups LLNG can actually modify, regardless of
+what ``managed_groups`` it sends.
+
+In ``/etc/open-bastion/openbastion.conf``:
+
+.. code:: ini
+
+   # Only allow these groups to be managed by LLNG on this server
+   allowed_managed_groups = docker,developers,readonly
+
+When configured:
+
+- Groups must be in both ``pamAccessManagedGroups`` (from LLNG) and
+  ``allowed_managed_groups`` (local) to be synced
+- Groups sent by LLNG but not in the local whitelist are silently
+  ignored
+- This allows local administrators to have final control over which
+  groups can be managed
+
+Use cases:
+
+- Restrict LLNG to manage only specific groups on sensitive servers
+- Allow different group policies per server even within the same server group
+- Provide a safety net against misconfigured LLNG policies
+
+Example: per-environment groups
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: perl
+
+   # Developer groups differ by environment
+   pamAccessManagedGroups = {
+       production => 'app-users,readonly', # read-only in prod
+       staging => 'app-users,developers,docker', # full dev access
+       bastion => 'operators' # bastion operators only
+   }
+
+When a user moves from staging to production access, their docker and
+developers group memberships are automatically removed on production
+servers.

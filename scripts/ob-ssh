@@ -11,7 +11,7 @@
 # Usage (on the bastion):
 #     ob-ssh [user@]backend [port]
 #
-# See doc/design/bastion-cert-vouching.rst.
+# See doc/references/bastion-cert-vouching.rst.
 #
 # Copyright (C) 2025 Linagora
 # Author: Xavier Guimard <xguimard@linagora.com>

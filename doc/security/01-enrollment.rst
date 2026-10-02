@@ -907,7 +907,7 @@ R7 - Enrôlement non autorisé (serveur malveillant)
        }
      }
 
-  **Ne pas ancrer la fin** (``^/device$``) — mais pas pour la raison qu'on croit : le formulaire d'approbation poste sur ``PORTAL_URL/device`` avec ``user_code`` et ``action`` dans le **corps**, donc ``REQUEST_URI`` vaut ``/device`` et une règle ancrée matche bien la décision. Ce qu'elle laisse passer, c'est la **page** ``/device?user_code=ABCD-EFGH`` — ``grant()`` compare à ``REQUEST_URI``, qui porte la query string — ainsi qu'un ``POST /device?user_code=…&action=approve`` fabriqué. Une règle non ancrée couvre les deux. Voir :ref:`llng-configuration-step-3b-restrict-device-and-the-ssh-ca-admin-routes-required` pour la règle jumelle sur les routes d'administration ``ssh-ca``.
+  **Ne pas ancrer la fin** (``^/device$``) — mais pas pour la raison qu'on croit : le formulaire d'approbation poste sur ``PORTAL_URL/device`` avec ``user_code`` et ``action`` dans le **corps**, donc ``REQUEST_URI`` vaut ``/device`` et une règle ancrée matche bien la décision. Ce qu'elle laisse passer, c'est la **page** ``/device?user_code=ABCD-EFGH`` — ``grant()`` compare à ``REQUEST_URI``, qui porte la query string — ainsi qu'un ``POST /device?user_code=…&action=approve`` fabriqué. Une règle non ancrée couvre les deux. Voir :ref:`llng-configuration-restrict-device-and-the-ssh-ca-admin-routes-required` pour la règle jumelle sur les routes d'administration ``ssh-ca``.
 
 - Activer les notifications lors des approbations
 

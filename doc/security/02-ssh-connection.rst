@@ -74,12 +74,19 @@ Flux complet
 1. Obtention du certificat (1x/an)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code:: bash
+L'utilisateur ouvre la page ``/ssh`` du portail LLNG, y colle sa clé
+publique et enregistre le certificat signé à côté de sa clé privée :
 
-   # Sur le poste client : obtenir un certificat signé par la CA LLNG
-   ob-ssh-cert --portal https://auth.example.com
+.. code:: text
+
+   # Sur le poste client : https://auth.example.com/ssh
    # → Certificat stocké dans ~/.ssh/id_ed25519-cert.pub (validité 1 an)
    # → La clé privée ~/.ssh/id_ed25519 ne change pas
+
+Sur un hôte où le paquet est installé et où aucun navigateur n'est
+disponible (poste d'administration, conteneur), ``ob-ssh-cert --portal
+https://auth.example.com`` obtient le même certificat en ligne de
+commande ; il n'est utilisé par aucun composant d'Open Bastion.
 
 .. _security-02-ssh-connection-2-connexion-ssh-via-bastion:
 
@@ -94,7 +101,7 @@ Flux complet
        participant Backend as Backend<br/>(TrustedCA + KRL + cert éphémère)
        participant LLNG as Portail LLNG
 
-       Note over Client: 1x/an : ob-ssh-cert<br/>→ certificat signé CA
+       Note over Client: 1x/an : page /ssh du portail<br/>→ certificat signé CA
 
        Client->>Bastion: 1. ssh dwho@bastion<br/>(présente certificat)
        Note over Bastion: 2. Vérifie signature CA<br/>Vérifie KRL (non révoqué)
@@ -257,7 +264,7 @@ Une durée **longue (1 an)** est acceptable car :
 2. **``/pam/authorize`` est vérifié à chaque connexion** : un certificat valide ne suffit pas
 3. **La KRL via ``/ssh/admin``** permet la révocation immédiate du certificat si nécessaire
 4. **``AuthorizedKeysFile none``** : les utilisateurs ne peuvent pas contourner en ajoutant leur clé dans ``~/.ssh/authorized_keys``
-5. **UX optimale** : l'utilisateur obtient son certificat une fois par an via ``ob-ssh-cert``
+5. **UX optimale** : l'utilisateur obtient son certificat une fois par an depuis la page ``/ssh`` du portail
 
 Workflow utilisateur
 ^^^^^^^^^^^^^^^^^^^^
@@ -268,7 +275,7 @@ Workflow utilisateur
    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
 
    # Une fois par an : renouveler le certificat via LLNG
-   ob-ssh-cert --portal https://auth.example.com
+   # → https://auth.example.com/ssh : y coller ~/.ssh/id_ed25519.pub
    # → ~/.ssh/id_ed25519-cert.pub mis à jour
    # → ssh-agent n'a pas besoin d'être rechargé
 
@@ -1238,7 +1245,7 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 
    Hors Mode E (modes « clé »), c'est techniquement possible et cela déplace le risque plutôt qu'il ne le réduit : une clé privée de longue durée réside alors sur le bastion, non bornée par un TTL de certificat et non révocable par le portail, et le rebond cesse d'être vouché (``allowed_bastions``, épinglage d'adresse source et TTL de voucher ne s'y appliquent plus). La traçabilité, elle, survit : un ``ssh`` lancé **depuis une session de bastion enregistrée** est capturé par l'enregistreur de pty — ce qui ne l'est pas, c'est un ``ssh -J bastion`` depuis le poste de travail (canal ``direct-tcpip``, cf. R-S25).
 
-   Les deux mesures conçues pour cette panne restent le **compte de service de secours** et l'**accès console hors-bande** ci-dessus. Voir :doc:`/offline-mode` pour la matrice complète de ce qui fonctionne hors ligne.
+   Les deux mesures conçues pour cette panne restent le **compte de service de secours** et l'**accès console hors-bande** ci-dessus. Voir :doc:`/offline-mode/index` pour la matrice complète de ce qui fonctionne hors ligne.
 
 **Remédiation infrastructure :**
 
@@ -1309,7 +1316,7 @@ R-S18 - Effacement des enregistrements de session par un utilisateur
 
 **Cadre — l'enregistreur est sur le bastion :** l'enregistrement se fait au **bastion**, point de passage obligé. Une session vers un backend transite par le pty du bastion ; **être root sur un backend ne permet donc ni d'échapper à l'enregistrement ni d'atteindre les fichiers** (qui sont sur le bastion, root-owned, hors d'atteinte d'un root de backend). Seul root **sur le bastion lui-même** (hôte d'audit, de confiance) pourrait altérer les traces.
 
-**Remédiation en place (PR #157, ``ob-record-sink``) :** le recording est streamé vers un **puits root activé par socket** ; le recorder n'écrit plus aucun fichier. Voir :doc:`/design/tamper-evident-session-recording`.
+**Remédiation en place (PR #157, ``ob-record-sink``) :** le recording est streamé vers un **puits root activé par socket** ; le recorder n'écrit plus aucun fichier. Voir :doc:`/references/tamper-evident-session-recording`.
 
 1. **Puits root ``ob-record-sink``** (socket-activé). Le recorder (uid utilisateur) streame le typescript via ``ob-record-connect`` ; le sink (root) écrit les fichiers. L'utilisateur enregistré est dérivé de ``SO_PEERCRED`` (vérifié par le noyau, jamais de l'en-tête).
 2. **Fichiers root-owned** : ``root:ob-sessions 0640`` dans une arborescence ``root:ob-sessions 0750``. L'utilisateur enregistré n'étant pas membre de ``ob-sessions``, il n'a **aucun** droit (lister/lire/``unlink``/tronquer) — c'est une frontière d'uid noyau (DAC).
@@ -1650,8 +1657,8 @@ CA SSH et certificats
 - ☐ ``TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub`` configuré sur bastion et backends
 - ☐ ``AuthorizedKeysFile none`` sur bastion et backends
 - ☐ ``ExposeAuthInfo yes`` dans sshd_config
-- ☐ Certificats émis pour tous les utilisateurs (validité 1 an)
-- ☐ ``ob-ssh-cert`` déployé sur les postes clients
+- ☐ Certificats émis pour tous les utilisateurs (validité 1 an), depuis la page ``/ssh`` du portail
+- ☐ ``ob-ssh-cert`` disponible sur les hôtes qui ont le paquet, pour les postes sans navigateur
 
 .. _security-02-ssh-connection-krl-key-revocation-list-1:
 

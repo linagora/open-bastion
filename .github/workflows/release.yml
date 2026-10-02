@@ -106,7 +106,8 @@ jobs:
             pkgconfig \
             systemd-rpm-macros \
             gnupg2 \
-            rpm-sign
+            rpm-sign \
+            python3-sphinx
 
       - name: Get version
         id: version
@@ -134,10 +135,16 @@ jobs:
           sed "s/@PROJECT_VERSION@/${VERSION}/g" \
             admin-builder/rpm/open-bastion-builder.spec.in \
             > ~/rpmbuild/SPECS/open-bastion-builder.spec
+          # ob-builder(1) is generated from doc/, and the spec installs it from
+          # the tarball: build it here, outside the tree that gets tarred.
+          sphinx-build -q -b man doc "$RUNNER_TEMP/man"
           # Tarball expected by the spec (Source0: %{name}-%{version}.tar.gz)
           tar czf ~/rpmbuild/SOURCES/open-bastion-builder-${VERSION}.tar.gz \
             --transform "s|^admin-builder|open-bastion-builder-${VERSION}|" \
-            admin-builder
+            admin-builder \
+            -C "$RUNNER_TEMP" \
+            --transform "s|^man/ob-builder.1|open-bastion-builder-${VERSION}/man/ob-builder.1|" \
+            man/ob-builder.1
           rpmbuild -bb ~/rpmbuild/SPECS/open-bastion-builder.spec
 
       - name: Move packages

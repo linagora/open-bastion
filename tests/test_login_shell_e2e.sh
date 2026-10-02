@@ -59,6 +59,7 @@ apt-get install -y -qq --no-install-recommends \
 
 # ── Build the NSS module and the launcher ────────────────────────────────────
 cmake -S /src -B /tmp/build -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_MAN=OFF -DBUILD_BUILDER=OFF \
     >/tmp/cmake.log 2>&1 || { tail -20 /tmp/cmake.log; exit 1; }
 cmake --build /tmp/build --target nss_openbastion ob-login-shell -j"$(nproc)" \
     >/tmp/build.log 2>&1 || { tail -30 /tmp/build.log; exit 1; }

@@ -47,7 +47,6 @@ usr/bin/ob-bastion-id
 usr/bin/ob-cert-request
 usr/bin/ob-record-connect
 
-usr/share/man/man1/ob-ssh-cert.1
 usr/share/man/man1/ob-ssh.1
 usr/share/man/man1/ob-scp.1
 usr/share/man/man1/ob-sftp.1
@@ -71,6 +70,11 @@ usr/share/man/man8/ob-sign-request.8
 usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
 usr/share/man/man8/ob-uninstall.8
+usr/share/man/man8/ob-ssh-cert.8
+usr/share/man/man8/ob-cache-admin.8
+usr/share/man/man8/ob-desktop-setup.8
+
+usr/share/man/man5/openbastion.conf.5
 
 # Deployed by `ob-bastion-setup --enable-audit-trace`.
 usr/share/open-bastion/audit/rules.d/open-bastion.rules

@@ -1,49 +1,58 @@
-Primary Audit Trace (auditd)
-============================
+Primary audit trace
+===================
 
-This document describes Open Bastion's optional **primary audit trace** based on the Linux kernel ``auditd`` subsystem. It is the second pillar of session traceability, complementary to the session recording covered in :doc:`Session Recording </session-recording>`.
+Session recording gives a faithful, replayable view of what a user did in
+their pty. It is not an independent trail: it covers only what happens
+inside that pty, it can be bypassed (``setsid``, ``at``, ``cron``,
+``systemd --user`` — the :doc:`containment hardening </hardening>` closes
+most of those paths), and a crash or a full disk can leave it partial.
 
-Rationale
----------
+The optional audit trace adds the kernel's own record. ``auditd`` logs the
+syscalls of every PAM-authenticated user, tagged with the audit user id
+(``auid``), which is set at login and survives ``setuid`` and deferred
+execution: a child started by ``at`` two hours later still points back to
+the original login. Recording answers "what did the user see and type?",
+auditd answers "what did the kernel run on behalf of this login?". You
+want both.
 
-Session recording (``ob-session-recorder``) gives you a faithful, replayable view of what a user did inside their pty: keystrokes, screen output, timing. This is invaluable for incident review — but it is **not** an independent audit trail:
+What it covers
+--------------
 
-- Recordings only cover what happens **inside the recorded pty**. Since 0.5.0 the files themselves are out of the user's reach — ``ob-record-sink`` runs as root, derives the user from ``SO_PEERCRED``, and writes ``/var/lib/open-bastion/sessions/<user>/`` as ``root:ob-sessions`` ``0750`` with ``0640`` files, so a recorded user cannot list, read, unlink or truncate any recording, including their own (#151). Tampering is not the gap; coverage is.
-- A determined user can attempt to bypass the pty entirely: ``setsid``, ``at``, ``cron``, jobs spawned through systemd ``--user``, daemons launched with ``nohup``. Containment (:ref:`Session Containment <session-recording-session-containment>` in PR1) closes most of these paths, but not all.
-- A coredump, a panic, or an out-of-disk event mid-session can leave a partial recording.
+- Every ``execve`` by a logged-in non-system user (``auid`` at least
+  1000), including programs started by ``at``, ``cron`` or
+  ``systemd --user``. The command line, working directory and credentials
+  are logged before the program runs.
 
-``auditd`` solves a different problem: it records **every syscall** of interest, at the kernel level, into an append-only log under ``/var/log/audit/``. Rules filter on ``auid`` (the audit user id, which is set at login by PAM and **does not change** across ``setuid``/``setgid`` transitions). This means:
+- Every outbound ``connect`` by such a user: reverse shells, back
+  connections, unusual destinations.
 
-- Even if a user spawns a child via ``at`` two hours later, the child's ``auid`` still points back to the original SSH login.
-- ``execve`` is logged with full ``argv``, working dir, and credentials, before the program even gets to run.
-- The audit log is owned by ``root:root`` (mode 0600 by default); the unprivileged user cannot tamper with it from inside their session.
+- Writes and attribute changes on the sensitive files (``/etc/passwd``,
+  ``/etc/shadow``, ``/etc/group``, ``/etc/gshadow``, ``/etc/sudoers`` and
+  ``/etc/sudoers.d/``, ``/etc/ssh/sshd_config`` and its drop-ins), on the
+  recordings directory and on ``/etc/open-bastion/`` — a user trying to
+  rewrite their own ``.typescript`` lands there.
 
-In short: recording answers *"what did the user see and type?"*, auditd answers *"what syscalls did the kernel actually execute on behalf of this auid?"*. You want both.
+What it does not cover
+----------------------
 
-Threat model
-------------
+- File contents, and keystrokes inside an already running program: the
+  rules record the syscall, not the data, which is what recording is for.
 
-What this trace **covers**:
+- Anything before login, and system processes (``auid`` under 1000 or
+  unset): the rules exclude them on purpose, or they would drown the
+  trail.
 
-- Every ``execve`` performed by a logged-in non-system user (auid ≥ 1000), including programs launched via ``at``, ``cron``, ``systemd --user``, or any process whose ancestry goes back to a PAM-authenticated login.
-- Every outbound ``connect`` syscall by such users (useful to detect exfiltration, reverse shells, or unusual back-connect targets).
-- Writes / attribute changes on sensitive files: ``/etc/passwd``, ``/etc/shadow``, ``/etc/group``, ``/etc/gshadow``, ``/etc/sudoers``, ``/etc/sudoers.d/``, ``/etc/ssh/sshd_config``, ``/etc/ssh/sshd_config.d/``.
-- Writes / attribute changes on the session recordings directory (``/var/lib/open-bastion/sessions/``) and on Open Bastion's own config directory (``/etc/open-bastion/``). This catches a user trying to delete or rewrite their own ``.typescript``.
-
-What this trace **does not** cover:
-
-- Contents of files read or written (auditd records the syscall, not the data).
-- Keystrokes inside an already-running program (use session recording for that).
-- Anything before login (those processes are tagged ``auid=4294967295`` / "unset" and explicitly excluded by our rules).
-- System processes (auid < 1000 — daemons, kernel threads). They are excluded on purpose, because they generate orders of magnitude more events and have no business showing up in a user audit trail.
-- Outbound UDP exfiltration via ``sendto``/``sendmsg`` on an unconnected socket (the canonical DNS-tunnel pattern). We trace ``connect`` only, by design — adding ``sendto``/``sendmsg`` would be very chatty by default. Operators who need broader coverage can add ``-S sendto -S sendmsg`` to ``/etc/audit/rules.d/open-bastion.rules`` and accept the volume.
-- Outbound traffic over ``io_uring`` (``io_uring_enter`` with ``IORING_OP_CONNECT`` / ``IORING_OP_SEND*``). Same trade-off as above.
-- Programs that use ``vfork``\ +exec patterns the kernel does not classify as ``execve``/``execveat`` (rare in practice). Both ``execve`` and ``execveat`` (syscall #322) are covered by our rules.
+- Outbound UDP (``sendto``/``sendmsg``, the DNS-tunnel pattern) and
+  traffic over ``io_uring``: only ``connect`` is traced, by design.
+  Operators who need the rest can add ``-S sendto -S sendmsg`` to the
+  rules and accept the volume.
 
 Activation
 ----------
 
-The audit trace is **opt-in** and **off by default**, consistent with Open Bastion's policy of not modifying global system state without an explicit admin decision (see also ``--enable-hardening`` in PR1).
+The audit trace is opt-in and off by default, like the hardening. It is
+the ``--enable-audit-trace`` option of
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`:
 
 .. code:: bash
 
@@ -51,78 +60,55 @@ The audit trace is **opt-in** and **off by default**, consistent with Open Basti
        --portal https://auth.example.com \
        --enable-audit-trace
 
-What ``--enable-audit-trace`` does, in order:
+What the step does, in order:
 
-1. Warns and skips the audit-trace step if the ``auditd`` package is not installed (Debian/Ubuntu: ``apt install auditd``; RHEL/Rocky/Fedora: ``dnf install audit``). The rest of ``ob-bastion-setup`` continues normally — the operator can install ``auditd`` later and re-run with ``--enable-audit-trace``. We declare ``auditd`` as a ``Recommends`` soft dependency so installing the bastion package alone never silently flips a global system knob.
-2. Asks the admin to confirm (skipped under ``--yes``).
-3. Enables and starts ``ob-audit-rotate.timer``, which rotates the audit log once a day (``ob-audit-rotate.service`` sends ``SIGUSR1``, auditd's "rotate now", to auditd's main process) so that ``num_logs=7`` gives a ~1-week retention window. This comes first: if the timer cannot be armed the step fails before auditd is touched. Up to 0.6 the rotation was a ``/etc/cron.daily/open-bastion-audit-rotate`` script; a host that still has it gets the timer on the same schedule, and the script is removed once the timer runs (see :ref:`Upgrading from the cron.daily script <audit-upgrading-from-cron>`).
-4. Installs ``/etc/audit/rules.d/open-bastion.rules`` (mode 0640 ``root:root``) from the template at ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``.
-5. Loads the new rules with ``augenrules --load`` and restarts the ``auditd`` service. **Note:** restarting auditd does *not* terminate active SSH sessions (unlike ``logind``), so this is safe to run on a live bastion.
+1. Warns and skips if the ``auditd`` package is not installed (``apt
+   install auditd``, or ``dnf install audit``); ``auditd`` is a
+   ``Recommends``, never a hard dependency, so installing Open Bastion
+   alone never flips a global system knob. Install it and re-run.
 
-**``/etc/audit/auditd.conf`` is deliberately NOT modified.** See :ref:`Tuning retention <audit-tuning-retention-manual-post-deployment-step>` below for the manual step.
+2. Asks for confirmation, unless ``--yes`` was given.
 
-Verification
-------------
+3. Enables ``ob-audit-rotate.timer``, the daily rotation, before anything
+   else: with ``num_logs=7`` it gives about a week of logs, and if the
+   timer cannot be armed the step stops before touching ``auditd``.
 
-After ``--enable-audit-trace`` succeeds, verify on the bastion:
+4. Installs ``/etc/audit/rules.d/open-bastion.rules`` from the template
+   under ``/usr/share/open-bastion/audit/rules.d/``.
+
+5. Loads the rules (``augenrules --load``) and restarts ``auditd``, which
+   does not disturb active SSH sessions.
+
+``/etc/audit/auditd.conf`` is deliberately left alone — a single
+admin-tunable file owned by the distribution's ``audit`` package, where a
+patch would turn the next package upgrade into a conffile prompt. Tuning
+it is a manual step, below.
+
+Verifying
+---------
 
 .. code:: bash
 
-   # 1. Rules loaded?
-   auditctl -l
-
-   # Expect lines like:
-   #   -a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=-1 -F key=ob-exec
-   #   -w /etc/passwd -p wa -k ob-passwd
-   #   ...
-
-   # 2. Recent execve events for any non-system user?
+   auditctl -l                      # rules loaded
    ausearch -k ob-exec -ts recent | head -40
+   ls -lh /var/log/audit/audit.log  # present and growing
+   systemctl status auditd          # running, enabled at boot
 
-   # 3. Audit log present and being written?
-   ls -lh /var/log/audit/audit.log
-
-   # 4. auditd running and enabled at boot?
-   systemctl status auditd
-
-For a more pointed test, log in as a non-system user and run any command:
+Then log in as a non-system user, run any command, and look for the
+record:
 
 .. code:: bash
 
-   # As root:
    ausearch -k ob-exec -x /usr/bin/whoami -ts today
 
-You should see at least one ``type=EXECVE`` record per ``whoami`` invocation made by an interactively logged-in user.
+There should be one ``type=EXECVE`` record per invocation.
 
-File lifecycle
---------------
+Retention
+---------
 
-Like the PR1 hardening drop-ins, the audit-trace files are **deployment artefacts**, not dpkg conffiles or rpm ``%config(noreplace)`` files. The distinction matters when you upgrade or remove the bastion package.
-
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| Path                                                                   | Owner            | Purpose                                                                  |
-+========================================================================+==================+==========================================================================+
-| ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``           | open-bastion pkg | Read-only template (shipped by package).                                 |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``/etc/audit/rules.d/open-bastion.rules``                              | deployment       | Live copy deployed by ``--enable-audit-trace``. Edit in place if needed. |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``ob-audit-rotate.timer`` / ``.service``                               | open-bastion pkg | Daily rotation. Shipped disabled; enabled by ``--enable-audit-trace``.   |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``/etc/systemd/system/ob-audit-rotate.timer.d/``                       | deployment       | Optional schedule drop-in (``systemctl edit ob-audit-rotate.timer``).    |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-| ``/etc/audit/auditd.conf``                                             | audit pkg        | Admin-tunable. **NOT modified by Open Bastion.**                         |
-+------------------------------------------------------------------------+------------------+--------------------------------------------------------------------------+
-
-We deliberately do **not** modify ``/etc/audit/auditd.conf`` because it is a single admin-tunable file owned by the ``audit`` distro package. Drop-in mechanisms (``rules.d/``, a systemd timer) are used where they exist; the single admin-tunable file ``auditd.conf`` is left untouched. If we patched it in place, any ``dpkg``/``rpm`` conffile prompt on the next ``audit`` package upgrade would confront the admin with unexpected diffs.
-
-.. _audit-tuning-retention-manual-post-deployment-step:
-
-Tuning retention (manual post-deployment step)
-----------------------------------------------
-
-**This is a required manual step** after running ``--enable-audit-trace``. Open Bastion does not modify ``/etc/audit/auditd.conf``. The distribution defaults (often ``num_logs=5``, ``max_log_file=8``) give only a few days of retention on a busy bastion.
-
-**Recommended: ~1 week local retention**
+This is a required manual step: the distribution's defaults (often
+``num_logs=5``, ``max_log_file=8``) keep only a few days on a busy
+bastion. For about a week:
 
 .. code:: bash
 
@@ -133,33 +119,26 @@ Tuning retention (manual post-deployment step)
      /etc/audit/auditd.conf
    sudo systemctl restart auditd
 
-Or edit the file directly:
+Further tuning, in the same file:
 
-.. code:: bash
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
 
-   sudo vim /etc/audit/auditd.conf
+   * - Want
+     - Setting
+   * - A longer history
+     - Raise ``num_logs`` (``num_logs = 30``).
+   * - Bigger files
+     - Raise ``max_log_file``, in MB.
+   * - A warning before the disk fills
+     - ``space_left = 500`` with ``space_left_action = SYSLOG``.
+   * - Refuse to go on when full
+     - ``disk_full_action = HALT`` (paranoid; the default is
+       ``SUSPEND``).
 
-To further tune:
-
-+-------------------+-------------------------------------------------------------------------------------------------------------------+
-| Want              | Edit ``/etc/audit/auditd.conf``                                                                                   |
-+===================+===================================================================================================================+
-| Longer history    | Raise ``num_logs`` (e.g. ``num_logs = 30``).                                                                      |
-+-------------------+-------------------------------------------------------------------------------------------------------------------+
-| Bigger files      | Raise ``max_log_file`` (in MB).                                                                                   |
-+-------------------+-------------------------------------------------------------------------------------------------------------------+
-| Disk-full safety  | Set ``space_left = 500`` and ``space_left_action = SYSLOG`` (warns to syslog when free space drops below 500 MB). |
-+-------------------+-------------------------------------------------------------------------------------------------------------------+
-| Stop on disk full | ``disk_full_action = HALT`` (paranoid; default is ``SUSPEND``).                                                   |
-+-------------------+-------------------------------------------------------------------------------------------------------------------+
-
-After editing, run:
-
-.. code:: bash
-
-   sudo systemctl restart auditd
-
-You may also want to adjust the rotation frequency. By default we rotate daily; if your event volume is low you can rotate weekly, in which case ``num_logs = 7`` gives a ~7-week window instead:
+Rotation is daily; on a quiet host, weekly gives a seven-times-longer
+window for the same ``num_logs``:
 
 .. code:: bash
 
@@ -168,63 +147,89 @@ You may also want to adjust the rotation frequency. By default we rotate daily; 
    # OnCalendar=
    # OnCalendar=weekly
 
-The empty ``OnCalendar=`` first is required: without it the drop-in adds a weekly trigger to the daily one instead of replacing it.
+The empty ``OnCalendar=`` is required: without it the drop-in adds a
+weekly trigger to the daily one instead of replacing it.
 
-.. _audit-upgrading-from-cron:
+Files
+-----
+
+.. list-table::
+   :header-rows: 1
+   :widths: 44 20 36
+
+   * - Path
+     - Comes from
+     - Notes
+   * - ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``
+     - the package
+     - Read-only template; do not edit, it is replaced on upgrade.
+   * - ``/etc/audit/rules.d/open-bastion.rules``
+     - the audit-trace step
+     - The live copy. Edit this one if the rules must change.
+   * - ``ob-audit-rotate.timer`` and ``.service``
+     - the package
+     - Shipped disabled, enabled by the step; schedule overridable with
+       ``systemctl edit``.
+   * - ``/etc/audit/auditd.conf``
+     - the ``audit`` package
+     - Yours to tune; Open Bastion never writes it.
+
+As with the hardening drop-ins, the deployed copy and the timer's
+enablement are deployment artefacts, not package conffiles: a purge does
+not remove them, and an upgrade does not overwrite them.
 
 Upgrading from the cron.daily script
 ------------------------------------
 
-Up to 0.6 the rotation was ``/etc/cron.daily/open-bastion-audit-rotate``, a copy of a template the package shipped. The template is gone; the copy keeps working after the upgrade, so nothing stops. ``ob-post-upgrade`` (or a new ``ob-bastion-setup --enable-audit-trace`` run) replaces it with ``ob-audit-rotate.timer``: daily, or weekly when the script had been moved to ``/etc/cron.weekly/`` as this page used to suggest. The script is removed only once the timer is enabled and active. A script that no longer carries its ``Installed by `ob-bastion-setup --enable-audit-trace``` line is treated as yours: it is left in place and a warning says so, and until you delete it the log rotates twice a day.
+Up to 0.6 the rotation was a ``/etc/cron.daily/open-bastion-audit-rotate``
+script that the package had copied there, and that copy keeps working
+after an upgrade. :doc:`ob-post-upgrade(8) </references/man/ob-post-upgrade>`
+(or a new ``--enable-audit-trace`` run) replaces it with the timer, at the
+same daily or weekly schedule, and
+deletes the script once the timer is active. A script without its
+``Installed by ob-bastion-setup`` marker line is treated as yours and left
+in place, with a warning: until it is removed, the log rotates twice.
 
 Forwarding to a remote collector
 --------------------------------
 
-A bastion that can be compromised should not store its only audit trail locally. The recommended next step (out of scope for this release) is to forward audit events to an external SIEM:
-
-- The ``audispd`` plugin framework is shipped by the ``audit`` package itself.
-- The ``audisp-syslog`` plugin (in the ``audisp-plugins`` package on Debian) forwards every audit record to syslog, from where rsyslog or systemd-journal-upload can ship them off-host over TLS.
-- For Splunk / Elastic / Wazuh, vendor-specific collectors hook into the same audispd socket.
-
-Open Bastion does **not** install or configure any forwarder. You need to make a deliberate choice about *where* the logs go and *how* they are protected in transit, both of which are deployment-specific.
+A bastion that can be compromised should not keep its only audit trail
+locally. The ``audit`` package ships the ``audispd`` plugin framework:
+``audisp-syslog`` (in ``audisp-plugins`` on Debian) forwards every record
+to syslog, from where rsyslog or ``systemd-journal-upload`` can ship it
+off-host, and vendor collectors for Splunk, Elastic or Wazuh hook into the
+same socket. Open Bastion installs and configures none of this: where the
+logs go, and how they are protected in transit, is a deployment decision.
 
 Disabling
 ---------
 
-Two ways:
-
 .. code:: bash
 
-   # 1. Runtime (until next auditd restart): drop all rules.
-   auditctl -D
+   auditctl -D                        # until the next auditd restart
 
-   # 2. Permanent: remove the drop-in and reload.
    rm /etc/audit/rules.d/open-bastion.rules
    systemctl disable --now ob-audit-rotate.timer
    augenrules --load
    systemctl restart auditd
 
-If you previously tuned ``/etc/audit/auditd.conf`` manually (as recommended in the Tuning section), those changes are yours to revert; they are harmless even without our rules.
+Retention changes you made to ``auditd.conf`` are yours to revert, and are
+harmless without the rules.
 
-Volume and saturation
----------------------
+Volume
+------
 
-``execve`` + ``connect`` audit rules generate a lot of events on a busy bastion. Plan accordingly:
-
-- A typical interactive shell session emits 50–500 ``execve`` events.
-- A long-running rsync or ansible run can emit thousands of ``connect`` events.
-- ``/var/log/audit/audit.log`` grows fast. With the defaults (``max_log_file=50``, ``num_logs=7``) the on-disk footprint caps at ~350 MB. Keep an eye on ``/var/log`` free space.
-
-If saturation becomes an issue:
-
-- Tune ``space_left`` / ``space_left_action`` to alert before disk fills.
-- Drop the ``connect`` rule if you don't actually need network-level forensics on this bastion.
-- Increase ``max_log_file`` and decrease ``num_logs`` for the same total footprint with fewer rotations.
-- Forward to a remote collector and shrink local retention.
+``execve`` and ``connect`` produce a lot of events on a busy bastion: an
+interactive shell emits 50 to 500 ``execve``, a long ``rsync`` or Ansible
+run thousands of ``connect``. With the recommended settings the audit log
+caps around 350 MB; watch the free space under ``/var/log``. If that is
+too much, drop the ``connect`` rule, alert earlier with ``space_left``,
+trade ``max_log_file`` against ``num_logs``, or forward off-host and keep
+less locally.
 
 See also
 --------
 
-- :doc:`Session Recording </session-recording>` — pty-level recording, the other half of the traceability story.
+- :doc:`/ssh-session-recording` — the pty-level recording, the other half
+  of the traceability story.
 - ``auditd.conf(5)``, ``auditctl(8)``, ``ausearch(8)``, ``aureport(8)``.
-- The shipped template: ``/usr/share/open-bastion/audit/rules.d/open-bastion.rules``.
