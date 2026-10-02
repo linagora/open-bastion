@@ -80,6 +80,105 @@ Two caches are involved, and they must be sized together:
   is not a local setting — the portal sends it in the ``/pam/authorize``
   response, from LLNG's ``pamAccessOfflineTtl``, with a 24-hour fallback.
 
+The NSS cache
+-------------
+
+``libnss_openbastion`` answers lookups from the file cache under
+``/var/cache/nss_llng``, whose lifetime is ``cache_ttl`` in
+``/etc/open-bastion/nss_openbastion.conf`` (default 300 seconds). The
+module never serves stale data: an entry older than ``cache_ttl`` is
+deleted the moment it is read rather than returned, and a transient
+portal failure is answered with ``NSS_STATUS_UNAVAIL``, never from the
+expired entry. On a host with no ``nscd`` — the default — that TTL is
+the whole of the outage buffer, and it ends in a cliff: about
+``cache_ttl`` after the last successful lookup, ``getent passwd <user>``
+returns nothing and ``sshd`` can no longer map the account.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 24 54
+
+   * - ``cache_ttl``
+     - Outage buffer
+     - Deprovisioning lag
+   * - ``300`` (default)
+     - about 5 minutes
+     - A removed user stops resolving within about 5 minutes.
+   * - ``3600``
+     - about 1 hour
+     - Up to 1 hour.
+   * - ``86400`` (maximum)
+     - about 24 hours
+     - Up to 24 hours.
+
+.. code:: bash
+
+   sed -i 's/^cache_ttl = .*/cache_ttl = 3600/' \
+       /etc/open-bastion/nss_openbastion.conf
+
+Raising it is safe with respect to revocation, which does not depend on
+this cache: PAM re-checks the authorization at each login, and the SSH
+CA KRL revokes certificates independently. A stale passwd entry lets a
+name resolve; it does not grant access. What a longer TTL delays is how
+quickly a user deprovisioned in LLNG stops appearing in ``getent
+passwd`` — everything this host does itself (user creation, group
+membership changes) invalidates that user's entry at once.
+
+Who refreshes it
+~~~~~~~~~~~~~~~~
+
+Only root can populate the cache: the module authenticates to the portal
+with the server token, which is root-only, so an unprivileged process
+can never reach the portal and reads the file cache alone. Root
+processes refill it as a side effect of their own lookups — ``sshd`` at
+each login, ``sudo``, ``cron``, ``systemd --user`` session setup.
+
+Hence a nuisance that appears with the portal perfectly healthy: in a
+session left idle longer than ``cache_ttl``, once no root-side lookup
+has refreshed the entry, ``ls -l`` shows numeric uids, ``whoami`` and
+``id`` fail, and an outgoing ``ssh`` or ``scp`` refuses to start with
+``You don't exist, go away!``. Anything a root process does — a new SSH
+session, an ``su``, a ``sudo``, a cron job for that user — repairs it at
+once; authentication and authorization are unaffected. Raise
+``cache_ttl`` so an idle session outlives it, or keep a root-side lookup
+ticking. Keeping ``nscd`` installed does not help: its entries expire
+the same way and it repopulates through this same module. Removing the
+root-only constraint would take a privileged refresher, which does not
+exist yet.
+
+Lookups for unknown names
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A name the portal does not know is cached in memory only, per process:
+the file cache is written on success only, so that an unauthenticated
+caller — ``sshd`` resolves the login name before authenticating — cannot
+fill ``/var/cache/nss_llng`` with entries. Every SSH attempt with an
+unknown name therefore costs one ``/pam/userinfo`` request, and since
+``sshd`` forks per connection, a connection flood is a request flood.
+Bound it where connection floods are bounded, not in the resolver:
+``MaxStartups`` in ``sshd_config``, and fail2ban or CrowdSec watching
+``sshd``.
+
+SELinux
+~~~~~~~
+
+The cache is written from the calling process's domain — ``sshd_t``,
+``sudo_t``, ``crond_t`` — because an NSS module runs inside whatever
+resolves the user. On a host with SELinux in ``enforcing`` mode the
+stock policy may not allow that, and a refused write is silent: the
+module serves the lookup from the portal and the cache simply never
+populates. Check before deploying:
+
+.. code:: bash
+
+   getenforce
+   ls -la /var/cache/nss_llng/                 # populated after a login?
+   ausearch -m avc -ts recent | grep nss_llng
+
+Relabelling to an existing type is not a solution — no stock type is
+writable by all those domains — and no policy module ships yet, so an
+enforcing host may simply keep resolving from the portal every time.
+
 A personal key on the bastion, as a fallback?
 ---------------------------------------------
 

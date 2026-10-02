@@ -126,6 +126,47 @@ logged. Consequences:
 for sshd variants that do propagate the information, and is required
 for :doc:`Service accounts </service-accounts>` fingerprint validation.
 
+Rejections
+~~~~~~~~~~
+
+A refused key is logged with its reason; see them with
+``journalctl -u sshd | grep "SSH key policy"``:
+
+- "RSA keys are not allowed by policy", and the same for Ed25519, ECDSA,
+  FIDO2/Security and DSA keys: the type is excluded;
+- "RSA key size below minimum required", or the ECDSA equivalent: the
+  key is smaller than the configured minimum;
+- "DSA keys are not allowed by policy (deprecated)": DSA is off unless
+  explicitly allowed;
+- "cannot identify the key presented by user ...": the host still runs
+  the pre-v1 ``ob-ssh-principals`` helper — re-run the setup script.
+
+Requiring a fingerprint at all
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``fingerprint_required`` is separate from the policy above: the policy
+says which keys are acceptable, this says whether a session with no
+identified key may proceed. Default: ``false``, and
+``ssh_fingerprint_required`` is an alias. Set it on hosts in a
+certificate or SSH-key mode; leave it off in the token modes, where
+there is never a fingerprint and every login would be denied.
+
+It matters more than a hardening knob usually would. The fingerprint
+reaches the portal through the spool the ``ob-ssh-principals`` helper
+writes; if that spool disappears — a ``tmpfiles.d`` entry lost across an
+upgrade, a helper that stopped running — the module calls
+``/pam/authorize`` without it, the plugin treats the field as optional,
+and the binding silently stops existing. With
+``fingerprint_required = true`` the session is refused at login instead,
+with an audited reason. The residual scores of R-S3 and R-S15 in
+:doc:`/security/index` assume the binding holds, which is why the
+homologation dossier carries the setting as condition of use CE09
+(:doc:`/security/08-dossier-homologation`). From plugin 0.6.0 the portal
+gains the matching half — ``pamAccessRequireFingerprint``, and a
+15-minute cap on unbound vouchers — which turns the same drift into hop
+failures a quarter of an hour into a session: visible, but much further
+from the cause.
+
 .. _security-cache-brute-force-protection:
 
 Cache brute-force protection
