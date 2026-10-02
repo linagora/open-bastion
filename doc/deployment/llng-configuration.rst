@@ -226,8 +226,8 @@ Server groups allow different authorization rules for different server categorie
 
 .. _llng-configuration-configure-in-lemonldap-ngini:
 
-Configure in lemonldap-ng.ini
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Configure in ``lemonldap-ng.ini``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In ``/etc/lemonldap-ng/lemonldap-ng.ini``, section ``[portal]``:
 
@@ -334,6 +334,8 @@ Security considerations
 - **Audit trail**: All group modifications are logged with event type ``GROUP_SYNC``
 - **Offline behavior**: Group sync uses cached group information when LLNG is unreachable
 - **File protection**: Group modifications use system tools (``groupadd``, ``gpasswd``) which handle ``/etc/group`` and ``/etc/gshadow`` atomically
+
+.. _local-whitelist-defense-in-depth:
 
 Local whitelist (defense-in-depth)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
