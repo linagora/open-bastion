@@ -2,9 +2,9 @@ Offline mode
 ============
 
 The LLNG portal is not always reachable. This page says what keeps working
-while it is down, and how the two server-side caches behind that answer are
-sized. The credentials a desktop login keeps for the same situation have
-their own page: :doc:`Cache administration </offline-mode/cache>`.
+while it is down, and how the caches behind that answer are sized. The
+credential cache a password is verified against during an outage has its
+own page: :doc:`Cache administration </offline-mode/cache>`.
 
 What works offline, and what needs the portal
 ---------------------------------------------

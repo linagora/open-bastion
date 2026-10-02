@@ -70,7 +70,8 @@ Installation
 Quick setup
 ~~~~~~~~~~~
 
-The ``ob-desktop-setup`` script automates the installation process:
+The :doc:`ob-desktop-setup(8) </references/man/ob-desktop-setup>` script
+automates the installation process:
 
 .. code:: bash
 
@@ -412,7 +413,7 @@ When using offline mode (cached credentials), 2FA is **bypassed** because:
 Offline mode
 ------------
 
-When the LLNG server is unreachable, the greeter can fall back to offline authentication using cached credentials. See :doc:`/offline-mode` for details.
+When the LLNG server is unreachable, the greeter can fall back to offline authentication using cached credentials. See :doc:`/offline-mode/index` for details.
 
 Screen unlock token refresh
 ---------------------------

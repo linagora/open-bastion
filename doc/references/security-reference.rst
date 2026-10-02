@@ -818,7 +818,8 @@ Operational considerations
 Administrative controls
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``ob-cache-admin`` tool provides secure cache management:
+The :doc:`ob-cache-admin(8) </references/man/ob-cache-admin>` tool provides
+secure cache management:
 
 .. code:: bash
 

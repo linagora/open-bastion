@@ -31,13 +31,13 @@ If you administer Open Bastion or plan to, read these in order:
   installation, and supported configuration methods (Ansible based,
   self-extracting installers or manual).
 
-* :doc:`/security-scenarios/index` for the five security scenarios — what a host accepts,
-  what ``sudo`` asks for — and how one is chosen.
+* :doc:`/security-scenarios/index` for the five security scenarios — what
+  a host accepts, what ``sudo`` asks for — and how one is chosen.
 
 * :doc:`Permissions </permissions>` and :doc:`/service-accounts` for
   who may do what.
 
-* :doc:`/offline-mode` for what survives a portal outage.
+* :doc:`/offline-mode/index` for what survives a portal outage.
 
 * :doc:`/ssh-session-recording` and :doc:`/audit` for what is traced.
 
@@ -78,8 +78,7 @@ formal analysis of the maximum security target.
    Security scenarios <security-scenarios/index>
    permissions
    service-accounts
-   offline-mode
-   offline-cache-admin
+   offline-mode/index
    hardening
    security
    ssh-session-recording

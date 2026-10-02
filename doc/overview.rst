@@ -67,7 +67,7 @@ Features
 Beyond its primary functionality —centralizing SSH and ``sudo`` access
 via OIDC— Open Bastion is feature rich. It provides:
 
-* :doc:`offline-mode`: Encrypted authorization cache keeps SSH key
+* :doc:`offline-mode/index`: Encrypted authorization cache keeps SSH key
   authentication working when LLNG is unavailable
 
 * User accounts and group resolution from LLNG via OIDC

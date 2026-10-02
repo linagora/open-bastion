@@ -28,12 +28,14 @@ install the package:
          sudo gpg --dearmor -o /etc/apt/keyrings/open-bastion.gpg
    
    DISTRO=trixie
-   echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] https://linagora.github.io/open-bastion ${DISTRO} main" | sudo tee /etc/apt/sources.list.d/open-bastion.list
+   echo "deb [signed-by=/etc/apt/keyrings/open-bastion.gpg]" \
+     "https://linagora.github.io/open-bastion ${DISTRO} main" | \
+     sudo tee /etc/apt/sources.list.d/open-bastion.list
    
    sudo apt update
    sudo apt install open-bastion
 
-Make sure to adapt to your distribution: Packages are provided for
+Make sure to adapt to your distribution: packages are provided for
 Debian trixie, bookworm and Ubuntu noble.
 
 Rocky Linux / RHEL (DNF)
@@ -81,8 +83,8 @@ Install from sources
    cmake --build build -- install
 
 Note the use of ``CMAKE_INSTALL_PREFIX=/usr`` rather than taking CMake's
-``/usr/local`` default: Paths written into the generated ``sshd`` and PAM
-configuration are absolute and hard-coded.
+``/usr/local`` default: paths written into the generated ``sshd`` and
+PAM configuration are absolute and hard-coded.
 
 .. _mandatory-lemonldap-ng-plugins:
 
@@ -108,9 +110,9 @@ First, register Linagora's plugins store, then install the plugins:
       https://linagora.github.io/lemonldap-ng-plugins/
 
    sudo lemonldap-ng-store install oidc-device-authorization \
-				   oidc-device-organization \
-				   pam-access \
-                                   ssh-ca
+        oidc-device-organization \
+        pam-access \
+        ssh-ca
 
 With LLNG ≥ 2.24.0, the ``Autoloader`` plugin is enabled by default and
 each plugin loads as soon as its activation key
