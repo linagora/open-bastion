@@ -1,3 +1,5 @@
+:orphan:
+
 Desktop SSO with Open Bastion
 =============================
 

@@ -142,7 +142,7 @@ jobs:
           tar czf ~/rpmbuild/SOURCES/open-bastion-builder-${VERSION}.tar.gz \
             --transform "s|^admin-builder|open-bastion-builder-${VERSION}|" \
             admin-builder \
-            -C "$RUNNER_TEMP/man" \
+            -C "$RUNNER_TEMP" \
             --transform "s|^man/ob-builder.1|open-bastion-builder-${VERSION}/man/ob-builder.1|" \
             man/ob-builder.1
           rpmbuild -bb ~/rpmbuild/SPECS/open-bastion-builder.spec

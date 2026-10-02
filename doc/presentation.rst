@@ -1,3 +1,5 @@
+:orphan:
+
 .. raw:: html
 
    <!-- column_layout: [1, 2, 1] -->

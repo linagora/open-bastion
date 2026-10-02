@@ -54,14 +54,14 @@ then deploy:
 For the underlying concepts and per-step manual configuration, see
 [Security scenarios](doc/security-scenarios/index.rst), the
 [Configuration Reference](doc/references/configuration.rst), and the
-[Admin Guide](doc/admin-guide.rst).
+[Deployment guide](doc/deployment/index.rst).
 
 ## How it works
 
 Each server is first **enrolled** by an administrator — installing the package and
 registering the host with the SSO (`ob-enroll`, or the generated `ob-builder`
 artefacts), which is also what assigns its server group. See the
-[Admin Guide](doc/admin-guide.rst) (or the [quick-starts](doc/index.rst#start-here))
+[manual configuration guide](doc/deployment/manual-configuration.rst) (or the [quick-starts](doc/index.rst#start-here))
 for the enrollment step. Once enrolled:
 
 1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
@@ -190,7 +190,7 @@ them pointing at files that are not there.
 
 The full, theme-organized index is in **[doc/index.rst](doc/index.rst)**. Highlights:
 
-- **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/deployment/self-extracting-installer.rst) / [Ansible](doc/deployment/ansible-deployment.rst) quick-starts · [Admin guide](doc/admin-guide.rst)
+- **Get started** — [Docker demo](quick-start/README.md) · [Shell](doc/deployment/self-extracting-installer.rst) / [Ansible](doc/deployment/ansible-deployment.rst) quick-starts · [Deployment guide](doc/deployment/index.rst)
 - **Connections & architecture** — [Bastion architecture](doc/references/bastion-architecture.rst) · [Security scenarios](doc/security-scenarios/index.rst) · [LLNG configuration](doc/deployment/llng-configuration.rst)
 - **Access & permissions** — [Access & Permissions](doc/permissions.rst) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.rst)
 - **Recording & audit** — [Session recording](doc/ssh-session-recording.rst) · [Audit trace](doc/audit.rst)
