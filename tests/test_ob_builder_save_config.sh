@@ -209,7 +209,11 @@ test_defaults_written() {
 test_secret_left_out() {
     local cfg="$TEST_TMPDIR/nosecret.yml" ok=true out
     out=$( set_rich_state; SAVE_CONFIG_SECRET=0; validate_inputs >/dev/null 2>&1; save_config "$cfg" 2>&1 )
-    grep -q 's3' "$cfg" && { ok=false; echo "  secret written"; }
+    # Not `grep 's3'`: the header carries the config path, and mktemp's random
+    # suffix can contain those two characters, which failed the suite at random.
+    # A fragment with a quote keeps the value-level check: no path holds one.
+    grep -q '^embedded_client_secret:' "$cfg" && { ok=false; echo "  secret written"; }
+    grep -qF 's3"cr' "$cfg" && { ok=false; echo "  secret value written"; }
     grep -q '^# embedded_client_secret: ""$' "$cfg" || { ok=false; echo "  no placeholder"; }
     grep -q 'left out' <<<"$out" || { ok=false; echo "  no warning"; }
     [ "$(stat -c %a "$cfg")" = "644" ] || { ok=false; echo "  mode not 644"; }
