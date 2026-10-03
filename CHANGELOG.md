@@ -55,7 +55,11 @@ here.
   included, as a YAML that `--config` replays; the questionnaire offers it as
   its last question (#311). An embedded `client_secret` is left out unless the
   admin agrees (the file is then 0600). The config format gains `insecure` and
-  `sign_with`, and `target_role` takes several roles (`"bastion,backend"`).
+  `sign_with`, and `target_role` takes several roles (`"bastion,backend"`). A
+  path typed at the questionnaire that already exists is only reused after
+  confirmation, and replacing one is announced: the saved file is the one
+  documented to be completed by hand. A path that cannot be confirmed
+  (non-interactive run) declines the save instead of failing or looping.
 
 ### Changed
 

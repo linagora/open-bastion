@@ -326,6 +326,7 @@ test_target_role_list() {
 test_questionnaire_offer() {
     local got
     got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=embedded
+           cd "$TEST_TMPDIR"   # the default path is relative to the cwd
            set_answers "" "" "y"   # save: yes, default path, include the secret
            collect_save_config_interactive >/dev/null 2>&1
            printf '%s|%s|%s' "$SAVE_CONFIG" "$SAVE_CONFIG_SECRET" "$(answers_left)" )
@@ -358,10 +359,21 @@ test_cli_refuses_overwrite() {
 }
 
 test_dry_run_writes_nothing() {
-    local cfg="$TEST_TMPDIR/dry.yml"
+    local cfg="$TEST_TMPDIR/dry.yml" existing="$TEST_TMPDIR/dry-existing.yml" out
     ( set_rich_state; DRY_RUN=1; validate_inputs >/dev/null 2>&1; save_config "$cfg" >/dev/null 2>&1 )
     [ ! -e "$cfg" ] && test_pass "--dry-run: the config is not written" \
                     || test_fail "--dry-run wrote the config"
+
+    # An existing target is reported as replaced, and nothing is claimed about
+    # a write that does not happen.
+    printf 'deployment_slug: stale-marker\n' > "$existing"
+    out=$( set_rich_state; DRY_RUN=1; validate_inputs >/dev/null 2>&1; save_config "$existing" 2>&1 )
+    if grep -q 'Would replace the existing config' <<<"$out" \
+       && ! grep -q 'not carried over' <<<"$out" && grep -q 'stale-marker' "$existing"; then
+        test_pass "--dry-run: an existing config is reported as replaced, not touched"
+    else
+        test_fail "--dry-run reported a write it did not do" "$out"
+    fi
 }
 
 test_replay_command_in_header() {
@@ -457,6 +469,75 @@ test_directory_path_refused() {
                                 || test_fail "questionnaire directory path gave '$got'"
 }
 
+# The default path is the same on every run for a given slug, and it names the
+# file the README tells the operator to complete by hand: it must not be
+# replaced on Enter alone.
+test_questionnaire_overwrite_guard() {
+    local existing="$TEST_TMPDIR/hand.yml" got
+    printf 'deployment_slug: hand\n# embedded_client_secret: fill me\n' > "$existing"
+    got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=prompt
+           set_answers "y" "$existing" "n" "$TEST_TMPDIR/other.yml"
+           collect_save_config_interactive >/dev/null 2>&1
+           printf '%s|%s|%s' "$SAVE_CONFIG" "$(answers_left)" "$(tr '\n' '/' < "$existing")" )
+    [ "$got" = "$TEST_TMPDIR/other.yml|0|deployment_slug: hand/# embedded_client_secret: fill me/" ] \
+        && test_pass "questionnaire: refusing the overwrite re-asks the path, file untouched" \
+        || test_fail "questionnaire overwrite refusal gave '$got'"
+
+    got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=prompt
+           set_answers "y" "$existing" "y"
+           collect_save_config_interactive >/dev/null 2>&1
+           printf '%s|%s|%s' "$SAVE_CONFIG" "$SAVE_CONFIG_SECRET" "$(answers_left)" )
+    [ "$got" = "$existing|0|0" ] \
+        && test_pass "questionnaire: accepting the overwrite keeps the path" \
+        || test_fail "questionnaire overwrite accept gave '$got'"
+
+    # ask_yesno answers its default without asking when non-interactive: the
+    # probe must not spin on the re-ask, nor keep a path it could not confirm.
+    got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=prompt
+           cd "$TEST_TMPDIR"; printf 'deployment_slug: keepme\n' > ./ob-builder-lab.yml
+           export OB_BUILDER_NON_INTERACTIVE=1
+           set_answers
+           collect_save_config_interactive >/dev/null 2>&1
+           printf '%s|%s|%s' "$SAVE_CONFIG" "$(cat "$ANS_IDX")" "$(cat ./ob-builder-lab.yml)" )
+    [ "$got" = "|0|deployment_slug: keepme" ] \
+        && test_pass "questionnaire: an existing default path is not saved non-interactively" \
+        || test_fail "non-interactive overwrite guard gave '$got'"
+
+    # The directory branch is re-asked too, so it needs the same way out: with
+    # no input to consume it would spin on the default path forever.
+    got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=prompt
+           cd "$TEST_TMPDIR"; rm -f ./ob-builder-lab.yml; mkdir ./ob-builder-lab.yml
+           export OB_BUILDER_NON_INTERACTIVE=1
+           set_answers
+           collect_save_config_interactive >/dev/null 2>&1
+           printf '%s|%s' "$SAVE_CONFIG" "$(cat "$ANS_IDX")" )
+    [ "$got" = "|0" ] \
+        && test_pass "questionnaire: a directory default path is not saved non-interactively" \
+        || test_fail "non-interactive directory guard gave '$got'"
+
+    # Refusing the overwrite and then pressing Enter skips the save: the second
+    # path prompt has no default, so the operator is not trapped.
+    got=$( reset_state; DEPLOYMENT_SLUG=lab; CLIENT_SECRET_MODE=prompt
+           set_answers "y" "$existing" "n" ""
+           collect_save_config_interactive >/dev/null 2>&1
+           printf '%s|%s|%s' "$SAVE_CONFIG" "$(answers_left)" "$(tr '\n' '/' < "$existing")" )
+    [ "$got" = "|0|deployment_slug: hand/# embedded_client_secret: fill me/" ] \
+        && test_pass "questionnaire: an empty answer after a refusal skips the save" \
+        || test_fail "no way out of the re-ask gave '$got'"
+}
+
+# Replacing a file the operator may have completed by hand is said out loud.
+test_overwrite_warns_about_hand_edits() {
+    local cfg="$TEST_TMPDIR/stale.yml" out
+    printf 'deployment_slug: stale-marker\n' > "$cfg"
+    out=$( set_rich_state; validate_inputs >/dev/null 2>&1; save_config "$cfg" 2>&1 )
+    if grep -q 'already exists' <<<"$out" && ! grep -q 'stale-marker' "$cfg"; then
+        test_pass "save_config warns before replacing an existing file"
+    else
+        test_fail "replacing an existing config was silent (or not replaced)" "$out"
+    fi
+}
+
 echo "Parsers under test: $PARSERS"
 [ -n "$PUBKEY" ] || echo "SKIP: ssh-keygen missing, round trip runs without a public key"
 
@@ -481,6 +562,8 @@ test_sign_with_checked_early
 test_null_string_round_trip
 test_keyring_saved_absolute
 test_directory_path_refused
+test_questionnaire_overwrite_guard
+test_overwrite_warns_about_hand_edits
 
 echo ""
 echo "=========================================="

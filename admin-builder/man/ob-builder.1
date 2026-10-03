@@ -64,7 +64,15 @@ An embedded client_secret is left out, as a comment to fill in, unless the
 questionnaire is told to write it; the file is then created mode 0600. Service
 accounts entered interactively carry no public key: a commented
 .I public_key_file
-line marks where to add it.
+line marks where to add it. Since that file is meant to be completed by hand,
+a path typed at the questionnaire that already exists is only reused after
+confirmation, and replacing an existing file is announced; a
+.B \-\-save\-config
+path given on the command line is taken as consent. When the file is written,
+it is replaced wholesale; neither an existing save path that cannot be
+confirmed nor
+.B \-\-dry\-run
+writes anything at all.
 .TP
 .B \-\-bundle
 Generate paired bastion + backend artefacts in one run, sharing the

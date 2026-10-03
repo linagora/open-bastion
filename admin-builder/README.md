@@ -65,6 +65,15 @@ the command that replays it. Two things are not carried over:
 `--config build.yml --save-config full.yml` also turns a hand-written config
 into the complete form.
 
+Because that file is meant to be completed by hand, a path typed at the
+questionnaire that already exists is only reused after confirmation (the
+default path is the same on every run for a given slug); a path that names a
+directory is rejected rather than confirmed. After a refused path
+the follow-up prompt has no default: pressing Enter there skips the save. A
+path given as `--save-config FILE` on the command line is taken as consent and
+is not re-checked; either way the file is replaced wholesale when it is
+written, so keep hand-added keys elsewhere than in the file you overwrite.
+
 Here is a complete `build.yml` for the max-security backend scenario:
 
 ```yaml

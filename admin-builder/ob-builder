@@ -1244,17 +1244,46 @@ EOF
 }
 
 # Offer to save the answers as a --config YAML, unless --save-config gave the
-# path; then, for an embedded secret, whether the file may carry it.
+# path (an explicit choice, not re-checked); then, for an embedded secret,
+# whether the file may carry it. A path typed at the prompt that already exists
+# is only reused after confirmation: that file is meant to be completed by hand.
 collect_save_config_interactive() {
     if [ -z "$SAVE_CONFIG" ]; then
         explain "The answers, and the defaults of everything not asked, can be saved as a YAML file. 'ob-builder --config FILE' then replays them without any question, e.g. for the next deployment or in CI."
         ask_yesno "Save these answers as a YAML config?" "y" || return 0
+        SAVE_CONFIG=$(ask "Config file path" "./ob-builder-${DEPLOYMENT_SLUG}.yml")
+        # Re-entered below after a refused path, then with no default so that
+        # Enter skips the save instead of naming the same file again.
         while :; do
-            SAVE_CONFIG=$(ask "Config file path" "./ob-builder-${DEPLOYMENT_SLUG}.yml")
-            [ -d "$SAVE_CONFIG" ] || break
-            log_warn "$SAVE_CONFIG is a directory; give a file path."
+            [ -n "$SAVE_CONFIG" ] || return 0
+            if [ -d "$SAVE_CONFIG" ]; then
+                log_warn "$SAVE_CONFIG is a directory; give a file path."
+            elif [ -e "$SAVE_CONFIG" ]; then
+                # The default path is the same on every run for a given slug, and
+                # the README tells the operator to complete that file by hand
+                # (the commented embedded_client_secret / public_key_file
+                # lines): never replace it without a word.
+                if ask_yesno "$SAVE_CONFIG exists; overwrite it?" "n"; then
+                    break
+                fi
+                log_warn "$SAVE_CONFIG left as it is."
+            else
+                break
+            fi
+            # ask and ask_yesno answer their defaults without asking in this
+            # mode, so the re-ask below would spin: decline the save instead.
+            if [ "${OB_BUILDER_NON_INTERACTIVE:-}" = "1" ]; then
+                if [ -d "$SAVE_CONFIG" ]; then
+                    # save_config refuses a directory, so do not suggest it.
+                    log_warn "Not saving the answers: $SAVE_CONFIG is a directory. Pass --save-config FILE."
+                else
+                    log_warn "Not saving the answers; pass --save-config \"$SAVE_CONFIG\" to replace it."
+                fi
+                SAVE_CONFIG=""
+                return 0
+            fi
+            SAVE_CONFIG=$(ask "Another path (empty to skip saving the answers)" "")
         done
-        [ -n "$SAVE_CONFIG" ] || return 0
     fi
     if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
         explain "Without the client_secret, the saved config needs embedded_client_secret added back by hand before --config accepts it. With it, the file holds the secret in clear (written 0600) and must be kept as confidential as the artefacts."
@@ -1747,8 +1776,18 @@ save_config() {
     # report it saved under the directory's name.
     [ ! -d "$path" ] || die "--save-config: $path is a directory; give a file path"
     if [ "$DRY_RUN" = "1" ]; then
-        log_info "[DRY-RUN] Would save the config to $path"
+        if [ -e "$path" ]; then
+            log_info "[DRY-RUN] Would replace the existing config $path"
+        else
+            log_info "[DRY-RUN] Would save the config to $path"
+        fi
         return 0
+    fi
+    # atomic_write replaces the file wholesale, so keys added by hand to an
+    # earlier save (embedded_client_secret, public_key_file) are not carried
+    # over. Say so rather than let the file change under the operator.
+    if [ -e "$path" ]; then
+        log_warn "$path already exists; keys added by hand (embedded_client_secret, public_key_file) are not carried over."
     fi
     content=$(render_config_yaml "$path") || die "Could not save the config to $path"
     [ "$CLIENT_SECRET_MODE" = "embedded" ] && [ "$SAVE_CONFIG_SECRET" = 1 ] && mode="0600"
