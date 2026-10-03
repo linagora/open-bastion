@@ -74,6 +74,15 @@ APT_URL_SET=0
 APT_SUITE_SET=0
 APT_COMPONENT_SET=0
 SIGN_WITH_SET=0
+# --save-config: write the resolved answers, defaults included, as a YAML that
+# --config replays (#311). The questionnaire offers it too.
+SAVE_CONFIG=""
+# Whether the saved config carries the embedded client_secret. Off unless the
+# admin says yes in the questionnaire: the file is meant to be kept and reused,
+# and a secret in it outlives the artefact that needed it.
+SAVE_CONFIG_SECRET=0
+# `insecure:` read from a config, applied once both parsers are done.
+CONFIG_INSECURE=""
 # --insecure: allow an http:// portal AND skip TLS verification, both for the
 # builder's own fetches and in the generated artefacts (verify_ssl = false).
 INSECURE=0
@@ -172,6 +181,10 @@ OUTPUTS (with --config, at least one of them is required):
   --output-ansible PATH      Write Ansible role tree here (directory)
                              With several roles, each artefact gets the role
                              as suffix (bootstrap-x-bastion.sh, role-backend)
+  --save-config PATH         Also save the answers, defaults included, as a
+                             YAML replayable with --config (the questionnaire
+                             offers it too). An embedded client_secret is left
+                             out unless the questionnaire is told otherwise.
 
 REPO / SIGNING:
   --repo-keyring PATH        Path to a local GPG keyring (.gpg) for the APT
@@ -208,6 +221,7 @@ QUESTIONNAIRE (asked when no --config is given; CLI values are not re-asked):
  10. Service accounts (SSH-key-only local accounts: ansible, backup, …)
  11. Auto-launch enroll/setup on the target? (yes | no | prompt), self-delete
  12. APT repository (URL, suite, component, keyring) and GPG signing key
+ 13. Save the answers as a YAML config for --config?
 
 SERVICE ACCOUNTS (--config YAML):
   Declare SSH-key-only local accounts under a 'service_accounts:' list. They are
@@ -245,6 +259,9 @@ SERVICE ACCOUNTS (--config YAML):
 EXAMPLES:
   # Fully interactive (outputs, roles and repository are asked for)
   $PROG_NAME
+
+  # Interactive, keeping the answers for the next, non-interactive, run
+  $PROG_NAME --save-config build.yml
 
   # Interactive, shell installer path given up front
   $PROG_NAME --output-shell /tmp/bootstrap-mybastion.sh
@@ -304,6 +321,10 @@ parse_args() {
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
                 SIGN_WITH="$2"; SIGN_WITH_SET=1; shift 2
                 ;;
+            --save-config)
+                [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
+                SAVE_CONFIG="$2"; shift 2
+                ;;
             --bundle)        BUNDLE=1; shift ;;
             --insecure|--allow-http)
                 [ "$1" = "--allow-http" ] && log_warn "--allow-http is deprecated, use --insecure (same effect)"
@@ -353,6 +374,8 @@ load_config() {
     # identical whether or not yq is installed.
     _parse_service_accounts_block "$f"
 
+    _normalise_config_values
+
     # When loading config we run non-interactively unless a missing value
     # forces a prompt. The prompts library checks OB_BUILDER_NON_INTERACTIVE.
     export OB_BUILDER_NON_INTERACTIVE=1
@@ -376,14 +399,17 @@ _load_config_yq() {
             _yq_flavor="python"
         fi
     fi
+    # `select(. != null)`, not `// …`: the alternative operator also drops
+    # `false`, so `self_delete: false` read as unset and fell back to the
+    # default, which is `yes` with an embedded secret.
     _yq_get() {
         local key="$1"
         local out
         if [ "$_yq_flavor" = "go" ]; then
-            out=$(yq eval ".${key} // \"\"" "$f" 2>/dev/null) || out=""
-            [ "$out" = "null" ] && out=""
+            # By tag: `. != null` also matches the STRING "null".
+            out=$(yq eval ".${key} | select(tag != \"!!null\")" "$f" 2>/dev/null) || out=""
         else
-            out=$(yq -r ".${key} // empty" "$f" 2>/dev/null) || out=""
+            out=$(yq -r ".${key} | select(. != null)" "$f" 2>/dev/null) || out=""
         fi
         printf '%s' "$out"
     }
@@ -406,6 +432,8 @@ _load_config_yq() {
     v=$(_yq_get enable_hardening);    [ -n "$v" ] && ENABLE_HARDENING="$v"
     v=$(_yq_get enable_audit_trace);  [ -n "$v" ] && ENABLE_AUDIT_TRACE="$v"
     v=$(_yq_get disable_session_recorder); [ -n "$v" ] && DISABLE_SESSION_RECORDER="$v"
+    v=$(_yq_get insecure);            [ -n "$v" ] && CONFIG_INSECURE="$v"
+    v=$(_yq_get sign_with);           [ -n "$v" ] && [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$v"
     v=$(_yq_get repo_keyring);        [ -n "$v" ] && [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$v"
     v=$(_yq_get apt_url);             [ -n "$v" ] && [ "$APT_URL" = "$DEFAULT_APT_URL" ] && APT_URL="$v"
     v=$(_yq_get apt_suite);           [ -n "$v" ] && [ "$APT_SUITE" = "$DEFAULT_APT_SUITE" ] && APT_SUITE="$v"
@@ -460,6 +488,8 @@ _load_config_awk() {
                 enable_hardening)    ENABLE_HARDENING="$val" ;;
                 enable_audit_trace)  ENABLE_AUDIT_TRACE="$val" ;;
                 disable_session_recorder) DISABLE_SESSION_RECORDER="$val" ;;
+                insecure)            CONFIG_INSECURE="$val" ;;
+                sign_with)           [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$val" ;;
                 repo_keyring)        [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$val" ;;
                 apt_url)             [ "$APT_URL"       = "$DEFAULT_APT_URL"       ] && APT_URL="$val" ;;
                 apt_suite)           [ "$APT_SUITE"     = "$DEFAULT_APT_SUITE"     ] && APT_SUITE="$val" ;;
@@ -471,6 +501,38 @@ _load_config_awk() {
             esac
         fi
     done < "$f"
+    return 0
+}
+
+# A YAML boolean as the yes/no these keys expect. yq hands `true`/`false` back
+# for an unquoted boolean, which validate_inputs would otherwise refuse.
+_cfg_yesno() {
+    case "$1" in
+        true|True|TRUE)    printf 'yes' ;;
+        false|False|FALSE) printf 'no' ;;
+        *)                 printf '%s' "$1" ;;
+    esac
+}
+
+# Shared by both parsers, after they ran.
+_normalise_config_values() {
+    AUTO_ENROLL_SETUP=$(_cfg_yesno "$AUTO_ENROLL_SETUP")
+    SELF_DELETE=$(_cfg_yesno "$SELF_DELETE")
+    ENABLE_HARDENING=$(_cfg_yesno "$ENABLE_HARDENING")
+    ENABLE_AUDIT_TRACE=$(_cfg_yesno "$ENABLE_AUDIT_TRACE")
+    DISABLE_SESSION_RECORDER=$(_cfg_yesno "$DISABLE_SESSION_RECORDER")
+    ANSIBLE_AUTO_APPROVE=$(_cfg_yesno "$ANSIBLE_AUTO_APPROVE")
+    # `insecure: yes` is the config form of --insecure, which a config saved
+    # from a questionnaire that switched to it for an http:// portal needs to
+    # replay at all. It only adds: `insecure: no` does not undo the flag.
+    case "$(_cfg_yesno "$CONFIG_INSECURE")" in
+        yes)
+            INSECURE=1
+            export OB_BUILDER_INSECURE=1
+            ;;
+        no|"") ;;
+        *) die "Invalid insecure: $CONFIG_INSECURE" ;;
+    esac
     return 0
 }
 
@@ -911,7 +973,13 @@ collect_service_accounts_interactive() {
         if [ "$sudo_allowed" = "true" ]; then
             ask_yesno "  Sudo without password (NOPASSWD)?" "n" && sudo_nopasswd="true"
         fi
-        gecos=$(ask "  Description / GECOS (optional)" "")
+        while :; do
+            gecos=$(ask "  Description / GECOS (optional)" "")
+            # Checked now: the saved config would otherwise refuse it after
+            # the whole questionnaire.
+            [ -z "$gecos" ] || _yaml_str "$gecos" >/dev/null && break
+            log_warn "Avoid control characters, ' #', and mixing both quote kinds."
+        done
         while :; do
             shell=$(ask "  Login shell (optional, absolute path)" "")
             is_valid_abs_path "$shell" && break
@@ -1170,6 +1238,58 @@ EOF
 
     # q11. Package repository and signing, unless given on the CLI.
     collect_repo_options_interactive
+
+    # q12. Keep the answers for --config (#311).
+    collect_save_config_interactive
+}
+
+# Offer to save the answers as a --config YAML, unless --save-config gave the
+# path (an explicit choice, not re-checked); then, for an embedded secret,
+# whether the file may carry it. A path typed at the prompt that already exists
+# is only reused after confirmation: that file is meant to be completed by hand.
+collect_save_config_interactive() {
+    if [ -z "$SAVE_CONFIG" ]; then
+        explain "The answers, and the defaults of everything not asked, can be saved as a YAML file. 'ob-builder --config FILE' then replays them without any question, e.g. for the next deployment or in CI."
+        ask_yesno "Save these answers as a YAML config?" "y" || return 0
+        SAVE_CONFIG=$(ask "Config file path" "./ob-builder-${DEPLOYMENT_SLUG}.yml")
+        # Re-entered below after a refused path, then with no default so that
+        # Enter skips the save instead of naming the same file again.
+        while :; do
+            [ -n "$SAVE_CONFIG" ] || return 0
+            if [ -d "$SAVE_CONFIG" ]; then
+                log_warn "$SAVE_CONFIG is a directory; give a file path."
+            elif [ -e "$SAVE_CONFIG" ]; then
+                # The default path is the same on every run for a given slug, and
+                # the README tells the operator to complete that file by hand
+                # (the commented embedded_client_secret / public_key_file
+                # lines): never replace it without a word.
+                if ask_yesno "$SAVE_CONFIG exists; overwrite it?" "n"; then
+                    break
+                fi
+                log_warn "$SAVE_CONFIG left as it is."
+            else
+                break
+            fi
+            # ask and ask_yesno answer their defaults without asking in this
+            # mode, so the re-ask below would spin: decline the save instead.
+            if [ "${OB_BUILDER_NON_INTERACTIVE:-}" = "1" ]; then
+                if [ -d "$SAVE_CONFIG" ]; then
+                    # save_config refuses a directory, so do not suggest it.
+                    log_warn "Not saving the answers: $SAVE_CONFIG is a directory. Pass --save-config FILE."
+                else
+                    log_warn "Not saving the answers; pass --save-config \"$SAVE_CONFIG\" to replace it."
+                fi
+                SAVE_CONFIG=""
+                return 0
+            fi
+            SAVE_CONFIG=$(ask "Another path (empty to skip saving the answers)" "")
+        done
+    fi
+    if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
+        explain "Without the client_secret, the saved config needs embedded_client_secret added back by hand before --config accepts it. With it, the file holds the secret in clear (written 0600) and must be kept as confidential as the artefacts."
+        ask_yesno "Write the client_secret in clear into the saved config?" "n" && SAVE_CONFIG_SECRET=1
+    fi
+    return 0
 }
 
 # True when role $1 is among TARGET_ROLES.
@@ -1305,13 +1425,27 @@ validate_inputs() {
         die "server_group_policy=fixed requires a non-empty server_group"
     fi
 
-    [ "${#TARGET_ROLES[@]}" -gt 0 ] || TARGET_ROLES=("$TARGET_ROLE")
+    # A config names several roles comma- or space-separated, like the
+    # questionnaire picks them: "bastion,backend".
+    if [ "${#TARGET_ROLES[@]}" -eq 0 ]; then
+        local -a _cfg_roles=()
+        IFS=', ' read -r -a _cfg_roles <<< "$TARGET_ROLE"
+        TARGET_ROLES=("${_cfg_roles[@]}")
+    fi
+    [ "${#TARGET_ROLES[@]}" -gt 0 ] || die "target_role is required"
     local _role
+    local -A _seen_role=()
     for _role in "${TARGET_ROLES[@]}"; do
-        [ -n "$_role" ]              || die "target_role is required"
         is_valid_target_role "$_role" || die "Invalid target_role: $_role"
+        [ -z "${_seen_role[$_role]:-}" ] || die "target_role lists '$_role' twice"
+        _seen_role[$_role]=1
     done
     TARGET_ROLE="${TARGET_ROLES[0]}"
+    # --bundle adds the companion of ONE role; with several it would generate
+    # some role twice, to the same paths.
+    if [ "$BUNDLE" = "1" ] && [ "${#TARGET_ROLES[@]}" -gt 1 ]; then
+        die "--bundle takes a single target_role (it adds the companion role itself)"
+    fi
 
     # apt_url / apt_suite / apt_component are concatenated into the
     # "deb [signed-by=...] URL SUITE COMPONENT" line and interpolated verbatim
@@ -1365,6 +1499,14 @@ validate_inputs() {
 
     : "${ANSIBLE_AUTO_APPROVE:=no}"
     case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
+
+    # The questionnaire checks the key when asked; a config or --sign-with
+    # value used to fail only at signing, after the SSO fetch and with the
+    # installer already written unsigned.
+    if [ -n "$SIGN_WITH" ] && [ -n "$OUTPUT_SHELL" ]; then
+        command -v gpg >/dev/null 2>&1 && gpg --list-secret-keys -- "$SIGN_WITH" >/dev/null 2>&1 \
+            || die "No usable GPG secret key '$SIGN_WITH' to sign with (in YAML, quote a hex key id: sign_with: \"0x...\")"
+    fi
 
     # Validate every service-account record (covers the YAML config path; the
     # interactive loop validates as it goes). Reject duplicate account names.
@@ -1449,6 +1591,7 @@ print_recap() {
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
   Sign with:           ${SIGN_WITH:-<none>}
+  Save config to:      ${SAVE_CONFIG:-<no>}
   Bundle:              $([ "$BUNDLE" = 1 ] && echo yes || echo no)
   Dry-run:             $([ "$DRY_RUN" = 1 ] && echo yes || echo no)
   TLS verification:    $([ "$INSECURE" = 1 ] && echo "DISABLED (--insecure)" || echo enabled)
@@ -1464,6 +1607,202 @@ EOF
         log_warn "Embedded client_secret will be written in clear text into every generated artefact."
         log_warn "Treat the resulting files as confidential — anyone who reads them reads the secret."
     fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# --save-config (#311): the resolved answers as a YAML --config replays.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Quote $1 as a YAML scalar that every config reader gets back verbatim: yq,
+# and the awk / service-account fallbacks, which strip one pair of quotes but
+# neither unescape nor see quotes when cutting an inline comment at " #".
+# Double quotes unless the value holds `"` or `\` (escapes there), then
+# single quotes; fails for a value no quoting carries through all of them.
+# Control characters (but tab) and NEL are refused too: yq folds CR and NEL
+# into a space, and rejects the WHOLE file over a C0 byte, DEL or invalid
+# UTF-8 -- every key then reads as empty, while awk loads it fine.
+_yaml_str() {
+    local v="$1" t="${1//$'\t'/}"
+    case "$t" in
+        *[[:cntrl:]]*|*$'\xc2\x85'*) return 1 ;;
+    esac
+    printf '%s' "$v" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || return 1
+    case "$v" in
+        *' #'*) return 1 ;;
+        *\"*|*\\*)
+            case "$v" in *\'*) return 1 ;; esac
+            printf "'%s'" "$v"
+            ;;
+        *) printf '"%s"' "$v" ;;
+    esac
+}
+
+# Print `[indent]key: <quoted value>`, or die naming the key. render_config_yaml
+# runs inside $(...), so the die only ends that subshell: save_config's
+# `|| die` is what stops the build.
+_yaml_kv() {
+    local key="$1" q
+    q=$(_yaml_str "$2") || die "--save-config: the value of '$key' cannot be written to YAML (control character, ' #', both quote kinds, or not UTF-8); change it or drop --save-config"
+    printf '%s%s: %s\n' "${3:-}" "$key" "$q"
+}
+
+# The command replaying the saved config, for its header.
+_replay_command() {
+    local cmd
+    cmd="$PROG_NAME --config $(printf '%q' "$1")"
+    [ "$BUNDLE" = "1" ] && cmd="$cmd --bundle"
+    [ -n "$OUTPUT_SHELL" ]   && cmd="$cmd --output-shell $(printf '%q' "$OUTPUT_SHELL")"
+    [ -n "$OUTPUT_ANSIBLE" ] && cmd="$cmd --output-ansible $(printf '%q' "$OUTPUT_ANSIBLE")"
+    printf '%s' "$cmd"
+}
+
+# The config YAML on stdout. Every key is written, defaults included, with the
+# accepted values as comments: that is what makes the file worth keeping.
+render_config_yaml() {
+    local path="$1" rec name fp sudo_allowed sudo_nopasswd shell home gecos uid gid pub q
+    printf '# ob-builder configuration, replayed without any question by:\n'
+    printf '#   %s\n' "$(_replay_command "$path")"
+    printf '# Generated by ob-builder %s on %s. Every key is written,\n' "$VERSION" "$BUILD_DATE"
+    printf '# defaults included. Output paths, --bundle and --dry-run stay on the\n'
+    printf '# command line.\n\n'
+
+    _yaml_kv deployment_slug "$DEPLOYMENT_SLUG"
+    printf '# token-only | token+unix | keys+llng | mixed | max-security\n'
+    _yaml_kv scenario "$SCENARIO"
+    _yaml_kv portal_url "$PORTAL_URL"
+    printf '# yes: allow an http:// portal and skip TLS verification, here and on the\n'
+    printf '# targets (verify_ssl = false, ob-enroll/setup -k). Test setups only.\n'
+    _yaml_kv insecure "$([ "$INSECURE" = 1 ] && echo yes || echo no)"
+
+    printf '\n'
+    _yaml_kv client_id "$CLIENT_ID"
+    printf '# fixed | modifiable (the target admin may override it with --client-id)\n'
+    _yaml_kv client_id_policy "$CLIENT_ID_POLICY"
+    printf '# none | prompt | embedded\n'
+    _yaml_kv client_secret_mode "$CLIENT_SECRET_MODE"
+    if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
+        if [ "$SAVE_CONFIG_SECRET" = 1 ] && q=$(_yaml_str "$EMBEDDED_CLIENT_SECRET"); then
+            printf '# In clear: keep this file as confidential as the artefacts.\n'
+            printf 'embedded_client_secret: %s\n' "$q"
+        else
+            printf '# Not saved. Required by client_secret_mode=embedded: add it back.\n'
+            printf '# embedded_client_secret: ""\n'
+        fi
+    fi
+    _yaml_kv server_group "$SERVER_GROUP"
+    printf '# fixed | modifiable (the target admin may override it with --server-group)\n'
+    _yaml_kv server_group_policy "$SERVER_GROUP_POLICY"
+
+    printf '\n# bastion | standalone | backend; several, comma-separated, give one\n'
+    printf '# artefact each, suffixed with the role\n'
+    _yaml_kv target_role "$(IFS=,; printf '%s' "${TARGET_ROLES[*]}")"
+    printf '# backend only: bastion ids allowed to reach it, comma-separated (empty =\n'
+    printf '# any bastion enrolled in the same server group)\n'
+    _yaml_kv allowed_bastions "$ALLOWED_BASTIONS"
+    printf '# yes | no: logind/nproc/at/cron containment (system-wide, see SECURITY.md)\n'
+    _yaml_kv enable_hardening "$ENABLE_HARDENING"
+    printf '# yes | no: auditd rules and their rotation timer\n'
+    _yaml_kv enable_audit_trace "$ENABLE_AUDIT_TRACE"
+    printf '# yes | no: bastion/standalone only, yes opts out of session recording\n'
+    _yaml_kv disable_session_recorder "$DISABLE_SESSION_RECORDER"
+
+    printf '\n# yes | no | prompt: the installer runs ob-enroll and ob-*-setup\n'
+    _yaml_kv auto_enroll_setup "$AUTO_ENROLL_SETUP"
+    printf '# yes | no: the shell installer removes itself after a successful run\n'
+    _yaml_kv self_delete "$SELF_DELETE"
+    printf '# yes | no: the Ansible role approves device codes with an LLNG cookie\n'
+    printf '# asked at each play run\n'
+    _yaml_kv ansible_auto_approve "$ANSIBLE_AUTO_APPROVE"
+    if [ -n "$SERVICE_KEYS_SETUP" ]; then
+        _yaml_kv service_keys "$SERVICE_KEYS_SETUP"
+    else
+        printf '# true | false: pass --enable-service-keys to the setup run (default: on\n'
+        printf '# when a service account has a public key)\n'
+        printf '# service_keys: true\n'
+    fi
+
+    printf '\n'
+    _yaml_kv apt_url "$APT_URL"
+    _yaml_kv apt_suite "$APT_SUITE"
+    _yaml_kv apt_component "$APT_COMPONENT"
+    # The default keyring stays a comment: its path is the builder's, and the
+    # config may be replayed by another installation of it.
+    if [ "$REPO_KEYRING" = "$DEFAULT_REPO_KEYRING" ]; then
+        printf '# repo_keyring: %s\n' "$DEFAULT_REPO_KEYRING"
+    else
+        # Absolute: a relative path would resolve against the replay's cwd.
+        _yaml_kv repo_keyring "$(realpath -- "$REPO_KEYRING")"
+    fi
+    printf '# GPG key id signing the shell installer (empty = no signature)\n'
+    _yaml_kv sign_with "$SIGN_WITH"
+
+    [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] || return 0
+    printf '\n# SSH-key-only local accounts, see doc/service-accounts.rst\n'
+    printf 'service_accounts:\n'
+    for rec in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
+        name=$(_sa_field 1 "$rec");          fp=$(_sa_field 2 "$rec")
+        sudo_allowed=$(_sa_field 3 "$rec");   sudo_nopasswd=$(_sa_field 4 "$rec")
+        shell=$(_sa_field 5 "$rec");          home=$(_sa_field 6 "$rec")
+        gecos=$(_sa_field 7 "$rec")
+        uid=$(_sa_field 8 "$rec");            gid=$(_sa_field 9 "$rec")
+        pub=$(_sa_field 10 "$rec")
+        _yaml_kv name "$name" '  - '
+        _yaml_kv key_fingerprint "$fp" '    '
+        if [ -n "$pub" ]; then
+            # The comment is free text that YAML may not carry (" #", both
+            # quotes); sshd and the fingerprint ignore it, so drop it then.
+            _yaml_str "$pub" >/dev/null || pub="${pub%% *} $(cut -d' ' -f2 <<<"$pub")"
+            _yaml_kv public_key "$pub" '    '
+        else
+            # The questionnaire does not ask for the key, and without it sshd
+            # has nothing to accept (#263).
+            printf '    # No public key: the account cannot log in until one is deployed.\n'
+            printf '    # public_key_file: keys/%s.pub\n' "$name"
+        fi
+        printf '    sudo_allowed: %s\n' "$sudo_allowed"
+        printf '    sudo_nopasswd: %s\n' "$sudo_nopasswd"
+        [ -z "$shell" ] || _yaml_kv shell "$shell" '    '
+        [ -z "$home" ]  || _yaml_kv home "$home" '    '
+        [ -z "$gecos" ] || _yaml_kv gecos "$gecos" '    '
+        [ -z "$uid" ]   || printf '    uid: %s\n' "$uid"
+        [ -z "$gid" ]   || printf '    gid: %s\n' "$gid"
+    done
+    return 0
+}
+
+save_config() {
+    local path="$1" content mode="0644"
+    # atomic_write's mv would drop the file INSIDE a directory and still
+    # report it saved under the directory's name.
+    [ ! -d "$path" ] || die "--save-config: $path is a directory; give a file path"
+    if [ "$DRY_RUN" = "1" ]; then
+        if [ -e "$path" ]; then
+            log_info "[DRY-RUN] Would replace the existing config $path"
+        else
+            log_info "[DRY-RUN] Would save the config to $path"
+        fi
+        return 0
+    fi
+    # atomic_write replaces the file wholesale, so keys added by hand to an
+    # earlier save (embedded_client_secret, public_key_file) are not carried
+    # over. Say so rather than let the file change under the operator.
+    if [ -e "$path" ]; then
+        log_warn "$path already exists; keys added by hand (embedded_client_secret, public_key_file) are not carried over."
+    fi
+    content=$(render_config_yaml "$path") || die "Could not save the config to $path"
+    [ "$CLIENT_SECRET_MODE" = "embedded" ] && [ "$SAVE_CONFIG_SECRET" = 1 ] && mode="0600"
+    atomic_write "$path" "$mode" "$content"$'\n'
+    log_info "Config saved to $path (replay with --config)"
+    if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
+        if [ "$SAVE_CONFIG_SECRET" != 1 ]; then
+            log_warn "The client_secret was left out of $path: add embedded_client_secret before replaying it."
+        elif ! _yaml_str "$EMBEDDED_CLIENT_SECRET" >/dev/null; then
+            # Consent was given, so silence here would read as "it is in there".
+            log_warn "The client_secret could not be written to $path (control character, ' #', both"
+            log_warn "  quote kinds, or not UTF-8): add embedded_client_secret by hand before replaying it."
+        fi
+    fi
+    return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2200,6 +2539,11 @@ main() {
         if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
             die "At least one of --output-shell or --output-ansible is required (nothing to produce otherwise). See --help."
         fi
+        # The saved copy drops the comments and, for an embedded secret, the
+        # secret itself: writing it over its source would lose both.
+        if [ -n "$SAVE_CONFIG" ] && [ "$SAVE_CONFIG" -ef "$CONFIG_FILE" ]; then
+            die "--save-config would overwrite the --config file $CONFIG_FILE; pick another path"
+        fi
         load_config "$CONFIG_FILE"
     else
         run_questionnaire
@@ -2210,6 +2554,11 @@ main() {
 
     # If --bundle is set, we will fetch JWKS regardless of primary role.
     print_recap
+
+    # Before the SSO fetch: the answers are kept even if the portal is down.
+    if [ -n "$SAVE_CONFIG" ]; then
+        save_config "$SAVE_CONFIG"
+    fi
 
     if [ "$DRY_RUN" = "1" ]; then
         log_warn "DRY-RUN: no files will be written"

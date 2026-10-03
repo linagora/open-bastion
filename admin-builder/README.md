@@ -42,12 +42,39 @@ asked again):
 10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
 11. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`), self-delete
 12. APT repository (URL, suite, component, keyring) and optional GPG signing key
+13. Save the answers as a YAML config for `--config` (default
+    `./ob-builder-<slug>.yml`)
 
 With `--config`, at least one of `--output-shell` / `--output-ansible` is required.
 
 ## Quick Start (Non-Interactive with Config File)
 
-For reproducible builds in CI or when deploying the same configuration to multiple targets, use a YAML config file. Here is a complete `build.yml` for the max-security backend scenario:
+For reproducible builds in CI or when deploying the same configuration to multiple targets, use a YAML config file.
+
+The simplest way to get one is to let the questionnaire write it: answer yes to
+its last question, or pass `--save-config build.yml`. Every key is written,
+defaults included, with the accepted values as comments, and the header gives
+the command that replays it. Two things are not carried over:
+
+- an embedded `client_secret` stays out (as a commented
+  `embedded_client_secret:` line to fill in) unless you agree to write it, in
+  which case the file is created mode 0600;
+- interactively entered service accounts have no public key: add one where the
+  commented `public_key_file:` line says, or the account cannot log in.
+
+`--config build.yml --save-config full.yml` also turns a hand-written config
+into the complete form.
+
+Because that file is meant to be completed by hand, a path typed at the
+questionnaire that already exists is only reused after confirmation (the
+default path is the same on every run for a given slug); a path that names a
+directory is rejected rather than confirmed. After a refused path
+the follow-up prompt has no default: pressing Enter there skips the save. A
+path given as `--save-config FILE` on the command line is taken as consent and
+is not re-checked; either way the file is replaced wholesale when it is
+written, so keep hand-added keys elsewhere than in the file you overwrite.
+
+Here is a complete `build.yml` for the max-security backend scenario:
 
 ```yaml
 # build.yml
@@ -60,10 +87,12 @@ client_secret_mode: prompt # none | prompt | embedded
 # embedded_client_secret: ...  # required when client_secret_mode=embedded
 server_group: backend-prod-us-east
 server_group_policy: fixed
-target_role: backend
+target_role: backend # bastion | standalone | backend, or several: "bastion,backend"
 auto_enroll_setup: prompt
 ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
+# insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)
+# sign_with: "0xKEYID"  # same as --sign-with (the command line wins); keep the quotes
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main

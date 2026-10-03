@@ -284,6 +284,7 @@ test_questionnaire_full() {
             "" ""                   # auto enroll, self-delete
             ""                      # ansible auto-approve
             "" "" "" "$FAKE_KEYRING" ""   # apt url/suite/component, keyring, sign-with
+            "n"                     # do not save the answers
         )
         set_answers "${a[@]}"
         run_questionnaire >/dev/null 2>&1
@@ -310,7 +311,7 @@ test_questionnaire_skips_cli_values() {
         DEPLOYMENT_SLUG="lab"; OUTPUT_ANSIBLE="/tmp/role"; TARGET_ROLE=""
         APT_URL_SET=1; APT_SUITE_SET=1; APT_COMPONENT_SET=1; REPO_KEYRING_SET=1
         INSECURE=1; PORTAL_URL="http://sso.lab"
-        set_answers "standalone" "" "n"   # roles, no service accounts
+        set_answers "standalone" "" "n" "n"   # roles, no service accounts, no save
         run_questionnaire >/dev/null 2>&1
         printf '%s|' "$OUTPUT_SHELL" "$OUTPUT_ANSIBLE" "${TARGET_ROLES[*]}" "$(answers_left)"
     )
