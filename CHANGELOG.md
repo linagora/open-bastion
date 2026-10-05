@@ -105,6 +105,10 @@ here.
 
 ### Fixed
 
+- **`ob-enroll -C FILE` reads `FILE`** (#314). The settings always came from
+  `/etc/open-bastion/openbastion.conf`: `ob-enroll -C` could enrol against
+  another portal and, without `-t`, overwrite the host's token. An unreadable
+  `-C` file is now an error. Command-line options still override the file.
 - **NSS-only SSO users can start `user@.service`** (#296).  The user session
   bus never came up since systemd-user PAM service expects a shadow
   entry an NSS-only SSO user didn't have. `ob-bastion-setup` now inserts
