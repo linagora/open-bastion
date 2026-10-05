@@ -126,6 +126,7 @@ is merely non-empty proves nothing.
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-backend-setup(8) <ob-bastion-setup>`,
 :doc:`ob-krl-refresh(8) <ob-krl-refresh>`,

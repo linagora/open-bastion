@@ -107,6 +107,7 @@ Must be run as root in order to read ``/var/lib/open-bastion/token``
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-builder(1) <ob-builder>`

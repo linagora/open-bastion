@@ -130,6 +130,7 @@ Exit status
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 ``pam_openbastion``,
 :manpage:`pam.d(5)`
 

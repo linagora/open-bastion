@@ -128,6 +128,8 @@ man_pages = [
      "vouching", "", 1),
     ("references/man/ob-session-prune", "ob-session-prune",
      "Compress and expire recorded SSH sessions", "", 8),
+    ("references/man/ob-session-monitor", "ob-session-monitor",
+     "Revalidate offline sessions once the portal is reachable", "", 8),
     ("references/man/ob-session-recorder", "ob-session-recorder",
      "Record SSH sessions on an Open Bastion host", "", 8),
     ("references/man/ob-sftp", "ob-sftp",

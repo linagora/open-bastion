@@ -246,6 +246,7 @@ Environment
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-post-upgrade(8) <ob-post-upgrade>`,
 :doc:`ob-krl-refresh(8) <ob-krl-refresh>`,

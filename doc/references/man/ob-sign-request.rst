@@ -108,6 +108,7 @@ host signs, then ``required``.
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-heartbeat(8) <ob-heartbeat>`,
 :doc:`ob-bastion-id(1) <ob-bastion-id>`,
 :doc:`ob-enroll(8) <ob-enroll>`,

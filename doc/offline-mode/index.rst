@@ -239,9 +239,10 @@ complementary mechanisms:
   ``/desktop/refresh`` before falling back to the SSO page or to the
   offline path;
 
-- ``ob-session-monitor``, a systemd service that polls the portal: when
-  connectivity returns, it checks every offline session against
-  ``/pam/userinfo`` and terminates the sessions whose account is gone.
+- :doc:`ob-session-monitor(8) </references/man/ob-session-monitor>`, a
+  systemd service that polls the portal: when connectivity returns, it
+  checks every offline session against ``/pam/userinfo`` and terminates the
+  sessions whose account is gone.
 
 .. list-table::
    :header-rows: 1

@@ -97,6 +97,7 @@ Exit status
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 ``pam_openbastion``,
 :manpage:`systemd.timer(5)`

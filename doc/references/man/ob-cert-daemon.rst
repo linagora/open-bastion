@@ -82,6 +82,7 @@ Files
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-cert-request(1) <ob-cert-request>`,
 :doc:`ob-ssh(1) <ob-ssh>`,
 :doc:`ob-scp(1) <ob-scp>`,

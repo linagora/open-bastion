@@ -73,6 +73,7 @@ usr/share/man/man8/ob-uninstall.8
 usr/share/man/man8/ob-ssh-cert.8
 usr/share/man/man8/ob-cache-admin.8
 usr/share/man/man8/ob-desktop-setup.8
+usr/share/man/man8/ob-session-monitor.8
 
 usr/share/man/man5/openbastion.conf.5
 

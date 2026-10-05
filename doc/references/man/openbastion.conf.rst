@@ -156,9 +156,14 @@ Authorization cache (offline mode)
 
 .. option:: auth_cache_force_online
 
-   While this file exists, every authorization goes to the portal and the
-   cache is not consulted. Default: ``/etc/open-bastion/force_online``.
-   Alias: ``force_online_file``.
+   Force-online file. While it exists, the cache is not consulted: an
+   empty file forces every user online, and a file listing usernames —
+   one per line, blank lines and ``#`` comments ignored — forces only
+   those users. When the cache is not consulted for a user, that user's
+   authorization goes to the portal, which is what bounds an offline
+   session that outlived its grace period; see
+   :doc:`ob-session-monitor(8) <ob-session-monitor>`. Default:
+   ``/etc/open-bastion/force_online``. Alias: ``force_online_file``.
 
 Authorization mode
 ~~~~~~~~~~~~~~~~~~

@@ -314,6 +314,7 @@ Exit status
 See also
 --------
 
+:doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-bastion-id(1) <ob-bastion-id>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-heartbeat(8) <ob-heartbeat>`,

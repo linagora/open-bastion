@@ -625,6 +625,7 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-ssh-cert.8
         ${MAN_OUT_DIR}/ob-cache-admin.8
         ${MAN_OUT_DIR}/ob-desktop-setup.8
+        ${MAN_OUT_DIR}/ob-session-monitor.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
 
