@@ -81,6 +81,12 @@ Backend, a server reached only through a bastion:
 
 - Account creation — a PAM session step creates the Unix account on
   first login, which ``--no-create-user`` disables.
+- Sudo through LLNG — SSO users authenticate with an LLNG token, local
+  accounts with their Unix password, thanks to a custom ``sudo`` PAM
+  stack; the ``open-bastion-sudo`` group and its ``sudoers`` drop-in
+  grant the elevation. LLNG is consulted again at every ``sudo``, so a
+  revoked right takes effect on the next one. Can be disabled with the
+  ``--no-sudo`` option.
 - Accepted bastions — the certificate hop is only accepted when the
   certificate's key-id carries a ``bastion=`` listed in
   ``/etc/open-bastion/allowed_bastions`` (``--allowed-bastions`` sets
@@ -100,11 +106,12 @@ Each of these is off unless the option is given:
   key revocation list refreshed every 30 minutes, and ``sudo`` with an
   LLNG token only. See :doc:`/security-scenarios/max-security-scenario`.
 
-- Sudo through LLNG — configured only under maximum security
-  (``--max-security``).
+- Sudo through LLNG — configured only under maximum security for the
+  bastion and standalone roles (``--max-security``).
 
 - Fresh LLNG token on every sudo (``--enable-sudo-fresh-otp``) — only
-  effective together with ``--max-security``.
+  effective together with ``--max-security`` for the bastion and
+  standalone roles.
 
 - SSH access for service accounts (``--enable-service-keys``) — see
   :doc:`/service-accounts`.
