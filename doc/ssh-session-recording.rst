@@ -269,31 +269,10 @@ Common issues
      - The session terminated immediately after it started.
      - Check the user's login shell and shell startup files for errors
        that would cause the session to exit right away.
-   * - ``Permission denied`` error
+   * - An auditor get ``Permission denied`` error when trying to read
+       recordings
      - The recording directory has incorrect permissions, or the
        recording sink is not running.
      - Make sure the user belongs to the ``ob-sessions`` group, that
        the recording directory has mode ``0750``, and that
        ``ob-record.socket`` is enabled and active.
-
-Environment variables
----------------------
-
-The recorder reads the following ``OB_*`` variables.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 26 74
-
-   * - Variable
-     - Description
-   * - ``OB_RECORDER_CONFIG``
-     - Config file path
-   * - ``OB_RECORDER_FORMAT``
-     - Recording format (currently only ``script`` is supported —
-       anything else falls back to it)
-   * - ``OB_MAX_SESSION``
-     - Max session duration in seconds
-   * - ``OB_SESSIONS_DIR``
-     - Ignored: the storage path belongs to :doc:`ob-record-sink(8)
-       </references/man/ob-record-sink>`
