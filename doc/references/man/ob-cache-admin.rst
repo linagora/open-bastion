@@ -6,7 +6,7 @@ Synopsis
 
 ::
 
-   ob-cache-admin <command> [options]
+   ob-cache-admin [options] <command> [arguments]
 
 Description
 -----------
@@ -65,8 +65,15 @@ Commands
    files and leftover ``.tmp`` files. Expiry is not checked here — the PAM
    module rejects an expired entry at login time.
 
+.. option:: help
+
+   Print the usage message; same as ``-h``.
+
 Options
 -------
+
+Options come before the command; everything after the command is one of
+its arguments.
 
 .. option:: -c, --config FILE
 
@@ -78,7 +85,8 @@ Options
 
 .. option:: -q, --quiet
 
-   Print the essentials only.
+   Silence the ``[INFO]`` and ``[OK]`` lines. What a command reports, and
+   its warnings and errors, still print.
 
 .. option:: -h, --help
 
