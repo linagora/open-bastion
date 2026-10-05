@@ -325,7 +325,7 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
 
 # ob-cert-daemon (root, socket-activated) holds the server token; ob-cert-request
 # is the unprivileged client ob-ssh / ob-scp / ob-sftp invoke -- no sudo, no
-# setuid. See doc/design/bastion-cert-vouching.rst.
+# setuid. See doc/references/bastion-cert-vouching.rst.
 add_executable(ob-cert-daemon
     src/ob-cert-daemon.c
     src/ob_cert_proto.c
@@ -483,7 +483,7 @@ install(TARGETS ob-client-jwt
 )
 
 # ob-record-sink (root, socket-activated) writes recordings root-owned so the
-# recorded user cannot touch them. See doc/design/tamper-evident-session-recording.rst.
+# recorded user cannot touch them. See doc/references/tamper-evident-session-recording.rst.
 add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
 target_include_directories(ob-record-sink PRIVATE
     ${CMAKE_SOURCE_DIR}/include

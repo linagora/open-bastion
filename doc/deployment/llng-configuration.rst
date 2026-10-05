@@ -48,6 +48,27 @@ In the LLNG Manager, create a new OIDC Relying Party:
      an old backup all stop being usable. Keep ``ob-heartbeat.timer``
      running — it is what keeps an active server's token alive.
 
+.. _llng-configuration-offline-refresh-token:
+
+.. warning::
+
+   **The offline refresh token.** A server's access token lasts about an
+   hour and is renewed by ``ob-heartbeat`` from an offline refresh token.
+   The portal issues one only when all of the following hold:
+
+   - the enrollment requests the ``offline_access`` scope (``ob-enroll``
+     always does),
+   - ``oidcRPMetaDataOptionsAllowOffline`` is ``1`` on the RP, and
+   - the deployed ``oidc-device-organization`` plugin is 0.3.3 or newer —
+     older versions strip ``offline_access`` from the device scope and
+     return no refresh token.
+
+   Without one, ``ob-enroll`` fails and ``ob-bastion-setup`` refuses the
+   maximum security installation: NSS and SSO stop working about an hour
+   after enrollment. The authorization-code flow can return a refresh
+   token even when this is misconfigured, so test the device flow, not
+   authorization-code.
+
 Step 2: plugins activation
 --------------------------
 

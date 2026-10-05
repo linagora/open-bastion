@@ -108,7 +108,7 @@ R-P2 - Révocation non autorisée de certificats (``ssh-ca``)
 
    ^/ssh/(admin|certs|revoke)(\?|/|$)   →   $groups =~ /\bob-ssh-admins\b/
 
-Attention à ne pas écrire ``^/ssh/revoke`` seul : cela capture aussi ``/ssh/revoked``, la KRL **publique** que chaque backend télécharge — la restreindre casserait la propagation des révocations. Voir la section « Step 3b » de :doc:`/deployment/llng-configuration` et la condition d'emploi CE02.
+Attention à ne pas écrire ``^/ssh/revoke`` seul : cela capture aussi ``/ssh/revoked``, la KRL **publique** que chaque backend télécharge — la restreindre casserait la propagation des révocations. Voir la section « Step 3 » de :doc:`/deployment/llng-configuration` et la condition d'emploi CE02.
 
 **Remédiation plugin (amont) :** contrôle d'autorisation intégré, par défaut refus tant qu'une règle dédiée n'est pas configurée. ``#58`` est **corrigée en amont** : ``/ssh/admin``, ``/ssh/certs`` et ``/ssh/revoke`` répondent 403 tant que ``sshCaAdminRule`` n'est pas renseignée. Le correctif n'est pas encore publié, et la ``locationRules`` reste la mesure applicable en attendant — elle garde par ailleurs son intérêt en défense en profondeur.
 

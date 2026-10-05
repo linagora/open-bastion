@@ -71,7 +71,7 @@ When ``oidcRPMetaDataOptionsDeviceOwnership`` is set to ``organization`` on an R
 
 This is useful for enrolling servers, kiosks, or IoT devices that belong to the organization rather than a specific user.
 
-For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the critical note under :ref:`Step 1 <llng-configuration-creation-of-the-oidc-relying-party>`.
+For the device to get a **durable** (offline) refresh token, also set ``oidcRPMetaDataOptionsAllowOffline = 1`` and deploy ``oidc-device-organization`` **>= 0.3.3** (earlier versions stripped ``offline_access``, leaving the server with a non-renewable token). See the :ref:`offline refresh token warning <llng-configuration-offline-refresh-token>` under Step 1.
 
 Device authorization security features
 --------------------------------------

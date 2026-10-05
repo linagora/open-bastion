@@ -3826,7 +3826,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      * it with pam_getenv — which can NEVER work: SendEnv/AcceptEnv only populate
      * the child process environment, never the PAM environment pam_getenv reads,
      * so a bastion_jwt_required backend rejected every session. That dead block
-     * has been removed (see doc/design/bastion-cert-vouching.rst).
+     * has been removed (see doc/references/bastion-cert-vouching.rst).
      *
      * Instead, the bastion presents a short-lived, LLNG-signed certificate whose:
      *   - `source-address` critical option makes sshd itself refuse the cert off

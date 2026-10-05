@@ -31,7 +31,7 @@ here.
   stdin (see Security).
 - **`--enable-sudo-fresh-otp`** on the setup script (#178): sets
   `timestamp_timeout=0` for the SSO group so every `sudo` re-authenticates.
-  Opt-in; limits in [doc/security-scenarios/index.rst](doc/security-scenarios/index.rst).
+  Opt-in; limits in [doc/references/maximum-security.rst](doc/references/maximum-security.rst).
 - **The postinst warns when a mode-c host's sshd still accepts passwords**
   (#180), louder under `UsePAM no`. It reports only; it changes nothing.
 - **`min_gid` / `max_gid`**: server-supplied GIDs are checked against their own
@@ -50,7 +50,7 @@ here.
   replaces `/etc/ssh/revoked_keys` atomically and fails its unit on error,
   keeping the current list. It runs sandboxed from `ob-krl-refresh.timer`,
   every 30 minutes; **`--krl-refresh-interval`** (1 to 60 minutes) changes
-  that. See [doc/security-scenarios/index.rst](doc/security-scenarios/index.rst).
+  that. See [doc/references/maximum-security.rst](doc/references/maximum-security.rst).
 - **`ob-builder --save-config FILE`** saves the questionnaire's answers, defaults
   included, as a YAML that `--config` replays; the questionnaire offers it as
   its last question (#311). An embedded `client_secret` is left out unless the

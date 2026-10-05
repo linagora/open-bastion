@@ -289,7 +289,7 @@ RP your hosts enrol against.
 Unset, `/ssh/admin`, `/ssh/certs` and `/ssh/revoke` answer **403 to everyone**
 once the portal restarts on 0.6.0. Set it **alongside** the vhost
 `locationRules`, not instead: see
-[doc/deployment/llng-configuration.rst](doc/deployment/llng-configuration.rst), step 3b.
+[doc/deployment/llng-configuration.rst](doc/deployment/llng-configuration.rst), Step 3.
 
 ---
 

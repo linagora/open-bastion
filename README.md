@@ -47,7 +47,7 @@ then deploy:
 | Quick-start                                                  | Use it to…                                                                                                                                                 |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work.       |
-| **[Configure your SSO](doc/deployment/llng-configuration.rst)**          | On your real LemonLDAP::NG: install the required plugins, and create the OIDC client(s) that carry your machines — the prerequisite before any deployment. |
+| **[Configure your SSO](doc/deployment/llng-configuration.rst)**          | On your real LemonLDAP::NG: activate the plugins and create the OIDC client(s) that carry your machines — the prerequisite before any deployment. |
 | **[Deploy a fleet with Ansible](doc/deployment/ansible-deployment.rst)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.         |
 | **[Deploy with a shell installer](doc/deployment/self-extracting-installer.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.         |
 
@@ -60,9 +60,7 @@ For the underlying concepts and per-step manual configuration, see
 
 Each server is first **enrolled** by an administrator — installing the package and
 registering the host with the SSO (`ob-enroll`, or the generated `ob-builder`
-artefacts), which is also what assigns its server group. See the
-[manual configuration guide](doc/deployment/manual-configuration.rst) (or the [quick-starts](doc/index.rst#start-here))
-for the enrollment step. Once enrolled:
+artefacts), which is also what assigns its server group. Once enrolled:
 
 1. A user authenticates to a server — with an LLNG **token** _(used as the SSH
    password)_ or an **SSO-signed SSH certificate** _(self-served from the
