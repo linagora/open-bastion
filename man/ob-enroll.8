@@ -32,6 +32,10 @@ Where to save the server token. Default: /var/lib/open-bastion/token
 .TP
 .BR \-C ", " \-\-config " " \fIFILE\fR
 Read settings from config file. Default: /etc/open-bastion/openbastion.conf
+.br
+Options given on the command line override the file. A file given with
+.B \-C
+that cannot be read is an error.
 .TP
 .BR \-k ", " \-\-insecure
 Skip SSL certificate verification.

@@ -111,12 +111,12 @@ test_missing_portal_url() {
     return 0
 }
 
-# Test 6: Missing client_secret exits with error
+# Test 6: without client_secret (public client) an unreachable portal is an
+# error, not a hang. Port 1 on loopback refuses at once: no network needed.
 test_missing_client_secret() {
     local config="$TEMP_DIR/test_config.conf"
-    echo "portal_url = https://example.com" > "$config"
+    echo "portal_url = http://127.0.0.1:1" > "$config"
 
-    # Should fail because client_secret is missing
     if "$SCRIPT_PATH" -C "$config" > /dev/null 2>&1; then
         return 1  # Should have failed
     fi
@@ -625,6 +625,48 @@ test_save_token_no_offline_ok() {
     return 0
 }
 
+# -C must be read before the options are applied (issue #314). main prints the
+# portal and server group before the first network call; the loopback portal
+# then fails at once.
+test_config_option_is_read() {
+    local config="$TEMP_DIR/c_option.conf" output
+    printf 'portal_url = http://127.0.0.1:1\nserver_group = grp-from-file\nserver_token_file = %s/c_option.token\n' \
+        "$TEMP_DIR" > "$config"
+    output=$("$SCRIPT_PATH" -C "$config" 2>&1) || true
+    echo "$output" | grep -q "Loading configuration from $config" || return 1
+    echo "$output" | grep -q "Portal: http://127.0.0.1:1" || return 1
+    echo "$output" | grep -q "Server Group: grp-from-file" || return 1
+}
+
+test_cli_overrides_config_option() {
+    local config="$TEMP_DIR/c_override.conf" output
+    printf 'portal_url = http://127.0.0.1:2\nserver_group = grp-from-file\n' > "$config"
+    output=$("$SCRIPT_PATH" -g grp-from-cli -C "$config" -p http://127.0.0.1:1 2>&1) || true
+    echo "$output" | grep -q "Portal: http://127.0.0.1:1" || return 1
+    echo "$output" | grep -q "Server Group: grp-from-cli" || return 1
+}
+
+test_config_option_missing_file() {
+    local output
+    if output=$("$SCRIPT_PATH" -C "$TEMP_DIR/does-not-exist.conf" 2>&1); then
+        return 1
+    fi
+    echo "$output" | grep -q "Cannot read config file" || return 1
+}
+
+# The value of another option is not taken for -C, and vice versa.
+test_find_config_option_skips_values() {
+    (
+        source_script_functions
+        CONFIG_FILE=/default.conf
+        CONFIG_FROM_CLI=""
+        find_config_option -g -C -t /tmp/tok
+        [ "$CONFIG_FILE" = /default.conf ] && [ -z "$CONFIG_FROM_CLI" ] || exit 1
+        find_config_option -g grp --config /from-cli.conf -t /tmp/tok
+        [ "$CONFIG_FILE" = /from-cli.conf ] && [ "$CONFIG_FROM_CLI" = 1 ] || exit 1
+    )
+}
+
 # Run all tests
 main() {
     echo "================================"
@@ -638,7 +680,11 @@ main() {
     run_test "--help exits 0" test_help_flag
     run_test "Unknown option exits non-zero" test_unknown_option
     run_test "Missing portal URL exits with error" test_missing_portal_url
-    run_test "Missing client_secret exits with error" test_missing_client_secret
+    run_test "No client_secret, unreachable portal exits with error" test_missing_client_secret
+    run_test "-C file is read" test_config_option_is_read
+    run_test "Command line overrides the -C file" test_cli_overrides_config_option
+    run_test "Unreadable -C file exits with error" test_config_option_missing_file
+    run_test "find_config_option skips other options' values" test_find_config_option_skips_values
     run_test "Config file parsing (read_config function)" test_read_config_function
     run_test "load_config reads config correctly" test_load_config_function
     run_test "parse_args sets variables correctly" test_parse_args_function
