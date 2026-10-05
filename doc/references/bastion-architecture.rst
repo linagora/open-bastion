@@ -608,7 +608,7 @@ This writes ``/etc/open-bastion/allowed_bastions`` (world-readable 0644 in a 071
 
    # /etc/ssh/sshd_config.d/00-open-bastion-backend.conf  (managed by ob-backend-setup)
    TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
-   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
+   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k
    AuthorizedPrincipalsCommandUser nobody
    # AcceptEnv LLNG_BASTION_JWT   ← REMOVED
 

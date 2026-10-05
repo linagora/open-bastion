@@ -223,10 +223,10 @@ Required sshd settings (no ``AcceptEnv`` needed):
    # /etc/ssh/sshd_config
    TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
    ExposeAuthInfo yes
-   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
+   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k
    AuthorizedPrincipalsCommandUser nobody
 
-``ob-ssh-principals`` is **generated at setup time** by ``ob-backend-setup`` (and by ``ob-bastion-setup``, in its two-token ``%u %f`` bastion form) into ``/usr/local/sbin/``. It is not a file shipped by the package, so it will not be found under ``/usr/lib/open-bastion/`` or ``/usr/sbin/``.
+``ob-ssh-principals`` is **generated at setup time** by ``ob-backend-setup`` (and by ``ob-bastion-setup``, in its ``%u %f %t %k`` bastion form) into ``/usr/local/sbin/``. It is not a file shipped by the package, so it will not be found under ``/usr/lib/open-bastion/`` or ``/usr/sbin/``.
 
 Direct user SSO certs that do not carry a ``bastion=`` key-id field are denied before PAM runs when an ``allowed_bastions`` file is present.
 

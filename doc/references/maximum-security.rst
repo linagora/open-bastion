@@ -27,46 +27,57 @@ The security model
       - Disable LLNG account              - Remove sudo_allowed
       - Remove from groups                  (immediate effect)
 
-The ``sshd`` drop-in
---------------------
+The ``sshd`` drop-ins
+---------------------
 
-``ob-bastion-setup --max-security`` writes
-``/etc/ssh/sshd_config.d/60-max-security.conf``:
+The setup command — :doc:`ob-bastion-setup(8)
+</references/man/ob-bastion-setup>`, run as ``ob-backend-setup`` on a
+backend — writes the ``sshd`` drop-in of the role it configures,
+``/etc/ssh/sshd_config.d/00-open-bastion-bastion.conf`` (bastion and
+standalone hosts) or ``00-open-bastion-backend.conf`` (backend);
+``--max-security`` adds ``/etc/ssh/sshd_config.d/60-max-security.conf``:
 
 .. code:: text
 
+   # 60-max-security.conf   (--max-security only)
+   AuthorizedKeysFile none                           # No unsigned keys
+   RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
+   ExposeAuthInfo yes                                # For certificate audit
+
+.. code:: text
+
+   # 00-open-bastion-bastion.conf on a bastion or standalone host,
+   # 00-open-bastion-backend.conf on a backend
    UsePAM yes
    PasswordAuthentication no                         # No SSH passwords
    KbdInteractiveAuthentication no
    PubkeyAuthentication yes                          # SSH certificates only
    TrustedUserCAKeys /etc/ssh/open-bastion_ca.pub
-   AuthorizedKeysFile none                           # No unsigned keys
-   RevokedKeys /etc/ssh/revoked_keys                 # KRL mandatory
-   ExposeAuthInfo yes                                # For certificate audit
-   # Bastion: two tokens (%u %f). Backend: three (%u %f %i) — %i carries the
-   # bastion= key-id checked against /etc/open-bastion/allowed_bastions.
-   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f
+   # Bastion and standalone: %u %f %t %k. Backend: %u %f %i %t %k — %i is
+   # the bastion= key-id checked against /etc/open-bastion/allowed_bastions.
+   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k
    AuthorizedPrincipalsCommandUser nobody
    PermitRootLogin no
-   PermitEmptyPasswords no
 
-**Do not replace ``ob-ssh-principals`` with ``/bin/echo %u``.** Earlier
-revisions of this documentation showed that shortcut; it silently disables
-two controls:
+**Do not replace ``ob-ssh-principals`` with ``/bin/echo %u``, and keep
+its argument list complete.** Earlier revisions of this documentation
+showed that shortcut; it silently disables three controls:
 
 - ``%f`` is what feeds the :ref:`SSH fingerprint binding
   <pam-modes-ssh-fingerprint-binding-on-pamauthorize-and-pamverify>`: the
   helper drops it in ``/run/open-bastion/ssh-fp/<pid>.fp`` for
   ``pam_openbastion`` to read. With ``/bin/echo`` no fingerprint is ever
   captured, so the binding degrades to "not sent".
-- On **backends** the helper is invoked with a third token,
+- ``%t`` and ``%k`` (key type and key blob) are what the optional
+  :doc:`SSH key policy </security>` reads from the same spool. It is
+  fail-closed: a login whose key cannot be identified is denied.
+- On **backends** the helper also gets ``%i``,
   ``AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f
-  %i``, and ``%i`` (the certificate key-id) is what carries
-  ``bastion=<id>``, checked against
-  ``/etc/open-bastion/allowed_bastions`` **before PAM runs**. With
-  ``/bin/echo`` any CA-signed certificate whose principal matches the
-  login name is accepted, including a direct user SSO certificate that
-  never went through a bastion.
+  %i %t %k``, the certificate key-id that carries ``bastion=<id>``,
+  checked against ``/etc/open-bastion/allowed_bastions`` **before PAM
+  runs**. With ``/bin/echo`` any CA-signed certificate whose principal
+  matches the login name is accepted, including a direct user SSO
+  certificate that never went through a bastion.
 
 The helper is written to ``/usr/local/sbin/ob-ssh-principals`` at setup
 time by ``ob-bastion-setup`` / ``ob-backend-setup``; it is not shipped as a

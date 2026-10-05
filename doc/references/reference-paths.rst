@@ -34,6 +34,8 @@ SSH / certificate paths
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
 | ``/etc/ssh/sshd_config.d/00-open-bastion-backend.conf`` | backend sshd drop-in                                                                      | ``ob-backend-setup``                        |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
+| ``/etc/ssh/sshd_config.d/60-max-security.conf``         | ``--max-security`` sshd settings: no unsigned keys, KRL, certificate audit                 | ``ob-bastion-setup``, ``ob-backend-setup`` |
++---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
 | ``/usr/local/sbin/ob-ssh-principals``                   | ``AuthorizedPrincipalsCommand`` helper — **generated at setup time, not a packaged file** | ``ob-bastion-setup``, ``ob-backend-setup``  |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
 | ``/run/open-bastion/ssh-fp.sock``                       | deposit socket the helper reaches through ``ob-fp-submit``                                | ``ob-fp.socket`` (systemd)                  |
@@ -41,14 +43,16 @@ SSH / certificate paths
 | ``/run/open-bastion/ssh-fp/<sshd-session-pid>.fp``      | fingerprint spool read by ``pam_openbastion`` — **``0700 root`` since #249**              | ``ob-fp-daemon``                            |
 +---------------------------------------------------------+-------------------------------------------------------------------------------------------+---------------------------------------------+
 
-``AuthorizedPrincipalsCommand`` takes **two** tokens on a bastion and **three** on a backend:
+``AuthorizedPrincipalsCommand`` takes four tokens on a bastion and five on
+a backend (``%i`` is the cert key-id, ``%t``/``%k`` feed the SSH key
+policy):
 
 ::
 
-   # bastion
-   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f
+   # bastion and standalone
+   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %t %k
    # backend  (%i = cert key-id, carries bastion=<id>)
-   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i
+   AuthorizedPrincipalsCommand /usr/local/sbin/ob-ssh-principals %u %f %i %t %k
    AuthorizedPrincipalsCommandUser nobody
 
 Configuration and state

@@ -119,12 +119,8 @@ Open Bastion side (per server)
 ------------------------------
 
 Set up by :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`,
-:doc:`ob-backend-setup(8) </references/man/ob-bastion-setup>` or
-:doc:`ob-standalone-setup(8) </references/man/ob-bastion-setup>` — or by
-the :doc:`ob-builder(1) </references/man/ob-builder>` artefacts, whose
-`README
-<https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__
-documents the questionnaire.
+run as ``ob-backend-setup`` on a backend and ``ob-standalone-setup`` on a
+standalone host.
 
 - Security scenario — the strictness of authentication and whether
   ``sudo`` is token-gated. The default, :doc:`maximum security
@@ -148,6 +144,14 @@ documents the questionnaire.
   directory, plus the ``approved_shells`` / ``approved_home_prefixes``
   allow-lists that bound what a provisioned (or service) account may
   use. See :doc:`Configuration </references/configuration>`.
+
+- Account existence — a bastion or standalone host creates no account:
+  ``libnss_openbastion`` resolves SSO users from LLNG on the fly (a
+  virtual passwd entry) and ``pam_mkhomedir`` creates only the home
+  directory. A backend writes the account instead: ``create_user`` is on
+  by default there (``--no-create-user`` disables it), and the module
+  appends the account to ``/etc/passwd`` and ``/etc/shadow`` on first
+  login and creates its home.
 
 - Group-sync whitelist — ``allowed_managed_groups`` limits which
   LLNG-managed groups may be created/modified locally
