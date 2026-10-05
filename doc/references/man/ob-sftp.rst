@@ -105,8 +105,3 @@ See also
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :manpage:`sftp(1)`,
 :manpage:`ssh(1)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

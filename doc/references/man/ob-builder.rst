@@ -115,7 +115,9 @@ provides them under a ``service_accounts:`` list (keys: ``name``,
 time and rendered into ``/etc/open-bastion/service-accounts.conf``
 (``0600 root:root``) on the target, with ``service_accounts_file`` set in
 ``openbastion.conf``. They apply to every role. See ``open-bastion`` and
-the project's :doc:`/service-accounts`.
+the project's :doc:`/service-accounts`, shipped as
+``/usr/share/doc/open-bastion-doc/html/service-accounts.html`` in the
+HTML documentation.
 
 Files
 -----
@@ -165,8 +167,3 @@ See also
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-backend-setup(8) <ob-bastion-setup>`,
 :doc:`ob-bastion-id(1) <ob-bastion-id>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

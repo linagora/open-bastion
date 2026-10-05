@@ -106,8 +106,3 @@ See also
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`
 
 LemonLDAP::NG documentation: https://lemonldap-ng.org/
-
-Author
-------
-
-Xavier Guimard xguimard@linagora.com

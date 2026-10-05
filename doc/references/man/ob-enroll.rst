@@ -135,8 +135,3 @@ See also
 :manpage:`pam.d(5)`
 
 LemonLDAP::NG documentation: https://lemonldap-ng.org/
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

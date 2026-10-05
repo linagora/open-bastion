@@ -87,8 +87,3 @@ See also
 :doc:`ob-ssh(1) <ob-ssh>`,
 :doc:`ob-scp(1) <ob-scp>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

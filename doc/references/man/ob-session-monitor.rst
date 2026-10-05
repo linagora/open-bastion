@@ -129,8 +129,3 @@ See also
 :doc:`ob-desktop-setup(8) <ob-desktop-setup>`,
 :doc:`ob-cache-admin(8) <ob-cache-admin>`,
 :manpage:`loginctl(1)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

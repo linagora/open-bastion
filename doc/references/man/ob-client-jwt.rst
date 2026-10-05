@@ -96,8 +96,3 @@ See also
 :doc:`ob-sign-request(8) <ob-sign-request>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-heartbeat(8) <ob-heartbeat>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

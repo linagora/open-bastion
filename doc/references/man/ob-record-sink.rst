@@ -99,8 +99,3 @@ See also
 :doc:`ob-record-connect(1) <ob-record-connect>`,
 :doc:`ob-session-recorder(8) <ob-session-recorder>`,
 :doc:`ob-cert-daemon(8) <ob-cert-daemon>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

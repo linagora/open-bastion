@@ -107,8 +107,3 @@ See also
 :manpage:`scp(1)`,
 :manpage:`sftp(1)`,
 :manpage:`ssh(1)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

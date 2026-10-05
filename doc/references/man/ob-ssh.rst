@@ -19,7 +19,9 @@ and re-originates the SSH connection to the backend with it.
 
 This replaces the former JWT-over-SendEnv transport (which never worked,
 because SendEnv/AcceptEnv do not populate the PAM environment the
-backend reads). See :doc:`/references/bastion-cert-vouching`.
+backend reads). See :doc:`/references/bastion-cert-vouching`, shipped as
+``/usr/share/doc/open-bastion-doc/html/references/bastion-cert-vouching.html``
+in the HTML documentation.
 
 Flow
 ~~~~
@@ -234,8 +236,3 @@ See also
 :doc:`ob-enroll(8) <ob-enroll>`,
 :manpage:`ssh(1)`,
 :manpage:`sshd_config(5)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

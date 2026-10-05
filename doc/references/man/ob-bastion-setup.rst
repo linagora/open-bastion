@@ -328,8 +328,3 @@ See also
 :manpage:`sshd_config(5)`
 
 LemonLDAP::NG documentation: https://lemonldap-ng.org/
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

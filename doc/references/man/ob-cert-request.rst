@@ -65,8 +65,3 @@ See also
 :doc:`ob-cert-daemon(8) <ob-cert-daemon>`,
 :doc:`ob-ssh(1) <ob-ssh>`,
 :doc:`ob-scp(1) <ob-scp>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

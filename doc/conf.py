@@ -87,68 +87,79 @@ manpages_url = "https://manpages.debian.org/{path}"
 
 # The troff man pages the packages install are generated from these documents
 # by the `man` builder, one file per entry: (document, name, description,
-# authors, section). The description becomes the man page's NAME line; the
-# reST documents carry no NAME section of their own. ob-backend-setup(8) and
-# ob-standalone-setup(8) document the same program as ob-bastion-setup(8): its
-# page lists them in NAME (man_name_aliases below) and they are installed as
-# symlinks to it — see the `man` target in CMakeLists.txt.
+# authors, section). The description becomes the man page's NAME line and the
+# author its AUTHOR section; the reST documents carry neither of their own.
+# ob-backend-setup(8) and ob-standalone-setup(8) document the same program as
+# ob-bastion-setup(8): its page lists them in NAME (man_name_aliases below)
+# and they are installed as symlinks to it — see the `man` target in
+# CMakeLists.txt.
+man_author = "Xavier Guimard <xguimard@linagora.com>"
 man_pages = [
     ("references/man/ob-bastion-id", "ob-bastion-id",
-     "Print this bastion's identifier (as seen by backends)", "", 1),
+     "Print this bastion's identifier (as seen by backends)", man_author, 1),
     ("references/man/ob-bastion-setup", "ob-bastion-setup",
-     "Configure a server as an Open Bastion node with LemonLDAP::NG", "", 8),
+     "Configure a server as an Open Bastion node with LemonLDAP::NG",
+     man_author, 8),
     ("references/man/ob-builder", "ob-builder",
-     "Generate Open Bastion deployment artefacts", "", 1),
+     "Generate Open Bastion deployment artefacts", man_author, 1),
     ("references/man/ob-cache-admin", "ob-cache-admin",
-     "Administer the offline credential cache", "", 8),
+     "Administer the offline credential cache", man_author, 8),
     ("references/man/ob-cert-daemon", "ob-cert-daemon",
-     "Privileged bastion hop-certificate minting service", "", 8),
+     "Privileged bastion hop-certificate minting service", man_author, 8),
     ("references/man/ob-cert-request", "ob-cert-request",
-     "Unprivileged client for the bastion certificate socket", "", 1),
+     "Unprivileged client for the bastion certificate socket", man_author, 1),
     ("references/man/ob-client-jwt", "ob-client-jwt",
      "Print a client_secret_jwt assertion without putting the secret on a "
-     "command line", "", 8),
+     "command line", man_author, 8),
     ("references/man/ob-desktop-setup", "ob-desktop-setup",
-     "Configure a workstation to log in through LemonLDAP::NG", "", 8),
+     "Configure a workstation to log in through LemonLDAP::NG", man_author, 8),
     ("references/man/ob-enroll", "ob-enroll",
-     "Enroll a server with LemonLDAP::NG for PAM authentication", "", 8),
+     "Enroll a server with LemonLDAP::NG for PAM authentication",
+     man_author, 8),
     ("references/man/ob-fp-daemon", "ob-fp-daemon",
-     "Privileged sink for the SSH key fingerprint spool", "", 8),
+     "Privileged sink for the SSH key fingerprint spool", man_author, 8),
     ("references/man/ob-fp-submit", "ob-fp-submit",
-     "Deposit an SSH key fingerprint with ob-fp-daemon", "", 8),
+     "Deposit an SSH key fingerprint with ob-fp-daemon", man_author, 8),
     ("references/man/ob-heartbeat", "ob-heartbeat",
-     "Send heartbeat to LemonLDAP::NG server", "", 8),
+     "Send heartbeat to LemonLDAP::NG server", man_author, 8),
     ("references/man/ob-krl-refresh", "ob-krl-refresh",
-     "Refresh the SSH key revocation list from the portal", "", 8),
+     "Refresh the SSH key revocation list from the portal", man_author, 8),
     ("references/man/ob-login-shell", "ob-login-shell",
-     "Login shell of SSO users on a host that records sessions", "", 8),
+     "Login shell of SSO users on a host that records sessions",
+     man_author, 8),
     ("references/man/ob-post-upgrade", "ob-post-upgrade",
-     "Finish an Open Bastion package upgrade on this host", "", 8),
+     "Finish an Open Bastion package upgrade on this host", man_author, 8),
     ("references/man/ob-record-connect", "ob-record-connect",
-     "Unprivileged connector for the session-recording sink", "", 1),
+     "Unprivileged connector for the session-recording sink", man_author, 1),
     ("references/man/ob-record-sink", "ob-record-sink",
-     "Privileged session-recording sink", "", 8),
+     "Privileged session-recording sink", man_author, 8),
     ("references/man/ob-scp", "ob-scp",
      "Bastion file copy to/from/between backends with LLNG certificate "
-     "vouching", "", 1),
+     "vouching", man_author, 1),
     ("references/man/ob-session-prune", "ob-session-prune",
-     "Compress and expire recorded SSH sessions", "", 8),
+     "Compress and expire recorded SSH sessions", man_author, 8),
     ("references/man/ob-session-monitor", "ob-session-monitor",
-     "Revalidate offline sessions once the portal is reachable", "", 8),
+     "Revalidate offline sessions once the portal is reachable",
+     man_author, 8),
     ("references/man/ob-session-recorder", "ob-session-recorder",
-     "Record SSH sessions on an Open Bastion host", "", 8),
+     "Record SSH sessions on an Open Bastion host", man_author, 8),
     ("references/man/ob-sftp", "ob-sftp",
-     "Bastion SFTP to a backend with LLNG certificate vouching", "", 1),
+     "Bastion SFTP to a backend with LLNG certificate vouching",
+     man_author, 1),
     ("references/man/ob-sign-request", "ob-sign-request",
-     "Compute the request-signing headers for a /pam/ portal call", "", 8),
+     "Compute the request-signing headers for a /pam/ portal call",
+     man_author, 8),
     ("references/man/ob-ssh", "ob-ssh",
-     "Bastion-to-backend SSH connector with LLNG certificate vouching", "", 1),
+     "Bastion-to-backend SSH connector with LLNG certificate vouching",
+     man_author, 1),
     ("references/man/ob-ssh-cert", "ob-ssh-cert",
-     "Obtain an SSH certificate from LemonLDAP::NG without a browser", "", 8),
+     "Obtain an SSH certificate from LemonLDAP::NG without a browser",
+     man_author, 8),
     ("references/man/ob-uninstall", "ob-uninstall",
-     "Take Open Bastion off this host, ready for package removal", "", 8),
+     "Take Open Bastion off this host, ready for package removal",
+     man_author, 8),
     ("references/man/openbastion.conf", "openbastion.conf",
-     "Configuration file of the Open Bastion PAM module", "", 5),
+     "Configuration file of the Open Bastion PAM module", man_author, 5),
 ]
 
 # A man page's NAME line lists every name its command is installed
@@ -186,14 +197,18 @@ def _append_man_name_aliases(app, exception):
             fh.write(page.replace(before, after, 1))
 
 
-def _drop_uri_less_reference_targets(app, doctree, docname):
-    """Keep the man pages free of empty link targets.
+def _drop_reference_targets(app, doctree, docname):
+    """Make the man pages print link text without targets.
 
-    A reference whose target is another document resolves to no URI at all
-    in the man builder, and the man writer then prints its target as an
-    empty ``<>`` after the link text — "ob-bastion-setup(8) <>". Removing
-    the empty ``refuri`` leaves the link text alone. External targets, such
-    as the ``:manpage:`` URLs, are kept and printed as before.
+    Whether the man writer appends a reference's target after its text —
+    "ob-ssh(1) <https://manpages.debian.org/…>" — depends on the docutils
+    and Sphinx versions in play: docutils' manpage writer typesets
+    URI-references as text by default, Sphinx only when ``man_show_urls``
+    is set, which this project does not set. Dropping the target gives the
+    same text everywhere, and removes the empty ``<>`` a reference to
+    another document is printed with, its target resolving to no URI at
+    all. The OSC 8 hyperlink newer Sphinx emits for external targets goes
+    with it.
     """
     if app.builder.format != "man":
         return
@@ -201,12 +216,11 @@ def _drop_uri_less_reference_targets(app, doctree, docname):
     from docutils import nodes
     # findall() is docutils >= 0.18.1; EL9 ships an older one (Sphinx 3.4).
     for node in getattr(doctree, "findall", doctree.traverse)(nodes.reference):
-        if not node.get("refuri"):
-            node.attributes.pop("refuri", None)
+        node.attributes.pop("refuri", None)
 
 
 def setup(app):
-    app.connect("doctree-resolved", _drop_uri_less_reference_targets)
+    app.connect("doctree-resolved", _drop_reference_targets)
     app.connect("build-finished", _append_man_name_aliases)
 
     if _mermaid:

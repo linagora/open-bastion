@@ -144,8 +144,3 @@ See also
 :manpage:`sshd_config(5)`,
 :manpage:`nsswitch.conf(5)`,
 :manpage:`shells(5)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

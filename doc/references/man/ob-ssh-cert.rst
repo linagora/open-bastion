@@ -132,8 +132,3 @@ See also
 :doc:`ob-cert-daemon(8) <ob-cert-daemon>`
 
 LemonLDAP::NG documentation: https://lemonldap-ng.org/
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

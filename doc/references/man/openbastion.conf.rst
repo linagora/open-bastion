@@ -586,8 +586,3 @@ See also
 
 The exhaustive security catalogue is in the HTML documentation shipped in
 ``/usr/share/doc/open-bastion/html``.
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

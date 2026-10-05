@@ -74,8 +74,3 @@ See also
 :doc:`ob-cert-request(1) <ob-cert-request>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-backend-setup(8) <ob-bastion-setup>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

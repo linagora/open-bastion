@@ -133,8 +133,3 @@ See also
 :doc:`ob-fp-daemon(8) <ob-fp-daemon>`,
 :doc:`ob-fp-submit(8) <ob-fp-submit>`,
 :doc:`ob-login-shell(8) <ob-login-shell>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

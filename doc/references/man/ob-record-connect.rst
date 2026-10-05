@@ -90,8 +90,3 @@ See also
 
 :doc:`ob-record-sink(8) <ob-record-sink>`,
 :doc:`ob-session-recorder(8) <ob-session-recorder>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

@@ -252,8 +252,3 @@ See also
 :doc:`ob-krl-refresh(8) <ob-krl-refresh>`,
 :doc:`ob-bastion-id(1) <ob-bastion-id>`,
 :doc:`ob-client-jwt(8) <ob-client-jwt>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

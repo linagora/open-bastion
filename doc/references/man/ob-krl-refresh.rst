@@ -152,8 +152,3 @@ See also
 :manpage:`sshd_config(5)`,
 :manpage:`ssh-keygen(1)`,
 :manpage:`systemd.timer(5)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

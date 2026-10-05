@@ -171,8 +171,3 @@ See also
 :manpage:`script(1)`,
 :manpage:`rrsync(1)`,
 :manpage:`sshd_config(5)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

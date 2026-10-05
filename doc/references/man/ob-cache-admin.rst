@@ -124,8 +124,3 @@ See also
 :doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-desktop-setup(8) <ob-desktop-setup>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`
-
-Author
-------
-
-Xavier Guimard xguimard@linagora.com

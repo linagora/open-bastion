@@ -113,8 +113,3 @@ See also
 :doc:`ob-bastion-id(1) <ob-bastion-id>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-cert-daemon(8) <ob-cert-daemon>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

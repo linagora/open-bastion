@@ -111,8 +111,3 @@ See also
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-builder(1) <ob-builder>`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

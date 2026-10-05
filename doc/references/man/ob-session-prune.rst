@@ -73,8 +73,3 @@ See also
 :doc:`ob-session-recorder(8) <ob-session-recorder>`,
 :doc:`ob-record-sink(8) <ob-record-sink>`,
 :manpage:`gzip(1)`
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>

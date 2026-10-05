@@ -128,8 +128,3 @@ See also
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
 :doc:`ob-backend-setup(8) <ob-bastion-setup>`,
 ``pam_openbastion``
-
-Author
-------
-
-Xavier Guimard <xguimard@linagora.com>
