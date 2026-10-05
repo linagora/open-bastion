@@ -10,12 +10,12 @@ cmake -S . -B build && cmake --build build && ctest --test-dir build
 for t in tests/test_ob_*.sh; do bash "$t"; done
 ```
 
-The HTML documentation builds with `-DBUILD_DOC=ON` and the `doc` target.
-The man pages build by default, from the same sources, with the `man` target;
-both need `sphinx-build` (`python3-sphinx`), and configuring with
-`-DBUILD_MAN=OFF` skips the man pages entirely.
-[.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for what
-CI runs.
+The man pages build by default, with the `man` target when `sphinx-build`
+(`python3-sphinx`) is installed; without Sphinx they are skipped, and
+asking for them explicitly with `-DBUILD_MAN=ON` makes their absence
+fatal. The HTML documentation is off by default: use `-DBUILD_DOC=ON`
+and the `doc` target.  [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for
+what CI runs.
 
 To build Debian packages from the working tree, use `scripts/build-dev-deb`
 (it passes its arguments to `dpkg-buildpackage`, default `-us -uc -b`). The

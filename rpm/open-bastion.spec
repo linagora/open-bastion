@@ -67,6 +67,7 @@ Features:
     -DUSE_LIBSODIUM=ON \
     -DBUILD_TESTING=ON \
     -DINSTALL_DESKTOP=ON \
+    -DBUILD_MAN=ON \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
 

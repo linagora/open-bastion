@@ -75,12 +75,17 @@ Install from sources
                         libssl-dev \
                         libkeyutils-dev \
                         cmake \
+                        pkgconf \
                         curl \
                         jq
-   
+
    cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr
    cmake --build build
    cmake --build build -- install
+
+``python3-sphinx`` is optional: with it the build generates the man pages,
+and ``-DBUILD_DOC=ON`` builds the HTML documentation as well; without it the
+man pages are skipped (``-DBUILD_MAN=ON`` makes their absence an error).
 
 Note the use of ``CMAKE_INSTALL_PREFIX=/usr`` rather than taking CMake's
 ``/usr/local`` default: paths written into the generated ``sshd`` and

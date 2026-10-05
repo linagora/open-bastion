@@ -26,7 +26,7 @@ artefacts are then distributed to the production servers.
 
 %install
 install -Dm 0755 ob-builder %{buildroot}/usr/bin/ob-builder
-install -Dm 0644 man/ob-builder.1 %{buildroot}/usr/share/man/man1/ob-builder.1
+@BUILDER_MAN_INSTALL@
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/lib
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/templates
 install -dm 0755 %{buildroot}/usr/share/open-bastion-builder/keyrings
@@ -36,7 +36,7 @@ cp -r keyrings/. %{buildroot}/usr/share/open-bastion-builder/keyrings/
 
 %files
 /usr/bin/ob-builder
-%{_mandir}/man1/ob-builder.1*
+@BUILDER_MAN_FILES@
 /usr/share/open-bastion-builder/
 
 %changelog

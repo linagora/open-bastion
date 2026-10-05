@@ -144,9 +144,18 @@ install(FILES ${CMAKE_SOURCE_DIR}/README.md
 
 find_program(SPHINX_BUILD NAMES sphinx-build sphinx-build-3)
 
-# The man pages are generated from doc/references/man/, the same sources the
-# HTML documentation is built from. On by default: the packages ship them.
-option(BUILD_MAN "Generate the man pages with Sphinx" ON)
+# The man pages are generated from doc/references/man/, the same
+# sources the HTML documentation is built from. Default depends on
+# sphinx-build being found or not.
+if(NOT DEFINED BUILD_MAN)
+    if(SPHINX_BUILD)
+        set(_ob_build_man_default ON)
+    else()
+        set(_ob_build_man_default OFF)
+    endif()
+    option(BUILD_MAN "Generate the man pages with Sphinx" ${_ob_build_man_default})
+    unset(_ob_build_man_default)
+endif()
 
 if(BUILD_MAN)
     if(NOT SPHINX_BUILD)
@@ -702,6 +711,15 @@ set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
+# A package built from a tree without man pages ships without them.
+set(OB_NO_MAN_WARNING_SCRIPT "")
+if(NOT BUILD_MAN)
+    set(OB_NO_MAN_WARNING_SCRIPT "${CMAKE_BINARY_DIR}/no-man-pages.cmake")
+    file(WRITE "${OB_NO_MAN_WARNING_SCRIPT}"
+        "message(WARNING \"BUILD_MAN=OFF — this package is built without man pages; install Sphinx (python3-sphinx) and reconfigure to include them\")\n")
+    set(CPACK_INSTALL_SCRIPTS "${OB_NO_MAN_WARNING_SCRIPT}")
+endif()
+
 include(CPack)
 
 # open-bastion-builder is packaged separately (no dependency on the runtime
@@ -715,14 +733,6 @@ option(BUILD_BUILDER "Build the open-bastion-builder package" ON)
 if(BUILD_BUILDER AND NOT EXISTS "${CMAKE_SOURCE_DIR}/admin-builder/debian/control")
     message(STATUS "admin-builder/ tree not present — disabling BUILD_BUILDER")
     set(BUILD_BUILDER OFF)
-endif()
-
-# Both builder packages ship ob-builder(1), which is generated from doc/.
-if(BUILD_BUILDER AND NOT BUILD_MAN)
-    message(FATAL_ERROR
-        "BUILD_BUILDER=ON requires the man pages: ob-builder(1) is generated "
-        "by the `man` target — configure with -DBUILD_MAN=ON, or "
-        "-DBUILD_BUILDER=OFF")
 endif()
 
 if(BUILD_BUILDER)
@@ -755,7 +765,22 @@ if(BUILD_BUILDER)
     if(NOT DPKG_DEB_EXECUTABLE)
         message(STATUS "dpkg-deb not found — skipping open-bastion-builder DEB target")
     else()
+    set(_ob_builder_man_warning)
+    if(OB_NO_MAN_WARNING_SCRIPT)
+        set(_ob_builder_man_warning
+            COMMAND ${CMAKE_COMMAND} -P "${OB_NO_MAN_WARNING_SCRIPT}")
+    endif()
+    set(_ob_builder_deb_man_cmds)
+    if(BUILD_MAN)
+        list(APPEND _ob_builder_deb_man_cmds
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${BUILDER_DEB_ROOT}/usr/share/man/man1"
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "${MAN_OUT_DIR}/ob-builder.1"
+                "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1")
+    endif()
     add_custom_target(builder-deb ALL
+        ${_ob_builder_man_warning}
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/bin"
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -782,11 +807,7 @@ if(BUILD_BUILDER)
             "${CMAKE_SOURCE_DIR}/admin-builder/keyrings"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
 
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${BUILDER_DEB_ROOT}/usr/share/man/man1"
-        COMMAND ${CMAKE_COMMAND} -E copy
-            "${MAN_OUT_DIR}/ob-builder.1"
-            "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1"
+        ${_ob_builder_deb_man_cmds}
 
         # DEBIAN maintainer scripts must be 0755.
         COMMAND chmod 0755
@@ -799,13 +820,34 @@ if(BUILD_BUILDER)
         COMMENT "Building ${BUILDER_PKG_NAME} Debian package"
         VERBATIM
     )
-    add_dependencies(builder-deb man)
+    if(BUILD_MAN)
+        add_dependencies(builder-deb man)
+    endif()
     endif()
 
     find_program(RPMBUILD_EXECUTABLE rpmbuild)
     if(RPMBUILD_EXECUTABLE)
         set(BUILDER_RPM_OUTPUT
             "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1.noarch.rpm")
+
+        # The tarball carries the generated man page only when there is one.
+        set(_ob_builder_tar_man)
+        if(BUILD_MAN)
+            list(APPEND _ob_builder_tar_man
+                -C "${CMAKE_BINARY_DIR}"
+                --transform "s|^man/ob-builder\.1|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}/man/ob-builder.1|"
+                man/ob-builder.1)
+        endif()
+
+        # The spec's two ob-builder(1) lines vanish when there is no man page to
+        # put in the package; a comment is inert in %install and %files alike.
+        if(BUILD_MAN)
+            set(BUILDER_MAN_INSTALL "install -Dm 0644 man/ob-builder.1 %{buildroot}/usr/share/man/man1/ob-builder.1")
+            set(BUILDER_MAN_FILES "%{_mandir}/man1/ob-builder.1*")
+        else()
+            set(BUILDER_MAN_INSTALL "# no man page (built without Sphinx)")
+            set(BUILDER_MAN_FILES "# no man page (built without Sphinx)")
+        endif()
 
         configure_file(
             "${CMAKE_SOURCE_DIR}/admin-builder/rpm/open-bastion-builder.spec.in"
@@ -816,6 +858,7 @@ if(BUILD_BUILDER)
         # rpmbuild requires a SOURCES tarball, not a plain directory tree.
         set(BUILDER_RPM_TARBALL "${CMAKE_BINARY_DIR}/builder-pkg/rpm/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}.tar.gz")
         add_custom_target(builder-rpm ALL
+            ${_ob_builder_man_warning}
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "${CMAKE_BINARY_DIR}/builder-pkg/rpm"
             # The second -C and --transform put the generated man page where
@@ -824,9 +867,7 @@ if(BUILD_BUILDER)
                 -C "${CMAKE_SOURCE_DIR}"
                 --transform "s|^admin-builder|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}|"
                 admin-builder
-                -C "${CMAKE_BINARY_DIR}"
-                --transform "s|^man/ob-builder\.1|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}/man/ob-builder.1|"
-                man/ob-builder.1
+                ${_ob_builder_tar_man}
             COMMAND ${RPMBUILD_EXECUTABLE}
                 --define "_topdir ${CMAKE_BINARY_DIR}/builder-pkg/rpm/rpmbuild"
                 --define "_sourcedir ${CMAKE_BINARY_DIR}/builder-pkg/rpm"
@@ -835,7 +876,9 @@ if(BUILD_BUILDER)
             COMMENT "Building ${BUILDER_PKG_NAME} RPM package"
             VERBATIM
         )
-        add_dependencies(builder-rpm man)
+        if(BUILD_MAN)
+            add_dependencies(builder-rpm man)
+        endif()
     else()
         message(STATUS "rpmbuild not found — skipping open-bastion-builder RPM target")
     endif()

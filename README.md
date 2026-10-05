@@ -172,7 +172,7 @@ configuration keys, and usage examples.
 
 ```bash
 # Install dependencies (Debian/Ubuntu)
-sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev cmake curl jq
+sudo apt-get install libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev cmake pkgconf curl jq
 
 # Build
 mkdir build && cd build
@@ -185,6 +185,9 @@ Set `CMAKE_INSTALL_PREFIX=/usr` rather than taking CMake's `/usr/local` default:
 the paths written into the generated sshd and PAM configuration are absolute
 (`/usr/sbin/ob-service-account-keys`, for one), so a `/usr/local` install leaves
 them pointing at files that are not there.
+
+`python3-sphinx` is optional: with it the build generates the man pages (and
+`-DBUILD_DOC=ON` the HTML documentation); without it they are skipped.
 
 ## Documentation
 

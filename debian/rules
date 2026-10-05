@@ -11,7 +11,8 @@ override_dh_auto_configure:
 		-DUSE_LIBSODIUM=ON \
 		-DINSTALL_SYSTEMD=OFF \
 		-DINSTALL_DESKTOP=ON \
-		-DBUILD_DOC=ON
+		-DBUILD_DOC=ON \
+		-DBUILD_MAN=ON
 
 override_dh_auto_install:
 	dh_auto_install
