@@ -8,6 +8,10 @@ import importlib.util
 import os
 import re
 
+from sphinx.util import logging
+
+logger = logging.getLogger("open-bastion.man")
+
 HERE = os.path.abspath(os.path.dirname(__file__))
 REPO = os.path.dirname(HERE)
 
@@ -85,8 +89,9 @@ manpages_url = "https://manpages.debian.org/{path}"
 # by the `man` builder, one file per entry: (document, name, description,
 # authors, section). The description becomes the man page's NAME line; the
 # reST documents carry no NAME section of their own. ob-backend-setup(8) and
-# ob-standalone-setup(8) document the same program as ob-bastion-setup(8) and
-# are installed as links to its page — see the `man` target in CMakeLists.txt.
+# ob-standalone-setup(8) document the same program as ob-bastion-setup(8): its
+# page lists them in NAME (man_name_aliases below) and they are installed as
+# symlinks to it — see the `man` target in CMakeLists.txt.
 man_pages = [
     ("references/man/ob-bastion-id", "ob-bastion-id",
      "Print this bastion's identifier (as seen by backends)", "", 1),
@@ -146,6 +151,41 @@ man_pages = [
      "Configuration file of the Open Bastion PAM module", "", 5),
 ]
 
+# A man page's NAME line lists every name its command is installed
+# under. The man builder derives the whole line — file name included —
+# from the man_pages entry, so the aliases are added to the generated
+# page once it is written, in _append_man_name_aliases() below.
+man_name_aliases = {
+    "ob-bastion-setup": ("ob-backend-setup", "ob-standalone-setup"),
+}
+
+
+def _append_man_name_aliases(app, exception):
+    """List an aliased command's other names in its man page NAME line."""
+    if app.builder.format != "man" or exception:
+        return
+
+    for _docname, name, _description, _authors, section in app.config.man_pages:
+        aliases = man_name_aliases.get(name)
+        if not aliases:
+            continue
+
+        path = os.path.join(app.outdir, "%s.%s" % (name, section))
+        with open(path, encoding="utf-8") as fh:
+            page = fh.read()
+
+        before = ".SH NAME\n%s \\- " % name
+        after = ".SH NAME\n%s, %s \\- " % (name, ", ".join(aliases))
+        if before not in page:
+            logger.warning("no NAME line to extend in %s: whatis(1) and "
+                           "apropos(1) will not find %s",
+                           path, ", ".join(aliases))
+            continue
+
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(page.replace(before, after, 1))
+
+
 def _drop_uri_less_reference_targets(app, doctree, docname):
     """Keep the man pages free of empty link targets.
 
@@ -167,6 +207,7 @@ def _drop_uri_less_reference_targets(app, doctree, docname):
 
 def setup(app):
     app.connect("doctree-resolved", _drop_uri_less_reference_targets)
+    app.connect("build-finished", _append_man_name_aliases)
 
     if _mermaid:
         return
