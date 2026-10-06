@@ -1,0 +1,1 @@
+rm_conffile /etc/open-bastion/openbastion.conf.example 0.7.0~

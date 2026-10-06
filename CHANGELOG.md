@@ -88,6 +88,15 @@ here.
   Exit 2 means failed or refused, 3 means no identity in the answer.
 - **A request-signing failure fails the request** instead of sending it
   unsigned, except in `ob-session-monitor` (#247).
+- **A generated `openbastion.conf` lists every option** (#310): after the
+  host's settings, the setup scripts, `ob-desktop-setup`, `ob-builder`
+  installers and Ansible roles, and the debconf questions append
+  `/usr/share/open-bastion/openbastion.conf.reference`, every option commented
+  out with its real default (`approved_home_prefixes`, audit, rate limiting and
+  others were missing from the old example). It replaces
+  `/etc/open-bastion/openbastion.conf.example`, which is no longer shipped. An
+  existing `openbastion.conf` is not rewritten by an upgrade. See
+  `openbastion.conf`(5).
 - **Unknown keys in `openbastion.conf` are logged** (key only, never the value)
   and still ignored (#229). The authorization cache has no local TTL setting;
   see [doc/references/configuration.rst](doc/references/configuration.rst).

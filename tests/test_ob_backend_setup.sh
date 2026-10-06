@@ -383,6 +383,29 @@ test_node_role_default() {
     fi
 }
 
+# The backend's own settings stay above the option reference, active.
+test_conf_carries_reference() {
+    if (
+        source_script "ob-backend-setup"
+        PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
+        CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true; CREATE_USERS=false
+        # shellcheck disable=SC2034  # read by render_openbastion_conf
+        OB_CONFIG="/nonexistent"
+        # shellcheck disable=SC2034
+        OB_CONFIG_REFERENCE="$TESTS_DIR/../config/openbastion.conf.reference"
+        local conf marker='openbastion.conf reference: every option'
+        conf=$(render_openbastion_conf)
+        sed "/$marker/,\$d" <<<"$conf" | grep -q '^create_user_enabled = false$' || exit 1
+        sed -n "/$marker/,\$p" <<<"$conf" | grep -q '^# create_user = false$' || exit 1
+        sed -n "/$marker/,\$p" <<<"$conf" | grep -qE '^[[:space:]]*[a-z_]+[[:space:]]*=' && exit 1
+        exit 0
+    ); then
+        pass "backend conf: settings, then the commented option reference"
+    else
+        fail "backend conf: settings, then the commented option reference"
+    fi
+}
+
 test_node_role_override() {
     local rc1 rc2
     (
@@ -687,6 +710,7 @@ run_test test_trailing_slash
 run_test test_max_security
 run_test test_node_role_default
 run_test test_node_role_override
+run_test test_conf_carries_reference
 run_test test_allowed_bastions_normalised
 run_test test_allowed_bastions_no_glob
 run_test test_allowed_bastions_empty_is_explicit

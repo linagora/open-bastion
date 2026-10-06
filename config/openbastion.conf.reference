@@ -1,0 +1,395 @@
+# ==============================================================================
+# openbastion.conf reference: every option, commented out, with its default
+# ==============================================================================
+# Each option of /etc/open-bastion/openbastion.conf is listed below, commented
+# out and set to its default value; "# key =" means no default. Each option is
+# described in openbastion.conf(5).
+#
+# When this reference follows a host's own settings, those settings are the
+# uncommented lines above it, and they are the ones in effect. To change an
+# option, edit it where it is set; uncomment it here only if it is set nowhere
+# else: when a key is set twice, the last occurrence wins.
+#
+# Syntax
+# ------
+# One setting per line, as key = value. A '#' or ';' at the start of a line
+# comments out the whole line.
+#
+# Booleans accept exactly true/yes/1/on and false/no/0/off, lowercase only.
+# Anything else (TRUE, tru, enabled, an empty value) is a fatal error: the PAM
+# module logs the key to syslog and refuses to start rather than guess.
+#
+# Inline comments: a '#' preceded by whitespace ends the value.
+#     verify_ssl = true            # this comment is ignored
+# A '#' inside a token is kept, so URL fragments and passwords survive:
+#     portal_url = https://sso.example.com/#frag
+# The keys client_secret, notify_secret, webhook_secret,
+# request_signing_secret, crowdsec_bouncer_key, crowdsec_password and cert_pin
+# are never stripped: their value is taken literally, '#' included.
+# For any other key, quote the value if it must contain " #":
+#     server_group = "prod # 2"
+#
+# An unknown key is logged to syslog and ignored.
+
+# ==============================================================================
+# Required
+# ==============================================================================
+
+# LemonLDAP::NG portal URL. It must start with https:// while verify_ssl is on.
+# Alias: portal
+# portal_url =
+
+# OIDC client ID of the PAM-access relying party, as declared in LLNG.
+# client_id =
+
+# OIDC client secret. Not required when authorize_only is on.
+# client_secret =
+
+# ==============================================================================
+# Server identity
+# ==============================================================================
+
+# File holding the access token ob-enroll obtained for this host. The module
+# has no default; ob-enroll and ob-heartbeat use /var/lib/open-bastion/token,
+# the path the setup scripts write. Alias: token_file
+# server_token_file =
+
+# Server group this host belongs to, as declared in LLNG's
+# pamAccessServerGroups.
+# server_group = default
+
+# Role reported to the portal in each heartbeat: bastion, standalone or
+# backend. Written by the setup scripts; read by ob-heartbeat.
+# node_role =
+
+# Have ob-heartbeat report the connected users (name, source host, tty, login
+# time) in each heartbeat. Privacy-sensitive: false turns the reporting off.
+# report_sessions = true
+
+# Most sessions sent in one heartbeat; the extra ones are dropped and a warning
+# is logged.
+# max_reported_sessions = 200
+
+# ==============================================================================
+# HTTP client
+# ==============================================================================
+
+# HTTP timeout in seconds, 1 to 300.
+# timeout = 10
+
+# Verify the portal's TLS certificate. false is for test setups only.
+# verify_ssl = true
+
+# PEM file holding the CA that signed the portal's certificate.
+# ca_cert =
+
+# Minimum TLS version: 12 (TLS 1.2) or 13 (TLS 1.3).
+# min_tls_version = 13
+
+# Public-key pinning, as curl's CURLOPT_PINNEDPUBLICKEY: semicolon-separated
+# sha256//<base64> pins or PEM file paths.
+# cert_pin =
+
+# ==============================================================================
+# Request signing
+# ==============================================================================
+
+# Shared HMAC-SHA256 secret that signs every /pam/ call this host makes. It
+# must equal the portal's pamAccessRequestSigningSecret, one value for the
+# whole fleet. Roll it out to every host before the portal requires
+# signatures: see UPGRADE-NOTES.md. Generate one with `openssl rand -hex 32`.
+# request_signing_secret =
+
+# ==============================================================================
+# Authorization cache (offline mode)
+# ==============================================================================
+
+# Cache the portal's authorization decisions, so an already-authorized user can
+# log in while the portal is unreachable. The portal decides how long a
+# decision stays valid. Alias: auth_cache
+# auth_cache_enabled = true
+
+# Cache directory.
+# auth_cache_dir = /var/cache/open-bastion/auth
+
+# While this file exists the cache is not consulted: empty, for every user;
+# listing usernames, one per line, for those users only.
+# Alias: force_online_file
+# auth_cache_force_online = /etc/open-bastion/force_online
+
+# ==============================================================================
+# Authorization mode
+# ==============================================================================
+
+# pam_sm_authenticate always succeeds and only pam_sm_acct_mgmt authorizes,
+# for setups where sshd authenticates the user with a key or certificate.
+# authorize_only = false
+
+# ==============================================================================
+# Logging and audit
+# ==============================================================================
+
+# error, warn, info, debug, or 0 to 3. Alias: debug
+# log_level = warn
+
+# Write the structured audit log. Alias: audit
+# audit_enabled = true
+
+# Audit log path. Alias: audit_file
+# audit_log_file = /var/log/open-bastion/audit.json
+
+# Also emit audit events to syslog. Alias: audit_syslog
+# audit_to_syslog = true
+
+# critical (0), auth (1, authentication events) or all (2).
+# audit_level = auth
+
+# ==============================================================================
+# Rate limiting
+# ==============================================================================
+
+# Throttle repeated authentication failures, per user and source address.
+# Alias: rate_limit
+# rate_limit_enabled = true
+
+# State directory of the limiter.
+# rate_limit_state_dir = /var/lib/open-bastion/ratelimit
+
+# Failures allowed before the first lockout, 1 to 100.
+# rate_limit_max_attempts = 5
+
+# First lockout, in seconds, 1 to 3600.
+# rate_limit_initial_lockout = 30
+
+# Longest lockout, in seconds, 60 to 86400.
+# rate_limit_max_lockout = 3600
+
+# Multiplier applied to the lockout at each repeat, 1.1 to 10.0.
+# rate_limit_backoff_mult = 2.0
+
+# ==============================================================================
+# Token binding
+# ==============================================================================
+# Parsed and kept, but not read by any component of this release.
+
+# Alias: bind_ip
+# token_bind_ip = true
+
+# Alias: bind_fingerprint
+# token_bind_fingerprint = false
+
+# Alias: check_revocation
+# token_check_revocation = false
+
+# Alias: rotate_refresh
+# token_rotate_refresh = true
+
+# ==============================================================================
+# User creation
+# ==============================================================================
+
+# Create the Unix account on first login when it does not exist yet. The
+# primary group must already exist locally. Alias: create_user_enabled
+# create_user = false
+
+# Login shell of a created account when the portal supplies none or an
+# unapproved one. It must be in approved_shells.
+# create_user_shell = /bin/bash
+
+# Parent directory of a created account's home. Alias: home_base
+# create_user_home_base = /home
+
+# Skeleton directory copied into the new home: absolute, owned by root, no
+# symlink. Alias: skel
+# create_user_skel = /etc/skel
+
+# Additional groups of a created account, comma-separated. Accepted and kept;
+# not applied in this release.
+# create_user_groups =
+
+# Colon-separated shells an account may use.
+# approved_shells = /bin/bash:/bin/sh:/usr/bin/bash:/usr/bin/sh:/bin/zsh:/usr/bin/zsh:/bin/dash:/usr/bin/dash:/bin/fish:/usr/bin/fish
+
+# Colon-separated prefixes a home directory may live under.
+# approved_home_prefixes = /home:/var/home
+
+# ==============================================================================
+# Group synchronization
+# ==============================================================================
+
+# Comma-separated whitelist of LLNG-managed groups the module may create or
+# change locally. Unset: no restriction beyond the portal's managed_groups.
+# allowed_managed_groups =
+
+# ==============================================================================
+# Service accounts
+# ==============================================================================
+
+# File declaring the key-only local accounts. Alias: service_accounts
+# service_accounts_file = /etc/open-bastion/service-accounts.conf
+
+# ==============================================================================
+# Notifications
+# ==============================================================================
+
+# Send security events to a webhook. Alias: notify
+# notify_enabled = false
+
+# Webhook URL. Alias: webhook_url
+# notify_url =
+
+# HMAC secret signing the webhook body. Alias: webhook_secret
+# notify_secret =
+
+# ==============================================================================
+# CrowdSec
+# ==============================================================================
+
+# Consult CrowdSec: a bouncer check before authentication, alerts after it.
+# Alias: crowdsec
+# crowdsec_enabled = false
+
+# CrowdSec LAPI URL.
+# crowdsec_url = http://127.0.0.1:8080
+
+# HTTP timeout for CrowdSec requests, in seconds, 1 to 60.
+# crowdsec_timeout = 5
+
+# true lets a login proceed when CrowdSec cannot be reached, false refuses it.
+# crowdsec_fail_open = true
+
+# Bouncer API key, from `cscli bouncers add open-bastion`. Required for the
+# pre-authentication IP check.
+# crowdsec_bouncer_key =
+
+# What to do with a banned address: reject or warn.
+# crowdsec_action = reject
+
+# Comma-separated addresses and CIDR ranges, IPv4 and IPv6, that bypass the
+# CrowdSec check, e.g. 10.0.0.0/8, 192.168.1.0/24, 2001:db8::/32
+# crowdsec_whitelist =
+
+# Machine ID and password, from `cscli machines add open-bastion --password`,
+# for sending alerts.
+# crowdsec_machine_id =
+# crowdsec_password =
+
+# Scenario name carried by the alerts.
+# crowdsec_scenario = open-bastion/ssh-auth-failure
+
+# true sends every authentication failure as an alert, false only when the
+# auto-ban threshold is reached.
+# crowdsec_send_all_alerts = true
+
+# Failures from one address before it is banned, 0 to 100; 0 disables
+# auto-banning and keeps reporting.
+# crowdsec_max_failures = 5
+
+# Window, in seconds, over which those failures are counted, 10 to 86400.
+# crowdsec_block_delay = 180
+
+# Ban duration, such as 4h, 1d, 1w.
+# crowdsec_ban_duration = 4h
+
+# ==============================================================================
+# SSH key policy
+# ==============================================================================
+
+# Refuse a connection whose key type or size is not allowed below. Fail-closed:
+# a login whose key cannot be identified is denied. It needs an sshd configured
+# by a recent setup script; check with
+#   grep -q 'spool-format: v1' /usr/local/sbin/ob-ssh-principals && echo OK
+# Alias: ssh_key_policy
+# ssh_key_policy_enabled = false
+
+# Comma-separated key types: ed25519, ecdsa, rsa, dsa, sk (FIDO2) or all.
+# all does not include dsa. Alias: ssh_allowed_types
+# ssh_key_allowed_types = all
+
+# Minimum RSA key size, in bits, 1024 to 16384. Alias: ssh_min_rsa_bits
+# ssh_key_min_rsa_bits = 2048
+
+# Minimum ECDSA key size, in bits, 256 to 521. Alias: ssh_min_ecdsa_bits
+# ssh_key_min_ecdsa_bits = 256
+
+# Refuse an SSH login whose key fingerprint cannot be recovered, instead of
+# authorizing it without the binding. Only for hosts that run the principals
+# helper (certificate modes): in the token-only modes there is never a
+# fingerprint and every SSH login would be denied.
+# Alias: ssh_fingerprint_required
+# fingerprint_required = false
+
+# ==============================================================================
+# Cache brute-force protection
+# ==============================================================================
+
+# Count every cache lookup per user, hits included, and lock out after
+# cache_rate_limit_max_attempts. Only an authorized cache hit resets the
+# counter. Alias: cache_rate_limit
+# cache_rate_limit_enabled = false
+
+# Cache lookups allowed before lockout, 1 to 100.
+# cache_rate_limit_max_attempts = 3
+
+# First lockout, in seconds, 1 to 86400, doubling on each repeat.
+# Alias: cache_rate_limit_lockout
+# cache_rate_limit_lockout_sec = 60
+
+# Longest lockout, in seconds, 60 to 86400.
+# Alias: cache_rate_limit_max_lockout
+# cache_rate_limit_max_lockout_sec = 3600
+
+# ==============================================================================
+# Desktop SSO (experimental)
+# ==============================================================================
+# For open-bastion-desktop: the LightDM greeter and offline sessions. A module
+# built without desktop support reports these keys as unknown.
+
+# Accept OAuth2 access tokens instead of one-time PAM tokens, validated through
+# /oauth2/introspect.
+# oauth2_token_auth = false
+
+# Cache successful OAuth2 authentications for offline fallback.
+# oauth2_token_cache = true
+
+# Refuse a token whose remaining lifetime is below this many seconds, 0 to 3600.
+# oauth2_token_min_ttl = 60
+
+# Cache credentials, with Argon2id and AES-256-GCM, for offline authentication.
+# offline_cache_enabled = false
+
+# Credential cache directory, root-owned mode 0700.
+# offline_cache_dir = /var/cache/open-bastion/credentials
+
+# How long a cached credential stays valid, in seconds, 3600 to 2592000.
+# offline_cache_ttl = 604800
+
+# Failed offline attempts before the entry is locked, 1 to 20; unlocking needs
+# an online authentication.
+# offline_cache_max_failures = 5
+
+# Lockout duration, in seconds, 60 to 86400.
+# offline_cache_lockout = 300
+
+# File holding the 32-byte encryption key, root-owned mode 0600.
+# offline_cache_key_file = /etc/open-bastion/cache.key
+
+# Have the session monitor revalidate offline sessions once the network is
+# back.
+# offline_revalidation_enabled = true
+
+# Age, in seconds, past which an offline cache forces an online
+# re-authentication at the next unlock, 600 to 86400.
+# offline_revalidation_grace = 14400
+
+# Longest time, in seconds, the portal may be unreachable while the network is
+# up before offline sessions are terminated, 600 to 86400.
+# offline_max_sso_unreachable = 3600
+
+# ==============================================================================
+# Accepted but not read from this file
+# ==============================================================================
+# cache_enabled, cache_dir, cache_ttl, create_home and default_shell are
+# written here by the setup scripts and ob-builder and are not reported as
+# unknown. The NSS module reads them from its own file,
+# /etc/open-bastion/nss_openbastion.conf.

@@ -208,6 +208,14 @@ What changes for SSO users on a recording host:
 Local accounts keep their shell. To give one that logs in over SSH the same
 protection: `chsh -s /usr/sbin/ob-login-shell <user>`.
 
+### A8. `openbastion.conf.example` is gone
+
+`/etc/open-bastion/openbastion.conf.example` is no longer shipped: the upgrade
+removes it, or keeps it as `.dpkg-bak` (Debian) or `.rpmsave` (RPM) if you
+edited it. Every option, commented out with its default, is now in
+`/usr/share/open-bastion/openbastion.conf.reference`; read it there, not in a
+copy you keep under `/etc`. Your `openbastion.conf` is not touched.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0

@@ -2,7 +2,7 @@ usr/lib/*/security/pam_openbastion.so*
 
 usr/lib/*/libnss_openbastion.so*
 
-etc/open-bastion/openbastion.conf.example
+usr/share/open-bastion/openbastion.conf.reference
 etc/open-bastion/nss_openbastion.conf.example
 etc/open-bastion/service-accounts.conf.example
 etc/open-bastion/session-recorder.conf.example
