@@ -44,7 +44,7 @@
 #include "service_account.h"
 #include "ssh_key_policy.h"
 #include "sshd_anchor.h"
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 #include "offline_cache.h"
 #endif /* ENABLE_DESKTOP_SSO */
 
@@ -64,7 +64,7 @@
 /* Buffer for "LLNG_BASTION_VOUCHER=<nonce>" (nonce is a UUID; allow slack) */
 #define OB_MAX_VOUCHER_ENV 256
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /* Offline session marker directory (for ob-session-monitor) */
 #define OFFLINE_SESSION_MARKER_DIR "/run/open-bastion/offline_sessions"
 #endif /* ENABLE_DESKTOP_SSO */
@@ -81,7 +81,7 @@ typedef struct {
     service_accounts_t service_accounts;  /* Service accounts (ansible, backup, etc.) */
     ssh_key_policy_t ssh_key_policy;  /* SSH key type/size policy (#91) */
     rate_limiter_t *cache_rate_limiter;  /* Brute-force protection for cache (#92) */
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     offline_cache_t *offline_cache;  /* Offline credential cache for Desktop SSO */
 #endif /* ENABLE_DESKTOP_SSO */
     /* Security: Store token file metadata for periodic re-verification (#46) */
@@ -129,7 +129,7 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
 static void invalidate_user_cache(const char *username, uid_t uid, int have_uid);
 static int validate_username(const char *user);
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /*
  * Send an info message to the PAM client via conversation.
  * Used to pass structured error codes to the LightDM greeter.
@@ -1349,7 +1349,7 @@ static void cleanup_data(pam_handle_t *pamh, void *data, int error_status)
         if (ob_data->auth_cache) {
             auth_cache_destroy(ob_data->auth_cache);
         }
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
         if (ob_data->offline_cache) {
             offline_cache_destroy(ob_data->offline_cache);
         }
@@ -1614,7 +1614,7 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
     /* Securely clear derived keys */
     explicit_bzero(&auth_cache_key, sizeof(auth_cache_key));
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Initialize offline credential cache (for Desktop SSO offline mode) */
     if (data->config.offline_cache_enabled) {
         const char *offline_dir = data->config.offline_cache_dir;
@@ -3029,7 +3029,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
      */
     ob_response_t response = {0};
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     if (data->config.oauth2_token_auth) {
         /*
          * OAuth2 token authentication mode (Desktop SSO)
@@ -4095,7 +4095,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
     }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /*
      * Store offline credential verifier if provided by server.
      * This enables offline Desktop SSO login when the server is unreachable.
@@ -4799,7 +4799,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_close_session(pam_handle_t *pamh,
         }
     }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Remove offline session marker on session close */
     remove_offline_session_marker(pamh, user);
 #endif /* ENABLE_DESKTOP_SSO */

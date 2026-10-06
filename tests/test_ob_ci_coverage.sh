@@ -99,8 +99,37 @@ test_no_orphan_c_tests() {
     fi
 }
 
+# The packages build with INSTALL_DESKTOP=ON, and so does every job that ran
+# ctest: a build without Desktop SSO compiled but was never tested, which is how
+# the authorization cache went unwritten there unnoticed (#318). Some job must
+# configure without INSTALL_DESKTOP=ON and run ctest on that tree (#321).
+test_ctest_without_desktop() {
+    local jobs
+    jobs=$(awk '
+        /^jobs:/ { injobs = 1; next }
+        !injobs { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+            if (job != "" && cfg && ctest && !desk) print job
+            job = $1; sub(/:$/, "", job); cfg = ctest = desk = 0
+            next
+        }
+        { line = $0; sub(/#.*/, "", line) }
+        line ~ /cmake[[:space:]]+-B/ { cfg = 1 }
+        line ~ /INSTALL_DESKTOP=ON/ { desk = 1 }
+        line ~ /(^|[[:space:]])ctest([[:space:]]|$)/ { ctest = 1 }
+        END { if (job != "" && cfg && ctest && !desk) print job }
+    ' "$CI")
+    if [ -n "$jobs" ]; then
+        pass "ctest runs on a build without Desktop SSO (job: ${jobs//$'\n'/ })"
+    else
+        fail "ctest runs on a build without Desktop SSO" \
+             "every job that runs ctest configures with INSTALL_DESKTOP=ON"
+    fi
+}
+
 run_test test_no_orphan_shell_tests
 run_test test_no_orphan_c_tests
+run_test test_ctest_without_desktop
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

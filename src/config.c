@@ -117,7 +117,7 @@ void config_init(pam_openbastion_config_t *config)
     /* Service accounts */
     config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication - disabled by default */
     config->oauth2_token_auth = false;
     config->oauth2_token_cache = true;
@@ -191,7 +191,7 @@ void config_free(pam_openbastion_config_t *config)
     free(config->auth_cache_dir);
     free(config->auth_cache_force_online);
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Offline credential cache */
     free(config->offline_cache_dir);
     free(config->offline_cache_key_file);
@@ -482,6 +482,48 @@ static int url_contains_dangerous_chars(const char *url)
  * invisible (#229).
  */
 #define PARSE_LINE_UNKNOWN_KEY 1
+/* A Desktop SSO setting read by a build without Desktop SSO: ignored. */
+#define PARSE_LINE_DESKTOP_KEY 2
+
+/*
+ * The Desktop SSO settings, compiled in every build so that a build without
+ * Desktop SSO recognises them instead of reporting them as typos. The desktop
+ * build parses them in parse_line() before they get here.
+ */
+static const char *const desktop_sso_keys[] = {
+    "oauth2_token_auth",
+    "oauth2_token_cache",
+    "oauth2_token_min_ttl",
+    "offline_cache_enabled",
+    "offline_cache_dir",
+    "offline_cache_ttl",
+    "offline_cache_max_failures",
+    "offline_cache_lockout",
+    "offline_cache_key_file",
+    "offline_revalidation_enabled",
+    "offline_revalidation_grace",
+    "offline_max_sso_unreachable",
+    NULL
+};
+
+/* The Desktop SSO PAM flags (arguments without a value). */
+static const char *const desktop_sso_flags[] = {
+    "oauth2_token_auth",
+    "no_oauth2_token_cache",
+    "offline_cache",
+    "no_offline_cache",
+    NULL
+};
+
+static bool in_list(const char *const *list, const char *name)
+{
+    for (; *list; list++) {
+        if (strcmp(*list, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static int parse_line(const char *key, const char *value, pam_openbastion_config_t *config)
 {
@@ -638,7 +680,7 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
              strcmp(key, "service_accounts") == 0) {
         SET_STRING_FIELD(config->service_accounts_file, value, key);
     }
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication */
     else if (strcmp(key, "oauth2_token_auth") == 0) {
         SET_BOOL_FIELD(config->oauth2_token_auth, value, key);
@@ -805,6 +847,9 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
              strcmp(key, "default_shell") == 0) {
         /* written by ob-bastion-setup / ob-backend-setup / ob-builder */
     }
+    else if (in_list(desktop_sso_keys, key)) {
+        return PARSE_LINE_DESKTOP_KEY;
+    }
     else {
         return PARSE_LINE_UNKNOWN_KEY;
     }
@@ -852,14 +897,20 @@ static void parse_config_file_line(char *line, pam_openbastion_config_t *config,
 
     value = strip_quotes(value);
 
-    if (parse_line(key, value, config) == PARSE_LINE_UNKNOWN_KEY) {
-        /*
-         * Never log the value: it may be client_secret. The key alone is
-         * enough to spot a typo such as auth_cache_offline_ttl for
-         * offline_cache_ttl (#229).
-         */
+    /*
+     * Never log the value: it may be client_secret. The key alone is enough
+     * to spot a typo such as auth_cache_offline_ttl for offline_cache_ttl
+     * (#229).
+     */
+    int rc = parse_line(key, value, config);
+    if (rc == PARSE_LINE_UNKNOWN_KEY) {
         syslog(LOG_WARNING,
                "open-bastion: unknown configuration key '%s' in %s, ignored",
+               key, filename ? filename : "openbastion.conf");
+    } else if (rc == PARSE_LINE_DESKTOP_KEY) {
+        syslog(LOG_WARNING,
+               "open-bastion: '%s' in %s is a Desktop SSO setting, not "
+               "supported by this build, ignored",
                key, filename ? filename : "openbastion.conf");
     }
 }
@@ -940,7 +991,11 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
                 syslog(LOG_WARNING, "open-bastion: strdup failed for PAM argument %s", key);
                 continue;
             }
-            parse_line(key, strip_quotes(value), config);
+            if (parse_line(key, strip_quotes(value), config) == PARSE_LINE_DESKTOP_KEY) {
+                syslog(LOG_WARNING,
+                       "open-bastion: PAM argument '%s' is a Desktop SSO "
+                       "setting, not supported by this build, ignored", key);
+            }
             free(value);
         }
         /* Boolean flags */
@@ -987,7 +1042,7 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
         else if (strcmp(arg, "no_create_user") == 0 || strcmp(arg, "nocreateuser") == 0) {
             config->create_user_enabled = false;
         }
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
         /* OAuth2 token authentication flags */
         else if (strcmp(arg, "oauth2_token_auth") == 0) {
             config->oauth2_token_auth = true;
@@ -1003,6 +1058,11 @@ int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *con
             config->offline_cache_enabled = false;
         }
 #endif /* ENABLE_DESKTOP_SSO */
+        else if (in_list(desktop_sso_flags, arg)) {
+            syslog(LOG_WARNING,
+                   "open-bastion: PAM argument '%s' is a Desktop SSO "
+                   "setting, not supported by this build, ignored", arg);
+        }
     }
 
     return 0;

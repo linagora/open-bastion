@@ -266,7 +266,7 @@ static void test_client_error_null(void)
     }
 }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /*
  * Test introspect_token with NULL parameters
  */
@@ -618,7 +618,7 @@ int main(void)
     test_authorize_without_offline();
     test_authorize_missing_authorized();
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Introspection tests (JWT client assertion) */
     test_introspect_token_null_params();
     test_introspect_token_no_server();

@@ -145,6 +145,10 @@ here.
   never wrote it, so `auth_cache_enabled` had no effect and an SSO outage
   refused every login. The `.deb` and `.rpm` packages, built with Desktop SSO,
   were not affected.
+- **A build without Desktop SSO recognises the Desktop SSO settings** (#321)
+  in `openbastion.conf` and as PAM arguments: it logs that it ignores them
+  instead of reporting an unknown key, or saying nothing for a PAM flag. CI now
+  runs the C tests on that build too.
 - **`ob-enroll -C FILE` reads `FILE`** (#314). The settings always came from
   `/etc/open-bastion/openbastion.conf`: `ob-enroll -C` could enrol against
   another portal and, without `-t`, overwrite the host's token. An unreadable
