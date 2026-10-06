@@ -79,6 +79,14 @@
     mode: '0644'
   when: ob_max_security
 
+# Appended to openbastion.conf by the template; absent before the package is
+# installed (check mode on a new host), in which case the conf goes without it.
+- name: Read the option reference the package ships
+  ansible.builtin.slurp:
+    src: /etc/open-bastion/openbastion.conf.example
+  register: ob_conf_reference
+  failed_when: false
+
 - name: Deploy openbastion.conf
   ansible.builtin.template:
     src: openbastion.conf.j2

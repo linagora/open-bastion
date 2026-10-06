@@ -4,6 +4,7 @@ set -e
 . /usr/share/debconf/confmodule
 
 CONF_FILE="/etc/open-bastion/openbastion.conf"
+CONF_REFERENCE="/etc/open-bastion/openbastion.conf.example"
 BACKUP_DIR="/var/backups/open-bastion"
 PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"
@@ -263,7 +264,13 @@ case "$1" in
             fi
 
             if [ -n "$PORTAL_URL" ]; then
-                generate_openbastion_conf "$PORTAL_URL" "$CLIENT_ID" "$CLIENT_SECRET" "$SERVER_GROUP" "$CREATE_USER" > "$CONF_FILE"
+                {
+                    generate_openbastion_conf "$PORTAL_URL" "$CLIENT_ID" "$CLIENT_SECRET" "$SERVER_GROUP" "$CREATE_USER"
+                    if [ -r "$CONF_REFERENCE" ]; then
+                        echo
+                        cat "$CONF_REFERENCE"
+                    fi
+                } > "$CONF_FILE"
                 chmod 600 "$CONF_FILE"
                 chown root:root "$CONF_FILE"
             fi

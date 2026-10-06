@@ -63,3 +63,7 @@ service_accounts_file = /etc/open-bastion/service-accounts.conf
 # allowed bastion=<id>, plus the cert's source-address critical option. Pass the
 # allowlist via `ob-backend-setup --allowed-bastions` (ob_bastion_allowed_bastions).
 # See doc/references/bastion-cert-vouching.rst.
+{% if ob_conf_reference is defined and ob_conf_reference.content is defined %}
+
+{{ ob_conf_reference.content | b64decode | trim }}
+{% endif %}

@@ -402,6 +402,90 @@ test_rendered_ansible() {
          || test_fail "ansible role check failed" "$desc"
 }
 
+# ── openbastion.conf option reference (#310) ───────────────────────────────
+
+# The installer writes the conf before the package that ships the reference is
+# installed, so it appends the reference after step_install, once.
+test_installer_conf_reference() {
+    local out="$TEST_TMPDIR/installer-ref.sh" ok=true desc="" fn
+    local conf="$TEST_TMPDIR/ref.conf" ref="$REPO_ROOT/config/openbastion.conf.example"
+    local marker='openbastion.conf reference: every option'
+    (
+        set_baseline
+        TEMPLATES_DIR="$REPO_ROOT/admin-builder/templates"
+        render_shell_installer "$out" bastion
+    ) >/dev/null 2>&1
+    fn="$TEST_TMPDIR/installer-ref-fn.sh"
+    sed -e 's/^set -euo pipefail$//' -e '/^main "\$@"$/d' "$out" > "$fn"
+    printf 'portal_url = https://sso.example.com\n' > "$conf"
+    chmod 0600 "$conf"
+    (
+        # shellcheck disable=SC1090
+        . "$fn"
+        set -euo pipefail
+        append_conf_reference "$conf" "$ref"
+        append_conf_reference "$conf" "$ref"
+        append_conf_reference "$conf" "$TEST_TMPDIR/absent"
+    ) >/dev/null 2>&1 || { ok=false; desc="append failed"; }
+    [ "$(head -1 "$conf")" = "portal_url = https://sso.example.com" ] || { ok=false; desc="settings not first"; }
+    [ "$(grep -c "$marker" "$conf")" = 1 ] || { ok=false; desc="reference not appended exactly once"; }
+    [ "$(stat -c %a "$conf")" = 600 ] || { ok=false; desc="mode not kept"; }
+    tail -n +3 "$conf" | cmp -s - "$ref" || { ok=false; desc="reference altered"; }
+    awk '/^    step_install$/ { i = NR } /^    step_conf_reference$/ { r = NR }
+         END { exit !(i && r == i + 1) }' "$out" || { ok=false; desc="not run right after step_install"; }
+    if $ok; then
+        test_pass "installer: appends the packaged option reference to openbastion.conf, once"
+    else
+        test_fail "installer conf reference check failed" "$desc"
+    fi
+}
+
+test_ansible_conf_reference() {
+    local out="$TEST_TMPDIR/role-ref" ok=true desc=""
+    (
+        set_baseline
+        TEMPLATES_DIR="$REPO_ROOT/admin-builder/templates"
+        render_ansible_role "$out" bastion
+    ) >/dev/null 2>&1 || { ok=false; desc="render failed"; }
+    local r="$out/roles/open-bastion"
+    awk '/ansible.builtin.slurp:/ { s = NR }
+         /src: \/etc\/open-bastion\/openbastion.conf.example/ && s { e = 1 }
+         /register: ob_conf_reference/ && e { g = NR }
+         /^- name: Deploy openbastion.conf$/ { d = NR }
+         END { exit !(g && d > g) }' "$r/tasks/main.yml" 2>/dev/null \
+        || { ok=false; desc="reference not read before the conf is deployed"; }
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import jinja2' 2>/dev/null; then
+        local rendered
+        rendered=$(python3 -I - "$r/templates/openbastion.conf.j2" \
+                   "$REPO_ROOT/config/openbastion.conf.example" <<'PY'
+import base64, sys, jinja2
+env = jinja2.Environment(trim_blocks=True, undefined=jinja2.StrictUndefined)
+env.filters['b64decode'] = lambda s: base64.b64decode(s).decode()
+env.filters['bool'] = bool
+t = env.from_string(open(sys.argv[1]).read())
+ctx = dict(ob_role='bastion', ob_pam_mode='E', ob_portal_url='https://x',
+           ob_client_id='c', ob_client_secret='', ob_server_group='g',
+           ob_verify_ssl=True, ob_service_accounts_enabled=False,
+           ob_conf_reference={'content': base64.b64encode(
+               open(sys.argv[2], 'rb').read()).decode()})
+print(t.render(**ctx))
+PY
+        ) || { ok=false; desc="template does not render"; }
+        sed '/openbastion.conf reference: every option/,$d' <<< "$rendered" \
+            | grep -q '^portal_url = https://x$' || { ok=false; desc="settings not above the reference"; }
+        grep -q '^# approved_home_prefixes = /home:/var/home$' <<< "$rendered" \
+            || { ok=false; desc="reference not rendered"; }
+    else
+        grep -q 'ob_conf_reference.content | b64decode' "$r/templates/openbastion.conf.j2" \
+            || { ok=false; desc="template does not append the reference"; }
+    fi
+    if $ok; then
+        test_pass "ansible role: reads the packaged option reference and appends it to openbastion.conf"
+    else
+        test_fail "ansible conf reference check failed" "$desc"
+    fi
+}
+
 test_recap_bundle_recorder() {
     local ok=true out
     out=$(
@@ -486,6 +570,8 @@ test_questionnaire_skips_cli_values
 test_rendered_installer
 test_installer_runtime
 test_rendered_ansible
+test_installer_conf_reference
+test_ansible_conf_reference
 test_recap_bundle_recorder
 test_ampersand_values
 test_prompt_eof

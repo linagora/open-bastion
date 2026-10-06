@@ -277,6 +277,42 @@ test_node_role_default() {
     fi
 }
 
+# ── Test 16b: the conf carries the option reference after the settings ──
+# Every key in the reference is commented out, so the settings above it stay
+# the only ones in effect; without the packaged reference, a pointer remains.
+test_conf_carries_reference() {
+    local out
+    if out=$(
+        source_script "ob-bastion-setup"
+        PORTAL_URL="https://x"; OB_TOKEN="/v/t"; SERVER_GROUP="g"
+        CLIENT_ID=""; CLIENT_SECRET=""; VERIFY_SSL=true
+        # shellcheck disable=SC2034  # read by render_openbastion_conf
+        OB_CONFIG="/nonexistent"
+        # shellcheck disable=SC2034
+        OB_CONFIG_REFERENCE="$SCRIPT_DIR/../config/openbastion.conf.example"
+        conf=$(render_openbastion_conf)
+        marker='openbastion.conf reference: every option'
+        [ "$(grep -c "$marker" <<<"$conf")" = 1 ] || { echo "no single reference"; exit 1; }
+        sed "/$marker/,\$d" <<<"$conf" | grep -q '^portal_url = https://x$' \
+            || { echo "settings not above the reference"; exit 1; }
+        sed -n "/$marker/,\$p" <<<"$conf" | grep -qE '^[[:space:]]*[a-z_]+[[:space:]]*=' \
+            && { echo "active key in the reference"; exit 1; }
+        grep -q '^# approved_home_prefixes = /home:/var/home$' <<<"$conf" \
+            || { echo "reference truncated"; exit 1; }
+        # shellcheck disable=SC2034
+        OB_CONFIG_REFERENCE="/nonexistent"
+        conf=$(render_openbastion_conf)
+        grep -q "$marker" <<<"$conf" && { echo "reference from nowhere"; exit 1; }
+        grep -q 'openbastion.conf(5)' <<<"$conf" || { echo "no pointer without the reference"; exit 1; }
+        grep -q '^portal_url = https://x$' <<<"$conf" || { echo "settings lost"; exit 1; }
+        exit 0
+    ); then
+        pass "openbastion.conf carries the option reference after the settings"
+    else
+        fail "openbastion.conf carries the option reference after the settings" "$out"
+    fi
+}
+
 # -- Test 17: portal URL with shell metacharacters is rejected --
 # PORTAL_URL is interpolated into generated artefacts (openbastion.conf and
 # ssh-proxy.conf, read back by root programs such as ob-krl-refresh), so the
@@ -500,6 +536,7 @@ run_test test_max_security
 run_test test_node_role
 run_test test_node_role_invalid
 run_test test_node_role_default
+run_test test_conf_carries_reference
 run_test test_portal_url_rejects_metacharacters
 run_test test_portal_url_accepts_normal
 run_test test_http_portal_requires_insecure

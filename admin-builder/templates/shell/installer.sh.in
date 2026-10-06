@@ -675,6 +675,29 @@ step_install() {
     log_info "open-bastion package installed"
 }
 
+# Append the option reference REF to CONF, once. A no-op when either is absent.
+append_conf_reference() {
+    local conf="$1" ref="$2" tmp
+    [ -f "${conf}" ] && [ -r "${ref}" ] || return 0
+    grep -qF 'openbastion.conf reference: every option' "${conf}" && return 0
+    tmp=$(mktemp "${conf}.XXXXXX")
+    { cat -- "${conf}"; printf '\n'; cat -- "${ref}"; } > "${tmp}"
+    chmod --reference="${conf}" "${tmp}"
+    chown --reference="${conf}" "${tmp}"
+    mv -f "${tmp}" "${conf}"
+    log_info "Appended the option reference to ${conf}"
+}
+
+# The package ships the reference, and step_config runs before step_install.
+step_conf_reference() {
+    if [ "${OPT_DRY_RUN}" = "true" ]; then
+        log_info "[DRY-RUN] Would append /etc/open-bastion/openbastion.conf.example to /etc/open-bastion/openbastion.conf"
+        return 0
+    fi
+    append_conf_reference /etc/open-bastion/openbastion.conf \
+        /etc/open-bastion/openbastion.conf.example
+}
+
 # ---------------------------------------------------------------------------
 # Step 4 — Enroll (ob-enroll)
 # ---------------------------------------------------------------------------
@@ -955,6 +978,7 @@ main() {
     step_repo
     step_config
     step_install
+    step_conf_reference
     step_enroll
     step_setup
     print_summary
