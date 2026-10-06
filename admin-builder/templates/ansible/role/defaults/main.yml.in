@@ -89,8 +89,8 @@ ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 
 # ── Backend-only: "accept only this bastion" ──────────────────────────────────
 # Empty for bastion/standalone roles. For backend roles ob-builder expands this
-# to ob_bastion_allowed_bastions (comma/space-separated bastion_id = enrolling
-# client_id) when an allowlist was given at build time. Enforcement is via
+# to ob_bastion_allowed_bastions (comma/space-separated bastion_id, as printed
+# by ob-bastion-id on each bastion) when an allowlist was given at build time. Enforcement is via
 # ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not the
 # old broken bastion_jwt config.
 @@BASTION_ALLOWLIST_VARS_YAML@@

@@ -130,6 +130,12 @@ here.
 
 ### Fixed
 
+- **The `ob-builder` allowed-bastions question points at the right file**
+  (#333). It said to tighten the list later in `openbastion.conf`, which has
+  no such setting: the list lives in `/etc/open-bastion/allowed_bastions`.
+  It also described the long-gone bastion JWT and "the same server group";
+  an empty list accepts any vouched bastion of the project. The generated
+  installer and Ansible role no longer call the bastion_id the client_id.
 - **A build without Desktop SSO writes the authorization cache** (#318). The
   store, and the parsing of the `offline` object of `/pam/authorize`, were
   compiled only with `-DINSTALL_DESKTOP=ON`: such a build read the cache but

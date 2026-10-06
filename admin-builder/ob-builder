@@ -1177,14 +1177,13 @@ EOF
         collect_target_roles_interactive
     fi
 
-    # q7b. (backend only) Allowed bastions whitelist
-    # The bastion JWT is signed by the LLNG SSO itself, so the SSO identity is
-    # already covered by bastion_jwt_issuer. What the backend can additionally
-    # enforce is which specific bastion(s) (sub claim / bastion_id) are
-    # permitted to forward sessions to it. Empty = accept any LLNG-enrolled
-    # bastion in the same group.
+    # q7b. (backend only) Allowed bastions allowlist
+    # Forwarded as ob-backend-setup --allowed-bastions, which writes it to
+    # /etc/open-bastion/allowed_bastions (not openbastion.conf). The principals
+    # helper matches it against the bastion=<id> of the hop certificate's
+    # key-id. Empty = any vouched bastion of the project.
     if _has_role backend && [ -z "${ALLOWED_BASTIONS-}" ]; then
-        explain "Optional whitelist of bastion identifiers (the 'bastion_id' claim LLNG embeds in each bastion's JWT) that are allowed to reach this backend. Comma-separated, e.g. 'bastion-01,bastion-02'. Leave empty to accept any bastion enrolled in the same LLNG server group as this backend. You don't pick this value — LLNG assigns it at enrollment. To discover it: deploy the bastion first, then run 'sudo ob-bastion-id' on it (or check the LLNG Manager). You can also leave this empty now and tighten it later by editing /etc/open-bastion/openbastion.conf on the backend."
+        explain "Optional allowlist of the bastions allowed to hop to this backend, given as their bastion_id (comma-separated). You don't pick these values: LLNG assigns a bastion_id to each bastion when it enrolls, and re-enrolling changes it. To get one: deploy the bastion first, then run 'sudo ob-bastion-id' on it. Leave empty to accept a hop from ANY bastion enrolled in the project (weaker: any host enrolled in the project that declares itself a bastion to the SSO could then hop here). The list ends up in /etc/open-bastion/allowed_bastions on the backend; to set it later, put the ids there (one per line, checked on every hop) or re-run 'ob-backend-setup --allowed-bastions <ids>'. Never delete that file: an absent file disables the bastion-voucher check entirely."
         ALLOWED_BASTIONS=$(ask "Allowed bastion ids (empty = any)" "")
     fi
 
@@ -1619,7 +1618,7 @@ print_recap() {
   Hardening:           $ENABLE_HARDENING
   Audit trace:         $ENABLE_AUDIT_TRACE
   Session recording:   $rec
-  Allowed bastions:    ${ALLOWED_BASTIONS:-<any in same group>}
+  Allowed bastions:    ${ALLOWED_BASTIONS:-<any bastion of the project>}
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
