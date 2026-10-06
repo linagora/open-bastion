@@ -21,7 +21,7 @@ typedef struct {
 typedef struct {
     bool enabled;           /* Offline mode allowed for this user */
     int ttl;                /* Cache TTL in seconds (0 = no caching) */
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     char *verifier;         /* Pre-computed Argon2id verifier for offline auth */
 #endif /* ENABLE_DESKTOP_SSO */
 } ob_offline_settings_t;
@@ -144,7 +144,7 @@ int ob_parse_verify_response(const char *body, ob_response_t *response,
 int ob_parse_authorize_response(const char *body, ob_response_t *response,
                                 char *err, size_t errlen);
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /*
  * Introspect an access token via /oauth2/introspect
  * DEPRECATED for user tokens - use ob_verify_token instead.

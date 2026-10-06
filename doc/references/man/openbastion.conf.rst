@@ -472,10 +472,12 @@ Cache brute-force protection
 Desktop SSO
 ~~~~~~~~~~~
 
-These settings are compiled into the desktop build of the module only, for
-the LightDM greeter and offline sessions, and serve only the
-``open-bastion-desktop`` package. Desktop SSO is experimental (alpha) and
-not production-ready; see :doc:`/desktop-sso/index`.
+These settings serve only the LightDM greeter and offline sessions of the
+``open-bastion-desktop`` package, and take effect only in a module built
+with Desktop SSO, as the packages are. A module built without it recognises
+them, logs that it ignores them, and behaves otherwise the same. Desktop SSO
+is experimental (alpha) and not production-ready; see
+:doc:`/desktop-sso/index`.
 
 .. option:: oauth2_token_auth
 
