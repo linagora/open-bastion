@@ -2126,6 +2126,13 @@ normalize_allowed_bastions() {
     normalized=""
     for entry in $raw; do
         case "$entry" in
+            -*)
+                # No bastion id starts with '-': this is the next option,
+                # taken as the value of an --allowed-bastions left empty.
+                error "Invalid bastion id in the allowed-bastions list: '$entry'"
+                error "Did --allowed-bastions miss its value? Pass \"\" for any vouched bastion."
+                exit 1
+                ;;
             *[!A-Za-z0-9._-]*)
                 error "Invalid bastion id in the allowed-bastions list: '$entry'"
                 error "Ids are what 'ob-bastion-id' prints on a bastion ([A-Za-z0-9._-])."

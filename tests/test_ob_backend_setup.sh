@@ -483,7 +483,7 @@ test_sudo_fresh_otp_optin() {
 # matching nothing (every hop denied, unexplained), and a whitespace-only value
 # would silently mean "any bastion" while looking configured.
 test_allowed_bastions_normalised() {
-    local rc1 rc2 rc3
+    local rc1 rc2 rc3 rc4
     (
         source_script "ob-backend-setup"
         BASTION_ALLOWED_IDS="b1, b2 ;b3"
@@ -504,10 +504,17 @@ test_allowed_bastions_normalised() {
         normalize_allowed_bastions 2>/dev/null
     )
     rc3=$?
-    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -ne 0 ]; then
-        pass "allowed-bastions list normalised, blank collapses, junk rejected"
+    # `--allowed-bastions --dry-run`: the next option taken as the list.
+    (
+        source_script "ob-backend-setup"
+        BASTION_ALLOWED_IDS="--dry-run"
+        normalize_allowed_bastions 2>/dev/null
+    )
+    rc4=$?
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -ne 0 ] && [ "$rc4" -ne 0 ]; then
+        pass "allowed-bastions list normalised, blank collapses, junk and options rejected"
     else
-        fail "allowed-bastions validation" "rc=$rc1/$rc2/$rc3"
+        fail "allowed-bastions validation" "rc=$rc1/$rc2/$rc3/$rc4"
     fi
 }
 
