@@ -830,8 +830,13 @@ if(BUILD_BUILDER)
 
     find_program(RPMBUILD_EXECUTABLE rpmbuild)
     if(RPMBUILD_EXECUTABLE)
+        # Release is 1%{?dist}, as in the spec.
+        execute_process(
+            COMMAND ${RPMBUILD_EXECUTABLE} --eval "%{?dist}"
+            OUTPUT_VARIABLE _ob_rpm_dist
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
         set(BUILDER_RPM_OUTPUT
-            "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1.noarch.rpm")
+            "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1${_ob_rpm_dist}.noarch.rpm")
 
         # The tarball carries the generated man page only when there is one.
         set(_ob_builder_tar_man)
@@ -871,11 +876,18 @@ if(BUILD_BUILDER)
                 --transform "s|^admin-builder|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}|"
                 admin-builder
                 ${_ob_builder_tar_man}
-            COMMAND ${RPMBUILD_EXECUTABLE}
+            COMMAND rm -f "${BUILDER_RPM_OUTPUT}"
+            # --nodeps: the spec has no BuildRequires, and the check would
+            # open the host rpmdb, which a non-RPM host (Debian) does not have.
+            # _build_name_fmt drops the default %{ARCH}/ subdirectory so the
+            # package lands next to the .deb.
+            COMMAND ${RPMBUILD_EXECUTABLE} --nodeps
                 --define "_topdir ${CMAKE_BINARY_DIR}/builder-pkg/rpm/rpmbuild"
                 --define "_sourcedir ${CMAKE_BINARY_DIR}/builder-pkg/rpm"
                 --define "_rpmdir ${CMAKE_BINARY_DIR}"
+                --define "_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm"
                 -bb "${CMAKE_BINARY_DIR}/open-bastion-builder.spec"
+            COMMAND ls -l "${BUILDER_RPM_OUTPUT}"
             COMMENT "Building ${BUILDER_PKG_NAME} RPM package"
             VERBATIM
         )

@@ -191,6 +191,10 @@ here.
   `auto_enroll_setup: false` used to fall back to `prompt`; both now apply.
   A `sign_with` key that gpg cannot use stops the build before the SSO is
   contacted, instead of leaving an unsigned installer behind.
+- **The CMake build puts the `open-bastion-builder` RPM next to the `.deb`**
+  (#322). On a host with `rpmbuild` it was written to `build/noarch/`, and on
+  Debian rpmbuild printed `cannot open Packages database` errors; the target
+  now also fails when the RPM is not written.
 
 ### Security
 
