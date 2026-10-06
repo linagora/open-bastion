@@ -35,7 +35,30 @@ Options
 .. option:: --config FILE
 
    Read all answers from a YAML config file (non-interactive). The
-   accepted keys are listed in the README shipped with the package.
+   accepted keys are listed in the README shipped with the package;
+   ``--save-config`` writes such a file with every key, defaults
+   included.
+
+.. option:: --save-config PATH
+
+   Also save the answers — defaults included, accepted values as
+   comments — as a YAML file that ``--config`` replays without any
+   question. The questionnaire offers it too (default
+   ``./ob-builder-<slug>.yml``). The file is written before the SSO is
+   contacted, never over the ``--config`` file, and not at all with
+   ``--dry-run``.
+
+   An embedded client_secret is left out, as a comment to fill in,
+   unless the questionnaire is told to write it; the file is then
+   created mode 0600. Service accounts entered interactively carry no
+   public key: a commented ``public_key_file`` line marks where to add
+   it. Since that file is meant to be completed by hand, a path typed at
+   the questionnaire that already exists is only reused after
+   confirmation, and replacing an existing file is announced; a
+   ``--save-config`` path given on the command line is taken as consent.
+   When the file is written, it is replaced wholesale; neither an
+   existing save path that cannot be confirmed nor ``--dry-run`` writes
+   anything at all.
 
 .. option:: --output-shell PATH
 
@@ -147,6 +170,12 @@ Fully interactive run:
 ::
 
    ob-builder
+
+Interactive run keeping the answers for the next, non-interactive, run:
+
+::
+
+   ob-builder --save-config build.yml
 
 Interactive run with the shell installer path given up front:
 
