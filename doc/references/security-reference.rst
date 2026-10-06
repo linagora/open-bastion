@@ -247,6 +247,8 @@ Voucher lifecycle
 | Renewal  | User reconnects to the bastion; no silent re-vouching                           |
 +----------+---------------------------------------------------------------------------------+
 
+.. _security-reference-authorization-cache-security:
+
 Authorization cache security
 ----------------------------
 
@@ -632,10 +634,10 @@ Example configuration
 
 .. _security-reference-offline-credential-cache-security:
 
-Offline credential cache security
----------------------------------
+Offline credential cache security (Desktop SSO)
+-----------------------------------------------
 
-The offline cache enables Desktop SSO authentication when the LLNG server is unreachable. This section describes the security architecture and considerations.
+The offline credential cache enables Desktop SSO authentication when the LLNG server is unreachable. This section describes the security architecture and considerations. Desktop SSO is **experimental (alpha)**, has not been security-reviewed, and ships in the ``open-bastion-desktop`` package; the cache is administered with :doc:`ob-cache-admin(8) </references/man/ob-cache-admin>` (see :doc:`/desktop-sso/credentials-cache`).
 
 Cryptographic design
 ~~~~~~~~~~~~~~~~~~~~

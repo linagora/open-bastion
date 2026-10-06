@@ -115,6 +115,15 @@ formal analysis of the maximum security target.
 
 
 .. toctree::
+   :caption: Desktop SSO (experimental)
+   :hidden:
+   :maxdepth: 2
+
+   desktop-sso/index
+   references/man/desktop-commands
+
+
+.. toctree::
    :caption: Security Analysis (EBIOS RM)
    :hidden:
    :maxdepth: 2

@@ -1,12 +1,20 @@
-Cache administration
-====================
+Credential cache
+================
 
-The credential cache lets a user log in with their password while the LLNG
-portal is unreachable: the PAM module stores what it needs at the last
-successful online login, encrypted, and verifies it locally during the
-outage. :doc:`Offline mode </offline-mode/index>` covers what else survives
-an outage; this page covers the cache itself and the ``ob-cache-admin``
-tool that administers it.
+.. warning::
+
+   Desktop SSO is **experimental (alpha)** and not production-ready: its
+   authentication path has not been security-reviewed. The credential
+   cache and ``ob-cache-admin`` ship in the ``open-bastion-desktop``
+   package.
+
+The credential cache lets a Desktop SSO user log in with their password
+while the LLNG portal is unreachable: the PAM module stores what it needs
+at the last successful online login, encrypted, and verifies it locally
+during the outage. :doc:`offline` covers the greeter side of an outage;
+this page covers the cache itself and the ``ob-cache-admin`` tool that
+administers it. Servers have no credential cache: what they keep through
+an outage is on :doc:`/offline-mode/index`.
 
 What an entry holds, and how it is protected
 --------------------------------------------
@@ -200,7 +208,7 @@ machine; and the whole cache can be cleared instantly with
 See also
 --------
 
-- :doc:`Offline mode </offline-mode/index>` — the outage matrix, the two
-  server-side caches, and :ref:`network revalidation
-  <offline-mode-network-revalidation>`.
-- :doc:`/desktop-sso` — the LightDM greeter that uses this cache.
+- :doc:`offline` — the greeter fallback and :ref:`network revalidation
+  <desktop-sso-network-revalidation>`.
+- :doc:`/desktop-sso/index` — the LightDM greeter that uses this cache.
+- :doc:`/offline-mode/index` — what a server keeps through an outage.

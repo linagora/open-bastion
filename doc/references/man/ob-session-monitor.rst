@@ -15,6 +15,12 @@ components.
 Description
 -----------
 
+.. warning::
+
+   Desktop SSO is experimental (alpha) and not production-ready: its
+   authentication path has not been security-reviewed. This command ships
+   in the ``open-bastion-desktop`` package.
+
 ``ob-session-monitor`` revalidates sessions that were opened offline. A
 desktop login served from the offline credential cache leaves a marker
 under ``/run/open-bastion/offline_sessions/`` naming the user and the

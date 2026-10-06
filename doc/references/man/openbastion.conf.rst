@@ -473,7 +473,9 @@ Desktop SSO
 ~~~~~~~~~~~
 
 These settings are compiled into the desktop build of the module only, for
-the LightDM greeter and offline sessions.
+the LightDM greeter and offline sessions, and serve only the
+``open-bastion-desktop`` package. Desktop SSO is experimental (alpha) and
+not production-ready; see :doc:`/desktop-sso/index`.
 
 .. option:: oauth2_token_auth
 

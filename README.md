@@ -195,9 +195,9 @@ The full, theme-organized index is in **[doc/index.rst](doc/index.rst)**. Highli
 - **Connections & architecture** — [Bastion architecture](doc/references/bastion-architecture.rst) · [Security scenarios](doc/security-scenarios/index.rst) · [LLNG configuration](doc/deployment/llng-configuration.rst)
 - **Access & permissions** — [Access & Permissions](doc/permissions.rst) (SSO-side vs server-side) · [Service accounts](doc/service-accounts.rst)
 - **Recording & audit** — [Session recording](doc/ssh-session-recording.rst) · [Audit trace](doc/audit.rst)
-- **Offline & resilience** — [Offline mode](doc/offline-mode/index.rst) · [Cache administration](doc/offline-mode/cache.rst)
+- **Offline & resilience** — [Offline mode](doc/offline-mode/index.rst)
 - **Security & hardening** — [Security features](doc/security.rst) · [Hardening](doc/hardening.rst) · [CrowdSec](doc/crowdsec.rst)
-- **Reference** — [Canonical names & paths](doc/references/reference-paths.rst) · [Configuration](doc/references/configuration.rst) · [Troubleshooting](doc/troubleshooting.rst) · [Desktop SSO](doc/desktop-sso.rst) _(experimental/alpha)_ · [Competitors](doc/competitors.rst)
+- **Reference** — [Canonical names & paths](doc/references/reference-paths.rst) · [Configuration](doc/references/configuration.rst) · [Troubleshooting](doc/troubleshooting.rst) · [Desktop SSO](doc/desktop-sso/index.rst) _(experimental/alpha)_ · [Competitors](doc/competitors.rst)
 - **Security analysis (EBIOS RM)** — [full risk study](doc/security/index.rst) _(French)_ · [conditions of use before deploying](doc/security/08-dossier-homologation.rst#2-conditions-demploi)
 
 `doc/` is a [Sphinx](https://www.sphinx-doc.org/) project, so the same pages
@@ -260,11 +260,14 @@ sudo ob-desktop-setup -p https://auth.example.com --offline
 
 ### Documentation
 
-- [Desktop SSO Guide](doc/desktop-sso.rst) - Complete setup and configuration
-- [Offline Mode](doc/offline-mode/index.rst) - Cached credential authentication
-- [Security reference](doc/references/security-reference.rst#offline-credential-cache-security) - Security details
+- [Desktop SSO Guide](doc/desktop-sso/index.rst) - Complete setup and configuration
+- [Offline desktop logins](doc/desktop-sso/offline.rst) - Cached credential authentication
+- [Credential cache](doc/desktop-sso/credentials-cache.rst) - The cache and `ob-cache-admin`
+- [Security reference](doc/references/security-reference.rst#offline-credential-cache-security-desktop-sso) - Security details
 
 ### Cache Management
+
+`ob-cache-admin` ships in `open-bastion-desktop`.
 
 ```bash
 # Show cache statistics

@@ -41,9 +41,6 @@ key where there is no browser; the :doc:`end user guide
        ``pam_openbastion`` reads.
    * - :doc:`ob-fp-submit(8) <ob-fp-submit>`
      - What the ``AuthorizedPrincipalsCommand`` helper uses to deposit them.
-   * - :doc:`ob-session-monitor(8) <ob-session-monitor>`
-     - Revalidates sessions opened offline: ends the ones the portal reports
-       gone, and forces the others back online after the grace period.
    * - :doc:`ob-client-jwt(8) <ob-client-jwt>`
      - Builds a ``client_secret_jwt`` assertion with the secret on stdin,
        used by :doc:`ob-enroll(8) <ob-enroll>`.
@@ -67,7 +64,6 @@ key where there is no browser; the :doc:`end user guide
    ob-cert-request
    ob-fp-daemon
    ob-fp-submit
-   ob-session-monitor
    ob-client-jwt
    ob-sign-request
    ob-ssh-cert

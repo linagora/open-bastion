@@ -4,7 +4,8 @@ Administrator man pages
 The commands an administrator runs on a bastion, on a backend, or — for
 ``ob-builder`` — on a workstation, to deploy a host, operate it and take it
 out of service, and the file the PAM module reads its settings from. Each
-has a man page of the same name.
+has a man page of the same name. The Desktop SSO commands, experimental,
+have their own list: :doc:`desktop-commands`.
 
 .. list-table::
    :header-rows: 1
@@ -40,11 +41,6 @@ has a man page of the same name.
        ownership.
    * - :doc:`ob-uninstall(8) <ob-uninstall>`
      - Take Open Bastion off the host, ready for package removal.
-   * - :doc:`ob-cache-admin(8) <ob-cache-admin>`
-     - Inspect, invalidate and unlock the offline credential cache.
-   * - :doc:`ob-desktop-setup(8) <ob-desktop-setup>`
-     - Configure a workstation to log in through LLNG with the LightDM
-       greeter, offline login included.
    * - :doc:`ob-builder(1) <ob-builder>`
      - Generate a self-extracting installer or an Ansible role from a
        questionnaire, for deploying a fleet.
@@ -62,5 +58,3 @@ has a man page of the same name.
    ob-post-upgrade
    ob-uninstall
    ob-builder
-   ob-cache-admin
-   ob-desktop-setup

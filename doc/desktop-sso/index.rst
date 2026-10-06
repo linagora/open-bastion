@@ -1,5 +1,3 @@
-:orphan:
-
 Desktop SSO with Open Bastion
 =============================
 
@@ -415,7 +413,7 @@ When using offline mode (cached credentials), 2FA is **bypassed** because:
 Offline mode
 ------------
 
-When the LLNG server is unreachable, the greeter can fall back to offline authentication using cached credentials. See :doc:`/offline-mode/index` for details.
+When the LLNG server is unreachable, the greeter can fall back to offline authentication using cached credentials. See :doc:`offline` for the fallback and the revalidation of offline sessions, and :doc:`credentials-cache` for the cache and ``ob-cache-admin``.
 
 Screen unlock token refresh
 ---------------------------
@@ -527,3 +525,8 @@ Log files
 - PAM/Open Bastion: ``journalctl | grep pam_openbastion``
 - Audit log: ``/var/log/open-bastion/audit.json``
 
+.. toctree::
+   :hidden:
+
+   offline
+   credentials-cache

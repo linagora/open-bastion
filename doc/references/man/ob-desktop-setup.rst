@@ -11,6 +11,12 @@ Synopsis
 Description
 -----------
 
+.. warning::
+
+   Desktop SSO is experimental (alpha) and not production-ready: its
+   authentication path has not been security-reviewed. This command ships
+   in the ``open-bastion-desktop`` package.
+
 ``ob-desktop-setup`` configures a workstation to log in through
 LemonLDAP::NG: it installs the LightDM display manager and its WebKit2
 greeter with the Open Bastion theme, writes the greeter's configuration,
