@@ -297,7 +297,7 @@ Sécurité du Cache d'Autorisation
 
 Le **cache d'autorisation** (``auth_cache``) est le seul cache côté PAM du module. Il conserve le résultat d'un appel ``/pam/authorize`` réussi afin qu'un utilisateur déjà autorisé puisse encore se connecter lorsque le portail LLNG est injoignable. Il ne met jamais en cache d'identifiants, de tokens ou de matériel de mot de passe — uniquement un verdict d'autorisation et les attributs de compte associés.
 
-Les entrées ne sont écrites que par les builds incluant les composants Desktop SSO (``-DINSTALL_DESKTOP=ON``, ce qu'utilisent les paquets ``.deb`` et ``.rpm``). Un build SSH seul lit le cache mais ne l'alimente jamais.
+Tous les builds l'alimentent, avec ou sans les composants Desktop SSO. Jusqu'à la 0.6.x, seuls les builds ``-DINSTALL_DESKTOP=ON`` — dont les paquets ``.deb`` et ``.rpm`` — écrivaient les entrées : un build SSH seul lisait le cache sans jamais l'alimenter (#318).
 
 Chiffrement au Repos
 ~~~~~~~~~~~~~~~~~~~~

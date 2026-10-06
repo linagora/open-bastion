@@ -114,6 +114,12 @@ here.
 
 ### Fixed
 
+- **A build without Desktop SSO writes the authorization cache** (#318). The
+  store, and the parsing of the `offline` object of `/pam/authorize`, were
+  compiled only with `-DINSTALL_DESKTOP=ON`: such a build read the cache but
+  never wrote it, so `auth_cache_enabled` had no effect and an SSO outage
+  refused every login. The `.deb` and `.rpm` packages, built with Desktop SSO,
+  were not affected.
 - **`ob-enroll -C FILE` reads `FILE`** (#314). The settings always came from
   `/etc/open-bastion/openbastion.conf`: `ob-enroll -C` could enrol against
   another portal and, without `-t`, overwrite the host's token. An unreadable

@@ -252,7 +252,7 @@ Authorization cache security
 
 The **authorization cache** (``auth_cache``) is the only PAM-side cache in the module. It stores the result of a successful ``/pam/authorize`` call so that an already-authorized user can still log in while the LLNG portal is unreachable. It never caches credentials, tokens, or password material — only an authorization verdict and the account attributes that come with it.
 
-Entries are written only by builds that include the Desktop SSO components (``-DINSTALL_DESKTOP=ON``, which is what the ``.deb`` and ``.rpm`` packages use). An SSH-only build reads the cache but never populates it.
+Every build writes it, with or without the Desktop SSO components. Up to 0.6.x only ``-DINSTALL_DESKTOP=ON`` builds — the ``.deb`` and ``.rpm`` packages among them — wrote entries: an SSH-only build read the cache but never populated it (#318).
 
 Encryption at rest
 ~~~~~~~~~~~~~~~~~~

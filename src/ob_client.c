@@ -1126,12 +1126,24 @@ static int ob_authorize_user_internal(ob_client_t *client,
         return -1;
     }
 
-    /* Parse JSON response */
-    struct json_object *json = json_tokener_parse(buf.data);
+    int prc = ob_parse_authorize_response(buf.data, response,
+                                          client->error, sizeof(client->error));
     free_buffer(&buf);
+    return prc;
+}
 
+int ob_parse_authorize_response(const char *body, ob_response_t *response,
+                                char *err, size_t errlen)
+{
+    if (!body || !response) {
+        if (err && errlen) snprintf(err, errlen, "Invalid parameters");
+        return -1;
+    }
+    memset(response, 0, sizeof(*response));
+
+    struct json_object *json = json_tokener_parse(body);
     if (!json) {
-        snprintf(client->error, sizeof(client->error), "Invalid JSON response");
+        snprintf(err, errlen, "Invalid JSON response");
         return -1;
     }
 
@@ -1139,13 +1151,13 @@ static int ob_authorize_user_internal(ob_client_t *client,
 
     /* Security: Validate required fields are present and have correct type */
     if (!json_object_object_get_ex(json, "authorized", &val)) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Missing required 'authorized' field in response");
         json_object_put(json);
         return -1;
     }
     if (!json_object_is_type(val, json_type_boolean)) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Invalid 'authorized' field type in response (expected boolean)");
         json_object_put(json);
         return -1;
@@ -1174,21 +1186,21 @@ static int ob_authorize_user_internal(ob_client_t *client,
     }
 
     if (!json_object_object_get_ex(json, "user", &val)) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Missing required 'user' field in response");
         json_object_put(json);
         return -1;
     }
     const char *authz_user_str = json_object_get_string(val);
     if (!authz_user_str) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Invalid 'user' field type in response");
         json_object_put(json);
         return -1;
     }
     response->user = strdup(authz_user_str);
     if (!response->user) {
-        snprintf(client->error, sizeof(client->error),
+        snprintf(err, errlen,
                  "Out of memory copying 'user' field");
         json_object_put(json);
         return -1;
@@ -1233,8 +1245,11 @@ static int ob_authorize_user_internal(ob_client_t *client,
         response->bastion_voucher_expires_in = json_object_get_int(val);
     }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
-    /* Parse offline settings object */
+    /*
+     * Parse offline settings object. enabled/ttl drive the authorization
+     * cache, which every build writes; only the credential verifier is
+     * Desktop SSO.
+     */
     struct json_object *offline_obj;
     if (json_object_object_get_ex(json, "offline", &offline_obj)) {
         if (json_object_is_type(offline_obj, json_type_object)) {
@@ -1245,13 +1260,14 @@ static int ob_authorize_user_internal(ob_client_t *client,
             if (json_object_object_get_ex(offline_obj, "ttl", &val)) {
                 response->offline.ttl = json_object_get_int(val);
             }
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
             if (json_object_object_get_ex(offline_obj, "verifier", &val)) {
                 const char *v = json_object_get_string(val);
                 if (v) response->offline.verifier = strdup(v);
             }
+#endif /* ENABLE_DESKTOP_SSO */
         }
     }
-#endif /* ENABLE_DESKTOP_SSO */
 
     json_object_put(json);
     return 0;
