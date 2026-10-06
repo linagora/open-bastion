@@ -7,7 +7,7 @@
 # SSO:         @@PORTAL_URL@@
 #
 # USAGE:
-#   ./open-bastion-bootstrap-@@DEPLOYMENT_SLUG@@.sh [OPTIONS] [info]
+#   ./bootstrap-@@DEPLOYMENT_SLUG@@-@@TARGET_ROLE@@.sh [OPTIONS] [info]
 #
 # Run with --help for full option list.
 
@@ -129,7 +129,7 @@ die()       { log_error "$*"; exit 1; }
 
 usage() {
     cat <<EOF
-Usage: ./open-bastion-bootstrap-${DEPLOYMENT_SLUG}.sh [OPTIONS] [info]
+Usage: ./bootstrap-${DEPLOYMENT_SLUG}-${TARGET_ROLE}.sh [OPTIONS] [info]
 
 Subcommands:
   info    Print embedded scenario metadata and exit (no system changes).

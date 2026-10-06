@@ -60,19 +60,24 @@ Options
    existing save path that cannot be confirmed nor ``--dry-run`` writes
    anything at all.
 
-.. option:: --output-shell PATH
+.. option:: --output-shell DIR
 
-   Write a self-extracting shell installer to ``PATH``.
+   Write the self-extracting shell installers in the directory ``DIR``,
+   created if missing. ob-builder names the files: one
+   ``bootstrap-<slug>-<role>.sh`` per target role (``--bundle`` included),
+   its ``.sig`` with :option:`--sign-with`, and the
+   ``PORTAL-CHECKLIST-<role>.md`` listing the portal settings to make.
+   A ``DIR`` ending in ``.sh``, or naming an existing file, is refused:
+   older releases took a file name there.
 
 .. option:: --output-ansible PATH
 
    Write an Ansible role tree to ``PATH`` (a directory).
 
    With ``--config``, at least one output is required; the questionnaire
-   asks for them otherwise (default ``./bootstrap-<slug>.sh`` and
-   ``./ansible-<slug>``). When several target roles are chosen
-   interactively, each artefact gets the role as suffix
-   (``bootstrap-<slug>-bastion.sh``, ``ansible-<slug>-backend``).
+   asks for them otherwise (default ``.`` and ``./ansible-<slug>``). When
+   several target roles are chosen, each role tree gets the role as
+   suffix (``ansible-<slug>-backend``).
 
 .. option:: --bundle
 
@@ -177,17 +182,17 @@ Interactive run keeping the answers for the next, non-interactive, run:
 
    ob-builder --save-config build.yml
 
-Interactive run with the shell installer path given up front:
+Interactive run with the shell installer directory given up front:
 
 ::
 
-   ob-builder --output-shell /tmp/bootstrap.sh
+   ob-builder --output-shell /tmp/bootstrap
 
 Replayable build from YAML (e.g. for CI):
 
 ::
 
-   ob-builder --config build.yml --output-shell /tmp/boot.sh --output-ansible /tmp/role
+   ob-builder --config build.yml --output-shell /tmp/boot --output-ansible /tmp/role
 
 See also
 --------

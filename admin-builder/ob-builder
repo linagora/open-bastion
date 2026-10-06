@@ -177,10 +177,13 @@ INPUT MODES:
   --bundle                   Generate paired bastion + backend artefacts in one run
 
 OUTPUTS (with --config, at least one of them is required):
-  --output-shell PATH        Write self-extracting shell installer here
+  --output-shell DIR         Write the self-extracting shell installer(s) in
+                             this directory, created if missing, as
+                             bootstrap-<slug>-<role>.sh (+ .sig, and
+                             PORTAL-CHECKLIST-<role>.md)
   --output-ansible PATH      Write Ansible role tree here (directory)
-                             With several roles, each artefact gets the role
-                             as suffix (bootstrap-x-bastion.sh, role-backend)
+                             With several roles, each role tree gets the role
+                             as suffix (PATH-bastion, PATH-backend)
   --save-config PATH         Also save the answers, defaults included, as a
                              YAML replayable with --config (the questionnaire
                              offers it too). An embedded client_secret is left
@@ -263,16 +266,16 @@ EXAMPLES:
   # Interactive, keeping the answers for the next, non-interactive, run
   $PROG_NAME --save-config build.yml
 
-  # Interactive, shell installer path given up front
-  $PROG_NAME --output-shell /tmp/bootstrap-mybastion.sh
+  # Interactive, shell installer directory given up front
+  $PROG_NAME --output-shell /tmp/bootstrap/
 
   # Replayable build from YAML config (e.g. for CI)
   $PROG_NAME --config build.yml \\
-             --output-shell /tmp/bootstrap.sh --output-ansible /tmp/role/
+             --output-shell /tmp/bootstrap/ --output-ansible /tmp/role/
 
   # Bundle (bastion + backend share the same CA / JWKS fetched once)
   $PROG_NAME --config build.yml --bundle \\
-             --output-shell /tmp/bootstrap.sh
+             --output-shell /tmp/bootstrap/
 
 EOF
 }
@@ -1035,7 +1038,7 @@ EOF
     # q1. Slug
     while :; do
         if [ -z "$DEPLOYMENT_SLUG" ]; then
-            explain "Short label used only to name generated files (e.g. bootstrap-<slug>.sh)."
+            explain "Short label used only to name generated files (e.g. bootstrap-<slug>-<role>.sh)."
             DEPLOYMENT_SLUG=$(ask "Deployment slug (lowercase, [a-z0-9-])" "")
         fi
         if is_valid_slug "$DEPLOYMENT_SLUG"; then
@@ -1047,11 +1050,17 @@ EOF
 
     # q1b. Outputs, unless one was given on the CLI.
     if [ -z "$OUTPUT_SHELL" ] && [ -z "$OUTPUT_ANSIBLE" ]; then
-        explain "A shell installer is one self-extracting script to run on each target. An Ansible role deploys a fleet from a playbook. With several target roles (asked below), each file gets the role as suffix."
-        local _kind
+        explain "A shell installer is one self-extracting script to run on each target, written as bootstrap-${DEPLOYMENT_SLUG}-<role>.sh in the directory you give. An Ansible role deploys a fleet from a playbook. With several target roles (asked below), each role tree gets the role as suffix."
+        local _kind _err
         _kind=$(ask_choice "Artefacts to generate" "shell|ansible|both" "shell")
         case "$_kind" in
-            shell|both) OUTPUT_SHELL=$(ask "Shell installer path" "./bootstrap-${DEPLOYMENT_SLUG}.sh") ;;
+            shell|both)
+                while :; do
+                    OUTPUT_SHELL=$(ask "Shell installer directory" ".")
+                    _err=$(check_output_shell_dir "$OUTPUT_SHELL") && break
+                    log_warn "$_err"
+                done
+                ;;
         esac
         case "$_kind" in
             ansible|both) OUTPUT_ANSIBLE=$(ask "Ansible role directory" "./ansible-${DEPLOYMENT_SLUG}") ;;
@@ -1534,9 +1543,34 @@ validate_inputs() {
     # (Outputs: checked fail-fast in main() with --config, asked otherwise.)
 }
 
-# Artefacts to produce, as parallel arrays (one entry per role). A single role
-# uses the paths as given; several roles get the role as suffix. --bundle adds
-# its companion role the same way it always did.
+# --output-shell names a directory, ob-builder picks the file names in it. A
+# file-name-looking argument (`bootstrap.sh`) is refused rather than turned
+# into a directory of that name. Prints the reason and fails when DIR is not
+# acceptable.
+check_output_shell_dir() {
+    local dir="$1"
+    [ -d "$dir" ] && return 0
+    if [ -e "$dir" ]; then
+        printf '%s' "--output-shell takes a directory, and $dir exists but is not one. ob-builder writes bootstrap-<slug>-<role>.sh inside the directory given."
+        return 1
+    fi
+    case "$dir" in
+        *.sh)
+            printf '%s' "--output-shell takes a directory, not a file name: ob-builder writes bootstrap-<slug>-<role>.sh inside it. Use --output-shell $(dirname -- "$dir") (or another directory) instead of $dir."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+shell_installer_path() {
+    printf '%s/bootstrap-%s-%s.sh' "${OUTPUT_SHELL%/}" "$DEPLOYMENT_SLUG" "$1"
+}
+
+# Artefacts to produce, as parallel arrays (one entry per role). Shell
+# installers always carry the role in their name. A single Ansible role tree
+# uses the path as given; several get the role as suffix. --bundle adds its
+# companion role the same way.
 _PLAN_ROLES=()
 _PLAN_SHELL=()
 _PLAN_ANSIBLE=()
@@ -1544,10 +1578,10 @@ build_output_plan() {
     local r sh an n="${#TARGET_ROLES[@]}"
     _PLAN_ROLES=(); _PLAN_SHELL=(); _PLAN_ANSIBLE=()
     for r in "${TARGET_ROLES[@]}"; do
-        sh="$OUTPUT_SHELL"; an="$OUTPUT_ANSIBLE"
-        if [ "$n" -gt 1 ]; then
-            [ -n "$sh" ] && sh=$(_pair_path "$OUTPUT_SHELL" "$r")
-            [ -n "$an" ] && an="${OUTPUT_ANSIBLE%/}-${r}"
+        sh=""; an="$OUTPUT_ANSIBLE"
+        [ -n "$OUTPUT_SHELL" ] && sh=$(shell_installer_path "$r")
+        if [ "$n" -gt 1 ] && [ -n "$an" ]; then
+            an="${OUTPUT_ANSIBLE%/}-${r}"
         fi
         _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
     done
@@ -1556,7 +1590,7 @@ build_output_plan() {
         r="backend"
         [ "$TARGET_ROLE" = "backend" ] && r="bastion"
         sh=""; an=""
-        [ -n "$OUTPUT_SHELL" ]   && sh=$(_pair_path "$OUTPUT_SHELL" "$r")
+        [ -n "$OUTPUT_SHELL" ]   && sh=$(shell_installer_path "$r")
         [ -n "$OUTPUT_ANSIBLE" ] && an="${OUTPUT_ANSIBLE%/}-${r}"
         _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
     fi
@@ -2458,22 +2492,6 @@ EOF
     log_info "Stub Ansible role written to $outpath"
 }
 
-# ─────────────────────────────────────────────────────────────────────────
-# Bundle handling.
-# When --bundle is set, the user-specified target_role drives ONE artefact
-# (call it primary) and we additionally render a backend artefact with
-# --output-shell/--output-ansible paths derived by appending -backend.
-# If the primary role is already 'backend', we instead render a paired
-# bastion artefact under -bastion. SSO assets (CA/JWKS) are fetched once.
-# ─────────────────────────────────────────────────────────────────────────
-_pair_path() {
-    local base="$1" suffix="$2"
-    case "$base" in
-        *.sh) printf '%s-%s.sh\n' "${base%.sh}" "$suffix" ;;
-        *)    printf '%s-%s\n' "$base" "$suffix" ;;
-    esac
-}
-
 # The portal side of R-P1, written next to the artefact.
 #
 # `pamAccessServerGroups` and `pamAccessAllowedRps` are Manager settings: no
@@ -2532,6 +2550,11 @@ main() {
     ob_init_tmpdir_trap
 
     parse_args "$@"
+
+    if [ -n "$OUTPUT_SHELL" ]; then
+        local _err
+        _err=$(check_output_shell_dir "$OUTPUT_SHELL") || die "$_err"
+    fi
 
     if [ -n "$CONFIG_FILE" ]; then
         # Fail fast: nothing to produce without an output target. The

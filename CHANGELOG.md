@@ -109,6 +109,11 @@ here.
   enables them where they apply; `ob-post-upgrade` migrates a 0.6 host,
   keeping its interval. `--enable-hardening` no longer asks for `root` in
   `cron.allow`. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A5).
+- **`ob-builder --output-shell` takes a directory** (#319), created if missing.
+  ob-builder writes `bootstrap-<slug>-<role>.sh` there for every role, single
+  or not, with its `.sig` and `PORTAL-CHECKLIST-<role>.md` (the checklist used
+  to land in the current directory). A path ending in `.sh` or naming an
+  existing file is refused. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C1).
 
 ### Removed
 

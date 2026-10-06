@@ -18,6 +18,10 @@ set -uo pipefail
 SHIMBIN="$WORK/shimbin"; mkdir -p "$SHIMBIN"
 ln -sf "$SSO_DIR/ob-builder-curl-shim.sh" "$SHIMBIN/curl"
 obbuild(){ PATH="$SHIMBIN:$PATH" "$REPO_ROOT/admin-builder/ob-builder" "$@" --insecure; }
+# ob-builder writes bootstrap-<slug>-<role>.sh into --output-shell; the three
+# build configs share one slug.
+BOOT_DIR="$WORK/shell"
+SLUG=$(awk '/^deployment_slug:/ {print $2; exit}' "$CONFIG_DIR/build-bastion.yml")
 
 # Standalone host: only the harness wires it in (lib.sh keeps it out of the
 # shared VM set). Same as deploy-ansible.sh — append it here so it is recreated,
@@ -47,12 +51,12 @@ mint_dwho_cert   # so the connection-phase + standalone assertions actually run
 # ── Phase 1: bastion installer — enrol, read bastion_id, then setup ──────────
 phase "Phase 1 — bastion (ob-builder --output-shell, scenario=$SCENARIO)"
 sed "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-bastion.yml" > "$WORK/build-bastion.yml"
-obbuild --config "$WORK/build-bastion.yml" --output-shell "$WORK/boot-bastion.sh" >"$WORK/gen-bastion.log" 2>&1 \
+obbuild --config "$WORK/build-bastion.yml" --output-shell "$BOOT_DIR" >"$WORK/gen-bastion.log" 2>&1 \
     && ok "generated bastion installer" || { bad "ob-builder bastion failed"; cat "$WORK/gen-bastion.log"; }
 
 info "enrol the bastion (--skip-setup), approving the device code in parallel"
 ( approve_device "${IP[$BASTION_VM]}" ) &
-run_installer "$BASTION_VM" "$WORK/boot-bastion.sh" --skip-setup >"$WORK/bastion-enroll.log" 2>&1
+run_installer "$BASTION_VM" "$BOOT_DIR/bootstrap-$SLUG-bastion.sh" --skip-setup >"$WORK/bastion-enroll.log" 2>&1
 wait
 # Keep stderr. ob-bastion-id distinguishes "refused" (exit 2, e.g. "HTTP 403 on
 # /pam/whoami") from "answered without an identity" (exit 3, "implements
@@ -77,19 +81,19 @@ else
 fi
 
 info "run bastion setup (--skip-enroll; this locks port 22)"
-run_installer "$BASTION_VM" "$WORK/boot-bastion.sh" --skip-enroll >"$WORK/bastion-setup.log" 2>&1 \
+run_installer "$BASTION_VM" "$BOOT_DIR/bootstrap-$SLUG-bastion.sh" --skip-enroll >"$WORK/bastion-setup.log" 2>&1 \
     && ok "bastion setup complete" || bad "bastion setup failed — see $WORK/bastion-setup.log"
 
 # ── Phase 2: backend installer with allowed_bastions=bastion_id ──────────────
 phase "Phase 2 — backends (ob-builder --output-shell, allowed_bastions=$BID, scenario=$SCENARIO)"
 sed -e "s/^allowed_bastions:.*/allowed_bastions: $BID/" \
     -e "s/^scenario:.*/scenario: $SCENARIO/" "$CONFIG_DIR/build-backend.yml" > "$WORK/build-backend.yml"
-obbuild --config "$WORK/build-backend.yml" --output-shell "$WORK/boot-backend.sh" >"$WORK/gen-backend.log" 2>&1 \
+obbuild --config "$WORK/build-backend.yml" --output-shell "$BOOT_DIR" >"$WORK/gen-backend.log" 2>&1 \
     && ok "generated backend installer" || bad "ob-builder backend failed"
 get_cookie   # refresh: the lab SSO uses short TTLs and bastion setup can outlast the initial cookie
 for v in "${BACKEND_VMS[@]}"; do
     ( approve_device "${IP[$v]}" ) &
-    run_installer "$v" "$WORK/boot-backend.sh" >"$WORK/$v.log" 2>&1
+    run_installer "$v" "$BOOT_DIR/bootstrap-$SLUG-backend.sh" >"$WORK/$v.log" 2>&1
     wait
     grep -q "Setup complete\|5/5\|Role-specific setup" "$WORK/$v.log" && ok "$v deployed" || bad "$v deploy — see $WORK/$v.log"
 done
@@ -121,14 +125,14 @@ service_accounts:
     gid: 6100
 EOF
     fi
-    obbuild --config "$WORK/build-standalone.yml" --output-shell "$WORK/boot-standalone.sh" >"$WORK/gen-standalone.log" 2>&1 \
+    obbuild --config "$WORK/build-standalone.yml" --output-shell "$BOOT_DIR" >"$WORK/gen-standalone.log" 2>&1 \
         && ok "generated standalone installer (incl. service account)" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
     # SSH-layer authorization for the service account — the documented manual step
     # ob-builder does not do. Must run before setup locks port 22.
     provision_service_helper "$STANDALONE_VM"
     get_cookie   # refresh before enrolling: the initial cookie may have expired by now (short lab TTLs)
     ( approve_device "${IP[$STANDALONE_VM]}" ) &
-    run_installer "$STANDALONE_VM" "$WORK/boot-standalone.sh" >"$WORK/$STANDALONE_VM.log" 2>&1
+    run_installer "$STANDALONE_VM" "$BOOT_DIR/bootstrap-$SLUG-standalone.sh" >"$WORK/$STANDALONE_VM.log" 2>&1
     wait
     grep -q "Setup complete\|5/5\|Role-specific setup" "$WORK/$STANDALONE_VM.log" \
         && ok "$STANDALONE_VM deployed" || bad "$STANDALONE_VM deploy — see $WORK/$STANDALONE_VM.log"
