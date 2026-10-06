@@ -547,11 +547,6 @@ install(TARGETS ob-login-shell
     RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-# Install SSH certificate tool (user-facing)
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-ssh-cert
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
 # Deployed by ob-bastion-setup; see doc/hardening.rst.
 install(FILES ${CMAKE_SOURCE_DIR}/config/hardening/logind.conf.d/open-bastion.conf
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/hardening/logind.conf.d
@@ -618,7 +613,6 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-client-jwt.8
         ${MAN_OUT_DIR}/ob-post-upgrade.8
         ${MAN_OUT_DIR}/ob-uninstall.8
-        ${MAN_OUT_DIR}/ob-ssh-cert.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
 

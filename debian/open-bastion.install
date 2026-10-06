@@ -38,7 +38,6 @@ usr/lib/open-bastion/ob-ssh-principals.backend
 usr/lib/open-bastion/ob-fp-spool.tmpfiles
 usr/lib/open-bastion/ob-portal-prerequisites.txt
 
-usr/bin/ob-ssh-cert
 usr/bin/ob-ssh
 usr/bin/ob-scp
 usr/bin/ob-sftp
@@ -69,7 +68,6 @@ usr/share/man/man8/ob-sign-request.8
 usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
 usr/share/man/man8/ob-uninstall.8
-usr/share/man/man8/ob-ssh-cert.8
 
 usr/share/man/man5/openbastion.conf.5
 

@@ -528,7 +528,7 @@ Répertoire état limitation de débit    0700        root
 Sécurité des Scripts
 --------------------
 
-Les scripts shell (``ob-ssh``, ``ob-enroll``, ``ob-ssh-cert``) mettent en œuvre des mesures de sécurité :
+Les scripts shell (``ob-ssh``, ``ob-enroll``) mettent en œuvre des mesures de sécurité :
 
 Construction JSON
 ~~~~~~~~~~~~~~~~~

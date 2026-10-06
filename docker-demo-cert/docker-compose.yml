@@ -9,7 +9,7 @@
 # Usage:
 #   docker compose up -d
 #   # Test SSO: llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
-#   # Get SSH cert: docker exec -it bastion ob-ssh-cert -p http://sso
+#   # Get SSH cert: sign a key on the portal /ssh page (http://localhost/ssh)
 #   # SSH to bastion: ssh -p 2222 dwho@localhost
 
 services:

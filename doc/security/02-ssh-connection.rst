@@ -83,11 +83,6 @@ publique et enregistre le certificat signé à côté de sa clé privée :
    # → Certificat stocké dans ~/.ssh/id_ed25519-cert.pub (validité 1 an)
    # → La clé privée ~/.ssh/id_ed25519 ne change pas
 
-Sur un hôte où le paquet est installé et où aucun navigateur n'est
-disponible (poste d'administration, conteneur), ``ob-ssh-cert --portal
-https://auth.example.com`` obtient le même certificat en ligne de
-commande ; il n'est utilisé par aucun composant d'Open Bastion.
-
 .. _security-02-ssh-connection-2-connexion-ssh-via-bastion:
 
 2. Connexion SSH via bastion
@@ -1658,7 +1653,6 @@ CA SSH et certificats
 - ☐ ``AuthorizedKeysFile none`` sur bastion et backends
 - ☐ ``ExposeAuthInfo yes`` dans sshd_config
 - ☐ Certificats émis pour tous les utilisateurs (validité 1 an), depuis la page ``/ssh`` du portail
-- ☐ ``ob-ssh-cert`` disponible sur les hôtes qui ont le paquet, pour les postes sans navigateur
 
 .. _security-02-ssh-connection-krl-key-revocation-list-1:
 

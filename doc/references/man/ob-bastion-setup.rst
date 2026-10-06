@@ -323,7 +323,6 @@ See also
 :doc:`ob-post-upgrade(8) <ob-post-upgrade>`,
 :doc:`ob-session-recorder(8) <ob-session-recorder>`,
 :doc:`ob-ssh(1) <ob-ssh>`,
-:doc:`ob-ssh-cert(8) <ob-ssh-cert>`,
 :manpage:`nsswitch.conf(5)`,
 :manpage:`sshd_config(5)`
 
