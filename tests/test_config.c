@@ -433,7 +433,7 @@ static int test_parse_insecure_flag(void)
     return ok;
 }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /* Test OAuth2 token auth defaults */
 static int test_oauth2_token_auth_defaults(void)
 {
@@ -658,7 +658,7 @@ int main(void)
     TEST(cache_rate_limit_bounds);
     TEST(fingerprint_required_default_off);
     TEST(parse_fingerprint_required);
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     TEST(oauth2_token_auth_defaults);
     TEST(parse_oauth2_token_auth_args);
     TEST(parse_oauth2_token_auth_config);

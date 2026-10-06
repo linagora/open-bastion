@@ -81,7 +81,7 @@ typedef struct {
     /* Service accounts (local accounts like ansible, backup, etc.) */
     char *service_accounts_file;    /* Path to service accounts config (default: /etc/open-bastion/service-accounts.conf) */
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication (for LightDM greeter) */
     bool oauth2_token_auth;         /* Accept OAuth2 access tokens instead of one-time PAM tokens (default: false) */
     bool oauth2_token_cache;        /* Cache successful OAuth2 token auth for offline mode (default: true) */

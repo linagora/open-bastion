@@ -220,6 +220,31 @@ static int classify(const char *raw)
     return rc;
 }
 
+/*
+ * ---- the Desktop SSO settings are recognised in every build (#321) ----
+ *
+ * A build without Desktop SSO ignores them with their own message, not as
+ * typos. In the desktop build each must reach its real branch of
+ * parse_line(): one that falls through to desktop_sso_keys[] means the list
+ * names a setting the parser does not handle.
+ */
+static void test_desktop_sso_keys(void)
+{
+    for (const char *const *k = desktop_sso_keys; *k; k++) {
+        char line[128];
+        char label[128];
+        snprintf(line, sizeof(line), "%s = 1", *k);
+        int rc = classify(line);
+#ifdef ENABLE_DESKTOP_SSO
+        snprintf(label, sizeof(label), "%-29s -> parsed (desktop build)", *k);
+        CHECK(rc != PARSE_LINE_DESKTOP_KEY && rc != PARSE_LINE_UNKNOWN_KEY, label);
+#else
+        snprintf(label, sizeof(label), "%-29s -> Desktop SSO setting (core build)", *k);
+        CHECK(rc == PARSE_LINE_DESKTOP_KEY, label);
+#endif
+    }
+}
+
 static void test_unknown_keys(void)
 {
     CHECK(classify("auth_cache_offline_ttl = 86400") == PARSE_LINE_UNKNOWN_KEY,
@@ -231,16 +256,11 @@ static void test_unknown_keys(void)
     CHECK(classify("auth_cache = true") == 0,
           "auth_cache                    -> recognised");
 #ifdef ENABLE_DESKTOP_SSO
-    /*
-     * offline_cache_ttl is the desktop-SSO credential cache, compiled in only
-     * with INSTALL_DESKTOP=ON (the Debian package). In a core build the key is
-     * genuinely inert, and reporting it is the honest answer.
-     */
     CHECK(classify("offline_cache_ttl = 86400") == 0,
           "offline_cache_ttl             -> recognised (desktop build)");
 #else
-    CHECK(classify("offline_cache_ttl = 86400") == PARSE_LINE_UNKNOWN_KEY,
-          "offline_cache_ttl             -> reported unknown (core build)");
+    CHECK(classify("offline_cache_ttl = 86400") == PARSE_LINE_DESKTOP_KEY,
+          "offline_cache_ttl             -> Desktop SSO setting, ignored (core build)");
 #endif
 
     /*
@@ -305,6 +325,7 @@ int main(void)
 
     printf("\nUnknown keys are reported instead of silently ignored (#229):\n");
     test_unknown_keys();
+    test_desktop_sso_keys();
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

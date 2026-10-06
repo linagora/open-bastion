@@ -31,6 +31,28 @@ Until 1.0, a dev build sorts above every release: `apt upgrade` does not bring
 a host back from a dev build to a release. Force it with
 `apt install open-bastion=<version> --allow-downgrades`.
 
+## Desktop SSO code
+
+`-DINSTALL_DESKTOP=ON` defines `ENABLE_DESKTOP_SSO`. The `.deb` and `.rpm`
+packages build with it, so the PAM module of the `open-bastion` package
+carries the Desktop SSO code. The module must therefore behave the same with
+or without it, Desktop SSO features aside:
+
+- an `#ifdef ENABLE_DESKTOP_SSO` block holds a Desktop SSO feature and
+  nothing else; anything a server uses stays outside, even when a Desktop
+  SSO feature uses it too;
+- a Desktop SSO setting is added to the parser and to `desktop_sso_keys[]`
+  (or `desktop_sso_flags[]` for a PAM flag) in `src/config.c`, so a build
+  without Desktop SSO ignores it with its own message instead of reporting
+  a typo;
+- CI runs `ctest` on both builds; run both locally when touching such a
+  block:
+
+```sh
+cmake -S . -B build-core -DINSTALL_DESKTOP=OFF && cmake --build build-core && ctest --test-dir build-core
+cmake -S . -B build-desktop -DINSTALL_DESKTOP=ON && cmake --build build-desktop && ctest --test-dir build-desktop
+```
+
 ## Code comments
 
 - Comment only unconventional or tricky code: a non-obvious

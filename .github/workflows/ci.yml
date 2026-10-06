@@ -232,6 +232,13 @@ jobs:
         cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON
         cmake --build build --parallel
 
+    # The only ctest run of a build without Desktop SSO: the other jobs build
+    # with INSTALL_DESKTOP=ON, like the packages.
+    - name: Run tests (build without Desktop SSO)
+      run: |
+        cd build
+        ctest --output-on-failure
+
     # cpack reports a failed install step as "CMake Error" and still exits 0
     # with a package missing the files that step should have put there.
     - name: Create Debian package

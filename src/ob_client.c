@@ -818,7 +818,7 @@ int ob_parse_verify_response(const char *body, ob_response_t *response,
     return 0;
 }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 int ob_introspect_token(ob_client_t *client,
                           const char *token,
                           ob_response_t *response)
@@ -1260,7 +1260,7 @@ int ob_parse_authorize_response(const char *body, ob_response_t *response,
             if (json_object_object_get_ex(offline_obj, "ttl", &val)) {
                 response->offline.ttl = json_object_get_int(val);
             }
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
             if (json_object_object_get_ex(offline_obj, "verifier", &val)) {
                 const char *v = json_object_get_string(val);
                 if (v) response->offline.verifier = strdup(v);
@@ -1331,7 +1331,7 @@ void ob_response_free(ob_response_t *response)
         free(response->managed_groups);
     }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Free offline verifier (contains sensitive data) */
     if (response->offline.verifier) {
         explicit_bzero(response->offline.verifier, strlen(response->offline.verifier));
