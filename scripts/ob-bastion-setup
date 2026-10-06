@@ -2489,7 +2489,8 @@ Backend options:
                           bastion to the SSO -- see doc/references/security-reference.rst.
                           Without --portal, on a backend already set up, it
                           replaces the list and changes nothing else (only
-                          --allow-any-bastion, --yes and --dry-run go with it).
+                          --allow-any-bastion, --yes, --dry-run and --insecure,
+                          which has no effect there, go with it).
       --allow-any-bastion Answer the prompt above with "any bastion", without
                           being asked. Same (weaker) result as an empty list;
                           the point is that it is written down. Non-interactive
@@ -2550,7 +2551,9 @@ parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --allowed-bastions | --allow-any-bastion) ALLOWLIST_OPT_GIVEN=true ;;
-            -y | --yes | -n | --dry-run | --node-role | -h | --help | -V | --version) ;;
+            # --insecure has no effect on an update, which contacts no
+            # portal; accepted so that the full-setup command line works.
+            -y | --yes | -n | --dry-run | -k | --insecure | --node-role | -h | --help | -V | --version) ;;
             *) SETUP_OPTS_GIVEN+=("$1") ;;
         esac
         case "$1" in

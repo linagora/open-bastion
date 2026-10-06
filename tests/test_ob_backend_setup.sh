@@ -749,6 +749,12 @@ test_allowed_bastions_update_configured_backend() {
     [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "b1 b2" ] || bad="$bad dry-run-wrote"
     grep -q 'DRY-RUN.*b3' <<<"$out" || bad="$bad dry-run-silent"
 
+    # --insecure, kept from a full-setup command line, is accepted.
+    out=$(run_update "$root" --allowed-bastions "b1 b2" --insecure 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad insecure-rc=$rc"
+    [ -e "$root/full-setup.log" ] && bad="$bad insecure-full-setup"
+
     # --yes --allow-any-bastion empties it, unprompted.
     out=$(run_update "$root" --allow-any-bastion --yes 2>&1)
     rc=$?

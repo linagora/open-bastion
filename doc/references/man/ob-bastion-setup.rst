@@ -248,8 +248,9 @@ without asking. The
 previous list is printed and the file is copied to a
 ``/var/backup/open-bastion-setup-*`` directory; a list identical to the
 current one is not rewritten. ``--yes`` and ``--dry-run`` are the only
-other options accepted: any other one belongs to the full setup, which
-takes ``--portal``.
+other options that act on the update; ``--insecure`` is accepted and has
+no effect, since the update contacts no portal. Any other option belongs
+to the full setup, which takes ``--portal``.
 
 The update is refused on a host whose sshd is not configured as an Open
 Bastion backend, or that has no ``/etc/open-bastion/openbastion.conf``:
