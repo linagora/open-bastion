@@ -17,14 +17,14 @@ typedef struct {
     bool sudo_nopasswd;     /* Sudo without password (future use) */
 } ob_permissions_t;
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /* Offline settings from /pam/authorize response */
 typedef struct {
     bool enabled;           /* Offline mode allowed for this user */
     int ttl;                /* Cache TTL in seconds (0 = no caching) */
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     char *verifier;         /* Pre-computed Argon2id verifier for offline auth */
-} ob_offline_settings_t;
 #endif /* ENABLE_DESKTOP_SSO */
+} ob_offline_settings_t;
 
 /* SSH certificate info extracted from environment */
 typedef struct {
@@ -67,11 +67,9 @@ typedef struct {
     char *bastion_voucher;
     int bastion_voucher_expires_in;
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Offline settings from /pam/authorize */
     ob_offline_settings_t offline;
     bool has_offline;       /* True if offline object was present */
-#endif /* ENABLE_DESKTOP_SSO */
 } ob_response_t;
 
 /* Client configuration */
@@ -134,6 +132,17 @@ int ob_verify_token(ob_client_t *client,
  */
 int ob_parse_verify_response(const char *body, ob_response_t *response,
                              char *err, size_t errlen);
+
+/*
+ * Parse a /pam/authorize response body into *response.
+ *
+ * Exposed (non-static) for unit testing the response contract; not part of the
+ * stable client API. *response is reset on entry. Returns 0 for a well-formed
+ * response — response->authorized reflects the verdict — and -1 on a malformed
+ * one, writing a message into err[0..errlen).
+ */
+int ob_parse_authorize_response(const char *body, ob_response_t *response,
+                                char *err, size_t errlen);
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 /*

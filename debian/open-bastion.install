@@ -26,7 +26,6 @@ usr/sbin/ob-post-upgrade
 usr/sbin/ob-uninstall
 usr/sbin/ob-service-account-keys
 usr/sbin/ob-record-sink
-usr/sbin/ob-cache-admin
 usr/sbin/ob-session-prune
 usr/sbin/ob-krl-refresh
 
@@ -71,9 +70,6 @@ usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
 usr/share/man/man8/ob-uninstall.8
 usr/share/man/man8/ob-ssh-cert.8
-usr/share/man/man8/ob-cache-admin.8
-usr/share/man/man8/ob-desktop-setup.8
-usr/share/man/man8/ob-session-monitor.8
 
 usr/share/man/man5/openbastion.conf.5
 

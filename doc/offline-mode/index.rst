@@ -2,9 +2,10 @@ Offline mode
 ============
 
 The LLNG portal is not always reachable. This page says what keeps working
-while it is down, and how the caches behind that answer are sized. The
-credential cache a password is verified against during an outage has its
-own page: :doc:`Cache administration </offline-mode/cache>`.
+on a server while it is down, and how the two caches behind that answer —
+the NSS cache and the authorization cache — are sized. Desktop SSO
+workstations, which are experimental, have a third cache, of credentials,
+for offline logins: see :doc:`/desktop-sso/offline`.
 
 What works offline, and what needs the portal
 ---------------------------------------------
@@ -179,6 +180,48 @@ Relabelling to an existing type is not a solution — no stock type is
 writable by all those domains — and no policy module ships yet, so an
 enforcing host may simply keep resolving from the portal every time.
 
+The authorization cache
+-----------------------
+
+``pam_openbastion`` keeps the verdict of each successful ``/pam/authorize``
+call, with the account attributes that come with it, so that the PAM
+``account`` phase can still answer while the portal is unreachable. It
+holds no credential, token or password material: an authorization, not an
+authentication — which is why ``sudo``'s ``auth`` phase still fails during
+an outage.
+
+An entry is written only when the portal allows it for that user, which
+it does when LLNG's ``pamAccessOfflineEnabled`` — off by default — is ``1``
+or a rule the user's session matches. The ``offline`` object of the
+``/pam/authorize`` response then carries the entry's lifetime, ``ttl``,
+from ``pamAccessOfflineTtl`` (24 hours when it carries none). Nothing local
+sets that lifetime, and it is also the revocation lag of an outage: a user
+removed in the portal keeps logging in from the cache until their entry
+expires.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 68
+
+   * - Setting, in ``openbastion.conf``
+     - Effect
+   * - ``auth_cache_enabled``
+     - ``false`` turns the cache off: every authorization goes to the
+       portal, and an outage refuses every SSO login. Default: ``true``.
+   * - ``auth_cache_dir``
+     - Where entries live, root-only, one encrypted file per user, server
+       group and host. Default: ``/var/cache/open-bastion/auth``.
+   * - ``auth_cache_force_online``
+     - While this file exists the cache is not consulted: empty, for every
+       user; listing names, for those users only. Default:
+       ``/etc/open-bastion/force_online``.
+
+Up to 0.6.x, a module built without the Desktop SSO components read this
+cache but never wrote it (#318); the ``.deb`` and ``.rpm`` packages, built
+with them, were not affected. The encryption, the file format and the rate
+limiting of cache lookups are in the :ref:`security reference
+<security-reference-authorization-cache-security>`.
+
 A personal key on the bastion, as a fallback?
 ---------------------------------------------
 
@@ -210,104 +253,11 @@ Prefer the two mechanisms designed for the outage: a break-glass service
 account, whose rights are read locally with no portal call, and out-of-band
 console access. Both are what R-S17 prescribes for a total lockout.
 
-Desktop logins (LightDM)
-------------------------
-
-The greeter detects an unreachable portal, shows an offline banner and
-falls back to the password prompt; there the PAM module verifies what it
-has cached for the user, and the greeter switches back to SSO when the
-portal answers again. ``ob-desktop-setup --offline`` sets it up, and
-``offline_mode_enabled`` in the greeter's configuration turns the fallback
-on or off. See :doc:`/desktop-sso` for the greeter itself, and
-:doc:`cache` for the credential cache: the cryptography, the file format,
-the ``offline_cache_*`` options, lockout handling and ``ob-cache-admin``.
-
-.. _offline-mode-network-revalidation:
-
-Network revalidation
---------------------
-
-An offline session is revalidated once the portal answers again, by three
-complementary mechanisms:
-
-- the PAM module, when the user unlocks their screen with a password: it
-  re-authenticates online, refreshes the cache and clears the offline
-  session marker, and refuses the unlock if the account has been revoked —
-  terminating the session itself is ``ob-session-monitor``'s business;
-
-- the greeter, which refreshes the OAuth2 access token through
-  ``/desktop/refresh`` before falling back to the SSO page or to the
-  offline path;
-
-- :doc:`ob-session-monitor(8) </references/man/ob-session-monitor>`, a
-  systemd service that polls the portal: when connectivity returns, it
-  checks every offline session against ``/pam/userinfo`` and terminates the
-  sessions whose account is gone.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 16 16 20 48
-
-   * - Network
-     - SSO portal
-     - Duration
-     - Action
-   * - Down
-     - Down
-     - any
-     - Normal offline mode.
-   * - Up
-     - Up
-     - —
-     - Revalidate the sessions.
-   * - Up
-     - Down
-     - under the timeout
-     - A warning is logged.
-   * - Up
-     - Down
-     - past the timeout
-     - Every offline session is terminated.
-
-The last two rows are the anti-firewall-bypass protection: a local rule
-that blocks the portal while the rest of the network works ends with every
-offline session terminated once ``offline_max_sso_unreachable`` (1 hour by
-default) has passed.
-
-.. code:: ini
-
-   # defaults
-   offline_revalidation_enabled = true
-   offline_revalidation_grace = 14400    # force online re-auth after 4 h
-   offline_max_sso_unreachable = 3600    # firewall-bypass timeout, 1 h
-
-.. code:: bash
-
-   sudo systemctl enable --now ob-session-monitor
-   journalctl -u ob-session-monitor
-
 Limitations
 -----------
-
-- The first login must be online: with no cached entry, there is no
-  offline login.
-
-- A password changed in the portal keeps its old cached value working
-  until the next online login refreshes the entry.
-
-- Group changes need an online login to propagate.
-
-- MFA is bypassed offline: the password is all there is.
-
-- Only the attributes that were cached are available.
 
 One caveat on the matrix above and the maximum security answer: they are
 derived from the code and the generated ``sshd`` configurations, but the
 key-mode path has not been validated end to end in a lab — portal up, then
 down, the cached authorization still admitting the key. Until it has, treat
 those rows as analysis rather than as a tested procedure (#165).
-
-.. toctree::
-   :maxdepth: 1
-
-   cache

@@ -161,8 +161,7 @@ standalone host.
   authorization cache on or off, and ``auth_cache_force_online``
   forces every check online; how long a cached authorization survives
   an SSO outage is decided by the server. See :doc:`Offline mode
-  </offline-mode/index>` and :doc:`cache administration
-  </offline-mode/cache>`.
+  </offline-mode/index>`.
 
 - Containment hardening — opt-in ``--enable-hardening`` adds
   logind ``KillUserProcesses``, an ``nproc`` cap and ``at``/``cron``

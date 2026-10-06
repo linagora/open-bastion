@@ -516,6 +516,76 @@ static void test_verify_missing_valid(void)
     PASS();
 }
 
+/*
+ * /pam/authorize response contract.
+ *
+ * Regression for #318: the 'offline' object was parsed only in the Desktop SSO
+ * build, so a core build never saw offline.enabled and never wrote the
+ * authorization cache. enabled/ttl must parse in every build.
+ */
+static void test_authorize_offline_settings(void)
+{
+    TEST("authorize response: offline enabled/ttl parsed in every build");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_authorize_response(
+        "{\"authorized\":true,\"user\":\"jdoe\","
+        "\"offline\":{\"enabled\":true,\"ttl\":3600}}",
+        &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL(err);
+        return;
+    }
+    if (!r.authorized || !r.has_offline || !r.offline.enabled ||
+        r.offline.ttl != 3600) {
+        FAIL("offline settings not parsed");
+        ob_response_free(&r);
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+static void test_authorize_without_offline(void)
+{
+    TEST("authorize response: no offline object leaves the cache off");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_authorize_response(
+        "{\"authorized\":true,\"user\":\"jdoe\"}", &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL(err);
+        return;
+    }
+    if (r.has_offline || r.offline.enabled) {
+        FAIL("offline must stay unset when the portal sends none");
+        ob_response_free(&r);
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+static void test_authorize_missing_authorized(void)
+{
+    TEST("authorize response: missing 'authorized' field is rejected");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_authorize_response("{\"user\":\"jdoe\"}", &r, err,
+                                         sizeof(err));
+    if (rc == 0) {
+        FAIL("a response without 'authorized' must not parse");
+        ob_response_free(&r);
+        return;
+    }
+    PASS();
+}
+
 int main(void)
 {
     printf("Running ob_client tests...\n\n");
@@ -542,6 +612,11 @@ int main(void)
     test_verify_active_requires_user();
     test_verify_active_with_user();
     test_verify_missing_valid();
+
+    /* /pam/authorize response contract (#318) */
+    test_authorize_offline_settings();
+    test_authorize_without_offline();
+    test_authorize_missing_authorized();
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /* Introspection tests (JWT client assertion) */

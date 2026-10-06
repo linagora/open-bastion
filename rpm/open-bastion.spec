@@ -41,7 +41,7 @@ Open Bastion PAM/NSS module for SSH bastion authentication supporting
 token-based and key-based authorization with server groups.
 
 %package desktop
-Summary:        Open Bastion LightDM greeter for Desktop SSO
+Summary:        Open Bastion LightDM greeter for Desktop SSO (experimental)
 BuildArch:      noarch
 Requires:       %{name} = %{version}-%{release}
 Requires:       lightdm
@@ -49,7 +49,12 @@ Requires:       lightdm-webkit2-greeter
 
 %description desktop
 A LightDM webkit2 greeter theme that enables desktop workstations to
-authenticate users via LemonLDAP::NG Single Sign-On.
+authenticate users via LemonLDAP::NG Single Sign-On, with ob-desktop-setup,
+ob-session-monitor and ob-cache-admin, the tool that administers the
+offline credential cache.
+
+Experimental (alpha), not production-ready: the authentication path has
+not been security-reviewed.
 
 Features:
  - SSO authentication via embedded LLNG portal iframe
@@ -111,7 +116,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-uninstall
 %{_sbindir}/ob-service-account-keys
 %{_sbindir}/ob-record-sink
-%{_sbindir}/ob-cache-admin
 %{_sbindir}/ob-session-prune
 %{_sbindir}/ob-krl-refresh
 %{_bindir}/ob-ssh-cert
@@ -178,9 +182,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-post-upgrade.8*
 %{_mandir}/man8/ob-uninstall.8*
 %{_mandir}/man8/ob-ssh-cert.8*
-%{_mandir}/man8/ob-cache-admin.8*
-%{_mandir}/man8/ob-desktop-setup.8*
-%{_mandir}/man8/ob-session-monitor.8*
 %{_mandir}/man5/openbastion.conf.5*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
@@ -202,6 +203,10 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %files desktop
 %{_sbindir}/ob-desktop-setup
 %{_sbindir}/ob-session-monitor
+%{_sbindir}/ob-cache-admin
+%{_mandir}/man8/ob-desktop-setup.8*
+%{_mandir}/man8/ob-session-monitor.8*
+%{_mandir}/man8/ob-cache-admin.8*
 %config(noreplace) %{_sysconfdir}/open-bastion/lightdm-openbastion.conf.example
 %dir %{_datadir}/lightdm-webkit
 %dir %{_datadir}/lightdm-webkit/themes

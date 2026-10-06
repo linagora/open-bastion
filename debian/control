@@ -56,9 +56,17 @@ Depends: ${misc:Depends},
  lightdm,
  lightdm-webkit2-greeter,
 Recommends: fonts-noto
-Description: Open Bastion LightDM greeter for Desktop SSO
+# ob-cache-admin and the Desktop SSO man pages moved here from open-bastion.
+Breaks: open-bastion (<< 0.7.0~)
+Replaces: open-bastion (<< 0.7.0~)
+Description: Open Bastion LightDM greeter for Desktop SSO (experimental)
  A LightDM webkit2 greeter theme that enables desktop workstations to
- authenticate users via LemonLDAP::NG Single Sign-On.
+ authenticate users via LemonLDAP::NG Single Sign-On, with ob-desktop-setup,
+ ob-session-monitor and ob-cache-admin, the tool that administers the
+ offline credential cache.
+ .
+ Experimental (alpha), not production-ready: the authentication path has
+ not been security-reviewed.
  .
  Features:
   - SSO authentication via embedded LLNG portal iframe

@@ -73,6 +73,14 @@ here.
   `-DBUILD_DOC=ON` and shipped as HTML in the new **`open-bastion-doc`**
   package (APT and GitHub release). References to `doc/*.md` now name `.rst`
   files.
+- **`ob-cache-admin` moves to `open-bastion-desktop`** (#317), with the man
+  pages of the three Desktop SSO commands (`ob-cache-admin`(8),
+  `ob-desktop-setup`(8), `ob-session-monitor`(8)): it administers the
+  credential cache, which only Desktop SSO writes. A host with
+  `open-bastion-desktop` installed keeps it. The Desktop SSO documentation,
+  credential cache included, is grouped under
+  [doc/desktop-sso/](doc/desktop-sso/index.rst), and the tools and their
+  pages state its experimental status.
 - **`SECURITY.md` is a reporting policy only** (#276); the product security
   description moved to [doc/references/security-reference.rst](doc/references/security-reference.rst).
 - **`ob-bastion-id` uses `POST /pam/whoami`** (#246), falling back to the legacy
@@ -114,6 +122,12 @@ here.
 
 ### Fixed
 
+- **A build without Desktop SSO writes the authorization cache** (#318). The
+  store, and the parsing of the `offline` object of `/pam/authorize`, were
+  compiled only with `-DINSTALL_DESKTOP=ON`: such a build read the cache but
+  never wrote it, so `auth_cache_enabled` had no effect and an SSO outage
+  refused every login. The `.deb` and `.rpm` packages, built with Desktop SSO,
+  were not affected.
 - **`ob-enroll -C FILE` reads `FILE`** (#314). The settings always came from
   `/etc/open-bastion/openbastion.conf`: `ob-enroll -C` could enrol against
   another portal and, without `-t`, overwrite the host's token. An unreadable

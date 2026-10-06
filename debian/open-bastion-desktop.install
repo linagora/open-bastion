@@ -3,6 +3,11 @@ usr/share/lightdm-webkit/themes/open-bastion/
 etc/open-bastion/lightdm-openbastion.conf.example usr/share/doc/open-bastion-desktop/examples/
 
 usr/sbin/ob-desktop-setup
+usr/share/man/man8/ob-desktop-setup.8
 
 usr/sbin/ob-session-monitor
+usr/share/man/man8/ob-session-monitor.8
 systemd/ob-session-monitor.service lib/systemd/system/
+
+usr/sbin/ob-cache-admin
+usr/share/man/man8/ob-cache-admin.8

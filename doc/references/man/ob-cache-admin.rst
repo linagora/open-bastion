@@ -11,6 +11,12 @@ Synopsis
 Description
 -----------
 
+.. warning::
+
+   Desktop SSO is experimental (alpha) and not production-ready: its
+   authentication path has not been security-reviewed. This command ships
+   in the ``open-bastion-desktop`` package.
+
 ``ob-cache-admin`` administers the offline credential cache of
 ``pam_openbastion``: the encrypted entries a password is verified against
 while the LLNG portal is unreachable. It works on
@@ -131,4 +137,4 @@ See also
 
 :doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-desktop-setup(8) <ob-desktop-setup>`,
-:doc:`ob-bastion-setup(8) <ob-bastion-setup>`
+:doc:`ob-session-monitor(8) <ob-session-monitor>`

@@ -56,9 +56,7 @@
 
 /* Time constants */
 #define SECONDS_PER_DAY 86400
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
 #define DEFAULT_OFFLINE_CACHE_TTL 86400  /* Default 24 hours for offline cache */
-#endif /* ENABLE_DESKTOP_SSO */
 
 /* Security: Maximum length for SSH_USER_AUTH environment variable */
 #define MAX_SSH_AUTH_LEN 8192
@@ -4066,7 +4064,6 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         return PAM_PERM_DENIED;
     }
 
-#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /*
      * Store authorization in cache if:
      * - Not already from cache
@@ -4098,6 +4095,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
     }
 
+#ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO only and never compiled inside open-bastion core */
     /*
      * Store offline credential verifier if provided by server.
      * This enables offline Desktop SSO login when the server is unreachable.

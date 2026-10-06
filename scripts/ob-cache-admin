@@ -65,6 +65,9 @@ Usage: ob-cache-admin [options] <command> [arguments]
 
 Manage the Open Bastion offline credential cache for Desktop SSO.
 
+Desktop SSO is experimental (alpha): not production-ready, and its
+authentication path has not been security-reviewed.
+
 Commands:
   stats                  Show cache statistics
   list                   List all cached users
@@ -446,6 +449,11 @@ done
 
 load_config
 CACHE_DIR="${CACHE_DIR:-$DEFAULT_CACHE_DIR}"
+
+# On stderr, so it stays out of what a command reports.
+if [[ -n "${COMMAND:-}" ]]; then
+    echo -e "${YELLOW}[WARN]${NC} Desktop SSO is experimental (alpha): not production-ready." >&2
+fi
 
 case "${COMMAND:-}" in
     stats)

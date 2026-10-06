@@ -49,6 +49,9 @@ Usage: $(basename "$0") [options]
 
 Configure desktop workstation for Open Bastion SSO via LightDM.
 
+Desktop SSO is experimental (alpha): not production-ready, and its
+authentication path has not been security-reviewed.
+
 Options:
   -p, --portal URL      LemonLDAP::NG portal URL (required)
   -o, --offline         Enable offline mode with credential caching
@@ -449,6 +452,10 @@ main() {
     echo ""
 
     parse_args "$@"
+
+    log_warn "Desktop SSO is experimental (alpha): not production-ready, and its"
+    log_warn "authentication path has not been security-reviewed."
+    echo ""
 
     if ! $DRY_RUN; then
         check_root

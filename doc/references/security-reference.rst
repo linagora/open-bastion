@@ -247,12 +247,14 @@ Voucher lifecycle
 | Renewal  | User reconnects to the bastion; no silent re-vouching                           |
 +----------+---------------------------------------------------------------------------------+
 
+.. _security-reference-authorization-cache-security:
+
 Authorization cache security
 ----------------------------
 
 The **authorization cache** (``auth_cache``) is the only PAM-side cache in the module. It stores the result of a successful ``/pam/authorize`` call so that an already-authorized user can still log in while the LLNG portal is unreachable. It never caches credentials, tokens, or password material — only an authorization verdict and the account attributes that come with it.
 
-Entries are written only by builds that include the Desktop SSO components (``-DINSTALL_DESKTOP=ON``, which is what the ``.deb`` and ``.rpm`` packages use). An SSH-only build reads the cache but never populates it.
+Every build writes it, with or without the Desktop SSO components. Up to 0.6.x only ``-DINSTALL_DESKTOP=ON`` builds — the ``.deb`` and ``.rpm`` packages among them — wrote entries: an SSH-only build read the cache but never populated it (#318).
 
 Encryption at rest
 ~~~~~~~~~~~~~~~~~~
@@ -632,10 +634,10 @@ Example configuration
 
 .. _security-reference-offline-credential-cache-security:
 
-Offline credential cache security
----------------------------------
+Offline credential cache security (Desktop SSO)
+-----------------------------------------------
 
-The offline cache enables Desktop SSO authentication when the LLNG server is unreachable. This section describes the security architecture and considerations.
+The offline credential cache enables Desktop SSO authentication when the LLNG server is unreachable. This section describes the security architecture and considerations. Desktop SSO is **experimental (alpha)**, has not been security-reviewed, and ships in the ``open-bastion-desktop`` package; the cache is administered with :doc:`ob-cache-admin(8) </references/man/ob-cache-admin>` (see :doc:`/desktop-sso/credentials-cache`).
 
 Cryptographic design
 ~~~~~~~~~~~~~~~~~~~~

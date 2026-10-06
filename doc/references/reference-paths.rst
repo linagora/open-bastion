@@ -13,7 +13,7 @@ Packages
 +--------------------------+-----------------------------------------------+----------------------------------------------------------------------+
 | ``open-bastion-builder`` | ``debian/control``                            | ``ob-builder`` (fleet installer generator)                           |
 +--------------------------+-----------------------------------------------+----------------------------------------------------------------------+
-| ``open-bastion-desktop`` | ``debian/control``, ``%package desktop``      | LightDM greeter for Desktop SSO                                      |
+| ``open-bastion-desktop`` | ``debian/control``, ``%package desktop``      | Desktop SSO, experimental: greeter, ``ob-cache-admin``               |
 +--------------------------+-----------------------------------------------+----------------------------------------------------------------------+
 
 There is **no** ``libnss-openbastion``, ``nss-openbastion`` or ``lightdm-openbastion-greeter`` package. ``libnss_openbastion.so`` ships inside ``open-bastion`` (``debian/open-bastion.install``), so ``apt install open-bastion`` is the whole install.
@@ -121,7 +121,7 @@ All unit names use the ``ob-`` prefix. There is no ``open-bastion-*.timer`` or `
 +-----------------------------------------------+----------------------------------------------------------------------------------+
 | ``ob-audit-rotate.timer`` / ``.service``      | daily auditd log rotation (``--enable-audit-trace``)                             |
 +-----------------------------------------------+----------------------------------------------------------------------------------+
-| ``ob-session-monitor.service``                | connected-session reporting                                                      |
+| ``ob-session-monitor.service``                | Desktop SSO: revalidates offline sessions (``open-bastion-desktop``)             |
 +-----------------------------------------------+----------------------------------------------------------------------------------+
 
 ``ob-cert.socket`` and ``ob-record.socket`` ship disabled (the package cannot know a host's role); ``ob-bastion-setup`` enables them, and the Debian ``postinst`` re-asserts them on upgrade for hosts that already carry the bastion sshd drop-in.
@@ -152,7 +152,7 @@ Commands
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 | ``ob-cert-daemon``                  | ``/usr/sbin`` | hop-certificate minting (socket-activated, ``SO_PEERCRED``)                                                |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
-| ``ob-cache-admin``                  | ``/usr/sbin`` | offline cache inspection                                                                                   |
+| ``ob-cache-admin``                  | ``/usr/sbin`` | Desktop SSO credential cache administration (``open-bastion-desktop``)                                     |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+
 | ``ob-session-prune``                | ``/usr/sbin`` | recording retention                                                                                        |
 +-------------------------------------+---------------+------------------------------------------------------------------------------------------------------------+

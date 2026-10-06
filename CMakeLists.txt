@@ -595,10 +595,6 @@ install(FILES ${CMAKE_SOURCE_DIR}/config/logrotate/open-bastion
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion/logrotate
 )
 
-install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
-    DESTINATION ${CMAKE_INSTALL_SBINDIR}
-)
-
 # The man pages are generated into ${MAN_OUT_DIR} by the `man` target, which
 # reads the reStructuredText under doc/references/man/. ob-standalone-setup.8
 # and ob-backend-setup.8 document the same program as ob-bastion-setup.8 and
@@ -623,11 +619,18 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-post-upgrade.8
         ${MAN_OUT_DIR}/ob-uninstall.8
         ${MAN_OUT_DIR}/ob-ssh-cert.8
-        ${MAN_OUT_DIR}/ob-cache-admin.8
-        ${MAN_OUT_DIR}/ob-desktop-setup.8
-        ${MAN_OUT_DIR}/ob-session-monitor.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
+
+    # Desktop SSO commands: shipped in open-bastion-desktop, with the commands.
+    if(INSTALL_DESKTOP)
+        install(FILES
+            ${MAN_OUT_DIR}/ob-cache-admin.8
+            ${MAN_OUT_DIR}/ob-desktop-setup.8
+            ${MAN_OUT_DIR}/ob-session-monitor.8
+            DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
+        )
+    endif()
 
     install(FILES
         ${MAN_OUT_DIR}/ob-ssh.1
@@ -678,6 +681,11 @@ if(INSTALL_DESKTOP)
     )
 
     install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-desktop-setup
+        DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    )
+
+    # Administers the credential cache, which only Desktop SSO writes.
+    install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
         DESTINATION ${CMAKE_INSTALL_SBINDIR}
     )
 
