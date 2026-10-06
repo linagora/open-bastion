@@ -62,7 +62,7 @@ ENABLE_HARDENING="@@ENABLE_HARDENING@@"
 ENABLE_AUDIT_TRACE="@@ENABLE_AUDIT_TRACE@@"
 DISABLE_SESSION_RECORDER="@@DISABLE_SESSION_RECORDER@@"
 # Backend-only "accept only this bastion" allowlist (comma/space-separated
-# bastion_id = enrolling client_id). Empty = accept any vouched bastion.
+# bastion_id, as printed by ob-bastion-id). Empty = accept any vouched bastion.
 ALLOWED_BASTIONS="@@ALLOWED_BASTIONS@@"
 
 # ---------------------------------------------------------------------------

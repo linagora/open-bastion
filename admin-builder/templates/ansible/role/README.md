@@ -50,7 +50,7 @@ backend scenarios when an allowlist was given):
 
 | Variable                      | Description                                                                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (= enrolling client_id) the backend accepts certs from. Empty/undefined = any vouched bastion. Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
+| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. Empty/undefined = any vouched bastion. Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):
 
