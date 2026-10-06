@@ -33,7 +33,9 @@ or
 .TP
 .B \-\-config \fIFILE\fR
 Read all answers from a YAML config file (non-interactive). The accepted
-keys are listed in the README shipped with the package.
+keys are listed in the README shipped with the package;
+.B \-\-save\-config
+writes such a file with every key, defaults included.
 .TP
 .B \-\-output\-shell \fIPATH\fR
 Write a self-extracting shell installer to \fIPATH\fR.
@@ -47,6 +49,30 @@ at least one output is required; the questionnaire asks for them otherwise
 (default \fI./bootstrap\-<slug>.sh\fR and \fI./ansible\-<slug>\fR). When
 several target roles are chosen interactively, each artefact gets the role as
 suffix (\fIbootstrap\-<slug>\-bastion.sh\fR, \fIansible\-<slug>\-backend\fR).
+.TP
+.B \-\-save\-config \fIPATH\fR
+Also save the answers, defaults included and with the accepted values as
+comments, as a YAML file that
+.B \-\-config
+replays without any question. The questionnaire offers it too (default
+\fI./ob\-builder\-<slug>.yml\fR). The file is written before the SSO is
+contacted, never over the
+.B \-\-config
+file, and not at all with
+.BR \-\-dry\-run .
+An embedded client_secret is left out, as a comment to fill in, unless the
+questionnaire is told to write it; the file is then created mode 0600. Service
+accounts entered interactively carry no public key: a commented
+.I public_key_file
+line marks where to add it. Since that file is meant to be completed by hand,
+a path typed at the questionnaire that already exists is only reused after
+confirmation, and replacing an existing file is announced; a
+.B \-\-save\-config
+path given on the command line is taken as consent. When the file is written,
+it is replaced wholesale; neither an existing save path that cannot be
+confirmed nor
+.B \-\-dry\-run
+writes anything at all.
 .TP
 .B \-\-bundle
 Generate paired bastion + backend artefacts in one run, sharing the
@@ -130,6 +156,12 @@ Fully interactive run:
 .PP
 .RS
 ob-builder
+.RE
+.PP
+Interactive run keeping the answers for the next, non-interactive, run:
+.PP
+.RS
+ob-builder --save-config build.yml
 .RE
 .PP
 Interactive run with the shell installer path given up front:

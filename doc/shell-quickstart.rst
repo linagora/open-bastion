@@ -55,7 +55,7 @@ Each ``bootstrap-*.sh`` is self-contained: it embeds the SSO CA key, the scenari
 
 ..
 
-   **Reproducible / CI builds.** Instead of answering prompts you can pass every answer in a YAML file and generate non-interactively (``ob-builder --config build.yml --output-shell …``). See `admin-builder/README.md <https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__ for the config keys.
+   **Reproducible / CI builds.** Instead of answering prompts you can pass every answer in a YAML file and generate non-interactively (``ob-builder --config build.yml --output-shell …``). The questionnaire writes that file for you: answer yes to its last question, or start it with ``--save-config build.yml``. See `admin-builder/README.md <https://github.com/linagora/open-bastion/blob/main/admin-builder/README.md>`__ for the config keys.
 
 .. _shell-quickstart-step-2--deploy-the-bastion:
 
