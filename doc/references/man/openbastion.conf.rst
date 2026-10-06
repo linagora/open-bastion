@@ -19,7 +19,8 @@ login, without restarting anything.
 A file written by the setup scripts, ``ob-desktop-setup``, an ``ob-builder``
 installer or Ansible role, or the package's debconf questions holds the
 host's settings first, then every option below, commented out with its
-default value, copied from ``openbastion.conf.example``. A key set twice
+default value, copied from
+``/usr/share/open-bastion/openbastion.conf.reference``. A key set twice
 takes its last value, so an option already set above the reference is
 changed where it is set.
 
@@ -570,9 +571,10 @@ Files
 ``/etc/open-bastion/openbastion.conf``
    This file's usual path; ``conf=`` names another one.
 
-``/etc/open-bastion/openbastion.conf.example``
+``/usr/share/open-bastion/openbastion.conf.reference``
    Every option, commented out, with its default: the reference appended
-   to a generated ``openbastion.conf``.
+   to a generated ``openbastion.conf``. Not a configuration file: an
+   upgrade replaces it.
 
 ``/etc/open-bastion/nss_openbastion.conf``
    Configuration of the NSS module, and of the keys listed under "Accepted

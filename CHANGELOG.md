@@ -83,9 +83,11 @@ here.
 - **A generated `openbastion.conf` lists every option** (#310): after the
   host's settings, the setup scripts, `ob-desktop-setup`, `ob-builder`
   installers and Ansible roles, and the debconf questions append
-  `openbastion.conf.example`, which now lists every option commented out with
-  its real default (`approved_home_prefixes`, audit, rate limiting and others
-  were missing). An existing file is not rewritten by an upgrade. See
+  `/usr/share/open-bastion/openbastion.conf.reference`, every option commented
+  out with its real default (`approved_home_prefixes`, audit, rate limiting and
+  others were missing from the old example). It replaces
+  `/etc/open-bastion/openbastion.conf.example`, which is no longer shipped. An
+  existing `openbastion.conf` is not rewritten by an upgrade. See
   `openbastion.conf`(5).
 - **Unknown keys in `openbastion.conf` are logged** (key only, never the value)
   and still ignored (#229). The authorization cache has no local TTL setting;

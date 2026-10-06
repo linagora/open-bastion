@@ -691,11 +691,11 @@ append_conf_reference() {
 # The package ships the reference, and step_config runs before step_install.
 step_conf_reference() {
     if [ "${OPT_DRY_RUN}" = "true" ]; then
-        log_info "[DRY-RUN] Would append /etc/open-bastion/openbastion.conf.example to /etc/open-bastion/openbastion.conf"
+        log_info "[DRY-RUN] Would append /usr/share/open-bastion/openbastion.conf.reference to /etc/open-bastion/openbastion.conf"
         return 0
     fi
     append_conf_reference /etc/open-bastion/openbastion.conf \
-        /etc/open-bastion/openbastion.conf.example
+        /usr/share/open-bastion/openbastion.conf.reference
 }
 
 # ---------------------------------------------------------------------------

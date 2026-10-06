@@ -392,7 +392,7 @@ test_conf_carries_reference() {
         # shellcheck disable=SC2034  # read by render_openbastion_conf
         OB_CONFIG="/nonexistent"
         # shellcheck disable=SC2034
-        OB_CONFIG_REFERENCE="$TESTS_DIR/../config/openbastion.conf.example"
+        OB_CONFIG_REFERENCE="$TESTS_DIR/../config/openbastion.conf.reference"
         local conf marker='openbastion.conf reference: every option'
         conf=$(render_openbastion_conf)
         sed "/$marker/,\$d" <<<"$conf" | grep -q '^create_user_enabled = false$' || exit 1

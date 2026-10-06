@@ -67,7 +67,7 @@ echo "=== openbastion.conf keys the project writes are all parsed (#229) ==="
 
 check_source "ob-bastion-setup writes only known keys (all roles)"  "$ROOT_DIR/scripts/ob-bastion-setup"  printf
 check_source "the shipped example carries only known keys" \
-    "$ROOT_DIR/config/openbastion.conf.example" reference
+    "$ROOT_DIR/config/openbastion.conf.reference" reference
 check_source "the ansible template carries only known keys" \
     "$ROOT_DIR/admin-builder/templates/ansible/role/templates/openbastion.conf.j2" conf
 check_source "ob-builder's embedded configs carry only known keys" \
@@ -87,13 +87,13 @@ else
     fail "the write-only keys stay tolerated" "missing from src/config.c:$_absent"
 fi
 
-# ── The shipped example is the complete option reference (#310) ──
+# ── The shipped reference is complete (#310) ──
 #
-# Every generated openbastion.conf carries config/openbastion.conf.example after
-# the host's own settings, so the example must list every key parse_line()
-# knows, commented out, with the default config.c really applies.
+# Every generated openbastion.conf carries config/openbastion.conf.reference
+# after the host's own settings, so it must list every key parse_line() knows,
+# commented out, with the default config.c really applies.
 
-EXAMPLE="$ROOT_DIR/config/openbastion.conf.example"
+EXAMPLE="$ROOT_DIR/config/openbastion.conf.reference"
 CONFIG_H="$ROOT_DIR/include/config.h"
 # Distinct options sharing one no-op branch of parse_line(), not aliases.
 HEARTBEAT_KEYS="node_role report_sessions max_reported_sessions"
@@ -246,7 +246,7 @@ TESTS_RUN=$((TESTS_RUN + 1))
 _bad=""
 grep -qF "cat \"\$CONF_REFERENCE\"" "$ROOT_DIR/debian/open-bastion.postinst" \
     || _bad="$_bad postinst"
-grep -qx 'CONF_REFERENCE="/etc/open-bastion/openbastion.conf.example"' \
+grep -qx 'CONF_REFERENCE="/usr/share/open-bastion/openbastion.conf.reference"' \
     "$ROOT_DIR/debian/open-bastion.postinst" || _bad="$_bad postinst-path"
 grep -qF "cat -- \"\$OB_CONFIG_REFERENCE\"; } >> \"\$OB_CONFIG_FILE\"" \
     "$ROOT_DIR/scripts/ob-desktop-setup" || _bad="$_bad ob-desktop-setup"
@@ -257,6 +257,32 @@ if [ -z "$_bad" ]; then
     pass "the postinst, ob-desktop-setup and the ansible template append the reference"
 else
     fail "every generator appends the reference" "not in:$_bad"
+fi
+
+# ── One installed copy, outside /etc, read by every generator ──
+REF_PATH=/usr/share/open-bastion/openbastion.conf.reference
+TESTS_RUN=$((TESTS_RUN + 1))
+_bad=""
+grep -qx "${REF_PATH#/}" "$ROOT_DIR/debian/open-bastion.install" || _bad="$_bad deb-install"
+grep -qx "%{_datadir}/open-bastion/openbastion.conf.reference" "$ROOT_DIR/rpm/open-bastion.spec" \
+    || _bad="$_bad rpm-files"
+grep -A1 -F 'config/openbastion.conf.reference' "$ROOT_DIR/CMakeLists.txt" \
+    | grep -qF "DESTINATION \${CMAKE_INSTALL_DATAROOTDIR}/open-bastion" || _bad="$_bad cmake"
+grep -qx 'rm_conffile /etc/open-bastion/openbastion.conf.example 0.7.0~' \
+    "$ROOT_DIR/debian/open-bastion.maintscript" || _bad="$_bad maintscript"
+for f in scripts/ob-bastion-setup scripts/ob-desktop-setup debian/open-bastion.postinst \
+         admin-builder/templates/shell/installer.sh.in \
+         admin-builder/templates/ansible/role/tasks/main.yml.in; do
+    grep -qF "$REF_PATH" "$ROOT_DIR/$f" || _bad="$_bad $f"
+done
+_left=$(grep -rlE '(^|[^-_[:alnum:]])openbastion\.conf\.example' "$ROOT_DIR/scripts" "$ROOT_DIR/admin-builder" \
+        "$ROOT_DIR/debian" "$ROOT_DIR/rpm" "$ROOT_DIR/CMakeLists.txt" "$ROOT_DIR/doc/references" \
+        | grep -v '/debian/open-bastion.maintscript$')
+[ -z "$_left" ] || _bad="$_bad still-names-the-old-example:$_left"
+if [ -z "$_bad" ]; then
+    pass "the reference is installed once, in /usr/share/open-bastion, and every generator reads it there"
+else
+    fail "the reference is installed once, in /usr/share/open-bastion" "$_bad"
 fi
 
 echo ""

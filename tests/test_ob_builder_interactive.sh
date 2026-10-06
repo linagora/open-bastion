@@ -408,7 +408,7 @@ test_rendered_ansible() {
 # installed, so it appends the reference after step_install, once.
 test_installer_conf_reference() {
     local out="$TEST_TMPDIR/installer-ref.sh" ok=true desc="" fn
-    local conf="$TEST_TMPDIR/ref.conf" ref="$REPO_ROOT/config/openbastion.conf.example"
+    local conf="$TEST_TMPDIR/ref.conf" ref="$REPO_ROOT/config/openbastion.conf.reference"
     local marker='openbastion.conf reference: every option'
     (
         set_baseline
@@ -449,7 +449,7 @@ test_ansible_conf_reference() {
     ) >/dev/null 2>&1 || { ok=false; desc="render failed"; }
     local r="$out/roles/open-bastion"
     awk '/ansible.builtin.slurp:/ { s = NR }
-         /src: \/etc\/open-bastion\/openbastion.conf.example/ && s { e = 1 }
+         /src: \/usr\/share\/open-bastion\/openbastion.conf.reference/ && s { e = 1 }
          /register: ob_conf_reference/ && e { g = NR }
          /^- name: Deploy openbastion.conf$/ { d = NR }
          END { exit !(g && d > g) }' "$r/tasks/main.yml" 2>/dev/null \
@@ -457,7 +457,7 @@ test_ansible_conf_reference() {
     if command -v python3 >/dev/null 2>&1 && python3 -c 'import jinja2' 2>/dev/null; then
         local rendered
         rendered=$(python3 -I - "$r/templates/openbastion.conf.j2" \
-                   "$REPO_ROOT/config/openbastion.conf.example" <<'PY'
+                   "$REPO_ROOT/config/openbastion.conf.reference" <<'PY'
 import base64, sys, jinja2
 env = jinja2.Environment(trim_blocks=True, undefined=jinja2.StrictUndefined)
 env.filters['b64decode'] = lambda s: base64.b64decode(s).decode()

@@ -89,7 +89,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_libdir}/security/pam_openbastion.so*
 %{_libdir}/libnss_openbastion.so*
 %dir %{_sysconfdir}/open-bastion
-%config(noreplace) %{_sysconfdir}/open-bastion/openbastion.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/nss_openbastion.conf.example
 %config(noreplace) %{_sysconfdir}/open-bastion/service-accounts.conf.example
 %dir %attr(0755,root,root) %{_sysconfdir}/open-bastion/service-accounts.d
@@ -145,6 +144,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 # Not %config: audit_log_file is configurable.
 %dir %{_datadir}/open-bastion/logrotate
 %{_datadir}/open-bastion/logrotate/open-bastion
+%{_datadir}/open-bastion/openbastion.conf.reference
 %{_unitdir}/ob-heartbeat.service
 %{_unitdir}/ob-heartbeat.timer
 %{_unitdir}/ob-cert.socket

@@ -289,7 +289,7 @@ test_conf_carries_reference() {
         # shellcheck disable=SC2034  # read by render_openbastion_conf
         OB_CONFIG="/nonexistent"
         # shellcheck disable=SC2034
-        OB_CONFIG_REFERENCE="$SCRIPT_DIR/../config/openbastion.conf.example"
+        OB_CONFIG_REFERENCE="$SCRIPT_DIR/../config/openbastion.conf.reference"
         conf=$(render_openbastion_conf)
         marker='openbastion.conf reference: every option'
         [ "$(grep -c "$marker" <<<"$conf")" = 1 ] || { echo "no single reference"; exit 1; }

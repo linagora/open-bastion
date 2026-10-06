@@ -83,7 +83,7 @@
 # installed (check mode on a new host), in which case the conf goes without it.
 - name: Read the option reference the package ships
   ansible.builtin.slurp:
-    src: /etc/open-bastion/openbastion.conf.example
+    src: /usr/share/open-bastion/openbastion.conf.reference
   register: ob_conf_reference
   failed_when: false
 

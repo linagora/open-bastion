@@ -4,7 +4,7 @@ set -e
 . /usr/share/debconf/confmodule
 
 CONF_FILE="/etc/open-bastion/openbastion.conf"
-CONF_REFERENCE="/etc/open-bastion/openbastion.conf.example"
+CONF_REFERENCE="/usr/share/open-bastion/openbastion.conf.reference"
 BACKUP_DIR="/var/backups/open-bastion"
 PAM_SSHD="/etc/pam.d/sshd"
 PAM_SUDO="/etc/pam.d/sudo"

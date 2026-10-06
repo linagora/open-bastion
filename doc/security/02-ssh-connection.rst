@@ -1740,7 +1740,7 @@ Tests de validation
 Description
 ~~~~~~~~~~~
 
-La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.example`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : tant que les plugins ne sont pas en ``0.6.0``, c'est le **seul** contrôle qui refuse une clé faible (voir la correction d'hypothèse de R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique aux clés utilisées pour signer les certificats CA.
+La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.reference`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : tant que les plugins ne sont pas en ``0.6.0``, c'est le **seul** contrôle qui refuse une clé faible (voir la correction d'hypothèse de R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique aux clés utilisées pour signer les certificats CA.
 
 Configuration recommandée (haute sécurité)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

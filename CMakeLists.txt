@@ -130,9 +130,8 @@ install(TARGETS pam_openbastion
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/security
 )
 
-install(FILES ${CMAKE_SOURCE_DIR}/config/openbastion.conf.example
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
-    RENAME openbastion.conf.example
+install(FILES ${CMAKE_SOURCE_DIR}/config/openbastion.conf.reference
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/open-bastion
 )
 install(FILES ${CMAKE_SOURCE_DIR}/config/service-accounts.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/open-bastion
