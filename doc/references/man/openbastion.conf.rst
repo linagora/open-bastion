@@ -126,8 +126,9 @@ HTTP client
 
 .. option:: min_tls_version
 
-   Minimum TLS version, as ``12`` (TLS 1.2) or ``13`` (TLS 1.3). Default:
-   ``13``; any other value falls back to it.
+   Not a setting: every connection to the portal requires TLS 1.3. The key
+   is still accepted so that existing files load; a value other than ``13``
+   or ``1.3`` is logged as ignored.
 
 .. option:: cert_pin
 

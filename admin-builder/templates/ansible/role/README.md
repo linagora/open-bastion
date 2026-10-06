@@ -56,7 +56,6 @@ Mode-specific variables (populated by ob-builder from the selected PAM mode):
 
 | Variable                           | Example (Mode E) |
 | ---------------------------------- | ---------------- |
-| `ob_min_tls_version`               | `13`             |
 | `ob_cache_ttl`                     | `60`             |
 | `ob_ssh_key_policy_enabled`        | `true`           |
 | `ob_ssh_key_allowed_types`         | `ed25519,rsa`    |

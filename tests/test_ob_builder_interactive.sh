@@ -116,9 +116,12 @@ test_mode_settings_no_verify_ssl() {
     for m in A B C D E; do
         _mode_settings_conf "$m" | grep -q verify_ssl && ok=false
     done
-    _mode_settings_conf E | grep -q '^min_tls_version = 13$' || ok=false
-    $ok && test_pass "_mode_settings_conf: no hardcoded verify_ssl, Mode E keeps min_tls_version" \
-         || test_fail "_mode_settings_conf still emits verify_ssl or lost min_tls_version"
+    _mode_settings_conf E | grep -q '^cache_ttl = 60$' || ok=false
+    for m in A B C D E; do
+        _mode_settings_conf "$m" | grep -q min_tls_version && ok=false
+    done
+    $ok && test_pass "_mode_settings_conf: no hardcoded verify_ssl nor min_tls_version, Mode E settings kept" \
+         || test_fail "_mode_settings_conf emits verify_ssl or min_tls_version, or lost Mode E settings"
 }
 
 test_conf_template_placeholder() {
@@ -408,7 +411,7 @@ test_rendered_installer() {
         grep -q '^INSECURE_DEFAULT="yes"$' "$out" || { ok=false; desc="INSECURE_DEFAULT not yes"; }
         grep -qF "_RED=\$'\\033[0;31m'" "$out" || { ok=false; desc="colors not in \$'...' form"; }
         grep -q '^verify_ssl = ##VERIFY_SSL##$' "$out" || { ok=false; desc="conf lacks runtime verify_ssl"; }
-        grep -q '^min_tls_version = 13$' "$out" || { ok=false; desc="Mode E settings lost"; }
+        grep -q '^cache_ttl = 60$' "$out" || { ok=false; desc="Mode E settings lost"; }
         grep -v '^[[:space:]]*#' "$out" | grep -qE '@@[A-Z_]+@@' && { ok=false; desc="unexpanded @@ placeholder"; }
         if command -v shellcheck >/dev/null 2>&1; then
             shellcheck -S warning -e SC2050 "$out" >/dev/null 2>&1 || { ok=false; desc="shellcheck warnings"; }

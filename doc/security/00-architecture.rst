@@ -78,11 +78,15 @@ Sécurité du Transport
 Configuration TLS
 ~~~~~~~~~~~~~~~~~
 
+Toutes les connexions au portail exigent TLS 1.3 : modules PAM et NSS,
+``ob-cert-daemon``, commandes (``ob-enroll``, ``ob-heartbeat``,
+``ob-krl-refresh``…) et ``ob-builder``. Aucun réglage ne permet de descendre
+en dessous ; un portail limité à TLS 1.2 doit être placé derrière un
+terminateur TLS 1.3.
+
 +---------------------+--------------+-------------------------------------------------+
 | Paramètre           | Défaut       | Description                                     |
 +=====================+==============+=================================================+
-| ``min_tls_version`` | 13 (TLS 1.3) | Version TLS minimale (12=1.2, 13=1.3)           |
-+---------------------+--------------+-------------------------------------------------+
 | ``verify_ssl``      | true         | Vérifier le certificat serveur                  |
 +---------------------+--------------+-------------------------------------------------+
 | ``ca_cert``         | système      | Chemin vers un certificat CA personnalisé       |
@@ -95,7 +99,6 @@ Configuration TLS
 .. code:: ini
 
    # Exemple de configuration
-   min_tls_version = 13
    cert_pin = sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
 Signature des Requêtes (Optionnel)

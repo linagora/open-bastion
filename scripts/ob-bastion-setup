@@ -249,7 +249,7 @@ confirm() {
 }
 
 build_curl_opts() {
-    CURL_OPTS=("-s" "-f" "--connect-timeout" "$TIMEOUT")
+    CURL_OPTS=("-s" "-f" "--tlsv1.3" "--connect-timeout" "$TIMEOUT")
     if [ "$VERIFY_SSL" = "false" ]; then
         CURL_OPTS+=("-k")
     fi

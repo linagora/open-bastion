@@ -60,10 +60,6 @@ static int check_file_permissions_fd(int fd)
 #define DEFAULT_AUDIT_LOG_FILE          "/var/log/open-bastion/audit.json"
 #define DEFAULT_RATE_LIMIT_STATE_DIR    "/var/lib/open-bastion/ratelimit"
 
-/* TLS version constants for min_tls_version configuration */
-#define TLS_VERSION_1_2 12
-#define TLS_VERSION_1_3 13
-
 void config_init(pam_openbastion_config_t *config)
 {
     memset(config, 0, sizeof(*config));
@@ -72,7 +68,6 @@ void config_init(pam_openbastion_config_t *config)
     config->timeout = DEFAULT_TIMEOUT;
     config->verify_ssl = true;
     config->log_level = 1;  /* warn */
-    config->min_tls_version = TLS_VERSION_1_3;  /* TLS 1.3 by default */
 
     /* Authorization cache settings (for offline mode) */
     config->auth_cache_enabled = true;
@@ -559,11 +554,16 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     else if (strcmp(key, "ca_cert") == 0) {
         SET_STRING_FIELD(config->ca_cert, value, key);
     }
+    /*
+     * Not a setting: every portal connection requires TLS 1.3. Recognised so
+     * that existing files load without an unknown-key warning.
+     */
     else if (strcmp(key, "min_tls_version") == 0) {
-        config->min_tls_version = parse_int(value, TLS_VERSION_1_3, 0, 99);
-        /* Normalize: accept 1.2, 1.3, 12, 13 */
-        if (config->min_tls_version == 1) config->min_tls_version = TLS_VERSION_1_2;  /* "1" -> 1.2 legacy */
-        else if (config->min_tls_version < TLS_VERSION_1_2) config->min_tls_version = TLS_VERSION_1_3;  /* Invalid -> default */
+        if (strcmp(value, "13") != 0 && strcmp(value, "1.3") != 0) {
+            syslog(LOG_WARNING,
+                   "open-bastion: min_tls_version = %s ignored: TLS 1.3 is "
+                   "required towards the portal", value);
+        }
     }
     else if (strcmp(key, "cert_pin") == 0) {
         SET_STRING_FIELD(config->cert_pin, value, key);

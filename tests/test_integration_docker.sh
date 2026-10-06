@@ -1112,17 +1112,17 @@ EOF
                 details="${details}- $scenario/$role: TARGET_ROLE not embedded as '${role}'"$'\n'
                 continue
             fi
-            # Mode E artefacts must include min_tls_version=13; other modes must not.
+            # Mode E artefacts must include cache_ttl=60; other modes must not.
             if [ "$scenario" = "max-security" ]; then
-                if ! grep -q "min_tls_version = 13" "$out"; then
+                if ! grep -q "^cache_ttl = 60$" "$out"; then
                     failures=$((failures + 1))
-                    details="${details}- $scenario/$role: Mode E expected min_tls_version=13"$'\n'
+                    details="${details}- $scenario/$role: Mode E expected cache_ttl=60"$'\n'
                     continue
                 fi
             else
-                if grep -q "min_tls_version = 13" "$out"; then
+                if grep -q "^cache_ttl = 60$" "$out"; then
                     failures=$((failures + 1))
-                    details="${details}- $scenario/$role: Mode E setting min_tls_version=13 leaked into non-max-security artefact"$'\n'
+                    details="${details}- $scenario/$role: Mode E setting cache_ttl=60 leaked into non-max-security artefact"$'\n'
                     continue
                 fi
             fi

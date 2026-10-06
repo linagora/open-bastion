@@ -32,10 +32,14 @@ Transport security
 TLS configuration
 ~~~~~~~~~~~~~~~~~
 
+Every connection to the portal requires TLS 1.3: the PAM and NSS modules,
+``ob-cert-daemon``, the commands (``ob-enroll``, ``ob-heartbeat``,
+``ob-krl-refresh``…) and ``ob-builder``. There is no setting to lower it; a
+portal that only speaks TLS 1.2 must be put behind a TLS 1.3 terminator.
+
 =================== ============ =======================================
 Setting             Default      Description
 =================== ============ =======================================
-``min_tls_version`` 13 (TLS 1.3) Minimum TLS version (12=1.2, 13=1.3)
 ``verify_ssl``      true         Verify server certificate
 ``ca_cert``         system       Custom CA certificate path
 ``cert_pin``        none         Certificate pin (sha256//base64 format)
@@ -46,7 +50,6 @@ Setting             Default      Description
 .. code:: ini
 
    # Example configuration
-   min_tls_version = 13
    cert_pin = sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
 Request signing (optional)
@@ -942,7 +945,7 @@ Security best practices
 
 When deploying Open Bastion:
 
-1. **Use TLS 1.3** - Set ``min_tls_version = 13`` in configuration
+1. **Serve the portal over TLS 1.3** - Open Bastion refuses anything older
 2. **Enable audit logging** - Set ``audit_enabled = true`` for security monitoring
 3. **Enable rate limiting** - Enabled by default, protects against brute-force
 4. **Restrict file permissions** - Configuration files should be ``0600`` owned by root

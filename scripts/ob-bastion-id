@@ -215,7 +215,7 @@ main() {
 
     SERVER_TOKEN="$server_token"
 
-    CURL_OPTS=( -sS --max-time "$TIMEOUT" -L )
+    CURL_OPTS=( -sS --tlsv1.3 --max-time "$TIMEOUT" -L )
     [ "$VERIFY_SSL" = "true" ] || CURL_OPTS+=( --insecure )
 
     log_info "Asking $PORTAL_URL/pam/whoami"

@@ -18,10 +18,6 @@
 #include "jwt_utils.h"
 #include "str_utils.h"
 
-/* TLS version constants for min_tls_version configuration */
-#define TLS_VERSION_1_2 12
-#define TLS_VERSION_1_3 13
-
 /* Security: Maximum user groups to prevent DoS via memory exhaustion */
 #define MAX_USER_GROUPS 256
 
@@ -60,7 +56,6 @@ struct ob_client {
     bool verify_ssl;
     char *ca_cert;
     char *signing_secret;  /* Optional HMAC secret for request signing */
-    int min_tls_version;   /* Minimum TLS version: 12=1.2, 13=1.3 */
     char *cert_pin;        /* Certificate pin for CURLOPT_PINNEDPUBLICKEY */
 };
 
@@ -346,7 +341,6 @@ ob_client_t *ob_client_init(const ob_client_config_t *config)
     client->verify_ssl = config->verify_ssl;
     client->ca_cert = strdup_or_null(config->ca_cert);
     client->signing_secret = strdup_or_null(config->signing_secret);
-    client->min_tls_version = config->min_tls_version > 0 ? config->min_tls_version : TLS_VERSION_1_3;
 
     /* Security: Validate certificate pin format before use (fixes #47) */
     if (config->cert_pin) {
@@ -569,18 +563,7 @@ static void setup_curl(ob_client_t *client)
         curl_easy_setopt(client->curl, CURLOPT_CAINFO, client->ca_cert);
     }
 
-    /* Set minimum TLS version (default: TLS 1.3) */
-    long ssl_version;
-    switch (client->min_tls_version) {
-        case TLS_VERSION_1_2:
-            ssl_version = CURL_SSLVERSION_TLSv1_2;
-            break;
-        case TLS_VERSION_1_3:
-        default:
-            ssl_version = CURL_SSLVERSION_TLSv1_3;
-            break;
-    }
-    curl_easy_setopt(client->curl, CURLOPT_SSLVERSION, ssl_version);
+    curl_easy_setopt(client->curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
 
     /* Certificate pinning if configured */
     if (client->cert_pin) {

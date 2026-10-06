@@ -509,6 +509,7 @@ int main(void)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &rb);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, cfg.timeout);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
     if (!cfg.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
