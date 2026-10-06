@@ -10,9 +10,12 @@ cmake -S . -B build && cmake --build build && ctest --test-dir build
 for t in tests/test_ob_*.sh; do bash "$t"; done
 ```
 
-The HTML documentation builds with `-DBUILD_DOC=ON` and the `doc` target.
-[.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for what
-CI runs.
+The man pages build by default, with the `man` target when `sphinx-build`
+(`python3-sphinx`) is installed; without Sphinx they are skipped, and
+asking for them explicitly with `-DBUILD_MAN=ON` makes their absence
+fatal. The HTML documentation is off by default: use `-DBUILD_DOC=ON`
+and the `doc` target.  [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for
+what CI runs.
 
 To build Debian packages from the working tree, use `scripts/build-dev-deb`
 (it passes its arguments to `dpkg-buildpackage`, default `-us -uc -b`). The
@@ -54,8 +57,10 @@ a host back from a dev build to a release. Force it with
   commits.
 - Elsewhere, reference that document rather than repeating its content.
 - Executables exposed to end-users and administrators are documented in
-  man pages, see the `man` folder. It's the right place to document
-  command line options.
+  reStructuredText under `doc/references/man/`. It's the right place to
+  document command line options. The troff man pages the packages install
+  are generated from those documents by the build (`-DBUILD_MAN=ON`), never
+  edited directly.
 
 ## Specific files
 

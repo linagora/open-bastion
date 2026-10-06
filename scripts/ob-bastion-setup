@@ -1396,7 +1396,7 @@ render_open_bastion_sudoers() {
     printf '%s\n' "%open-bastion-sudo ALL=(ALL) ALL"
 }
 
-# For --enable-sudo-fresh-otp, see doc/pam-modes.rst.
+# For --enable-sudo-fresh-otp, see doc/references/maximum-security.rst.
 write_open_bastion_sudoers() {
     local sudoers_file="$1" header="$2"
     local tmp_sudoers rendered
@@ -2396,7 +2396,7 @@ Backend options:
                           'ob-bastion-id' on the bastion. Prompted interactively
                           if omitted. An EMPTY list accepts a hop from any host
                           enrolled in the project that can declare itself a
-                          bastion to the SSO -- see doc/security-reference.rst.
+                          bastion to the SSO -- see doc/references/security-reference.rst.
       --allow-any-bastion Answer the prompt above with "any bastion", without
                           being asked. Same (weaker) result as an empty list;
                           the point is that it is written down. Non-interactive
@@ -2649,7 +2649,7 @@ check_role_options() {
     # no sudoers rule, so no SSO user could elevate.
     if is_backend && [ "$ENABLE_SUDO" != "true" ] && [ "$MAX_SECURITY" = "true" ]; then
         error "--no-sudo cannot be combined with --max-security: Mode E replaces the"
-        error "sudo PAM stack with LLNG-token-only authentication (see doc/pam-modes.rst)."
+        error "sudo PAM stack with LLNG-token-only authentication (see doc/security-scenarios/index.rst)."
         exit 1
     fi
 }

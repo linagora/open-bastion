@@ -1,40 +1,59 @@
-Competitors and Alternatives
+Competitors and alternatives
 ============================
 
-This document compares LLNG-PAM-MODULE with alternative solutions for SSH authentication, authorization, and session management.
+This document compares Open Bastion with alternative solutions for SSH
+authentication, authorization, and session management.
 
-Solution Categories
+Solution categories
 -------------------
 
 There are two distinct meanings of "PAM" in the security industry:
 
-- **PAM (Pluggable Authentication Modules)**: Linux authentication framework
-- **PAM (Privileged Access Management)**: Enterprise security product category
+- PAM (Pluggable Authentication Modules): the Linux authentication
+  framework.
+- PAM (Privileged Access Management): an enterprise security product
+  category.
 
-LLNG-PAM-MODULE addresses both: it's a Linux PAM module that, combined with LemonLDAP::NG's bastion feature, provides Privileged Access Management capabilities.
+Open Bastion addresses both: it is the PAM and NSS module of a
+LemonLDAP::NG deployment, and with the portal's bastion features —
+session recording, hop vouching, key-only service accounts — it covers,
+for SSH, what a Privileged Access Management product covers.
 
---------------
-
-Direct Competitors: PAM Modules for SSO
+Direct competitors: PAM modules for SSO
 ---------------------------------------
 
 These are alternative PAM modules for centralizing SSH authentication:
 
-+--------------------+----------------+--------------------------------------+----------------------------------------+
-| Solution           | Protocol       | Features                             | Limitations                            |
-+====================+================+======================================+========================================+
-| **pam_sss (SSSD)** | LDAP, Kerberos | Widely deployed, FreeIPA integration | No web SSO, complex setup              |
-+--------------------+----------------+--------------------------------------+----------------------------------------+
-| **pam_krb5**       | Kerberos       | Strong enterprise auth               | Requires Kerberos infrastructure       |
-+--------------------+----------------+--------------------------------------+----------------------------------------+
-| **pam_ldap**       | LDAP           | Simple, direct LDAP auth             | No SSO, no MFA integration             |
-+--------------------+----------------+--------------------------------------+----------------------------------------+
-| **pam_cas**        | CAS            | Apereo CAS integration               | Limited to CAS protocol                |
-+--------------------+----------------+--------------------------------------+----------------------------------------+
-| **pam_oauth2**     | OAuth2         | Modern protocol                      | Community-maintained, limited features |
-+--------------------+----------------+--------------------------------------+----------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 20 32 26
 
-LLNG-PAM-MODULE Advantages
+   * - Solution
+     - Protocol
+     - Features
+     - Limitations
+   * - pam_sss (SSSD)
+     - LDAP, Kerberos
+     - Widely deployed, FreeIPA integration
+     - No web SSO, complex setup
+   * - pam_krb5
+     - Kerberos
+     - Strong enterprise auth
+     - Requires Kerberos infrastructure
+   * - pam_ldap
+     - LDAP
+     - Simple, direct LDAP auth
+     - No SSO, no MFA integration
+   * - pam_cas
+     - CAS
+     - Apereo CAS integration
+     - Limited to CAS protocol
+   * - pam_oauth2
+     - OAuth2
+     - Modern protocol
+     - Community-maintained, limited features
+
+Open Bastion advantages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Unified web SSO and system authentication
@@ -43,139 +62,173 @@ LLNG-PAM-MODULE Advantages
 - Token-based authentication (no password exposure)
 - Session recording via bastion mode
 
---------------
-
-IAM/SSO Solutions Comparison
+IAM/SSO solutions comparison
 ----------------------------
 
-Complete Identity and Access Management solutions with system integration:
+Complete Identity and Access Management solutions with system
+integration:
 
-+--------------------------------+-------------+-----------------+---------+-------------------+
-| Solution                       | Type        | PAM Integration | Web SSO | Session Recording |
-+================================+=============+=================+=========+===================+
-| **LemonLDAP::NG + PAM Module** | Open source | Native          | ✅      | ✅ (bastion)      |
-+--------------------------------+-------------+-----------------+---------+-------------------+
-| **FreeIPA**                    | Open source | Via SSSD        | Limited | ❌                |
-+--------------------------------+-------------+-----------------+---------+-------------------+
-| **Keycloak**                   | Open source | Third-party     | ✅      | ❌                |
-+--------------------------------+-------------+-----------------+---------+-------------------+
-| **Authentik**                  | Open source | Limited         | ✅      | ❌                |
-+--------------------------------+-------------+-----------------+---------+-------------------+
-| **Apereo CAS**                 | Open source | pam_cas         | ✅      | ❌                |
-+--------------------------------+-------------+-----------------+---------+-------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 14 18 14 20
 
-Key Differentiators
+   * - Solution
+     - Type
+     - PAM integration
+     - Web SSO
+     - Session recording
+   * - Open Bastion (with LemonLDAP::NG)
+     - Open source
+     - Native
+     - ✅
+     - ✅ (bastion)
+   * - FreeIPA
+     - Open source
+     - Via SSSD
+     - Limited
+     - ❌
+   * - Keycloak
+     - Open source
+     - Third-party
+     - ✅
+     - ❌
+   * - Authentik
+     - Open source
+     - Limited
+     - ✅
+     - ❌
+   * - Apereo CAS
+     - Open source
+     - pam_cas
+     - ✅
+     - ❌
+
+Key differentiators
 ~~~~~~~~~~~~~~~~~~~
 
-LemonLDAP::NG with LLNG-PAM-MODULE is unique in providing:
+Open Bastion, on LemonLDAP::NG, is unique in providing:
 
-1. **Single solution** for web SSO AND system access
-2. **Native PAM module** designed specifically for the SSO
-3. **Bastion with session recording** for audit compliance
-4. **Centralized policy management** for both web and SSH access
+1. A single solution for web SSO and system access.
+2. A native PAM module designed specifically for the SSO.
+3. A bastion with session recording for audit compliance.
+4. Centralized policy management for both web and SSH access.
 
---------------
-
-Privileged Access Management (PAM) Solutions
+Privileged access management (PAM) solutions
 --------------------------------------------
 
-Enterprise solutions focused on privileged access control and session recording:
+Enterprise solutions focused on privileged access control and session
+recording:
 
-+------------------------+-------------+------+---------+-------------------+----------+
-| Solution               | License     | Cost | Web SSO | Session Recording | SSH Auth |
-+========================+=============+======+=========+===================+==========+
-| **LLNG + Bastion**     | AGPL        | Free | ✅      | ✅                | ✅       |
-+------------------------+-------------+------+---------+-------------------+----------+
-| **Wallix Bastion**     | Proprietary | €€€  | ❌      | ✅                | ✅       |
-+------------------------+-------------+------+---------+-------------------+----------+
-| **CyberArk**           | Proprietary | €€€€ | ❌      | ✅                | ✅       |
-+------------------------+-------------+------+---------+-------------------+----------+
-| **BeyondTrust**        | Proprietary | €€€€ | ❌      | ✅                | ✅       |
-+------------------------+-------------+------+---------+-------------------+----------+
-| **Delinea (Thycotic)** | Proprietary | €€€  | ❌      | ✅                | ✅       |
-+------------------------+-------------+------+---------+-------------------+----------+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 14 8 10 22 12
 
-Feature Comparison with Wallix
+   * - Solution
+     - License
+     - Cost
+     - Web SSO
+     - Session recording
+     - SSH auth
+   * - Open Bastion
+     - AGPL
+     - Free
+     - ✅
+     - ✅
+     - ✅
+   * - Wallix Bastion
+     - Proprietary
+     - €€€
+     - ❌
+     - ✅
+     - ✅
+   * - CyberArk
+     - Proprietary
+     - €€€
+     - ❌
+     - ✅
+     - ✅
+   * - BeyondTrust
+     - Proprietary
+     - €€€
+     - ❌
+     - ✅
+     - ✅
+   * - Delinea (Thycotic)
+     - Proprietary
+     - €€€
+     - ❌
+     - ✅
+     - ✅
+
+Feature comparison with Wallix
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Wallix is a French company whose Wallix Bastion product is often considered in the same market. Here's a detailed comparison:
+Wallix is a French company whose Wallix Bastion product is often
+considered in the same market. The table compares the two.
 
 =============================== ================= =================
-Feature                         LLNG + Bastion    Wallix Bastion
+Feature                         Open Bastion      Wallix Bastion
 =============================== ================= =================
-**SSH Session Recording**       ✅                ✅
-**Session Playback**            ✅                ✅
-**Multi-Factor Authentication** ✅ (built-in)     ✅ (add-on)
-**Web Single Sign-On**          ✅                ❌
-**SAML/OIDC Provider**          ✅                Limited
-**Centralized Access Policies** ✅                ✅
-**Password Vault**              Unneeded (SSH CA) ✅
-**RDP Recording**               ❌                ✅
-**License**                     AGPL (Free)       Proprietary
-**Typical Cost**                Free              50-100€/user/year
+SSH Session Recording           ✅                ✅
+Session Playback                ✅                ✅
+Multi-Factor Authentication     ✅                ✅ (add-on)
+Web Single Sign-On              ✅                ❌
+SAML/OIDC Provider              ✅                Limited
+Centralized Access Policies     ✅                ✅
+Password Vault                  Unneeded (SSH CA) ✅
+RDP Recording                   ❌                ✅
+License                         AGPL (Free)       Proprietary
+Typical Cost                    Free              50-100€/user/year
 =============================== ================= =================
 
-When to Choose LLNG
-~~~~~~~~~~~~~~~~~~~
+When to choose Open Bastion
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Choose LemonLDAP::NG + PAM Module when you need:
+Choose Open Bastion when you need:
 
-- **Web SSO + System Access** in a unified solution
-- **Open source** with no licensing costs
-- **French sovereignty** with open source flexibility
-- **SSH-focused** privileged access management
-- **Custom integration** capabilities
+- Web SSO and system access in a unified solution
+- Open source with no licensing costs
+- French sovereignty with open source flexibility
+- SSH-focused privileged access management
+- Custom integration capabilities
 
-When to Consider Wallix/CyberArk
+When to consider Wallix/CyberArk
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Consider commercial PAM solutions when you need:
 
-- **RDP session recording** (Windows servers)
-- **Built-in password vault** with rotation
-- **Vendor support contracts** required by policy
-- **Pre-certified compliance** (some regulations accept specific vendors)
+- RDP session recording (Windows servers)
+- A built-in password vault with rotation
+- Vendor support contracts required by policy
+- Pre-certified compliance (some regulations accept specific vendors)
 
---------------
-
-Migration Paths
+Migration paths
 ---------------
 
 From pam_ldap or pam_krb5
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Deploy LemonLDAP::NG with your existing LDAP/AD backend
-2. Install LLNG-PAM-MODULE alongside existing PAM config
+2. Install Open Bastion alongside the existing PAM configuration
 3. Test with a pilot group using LLNG tokens
 4. Gradually migrate users to LLNG authentication
 5. Remove legacy PAM modules
 
-From Commercial PAM Solutions
+From commercial PAM solutions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Assess current session recording requirements
-2. Deploy LLNG bastion for SSH access
-3. Migrate SSH servers first (LLNG strength)
+2. Deploy Open Bastion for SSH access
+3. Migrate SSH servers first, where Open Bastion is strongest
 4. Keep commercial solution for RDP if needed
 5. Evaluate cost savings after migration
-
---------------
 
 Summary
 -------
 
-LLNG-PAM-MODULE with LemonLDAP::NG provides a unique combination:
-
-- **Cost**: Free and open source vs €50-100/user/year for commercial PAM
-- **Scope**: Web SSO + SSH + bastion in one solution
-- **Flexibility**: Fully customizable policies and integrations
-- **Compliance**: Session recording for audit requirements
-
-For organizations primarily using Linux/SSH infrastructure and needing web SSO, LemonLDAP::NG offers the most comprehensive and cost-effective solution.
-
-See Also
---------
-
-- :doc:`Bastion Architecture </bastion-architecture>` - certificate-vouching bastion authentication
-- :doc:`Session Recording </session-recording>` - SSH session recording
-- :doc:`Admin Guide </admin-guide>` - Complete administration guide
+Open Bastion, on LemonLDAP::NG, provides a unique combination: web SSO,
+SSH access and a bastion with session recording, under an open source
+license, where commercial PAM solutions charge per user per year. For
+organizations whose infrastructure is mostly Linux and SSH and that need
+web SSO, the Open Bastion stack is the most comprehensive and
+cost-effective answer.

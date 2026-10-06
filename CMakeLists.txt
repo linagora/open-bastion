@@ -142,11 +142,53 @@ install(FILES ${CMAKE_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 
+find_program(SPHINX_BUILD NAMES sphinx-build sphinx-build-3)
+
+# The man pages are generated from doc/references/man/, the same
+# sources the HTML documentation is built from. Default depends on
+# sphinx-build being found or not.
+if(NOT DEFINED BUILD_MAN)
+    if(SPHINX_BUILD)
+        set(_ob_build_man_default ON)
+    else()
+        set(_ob_build_man_default OFF)
+    endif()
+    option(BUILD_MAN "Generate the man pages with Sphinx" ${_ob_build_man_default})
+    unset(_ob_build_man_default)
+endif()
+
+if(BUILD_MAN)
+    if(NOT SPHINX_BUILD)
+        message(FATAL_ERROR
+            "BUILD_MAN=ON but sphinx-build was not found — install python3-sphinx, "
+            "or configure with -DBUILD_MAN=OFF to build without man pages")
+    endif()
+
+    set(MAN_OUT_DIR ${CMAKE_BINARY_DIR}/man)
+    add_custom_target(man ALL
+        COMMAND ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1
+                ${SPHINX_BUILD} -q -b man
+                -d ${CMAKE_BINARY_DIR}/doc/doctrees-man
+                ${CMAKE_SOURCE_DIR}/doc ${MAN_OUT_DIR}
+        COMMENT "Generating the man pages with Sphinx"
+        VERBATIM
+    )
+
+    # One page documents the three roles of the setup command; the aliases are
+    # installed as links to it, as they always were.
+    foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
+        add_custom_command(TARGET man POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E create_symlink
+                ob-bastion-setup.8 ${MAN_OUT_DIR}/${_ob_setup_alias}.8
+            VERBATIM
+        )
+    endforeach()
+endif()
+
 # Off by default so the ordinary build needs no Python; debian/rules enables it.
 option(BUILD_DOC "Build the HTML documentation with Sphinx" OFF)
 
 if(BUILD_DOC)
-    find_program(SPHINX_BUILD NAMES sphinx-build sphinx-build-3)
     if(NOT SPHINX_BUILD)
         message(FATAL_ERROR "BUILD_DOC=ON but sphinx-build was not found")
     endif()
@@ -283,7 +325,7 @@ install(FILES ${CMAKE_SOURCE_DIR}/scripts/ssh-proxy.conf.example
 
 # ob-cert-daemon (root, socket-activated) holds the server token; ob-cert-request
 # is the unprivileged client ob-ssh / ob-scp / ob-sftp invoke -- no sudo, no
-# setuid. See doc/design/bastion-cert-vouching.rst.
+# setuid. See doc/references/bastion-cert-vouching.rst.
 add_executable(ob-cert-daemon
     src/ob-cert-daemon.c
     src/ob_cert_proto.c
@@ -441,7 +483,7 @@ install(TARGETS ob-client-jwt
 )
 
 # ob-record-sink (root, socket-activated) writes recordings root-owned so the
-# recorded user cannot touch them. See doc/design/tamper-evident-session-recording.rst.
+# recorded user cannot touch them. See doc/references/tamper-evident-session-recording.rst.
 add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
 target_include_directories(ob-record-sink PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -557,45 +599,51 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-cache-admin
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
-install(FILES
-    ${CMAKE_SOURCE_DIR}/man/ob-enroll.8
-    ${CMAKE_SOURCE_DIR}/man/ob-heartbeat.8
-    ${CMAKE_SOURCE_DIR}/man/ob-bastion-setup.8
-    ${CMAKE_SOURCE_DIR}/man/ob-session-recorder.8
-    ${CMAKE_SOURCE_DIR}/man/ob-login-shell.8
-    ${CMAKE_SOURCE_DIR}/man/ob-session-prune.8
-    ${CMAKE_SOURCE_DIR}/man/ob-krl-refresh.8
-    ${CMAKE_SOURCE_DIR}/man/ob-cert-daemon.8
-    ${CMAKE_SOURCE_DIR}/man/ob-fp-daemon.8
-    ${CMAKE_SOURCE_DIR}/man/ob-fp-submit.8
-    ${CMAKE_SOURCE_DIR}/man/ob-record-sink.8
-    ${CMAKE_SOURCE_DIR}/man/ob-sign-request.8
-    ${CMAKE_SOURCE_DIR}/man/ob-client-jwt.8
-    ${CMAKE_SOURCE_DIR}/man/ob-post-upgrade.8
-    ${CMAKE_SOURCE_DIR}/man/ob-uninstall.8
-    DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
-)
-
-# Man pages for the ob-standalone-setup and ob-backend-setup symlinks: one page,
-# ob-bastion-setup.8, documents the three roles.
-foreach(_ob_setup_alias ob-standalone-setup ob-backend-setup)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
-        ob-bastion-setup.8 "${CMAKE_BINARY_DIR}/${_ob_setup_alias}.8")
-    install(FILES ${CMAKE_BINARY_DIR}/${_ob_setup_alias}.8
+# The man pages are generated into ${MAN_OUT_DIR} by the `man` target, which
+# reads the reStructuredText under doc/references/man/. ob-standalone-setup.8
+# and ob-backend-setup.8 document the same program as ob-bastion-setup.8 and
+# are generated from its document (see man_pages in doc/conf.py).
+if(BUILD_MAN)
+    install(FILES
+        ${MAN_OUT_DIR}/ob-enroll.8
+        ${MAN_OUT_DIR}/ob-heartbeat.8
+        ${MAN_OUT_DIR}/ob-bastion-setup.8
+        ${MAN_OUT_DIR}/ob-standalone-setup.8
+        ${MAN_OUT_DIR}/ob-backend-setup.8
+        ${MAN_OUT_DIR}/ob-session-recorder.8
+        ${MAN_OUT_DIR}/ob-login-shell.8
+        ${MAN_OUT_DIR}/ob-session-prune.8
+        ${MAN_OUT_DIR}/ob-krl-refresh.8
+        ${MAN_OUT_DIR}/ob-cert-daemon.8
+        ${MAN_OUT_DIR}/ob-fp-daemon.8
+        ${MAN_OUT_DIR}/ob-fp-submit.8
+        ${MAN_OUT_DIR}/ob-record-sink.8
+        ${MAN_OUT_DIR}/ob-sign-request.8
+        ${MAN_OUT_DIR}/ob-client-jwt.8
+        ${MAN_OUT_DIR}/ob-post-upgrade.8
+        ${MAN_OUT_DIR}/ob-uninstall.8
+        ${MAN_OUT_DIR}/ob-ssh-cert.8
+        ${MAN_OUT_DIR}/ob-cache-admin.8
+        ${MAN_OUT_DIR}/ob-desktop-setup.8
+        ${MAN_OUT_DIR}/ob-session-monitor.8
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man8
     )
-endforeach()
 
-install(FILES
-    ${CMAKE_SOURCE_DIR}/man/ob-ssh-cert.1
-    ${CMAKE_SOURCE_DIR}/man/ob-ssh.1
-    ${CMAKE_SOURCE_DIR}/man/ob-scp.1
-    ${CMAKE_SOURCE_DIR}/man/ob-sftp.1
-    ${CMAKE_SOURCE_DIR}/man/ob-bastion-id.1
-    ${CMAKE_SOURCE_DIR}/man/ob-cert-request.1
-    ${CMAKE_SOURCE_DIR}/man/ob-record-connect.1
-    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
-)
+    install(FILES
+        ${MAN_OUT_DIR}/ob-ssh.1
+        ${MAN_OUT_DIR}/ob-scp.1
+        ${MAN_OUT_DIR}/ob-sftp.1
+        ${MAN_OUT_DIR}/ob-bastion-id.1
+        ${MAN_OUT_DIR}/ob-cert-request.1
+        ${MAN_OUT_DIR}/ob-record-connect.1
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+    )
+
+    install(FILES
+        ${MAN_OUT_DIR}/openbastion.conf.5
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man5
+    )
+endif()
 
 # Disabled for Debian packaging, which uses dh_installsystemd instead.
 if(INSTALL_SYSTEMD)
@@ -664,6 +712,15 @@ set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_REQUIRES "pam, libcurl, json-c, openssl-libs, keyutils-libs, curl, jq")
 
+# A package built from a tree without man pages ships without them.
+set(OB_NO_MAN_WARNING_SCRIPT "")
+if(NOT BUILD_MAN)
+    set(OB_NO_MAN_WARNING_SCRIPT "${CMAKE_BINARY_DIR}/no-man-pages.cmake")
+    file(WRITE "${OB_NO_MAN_WARNING_SCRIPT}"
+        "message(WARNING \"BUILD_MAN=OFF — this package is built without man pages; install Sphinx (python3-sphinx) and reconfigure to include them\")\n")
+    set(CPACK_INSTALL_SCRIPTS "${OB_NO_MAN_WARNING_SCRIPT}")
+endif()
+
 include(CPack)
 
 # open-bastion-builder is packaged separately (no dependency on the runtime
@@ -709,7 +766,22 @@ if(BUILD_BUILDER)
     if(NOT DPKG_DEB_EXECUTABLE)
         message(STATUS "dpkg-deb not found — skipping open-bastion-builder DEB target")
     else()
+    set(_ob_builder_man_warning)
+    if(OB_NO_MAN_WARNING_SCRIPT)
+        set(_ob_builder_man_warning
+            COMMAND ${CMAKE_COMMAND} -P "${OB_NO_MAN_WARNING_SCRIPT}")
+    endif()
+    set(_ob_builder_deb_man_cmds)
+    if(BUILD_MAN)
+        list(APPEND _ob_builder_deb_man_cmds
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${BUILDER_DEB_ROOT}/usr/share/man/man1"
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "${MAN_OUT_DIR}/ob-builder.1"
+                "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1")
+    endif()
     add_custom_target(builder-deb ALL
+        ${_ob_builder_man_warning}
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${BUILDER_DEB_ROOT}/usr/bin"
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -736,11 +808,7 @@ if(BUILD_BUILDER)
             "${CMAKE_SOURCE_DIR}/admin-builder/keyrings"
             "${BUILDER_DEB_ROOT}/usr/share/open-bastion-builder/keyrings"
 
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${BUILDER_DEB_ROOT}/usr/share/man/man1"
-        COMMAND ${CMAKE_COMMAND} -E copy
-            "${CMAKE_SOURCE_DIR}/admin-builder/man/ob-builder.1"
-            "${BUILDER_DEB_ROOT}/usr/share/man/man1/ob-builder.1"
+        ${_ob_builder_deb_man_cmds}
 
         # DEBIAN maintainer scripts must be 0755.
         COMMAND chmod 0755
@@ -753,12 +821,34 @@ if(BUILD_BUILDER)
         COMMENT "Building ${BUILDER_PKG_NAME} Debian package"
         VERBATIM
     )
+    if(BUILD_MAN)
+        add_dependencies(builder-deb man)
+    endif()
     endif()
 
     find_program(RPMBUILD_EXECUTABLE rpmbuild)
     if(RPMBUILD_EXECUTABLE)
         set(BUILDER_RPM_OUTPUT
             "${CMAKE_BINARY_DIR}/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}-1.noarch.rpm")
+
+        # The tarball carries the generated man page only when there is one.
+        set(_ob_builder_tar_man)
+        if(BUILD_MAN)
+            list(APPEND _ob_builder_tar_man
+                -C "${CMAKE_BINARY_DIR}"
+                --transform "s|^man/ob-builder\.1|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}/man/ob-builder.1|"
+                man/ob-builder.1)
+        endif()
+
+        # The spec's two ob-builder(1) lines vanish when there is no man page to
+        # put in the package; a comment is inert in %install and %files alike.
+        if(BUILD_MAN)
+            set(BUILDER_MAN_INSTALL "install -Dm 0644 man/ob-builder.1 %{buildroot}/usr/share/man/man1/ob-builder.1")
+            set(BUILDER_MAN_FILES "%{_mandir}/man1/ob-builder.1*")
+        else()
+            set(BUILDER_MAN_INSTALL "# no man page (built without Sphinx)")
+            set(BUILDER_MAN_FILES "# no man page (built without Sphinx)")
+        endif()
 
         configure_file(
             "${CMAKE_SOURCE_DIR}/admin-builder/rpm/open-bastion-builder.spec.in"
@@ -769,12 +859,16 @@ if(BUILD_BUILDER)
         # rpmbuild requires a SOURCES tarball, not a plain directory tree.
         set(BUILDER_RPM_TARBALL "${CMAKE_BINARY_DIR}/builder-pkg/rpm/${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}.tar.gz")
         add_custom_target(builder-rpm ALL
+            ${_ob_builder_man_warning}
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "${CMAKE_BINARY_DIR}/builder-pkg/rpm"
+            # The second -C and --transform put the generated man page where
+            # the spec expects it inside the tarball.
             COMMAND tar -czf "${BUILDER_RPM_TARBALL}"
                 -C "${CMAKE_SOURCE_DIR}"
                 --transform "s|^admin-builder|${BUILDER_PKG_NAME}-${BUILDER_PKG_VERSION}|"
                 admin-builder
+                ${_ob_builder_tar_man}
             COMMAND ${RPMBUILD_EXECUTABLE}
                 --define "_topdir ${CMAKE_BINARY_DIR}/builder-pkg/rpm/rpmbuild"
                 --define "_sourcedir ${CMAKE_BINARY_DIR}/builder-pkg/rpm"
@@ -783,6 +877,9 @@ if(BUILD_BUILDER)
             COMMENT "Building ${BUILDER_PKG_NAME} RPM package"
             VERBATIM
         )
+        if(BUILD_MAN)
+            add_dependencies(builder-rpm man)
+        endif()
     else()
         message(STATUS "rpmbuild not found — skipping open-bastion-builder RPM target")
     endif()

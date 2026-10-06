@@ -20,7 +20,7 @@ format = script
 # Set to 0 to disable timeout
 max_duration = 86400
 
-# Retention, applied daily by ob-session-prune.timer (see doc/session-recording.rst).
+# Retention, applied daily by ob-session-prune.timer (see doc/security.rst).
 #
 # Compress closed recordings older than this many days (0 = never).
 recording_compress_after_days = 1

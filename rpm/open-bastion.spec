@@ -17,6 +17,8 @@ BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig(libsodium)
 BuildRequires:  pkgconfig
 BuildRequires:  systemd-rpm-macros
+# Generates the man pages from doc/references/man/ (see the `man` target).
+BuildRequires:  python3-sphinx
 
 Requires:       pam
 Requires:       libcurl
@@ -65,6 +67,7 @@ Features:
     -DUSE_LIBSODIUM=ON \
     -DBUILD_TESTING=ON \
     -DINSTALL_DESKTOP=ON \
+    -DBUILD_MAN=ON \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir}
 %cmake_build
 
@@ -156,7 +159,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_unitdir}/ob-krl-refresh.timer
 %{_unitdir}/ob-audit-rotate.service
 %{_unitdir}/ob-audit-rotate.timer
-%{_mandir}/man1/ob-ssh-cert.1*
 %{_mandir}/man1/ob-bastion-id.1*
 %{_mandir}/man8/ob-enroll.8*
 %{_mandir}/man8/ob-heartbeat.8*
@@ -175,6 +177,11 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-client-jwt.8*
 %{_mandir}/man8/ob-post-upgrade.8*
 %{_mandir}/man8/ob-uninstall.8*
+%{_mandir}/man8/ob-ssh-cert.8*
+%{_mandir}/man8/ob-cache-admin.8*
+%{_mandir}/man8/ob-desktop-setup.8*
+%{_mandir}/man8/ob-session-monitor.8*
+%{_mandir}/man5/openbastion.conf.5*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*
 %{_mandir}/man1/ob-sftp.1*

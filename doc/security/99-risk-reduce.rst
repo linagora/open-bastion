@@ -148,7 +148,7 @@ Pistes pour réduire P à 1 :
 Pistes d'Amélioration - Vouching par certificat (Bastion→Backend)
 -----------------------------------------------------------------
 
-   Le transport ``LLNG_BASTION_JWT`` via ``SendEnv``/``AcceptEnv`` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher ``(bastion_id, user)`` émis par ``/pam/authorize``, transporté localement via ``pam_putenv``, échangé par ``ob-ssh`` (via ``ob-cert-request``/``ob-cert-daemon`` socket-activé, pas de sudoers) contre un certificat ~120 s signé par la CA ``ssh-ca`` (``/pam/bastion-cert``), épinglé à l'IP du bastion par ``source-address``. Voir :doc:`/security/02-ssh-connection` et :doc:`/design/bastion-cert-vouching`.
+   Le transport ``LLNG_BASTION_JWT`` via ``SendEnv``/``AcceptEnv`` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher ``(bastion_id, user)`` émis par ``/pam/authorize``, transporté localement via ``pam_putenv``, échangé par ``ob-ssh`` (via ``ob-cert-request``/``ob-cert-daemon`` socket-activé, pas de sudoers) contre un certificat ~120 s signé par la CA ``ssh-ca`` (``/pam/bastion-cert``), épinglé à l'IP du bastion par ``source-address``. Voir :doc:`/security/02-ssh-connection` et :doc:`/references/bastion-cert-vouching`.
 
 R-S9 *(P=1, I=2)* - Interception ou vol du certificat éphémère bastion
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -236,7 +236,7 @@ R-S18 *(P=1, I=1)* - Effacement des enregistrements de session
 
 **Cadre (important) — où se fait l'enregistrement :** l'enregistreur vit sur le **bastion**, le point de passage obligé. Une session vers un backend transite par le pty du bastion, donc **être root sur un backend ne permet pas d'échapper à l'enregistrement ni d'atteindre les fichiers** : ils sont sur le bastion, root-owned, et un root de backend n'a aucun accès au système de fichiers du bastion. Le seul acteur capable d'altérer les traces est **root sur le bastion lui-même** (l'hôte d'audit), un ensemble réduit et de confiance — voir le modèle de menace ci-dessous.
 
-**Remédiation implémentée (PR #157, ``ob-record-sink``) :** le recording est désormais **streamé vers un puits root activé par socket** (design retenu :doc:`/design/tamper-evident-session-recording`), qui correspond exactement à l'option « démon collecteur privilégié » listée auparavant comme non-retenue :
+**Remédiation implémentée (PR #157, ``ob-record-sink``) :** le recording est désormais **streamé vers un puits root activé par socket** (design retenu :doc:`/references/tamper-evident-session-recording`), qui correspond exactement à l'option « démon collecteur privilégié » listée auparavant comme non-retenue :
 
 - Le recorder (sous l'uid utilisateur) n'écrit plus aucun fichier. Il ouvre une socket Unix via ``ob-record-connect`` et y streame le typescript ; ``ob-record-sink`` (root, socket-activé) écrit les fichiers.
 - L'utilisateur enregistré est dérivé de ``SO_PEERCRED`` (vérifié par le noyau, jamais de l'en-tête) → pas d'usurpation ni de traversée de chemin.
@@ -255,7 +255,7 @@ R-S18 *(P=1, I=1)* - Effacement des enregistrements de session
 
 Pistes pour réduire encore I (couvrir root du bastion, déjà hors périmètre) :
 
-1. **Centralisation syslog / streaming WORM** : pousser logs et recordings vers un serveur distant (SIEM / endpoint LLNG WORM) pour résister à une compromission root du bastion. Roadmap dans :doc:`/session-recording`.
+1. **Centralisation syslog / streaming WORM** : pousser logs et recordings vers un serveur distant (SIEM / endpoint LLNG WORM) pour résister à une compromission root du bastion. Roadmap dans :doc:`/ssh-session-recording`.
 2. **Signature des sessions** : signer cryptographiquement les fichiers à la clôture (clé privée hors du bastion) pour détecter toute altération a posteriori.
 
 .. _security-99-risk-reduce-r-s17-p1-i2---verrouillage-total-lockout:

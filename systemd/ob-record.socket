@@ -12,7 +12,7 @@ SocketMode=0666
 Accept=yes
 # Each recorded session holds one connection for its lifetime; bound the total
 # and each user's share. MaxConnectionsPerSource needs systemd >= 256. See
-# doc/session-recording.rst.
+# doc/ssh-session-recording.rst.
 MaxConnections=1024
 MaxConnectionsPerSource=16
 # Parent /run/open-bastion must exist before sockets.target; created at 0711

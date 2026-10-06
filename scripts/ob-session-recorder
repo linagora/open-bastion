@@ -366,7 +366,7 @@ stop_watchdog() {
 # string the client wrote. Hence an allow-list of the exact forms genuine
 # clients send, executed as an argv from a root-owned path, never through a
 # shell; anything else is an ordinary recorded session, as is any request with
-# a PTY. See doc/session-recording.rst.
+# a PTY. See doc/ssh-session-recording.rst.
 #
 # The forms (checked against OpenSSH 10 and rsync 3.x clients):
 #   rsync --server [--sender] -FLAGS[e.CAPS] [--long-option[=value]...] . PATH...

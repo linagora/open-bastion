@@ -1893,7 +1893,7 @@ render_template() {
 
 # Mode-specific settings emitted into openbastion.conf as plain key=val lines.
 # Mirrors the working examples in local/etc/open-bastion/openbastion.conf and
-# the per-mode rules documented in doc/pam-modes.rst.
+# the per-mode rules documented in doc/security-scenarios/index.rst.
 _mode_settings_conf() {
     local mode="$1"
     case "$mode" in

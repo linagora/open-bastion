@@ -2,15 +2,21 @@
 #
 # ob-cache-admin - Manage Open Bastion offline credential cache
 #
-# Usage: ob-cache-admin <command> [options]
+# Usage: ob-cache-admin [options] <command> [arguments]
 #
 # Copyright (C) 2025 Linagora
 # License: AGPL-3.0
 
 set -e
 
-CACHE_DIR="${OB_CACHE_DIR:-/var/cache/open-bastion/credentials}"
+# Cache directory, in order of precedence: -d, OB_CACHE_DIR, offline_cache_dir
+# from the config file, then this default. load_config() only fills in the
+# third; an empty CACHE_DIR means nothing has chosen yet.
+DEFAULT_CACHE_DIR="/var/cache/open-bastion/credentials"
+CACHE_DIR="${OB_CACHE_DIR:-}"
 CONFIG_FILE="${OB_CONFIG_FILE:-/etc/open-bastion/openbastion.conf}"
+
+QUIET=false
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,8 +28,17 @@ NC='\033[0m'
 
 CACHE_MAGIC="OBCRED01"
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_info() {
+    if [[ "$QUIET" != "true" ]]; then
+        echo -e "${BLUE}[INFO]${NC} $1"
+    fi
+}
+
+log_success() {
+    if [[ "$QUIET" != "true" ]]; then
+        echo -e "${GREEN}[OK]${NC} $1"
+    fi
+}
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
@@ -38,7 +53,7 @@ load_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
         local dir
         dir=$(grep -E "^\s*offline_cache_dir\s*=" "$CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' | head -1)
-        if [[ -n "$dir" ]]; then
+        if [[ -n "$dir" && -z "$CACHE_DIR" ]]; then
             CACHE_DIR="$dir"
         fi
     fi
@@ -46,7 +61,7 @@ load_config() {
 
 usage() {
     cat << 'EOF'
-Usage: ob-cache-admin <command> [arguments]
+Usage: ob-cache-admin [options] <command> [arguments]
 
 Manage the Open Bastion offline credential cache for Desktop SSO.
 
@@ -57,13 +72,13 @@ Commands:
   invalidate <username>  Remove cached credentials for a user
   invalidate-all         Remove all cached credentials (emergency)
   unlock <username>      Reset failed attempts for a locked user
-  cleanup                Remove expired cache entries
+  cleanup                Remove unusable cache files
   help                   Show this help message
 
 Options:
   -c, --config FILE      Use alternate config file
   -d, --cache-dir DIR    Override cache directory
-  -q, --quiet            Quiet mode (less output)
+  -q, --quiet            Hide [INFO] and [OK] lines
   -h, --help             Show this help message
 
 Examples:
@@ -395,8 +410,6 @@ cmd_cleanup() {
     echo ""
 }
 
-# shellcheck disable=SC2034
-QUIET=false
 COMMAND=""
 CMD_ARGS=()
 
@@ -411,7 +424,6 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -q|--quiet)
-            # shellcheck disable=SC2034
             QUIET=true
             shift
             ;;
@@ -433,6 +445,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 load_config
+CACHE_DIR="${CACHE_DIR:-$DEFAULT_CACHE_DIR}"
 
 case "${COMMAND:-}" in
     stats)

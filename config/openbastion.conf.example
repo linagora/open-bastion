@@ -235,7 +235,8 @@ log_level = warn
 # (written by `ob-backend-setup --allowed-bastions <client_ids>`).
 # The legacy `bastion_jwt_*` keys (LLNG_BASTION_JWT over SendEnv) have been
 # removed — that transport was structurally broken. See
-# doc/bastion-architecture.rst and doc/design/bastion-cert-vouching.rst.
+# doc/references/bastion-architecture.rst and
+# doc/references/bastion-cert-vouching.rst.
 
 # ==============================================================================
 # CrowdSec Integration (optional)

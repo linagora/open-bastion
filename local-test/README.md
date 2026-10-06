@@ -11,7 +11,7 @@ ob-builder → bastion → deploy → ob-bastion-id → ob-builder → backends 
 
 | Script                                   | Path it validates                                                                                            |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/ansible-quickstart.rst)) |
+| [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/deployment/ansible-deployment.rst)) |
 | [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer                                                        |
 
 Both use [`lib.sh`](lib.sh) for the shared steps (build the `.deb`, serve the
