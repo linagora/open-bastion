@@ -35,11 +35,8 @@ specific to the shell artefacts: at the artefacts question, answer
 requested for the backend role, one extra prompt requests the ids of
 the bastions allowed to reach the backend. Those ids only exist after
 the bastion is enrolled: the usual order is to leave the prompt empty
-(any vouched bastion in the same server group is then accepted). The
-list can be set later on each backend with
-``sudo ob-backend-setup --allowed-bastions <id>[,<id>...]``, which
-updates ``/etc/open-bastion/allowed_bastions`` and nothing else; see
-:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`.
+and set the list once the backends are deployed, see
+:ref:`shell-quickstart-step-3--deploy-the-backends`.
 
 The installers are written as ``bootstrap-<slug>-<role>.sh``, next to
 a ``PORTAL-CHECKLIST-<role>.md``, in the directory given at the
@@ -129,6 +126,21 @@ Copy the backend installer to each backend host and run it there.
      scp bootstrap-acme-backend.sh "$host":/tmp/
      ssh -t "$host" 'sudo /tmp/bootstrap-acme-backend.sh --yes'
    done
+
+If the allowed bastions prompt was left empty, each backend accepts a
+hop from any vouched bastion of the project. Restrict it to your
+bastions with their ``bastion_id`` (see
+:ref:`shell-quickstart-step-2--deploy-the-bastion`):
+
+.. code:: bash
+
+   for host in web-1 web-2; do
+     ssh -t "$host" 'sudo ob-backend-setup --allowed-bastions <id>[,<id>...]'
+   done
+
+This updates ``/etc/open-bastion/allowed_bastions`` and nothing else,
+and takes effect at the next hop; see
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`.
 
 .. _usefull_installer_flags:
 

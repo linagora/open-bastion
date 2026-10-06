@@ -91,8 +91,8 @@ Backend, a server reached only through a bastion:
   certificate's key-id carries a ``bastion=`` listed in
   ``/etc/open-bastion/allowed_bastions`` (``--allowed-bastions`` sets
   it at setup time; later, ``ob-backend-setup --allowed-bastions IDS``
-  without ``--portal`` updates it alone). Left empty, any bastion of
-  the same server group is accepted; see ``ob-bastion-setup(8)``.
+  without ``--portal`` updates it alone). Left empty, any vouched
+  bastion of the project is accepted; see ``ob-bastion-setup(8)``.
 
 Standalone, a host users log in to directly, with no backend behind
 it: the bastion configuration without the hop. The
