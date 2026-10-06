@@ -36,8 +36,10 @@ requested for the backend role, one extra prompt requests the ids of
 the bastions allowed to reach the backend. Those ids only exist after
 the bastion is enrolled: the usual order is to leave the prompt empty
 (any vouched bastion in the same server group is then accepted). The
-list can be set later by editing
-``/etc/open-bastion/allowed_bastions`` on the backends.
+list can be set later on each backend with
+``sudo ob-backend-setup --allowed-bastions <id>[,<id>...]``, which
+updates ``/etc/open-bastion/allowed_bastions`` and nothing else; see
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`.
 
 The installers are written as ``bootstrap-<slug>-<role>.sh``, next to
 a ``PORTAL-CHECKLIST-<role>.md``, in the directory given at the

@@ -8,6 +8,7 @@ Synopsis
 
    ob-bastion-setup --portal URL [OPTIONS]
    ob-backend-setup --portal URL [OPTIONS]
+   ob-backend-setup --allowed-bastions IDS [--yes] [--dry-run]
    ob-standalone-setup --portal URL [OPTIONS]
 
 Description
@@ -57,7 +58,9 @@ Common options
 
 .. option:: -p, --portal URL
 
-   LemonLDAP::NG portal URL (required).
+   LemonLDAP::NG portal URL. Required, except to update the allowed
+   bastions of a configured backend (see `Updating the allowed
+   bastions`_).
 
 .. option:: -g, --server-group NAME
 
@@ -173,6 +176,8 @@ Refused when the role is ``bastion`` or ``standalone``.
    :doc:`ob-bastion-id(1) <ob-bastion-id>` on each bastion) allowed to
    hop to this backend. Prompted for if omitted in an interactive run. An
    empty list accepts a hop from any bastion enrolled in the project.
+   Without ``--portal``, it replaces the list of a backend already set
+   up and changes nothing else (see `Updating the allowed bastions`_).
 
 .. option:: --allow-any-bastion
 
@@ -222,6 +227,33 @@ refused: remove the old block first.
 Invoked under a name other than the three above, the command configures a
 bastion unless ``--node-role`` is given, and a ``--yes`` run then
 requires ``--node-role``.
+
+Updating the allowed bastions
+-----------------------------
+
+On a backend already set up (by this command, the self-extracting
+installer or Ansible), ``ob-backend-setup --allowed-bastions IDS``
+without ``--portal`` replaces ``/etc/open-bastion/allowed_bastions`` and
+nothing else: no questionnaire, no enrollment, and sshd, PAM and
+``openbastion.conf`` are left as they are. The principals helper reads
+the file at every hop, so the new list applies from the next connection,
+without restarting sshd.
+
+The ids given replace the whole list; they are not added to it, so name
+every bastion that must keep hopping to the host. They are checked as in
+a full setup. ``--allowed-bastions ""`` asks for ids as a full setup
+does, and keeps the list empty only on an explicit answer; with
+``--yes``, or as ``--allow-any-bastion``, the empty list is written
+without asking. The
+previous list is printed and the file is copied to a
+``/var/backup/open-bastion-setup-*`` directory; a list identical to the
+current one is not rewritten. ``--yes`` and ``--dry-run`` are the only
+other options accepted: any other one belongs to the full setup, which
+takes ``--portal``.
+
+The update is refused on a host whose sshd is not configured as an Open
+Bastion backend, or that has no ``/etc/open-bastion/openbastion.conf``:
+set it up with ``--portal`` first.
 
 User creation
 -------------
@@ -295,6 +327,13 @@ pre-obtained token:
        --server-group production --client-id pam-access \
        --allowed-bastions bastion-01,bastion-02 \
        --token-file /root/server-token.json --yes
+
+Replace the allowed bastions of a backend already set up, for instance
+after enrolling a new bastion:
+
+::
+
+   sudo ob-backend-setup --allowed-bastions bastion-01,bastion-03
 
 Standalone host, dry run:
 

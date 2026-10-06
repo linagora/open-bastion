@@ -204,7 +204,7 @@ Backend configuration is managed via ``ob-backend-setup``:
    ob-backend-setup --allowed-bastions bastion-01,bastion-02
    # Ansible variable: ob_bastion_allowed_bastions
 
-This writes ``/etc/open-bastion/allowed_bastions`` (0644 inside a 0711 directory) and wires ``AuthorizedPrincipalsCommand``. If the file is absent, legacy direct-user SSO certs are accepted. If the file is present but empty, any vouched bastion is accepted. If the file is unreadable, ``ob-ssh-principals`` fails closed (denies the connection).
+On a backend already set up, this command replaces ``/etc/open-bastion/allowed_bastions`` and changes nothing else; the full setup (with ``--portal``) writes the same file and wires ``AuthorizedPrincipalsCommand``. The file is 0644 inside a 0711 directory. If the file is absent, legacy direct-user SSO certs are accepted. If the file is present but empty, any vouched bastion is accepted. If the file is unreadable, ``ob-ssh-principals`` fails closed (denies the connection).
 
    **Set this list.** An empty allowlist accepts a hop voucher from **any** host enrolled in the project, and that allowlist is the residual defence behind a real gap on the SSO side: the pam-access plugin performs no RP/audience binding on ``/pam/*`` tokens, and when ``pamAccessServerGroups`` is empty — the configuration recommended for multi-group projects — it takes ``server_group`` straight from the request body. Any compromised enrolled host in the project can therefore declare itself a bastion and mint a 12-hour hop voucher for a user. The second defence, ``pamAccessBastionCertPinSourceAddress``, is also off by default.
 
