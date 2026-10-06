@@ -29,6 +29,10 @@ NODE_ROLE="$PROG_ROLE"
 # Role-specific options, checked after parsing: --node-role may come later.
 BACKEND_ONLY_OPTS=()
 BASTION_ONLY_OPTS=()
+# Without --portal, a backend run that only sets the allowlist updates it
+# alone; any other option needs the full setup.
+ALLOWLIST_OPT_GIVEN=false
+SETUP_OPTS_GIVEN=()
 SHOW_HELP=false
 NODE_ROLE_GIVEN=false
 NON_INTERACTIVE=false
@@ -376,13 +380,20 @@ finish_principals_helper() {
 
 install_allowed_bastions() {
     # The file's mere presence, even empty, enforces bastion-only certs, so
-    # check every step (errexit is suspended, see the caller).
-    local dir
+    # check every step (errexit is suspended, see the callers). The helper
+    # reads it at every hop and a truncated one means "any vouched bastion":
+    # replace it by a rename, never in place.
+    local dir tmp=""
     dir=$(dirname "$OB_ALLOWED_BASTIONS_FILE")
     backup_file "$OB_ALLOWED_BASTIONS_FILE"
     if ! mkdir -p "$dir" \
-       || ! printf '%s\n' "$BASTION_ALLOWED_IDS" > "$OB_ALLOWED_BASTIONS_FILE" \
-       || ! chmod 644 "$OB_ALLOWED_BASTIONS_FILE"; then
+       || ! tmp=$(mktemp "$OB_ALLOWED_BASTIONS_FILE.XXXXXX") \
+       || ! printf '%s\n' "$BASTION_ALLOWED_IDS" > "$tmp" \
+       || ! chmod 644 "$tmp" \
+       || ! mv -f "$tmp" "$OB_ALLOWED_BASTIONS_FILE"; then
+        if [ -n "$tmp" ]; then
+            rm -f "$tmp"
+        fi
         error "Could not write $OB_ALLOWED_BASTIONS_FILE"
         return 1
     fi
@@ -404,6 +415,63 @@ install_allowed_bastions() {
         warn "Fix it with:  ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]"
         warn "(the bastion_id of a bastion is printed by ob-bastion-id on it)"
     fi
+}
+
+# In the form normalize_allowed_bastions gives, whatever separators a hand
+# edit used.
+read_allowed_bastions() {
+    tr -s ',;[:space:]' ' ' < "$OB_ALLOWED_BASTIONS_FILE" | sed 's/^ //; s/ $//'
+}
+
+# The principals helper reads the allowlist at every hop, so a configured
+# backend needs nothing else rewritten, and sshd no restart.
+update_allowed_bastions() {
+    local stack old
+    check_root
+    stack=$(configured_sshd_stack)
+    if [ -n "$stack" ] && [ "$stack" != "backend" ]; then
+        error "This host's sshd is configured as a $stack: allowed bastions apply to a"
+        error "backend only. Turning it into a backend takes the full setup:"
+        error "  $PROG_NAME --portal URL [OPTIONS]"
+        return 1
+    fi
+    if [ "$stack" != "backend" ] || [ ! -e "$OB_CONFIG" ]; then
+        error "This host is not set up as an Open Bastion backend (no backend sshd"
+        error "configuration, or no $OB_CONFIG). Without --portal, $PROG_NAME"
+        error "only updates the allowed bastions of a configured backend. Run the"
+        error "full setup first:"
+        error "  $PROG_NAME --portal URL --allowed-bastions IDS [OPTIONS]"
+        return 1
+    fi
+
+    prompt_allowed_bastions
+    normalize_allowed_bastions
+
+    if [ -e "$OB_ALLOWED_BASTIONS_FILE" ]; then
+        old=$(read_allowed_bastions) || {
+            error "Could not read $OB_ALLOWED_BASTIONS_FILE"
+            return 1
+        }
+        if [ "$old" = "$BASTION_ALLOWED_IDS" ]; then
+            info "Allowed bastions unchanged: ${old:-<empty: any vouched bastion>}"
+            return 0
+        fi
+        info "Allowed bastions were: ${old:-<empty: any vouched bastion>}"
+    else
+        info "No $OB_ALLOWED_BASTIONS_FILE: this backend accepts direct SSO"
+        info "certificates until it exists."
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would write $OB_ALLOWED_BASTIONS_FILE: ${BASTION_ALLOWED_IDS:-<empty: any vouched bastion>}"
+        return 0
+    fi
+    install_allowed_bastions || return 1
+    info "Updated $OB_ALLOWED_BASTIONS_FILE, effective from the next hop."
+    if [ -e "$BACKUP_DIR" ]; then
+        info "The previous list is saved in $BACKUP_DIR."
+    fi
+    info "Nothing else was reconfigured: sshd, PAM and the enrollment are unchanged."
 }
 
 # Without sshd_config.d an existing block is never rewritten, so a role
@@ -2058,6 +2126,13 @@ normalize_allowed_bastions() {
     normalized=""
     for entry in $raw; do
         case "$entry" in
+            -*)
+                # No bastion id starts with '-': this is the next option,
+                # taken as the value of an --allowed-bastions left empty.
+                error "Invalid bastion id in the allowed-bastions list: '$entry'"
+                error "Did --allowed-bastions miss its value? Pass \"\" for any vouched bastion."
+                exit 1
+                ;;
             *[!A-Za-z0-9._-]*)
                 error "Invalid bastion id in the allowed-bastions list: '$entry'"
                 error "Ids are what 'ob-bastion-id' prints on a bastion ([A-Za-z0-9._-])."
@@ -2083,7 +2158,10 @@ prompt_allowed_bastions() {
     warn "Run 'ob-bastion-id' on each bastion to get its id."
     while :; do
         printf "Allowed bastion ids (comma-separated): " >&2
-        IFS= read -r input
+        if ! IFS= read -r input && [ -z "$input" ]; then
+            error "No answer on standard input: pass --allowed-bastions IDS or --allow-any-bastion."
+            exit 1
+        fi
         # Separators alone normalize to the empty list, which needs the "y".
         if [ -n "${input//[[:space:],;]/}" ]; then
             BASTION_ALLOWED_IDS="$input"
@@ -2409,6 +2487,10 @@ Backend options:
                           if omitted. An EMPTY list accepts a hop from any host
                           enrolled in the project that can declare itself a
                           bastion to the SSO -- see doc/references/security-reference.rst.
+                          Without --portal, on a backend already set up, it
+                          replaces the list and changes nothing else (only
+                          --allow-any-bastion, --yes, --dry-run and --insecure,
+                          which has no effect there, go with it).
       --allow-any-bastion Answer the prompt above with "any bastion", without
                           being asked. Same (weaker) result as an empty list;
                           the point is that it is written down. Non-interactive
@@ -2418,9 +2500,10 @@ Backend options:
                           with --max-security, which configures it regardless)
   --no-create-user        Don't enable automatic user creation
 
-Example:
+Examples:
   $PROG_NAME${role_opt} --portal https://auth.example.com \\
       --server-group production --allowed-bastions bastion-01
+  $PROG_NAME${role_opt} --allowed-bastions bastion-01,bastion-02
 
 What this script does:
   1. Downloads SSH CA public key from LLNG
@@ -2466,6 +2549,13 @@ EOF
 
 parse_args() {
     while [ $# -gt 0 ]; do
+        case "$1" in
+            --allowed-bastions | --allow-any-bastion) ALLOWLIST_OPT_GIVEN=true ;;
+            # --insecure has no effect on an update, which contacts no
+            # portal; accepted so that the full-setup command line works.
+            -y | --yes | -n | --dry-run | -k | --insecure | --node-role | -h | --help | -V | --version) ;;
+            *) SETUP_OPTS_GIVEN+=("$1") ;;
+        esac
         case "$1" in
             -p|--portal)
                 if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
@@ -2687,8 +2777,23 @@ main() {
             ;;
     esac
 
+    if [ "$ALLOWLIST_OPT_GIVEN" = "true" ] && [ -z "$PORTAL_URL" ]; then
+        if [ ${#SETUP_OPTS_GIVEN[@]} -gt 0 ]; then
+            error "Without --portal, $PROG_NAME only updates the allowed bastions of a"
+            error "configured backend. Not with ${SETUP_OPTS_GIVEN[*]}: pass --portal for"
+            error "the full setup, or leave ${SETUP_OPTS_GIVEN[*]} out."
+            exit 1
+        fi
+        update_allowed_bastions || exit 1
+        exit 0
+    fi
+
     if [ -z "$PORTAL_URL" ]; then
         error "Portal URL is required (-p/--portal)"
+        if is_backend; then
+            error "To change only the allowed bastions of a configured backend:"
+            error "  $PROG_NAME --allowed-bastions IDS"
+        fi
         exit 1
     fi
 

@@ -483,7 +483,7 @@ test_sudo_fresh_otp_optin() {
 # matching nothing (every hop denied, unexplained), and a whitespace-only value
 # would silently mean "any bastion" while looking configured.
 test_allowed_bastions_normalised() {
-    local rc1 rc2 rc3
+    local rc1 rc2 rc3 rc4
     (
         source_script "ob-backend-setup"
         BASTION_ALLOWED_IDS="b1, b2 ;b3"
@@ -504,10 +504,17 @@ test_allowed_bastions_normalised() {
         normalize_allowed_bastions 2>/dev/null
     )
     rc3=$?
-    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -ne 0 ]; then
-        pass "allowed-bastions list normalised, blank collapses, junk rejected"
+    # `--allowed-bastions --dry-run`: the next option taken as the list.
+    (
+        source_script "ob-backend-setup"
+        BASTION_ALLOWED_IDS="--dry-run"
+        normalize_allowed_bastions 2>/dev/null
+    )
+    rc4=$?
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -ne 0 ] && [ "$rc4" -ne 0 ]; then
+        pass "allowed-bastions list normalised, blank collapses, junk and options rejected"
     else
-        fail "allowed-bastions validation" "rc=$rc1/$rc2/$rc3"
+        fail "allowed-bastions validation" "rc=$rc1/$rc2/$rc3/$rc4"
     fi
 }
 
@@ -658,6 +665,177 @@ test_allowed_bastions_empty_is_explicit() {
     fi
 }
 
+# ── --allowed-bastions without --portal updates a configured backend (#323) ──
+#
+# The documented way to fill the allowlist after an installer run is
+# `ob-backend-setup --allowed-bastions <ids>`. It must rewrite that file alone
+# -- no questionnaire, no sshd/PAM/enrollment step -- and refuse on a host that
+# is not a configured backend. main() runs under `set -euo pipefail`, as the
+# real command does (the harness strips it), against a scratch root.
+
+# $1 = "backend", "bastion" or "none" (sshd drop-in present); the allowlist
+# starts as "old1 old2". Prints the root.
+make_update_root() {
+    local root
+    root=$(mktemp -d)
+    mkdir -p "$root/etc/open-bastion" "$root/etc/ssh/sshd_config.d"
+    echo "portal_url = https://auth.example.com" > "$root/etc/open-bastion/openbastion.conf"
+    if [ "$1" != "none" ]; then
+        echo "# managed" > "$root/etc/ssh/sshd_config.d/00-open-bastion-$1.conf"
+    fi
+    printf 'old1 old2\n' > "$root/etc/open-bastion/allowed_bastions"
+    chmod 644 "$root/etc/open-bastion/allowed_bastions"
+    printf '%s' "$root"
+}
+
+# $1 = root, then the options. Every step of the full setup is replaced by a
+# marker in $root/full-setup.log; stdin is closed, so any question fails.
+run_update() {
+    local root="$1"
+    shift
+    (
+        load_setup_as ob-backend-setup || exit 99
+        set -euo pipefail
+        OB_CONFIG="$root/etc/open-bastion/openbastion.conf"
+        OB_ALLOWED_BASTIONS_FILE="$root/etc/open-bastion/allowed_bastions"
+        SSHD_CONFIG="$root/etc/ssh/sshd_config"
+        SSHD_CONFIG_DIR="$root/etc/ssh/sshd_config.d"
+        BACKUP_DIR="$root/backup"
+        check_root() { :; }
+        # The full setup looks for sshd before its first step.
+        mkdir -p "$root/bin" && printf '#!/bin/sh\n' > "$root/bin/sshd" && chmod +x "$root/bin/sshd"
+        PATH="$root/bin:$PATH"
+        local f
+        for f in prompt_required_settings preflight_sshd_config download_ca_key \
+                 prepare_principals_helper configure_pam_openbastion enroll_server \
+                 configure_sshd configure_pam_sshd configure_pam_sudo configure_nss \
+                 restart_sshd; do
+            eval "$f() { echo $f >> '$root/full-setup.log'; exit 42; }"
+        done
+        main "$@"
+    ) </dev/null
+}
+
+test_allowed_bastions_update_configured_backend() {
+    local root out rc bad=""
+    root=$(make_update_root backend)
+    local conf_before; conf_before=$(cat "$root/etc/open-bastion/openbastion.conf")
+
+    out=$(run_update "$root" --allowed-bastions "b1, b2" 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad rc=$rc"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "b1 b2" ] || bad="$bad content"
+    [ "$(stat -c %a "$root/etc/open-bastion/allowed_bastions")" = 644 ] || bad="$bad mode"
+    [ "$(stat -c %a "$root/etc/open-bastion")" = 711 ] || bad="$bad dir-mode"
+    [ -e "$root/full-setup.log" ] && bad="$bad full-setup:$(tr '\n' ',' < "$root/full-setup.log")"
+    [ "$(cat "$root/etc/open-bastion/openbastion.conf")" = "$conf_before" ] || bad="$bad conf-changed"
+    grep -q 'old1 old2' <<<"$out" || bad="$bad old-list-not-reported"
+    grep -q 'Continue with' <<<"$out" && bad="$bad asked-to-continue"
+    [ "$(cat "$root/backup/allowed_bastions" 2>/dev/null)" = "old1 old2" ] || bad="$bad no-backup"
+    compgen -G "$root/etc/open-bastion/allowed_bastions.*" >/dev/null && bad="$bad temp-file-left"
+
+    # Same list again: nothing is rewritten.
+    rm -rf "$root/backup"
+    out=$(run_update "$root" --allowed-bastions "b1;b2" 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad same-rc=$rc"
+    grep -q 'unchanged' <<<"$out" || bad="$bad same-not-reported"
+    [ -e "$root/backup" ] && bad="$bad same-rewritten"
+
+    # --dry-run reports and writes nothing.
+    out=$(run_update "$root" --allowed-bastions b3 --dry-run 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad dry-rc=$rc"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "b1 b2" ] || bad="$bad dry-run-wrote"
+    grep -q 'DRY-RUN.*b3' <<<"$out" || bad="$bad dry-run-silent"
+
+    # --insecure, kept from a full-setup command line, is accepted.
+    out=$(run_update "$root" --allowed-bastions "b1 b2" --insecure 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad insecure-rc=$rc"
+    [ -e "$root/full-setup.log" ] && bad="$bad insecure-full-setup"
+
+    # --yes --allow-any-bastion empties it, unprompted.
+    out=$(run_update "$root" --allow-any-bastion --yes 2>&1)
+    rc=$?
+    [ "$rc" -eq 0 ] || bad="$bad any-rc=$rc"
+    [ -z "$(tr -d '[:space:]' < "$root/etc/open-bastion/allowed_bastions")" ] \
+        || bad="$bad any-not-empty"
+    [ -e "$root/full-setup.log" ] && bad="$bad full-setup-later"
+
+    rm -rf "$root"
+    if [ -z "$bad" ]; then
+        pass "--allowed-bastions without --portal updates only the allowlist of a configured backend"
+    else
+        fail "--allowed-bastions without --portal updates only the allowlist of a configured backend" "$bad"
+    fi
+}
+
+test_allowed_bastions_update_refusals() {
+    local root out rc bad=""
+
+    # Not set up: no backend drop-in.
+    root=$(make_update_root none)
+    out=$(run_update "$root" --allowed-bastions b1 2>&1)
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad unconfigured-rc=$rc"
+    grep -q -- '--portal' <<<"$out" || bad="$bad unconfigured-no-hint"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad unconfigured-wrote"
+    rm -rf "$root"
+
+    # Backend drop-in but no openbastion.conf.
+    root=$(make_update_root backend)
+    rm -f "$root/etc/open-bastion/openbastion.conf"
+    run_update "$root" --allowed-bastions b1 >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad no-conf-rc=$rc"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad no-conf-wrote"
+    rm -rf "$root"
+
+    # A bastion.
+    root=$(make_update_root bastion)
+    out=$(run_update "$root" --allowed-bastions b1 2>&1)
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad bastion-rc=$rc"
+    grep -q 'configured as a bastion' <<<"$out" || bad="$bad bastion-msg"
+    rm -rf "$root"
+
+    # An invalid id, on a configured backend: the list is left as it was.
+    root=$(make_update_root backend)
+    out=$(run_update "$root" --allowed-bastions 'b1,bad/id' 2>&1)
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad invalid-rc=$rc"
+    grep -q "Invalid bastion id.*bad/id" <<<"$out" || bad="$bad invalid-msg"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad invalid-wrote"
+
+    # Another setup option without --portal: refused, not half-applied.
+    out=$(run_update "$root" --allowed-bastions b1 --no-sudo 2>&1)
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad extra-opt-rc=$rc"
+    grep -q -- '--no-sudo' <<<"$out" || bad="$bad extra-opt-msg"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad extra-opt-wrote"
+
+    # An empty answer with nobody to ask: refused, not an endless prompt loop.
+    out=$(run_update "$root" --allowed-bastions "" 2>&1)
+    rc=$?
+    [ "$rc" -eq 1 ] || bad="$bad empty-eof-rc=$rc"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad empty-eof-wrote"
+
+    # With --portal, it is the full setup, as before.
+    run_update "$root" -p https://auth.example.com --allowed-bastions b1 >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 42 ] || bad="$bad portal-rc=$rc"
+    [ -s "$root/full-setup.log" ] || bad="$bad portal-not-full-setup"
+    [ "$(cat "$root/etc/open-bastion/allowed_bastions")" = "old1 old2" ] || bad="$bad portal-updated-only"
+    rm -rf "$root"
+
+    if [ -z "$bad" ]; then
+        pass "--allowed-bastions update refuses unconfigured hosts, bastions, bad ids and extra options"
+    else
+        fail "--allowed-bastions update refuses unconfigured hosts, bastions, bad ids and extra options" "$bad"
+    fi
+}
+
 # ── Test 18: the generated sshd PAM auth stack is fail-closed (#180) ──
 # A bare "auth required pam_permit.so" made pam_authenticate() succeed for any
 # password if sshd ever ran the stack (PasswordAuthentication /
@@ -714,6 +892,8 @@ run_test test_conf_carries_reference
 run_test test_allowed_bastions_normalised
 run_test test_allowed_bastions_no_glob
 run_test test_allowed_bastions_empty_is_explicit
+run_test test_allowed_bastions_update_configured_backend
+run_test test_allowed_bastions_update_refusals
 
 run_test test_sudo_fresh_otp_optin
 run_test test_pam_sshd_fail_closed

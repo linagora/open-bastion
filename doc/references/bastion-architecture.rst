@@ -594,7 +594,7 @@ Run ``ob-backend-setup`` with the ``--allowed-bastions`` option to configure bac
        --server-group production \
        --allowed-bastions bastion-01,bastion-02
 
-This writes ``/etc/open-bastion/allowed_bastions`` (world-readable 0644 in a 0711 directory so the helper, running as nobody, can read it) and wires ``AuthorizedPrincipalsCommand``. Ansible variable: ``ob_bastion_allowed_bastions``.
+This writes ``/etc/open-bastion/allowed_bastions`` (world-readable 0644 in a 0711 directory so the helper, running as nobody, can read it) and wires ``AuthorizedPrincipalsCommand``. Ansible variable: ``ob_bastion_allowed_bastions``. On a backend already set up, ``ob-backend-setup --allowed-bastions bastion-01,bastion-02`` alone, without ``--portal``, replaces the list and changes nothing else.
 
 .. code:: ini
 

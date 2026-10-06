@@ -69,6 +69,10 @@ here.
   (it used to change only the label), switching a host's role is supported,
   options of another role are refused and `--help` lists only the current
   role's options. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A4).
+- **`ob-backend-setup --allowed-bastions IDS` updates a configured backend**
+  (#323): without `--portal`, it replaces `/etc/open-bastion/allowed_bastions`
+  and changes nothing else, with no questionnaire; it is refused on a host not
+  set up as a backend. See `ob-bastion-setup`(8).
 - **Documentation is a Sphinx (reStructuredText) project**, built with
   `-DBUILD_DOC=ON` and shipped as HTML in the new **`open-bastion-doc`**
   package (APT and GitHub release). References to `doc/*.md` now name `.rst`

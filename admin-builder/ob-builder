@@ -1730,7 +1730,7 @@ render_config_yaml() {
     printf '# artefact each, suffixed with the role\n'
     _yaml_kv target_role "$(IFS=,; printf '%s' "${TARGET_ROLES[*]}")"
     printf '# backend only: bastion ids allowed to reach it, comma-separated (empty =\n'
-    printf '# any bastion enrolled in the same server group)\n'
+    printf '# any vouched bastion of the project)\n'
     _yaml_kv allowed_bastions "$ALLOWED_BASTIONS"
     printf '# yes | no: logind/nproc/at/cron containment (system-wide, see SECURITY.md)\n'
     _yaml_kv enable_hardening "$ENABLE_HARDENING"
