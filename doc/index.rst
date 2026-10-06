@@ -42,6 +42,8 @@ How users reach servers, and how the bastion→backend hop is secured.
 +---------------------------------------------------------------------+-------------------------------------------------------------------------+
 | :doc:`Design: certificate vouching </design/bastion-cert-vouching>` | Why and how the ephemeral-cert hop works                                |
 +---------------------------------------------------------------------+-------------------------------------------------------------------------+
+| :doc:`RDP feasibility study </rdp-feasibility>`                     | WALLIX Redemption RDP proxy integration study                           |
++---------------------------------------------------------------------+-------------------------------------------------------------------------+
 
 .. _index-access--permissions:
 
@@ -172,6 +174,7 @@ Full risk study following the ANSSI EBIOS RM method, for audits and compliance (
    pam-modes
    llng-plugin-parameters
    design/bastion-cert-vouching
+   rdp-feasibility
 
 .. toctree::
    :caption: Access & permissions
