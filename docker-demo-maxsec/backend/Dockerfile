@@ -43,7 +43,7 @@ COPY config/ /src/open-bastion/config/
 COPY README.md /src/open-bastion/README.md
 WORKDIR /src/open-bastion
 # `make install` with CMAKE_INSTALL_PREFIX=/usr puts every ob-* script at the
-# same path the production .deb does (/usr/sbin/ob-enroll, /usr/bin/ob-ssh-cert,
+# same path the production .deb does (/usr/sbin/ob-enroll, /usr/bin/ob-ssh,
 # etc.). New scripts added to CMakeLists.txt land in the demo automatically;
 # no per-Dockerfile allowlist to maintain.
 RUN mkdir -p build && cd build && \

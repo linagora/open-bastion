@@ -118,7 +118,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-record-sink
 %{_sbindir}/ob-session-prune
 %{_sbindir}/ob-krl-refresh
-%{_bindir}/ob-ssh-cert
 %{_bindir}/ob-ssh
 %{_bindir}/ob-scp
 %{_bindir}/ob-sftp
@@ -181,7 +180,6 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-client-jwt.8*
 %{_mandir}/man8/ob-post-upgrade.8*
 %{_mandir}/man8/ob-uninstall.8*
-%{_mandir}/man8/ob-ssh-cert.8*
 %{_mandir}/man5/openbastion.conf.5*
 %{_mandir}/man1/ob-ssh.1*
 %{_mandir}/man1/ob-scp.1*

@@ -2304,7 +2304,7 @@ print_summary() {
             fi
         else
             echo "  1. Verify SSH connectivity from another terminal"
-            echo "  2. Test certificate authentication with ob-ssh-cert"
+            echo "  2. Test certificate authentication with a certificate signed on the portal /ssh page"
             if [ "$DISABLE_SESSION_RECORDER" != "true" ]; then
                 echo "  3. Check session recordings in /var/lib/open-bastion/sessions/"
             fi

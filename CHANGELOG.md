@@ -119,6 +119,9 @@ here.
   as unknown keys, so existing files still load. The documentation now
   describes the actual `LLNGCACHE04` authorization cache.
 - **`nscd` dependency.** Existing installations are left alone.
+- **`ob-ssh-cert`** and its man page (#316): it could not work, because the
+  portal's `/ssh/sign` route authenticates with the SSO cookie and ignores the
+  Bearer token the script sent. Sign keys on the portal's `/ssh` page.
 
 ### Fixed
 
