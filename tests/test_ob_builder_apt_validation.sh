@@ -207,7 +207,7 @@ YML
 
     local out rc
     out=$("$BUILDER" --config "$cfg" --repo-keyring "$FAKE_KEYRING" \
-                     --output-shell "$TEST_TMPDIR/out.sh" --dry-run 2>&1); rc=$?
+                     --output-shell "$TEST_TMPDIR/out" --dry-run 2>&1); rc=$?
 
     if [ $rc -ne 0 ] && grep -qi "invalid apt_url" <<<"$out"; then
         test_pass "YAML config path: hostile apt_url refused by the builder"

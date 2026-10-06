@@ -17,6 +17,8 @@ move independently, so each part below says when it applies.
 
 If you do both: Part A on every host first, then Part B.
 
+**Part C — scripts that call `ob-builder`.** Only if they pass `--output-shell`.
+
 ---
 
 ## Part A — on every host
@@ -295,3 +297,26 @@ once the portal restarts on 0.6.0. Set it **alongside** the vhost
 
 The full portal-side list is in the plugins'
 [UPGRADING.md](https://github.com/linagora/lemonldap-ng-plugins/blob/main/UPGRADING.md).
+
+---
+
+## Part C — scripts that call `ob-builder`
+
+### C1. `--output-shell` takes a directory
+
+```sh
+ob-builder --config build.yml --output-shell out/
+# writes out/bootstrap-<slug>-<role>.sh, its .sig, out/PORTAL-CHECKLIST-<role>.md
+```
+
+It used to be a file name, with the role inserted when there were several. A
+path ending in `.sh`, or naming an existing file, is now refused, so a script
+still passing `--output-shell bootstrap.sh` stops with:
+
+```
+--output-shell takes a directory, not a file name: ...
+```
+
+Pass the directory instead, and take the installer from
+`<dir>/bootstrap-<slug>-<role>.sh`: the role is in the name even for a single
+role.

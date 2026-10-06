@@ -353,7 +353,7 @@ test_questionnaire_offer() {
 test_cli_refuses_overwrite() {
     local cfg="$TEST_TMPDIR/same.yml" out rc
     printf 'deployment_slug: x\n' > "$cfg"
-    out=$(bash "$BUILDER" --config "$cfg" --save-config "$cfg" --output-shell "$TEST_TMPDIR/o.sh" 2>&1); rc=$?
+    out=$(bash "$BUILDER" --config "$cfg" --save-config "$cfg" --output-shell "$TEST_TMPDIR/o" 2>&1); rc=$?
     if [ "$rc" -ne 0 ] && grep -q 'would overwrite the --config file' <<<"$out" \
        && [ "$(cat "$cfg")" = "deployment_slug: x" ]; then
         test_pass "--save-config refuses to overwrite the --config file"
@@ -382,9 +382,9 @@ test_dry_run_writes_nothing() {
 
 test_replay_command_in_header() {
     local cfg="$TEST_TMPDIR/hdr.yml"
-    ( set_rich_state; OUTPUT_SHELL="./b oot.sh"; OUTPUT_ANSIBLE="./role"; SIGN_WITH=""
+    ( set_rich_state; OUTPUT_SHELL="./b oot"; OUTPUT_ANSIBLE="./role"; SIGN_WITH=""
       validate_inputs >/dev/null 2>&1; save_config "$cfg" >/dev/null 2>&1 )
-    if grep -qF "#   ob-builder --config ${cfg} --output-shell ./b\\ oot.sh --output-ansible ./role" "$cfg"; then
+    if grep -qF "#   ob-builder --config ${cfg} --output-shell ./b\\ oot --output-ansible ./role" "$cfg"; then
         test_pass "header: replay command with the output paths, shell-quoted"
     else
         test_fail "header lacks the replay command" "$(head -3 "$cfg")"
@@ -431,7 +431,7 @@ test_gecos_checked_on_entry() {
 
 test_sign_with_checked_early() {
     local out rc
-    out=$( set_rich_state; SIGN_WITH="0xNOPE-NOT-A-KEY"; OUTPUT_SHELL="$TEST_TMPDIR/x.sh"
+    out=$( set_rich_state; SIGN_WITH="0xNOPE-NOT-A-KEY"; OUTPUT_SHELL="$TEST_TMPDIR/x"
            validate_inputs 2>&1 ); rc=$?
     if [ "$rc" -ne 0 ] && grep -q "No usable GPG secret key '0xNOPE-NOT-A-KEY'" <<<"$out"; then
         test_pass "sign_with: an unusable key stops the build before the SSO fetch"

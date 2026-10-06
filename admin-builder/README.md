@@ -6,7 +6,7 @@
 
 Administrators use `ob-builder` to answer a single questionnaire once, capturing deployment parameters (SSO URL, authentication scenario, target role, etc.). The builder fetches the SSH CA key and JWKS from the SSO server and generates two types of artifacts:
 
-1. **Self-extracting shell installer** (`bootstrap-<slug>.sh`) — can be copied to target servers and executed; handles package installation, configuration, and enrollment
+1. **Self-extracting shell installer** (`bootstrap-<slug>-<role>.sh`) — can be copied to target servers and executed; handles package installation, configuration, and enrollment
 2. **Ansible role tree** — for playbook-based deployments across fleets
 
 Each artifact is self-contained: it embeds the SSO CA key, includes pre-validated configuration, and can be distributed via any channel (scp, artifact repository, CI/CD). On the target server, the artifact installs the Open Bastion package via APT/YUM, writes configuration, optionally launches `ob-enroll` and `ob-bastion-setup` / `ob-backend-setup`, and cleans up automatically. The administrator never distributes secrets in the artifacts; instead, secrets are passed via CLI flags, environment variables, or secure files at deployment time.
@@ -27,7 +27,8 @@ asked again):
 
 1. Deployment slug (name used for the generated script)
 2. Artefacts to generate (`shell`, `ansible` or `both`) and their paths
-   (default `./bootstrap-<slug>.sh` and `./ansible-<slug>`)
+   (default `.`, the directory receiving the shell installers, and
+   `./ansible-<slug>`)
 3. Security scenario (`token-only`, `token+unix`, `keys+llng`, `mixed`, `max-security`)
 4. SSO portal URL (validated via OIDC discovery). An `http://` URL offers to
    switch to `--insecure` (test setups only)
@@ -36,8 +37,8 @@ asked again):
    secret is typed twice)
 7. Server group and policy
 8. Target role(s): `bastion`, `standalone`, `backend` — one or more. With
-   several roles, each artefact is suffixed with the role
-   (`bootstrap-<slug>-bastion.sh`, `ansible-<slug>-backend`, …)
+   several roles, each Ansible role tree is suffixed with the role
+   (`ansible-<slug>-backend`, …)
 9. Allowed bastions (backend), hardening, audit trace, session recording
 10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
 11. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`), self-delete
@@ -46,6 +47,11 @@ asked again):
     `./ob-builder-<slug>.yml`)
 
 With `--config`, at least one of `--output-shell` / `--output-ansible` is required.
+
+`--output-shell` takes a directory, created if missing. ob-builder names
+what it writes there: `bootstrap-<slug>-<role>.sh` for each target role, its
+`.sig` with `--sign-with`, and `PORTAL-CHECKLIST-<role>.md`. A path ending in
+`.sh`, or naming an existing file, is refused.
 
 ## Quick Start (Non-Interactive with Config File)
 
@@ -121,11 +127,12 @@ Generate the artifacts:
 ```bash
 ob-builder \
   --config build.yml \
-  --output-shell bootstrap-prod-backend.sh \
+  --output-shell . \
   --output-ansible /tmp/role-prod-backend/
 ```
 
-The builder fetches the CA SSH key and JWKS from the SSO server, validates the configuration, and produces both a shell installer and Ansible role with all credentials pre-loaded (except the client secret, which is handled separately on the target).
+With `deployment_slug: prod` and `target_role: backend`, the shell installer
+is `./bootstrap-prod-backend.sh`. The builder fetches the CA SSH key and JWKS from the SSO server, validates the configuration, and produces both a shell installer and Ansible role with all credentials pre-loaded (except the client secret, which is handled separately on the target).
 
 ## Outputs
 
@@ -232,7 +239,7 @@ To generate a matched set of bastion and backend artifacts that share the same S
 ob-builder \
   --config build.yml \
   --bundle \
-  --output-shell /tmp/bastion-bundle.sh \
+  --output-shell /tmp/bundle/ \
   --output-ansible /tmp/role-bundle/
 ```
 
@@ -242,7 +249,7 @@ This is useful when deploying an entire PAC at once: a single `build.yml` produc
 
 - **TLS enforced**: The builder refuses `http://` SSO URLs by default. `--insecure` (test setups only; `--allow-http` is a deprecated alias) allows them and disables TLS verification both in the builder and in the generated artefacts: `verify_ssl = false` in `openbastion.conf`, `ob-enroll`/`ob-*-setup` run with `-k`, `ob_verify_ssl: false` in the Ansible role. Without it, `pam_openbastion` refuses an `http://` portal and nobody can log in.
 - **Client secret handling**: Three modes are supported. With `none` the relying party is public (no secret). With `prompt` the secret is asked for at install time on the target (recommended). With `embedded` the secret is baked into the artifact in clear text — convenient but the artifact must then be treated as confidential; the generated installer defaults to `--self-delete` so the script removes itself from disk after a successful run.
-- **GPG signatures**: Use `--sign-with KEYID` to GPG-sign the shell installer; targets can verify with `gpg --verify bootstrap-<slug>.sh.sig bootstrap-<slug>.sh` before execution.
+- **GPG signatures**: Use `--sign-with KEYID` to GPG-sign the shell installer; targets can verify with `gpg --verify bootstrap-<slug>-<role>.sh.sig bootstrap-<slug>-<role>.sh` before execution.
 - **Repository keyring**: Defaults to the Linagora keyring shipped with the builder package (`/usr/share/open-bastion-builder/keyrings/open-bastion-linagora.gpg`). Override via `--repo-keyring` or the `repo_keyring` config key when targeting a different APT mirror.
 - **Existing config protection**: The shell installer refuses to overwrite `/etc/open-bastion` unless `--force` is passed, preventing accidental clobbering of production configurations.
 

@@ -796,7 +796,7 @@ test_builder_deployed_backend() {
     local workdir
     workdir=$(mktemp -d -t ob-builder-test.XXXXXX)
     local cfg="${workdir}/build.yml"
-    local artefact="${workdir}/bootstrap-backend-new.sh"
+    local artefact="${workdir}/shell/bootstrap-cert-demo-backend-new-backend.sh"
 
     cat > "$cfg" <<EOF
 deployment_slug: cert-demo-backend-new
@@ -814,7 +814,7 @@ self_delete: no
 EOF
 
     local rc=0
-    "$builder" --config "$cfg" --output-shell "$artefact" --insecure \
+    "$builder" --config "$cfg" --output-shell "${workdir}/shell" --insecure \
         >"${workdir}/builder.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
         local size
@@ -1067,7 +1067,7 @@ test_builder_scenarios_matrix() {
             total=$((total + 1))
             local slug="m-${scenario//+/-}-${role}"
             local cfg="${matrix_dir}/${slug}.yml"
-            local out="${matrix_dir}/${slug}.sh"
+            local out="${matrix_dir}/${slug}/bootstrap-${slug}-${role}.sh"
             cat > "$cfg" <<EOF
 deployment_slug: ${slug}
 scenario: ${scenario}
@@ -1081,7 +1081,7 @@ target_role: ${role}
 auto_enroll_setup: no
 self_delete: no
 EOF
-            if ! "$builder" --config "$cfg" --output-shell "$out" --insecure \
+            if ! "$builder" --config "$cfg" --output-shell "${matrix_dir}/${slug}" --insecure \
                    > "${matrix_dir}/${slug}.log" 2>&1; then
                 failures=$((failures + 1))
                 details="${details}- $scenario/$role: ob-builder failed (see ${matrix_dir}/${slug}.log)"$'\n'

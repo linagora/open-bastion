@@ -39,6 +39,10 @@ the bastion is enrolled: the usual order is to leave the prompt empty
 list can be set later by editing
 ``/etc/open-bastion/allowed_bastions`` on the backends.
 
+The installers are written as ``bootstrap-<slug>-<role>.sh``, next to
+a ``PORTAL-CHECKLIST-<role>.md``, in the directory given at the
+artefacts question (the current one by default).
+
 The generated scripts are self-contained: they embed the SSO CA key,
 the scenario, the ``client_id`` and the APT repo config. You can
 inspect what is baked in with the ``info`` command (replace ``acme``
@@ -59,7 +63,7 @@ with your slug):
 
    .. code:: bash
 
-     ob-builder --config build.yml --output-shell …
+     ob-builder --config build.yml --output-shell .
 
 See :doc:`ob-builder(1) </references/man/ob-builder>` for the full command
 manual.

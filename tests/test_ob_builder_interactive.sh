@@ -229,31 +229,102 @@ test_output_plan() {
     local got ok=true
     got=$(
         set_baseline
-        OUTPUT_SHELL="./bootstrap-demo.sh"; OUTPUT_ANSIBLE="./ansible-demo/"
+        OUTPUT_SHELL="./out/"; OUTPUT_ANSIBLE="./ansible-demo/"
         TARGET_ROLES=(bastion backend)
         build_output_plan
         printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}" "${_PLAN_ANSIBLE[@]}"
     )
-    [ "$got" = "bastion,backend,./bootstrap-demo-bastion.sh,./bootstrap-demo-backend.sh,./ansible-demo-bastion,./ansible-demo-backend," ] \
+    [ "$got" = "bastion,backend,./out/bootstrap-demo-bastion.sh,./out/bootstrap-demo-backend.sh,./ansible-demo-bastion,./ansible-demo-backend," ] \
         || { ok=false; echo "multi: $got"; }
     got=$(
         set_baseline
-        OUTPUT_SHELL="./bootstrap-demo.sh"
+        OUTPUT_SHELL="."; OUTPUT_ANSIBLE="./ansible-demo"
         TARGET_ROLES=(standalone)
         build_output_plan
         printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}" "${_PLAN_ANSIBLE[@]}"
     )
-    [ "$got" = "standalone,./bootstrap-demo.sh,," ] || { ok=false; echo "single: $got"; }
+    [ "$got" = "standalone,./bootstrap-demo-standalone.sh,./ansible-demo," ] || { ok=false; echo "single: $got"; }
     got=$(
         set_baseline
-        OUTPUT_SHELL="/tmp/b.sh"; BUNDLE=1
+        OUTPUT_SHELL="/tmp/b"; BUNDLE=1
         TARGET_ROLE=backend; TARGET_ROLES=(backend)
         build_output_plan
         printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}"
     )
-    [ "$got" = "backend,bastion,/tmp/b.sh,/tmp/b-bastion.sh," ] || { ok=false; echo "bundle: $got"; }
-    $ok && test_pass "build_output_plan: single role as-is, several suffixed, bundle pairing unchanged" \
+    [ "$got" = "backend,bastion,/tmp/b/bootstrap-demo-backend.sh,/tmp/b/bootstrap-demo-bastion.sh," ] || { ok=false; echo "bundle: $got"; }
+    $ok && test_pass "build_output_plan: installers named bootstrap-<slug>-<role>.sh in --output-shell DIR" \
          || test_fail "build_output_plan derived wrong paths"
+}
+
+# --output-shell names a directory; a file name is refused rather than
+# silently turned into a directory.
+test_check_output_shell_dir() {
+    local ok=true p
+    mkdir -p "$TEST_TMPDIR/csd/dir" "$TEST_TMPDIR/csd/odd.sh"
+    : > "$TEST_TMPDIR/csd/file"
+    for p in "$TEST_TMPDIR/csd/new" "$TEST_TMPDIR/csd/new/" "$TEST_TMPDIR/csd/dir" \
+             "$TEST_TMPDIR/csd/odd.sh" "." "$TEST_TMPDIR/csd/x.sh/"; do
+        check_output_shell_dir "$p" >/dev/null || { ok=false; echo "refused: $p"; }
+    done
+    for p in "boot.sh" "$TEST_TMPDIR/csd/boot.sh" "$TEST_TMPDIR/csd/file"; do
+        check_output_shell_dir "$p" >/dev/null && { ok=false; echo "accepted: $p"; }
+    done
+    grep -q 'takes a directory' <<< "$(check_output_shell_dir "$TEST_TMPDIR/csd/a/boot.sh")" \
+        || { ok=false; echo "no explanation"; }
+    $ok && test_pass "check_output_shell_dir: directories accepted, *.sh and existing files refused" \
+         || test_fail "check_output_shell_dir accepted or refused the wrong paths"
+}
+
+# The real script (with set -euo pipefail): refused before anything is
+# written, the config not even read.
+test_cli_refuses_shell_file() {
+    local ok=true out rc cfg="$TEST_TMPDIR/refuse.yml"
+    printf 'deployment_slug: demo\n' > "$cfg"
+    out=$(cd "$TEST_TMPDIR" && bash "$BUILDER" --config "$cfg" --output-shell "$TEST_TMPDIR/boot.sh" 2>&1); rc=$?
+    { [ "$rc" -ne 0 ] && grep -q 'takes a directory, not a file name' <<< "$out" \
+      && [ ! -e "$TEST_TMPDIR/boot.sh" ] && ! grep -q 'Loading config' <<< "$out"; } \
+        || { ok=false; echo "*.sh (rc=$rc): $out"; }
+    : > "$TEST_TMPDIR/plainfile"
+    out=$(bash "$BUILDER" --config "$cfg" --output-shell "$TEST_TMPDIR/plainfile" 2>&1); rc=$?
+    { [ "$rc" -ne 0 ] && grep -q 'exists but is not one' <<< "$out"; } \
+        || { ok=false; echo "regular file (rc=$rc): $out"; }
+    $ok && test_pass "ob-builder --output-shell FILE: refused with an explanation, nothing written" \
+         || test_fail "ob-builder --output-shell FILE not refused"
+}
+
+# Whole run through main(): DIR created, files named by ob-builder, checklists
+# in DIR and not in the current directory.
+test_main_writes_into_dir() {
+    local ok=true cfg="$TEST_TMPDIR/maindir.yml" dir="$TEST_TMPDIR/shell-out/sub" cwd="$TEST_TMPDIR/cwd" rc=0 f
+    mkdir -p "$cwd"
+    cat > "$cfg" <<YML
+deployment_slug: demo
+scenario: max-security
+portal_url: https://sso.example.com
+client_id: pam-access
+client_secret_mode: prompt
+server_group: default
+target_role: bastion
+YML
+    (
+        cd "$cwd" || exit 1
+        fetch_sso_assets() {
+            WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
+            printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
+        }
+        main --config "$cfg" --bundle --repo-keyring "$FAKE_KEYRING" --output-shell "$dir"
+    ) >"$TEST_TMPDIR/maindir.log" 2>&1 || rc=$?
+    [ "$rc" -eq 0 ] || { ok=false; echo "main failed (rc=$rc)"; tail -5 "$TEST_TMPDIR/maindir.log"; }
+    for f in bootstrap-demo-bastion.sh bootstrap-demo-backend.sh \
+             PORTAL-CHECKLIST-bastion.md PORTAL-CHECKLIST-backend.md; do
+        [ -f "$dir/$f" ] || { ok=false; echo "missing $dir/$f"; }
+    done
+    [ -x "$dir/bootstrap-demo-bastion.sh" ] || { ok=false; echo "installer not executable"; }
+    [ -z "$(ls -A "$cwd")" ] || { ok=false; echo "written in the cwd: $(ls -A "$cwd")"; }
+    grep -qF "Portal checklist: $dir/PORTAL-CHECKLIST-backend.md" "$TEST_TMPDIR/maindir.log" \
+        || { ok=false; echo "summary does not name the checklist in DIR"; }
+    $ok && test_pass "main: --output-shell DIR created, bootstrap-<slug>-<role>.sh and checklists inside it" \
+         || test_fail "main did not write the shell artefacts into --output-shell DIR"
 }
 
 # Full questionnaire, two roles, outputs and repo options asked.
@@ -269,7 +340,7 @@ test_questionnaire_full() {
         REPO_KEYRING=""; INSECURE=0
         local -a a=(
             "lab"                   # slug
-            "both" "" ""            # outputs + default paths
+            "both" "x.sh" "" ""     # outputs: a file name re-asked, then default paths
             ""                      # scenario (default)
             "http://sso.lab" "n"    # http refused once...
             "http://sso.lab" "y"    # ...then accepted with --insecure
@@ -294,7 +365,7 @@ test_questionnaire_full() {
             "$PORTAL_URL" "$EMBEDDED_CLIENT_SECRET" "${TARGET_ROLES[*]}" "$ALLOWED_BASTIONS" \
             "$DISABLE_SESSION_RECORDER" "$APT_URL" "$REPO_KEYRING" "${_PLAN_SHELL[*]}" "$(answers_left)"
     )
-    local want="./bootstrap-lab.sh|./ansible-lab|1|1|http://sso.lab|x|bastion backend|b1|yes|$DEFAULT_APT_URL|$FAKE_KEYRING|./bootstrap-lab-bastion.sh ./bootstrap-lab-backend.sh|0|"
+    local want=".|./ansible-lab|1|1|http://sso.lab|x|bastion backend|b1|yes|$DEFAULT_APT_URL|$FAKE_KEYRING|./bootstrap-lab-bastion.sh ./bootstrap-lab-backend.sh|0|"
     if [ "$got" = "$want" ]; then
         test_pass "questionnaire: outputs, http -> --insecure, confirmed secret, two roles, repo options"
     else
@@ -481,6 +552,9 @@ test_validate_http_needs_insecure
 test_ask_secret_confirm
 test_multi_role_loop
 test_output_plan
+test_check_output_shell_dir
+test_cli_refuses_shell_file
+test_main_writes_into_dir
 test_questionnaire_full
 test_questionnaire_skips_cli_values
 test_rendered_installer
