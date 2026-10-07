@@ -135,7 +135,14 @@ HTTP client
    Public-key pinning, as ``curl``'s ``CURLOPT_PINNEDPUBLICKEY``: a
    semicolon-separated list of ``sha256//<base64>`` pins or paths to PEM
    files. When set, the portal's certificate public key must match one of
-   them. The value is taken literally.
+   them, even with ``verify_ssl = false``. The value is taken literally.
+
+   Enforced by the PAM module, the NSS module and ``ob-cert-daemon``, which
+   all read it from this file; the commands (``ob-heartbeat``,
+   ``ob-bastion-id``, ``ob-enroll``…) do not pin. A value that is not a pin
+   is refused, not ignored: the PAM module does not load, and the other two
+   make no portal call. List the next key beside the current one before the
+   portal's certificate is renewed.
 
 Request signing
 ~~~~~~~~~~~~~~~
@@ -147,7 +154,8 @@ Request signing
    makes. It must equal the portal's ``pamAccessRequestSigningSecret``:
    one value for the whole fleet, proving fleet membership rather than
    identifying a caller. Generate one with ``openssl rand -hex 32``. The
-   value is taken literally, ``#`` included.
+   value is taken literally, ``#`` included. The NSS module reads it from
+   this file too, for ``/pam/userinfo``.
 
 Signed answers
 ~~~~~~~~~~~~~~
