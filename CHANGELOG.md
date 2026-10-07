@@ -221,6 +221,15 @@ here.
 
 ### Security
 
+- **Every connection to the portal requires TLS 1.3** (#330): the token
+  refresh, `ob-cert-daemon`, the NSS module and every command (`ob-enroll`,
+  `ob-heartbeat`, `ob-krl-refresh`, `ob-bastion-id`, `ob-bastion-setup`,
+  `ob-uninstall`, `ob-session-monitor`, `ob-desktop-setup`, ob-builder) used
+  curl's default and accepted TLS 1.2; only the PAM module's own client
+  required 1.3. `min_tls_version` is no longer a setting: it never reached
+  that client, and an existing line is now ignored (logged unless `13`).
+  ob-builder and the Ansible role stop writing it. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A8).
 - **Session recording could be bypassed** (#287): any command that looked like
   scp, rsync or sftp ran unrecorded, so `ssh -tt bastion 'scp -t /tmp/x; bash'`
   gave an unrecorded shell. Only the exact commands genuine clients send now

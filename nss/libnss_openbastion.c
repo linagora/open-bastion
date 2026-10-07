@@ -2080,6 +2080,7 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, g_config.timeout);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
 
     if (!g_config.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);

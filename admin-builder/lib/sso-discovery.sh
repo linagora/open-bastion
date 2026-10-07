@@ -33,7 +33,7 @@ SSO_CA_FINGERPRINT=""
 # we prefer it but accept lower. Connect-timeout keeps the builder snappy
 # when the SSO is unreachable.
 _sso_curl_opts() {
-    local -a opts=("-sS" "-f" "--connect-timeout" "10" "--max-time" "30")
+    local -a opts=("-sS" "-f" "--tlsv1.3" "--connect-timeout" "10" "--max-time" "30")
     if [ "${OB_BUILDER_INSECURE:-0}" = "1" ]; then
         opts+=("-k")
     fi

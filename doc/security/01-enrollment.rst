@@ -667,7 +667,6 @@ Le JWT (``client_assertion``) est signé avec le ``client_secret`` mais celui-ci
 
    # /etc/open-bastion/openbastion.conf
    verify_ssl = true          # Ne JAMAIS mettre false en production
-   min_tls_version = 1.3      # Imposer TLS 1.3
    cert_pin = sha256//...     # Pinning du certificat LLNG (recommandé)
 
 .. code:: ini
@@ -1371,7 +1370,6 @@ Configuration minimale sécurisée
 
    # Sécurité TLS
    verify_ssl = true
-   min_tls_version = 1.3
 
    # Credentials OIDC (plutôt que les passer en CLI)
    client_id = pam-access
@@ -1389,7 +1387,6 @@ Configuration renforcée
 
    portal_url = https://auth.example.com
    verify_ssl = true
-   min_tls_version = 1.3
 
    # Certificate pinning (fortement recommandé)
    cert_pin = sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

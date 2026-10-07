@@ -1963,7 +1963,6 @@ MODE
         E)
             cat << 'MODE'
 # Mode E — maximum security (SSO certs only, sudo via LLNG token, KRL)
-min_tls_version = 13
 cache_enabled = true
 cache_ttl = 60
 ssh_key_policy_enabled = true
@@ -2005,7 +2004,6 @@ YML
             ;;
         E)
             cat << 'YML'
-ob_min_tls_version: 13
 ob_cache_enabled: true
 ob_cache_ttl: 60
 ob_ssh_key_policy_enabled: true

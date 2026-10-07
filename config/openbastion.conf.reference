@@ -83,7 +83,9 @@
 # PEM file holding the CA that signed the portal's certificate.
 # ca_cert =
 
-# Minimum TLS version: 12 (TLS 1.2) or 13 (TLS 1.3).
+# Not a setting: every connection to the portal requires TLS 1.3. The key is
+# still accepted so that existing files load; a value other than 13 or 1.3 is
+# logged as ignored.
 # min_tls_version = 13
 
 # Public-key pinning, as curl's CURLOPT_PINNEDPUBLICKEY: semicolon-separated

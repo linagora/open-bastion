@@ -309,6 +309,7 @@ int token_manager_refresh(token_manager_t *tm,
     curl_easy_setopt(tm->curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(tm->curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(tm->curl, CURLOPT_TIMEOUT, (long)tm->config.timeout);
+    curl_easy_setopt(tm->curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
     curl_easy_setopt(tm->curl, CURLOPT_SSL_VERIFYPEER, tm->config.verify_ssl ? 1L : 0L);
     curl_easy_setopt(tm->curl, CURLOPT_SSL_VERIFYHOST, tm->config.verify_ssl ? 2L : 0L);
 
@@ -443,6 +444,7 @@ int token_manager_introspect(token_manager_t *tm,
     curl_easy_setopt(tm->curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(tm->curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(tm->curl, CURLOPT_TIMEOUT, (long)tm->config.timeout);
+    curl_easy_setopt(tm->curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
     curl_easy_setopt(tm->curl, CURLOPT_SSL_VERIFYPEER, tm->config.verify_ssl ? 1L : 0L);
     curl_easy_setopt(tm->curl, CURLOPT_SSL_VERIFYHOST, tm->config.verify_ssl ? 2L : 0L);
 

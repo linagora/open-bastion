@@ -216,6 +216,22 @@ edited it. Every option, commented out with its default, is now in
 `/usr/share/open-bastion/openbastion.conf.reference`; read it there, not in a
 copy you keep under `/etc`. Your `openbastion.conf` is not touched.
 
+### A9. The portal must speak TLS 1.3
+
+Every connection to the portal now requires TLS 1.3: the PAM and NSS modules,
+`ob-cert-daemon` and the commands, `ob-enroll` and `ob-heartbeat` included.
+Until now only the PAM module did, so a portal limited to TLS 1.2 enrolled
+hosts and kept their tokens alive while every login failed. Check from one
+host, before upgrading:
+
+```sh
+curl --tlsv1.3 -sS -o /dev/null https://auth.example.com/ && echo OK
+```
+
+A portal that fails it goes behind a TLS 1.3 terminator; there is no setting
+to lower the minimum. `min_tls_version` is no longer one: an existing line is
+ignored, and logged when it asks for anything but `13`.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0

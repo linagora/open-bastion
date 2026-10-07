@@ -1222,7 +1222,7 @@ revoke_one() {
         jwt=$(client_assertion) || return 1
         [ -n "$jwt" ] || return 1
     fi
-    opts=(-sS -f --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}'
+    opts=(-sS -f --tlsv1.3 --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}'
           -H 'Content-Type: application/x-www-form-urlencoded' --data-binary @-)
     [ "$VERIFY_SSL" = "false" ] && opts+=(-k)
     code=$(printf '%s\n%s\n%s\n%s\n' "$token" "$hint" "$CLIENT_ID" "$jwt" \

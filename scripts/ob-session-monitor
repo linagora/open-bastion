@@ -107,7 +107,7 @@ read_config() {
 
 check_portal() {
     local url="${PORTAL_URL}/desktop/login?check=1"
-    if curl -sf -o /dev/null -m 5 "$url" 2>/dev/null; then
+    if curl -sf --tlsv1.3 -o /dev/null -m 5 "$url" 2>/dev/null; then
         return 0
     fi
     return 1
@@ -152,7 +152,7 @@ check_user_valid() {
     fi
 
     local raw curl_rc=0
-    raw=$(curl -s -m 10 -w '\n%{http_code}' \
+    raw=$(curl -s --tlsv1.3 -m 10 -w '\n%{http_code}' \
         -H "Content-Type: application/json" \
         ${auth_header:+-H "$auth_header"} \
         "${SIGN_HEADERS[@]}" \

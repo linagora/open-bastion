@@ -321,7 +321,7 @@ validate_config() {
 
 # No -f: call sites check the status and need the body to diagnose failures.
 build_curl_opts() {
-    CURL_OPTS=("-s")
+    CURL_OPTS=("-s" "--tlsv1.3")
 
     if [ -n "${INSECURE:-}" ]; then
         CURL_OPTS+=("-k")

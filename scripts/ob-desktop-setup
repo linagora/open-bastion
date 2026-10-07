@@ -390,7 +390,7 @@ test_connectivity() {
         return
     fi
 
-    if curl -s --connect-timeout 5 "$PORTAL_URL/desktop/login" > /dev/null 2>&1; then
+    if curl -s --tlsv1.3 --connect-timeout 5 "$PORTAL_URL/desktop/login" > /dev/null 2>&1; then
         log_success "Successfully connected to portal"
     else
         log_warn "Could not connect to portal. Please verify the URL and network configuration."

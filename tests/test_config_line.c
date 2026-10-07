@@ -255,6 +255,11 @@ static void test_unknown_keys(void)
           "verify_ssl                    -> recognised");
     CHECK(classify("auth_cache = true") == 0,
           "auth_cache                    -> recognised");
+    /* Not a setting any more (TLS 1.3 is required), but existing files carry it. */
+    CHECK(classify("min_tls_version = 13") == 0,
+          "min_tls_version = 13          -> recognised, no unknown-key warning");
+    CHECK(classify("min_tls_version = 12") == 0,
+          "min_tls_version = 12          -> recognised, ignored (logged)");
 #ifdef ENABLE_DESKTOP_SSO
     CHECK(classify("offline_cache_ttl = 86400") == 0,
           "offline_cache_ttl             -> recognised (desktop build)");
