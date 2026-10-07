@@ -28,6 +28,7 @@
 #include <sys/stat.h>
 
 #include "ob_sign.h"
+#include "str_utils.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -278,6 +279,72 @@ static void test_load_secret(const char *dir)
           "an over-long secret line is refused, not truncated");
 }
 
+/*
+ * ob_sign_load_settings(): the one pass the NSS module and ob-cert-daemon
+ * make over openbastion.conf for the secret and the pin (#332).
+ */
+static void test_load_settings(const char *dir)
+{
+    char path[512];
+    char *secret = NULL, *pin = NULL;
+    const char *P1 = "sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+    printf("ob_sign_load_settings (#332):\n");
+    char conf[512];
+    snprintf(conf, sizeof(conf),
+             "portal_url = https://x\n"
+             "request_signing_secret = s#1\n"
+             "cert_pin = \"%s\"\n", P1);
+    write_conf(dir, path, sizeof(path), conf, 0600);
+    CHECK(ob_sign_load_settings(path, &secret, &pin) == 0
+          && secret && strcmp(secret, "s#1") == 0 && pin && strcmp(pin, P1) == 0,
+          "both keys read in one pass, quotes removed, '#' kept");
+    free(secret);
+    free(pin);
+
+    write_conf(dir, path, sizeof(path), "portal_url = https://x\n", 0600);
+    CHECK(ob_sign_load_settings(path, &secret, &pin) == 0 && !secret && !pin,
+          "neither key: 0, both NULL (signing and pinning are optional)");
+
+    write_conf(dir, path, sizeof(path),
+               "cert_pin = sha256//old\ncert_pin =\n", 0600);
+    CHECK(ob_sign_load_settings(path, &secret, &pin) == 0 && !pin,
+          "the last assignment wins, and empty counts as absent");
+
+    write_conf(dir, path, sizeof(path), "cert_pin = sha256//x\n", 0600);
+    CHECK(ob_sign_load_settings(path, &secret, NULL) == 0 && !secret,
+          "a NULL output skips that key");
+
+    write_conf(dir, path, sizeof(path), "cert_pin = sha256//x\n", 0644);
+    CHECK(ob_sign_load_settings(path, &secret, &pin) < 0 && !secret && !pin,
+          "a group/world-readable config is refused");
+
+    char *big = malloc(4096);
+    if (!big) exit(1);
+    strcpy(big, "request_signing_secret = s\ncert_pin = /");
+    size_t n = strlen(big);
+    memset(big + n, 'z', 2000);
+    strcpy(big + n + 2000, "\n");
+    write_conf(dir, path, sizeof(path), big, 0600);
+    free(big);
+    CHECK(ob_sign_load_settings(path, &secret, &pin) < 0 && !secret && !pin,
+          "an over-long cert_pin line is refused, and the secret dropped with it");
+
+    printf("str_cert_pin_valid:\n");
+    CHECK(str_cert_pin_valid(P1), "sha256//<44 base64 chars>");
+    CHECK(str_cert_pin_valid("sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+          "sha256// without padding (43)");
+    CHECK(str_cert_pin_valid("/etc/open-bastion/portal.pub"), "a key file path");
+    CHECK(str_cert_pin_valid("sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=;"
+                             "sha256//BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="),
+          "two pins (rotation)");
+    CHECK(!str_cert_pin_valid("md5//AAAA"), "another hash refused");
+    CHECK(!str_cert_pin_valid("sha256//short"), "a short hash refused");
+    CHECK(!str_cert_pin_valid("sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-_"),
+          "base64url refused (libcurl takes standard base64)");
+    CHECK(!str_cert_pin_valid(""), "empty refused");
+}
+
 int main(void)
 {
     printf("=== ob_sign: request signing wire format ===\n");
@@ -292,6 +359,7 @@ int main(void)
     test_failures_are_empty();
     test_nonce();
     test_load_secret(dir);
+    test_load_settings(dir);
 
     char path[512];
     snprintf(path, sizeof(path), "%s/openbastion.conf", dir);

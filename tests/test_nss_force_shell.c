@@ -37,11 +37,13 @@
 const char *test_cache_root(void);
 const char *test_cache_byname(void);
 const char *test_conf_path(void);
+const char *test_pam_conf_path(void);
 #define CACHE_DIR            test_cache_root()
 #define CACHE_DIR_BYNAME     test_cache_byname()
 #define CACHE_TRUSTED_UID    (getuid())
 #define NSS_OB_CONF          test_conf_path()
 #define NSS_CONF_TRUSTED_UID (getuid())
+#define NSS_OB_PAM_CONF      test_pam_conf_path()
 
 #include "../nss/libnss_openbastion.c"
 
@@ -78,6 +80,14 @@ const char *test_conf_path(void)
 {
     static char p[192];
     snprintf(p, sizeof(p), "%s/nss_openbastion.conf", base());
+    return p;
+}
+
+/* openbastion.conf, where the NSS module reads request_signing_secret and cert_pin */
+const char *test_pam_conf_path(void)
+{
+    static char p[192];
+    snprintf(p, sizeof(p), "%s/openbastion.conf", base());
     return p;
 }
 
@@ -332,6 +342,8 @@ static void test_serving_paths(void)
     char sa[256];
     snprintf(sa, sizeof(sa), "%s/no-service-accounts.conf", base());
     g_config.service_accounts_file = strdup(sa);
+    /* An openbastion.conf that neither signs nor pins (#332). */
+    write_file(test_pam_conf_path(), "# no request_signing_secret, no cert_pin\n", 0600);
     g_initialized = 1;
 
     printf("The portal supplies /bin/zsh:\n");

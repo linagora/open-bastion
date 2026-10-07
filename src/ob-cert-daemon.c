@@ -50,6 +50,7 @@
 
 #include "ob_cert_proto.h"
 #include "ob_sign.h"
+#include "str_utils.h"
 
 #define OB_CONFIG "/etc/open-bastion/openbastion.conf"
 #define PROXY_CONFIG "/etc/open-bastion/ssh-proxy.conf"
@@ -174,10 +175,12 @@ struct ob_cfg {
     int verify_ssl;
     long timeout;
     char *signing_secret;   /* request_signing_secret, or NULL: see ob_sign.h */
+    char *cert_pin;         /* cert_pin, or NULL: CURLOPT_PINNEDPUBLICKEY */
 };
 
 /* openbastion.conf: ini-style "key = value". We need portal_url/verify_ssl, and
- * the signing secret -- which is read by ob_sign_load_secret rather than here,
+ * the signing secret and cert_pin -- which are read by ob_sign_load_settings
+ * rather than here,
  * because '#' is an ordinary character in a generated secret and the comment
  * stripping below would silently truncate it (#247). Root-only by construction
  * (every installer writes it 0600 root) and read the same way by the PAM
@@ -417,10 +420,16 @@ int main(void)
      * pamAccessRequestSigningMode=required it would be refused, and the
      * refusal would point at the portal instead of at this file.
      */
-    if (ob_sign_load_secret(OB_CONFIG, &cfg.signing_secret) < 0) {
-        cfg.signing_secret = NULL;
-        fail("cannot read " OB_CONFIG " for request_signing_secret; "
-             "sending this request unsigned");
+    if (ob_sign_load_settings(OB_CONFIG, &cfg.signing_secret, &cfg.cert_pin) < 0) {
+        fail("cannot read " OB_CONFIG " for request_signing_secret and "
+             "cert_pin; sending this request unsigned and unpinned");
+    }
+    /* A pin that cannot be enforced is refused rather than dropped: the
+     * operator who set it asked for this call to be pinned (#332). */
+    if (cfg.cert_pin && !str_cert_pin_valid(cfg.cert_pin)) {
+        fail("invalid cert_pin in " OB_CONFIG " (expected sha256//<base64> "
+             "or the path of a public key)");
+        return 1;
     }
 
     /* strip a trailing slash from portal_url */
@@ -510,6 +519,9 @@ int main(void)
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, cfg.timeout);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_3);
+    if (cfg.cert_pin) {
+        curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, cfg.cert_pin);
+    }
     if (!cfg.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);

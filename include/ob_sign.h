@@ -19,10 +19,10 @@
  * empty string, so the message still ends with a trailing '.'. <path> carries
  * no scheme, host or query string, and <body> is the raw bytes as sent.
  *
- * This header exists because the fleet has four callers of /pam/<endpoint> -- the PAM
- * module, ob-cert-daemon, and the two shell scripts through ob-sign-request --
- * and pamAccessRequestSigningMode=required refuses any of them that gets it
- * wrong (#247).
+ * This header exists because the fleet has several callers of /pam/<endpoint>
+ * -- the PAM and NSS modules, ob-cert-daemon, and the shell scripts through
+ * ob-sign-request -- and pamAccessRequestSigningMode=required refuses any of
+ * them that gets it wrong (#247, #332).
  */
 
 #ifndef OB_SIGN_H
@@ -81,5 +81,20 @@ void ob_sign_compute(const char *secret,
  * secret (see key_holds_opaque_secret in config.c).
  */
 int ob_sign_load_secret(const char *conf_path, char **secret);
+
+/*
+ * Read request_signing_secret and cert_pin out of an openbastion.conf-style
+ * file in one pass, for the portal clients that do not go through config.c:
+ * the NSS module and ob-cert-daemon (#332). Either output may be NULL to skip
+ * that key.
+ *
+ * Returns 0 when the file was read -- each requested value is then set
+ * (caller frees) or left NULL when the key is absent or empty -- and -1, with
+ * both outputs NULL, when the file cannot be read, is not adequately
+ * protected (same policy as ob_sign_load_secret), or carries one of the two
+ * keys on a line too long to read whole. The pin is returned as written: check
+ * it with str_cert_pin_valid() before handing it to libcurl.
+ */
+int ob_sign_load_settings(const char *conf_path, char **secret, char **cert_pin);
 
 #endif /* OB_SIGN_H */

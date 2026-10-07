@@ -252,90 +252,6 @@ static int add_signing_headers(struct curl_slist **headers,
     return 0;
 }
 
-/*
- * Security: Validate certificate pin format (fixes #47)
- * Valid formats:
- * - sha256//base64hash (44 chars of base64 after sha256//)
- * - Path to DER or PEM file (starts with / or .)
- * Multiple pins can be separated by ';'
- * Returns 1 if valid, 0 if invalid
- */
-static int validate_cert_pin_format(const char *pin)
-{
-    if (!pin || !*pin) {
-        return 0;
-    }
-
-    /* Work on a copy to handle multiple pins */
-    char *pin_copy = strdup(pin);
-    if (!pin_copy) {
-        return 0;
-    }
-
-    int valid = 1;
-    char *saveptr = NULL;
-    char *token = strtok_r(pin_copy, ";", &saveptr);
-
-    while (token && valid) {
-        /* Skip leading whitespace */
-        while (*token == ' ') token++;
-
-        /* Strip trailing whitespace */
-        size_t token_len = strlen(token);
-        while (token_len > 0 && token[token_len - 1] == ' ') {
-            token[token_len - 1] = '\0';
-            token_len--;
-        }
-
-        if (strncmp(token, "sha256//", 8) == 0) {
-            /* SHA256 hash format: "sha256//" followed by base64 of 32 bytes
-             * Standard base64 encoding of 32 bytes is 44 characters (with padding);
-             * we also accept 43-character encodings when the trailing padding is omitted.
-             */
-            const char *hash = token + 8;
-            size_t len = strlen(hash);
-            /* Accept standard base64 length for 32 bytes (44 chars) and the
-             * no-padding variant (43 chars). Only the standard base64 alphabet
-             * (+ and /, not - or _) is allowed by the character check below.
-             */
-            if (len < 43 || len > 44) {
-                valid = 0;
-            } else {
-                /* Validate base64 characters */
-                for (size_t i = 0; i < len && valid; i++) {
-                    char c = hash[i];
-                    if (!((c >= 'A' && c <= 'Z') ||
-                          (c >= 'a' && c <= 'z') ||
-                          (c >= '0' && c <= '9') ||
-                          c == '+' || c == '/' || c == '=')) {
-                        valid = 0;
-                    }
-                }
-            }
-        } else if (token[0] == '/' || token[0] == '.') {
-            /* File path - check if it looks like a valid path */
-            /* Basic check: not empty after prefix, no control characters */
-            if (strlen(token) < 2) {
-                valid = 0;
-            } else {
-                for (const char *p = token; *p && valid; p++) {
-                    if ((unsigned char)*p < 32) {
-                        valid = 0;
-                    }
-                }
-            }
-        } else {
-            /* Unknown format */
-            valid = 0;
-        }
-
-        token = strtok_r(NULL, ";", &saveptr);
-    }
-
-    free(pin_copy);
-    return valid;
-}
-
 ob_client_t *ob_client_init(const ob_client_config_t *config)
 {
     if (!config || !config->portal_url) {
@@ -368,7 +284,7 @@ ob_client_t *ob_client_init(const ob_client_config_t *config)
 
     /* Security: Validate certificate pin format before use (fixes #47) */
     if (config->cert_pin) {
-        if (!validate_cert_pin_format(config->cert_pin)) {
+        if (!str_cert_pin_valid(config->cert_pin)) {
             snprintf(client->error, sizeof(client->error),
                      "Invalid certificate pin format. Expected sha256//base64 or file path");
             ob_client_destroy(client);

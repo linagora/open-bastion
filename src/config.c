@@ -1140,6 +1140,16 @@ int config_validate(const pam_openbastion_config_t *config)
         return -7;
     }
 
+    /*
+     * #332: until now nothing read cert_pin, so a malformed one went
+     * unnoticed. The client would refuse it anyway (ob_client_init); refusing
+     * here names the key instead of "Failed to initialize LLNG client".
+     */
+    if (config->cert_pin && *config->cert_pin
+        && !str_cert_pin_valid(config->cert_pin)) {
+        return -8;
+    }
+
     if (!config->portal_url || strlen(config->portal_url) == 0) {
         return -1;  /* portal_url is required */
     }
@@ -1197,6 +1207,13 @@ void config_client_settings(const pam_openbastion_config_t *config,
     client->timeout = config->timeout;
     client->verify_ssl = config->verify_ssl;
     client->ca_cert = config->ca_cert;
+    /*
+     * #332: both keys were parsed and never handed over, so the module's
+     * calls went out unsigned and unpinned whatever openbastion.conf said.
+     */
+    client->signing_secret = config->request_signing_secret;
+    client->cert_pin = (config->cert_pin && *config->cert_pin)
+                       ? config->cert_pin : NULL;
     client->response_signing = config->response_signing;
     client->sso_jwks_file = config->sso_jwks_file;
     client->sso_issuer = config->sso_issuer;
