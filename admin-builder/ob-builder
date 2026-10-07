@@ -1204,8 +1204,22 @@ EOF
     # helper matches it against the bastion=<id> of the hop certificate's
     # key-id. Empty = any vouched bastion of the project.
     if _has_role backend && [ -z "${ALLOWED_BASTIONS-}" ]; then
-        explain "Optional allowlist of the bastions allowed to hop to this backend, given as their bastion_id (comma-separated). You don't pick these values: LLNG assigns a bastion_id to each bastion when it enrolls, and re-enrolling changes it. To get one: deploy the bastion first, then run 'sudo ob-bastion-id' on it. Leave empty to accept a hop from ANY bastion enrolled in the project (weaker: any host enrolled in the project that declares itself a bastion to the SSO could then hop here). The list ends up in /etc/open-bastion/allowed_bastions on the backend; to set it later, put the ids there (one per line, checked on every hop) or re-run 'ob-backend-setup --allowed-bastions <ids>'. Never delete that file: an absent file disables the bastion-voucher check entirely."
-        ALLOWED_BASTIONS=$(ask "Allowed bastion ids (empty = any)" "")
+        # The collect answer is the Ansible role's: it reads the ids on the
+        # bastions themselves. Without an Ansible tree there is nothing to
+        # read them, so the answer is not offered.
+        local _collect_hint="" _collect_answer=""
+        if [ -n "$OUTPUT_ANSIBLE" ]; then
+            _collect_hint=" Answer 'null' to have the Ansible role collect the ids from the bastions themselves: it reads ob-bastion-id on every host of the bastions group while configuring a backend, and stops if one of them cannot answer."
+            _collect_answer=", null = collect"
+        fi
+        explain "Optional allowlist of the bastions allowed to hop to this backend, given as their bastion_id (comma-separated). You don't pick these values: LLNG assigns a bastion_id to each bastion when it enrolls, and re-enrolling changes it. To get one: deploy the bastion first, then run 'sudo ob-bastion-id' on it. Leave empty to accept a hop from ANY bastion enrolled in the project (weaker: any host enrolled in the project that declares itself a bastion to the SSO could then hop here).${_collect_hint} The list ends up in /etc/open-bastion/allowed_bastions on the backend; to set it later, put the ids there (one per line, checked on every hop) or re-run 'ob-backend-setup --allowed-bastions <ids>'. Never delete that file: an absent file disables the bastion-voucher check entirely."
+        ALLOWED_BASTIONS=$(ask "Allowed bastion ids (empty = any${_collect_answer})" "")
+        if [ "$ALLOWED_BASTIONS" = "null" ]; then
+            [ -n "$OUTPUT_ANSIBLE" ] \
+                || die "'null' has the Ansible role collect the ids, and only an Ansible tree can do that. Give the ids, or leave empty to accept any vouched bastion."
+            ALLOWED_BASTIONS=""
+            ALLOWED_BASTIONS_COLLECT=1
+        fi
     fi
 
     # q7c. Optional opt-in features: system hardening, audit trace, and
