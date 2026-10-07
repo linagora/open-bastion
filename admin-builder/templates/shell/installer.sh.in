@@ -26,6 +26,17 @@ TARGET_ROLE="@@TARGET_ROLE@@"
 PORTAL_URL_DEFAULT="@@PORTAL_URL@@"
 CA_SSH_FINGERPRINT="@@CA_SSH_FINGERPRINT@@"
 
+# Signed portal answers (#339). The portal's JWKS (embedded below, canonical
+# form) is the trust anchor the PAM and NSS modules check the answers against.
+# It was fetched for SSO_JWKS_CLIENT_ID only: another client_id is another
+# relying party, whose answers may be signed with other keys. Empty SHA-256 =
+# no JWKS embedded.
+SSO_JWKS_SHA256="@@SSO_JWKS_SHA256@@"
+SSO_JWKS_CLIENT_ID="@@SSO_JWKS_CLIENT_ID@@"
+SSO_JWKS_FILE="/var/lib/open-bastion/jwks/sso-jwks.json"
+# off | prefer | required (built-in default, --response-signing overrides)
+RESPONSE_SIGNING_DEFAULT="@@RESPONSE_SIGNING@@"
+
 # Policies (fixed | modifiable)
 CLIENT_ID_POLICY="@@CLIENT_ID_POLICY@@"
 SERVER_GROUP_POLICY="@@SERVER_GROUP_POLICY@@"
@@ -94,6 +105,10 @@ if [ "${INSECURE_DEFAULT}" = "yes" ]; then
     OPT_INSECURE=true
 fi
 OPT_SELF_DELETE=""   # "", "yes" or "no" — empty means honour SELF_DELETE_DEFAULT
+OPT_RESPONSE_SIGNING=""  # "" = RESPONSE_SIGNING_DEFAULT
+# Resolved in step_config: what openbastion.conf gets and the setup is told.
+RESPONSE_SIGNING_EFFECTIVE="off"
+SSO_JWKS_WRITTEN=false
 
 DISTRO=""  # debian | rhel
 ENROLL_DONE=false
@@ -147,11 +162,16 @@ Options:
   --skip-install            Don't install the open-bastion package (assume it
                             is already present, e.g. built from source)
   --dry-run                 Print actions without executing them
-  --force                   Overwrite existing /etc/open-bastion (normally refused)
+  --force                   Overwrite existing /etc/open-bastion (normally refused),
+                            and the host's JWKS -- even one ob-heartbeat
+                            rotated since -- with the embedded one
   --non-interactive         Fail instead of prompting (for CI)
   --insecure                Disable TLS verification: verify_ssl = false and
                             ob-enroll/setup -k (test setups only; built-in
                             default: ${INSECURE_DEFAULT})
+  --response-signing MODE   off | prefer | required: signed portal answers,
+                            checked against the embedded JWKS (built-in
+                            default: ${RESPONSE_SIGNING_DEFAULT})
   --self-delete             Remove this installer from disk after success
                             (overrides the built-in default: ${SELF_DELETE_DEFAULT})
   --no-self-delete          Keep the installer on disk after success
@@ -162,6 +182,8 @@ Embedded metadata:
   Role:       ${TARGET_ROLE}
   SSO portal: ${PORTAL_URL_DEFAULT}
   CA SHA256:  ${CA_SSH_FINGERPRINT}
+  JWKS SHA-256: ${SSO_JWKS_SHA256:-<none embedded>} (client_id ${SSO_JWKS_CLIENT_ID:-<none>})
+  Signed answers: response_signing = ${RESPONSE_SIGNING_DEFAULT}
   TLS verify: $([ "${INSECURE_DEFAULT}" = "yes" ] && echo "disabled (built with --insecure)" || echo "enabled")
 
 EOF
@@ -205,6 +227,12 @@ parse_args() {
                 OPT_NON_INTERACTIVE=true; shift ;;
             --insecure)
                 OPT_INSECURE=true; shift ;;
+            --response-signing)
+                case "${2:-}" in
+                    off|prefer|required) OPT_RESPONSE_SIGNING="$2" ;;
+                    *) die "--response-signing requires off, prefer or required" ;;
+                esac
+                shift 2 ;;
             --self-delete)
                 OPT_SELF_DELETE=yes; shift ;;
             --no-self-delete)
@@ -234,6 +262,8 @@ cmd_info() {
     echo "  Secret mode:     ${CLIENT_SECRET_MODE}"
     echo "  Auto enroll:     ${AUTO_ENROLL_SETUP}"
     echo "  CA fingerprint:  ${CA_SSH_FINGERPRINT}"
+    echo "  JWKS SHA-256:    ${SSO_JWKS_SHA256:-<none embedded>} (client_id ${SSO_JWKS_CLIENT_ID:-<none>})"
+    echo "  Signed answers:  response_signing = ${RESPONSE_SIGNING_DEFAULT}"
     echo "  TLS verify:      $([ "${INSECURE_DEFAULT}" = "yes" ] && echo "disabled (built with --insecure)" || echo "enabled")"
     exit 0
 }
@@ -347,6 +377,76 @@ resolve_client_secret() {
             log_warn "Entries do not match, try again."
         done
     fi
+}
+
+# The response_signing this host gets. Never prefer/required without a JWKS to
+# check the answers against: prefer would only log a warning on every call,
+# required would refuse them all. The embedded JWKS is usable only for the
+# client_id it was fetched for.
+resolve_response_signing() {
+    local want="${OPT_RESPONSE_SIGNING:-${RESPONSE_SIGNING_DEFAULT}}" why=""
+    if [ -z "${SSO_JWKS_SHA256}" ]; then
+        why="this artefact carries no JWKS"
+    elif [ "${CLIENT_ID}" != "${SSO_JWKS_CLIENT_ID}" ]; then
+        why="the embedded JWKS belongs to client_id '${SSO_JWKS_CLIENT_ID}', this host enrols as '${CLIENT_ID}'"
+    fi
+    if [ -z "${why}" ]; then
+        RESPONSE_SIGNING_EFFECTIVE="${want}"
+        return 0
+    fi
+    case "${want}" in
+        off) RESPONSE_SIGNING_EFFECTIVE=off ;;
+        required)
+            die "response_signing = required, but ${why}. Provide the JWKS with ob-*-setup --sso-jwks FILE, or use --response-signing prefer|off."
+            ;;
+        *)
+            log_warn "Signed answers disabled (response_signing = off): ${why}."
+            log_warn "Enable them later with: ob-*-setup ... --sso-jwks-sha256 <SHA-256 of the portal's JWKS>"
+            RESPONSE_SIGNING_EFFECTIVE=off
+            ;;
+    esac
+}
+
+# Write the embedded JWKS to SSO_JWKS_FILE, root:root 0644, atomically, after
+# checking it is byte for byte what ob-builder fetched. Only when it belongs to
+# this host's client_id.
+write_sso_jwks() {
+    [ -n "${SSO_JWKS_SHA256}" ] && [ "${CLIENT_ID}" = "${SSO_JWKS_CLIENT_ID}" ] || return 0
+    command -v sha256sum >/dev/null 2>&1 || die "sha256sum is required to check the embedded JWKS"
+    local _tmp _got _dir _parent
+    # Before the package, which makes them too: /var/lib/open-bastion 0711
+    # (traversable, not listable), jwks/ root:root 0755 (ob-heartbeat renames
+    # a rotated key set into it).
+    _dir=$(dirname "${SSO_JWKS_FILE}")
+    _parent=$(dirname "${_dir}")
+    if [ ! -d "${_parent}" ]; then
+        mkdir -p "${_parent}"
+        chmod 0711 "${_parent}"
+    fi
+    mkdir -p "${_dir}"
+    chmod 0755 "${_dir}"
+    chown root:root "${_dir}"
+    _tmp=$(mktemp "${SSO_JWKS_FILE}.XXXXXX")
+    if ! base64 -d > "${_tmp}" 2>/dev/null << 'OB_JWKS_EOF'
+@@SSO_JWKS_B64@@
+OB_JWKS_EOF
+    then
+        rm -f "${_tmp}"
+        die "The embedded JWKS cannot be decoded: this artifact is corrupted or was tampered with."
+    fi
+    _got=$(sha256sum "${_tmp}" | awk '{print $1}')
+    if [ "${_got}" != "${SSO_JWKS_SHA256}" ]; then
+        rm -f "${_tmp}"
+        log_error "JWKS fingerprint mismatch!"
+        log_error "  Expected: ${SSO_JWKS_SHA256}"
+        log_error "  Got:      ${_got}"
+        die "The embedded JWKS does not match its build-time SHA-256: this artifact may have been tampered with."
+    fi
+    chmod 0644 "${_tmp}"
+    chown root:root "${_tmp}"
+    mv -f "${_tmp}" "${SSO_JWKS_FILE}"
+    SSO_JWKS_WRITTEN=true
+    log_info "Written: ${SSO_JWKS_FILE} (0644 root:root, SHA-256 ${SSO_JWKS_SHA256})"
 }
 
 # ---------------------------------------------------------------------------
@@ -475,6 +575,7 @@ step_config() {
     resolve_client_id
     resolve_server_group
     resolve_client_secret
+    resolve_response_signing
 
     # pam_openbastion refuses an http portal while verify_ssl is on.
     local _verify_ssl=true
@@ -488,6 +589,10 @@ step_config() {
         log_info "[DRY-RUN]   client_id    = ${CLIENT_ID}"
         log_info "[DRY-RUN]   server_group = ${SERVER_GROUP}"
         log_info "[DRY-RUN]   verify_ssl   = ${_verify_ssl}"
+        log_info "[DRY-RUN]   response_signing = ${RESPONSE_SIGNING_EFFECTIVE}"
+        if [ -n "${SSO_JWKS_SHA256}" ] && [ "${CLIENT_ID}" = "${SSO_JWKS_CLIENT_ID}" ]; then
+            log_info "[DRY-RUN] Would write ${SSO_JWKS_FILE} (0644, SHA-256 ${SSO_JWKS_SHA256})"
+        fi
         log_info "[DRY-RUN]   client_secret= <$([ -n "${CLIENT_SECRET}" ] && echo 'set' || echo 'empty')>"
         if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
             log_info "[DRY-RUN] Would write /etc/open-bastion/service-accounts.conf (0600)"
@@ -524,6 +629,10 @@ OB_CONF_EOF
     _conf_content="${_conf_content//##SERVER_GROUP##/"${SERVER_GROUP}"}"
     _conf_content="${_conf_content//##CLIENT_SECRET##/"${CLIENT_SECRET}"}"
     _conf_content="${_conf_content//##VERIFY_SSL##/"${_verify_ssl}"}"
+    _conf_content="${_conf_content//##RESPONSE_SIGNING##/"${RESPONSE_SIGNING_EFFECTIVE}"}"
+
+    # The trust anchor of signed answers, before the conf that names it.
+    write_sso_jwks
 
     # Atomic write at 0600 root:root.
     local _conf_tmp
@@ -766,6 +875,18 @@ step_enroll() {
 # Step 5 — Role-specific setup
 # ---------------------------------------------------------------------------
 
+# The setup run rewrites openbastion.conf and nss_openbastion.conf: hand it the
+# mode, and the JWKS step_config wrote with its fingerprint, so it neither
+# fetches it again nor asks for a confirmation.
+add_signing_setup_opts() {
+    _setup_opts+=("--response-signing" "${RESPONSE_SIGNING_EFFECTIVE}")
+    if [ "${SSO_JWKS_WRITTEN}" = "true" ] || { [ "${OPT_DRY_RUN}" = "true" ] \
+            && [ -n "${SSO_JWKS_SHA256}" ] && [ "${CLIENT_ID}" = "${SSO_JWKS_CLIENT_ID}" ]; }; then
+        _setup_opts+=("--sso-jwks" "${SSO_JWKS_FILE}" "--sso-jwks-sha256" "${SSO_JWKS_SHA256}")
+    fi
+    return 0
+}
+
 step_setup() {
     log_step "5/5  Role-specific setup (${TARGET_ROLE})"
 
@@ -824,6 +945,7 @@ step_setup() {
             [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             [ "${DISABLE_SESSION_RECORDER}" = "yes" ] && _setup_opts+=("--disable-session-recorder")
+            add_signing_setup_opts
             if [ "${OPT_DRY_RUN}" = "true" ]; then
                 log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-bastion-setup ${_setup_opts[*]}"
                 return 0
@@ -854,6 +976,7 @@ step_setup() {
             # (#265), so the installer would tear down its own work and end green.
             [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
+            add_signing_setup_opts
             if [ "${OPT_DRY_RUN}" = "true" ]; then
                 log_info "[DRY-RUN] Would run: OB_CLIENT_SECRET=<secret> /usr/sbin/ob-backend-setup ${_setup_opts[*]}"
                 return 0
@@ -905,6 +1028,10 @@ print_summary() {
     echo "  Server grp:  ${SERVER_GROUP}"
     echo "  CA key:      /etc/ssh/open-bastion_ca.pub"
     echo "  CA SHA256:   ${CA_SSH_FINGERPRINT}"
+    echo "  Signed answers: response_signing = ${RESPONSE_SIGNING_EFFECTIVE}"
+    if [ -n "${SSO_JWKS_SHA256}" ] && [ "${CLIENT_ID}" = "${SSO_JWKS_CLIENT_ID}" ]; then
+        echo "  JWKS:        ${SSO_JWKS_FILE} (SHA-256 ${SSO_JWKS_SHA256})"
+    fi
     print_bastion_id
     if [ "${OPT_DRY_RUN}" = "true" ]; then
         echo ""

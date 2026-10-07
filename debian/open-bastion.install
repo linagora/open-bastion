@@ -21,6 +21,7 @@ usr/sbin/ob-cert-daemon
 usr/sbin/ob-fp-daemon
 usr/sbin/ob-fp-submit
 usr/sbin/ob-sign-request
+usr/sbin/ob-verify-response
 usr/sbin/ob-client-jwt
 usr/sbin/ob-post-upgrade
 usr/sbin/ob-uninstall
@@ -65,6 +66,7 @@ usr/share/man/man8/ob-fp-daemon.8
 usr/share/man/man8/ob-fp-submit.8
 usr/share/man/man8/ob-record-sink.8
 usr/share/man/man8/ob-sign-request.8
+usr/share/man/man8/ob-verify-response.8
 usr/share/man/man8/ob-client-jwt.8
 usr/share/man/man8/ob-post-upgrade.8
 usr/share/man/man8/ob-uninstall.8

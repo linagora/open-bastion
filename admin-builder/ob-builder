@@ -87,6 +87,13 @@ CONFIG_INSECURE=""
 # builder's own fetches and in the generated artefacts (verify_ssl = false).
 INSECURE=0
 DRY_RUN=0
+# Signed portal answers (#339): off | prefer | required, written as
+# response_signing on the targets. Default prefer (migration step 2): the
+# targets ask for signed answers and check them against the JWKS the artefact
+# carries, but still accept the unsigned answers of a portal whose plugin does
+# not sign yet. `required` would lock them out until it does.
+RESPONSE_SIGNING=""
+RESPONSE_SIGNING_SET=0
 
 # ── Questionnaire-collected variables (also overridable via YAML) ───────
 DEPLOYMENT_SLUG=""
@@ -203,6 +210,16 @@ REPO / SIGNING:
   --apt-component COMP       APT component            (default: $DEFAULT_APT_COMPONENT)
   --sign-with KEYID          GPG-sign the shell output with this key (.sig sidecar)
 
+SIGNED ANSWERS:
+  --response-signing MODE    off | prefer | required (default: prefer). The
+                             portal's JWKS (jwks_uri?client_id=<client_id>) is
+                             fetched for every role and deployed as
+                             /var/lib/open-bastion/jwks/sso-jwks.json; the targets get
+                             response_signing = MODE. Use 'required' only once
+                             the portal signs its answers: before, it refuses
+                             every SSO login. Without a usable JWKS, prefer
+                             builds with off (warning), required stops.
+
 OTHER:
   --insecure                 Allow an http:// SSO URL and skip TLS verification,
                              both here and on the targets (verify_ssl = false,
@@ -278,6 +295,7 @@ EXAMPLES:
   # A bastion and its backends in one run: target_role: "bastion,backend"
   # in build.yml. No portal conversation is repeated, so the two roles share
   # the CA fetched once.
+  # The JWKS of client_id is fetched for every role; see --response-signing.
 
 EOF
 }
@@ -329,6 +347,10 @@ parse_args() {
             --save-config)
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
                 SAVE_CONFIG="$2"; shift 2
+                ;;
+            --response-signing)
+                [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
+                RESPONSE_SIGNING="$2"; RESPONSE_SIGNING_SET=1; shift 2
                 ;;
             --bundle)
                 # Removed: it only prefixed one role with another. Keep the
@@ -456,6 +478,7 @@ _load_config_yq() {
     v=$(_yq_get enable_audit_trace);  [ -n "$v" ] && ENABLE_AUDIT_TRACE="$v"
     v=$(_yq_get disable_session_recorder); [ -n "$v" ] && DISABLE_SESSION_RECORDER="$v"
     v=$(_yq_get insecure);            [ -n "$v" ] && CONFIG_INSECURE="$v"
+    v=$(_yq_get response_signing);    [ -n "$v" ] && [ "$RESPONSE_SIGNING_SET" = 0 ] && RESPONSE_SIGNING="$v"
     v=$(_yq_get sign_with);           [ -n "$v" ] && [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$v"
     v=$(_yq_get repo_keyring);        [ -n "$v" ] && [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$v"
     v=$(_yq_get apt_url);             [ -n "$v" ] && [ "$APT_URL" = "$DEFAULT_APT_URL" ] && APT_URL="$v"
@@ -512,6 +535,7 @@ _load_config_awk() {
                 enable_audit_trace)  ENABLE_AUDIT_TRACE="$val" ;;
                 disable_session_recorder) DISABLE_SESSION_RECORDER="$val" ;;
                 insecure)            CONFIG_INSECURE="$val" ;;
+                response_signing)    [ "$RESPONSE_SIGNING_SET" = 0 ] && RESPONSE_SIGNING="$val" ;;
                 sign_with)           [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$val" ;;
                 repo_keyring)        [ -z "$REPO_KEYRING" ] && REPO_KEYRING="$val" ;;
                 apt_url)             [ "$APT_URL"       = "$DEFAULT_APT_URL"       ] && APT_URL="$val" ;;
@@ -1563,6 +1587,18 @@ validate_inputs() {
     : "${ANSIBLE_AUTO_APPROVE:=no}"
     case "$ANSIBLE_AUTO_APPROVE" in yes|no) ;; *) die "Invalid ansible_auto_approve: $ANSIBLE_AUTO_APPROVE" ;; esac
 
+    : "${RESPONSE_SIGNING:=prefer}"
+    case "$RESPONSE_SIGNING" in
+        off|prefer|required) ;;
+        *) die "Invalid response_signing: $RESPONSE_SIGNING (off | prefer | required)" ;;
+    esac
+    # The JWKS is the one of the RP the targets enrol with: without a
+    # client_id there is no RP to ask for, and the portal's global keys need
+    # not be the ones it signs with.
+    if [ "$RESPONSE_SIGNING" = "required" ] && [ -z "$CLIENT_ID" ]; then
+        die "response_signing=required needs a client_id (the JWKS is fetched for that relying party)"
+    fi
+
     # The questionnaire checks the key when asked; a config or --sign-with
     # value used to fail only at signing, after the SSO fetch and with the
     # installer already written unsigned.
@@ -1664,6 +1700,7 @@ print_recap() {
   Allowed bastions:    $([ "$ALLOWED_BASTIONS_COLLECT" = 1 ] && echo "<collected from the bastions>" || echo "${ALLOWED_BASTIONS:-<any bastion of the project>}")
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
+  Signed answers:      response_signing = $RESPONSE_SIGNING  (JWKS of client_id ${CLIENT_ID:-<none>})
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
   Sign with:           ${SIGN_WITH:-<none>}
@@ -1677,6 +1714,10 @@ EOF
     [ -n "$OUTPUT_ANSIBLE" ] && printf '  %-21s%s\n' "Ansible tree:" "$OUTPUT_ANSIBLE"
     if [ "$INSECURE" = "1" ]; then
         log_warn "TLS verification is disabled: targets get verify_ssl = false and run ob-enroll/setup with -k."
+    fi
+    if [ "$RESPONSE_SIGNING" = "required" ]; then
+        log_warn "response_signing = required: the targets refuse every unsigned portal answer."
+        log_warn "Only use it once the portal's pam-access plugin signs its answers (UPGRADE-NOTES.md)."
     fi
     if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
         log_warn "Embedded client_secret will be written in clear text into every generated artefact."
@@ -1799,6 +1840,9 @@ render_config_yaml() {
     printf '# yes | no: the Ansible role approves device codes with an LLNG cookie\n'
     printf '# asked at each play run\n'
     _yaml_kv ansible_auto_approve "$ANSIBLE_AUTO_APPROVE"
+    printf '# off | prefer | required: response_signing on the targets, checked\n'
+    printf '# against the JWKS fetched for client_id (see UPGRADE-NOTES.md before required)\n'
+    _yaml_kv response_signing "$RESPONSE_SIGNING"
     if [ -n "$SERVICE_KEYS_SETUP" ]; then
         _yaml_kv service_keys "$SERVICE_KEYS_SETUP"
     else
@@ -1896,7 +1940,10 @@ save_config() {
 # Files produced:
 #   $WORK_DIR/ca.pub
 #   $WORK_DIR/krl       (empty if not fetched)
-#   $WORK_DIR/jwks.json (only when a backend artefact is produced)
+#   $WORK_DIR/jwks.json (the canonical JWKS of client_id's RP, every role;
+#                        absent without a client_id, or when no usable JWKS
+#                        could be fetched and the mode is not required: the
+#                        artefacts then get response_signing = off)
 # ─────────────────────────────────────────────────────────────────────────
 fetch_sso_assets() {
     WORK_DIR=$(mktemp_dir)
@@ -1916,10 +1963,36 @@ fetch_sso_assets() {
         : > "$WORK_DIR/krl"
     fi
 
-    if _has_role backend; then
-        if ! sso_fetch_jwks "$PORTAL_URL" "$WORK_DIR/jwks.json"; then
-            die "JWKS fetch failed; backend artefacts require it."
+    # The trust anchor of signed answers (#339), for every role: bastions
+    # and standalone hosts check the portal's answers as much as backends do.
+    if [ -z "$CLIENT_ID" ]; then
+        # validate_inputs already refused `required` here.
+        log_warn "No client_id: the JWKS is not fetched (it is per relying party)."
+        log_warn "The artefacts get response_signing = off; provision the JWKS on the"
+        log_warn "targets with ob-*-setup --sso-jwks / --sso-jwks-sha256."
+    elif ! sso_fetch_jwks "$PORTAL_URL" "$WORK_DIR/jwks.json" "$CLIENT_ID"; then
+        rm -f -- "$WORK_DIR/jwks.json"
+        # Same rule as the setup script: prefer degrades to off, required
+        # stops. A portal with no usable signature key for this RP cannot
+        # sign its answers anyway, and a bastion build never needed a JWKS
+        # before #339: prefer must not turn that into a failed build.
+        if [ "$RESPONSE_SIGNING" = "required" ]; then
+            die "No usable JWKS; response_signing = required needs it (--response-signing prefer|off builds without)."
         fi
+        log_warn "No usable JWKS for client_id $CLIENT_ID: the artefacts carry none and get"
+        log_warn "  response_signing = off instead of $RESPONSE_SIGNING. Check the RP's signing key"
+        log_warn "  (oidcRPMetaDataOptionsSigningKey / oidcServiceSignatureKey, with a key id)."
+    fi
+}
+
+# The response_signing the artefacts carry: off when there is no JWKS to check
+# the answers against. Writing prefer without one would only log a warning on
+# every PAM and NSS call; required would refuse them all.
+effective_response_signing() {
+    if [ -s "$WORK_DIR/jwks.json" ]; then
+        printf '%s' "$RESPONSE_SIGNING"
+    else
+        printf 'off'
     fi
 }
 
@@ -2137,6 +2210,17 @@ build_placeholder_map() {
     fi
     gpg_b64=$(base64_file "$REPO_KEYRING")
 
+    # Signed answers (#339): the canonical JWKS of client_id's RP, its SHA-256
+    # (checked by the installer before it writes the file, and passed to the
+    # setup run), the client_id it belongs to, and the mode.
+    local jwks_b64="" jwks_sha256="" jwks_client_id="" rsig
+    rsig=$(effective_response_signing)
+    if [ -s "$WORK_DIR/jwks.json" ]; then
+        jwks_b64=$(base64_file "$WORK_DIR/jwks.json")
+        jwks_sha256=$(sso_jwks_sha256 "$WORK_DIR/jwks.json")
+        jwks_client_id="${SSO_JWKS_CLIENT_ID:-$CLIENT_ID}"
+    fi
+
     apt_sources="deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] ${APT_URL} ${APT_SUITE} ${APT_COMPONENT}"
 
     ph_reset
@@ -2178,6 +2262,15 @@ build_placeholder_map() {
     ph_set AUTO_SETUP_BOOL       "$auto_setup_bool"
     ph_set INSECURE_DEFAULT      "$insecure_default"
     ph_set VERIFY_SSL_BOOL       "$verify_ssl_bool"
+    ph_set SSO_JWKS_B64          "$jwks_b64"
+    ph_set SSO_JWKS_SHA256       "$jwks_sha256"
+    ph_set SSO_JWKS_CLIENT_ID    "$jwks_client_id"
+    ph_set RESPONSE_SIGNING      "$rsig"
+    if [ -n "$jwks_b64" ]; then
+        ph_set SSO_JWKS_SRC      "sso-jwks.json"
+    else
+        ph_set SSO_JWKS_SRC      ""
+    fi
 
     # Optional opt-in features. Shell installer consumes the yes/no strings;
     # the Ansible role consumes the true/false boolean variants.
@@ -2411,7 +2504,7 @@ EOF
 #   <out>/roles/open-bastion-<role>/files/open-bastion-ca.pub
 #   <out>/roles/open-bastion-<role>/files/open-bastion-krl  (if max-security)
 #   <out>/roles/open-bastion-<role>/files/open-bastion.gpg
-#   <out>/roles/open-bastion-<role>/files/jwks.json       (if fetched)
+#   <out>/roles/open-bastion-<role>/files/sso-jwks.json   (portal JWKS, if fetched)
 #   <out>/roles/open-bastion-<role>/templates/openbastion.conf.j2
 #   <out>/roles/open-bastion-<role>/tasks/main.yml
 #   <out>/roles/open-bastion-<role>/tasks/<role>.yml
@@ -2493,8 +2586,8 @@ render_ansible_role() {
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -f "$WORK_DIR/jwks.json" ]; then
-        atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
+    if [ -s "$WORK_DIR/jwks.json" ]; then
+        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
 
     _tighten_if_embedded "$outpath/roles/open-bastion-${role}/defaults/main.yml" "0600"
@@ -2575,6 +2668,8 @@ ob_server_group: ${SERVER_GROUP:-}
 ob_server_group_policy: $SERVER_GROUP_POLICY
 ob_auto_enroll_setup: $AUTO_ENROLL_SETUP
 ob_ca_fingerprint: ${SSO_CA_FINGERPRINT:-}
+ob_response_signing: $(effective_response_signing)
+ob_sso_jwks_sha256: "$([ -s "$WORK_DIR/jwks.json" ] && sso_jwks_sha256 "$WORK_DIR/jwks.json")"
 ob_apt_url: $APT_URL
 ob_apt_suite: $APT_SUITE
 ob_apt_component: $APT_COMPONENT
@@ -2589,8 +2684,8 @@ EOF
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -f "$WORK_DIR/jwks.json" ]; then
-        atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
+    if [ -s "$WORK_DIR/jwks.json" ]; then
+        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
     _tighten_if_embedded "$defaults_dir/main.yml" "0600"
     _write_embedded_secret_gitignore "$outpath"
@@ -2710,6 +2805,12 @@ main() {
         fi
     done
     [ -n "$OUTPUT_ANSIBLE" ] && log_info "Ansible tree:      $OUTPUT_ANSIBLE"
+    if [ -s "${WORK_DIR:-/nonexistent}/jwks.json" ]; then
+        log_info "Portal JWKS (client_id ${SSO_JWKS_CLIENT_ID:-$CLIENT_ID}) SHA-256: $(sso_jwks_sha256 "$WORK_DIR/jwks.json")"
+        log_info "  Signed answers: response_signing = $(effective_response_signing)"
+    else
+        log_warn "No portal JWKS in the artefacts: signed answers stay off (response_signing = off)."
+    fi
     return 0
 }
 

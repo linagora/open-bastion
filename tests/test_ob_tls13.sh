@@ -52,7 +52,8 @@ test_c_clients() {
 
 SCRIPTS="scripts/ob-bastion-id scripts/ob-bastion-setup scripts/ob-desktop-setup
 scripts/ob-enroll scripts/ob-heartbeat scripts/ob-krl-refresh
-scripts/ob-session-monitor scripts/ob-uninstall admin-builder/lib/sso-discovery.sh"
+scripts/ob-session-monitor scripts/ob-uninstall admin-builder/lib/sso-discovery.sh
+scripts/ob-sign-lib.sh"
 
 test_script_clients() {
     local bad="" rel out

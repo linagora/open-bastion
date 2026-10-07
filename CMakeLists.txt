@@ -450,6 +450,41 @@ install(TARGETS ob-sign-request
     RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )
 
+# The shell callers' verifier of the portal's signed answers (#339): the same
+# ob_jws.c as the PAM and NSS modules, behind a command line. Sourced through
+# ob-sign-lib.sh by ob-heartbeat, ob-bastion-id and ob-session-monitor.
+add_executable(ob-verify-response
+    src/ob-verify-response.c
+    src/ob_jws.c
+    src/ob_sign.c
+    src/str_utils.c
+)
+target_include_directories(ob-verify-response PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_compile_options(ob-verify-response PRIVATE
+    -Wall -Wextra -Werror
+    -D_GNU_SOURCE
+    -fstack-protector-strong
+    -Wformat -Wformat-security
+    $<$<CONFIG:Release>:-flto>
+)
+target_link_libraries(ob-verify-response
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+)
+target_link_options(ob-verify-response PRIVATE
+    -Wl,-z,relro
+    -Wl,-z,now
+    -Wl,-z,noexecstack
+    $<$<CONFIG:Release>:-flto>
+)
+install(TARGETS ob-verify-response
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+)
+
 # Same /proc/<pid>/cmdline concern as ob-sign-request, for the OIDC client
 # secret: it arrives on stdin, never as a command-line argument.
 add_executable(ob-client-jwt
@@ -610,6 +645,7 @@ if(BUILD_MAN)
         ${MAN_OUT_DIR}/ob-fp-submit.8
         ${MAN_OUT_DIR}/ob-record-sink.8
         ${MAN_OUT_DIR}/ob-sign-request.8
+        ${MAN_OUT_DIR}/ob-verify-response.8
         ${MAN_OUT_DIR}/ob-client-jwt.8
         ${MAN_OUT_DIR}/ob-post-upgrade.8
         ${MAN_OUT_DIR}/ob-uninstall.8

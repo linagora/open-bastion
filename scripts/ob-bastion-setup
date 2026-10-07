@@ -109,6 +109,46 @@ AUDIT_RULES_FILE="/etc/audit/rules.d/open-bastion.rules"
 # not-attempted, success, token-provided, reused, dry-run or failed
 ENROLL_RESULT="not-attempted"
 
+# ── Signed portal answers (#339) ──
+# The portal's JWKS, trust anchor of the signed answers the PAM and NSS
+# modules check (src/ob_jws.c refuses it unless it is a regular file owned by
+# root and not writable by group or others).
+SSO_JWKS_FILE="/var/lib/open-bastion/jwks/sso-jwks.json"
+SSO_JWKS_SRC=""          # --sso-jwks FILE
+SSO_JWKS_SHA256=""       # --sso-jwks-sha256 HEX (canonical form, see jwks_canonical)
+# --response-signing; empty = the host's current value, else prefer
+RESPONSE_SIGNING=""
+# What openbastion.conf and nss_openbastion.conf get: never prefer/required
+# without a JWKS (set by install_sso_jwks).
+RESPONSE_SIGNING_EFFECTIVE="off"
+# not-attempted, installed, kept, off, declined, unavailable or dry-run
+SSO_JWKS_RESULT="not-attempted"
+SSO_JWKS_FP=""
+# Bound of src/ob_jws.c (OB_JWS_MAX_JWKS): a bigger file never loads.
+SSO_JWKS_MAX_BYTES=262144
+# The C verifier's own verdict on a JWKS (`check-jwks`), when installed.
+OB_VERIFY_RESPONSE="${OB_VERIFY_RESPONSE-/usr/sbin/ob-verify-response}"
+# What src/ob_jws.c can use: a "keys" array with at least one signature key
+# with a kid, RSA >= 2048 bits, EC P-256/384/521 or Ed25519 (shape only: the
+# C verifier itself, through ob-verify-response, has the last word when it is
+# installed); a private key ("d") refuses the file.
+# Same filter as admin-builder/lib/sso-discovery.sh (SSO_JWKS_FILTER).
+OB_JWKS_FILTER='def b64len: if type == "string" then gsub("=+$"; "") | length else -1 end;
+type == "object"
+  and (.keys | type == "array")
+  and ([.keys[] | objects | select(has("d"))] | length == 0)
+  and ([.keys[] | objects
+        | select((.kid | type) == "string" and (.kid | length) > 0)
+        | select((has("use") | not) or .use == "sig")
+        | select((has("key_ops") | not)
+                 or ((.key_ops | type) == "array" and any(.key_ops[]; . == "verify")))
+        | select((.kty == "RSA" and (.n | b64len) >= 342 and (.e | b64len) > 0)
+                 or (.kty == "EC" and ([.crv, (.x | b64len), (.y | b64len)]
+                     | . == ["P-256", 43, 43] or . == ["P-384", 64, 64]
+                       or . == ["P-521", 88, 88]))
+                 or (.kty == "OKP" and .crv == "Ed25519" and (.x | b64len) == 43))
+       ] | length > 0)'
+
 # Files written by this run, for rollback_on_failure()
 CREATED_FILES=()
 
@@ -286,6 +326,284 @@ download_ca_key() {
     chmod 644 "$SSH_CA_FILE"
     track_created "$SSH_CA_FILE"
     info "CA public key saved to $SSH_CA_FILE"
+}
+
+# ── Signed portal answers: the JWKS (#339) ───────────────────────────────────
+
+# Print the canonical form (`jq -S -c .`) of the JWKS in FILE when it is one
+# src/ob_jws.c can use; fail otherwise. The portal does not sort the keys of
+# its JSON, so two fetches of the same JWKS can differ byte for byte: the
+# canonical form is what is written and fingerprinted, and what an operator
+# reproduces with `curl -s URL | jq -S -c . | sha256sum`.
+jwks_canonical() {
+    local f="$1" size
+    [ -f "$f" ] && [ -r "$f" ] || return 1
+    size=$(wc -c < "$f" 2>/dev/null) || return 1
+    [ "$size" -gt 0 ] && [ "$size" -le "$SSO_JWKS_MAX_BYTES" ] || return 1
+    jq -e "$OB_JWKS_FILTER" "$f" >/dev/null 2>&1 || return 1
+    # The filter judges shapes; the verifier loads the keys (curve points,
+    # RSA modulus) exactly as the PAM and NSS modules will.
+    if [ -n "$OB_VERIFY_RESPONSE" ] && [ -x "$OB_VERIFY_RESPONSE" ]; then
+        "$OB_VERIFY_RESPONSE" check-jwks --quiet "$f" >/dev/null 2>&1 || return 1
+    fi
+    jq -S -c . "$f"
+}
+
+# What src/ob_jws.c checks before trusting the file: a regular file (not a
+# symlink), owned by root (or by us, like the module), not writable by group
+# or others. A file failing this is no trust anchor, whatever it contains.
+jwks_file_loadable() {
+    local f="$1" uid mode
+    [ -f "$f" ] && [ ! -L "$f" ] || return 1
+    uid=$(stat -c '%u' -- "$f") || return 1
+    mode=$(stat -c '%a' -- "$f") || return 1
+    [ "$uid" = 0 ] || [ "$uid" = "$(id -u)" ] || return 1
+    (( (8#$mode & 8#022) == 0 ))
+}
+
+# SHA-256 (lowercase hex) of stdin.
+sha256_hex() {
+    sha256sum | awk '{print $1}'
+}
+
+# A --sso-jwks-sha256 value as 64 lowercase hex digits: case, a "sha256:"
+# prefix and colons are forgiven. Fails on anything else.
+normalize_sha256() {
+    local v
+    v=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    v="${v#sha256:}"
+    v="${v//:/}"
+    [[ "$v" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s' "$v"
+}
+
+# One line per key: kid, kty and alg, for the operator to look at.
+jwks_describe() {
+    jq -r '.keys[] | objects | "    kid=\(.kid // "-")  kty=\(.kty // "-")  alg=\(.alg // "-")  use=\(.use // "-")"' "$1" 2>/dev/null
+}
+
+# The JWKS of this host's relying party, as the portal publishes it.
+jwks_url() {
+    local enc
+    enc=$(jq -rn --arg v "$CLIENT_ID" '$v | @uri')
+    printf '%s/oauth2/jwks?client_id=%s' "$PORTAL_URL" "$enc"
+}
+
+# The mode asked for: --response-signing, else the host's current value
+# (a re-run must not turn `required` back into `prefer`), else prefer.
+resolve_response_signing() {
+    [ -n "$RESPONSE_SIGNING" ] && return 0
+    local current
+    current=$(conf_value "$OB_CONFIG" response_signing)
+    case "$current" in
+        off|prefer|required)
+            RESPONSE_SIGNING="$current"
+            info "Keeping response_signing = $current from $OB_CONFIG"
+            ;;
+        *) RESPONSE_SIGNING=prefer ;;
+    esac
+}
+
+# No JWKS could be installed. prefer falls back to off: without a JWKS it would
+# only log a warning on every PAM and NSS call. required is refused instead:
+# the operator asked for signatures, and a host that silently runs without
+# them is not what was asked for.
+jwks_unavailable() {
+    local result="$1" reason="$2"
+    if [ "$RESPONSE_SIGNING" = "required" ]; then
+        error "response_signing = required, but no JWKS can be installed: $reason."
+        error "Give the portal's JWKS with --sso-jwks FILE, or its SHA-256 with"
+        error "--sso-jwks-sha256 HEX (from: curl -s '$(jwks_url)' | jq -S -c . | sha256sum"
+        error "run where you trust the network), or use --response-signing prefer|off."
+        SSO_JWKS_RESULT="$result"
+        return 1
+    fi
+    if [ "$RESPONSE_SIGNING" != "off" ]; then
+        warn "No JWKS installed ($reason): writing response_signing = off instead of $RESPONSE_SIGNING."
+        warn "Signed portal answers stay unchecked. Re-run with --sso-jwks FILE or"
+        warn "--sso-jwks-sha256 HEX to enable them."
+    fi
+    RESPONSE_SIGNING_EFFECTIVE="off"
+    SSO_JWKS_RESULT="$result"
+    return 0
+}
+
+# Install the canonical JWKS in file CANON at SSO_JWKS_FILE: root:root 0644,
+# written to a temporary file and renamed, so neither module ever reads half a
+# trust anchor, and a symlink planted at the path is replaced, not followed.
+write_sso_jwks() {
+    local canon="$1" dir parent tmp
+    dir=$(dirname "$SSO_JWKS_FILE")
+    parent=$(dirname "$dir")
+    # The package makes both; a host set up without it gets them here.
+    # /var/lib/open-bastion is 0711 (traversable, not listable); jwks/ is
+    # root:root 0755, the directory ob-heartbeat renames a rotated key set into.
+    if [ ! -d "$parent" ]; then
+        { mkdir -p "$parent" && chmod 0711 "$parent"; } || return 1
+    fi
+    if ! mkdir -p "$dir" || ! chmod 0755 "$dir" || ! chown root:root "$dir"; then
+        error "Could not create $dir (root:root 0755)"
+        return 1
+    fi
+    backup_file "$SSO_JWKS_FILE"
+    tmp=$(mktemp "$SSO_JWKS_FILE.XXXXXX") || return 1
+    if ! cat -- "$canon" > "$tmp" || ! chmod 0644 "$tmp" || ! chown root:root "$tmp" \
+       || ! mv -f -- "$tmp" "$SSO_JWKS_FILE"; then
+        rm -f -- "$tmp"
+        error "Could not write $SSO_JWKS_FILE"
+        return 1
+    fi
+    track_created "$SSO_JWKS_FILE"
+    info "Installed $SSO_JWKS_FILE (root:root 0644, SHA-256 $SSO_JWKS_FP)"
+}
+
+# Interactive trust decision on a JWKS fetched over TLS alone. The answer is
+# no unless the operator says yes: a key accepted here is what every later
+# answer is checked against.
+confirm_jwks() {
+    local canon="$1" url="$2" response
+    echo ""
+    echo "The portal's JWKS for client_id '$CLIENT_ID', fetched from:"
+    echo "  $url"
+    jwks_describe "$canon"
+    echo "  SHA-256: $SSO_JWKS_FP"
+    echo ""
+    echo "It becomes the trust anchor of every signed portal answer on this host."
+    echo "Compare the SHA-256 with one you trust: the PORTAL-CHECKLIST of the"
+    echo "ob-builder artefact, or 'curl -s URL | jq -S -c . | sha256sum' run on the"
+    echo "portal or another network you trust. Pass it as --sso-jwks-sha256 to"
+    echo "skip this question."
+    echo -en "${YELLOW}Does the SHA-256 match? [y/N] ${NC}"
+    read -r response || response=""
+    case "$response" in
+        [yY][eE][sS]|[yY]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Phase 1 (inert until openbastion.conf names it): put the portal's JWKS in
+# place and settle RESPONSE_SIGNING_EFFECTIVE.
+#   --sso-jwks FILE        that file, which must be a usable JWKS and match
+#                          --sso-jwks-sha256 when given; otherwise fatal.
+#   (none), file present   kept when usable (and matching --sso-jwks-sha256):
+#                          it may have been rotated through the signed
+#                          heartbeat, a TLS-only fetch must not undo that.
+#   (none)                 fetched from the portal, then trusted only on a
+#                          matching --sso-jwks-sha256 (a mismatch is fatal) or
+#                          an interactive confirmation.
+install_sso_jwks() {
+    step "Installing the portal's JWKS (signed answers)..."
+    resolve_response_signing
+
+    local work canon fetched url
+    work=$(mktemp -d) || return 1
+    canon="$work/canon.json"
+
+    # 1. An explicit file.
+    if [ -n "$SSO_JWKS_SRC" ]; then
+        if ! jwks_canonical "$SSO_JWKS_SRC" > "$canon"; then
+            error "$SSO_JWKS_SRC is not a usable JWKS: a JSON object whose 'keys' array holds"
+            error "at least one RSA, EC or OKP signature key with a kid, no private key,"
+            error "at most $SSO_JWKS_MAX_BYTES bytes."
+            rm -rf -- "$work"
+            SSO_JWKS_RESULT="unavailable"
+            return 1
+        fi
+        SSO_JWKS_FP=$(sha256_hex < "$canon")
+        if [ -n "$SSO_JWKS_SHA256" ] && [ "$SSO_JWKS_FP" != "$SSO_JWKS_SHA256" ]; then
+            error "JWKS fingerprint mismatch for $SSO_JWKS_SRC:"
+            error "  expected: $SSO_JWKS_SHA256"
+            error "  got:      $SSO_JWKS_FP"
+            rm -rf -- "$work"
+            SSO_JWKS_RESULT="unavailable"
+            return 1
+        fi
+        if [ "$DRY_RUN" = "true" ]; then
+            info "[DRY-RUN] Would install $SSO_JWKS_SRC as $SSO_JWKS_FILE (SHA-256 $SSO_JWKS_FP)"
+            SSO_JWKS_RESULT="dry-run"
+        else
+            write_sso_jwks "$canon" || { rm -rf -- "$work"; return 1; }
+            SSO_JWKS_RESULT="installed"
+        fi
+        rm -rf -- "$work"
+        RESPONSE_SIGNING_EFFECTIVE="$RESPONSE_SIGNING"
+        return 0
+    fi
+
+    # 2. Nothing asked for: no fetch.
+    if [ "$RESPONSE_SIGNING" = "off" ]; then
+        info "response_signing = off: no JWKS needed"
+        rm -rf -- "$work"
+        RESPONSE_SIGNING_EFFECTIVE="off"
+        SSO_JWKS_RESULT="off"
+        return 0
+    fi
+
+    # 3. The host already has one the modules would load.
+    if jwks_file_loadable "$SSO_JWKS_FILE" && jwks_canonical "$SSO_JWKS_FILE" > "$canon"; then
+        SSO_JWKS_FP=$(sha256_hex < "$canon")
+        if [ -z "$SSO_JWKS_SHA256" ] || [ "$SSO_JWKS_FP" = "$SSO_JWKS_SHA256" ]; then
+            info "Keeping $SSO_JWKS_FILE (SHA-256 $SSO_JWKS_FP)"
+            rm -rf -- "$work"
+            RESPONSE_SIGNING_EFFECTIVE="$RESPONSE_SIGNING"
+            SSO_JWKS_RESULT="kept"
+            return 0
+        fi
+        info "$SSO_JWKS_FILE does not match --sso-jwks-sha256: fetching the portal's"
+    fi
+
+    # 4. Fetch, then trust only on a fingerprint the operator vouches for.
+    if [ -z "$SSO_JWKS_SHA256" ] && [ "$NON_INTERACTIVE" = "true" ]; then
+        rm -rf -- "$work"
+        jwks_unavailable "unavailable" "non-interactive run without --sso-jwks or --sso-jwks-sha256, nobody to confirm a fetched JWKS"
+        return
+    fi
+    build_curl_opts
+    url=$(jwks_url)
+    fetched="$work/fetched.json"
+    if ! curl "${CURL_OPTS[@]}" -o "$fetched" "$url" 2>/dev/null; then
+        rm -rf -- "$work"
+        jwks_unavailable "unavailable" "cannot fetch $url"
+        return
+    fi
+    if ! jwks_canonical "$fetched" > "$canon"; then
+        rm -rf -- "$work"
+        jwks_unavailable "unavailable" "$url did not return a usable JWKS"
+        return
+    fi
+    SSO_JWKS_FP=$(sha256_hex < "$canon")
+    if [ -n "$SSO_JWKS_SHA256" ]; then
+        if [ "$SSO_JWKS_FP" != "$SSO_JWKS_SHA256" ]; then
+            # Not a fallback to off: the fetch was given a fingerprint, and a
+            # different key is either a rotation to look at or an interception.
+            error "JWKS fingerprint mismatch: the portal's JWKS is not the one expected."
+            error "  expected: $SSO_JWKS_SHA256"
+            error "  got:      $SSO_JWKS_FP  (from $url)"
+            error "Either the portal rotated its keys (check the new SHA-256 on a trusted"
+            error "channel) or this host does not talk to the real portal."
+            rm -rf -- "$work"
+            SSO_JWKS_RESULT="unavailable"
+            return 1
+        fi
+        info "JWKS fetched from $url matches --sso-jwks-sha256"
+    elif [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Fetched $url (SHA-256 $SSO_JWKS_FP); a real run asks to confirm it"
+    elif ! confirm_jwks "$canon" "$url"; then
+        rm -rf -- "$work"
+        jwks_unavailable "declined" "the fetched JWKS was not confirmed"
+        return
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        info "[DRY-RUN] Would install it as $SSO_JWKS_FILE"
+        SSO_JWKS_RESULT="dry-run"
+    else
+        write_sso_jwks "$canon" || { rm -rf -- "$work"; return 1; }
+        SSO_JWKS_RESULT="installed"
+    fi
+    rm -rf -- "$work"
+    RESPONSE_SIGNING_EFFECTIVE="$RESPONSE_SIGNING"
+    return 0
 }
 
 # /usr/lib/open-bastion once installed, share/ when run from the source tree.
@@ -762,6 +1080,12 @@ $(printf '%-10s include                     %s' "$t" "$PAM_SYSTEMD_USER_VENDOR")
     info "Configured $PAM_SYSTEMD_USER for NSS-only SSO users"
 }
 
+# Last active value of KEY in the key = value file FILE, empty when unset.
+conf_value() {
+    [ -r "$1" ] || return 0
+    sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*\\([^#[:space:]]*\\).*/\\1/p" "$1" | tail -1
+}
+
 render_openbastion_conf() {
     render_openbastion_settings
     printf '\n'
@@ -799,6 +1123,18 @@ render_openbastion_settings() {
     printf '# HTTP settings\n'
     printf 'timeout = 10\n'
     printf 'verify_ssl = %s\n\n' "$VERIFY_SSL"
+    printf '# Signed portal answers, checked against the JWKS (see openbastion.conf(5))\n'
+    printf 'response_signing = %s\n' "$RESPONSE_SIGNING_EFFECTIVE"
+    if [ "$RESPONSE_SIGNING_EFFECTIVE" != "off" ]; then
+        printf 'sso_jwks_file = %s\n' "$SSO_JWKS_FILE"
+    fi
+    # Rewritten wholesale: keep an operator's sso_issuer.
+    local _issuer
+    _issuer=$(conf_value "$OB_CONFIG" sso_issuer)
+    if [ -n "$_issuer" ]; then
+        printf 'sso_issuer = %s\n' "$_issuer"
+    fi
+    printf '\n'
     printf '# Cache settings (reduce load on portal)\n'
     printf 'cache_enabled = true\n'
     printf 'cache_dir = /var/cache/open-bastion\n'
@@ -1591,6 +1927,21 @@ portal_url = $PORTAL_URL
 # Server token file
 server_token_file = $OB_TOKEN
 
+# Signed portal answers (off, prefer or required), checked against the JWKS:
+# same rules as in openbastion.conf, client_id is the expected audience.
+response_signing = $RESPONSE_SIGNING_EFFECTIVE
+EOF
+    if [ -n "$CLIENT_ID" ]; then
+        echo "client_id = $CLIENT_ID"
+    fi
+    if [ "$RESPONSE_SIGNING_EFFECTIVE" != "off" ]; then
+        echo "sso_jwks_file = $SSO_JWKS_FILE"
+    fi
+    local issuer
+    issuer=$(conf_value "$NSS_OB_CONF" sso_issuer)
+    [ -z "$issuer" ] || echo "sso_issuer = $issuer"
+    cat <<EOF
+
 # Cache settings
 cache_enabled = true
 cache_ttl = 300
@@ -2265,6 +2616,18 @@ print_summary() {
     if is_backend; then
         echo "  Allowed bastions: ${BASTION_ALLOWED_IDS:-<any vouched bastion>}"
     fi
+    echo "  Signed answers: response_signing = $RESPONSE_SIGNING_EFFECTIVE"
+    case "$SSO_JWKS_RESULT" in
+        installed|kept)
+            echo "  Portal JWKS:   $SSO_JWKS_FILE ($SSO_JWKS_RESULT, SHA-256 $SSO_JWKS_FP)"
+            ;;
+        dry-run)
+            echo "  Portal JWKS:   $SSO_JWKS_FILE (dry-run, SHA-256 $SSO_JWKS_FP)"
+            ;;
+        declined|unavailable)
+            echo "  Portal JWKS:   not installed ($SSO_JWKS_RESULT): signed answers are off"
+            ;;
+    esac
     echo ""
     echo "Features enabled:"
     echo "  ✓ SSH certificate authentication"
@@ -2472,6 +2835,25 @@ Options:
                           retention manually (see doc/audit.rst).
                           Requires auditd package (apt install auditd /
                           dnf install audit).
+  --response-signing MODE off, prefer or required: have the PAM and NSS
+                          modules check the portal's signed answers against
+                          its JWKS (openbastion.conf(5)). Default: the
+                          host's current value, else prefer. Without a JWKS
+                          prefer becomes off (with a warning) and required
+                          is refused. Use required only once the portal
+                          signs its answers.
+  --sso-jwks FILE         Install FILE as the portal's JWKS
+                          ($SSO_JWKS_FILE, root:root 0644). It must be a
+                          usable JWKS; checked against --sso-jwks-sha256
+                          when given.
+  --sso-jwks-sha256 HEX   SHA-256 of the portal's JWKS in canonical form
+                          (curl --tlsv1.3 -s '<portal>/oauth2/jwks?client_id=<id>' |
+                          jq -S -c . | sha256sum). Without --sso-jwks, the
+                          JWKS is fetched and installed only if it matches;
+                          a mismatch aborts. Without either, a JWKS already
+                          on the host is kept, otherwise it is fetched and
+                          its SHA-256 shown for confirmation (with --yes:
+                          nothing is installed and signing stays off).
   -n, --dry-run           Show what would be done without making changes
   -h, --help              Show this help (for the role in effect)
   -V, --version           Show version
@@ -2676,6 +3058,35 @@ parse_args() {
                 SUDO_FRESH_OTP=true
                 shift
                 ;;
+            --response-signing)
+                case "${2:-}" in
+                    off | prefer | required) RESPONSE_SIGNING="$2" ;;
+                    *)
+                        error "Option $1 requires off, prefer or required"
+                        exit 1
+                        ;;
+                esac
+                shift 2
+                ;;
+            --sso-jwks)
+                if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                    error "Option $1 requires an argument"
+                    exit 1
+                fi
+                if [ ! -f "$2" ]; then
+                    error "JWKS file not found: $2"
+                    exit 1
+                fi
+                SSO_JWKS_SRC="$2"
+                shift 2
+                ;;
+            --sso-jwks-sha256)
+                if ! SSO_JWKS_SHA256=$(normalize_sha256 "${2:-}"); then
+                    error "Option $1 requires a SHA-256 (64 hexadecimal digits)"
+                    exit 1
+                fi
+                shift 2
+                ;;
             --enable-service-keys)
                 ENABLE_SERVICE_KEYS=true
                 shift
@@ -2828,7 +3239,7 @@ main() {
 
     check_root
 
-    for cmd in curl sshd sed; do
+    for cmd in curl sshd sed jq sha256sum; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             error "Required command not found: $cmd"
             exit 1
@@ -2857,6 +3268,10 @@ main() {
     if [ "$MAX_SECURITY" = "true" ]; then
         echo "Max Security: true (Mode E)"
     fi
+    echo "Signed answers: response_signing = ${RESPONSE_SIGNING:-<current value of the host, else prefer>}"
+    if [ -n "$SSO_JWKS_SRC" ]; then
+        echo "Portal JWKS:   $SSO_JWKS_SRC"
+    fi
     echo ""
 
     if [ "$DRY_RUN" = "true" ]; then
@@ -2873,6 +3288,7 @@ main() {
 
     # ── Phase 1: inert preparation (no SSH/PAM lockdown yet) ──
     download_ca_key || { rollback_on_failure; exit 1; }
+    install_sso_jwks || { rollback_on_failure; exit 1; }
     prepare_principals_helper || { rollback_on_failure; exit 1; }
     configure_pam_openbastion || { rollback_on_failure; exit 1; }
     if is_backend; then

@@ -85,7 +85,10 @@ HTTPServer(("127.0.0.1", PORT), H).serve_forever()
 MOCK
 
 # Pull check_user_valid out of the shipped script, with just enough scaffolding
-# around it. Sourcing the whole script would start its main loop.
+# around it. Sourcing the whole script would start its main loop. The real
+# ob-sign-lib.sh is sourced (ob_pam_post makes the request); with no
+# configuration file it signs nothing and asks for no signed answer, and the
+# stubs that follow it replace the request signing.
 extract_function() {
     awk '/^check_user_valid\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$SCRIPT"
 }
@@ -106,6 +109,7 @@ run_case() {
         echo "PORTAL_URL='http://127.0.0.1:$PORT'"
         echo "CONFIG_FILE='$WORK/ob.conf'"
         echo 'SERVER_TOKEN=""'
+        echo ". '$ROOT_DIR/scripts/ob-sign-lib.sh'"
         echo 'SIGN_HEADERS=()'
         echo 'ob_sign_request() { SIGN_HEADERS=(); return 0; }'
         echo 'log_warn() { echo "WARN: $*" >&2; }'
@@ -128,6 +132,7 @@ run_unreachable_case() {
         echo "PORTAL_URL='http://127.0.0.1:$PORT'"
         echo "CONFIG_FILE='$WORK/ob.conf'"
         echo 'SERVER_TOKEN=""'
+        echo ". '$ROOT_DIR/scripts/ob-sign-lib.sh'"
         echo 'SIGN_HEADERS=()'
         echo 'ob_sign_request() { SIGN_HEADERS=(); return 0; }'
         echo 'log_warn() { echo "WARN: $*" >&2; }'
@@ -196,6 +201,7 @@ test_signing_failure_is_unknown() {
         echo "PORTAL_URL='http://127.0.0.1:1'"
         echo "CONFIG_FILE='$WORK/ob.conf'"
         echo 'SERVER_TOKEN=""'
+        echo ". '$ROOT_DIR/scripts/ob-sign-lib.sh'"
         echo 'SIGN_HEADERS=()'
         echo 'OB_SIGN_ERROR="cannot sign /pam/userinfo: boom"'
         echo 'ob_sign_request() { return 1; }'
@@ -241,6 +247,7 @@ test_unknown_branch_survives_errexit() {
         echo "PORTAL_URL='http://127.0.0.1:$PORT'"
         echo "CONFIG_FILE='$WORK/ob.conf'"
         echo 'SERVER_TOKEN=""'
+        echo ". '$ROOT_DIR/scripts/ob-sign-lib.sh'"
         echo 'SIGN_HEADERS=()'
         echo 'ob_sign_request() { SIGN_HEADERS=(); return 0; }'
         echo 'log_warn() { echo "WARN: $*" >&2; }'

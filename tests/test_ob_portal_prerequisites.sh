@@ -166,6 +166,9 @@ test_builder_writes_checklist() {
             ph_set PORTAL_URL         "https://sso.example.org"
             ph_set CLIENT_ID          "pam-access"
             ph_set SERVER_GROUP       "prod"
+            ph_set RESPONSE_SIGNING   "prefer"
+            ph_set SSO_JWKS_CLIENT_ID "pam-access"
+            ph_set SSO_JWKS_SHA256    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         }
         DRY_RUN=0
         TEMPLATES_DIR="$SCRIPT_DIR_SAVED/admin-builder/templates"
@@ -189,6 +192,9 @@ test_builder_writes_checklist() {
         grep -q '@@[A-Z_]*@@' "$f" && bad="$bad unresolved-placeholder-in:$(basename "$f")"
         grep -q 'pam-access' "$f" || bad="$bad client-id-not-filled-in:$(basename "$f")"
         grep -q 'pamAccessAllowedRps' "$f" || bad="$bad setting-missing-in:$(basename "$f")"
+        # The JWKS the hosts trust (#339), to compare on a trusted channel.
+        grep -q '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' "$f" \
+            || bad="$bad jwks-sha256-missing-in:$(basename "$f")"
     done
 
     if [ -z "$bad" ]; then
