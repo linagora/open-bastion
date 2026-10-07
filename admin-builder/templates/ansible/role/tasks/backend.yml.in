@@ -14,6 +14,55 @@
   vars:
     ob_role: backend
 
+# The allowlist is the bastion_ids the portal assigned at enrolment, and the
+# only place they exist is on the bastions. With no build-time list, read them
+# there instead of asking the admin to copy them around: ob-bastion-id needs
+# root (it reads the 0600 server token), which the play's become provides on
+# the delegated host. An explicit ob_bastion_allowed_bastions wins, empty
+# string included ("" = accept any vouched bastion, as ob-backend-setup's
+# --allow-any-bastion).
+- name: Read each bastion's id
+  ansible.builtin.command: ob-bastion-id
+  delegate_to: "{{ item }}"
+  loop: "{{ groups.get(ob_bastion_group, []) }}"
+  register: ob_bastion_ids
+  changed_when: false
+  # Read-only probe, and the tasks below consume its result: skipped in check
+  # mode, the assert would fail on a missing 'stdout' rather than preview the
+  # run.
+  check_mode: false
+  when:
+    - ob_auto_setup
+    - ob_bastion_allowed_bastions is not defined
+
+# A missing group loops over nothing, and nothing is an allowlist too: the
+# file would be written empty, which accepts any vouched bastion. Refuse
+# instead. A delegated bastion that is unreachable or not enrolled fails its
+# own item above, so this only has to catch the silent cases.
+- name: Check every bastion answered
+  ansible.builtin.assert:
+    that:
+      - groups.get(ob_bastion_group, []) | length > 0
+      - ob_bastion_ids.results | length == groups.get(ob_bastion_group, []) | length
+      - ob_bastion_ids.results | map(attribute='stdout') | map('trim') | select('eq', '') | length == 0
+    fail_msg: >-
+      Could not collect the bastion ids from ob_bastion_group
+      ('{{ ob_bastion_group }}'): the group must exist, hold every bastion of
+      this deployment, and each of them must answer ob-bastion-id (enrolled,
+      reachable, root). Set ob_bastion_allowed_bastions explicitly to skip the
+      collection; the empty string accepts any vouched bastion.
+  when:
+    - ob_auto_setup
+    - ob_bastion_allowed_bastions is not defined
+
+- name: Derive the allowed bastions from them
+  ansible.builtin.set_fact:
+    ob_bastion_allowed_bastions: >-
+      {{ ob_bastion_ids.results | map(attribute='stdout') | map('trim') | join(',') }}
+  when:
+    - ob_auto_setup
+    - ob_bastion_allowed_bastions is not defined
+
 - name: Configure backend (ob-backend-setup)
   ansible.builtin.command:
     argv: >-

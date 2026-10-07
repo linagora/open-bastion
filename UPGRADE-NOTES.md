@@ -17,7 +17,9 @@ move independently, so each part below says when it applies.
 
 If you do both: Part A on every host first, then Part B.
 
-**Part C — scripts that call `ob-builder`.** Only if they pass `--output-shell`.
+**Part C — scripts that call `ob-builder`, and Ansible inventories.** Only if
+a script passes `--output-shell` or `--bundle`, or if a generated role tree is
+driven by your own inventory.
 
 ---
 
@@ -324,7 +326,7 @@ The full portal-side list is in the plugins'
 
 ---
 
-## Part C — scripts that call `ob-builder`
+## Part C — scripts that call `ob-builder`, and Ansible inventories
 
 ### C1. `--output-shell` takes a directory
 
@@ -344,3 +346,55 @@ still passing `--output-shell bootstrap.sh` stops with:
 Pass the directory instead, and take the installer from
 `<dir>/bootstrap-<slug>-<role>.sh`: the role is in the name even for a single
 role.
+
+### C2. `--bundle` is removed, and the Ansible output is one tree
+
+```sh
+ob-builder --config build.yml --output-ansible roles/
+# one tree: site.yml (several roles), playbook-<role>.yml,
+#           roles/open-bastion-<role>/, PORTAL-CHECKLIST-<role>.md
+```
+
+Name the roles to generate in the config instead of passing `--bundle`:
+
+```yaml
+target_role: "bastion,backend"
+```
+
+Both roles then come out of one run and share the CA, as a bundle did. A
+script still passing `--bundle` stops with that replacement rather than with
+"unknown option".
+
+The output paths change. `--bundle` used to write the role you built to the
+path you gave and its companion to `<path>-<role>`; every role now lives in
+the one tree, under its own name. Update the scripts that read
+`defaults/main.yml` or `files/` from the old location: the role directories
+are now `roles/open-bastion-bastion/` and `roles/open-bastion-backend/`.
+
+### C3. The inventory must declare `ob_role`
+
+A role tree only configures the hosts that declare its role, and hosts
+without `ob_role` are now skipped instead of inheriting the tree's role:
+
+```yaml
+bastions:
+  vars:
+    ob_role: bastion
+backends:
+  vars:
+    ob_role: backend
+```
+
+Add `ob_role: bastion|backend|standalone` to every host you want configured —
+per host or per group. A value that is none of the three stops the play, so a
+typo is not mistaken for "not my host".
+
+Then run `site.yml`, which plays every role of the build in order over the
+whole inventory:
+
+```sh
+ansible-playbook -i inventory.yml site.yml
+```
+
+`--limit bastions` / `--limit backends` are no longer needed to keep a tree
+off the hosts of the other role; they only narrow a run.

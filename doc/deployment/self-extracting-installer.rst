@@ -56,7 +56,7 @@ with your slug):
    Instead of answering prompts you can pass every answer through a
    YAML file and generate installers non-interactively, with the same
    ``build.yml`` as the :ref:`Ansible path
-   <ansible-deployment-option-a--bundle>`. The questionnaire writes that
+   <ansible-deployment-step-1--one-run>`. The questionnaire writes that
    file for you: answer yes to its last question, or start ``ob-builder``
    with ``--save-config build.yml``:
 

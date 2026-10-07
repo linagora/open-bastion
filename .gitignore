@@ -55,11 +55,11 @@ build-verify/
 build-asan/
 bv/
 
-# Deployment bundles produced by ob-builder (#203).
+# Deployment artefacts produced by ob-builder (#203).
 #
-# A bundle built with client_secret_mode=embedded carries the OIDC client
-# secret in clear text in roles/open-bastion/defaults/main.yml, and its
-# inventory names production hosts. Generate bundles OUTSIDE this working
+# A tree built with client_secret_mode=embedded carries the OIDC client
+# secret in clear text in roles/open-bastion-*/defaults/main.yml, and its
+# inventory names production hosts. Generate those trees OUTSIDE this working
 # tree; these entries only cover the ones that are already here.
 /linagora-setup-bastion/
 /linagora-setup-backend/

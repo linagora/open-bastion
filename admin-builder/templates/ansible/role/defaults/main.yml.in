@@ -13,7 +13,12 @@
 ob_deployment_slug: "@@DEPLOYMENT_SLUG@@"
 ob_scenario: "@@SCENARIO@@"
 ob_pam_mode: "@@PAM_MODE@@"
-ob_role: "@@TARGET_ROLE@@"  # bastion | standalone | backend
+# The role this tree configures. A host is only touched when the inventory
+# declares the same role in ob_role (host_vars/group_vars): a host whose
+# ob_role is missing or different is skipped untouched, so one tree can be
+# played over a mixed inventory. site.yml plays every tree of the deployment
+# in order.
+ob_artefact_role: "@@TARGET_ROLE@@"  # bastion | standalone | backend
 ob_max_security: @@MAX_SECURITY_BOOL@@  # true when ob_pam_mode == E
 
 # ── OIDC / portal settings ────────────────────────────────────────────────────
@@ -66,8 +71,9 @@ ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
 # instead of waiting for a human to validate it in a browser. The cookie is
 # obtained with the `llng` CLI from simple-oidc-client:
 #   llng --llng-server <portal> llng_cookie
-# It is asked for at every play run via vars_prompt in playbook.yml and is
-# never persisted to disk. Falls back to the manual flow if the cookie is empty.
+# It is asked for at every play run via vars_prompt in the generated playbook
+# and is never persisted to disk. Falls back to the manual flow if the cookie
+# is empty.
 ob_ansible_auto_approve: @@ANSIBLE_AUTO_APPROVE_BOOL@@
 ob_llng_cookie: ""
 
@@ -88,9 +94,11 @@ ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 @@MODE_SETTINGS_YAML@@
 
 # ── Backend-only: "accept only this bastion" ──────────────────────────────────
-# Empty for bastion/standalone roles. For backend roles ob-builder expands this
-# to ob_bastion_allowed_bastions (comma/space-separated bastion_id, as printed
-# by ob-bastion-id on each bastion) when an allowlist was given at build time. Enforcement is via
-# ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not the
-# old broken bastion_jwt config.
+# Absent for bastion/standalone roles, where nothing hops in. On a backend:
+# ob_bastion_allowed_bastions (comma/space-separated bastion_id, as printed by
+# ob-bastion-id on each bastion) when an allowlist was given at build time;
+# without it, the play collects the ids from the bastion hosts of
+# ob_bastion_group and fails rather than write a partial list. Enforcement is
+# via ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not
+# the old broken bastion_jwt config.
 @@BASTION_ALLOWLIST_VARS_YAML@@

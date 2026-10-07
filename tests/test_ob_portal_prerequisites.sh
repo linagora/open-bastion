@@ -178,11 +178,11 @@ test_builder_writes_checklist() {
 
     [ -f "$WORK/art/PORTAL-CHECKLIST-bastion.md" ] \
         || bad="$bad no-checklist-beside-installer"
-    [ -f "$WORK/art/role/PORTAL-CHECKLIST.md" ] \
+    [ -f "$WORK/art/role/PORTAL-CHECKLIST-bastion.md" ] \
         || bad="$bad no-checklist-in-ansible-role"
 
     local f
-    for f in "$WORK/art/PORTAL-CHECKLIST-bastion.md" "$WORK/art/role/PORTAL-CHECKLIST.md"; do
+    for f in "$WORK/art/PORTAL-CHECKLIST-bastion.md" "$WORK/art/role/PORTAL-CHECKLIST-bastion.md"; do
         [ -f "$f" ] || continue
         # An unresolved @@PLACEHOLDER@@ is a checklist that tells the operator
         # to configure a literal @@CLIENT_ID@@.

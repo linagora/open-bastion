@@ -41,8 +41,8 @@ deployment — the security scenario, the OIDC client, the package
 repository and the SSH CA key are asked once — and what applies it to
 the targets is what you choose here:
 
-* :doc:`Ansible deployment </deployment/ansible-deployment>` — generate an
-  Ansible role, declare the hosts, apply with one ``ansible-playbook`` run.
+* :doc:`Ansible deployment </deployment/ansible-deployment>` — generate the
+  Ansible tree, declare the hosts, apply with one ``ansible-playbook`` run.
   The path to a fleet.
 
 * :doc:`Self-extracting installer </deployment/self-extracting-installer>` —

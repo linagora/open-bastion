@@ -87,7 +87,6 @@ CONFIG_INSECURE=""
 # builder's own fetches and in the generated artefacts (verify_ssl = false).
 INSECURE=0
 DRY_RUN=0
-BUNDLE=0
 
 # ── Questionnaire-collected variables (also overridable via YAML) ───────
 DEPLOYMENT_SLUG=""
@@ -104,9 +103,9 @@ TARGET_ROLE=""
 # TARGET_ROLE stays the first one.
 TARGET_ROLES=()
 AUTO_ENROLL_SETUP=""
-# Pass --enable-service-keys through to the setup script the bundle runs.
+# Pass --enable-service-keys through to the setup script the artefacts run.
 #
-# Without it the bundle deploys the keys and then the setup run it launches
+# Without it the artefacts deploy the keys and then the setup run they launch
 # REMOVES the drop-in that serves them: a setup run without the flag cleans up
 # its own generated file (#265), and the installer's setup argv had no way to
 # carry one. The two features together were self-defeating.
@@ -174,16 +173,16 @@ INPUT MODES:
   (no args)                  Fully interactive questionnaire (asks for the
                              outputs too, and may target several roles)
   --config FILE              Non-interactive, read all answers from a YAML file
-  --bundle                   Generate paired bastion + backend artefacts in one run
 
 OUTPUTS (with --config, at least one of them is required):
   --output-shell DIR         Write the self-extracting shell installer(s) in
                              this directory, created if missing, as
                              bootstrap-<slug>-<role>.sh (+ .sig, and
                              PORTAL-CHECKLIST-<role>.md)
-  --output-ansible PATH      Write Ansible role tree here (directory)
-                             With several roles, each role tree gets the role
-                             as suffix (PATH-bastion, PATH-backend)
+  --output-ansible PATH      Write the Ansible tree here (directory), with one
+                             playbook-<role>.yml and roles/open-bastion-<role>/
+                             per target role, plus a site.yml playing them in
+                             order when there are several
   --save-config PATH         Also save the answers, defaults included, as a
                              YAML replayable with --config (the questionnaire
                              offers it too). An embedded client_secret is left
@@ -234,12 +233,12 @@ SERVICE ACCOUNTS (--config YAML):
   Give each account its public_key (or public_key_file): the fingerprint alone
   tells pam_openbastion what to expect but gives sshd nothing to accept, so
   without the key the account cannot log in and the deployment looks complete
-  (#263). With it, the bundle also writes
+  (#263). With it, the artefacts also write
   /etc/open-bastion/service-accounts.d/<name>.pub.
 
   sshd still needs the AuthorizedKeysCommand that serves those files. When any
-  account carries a key the bundle passes --enable-service-keys to the setup it
-  runs, so this is handled; set service_keys: false to opt out, or true to
+  account carries a key the artefacts pass --enable-service-keys to the setup
+  they run, so this is handled; set service_keys: false to opt out, or true to
   force it. If setup is skipped, run it by hand on the target -- the installer
   says so when it finds sshd not serving them. Example:
     service_accounts:
@@ -247,8 +246,8 @@ SERVICE ACCOUNTS (--config YAML):
         public_key_file: keys/ci.pub  # or public_key: "ssh-ed25519 AAAA… ci@host"
                                       # (relative to THIS file; the two are exclusive)
         # key_fingerprint is DERIVED from the key. Give it too only if you want
-        # it cross-checked: a mismatch stops the build rather than shipping a
-        # bundle that installs cleanly and refuses the login.
+        # it cross-checked: a mismatch stops the build rather than shipping
+        # artefacts that install cleanly and refuse the login.
         sudo_allowed: true
         sudo_nopasswd: true
         shell: /bin/bash
@@ -273,9 +272,9 @@ EXAMPLES:
   $PROG_NAME --config build.yml \\
              --output-shell /tmp/bootstrap/ --output-ansible /tmp/role/
 
-  # Bundle (bastion + backend share the same CA / JWKS fetched once)
-  $PROG_NAME --config build.yml --bundle \\
-             --output-shell /tmp/bootstrap/
+  # A bastion and its backends in one run: target_role: "bastion,backend"
+  # in build.yml. No portal conversation is repeated, so the two roles share
+  # the CA fetched once.
 
 EOF
 }
@@ -328,7 +327,12 @@ parse_args() {
                 [ -n "${2:-}" ] && [[ "${2:-}" != -* ]] || die "Option $1 requires an argument"
                 SAVE_CONFIG="$2"; shift 2
                 ;;
-            --bundle)        BUNDLE=1; shift ;;
+            --bundle)
+                # Removed: it only prefixed one role with another. Keep the
+                # flag recognised a while longer so old build scripts fail
+                # with the replacement instead of "unknown option".
+                die "--bundle was removed (#338): list the roles to generate in the config, e.g. target_role: \"bastion,backend\", or pick several roles in the questionnaire. Both roles then come out of the same run, sharing the CA fetched once."
+                ;;
             --insecure|--allow-http)
                 [ "$1" = "--allow-http" ] && log_warn "--allow-http is deprecated, use --insecure (same effect)"
                 INSECURE=1
@@ -640,10 +644,10 @@ _sa_reconcile_key() {
     if [ -z "$pubkey" ]; then
         # Fingerprint-only. Promised a message here and never emitted one; the
         # branch was dead code. It matters: this is the pre-#263 shape, and the
-        # bundle cannot make the account work on its own.
+        # artefacts cannot make the account work on their own.
         if [ -n "$fp" ]; then
             log_warn "service account '$name': key_fingerprint without public_key."
-            log_warn "  The bundle will deploy service-accounts.conf but no"
+            log_warn "  The artefacts will deploy service-accounts.conf but no"
             log_warn "  /etc/open-bastion/service-accounts.d/$name.pub, so sshd has no key to"
             log_warn "  offer and the account cannot log in until you deploy one by hand."
             log_warn "  Add public_key or public_key_file to have this handled for you."
@@ -800,10 +804,11 @@ _parse_service_accounts_block() {
             exit 1
         fi
 
-        # A key/fingerprint mismatch stops the build. Not a warning: the bundle
-        # would install cleanly and refuse the login on the target, which is the
-        # most expensive place to discover it. Explicit rather than relying on
-        # errexit, whose behaviour here depends on the calling context.
+        # A key/fingerprint mismatch stops the build. Not a warning: the
+        # artefacts would install cleanly and refuse the login on the target,
+        # which is the most expensive place to discover it. Explicit rather
+        # than relying on errexit, whose behaviour here depends on the calling
+        # context.
         _sa_reconcile_key || exit 1
         SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid" "$pubkey")")
         have_acct=0
@@ -1003,7 +1008,7 @@ collect_service_accounts_interactive() {
         # and that is exactly the shape worth warning about.
         rec=$(_sa_pack "$name" "$fp" "$sudo_allowed" "$sudo_nopasswd" "$shell" "$home" "$gecos" "$uid" "$gid" "")
         log_warn "service account '$name': no public key given."
-        log_warn "  The bundle will deploy service-accounts.conf but no"
+        log_warn "  The artefacts will deploy service-accounts.conf but no"
         log_warn "  /etc/open-bastion/service-accounts.d/$name.pub, so sshd has no key to"
         log_warn "  offer and the account cannot log in until you deploy one by hand."
         log_warn "  Use --config with public_key_file to have this handled for you."
@@ -1159,8 +1164,8 @@ EOF
         die "server_group_policy=fixed requires a non-empty server_group"
     fi
 
-    # q7. Target role(s). A preset role (config) or --bundle keeps a single one.
-    if [ -n "$TARGET_ROLE" ] || [ "$BUNDLE" = "1" ]; then
+    # q7. Target role(s). A role preset by the config keeps a single one.
+    if [ -n "$TARGET_ROLE" ]; then
         while :; do
             if [ -z "$TARGET_ROLE" ]; then
                 explain "Pick what this artefact configures: a bastion (jump host accepting SSH from users), a backend (server reached only through a bastion), or a standalone host (isolated server with no bastion in front)."
@@ -1449,11 +1454,6 @@ validate_inputs() {
         _seen_role[$_role]=1
     done
     TARGET_ROLE="${TARGET_ROLES[0]}"
-    # --bundle adds the companion of ONE role; with several it would generate
-    # some role twice, to the same paths.
-    if [ "$BUNDLE" = "1" ] && [ "${#TARGET_ROLES[@]}" -gt 1 ]; then
-        die "--bundle takes a single target_role (it adds the companion role itself)"
-    fi
 
     # apt_url / apt_suite / apt_component are concatenated into the
     # "deb [signed-by=...] URL SUITE COMPONENT" line and interpolated verbatim
@@ -1567,39 +1567,27 @@ shell_installer_path() {
 }
 
 # Artefacts to produce, as parallel arrays (one entry per role). Shell
-# installers always carry the role in their name. A single Ansible role tree
-# uses the path as given; several get the role as suffix. --bundle adds its
-# companion role the same way.
+# installers always carry the role in their name. The Ansible roles of a run
+# share the one output directory, told apart by their per-role file names.
 _PLAN_ROLES=()
 _PLAN_SHELL=()
-_PLAN_ANSIBLE=()
 build_output_plan() {
-    local r sh an n="${#TARGET_ROLES[@]}"
-    _PLAN_ROLES=(); _PLAN_SHELL=(); _PLAN_ANSIBLE=()
+    local r
+    _PLAN_ROLES=(); _PLAN_SHELL=()
     for r in "${TARGET_ROLES[@]}"; do
-        sh=""; an="$OUTPUT_ANSIBLE"
-        [ -n "$OUTPUT_SHELL" ] && sh=$(shell_installer_path "$r")
-        if [ "$n" -gt 1 ] && [ -n "$an" ]; then
-            an="${OUTPUT_ANSIBLE%/}-${r}"
+        _PLAN_ROLES+=("$r")
+        if [ -n "$OUTPUT_SHELL" ]; then
+            _PLAN_SHELL+=("$(shell_installer_path "$r")")
+        else
+            _PLAN_SHELL+=("")
         fi
-        _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
     done
-    if [ "$BUNDLE" = "1" ]; then
-        # Companion of the primary role.
-        r="backend"
-        [ "$TARGET_ROLE" = "backend" ] && r="bastion"
-        sh=""; an=""
-        [ -n "$OUTPUT_SHELL" ]   && sh=$(shell_installer_path "$r")
-        [ -n "$OUTPUT_ANSIBLE" ] && an="${OUTPUT_ANSIBLE%/}-${r}"
-        _PLAN_ROLES+=("$r"); _PLAN_SHELL+=("$sh"); _PLAN_ANSIBLE+=("$an")
-    fi
     return 0
 }
 
 # Print a recap before doing any work — last chance for the admin to bail.
 print_recap() {
     local i r rec="n/a (backend role)" nb=0
-    # Bundle: the companion bastion is in _PLAN_ROLES, not TARGET_ROLES
     for r in "${_PLAN_ROLES[@]}"; do [ "$r" != "backend" ] && nb=1; done
     if [ "$nb" = 1 ]; then
         [ "$DISABLE_SESSION_RECORDER" = "yes" ] && rec="disabled (opt-out)" || rec="enabled"
@@ -1625,14 +1613,13 @@ print_recap() {
   Repo keyring:        $REPO_KEYRING
   Sign with:           ${SIGN_WITH:-<none>}
   Save config to:      ${SAVE_CONFIG:-<no>}
-  Bundle:              $([ "$BUNDLE" = 1 ] && echo yes || echo no)
   Dry-run:             $([ "$DRY_RUN" = 1 ] && echo yes || echo no)
   TLS verification:    $([ "$INSECURE" = 1 ] && echo "DISABLED (--insecure)" || echo enabled)
 EOF
     for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
-        printf '  %-21sshell=%s  ansible=%s\n' "Output (${_PLAN_ROLES[$i]}):" \
-            "${_PLAN_SHELL[$i]:-<none>}" "${_PLAN_ANSIBLE[$i]:-<none>}"
+        printf '  %-21sshell=%s\n' "Output (${_PLAN_ROLES[$i]}):" "${_PLAN_SHELL[$i]:-<none>}"
     done
+    [ -n "$OUTPUT_ANSIBLE" ] && printf '  %-21s%s\n' "Ansible tree:" "$OUTPUT_ANSIBLE"
     if [ "$INSECURE" = "1" ]; then
         log_warn "TLS verification is disabled: targets get verify_ssl = false and run ob-enroll/setup with -k."
     fi
@@ -1683,7 +1670,6 @@ _yaml_kv() {
 _replay_command() {
     local cmd
     cmd="$PROG_NAME --config $(printf '%q' "$1")"
-    [ "$BUNDLE" = "1" ] && cmd="$cmd --bundle"
     [ -n "$OUTPUT_SHELL" ]   && cmd="$cmd --output-shell $(printf '%q' "$OUTPUT_SHELL")"
     [ -n "$OUTPUT_ANSIBLE" ] && cmd="$cmd --output-ansible $(printf '%q' "$OUTPUT_ANSIBLE")"
     printf '%s' "$cmd"
@@ -1696,7 +1682,7 @@ render_config_yaml() {
     printf '# ob-builder configuration, replayed without any question by:\n'
     printf '#   %s\n' "$(_replay_command "$path")"
     printf '# Generated by ob-builder %s on %s. Every key is written,\n' "$VERSION" "$BUILD_DATE"
-    printf '# defaults included. Output paths, --bundle and --dry-run stay on the\n'
+    printf '# defaults included. Output paths and --dry-run stay on the\n'
     printf '# command line.\n\n'
 
     _yaml_kv deployment_slug "$DEPLOYMENT_SLUG"
@@ -1863,7 +1849,7 @@ fetch_sso_assets() {
         : > "$WORK_DIR/krl"
     fi
 
-    if _has_role backend || [ "$BUNDLE" = "1" ]; then
+    if _has_role backend; then
         if ! sso_fetch_jwks "$PORTAL_URL" "$WORK_DIR/jwks.json"; then
             die "JWKS fetch failed; backend artefacts require it."
         fi
@@ -2015,9 +2001,8 @@ YML
     esac
 }
 
-# Build the placeholder map for the current run. Called once per artefact
-# (so the bastion + backend cycle in --bundle gets fresh role-specific
-# values).
+# Build the placeholder map for the current run. Called once per artefact,
+# so every role of a run gets its own values.
 build_placeholder_map() {
     local role="$1"
     local pam_mode bastion_backend_block bastion_allowlist_yaml ca_b64 krl_b64 gpg_b64 apt_sources
@@ -2035,14 +2020,18 @@ build_placeholder_map() {
     # the Ansible role (which forwards it as ob-backend-setup --allowed-bastions).
     bastion_backend_block=""
     # Role-scoped: the allowlist is meaningful only for a backend. Keep it empty
-    # for bastion/standalone artefacts (matters in --bundle, where one config
-    # produces both roles — the bastion installer must NOT embed the allowlist).
+    # for bastion/standalone artefacts: one config produces every role of the
+    # run, and the bastion installer must NOT embed the allowlist. A backend
+    # without a build-time allowlist still gets ob_bastion_group, the inventory
+    # group the play collects the ids from.
     local allowlist_for_role=""
-    if [ "$role" = "backend" ] && [ -n "${ALLOWED_BASTIONS:-}" ]; then
-        allowlist_for_role="$ALLOWED_BASTIONS"
-        bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
-    else
-        bastion_allowlist_yaml=""
+    bastion_allowlist_yaml=""
+    if [ "$role" = "backend" ]; then
+        if [ -n "${ALLOWED_BASTIONS:-}" ]; then
+            allowlist_for_role="$ALLOWED_BASTIONS"
+            bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""$'\n'
+        fi
+        bastion_allowlist_yaml+="ob_bastion_group: bastions"
     fi
 
     mode_settings=$(_mode_settings_conf "$pam_mode")
@@ -2211,7 +2200,7 @@ VARSPROMPT
 # text into every artefact: the shell installer (0755 by default) and the
 # Ansible role's defaults/main.yml (0644). Two accidents follow from that, and
 # both were observed on a real build host: any local account could read the
-# secret, and a bundle generated inside a git working tree was one `git add -A`
+# secret, and a tree generated inside a git working tree was one `git add -A`
 # away from being published.
 #
 # These helpers are no-ops for client_secret_mode=prompt/none, where nothing
@@ -2228,7 +2217,7 @@ _tighten_if_embedded() {
         || log_warn "Could not restrict permissions on $path (it holds the client secret)"
 }
 
-_write_bundle_gitignore() {
+_write_embedded_secret_gitignore() {
     local outpath="$1"
 
     [ "$CLIENT_SECRET_MODE" = "embedded" ] || return 0
@@ -2237,12 +2226,12 @@ _write_bundle_gitignore() {
     atomic_write "$outpath/.gitignore" "0644" \
 "# Written by ob-builder $VERSION.
 #
-# This bundle was built with client_secret_mode=embedded:
-# roles/open-bastion/defaults/main.yml holds the OIDC client secret in clear
+# This tree was built with client_secret_mode=embedded:
+# roles/open-bastion-*/defaults/main.yml holds the OIDC client secret in clear
 # text, and the inventory names real hosts. Ignoring the whole directory keeps
 # a stray 'git add -A' from publishing it.
 #
-# To version this bundle deliberately: delete this file, hold the secret with
+# To version this tree deliberately: delete this file, hold the secret with
 # 'ansible-vault encrypt_string' and rebuild with client_secret_mode=prompt.
 *
 "
@@ -2344,18 +2333,20 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────
-# Ansible role rendering.
-# Mirrors the layout described in the design plan:
-#   <out>/playbook.yml
-#   <out>/roles/open-bastion/defaults/main.yml
-#   <out>/roles/open-bastion/files/open-bastion-ca.pub
-#   <out>/roles/open-bastion/files/open-bastion-krl       (if max-security)
-#   <out>/roles/open-bastion/files/open-bastion.gpg
-#   <out>/roles/open-bastion/files/jwks.json              (if backend/bundle)
-#   <out>/roles/open-bastion/templates/openbastion.conf.j2
-#   <out>/roles/open-bastion/tasks/main.yml
-#   <out>/roles/open-bastion/tasks/{bastion,backend,standalone}.yml
-#   <out>/roles/open-bastion/handlers/main.yml
+# Ansible role rendering. One directory per build, one role per target role:
+#   <out>/site.yml                                    (several roles)
+#   <out>/playbook-<role>.yml
+#   <out>/inventory.yml.example
+#   <out>/PORTAL-CHECKLIST-<role>.md
+#   <out>/roles/open-bastion-<role>/defaults/main.yml
+#   <out>/roles/open-bastion-<role>/files/open-bastion-ca.pub
+#   <out>/roles/open-bastion-<role>/files/open-bastion-krl  (if max-security)
+#   <out>/roles/open-bastion-<role>/files/open-bastion.gpg
+#   <out>/roles/open-bastion-<role>/files/jwks.json       (backend roles)
+#   <out>/roles/open-bastion-<role>/templates/openbastion.conf.j2
+#   <out>/roles/open-bastion-<role>/tasks/main.yml
+#   <out>/roles/open-bastion-<role>/tasks/<role>.yml
+#   <out>/roles/open-bastion-<role>/handlers/main.yml
 # Each template at $TEMPLATES_DIR/ansible/... ending in .in is expanded;
 # other files are copied as-is.
 # ─────────────────────────────────────────────────────────────────────────
@@ -2383,18 +2374,27 @@ render_ansible_role() {
 
     # Walk the template tree.
     # The source layout uses a short "role/" prefix; the rendered output
-    # follows the standard Ansible "roles/open-bastion/" layout. The
-    # remap below performs that translation transparently so the source
-    # tree stays compact while the artefact remains drop-in compatible
-    # with `ansible-playbook -i inventory playbook.yml`.
+    # follows the standard "roles/open-bastion-<role>/" layout, so one tree
+    # can hold several roles without their files colliding. The playbook is
+    # named per role for the same reason. The remap below performs that
+    # translation transparently so the source tree stays compact while the
+    # artefact remains drop-in compatible with
+    # `ansible-playbook -i inventory site.yml`.
     local rel f dest
     while IFS= read -r -d '' f; do
         rel="${f#"$src"/}"
         # Drop the trailing ".in" suffix on templated files.
         rel="${rel%.in}"
-        # Remap "role/<x>" to "roles/open-bastion/<x>".
+        # Only this role's task file is ever run (main.yml dispatches on
+        # ob_artefact_role): shipping the others would be dead weight.
         case "$rel" in
-            role/*) rel="roles/open-bastion/${rel#role/}" ;;
+            role/tasks/bastion.yml|role/tasks/backend.yml|role/tasks/standalone.yml)
+                [ "$rel" = "role/tasks/${role}.yml" ] || continue
+                ;;
+        esac
+        case "$rel" in
+            role/*) rel="roles/open-bastion-${role}/${rel#role/}" ;;
+            playbook.yml) rel="playbook-${role}.yml" ;;
         esac
         dest="$outpath/$rel"
         if [[ "$f" == *.in ]]; then
@@ -2406,7 +2406,7 @@ render_ansible_role() {
     done < <(find "$src" -type f -print0)
 
     # Drop in the binary assets that templates can't carry.
-    local files_dir="$outpath/roles/open-bastion/files"
+    local files_dir="$outpath/roles/open-bastion-${role}/files"
     mkdir -p "$files_dir"
     atomic_write_from "$files_dir/open-bastion-ca.pub" "0644" "$WORK_DIR/ca.pub"
     if [ "$SCENARIO" = "max-security" ]; then
@@ -2420,14 +2420,36 @@ render_ansible_role() {
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -f "$WORK_DIR/jwks.json" ]; then
+    # Backend-only, like the fetch: a bastion verifies nothing with it.
+    if [ "$role" = "backend" ] && [ -f "$WORK_DIR/jwks.json" ]; then
         atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
 
-    _tighten_if_embedded "$outpath/roles/open-bastion/defaults/main.yml" "0600"
-    _write_bundle_gitignore "$outpath"
+    _tighten_if_embedded "$outpath/roles/open-bastion-${role}/defaults/main.yml" "0600"
+    _write_embedded_secret_gitignore "$outpath"
 
     log_info "Ansible role written to $outpath"
+}
+
+# <out>/site.yml, when a run produces several roles: one playbook import per
+# role, in the order they were asked for. Each playbook skips the hosts that
+# declare another role, so the file is the entry point for a mixed inventory:
+# `ansible-playbook -i inventory.yml site.yml`.
+render_site_playbook() {
+    local outpath="$1" r content=""
+    [ -n "$outpath" ] || return 0
+    [ "${#_PLAN_ROLES[@]}" -gt 1 ] || return 0
+
+    if [ "$DRY_RUN" = "1" ]; then
+        log_info "[DRY-RUN] Would write $outpath/site.yml"
+        return 0
+    fi
+
+    for r in "${_PLAN_ROLES[@]}"; do
+        content="${content}- import_playbook: playbook-${r}.yml"$'\n'
+    done
+    atomic_write "$outpath/site.yml" "0644" "$content"
+    log_info "Site playbook written to $outpath/site.yml"
 }
 
 # Minimal Ansible stub when templates are missing — writes defaults/main.yml
@@ -2443,8 +2465,8 @@ _render_stub_ansible() {
         return 0
     fi
 
-    local defaults_dir="$outpath/roles/open-bastion/defaults"
-    local files_dir="$outpath/roles/open-bastion/files"
+    local defaults_dir="$outpath/roles/open-bastion-${role}/defaults"
+    local files_dir="$outpath/roles/open-bastion-${role}/files"
     mkdir -p "$defaults_dir" "$files_dir"
 
     local defaults
@@ -2456,7 +2478,7 @@ _render_stub_ansible() {
 ob_deployment_slug: $DEPLOYMENT_SLUG
 ob_scenario: $SCENARIO
 ob_pam_mode: $pam_mode
-ob_role: $role
+ob_artefact_role: $role
 ob_portal_url: $PORTAL_URL
 ob_verify_ssl: $([ "$INSECURE" = 1 ] && echo false || echo true)
 ob_client_id: ${CLIENT_ID:-}
@@ -2480,11 +2502,11 @@ EOF
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -f "$WORK_DIR/jwks.json" ]; then
+    if [ "$role" = "backend" ] && [ -f "$WORK_DIR/jwks.json" ]; then
         atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
     _tighten_if_embedded "$defaults_dir/main.yml" "0600"
-    _write_bundle_gitignore "$outpath"
+    _write_embedded_secret_gitignore "$outpath"
 
     log_info "Stub Ansible role written to $outpath"
 }
@@ -2495,9 +2517,9 @@ EOF
 # installer and no Ansible task can set them, and probing the portal for their
 # state would need an API that publishes the project's bastions, server groups
 # and RPs -- which is not something an SSO should offer. So the artefact carries
-# the requirement instead, pre-filled with the client_id and server_group THIS
-# bundle enrols with, rather than leaving the admin to map a generic warning
-# onto their own deployment.
+# the requirement instead, pre-filled with the client_id and server_group the
+# role itself enrols with, rather than leaving the admin to map a generic
+# warning onto their own deployment.
 #
 # It is written for both output kinds. The shell installer runs the setup
 # script, which prints the same requirement; the Ansible role runs it through a
@@ -2525,13 +2547,12 @@ run_outputs_for_role() {
 
     [ -n "$shell_out" ]   && render_shell_installer "$shell_out" "$role"
     [ -n "$ansible_out" ] && render_ansible_role    "$ansible_out" "$role"
-    # Next to the installer, and inside the role tree. Named per role so a
-    # --bundle run does not have its bastion checklist overwritten by its
-    # backend one.
+    # Next to the installer, and inside the tree. Named per role: one tree
+    # holds every role of the run.
     [ -n "$shell_out" ]   && render_portal_checklist \
         "$(dirname -- "$shell_out")/PORTAL-CHECKLIST-${role}.md" "$role"
     [ -n "$ansible_out" ] && render_portal_checklist \
-        "$ansible_out/PORTAL-CHECKLIST.md" "$role"
+        "$ansible_out/PORTAL-CHECKLIST-${role}.md" "$role"
     # When one of the outputs is empty the corresponding `cmd && X` is
     # false; the function would otherwise return non-zero and trip set -e
     # in main(). Explicit success keeps execution flowing.
@@ -2572,7 +2593,6 @@ main() {
     validate_inputs
     build_output_plan
 
-    # If --bundle is set, we will fetch JWKS regardless of primary role.
     print_recap
 
     # Before the SSO fetch: the answers are kept even if the portal is down.
@@ -2586,25 +2606,23 @@ main() {
 
     fetch_sso_assets
 
-    # One pass per role; with --bundle the last entry is the companion role.
-    local i sh an
+    # One pass per role, all into the same Ansible tree.
+    local i sh
     for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
-        if [ "$BUNDLE" = "1" ] && [ "$i" -gt 0 ]; then
-            log_step "Bundle: also generating ${_PLAN_ROLES[$i]} artefact"
-        fi
-        run_outputs_for_role "${_PLAN_ROLES[$i]}" "${_PLAN_SHELL[$i]}" "${_PLAN_ANSIBLE[$i]}"
+        run_outputs_for_role "${_PLAN_ROLES[$i]}" "${_PLAN_SHELL[$i]}" "$OUTPUT_ANSIBLE"
     done
+    render_site_playbook "$OUTPUT_ANSIBLE"
 
     log_step "Done"
     for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
-        sh="${_PLAN_SHELL[$i]}"; an="${_PLAN_ANSIBLE[$i]}"
+        sh="${_PLAN_SHELL[$i]}"
         if [ -n "$sh" ]; then
             log_info "[${_PLAN_ROLES[$i]}] Shell installer:  $sh"
             [ -n "$SIGN_WITH" ] && log_info "[${_PLAN_ROLES[$i]}] Signature:        ${sh}.sig"
             log_info "[${_PLAN_ROLES[$i]}] Portal checklist: $(dirname -- "$sh")/PORTAL-CHECKLIST-${_PLAN_ROLES[$i]}.md"
         fi
-        [ -n "$an" ] && log_info "[${_PLAN_ROLES[$i]}] Ansible role:     $an"
     done
+    [ -n "$OUTPUT_ANSIBLE" ] && log_info "Ansible tree:      $OUTPUT_ANSIBLE"
     return 0
 }
 

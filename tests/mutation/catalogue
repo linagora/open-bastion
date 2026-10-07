@@ -176,7 +176,7 @@ why     || existed.
 
 id      || portal-prereq-builder-ansible
 file    || admin-builder/ob-builder
-search  || "$ansible_out/PORTAL-CHECKLIST.md" "$role"
+search  || "$ansible_out/PORTAL-CHECKLIST-${role}.md" "$role"
 replace || "$ansible_out/OB-MUTANT-CHECKLIST.md" "$role"
 suite   || tests/test_ob_portal_prerequisites.sh
 why     || #268: the Ansible role runs the setup script through a task whose

@@ -1191,7 +1191,9 @@ client_id_policy: modifiable
 client_secret_mode: prompt
 server_group: smoke
 server_group_policy: modifiable
-target_role: backend
+# Both roles: site.yml imports the two playbooks, so the syntax-check walks
+# the guard and the allowlist collection of each of them.
+target_role: "bastion,backend"
 auto_enroll_setup: yes
 self_delete: no
 ansible_auto_approve: yes
@@ -1218,13 +1220,33 @@ EOF
     if ! ansible-playbook --syntax-check \
             -i "${outdir}/role/inventory.yml" \
             -e "ob_client_secret=dummy ob_llng_cookie=lemonldap=dummy" \
-            "${outdir}/role/playbook.yml" \
+            "${outdir}/role/site.yml" \
             > "${outdir}/syntax.log" 2>&1; then
-        fail "ansible-playbook --syntax-check failed on the generated role" \
+        fail "ansible-playbook --syntax-check failed on the generated tree" \
              "$(cat "${outdir}/syntax.log")"
         rm -rf "$outdir"
         return 1
     fi
+    # The two roles of the run must each have their playbook, their role
+    # directory, and only their own task file.
+    local f
+    for f in playbook-bastion.yml playbook-backend.yml \
+             roles/open-bastion-bastion/tasks/bastion.yml \
+             roles/open-bastion-backend/tasks/backend.yml; do
+        if [ ! -f "${outdir}/role/${f}" ]; then
+            fail "generated tree is missing ${f}" "$(find "${outdir}/role" -type f)"
+            rm -rf "$outdir"
+            return 1
+        fi
+    done
+    for f in roles/open-bastion-bastion/tasks/backend.yml \
+             roles/open-bastion-backend/tasks/bastion.yml; do
+        if [ -e "${outdir}/role/${f}" ]; then
+            fail "generated tree ships the other role's task file" "${f}"
+            rm -rf "$outdir"
+            return 1
+        fi
+    done
 
     rm -rf "$outdir"
     pass "Ansible role passes syntax-check (auto-approve variant)"

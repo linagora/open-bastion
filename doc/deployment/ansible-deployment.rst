@@ -20,7 +20,7 @@ end in the same setup commands:
 your workstation. It talks to the SSO portal to fetch the SSH CA public key
 and the JWKS, then bakes them — plus your security scenario, your OIDC
 ``client_id`` and the package repository — into the artefacts you ask for: an
-Ansible role, a self-extracting shell installer, or both. The targets run
+Ansible tree, a self-extracting shell installer, or both. The targets run
 those artefacts and never contact your workstation again.
 
 Run it without arguments for the questionnaire. It asks, in order: the
@@ -37,11 +37,9 @@ in a YAML file, which is what makes a deployment reproducible.
 Non-interactive: ``build.yml``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A bastion and a backend differ only by ``target_role`` (and the
-backend's "accept only this bastion" allowlist). You can generate them
-in two runs, or in one run with ``--bundle`` so both share the exact
-same CA and JWKS. Write one ``build.yml`` describing the deployment,
-then let ``--bundle`` emit the matched pair:
+A bastion and a backend differ by ``target_role`` and by the backend's
+"accept only this bastion" allowlist. ``target_role`` takes several
+roles, so one run emits the whole deployment from one ``build.yml``:
 
 .. code:: yaml
 
@@ -50,12 +48,12 @@ then let ``--bundle`` emit the matched pair:
    # token-only | token+unix | keys+llng | mixed | max-security
    scenario: token-only
    portal_url: https://sso.example.com
-   client_id: ob-bastion # the bastion's OIDC client (= its bastion_id)
+   client_id: ob-client-bastion # the bastion's OIDC client
    client_id_policy: fixed
    client_secret_mode: prompt # none | prompt | embedded
    server_group: bastion
    server_group_policy: fixed
-   target_role: bastion # bundle derives the matching backend automatically
+   target_role: "bastion,backend"
    auto_enroll_setup: yes
    # Let the play approve device codes via an LLNG cookie
    ansible_auto_approve: yes
@@ -65,27 +63,31 @@ then let ``--bundle`` emit the matched pair:
 
 .. code:: bash
 
-   ob-builder --config build.yml --bundle --output-ansible ./roles-acme/
+   ob-builder --config build.yml --output-ansible ./roles-acme/
+
+A role that needs its own OIDC client or server group takes them from
+the inventory, per host or per group (:ref:`Step 2
+<ansible-deployment-step-2--declare-your-hosts-and-their-ips>`).
 
 With ``client_secret_mode: embedded``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The default is ``prompt``, which keeps the OIDC client secret out of
-every generated file. ``embedded`` bakes it in clear text into
-``defaults/main.yml`` and into the shell installer, so the bundle
+every generated file. ``embedded`` bakes it in clear text into each
+role's ``defaults/main.yml`` and into the shell installer, so the tree
 becomes a credential:
 
-- ``ob-builder`` restricts those two files to the building user
+- ``ob-builder`` restricts those files to the building user
   (``0600`` and ``0700``) and drops a ``.gitignore`` at the root of the
-  bundle so a ``git add -A`` in a surrounding working tree cannot
-  publish it;
+  tree so a ``git add -A`` in a surrounding working tree cannot publish
+  it;
 - treat the directory as secret material — do not copy it into a
   repository, an attachment or a shared drive;
 - to version it anyway, delete that ``.gitignore``, rebuild with
   ``client_secret_mode: prompt``, and supply the secret with
   ``ansible-vault encrypt_string 's3cr3t' --name ob_client_secret``;
-- if a bundle has already been shared, rotate the client secret in the
-  LLNG portal: it is a bearer credential for the deployment's OIDC
+- if such a tree has already been shared, rotate the client secret in
+  the LLNG portal: it is a bearer credential for the deployment's OIDC
   client.
 
 Prerequisites
@@ -113,39 +115,42 @@ Prerequisites
 Step 1 — generate the roles
 ---------------------------
 
-.. _ansible-deployment-option-a--bundle:
+.. _ansible-deployment-step-1--one-run:
 
-Option A — bundle (recommended: bastion + backend share one CA)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+One run, one tree
+~~~~~~~~~~~~~~~~~
 
-The ``build.yml`` above, with ``--bundle --output-ansible``, emits both roles
-from one portal conversation.
-
-.. _ansible-deployment-option-b--two-independent-runs:
-
-Option B — two independent runs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Generate the bastion role:
+With the ``build.yml`` above (``target_role: "bastion,backend"``):
 
 .. code:: bash
 
-   ob-builder --config build-bastion.yml --output-ansible ./role-bastion/
+   ob-builder --config build.yml --output-ansible ./roles-acme/
 
-…and the backend role (same file, ``target_role: backend``, a
-backend ``server_group``, and optionally an ``allowed_bastions``
-allowlist):
+The tree contains one role directory per target role, and a playbook
+per role:
 
-.. code:: bash
+.. code:: text
 
-   ob-builder --config build-backend.yml --output-ansible ./role-backend/
+   roles-acme/
+   ├── site.yml                       # plays the roles in order
+   ├── playbook-bastion.yml           # hosts: all, skips the other roles' hosts
+   ├── playbook-backend.yml
+   ├── inventory.yml.example
+   ├── PORTAL-CHECKLIST-bastion.md    # the portal settings to make, per role
+   ├── PORTAL-CHECKLIST-backend.md
+   └── roles/
+       ├── open-bastion-bastion/      # defaults/, tasks/, templates/, files/
+       └── open-bastion-backend/
 
-The generated tree contains ``defaults/main.yml`` (all the baked-in
-``ob_*`` values), ``tasks/``, ``templates/`` and a ``files/`` directory
-holding the SSH CA public key fetched from the portal. The role's
-`README
+``roles/open-bastion-<role>/defaults/main.yml`` holds the baked-in
+``ob_*`` values, and the role's `README
 <https://github.com/linagora/open-bastion/blob/main/admin-builder/
-templates/ansible/role/README.md>`__ lists every ``ob_*`` variable.
+templates/ansible/role/README.md>`__ lists every one of them. A run
+producing a single role writes the same tree, minus ``site.yml``.
+
+Generating every role in one run, rather than in two independent ones,
+means the CA and the JWKS are fetched once: a rotation between two runs
+would leave the bastion and its backends trusting different keys.
 
 .. _ansible-deployment-step-2--declare-your-hosts-and-their-ips:
 
@@ -153,10 +158,10 @@ Step 2 — declare your hosts and their IPs
 -----------------------------------------
 
 This is where the IPs of the machines you are building go. Create an
-``inventory.yml`` next to the role and list every target under the
+``inventory.yml`` next to the tree and list every target under the
 right group — the bastion(s) under ``bastions``, every backend under
-``backends``. The address of each machine is the ``ansible_host``
-line:
+``backends`` — declaring its role and its own OIDC settings. The address
+of each machine is the ``ansible_host`` line:
 
 .. code:: yaml
 
@@ -168,52 +173,74 @@ line:
 
      children:
        bastions:
+         vars:
+           # A role tree only configures the hosts that declare its role; a
+           # host without ob_role is skipped untouched.
+           ob_role: bastion
+           ob_server_group: bastion
+           ob_client_id: ob-client-bastion
+           ob_client_secret: "{{ vault_bastion_secret }}"
          hosts:
            bastion-1:
              ansible_host: 10.0.0.10 # <-- IP (or DNS name) of the bastion
-             ob_role: bastion
-             ob_server_group: bastion
-             ob_client_id: ob-bastion # this bastion's id (== client_id)
-             ob_client_secret: "{{ vault_bastion_secret }}"
 
        backends:
+         vars:
+           ob_role: backend
+           ob_server_group: backend
+           ob_client_id: ob-client-backend
+           ob_client_secret: "{{ vault_backend_secret }}"
          hosts:
            web-1:
              ansible_host: 10.0.0.21 # <-- IP of the first backend
-             ob_role: backend
-             ob_server_group: backend
-             # "Accept only this bastion": the backend refuses any cert whose
-             # key-id does not carry bastion=<one of these ids>.
-             ob_bastion_allowed_bastions: "ob-bastion"
            web-2:
              ansible_host: 10.0.0.22 # <-- IP of the second backend
-             ob_role: backend
-             ob_server_group: backend
-             ob_bastion_allowed_bastions: "ob-bastion"
 
 Notes:
 
 - ``ansible_host`` accepts an IP or a resolvable hostname — use
   whichever your workstation can reach. Adding a machine to the fleet
   is just one more ``hosts:`` entry with its ``ansible_host``.
-- Per-host values (``ob_role``, ``ob_server_group``, ``ob_client_id``,
-  ``ob_bastion_allowed_bastions``) override the role's baked-in
-  defaults, so a single role can drive both bastions and backends —
-  dispatch is by ``ob_role``.
+- ``ob_role`` is what a host becomes. It is required on every host you
+  want configured; a host without it is skipped, and a value that is
+  not ``bastion``, ``backend`` or ``standalone`` stops the play.
+- Each server group enrols with its own OIDC ``client_id`` — the portal
+  maps a ``client_id`` to one server group, see :ref:`Server groups
+  <llng-configuration-server-groups>` — hence the per-group values
+  above. They override the role's baked-in ones.
+- The backend's allowlist is not in the inventory by default: the play
+  reads each bastion's ``bastion_id`` from the bastion itself
+  (``ob-bastion-id``, over the ``bastions`` group) and configures
+  ``/etc/open-bastion/allowed_bastions`` with them. Set
+  ``ob_bastion_allowed_bastions`` to take over — ``""`` accepts any
+  vouched bastion. See :ref:`allowed bastions
+  <ansible-deployment-allowed-bastions>`.
 - Keep the OIDC client secret in ``ansible-vault``, not in clear text.
   The role also never persists the LLNG approval cookie (it is asked
   per run).
 
-A matching ``playbook.yml`` is trivial — apply the one role to
-everyone and let ``ob_role`` dispatch:
+.. _ansible-deployment-allowed-bastions:
 
-.. code:: yaml
+The backend's allowlist
+~~~~~~~~~~~~~~~~~~~~~~~
 
-   # playbook.yml
-   - hosts: all
-     become: true
-     roles:
-       - role: open-bastion
+``/etc/open-bastion/allowed_bastions`` is the residual defence that
+keeps a backend from accepting a hop voucher minted by a host that
+merely enrolled in the project: it lists the ``bastion_id`` of every
+bastion allowed to hop there, as assigned by the portal at enrolment
+(``ob-bastion-id`` prints it). Those ids only exist on the bastions, so
+the play collects them by delegating ``ob-bastion-id`` to each host of
+``ob_bastion_group`` (default ``bastions``) while configuring the
+backend:
+
+- every host of the group must answer, otherwise the play stops — an
+  empty or short list would accept any bastion, or deny the missing
+  ones, without saying so;
+- ``ob_bastion_allowed_bastions`` overrides the collection entirely.
+  An empty string is the explicit "accept any vouched bastion", the
+  same answer as ``--allow-any-bastion``;
+- re-enrolling a bastion assigns it a new id, so re-run the play after
+  one: the collection picks the new value up.
 
 .. _ansible-deployment-step-3--apply:
 
@@ -231,7 +258,7 @@ CLI comes from `simple-oidc-client
    COOKIE=$(llng --llng-server sso.example.com --login admin \
                 --password '***' llng_cookie)
 
-   ansible-playbook -i inventory.yml playbook.yml \
+   ansible-playbook -i inventory.yml site.yml \
      --ask-vault-pass \
      --extra-vars "ob_llng_cookie='$COOKIE'"
 
@@ -252,25 +279,31 @@ with your backend's key):
 Without auto-approve, omit ``ob_llng_cookie``: the play prints a
 device URL + code per host for manual browser approval.
 
-Limit a run to one group or host while iterating:
+``site.yml`` plays each role in turn over the whole inventory; a tree
+only touches the hosts that declare its role, so nothing else is
+needed. ``--limit`` narrows a run while iterating:
 
 .. code:: bash
 
-   ansible-playbook -i inventory.yml playbook.yml --limit bastions
-   ansible-playbook -i inventory.yml playbook.yml --limit web-1
+   ansible-playbook -i inventory.yml site.yml --limit bastions
+   ansible-playbook -i inventory.yml site.yml --limit web-1
 
 What the play does on each host
 -------------------------------
 
-1. Configures the APT/YUM repo and installs the ``open-bastion``
+1. Skips the host when its ``ob_role`` is missing or is not the tree's
+   own role — the whole fleet can be listed under every tree.
+2. Configures the APT/YUM repo and installs the ``open-bastion``
    package.
-2. Writes ``/etc/open-bastion/openbastion.conf`` from the baked-in
+3. Writes ``/etc/open-bastion/openbastion.conf`` from the baked-in
    scenario.
-3. Runs :doc:`ob-enroll(8) </references/man/ob-enroll>` (Device
+4. Runs :doc:`ob-enroll(8) </references/man/ob-enroll>` (Device
    Authorization Grant) to obtain the server's long-lived offline
    token; ``ob-heartbeat.timer`` then keeps the short-lived access
    token fresh.
-4. Runs :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`
+5. On a backend, reads the bastion ids from the bastions (see
+   `The backend's allowlist`_).
+6. Runs :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`
    / ``ob-backend-setup``, which locks SSH down to SSO-issued
    certificates and — on backends — enforces the ``allowed_bastions``
    policy. What those commands change is described in
@@ -286,7 +319,11 @@ lands on the bastion or the backends.
 Updating the fleet
 ------------------
 
-Re-running the playbook is idempotent: bump the package in your repo
+Re-running ``site.yml`` is idempotent: bump the package in your repo
 and run again to upgrade, or change a host's ``ob_*`` vars and
 re-apply to reconfigure. Adding a server is one new inventory entry
 plus a ``--limit <newhost>`` run.
+
+After re-enrolling a bastion — or adding or removing one — re-run
+``site.yml`` so the backends collect the ids again: a backend sitting
+on a stale list refuses the hops from the bastion that changed.

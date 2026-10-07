@@ -96,7 +96,7 @@ reset_state() {
     SIGN_WITH=""; SIGN_WITH_SET=0
     INSECURE=0; CONFIG_INSECURE=""; unset OB_BUILDER_INSECURE
     SAVE_CONFIG=""; SAVE_CONFIG_SECRET=0
-    OUTPUT_SHELL=""; OUTPUT_ANSIBLE=""; BUNDLE=0; DRY_RUN=0
+    OUTPUT_SHELL=""; OUTPUT_ANSIBLE=""; DRY_RUN=0
 }
 
 # A state that exercises every key: several roles, --insecure, an embedded
@@ -315,13 +315,10 @@ test_target_role_list() {
     ( reset_state; TARGET_ROLE="bastion,bastion"; DEPLOYMENT_SLUG=x; SCENARIO=max-security
       PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
         | grep -q 'twice' || { ok=false; echo "  duplicate accepted"; }
-    ( reset_state; TARGET_ROLE="bastion,standalone"; BUNDLE=1; DEPLOYMENT_SLUG=x; SCENARIO=max-security
-      PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
-        | grep -q 'single target_role' || { ok=false; echo "  bundle with two roles accepted"; }
     ( reset_state; TARGET_ROLE=""; DEPLOYMENT_SLUG=x; SCENARIO=max-security
       PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
         | grep -q 'target_role is required' || { ok=false; echo "  empty role accepted"; }
-    $ok && test_pass "target_role: comma/space list, duplicates, --bundle and empty refused" \
+    $ok && test_pass "target_role: comma/space list accepted, duplicates and empty refused" \
          || test_fail "target_role list handling"
 }
 

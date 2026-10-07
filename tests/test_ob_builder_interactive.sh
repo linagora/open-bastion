@@ -105,7 +105,6 @@ set_baseline() {
     SSO_CA_FINGERPRINT="SHA256:fake"
     OUTPUT_SHELL=""
     OUTPUT_ANSIBLE=""
-    BUNDLE=0
     DRY_RUN=0
 }
 
@@ -235,28 +234,45 @@ test_output_plan() {
         OUTPUT_SHELL="./out/"; OUTPUT_ANSIBLE="./ansible-demo/"
         TARGET_ROLES=(bastion backend)
         build_output_plan
-        printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}" "${_PLAN_ANSIBLE[@]}"
+        printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}"
     )
-    [ "$got" = "bastion,backend,./out/bootstrap-demo-bastion.sh,./out/bootstrap-demo-backend.sh,./ansible-demo-bastion,./ansible-demo-backend," ] \
+    [ "$got" = "bastion,backend,./out/bootstrap-demo-bastion.sh,./out/bootstrap-demo-backend.sh," ] \
         || { ok=false; echo "multi: $got"; }
     got=$(
         set_baseline
         OUTPUT_SHELL="."; OUTPUT_ANSIBLE="./ansible-demo"
         TARGET_ROLES=(standalone)
         build_output_plan
-        printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}" "${_PLAN_ANSIBLE[@]}"
-    )
-    [ "$got" = "standalone,./bootstrap-demo-standalone.sh,./ansible-demo," ] || { ok=false; echo "single: $got"; }
-    got=$(
-        set_baseline
-        OUTPUT_SHELL="/tmp/b"; BUNDLE=1
-        TARGET_ROLE=backend; TARGET_ROLES=(backend)
-        build_output_plan
         printf '%s,' "${_PLAN_ROLES[@]}" "${_PLAN_SHELL[@]}"
     )
-    [ "$got" = "backend,bastion,/tmp/b/bootstrap-demo-backend.sh,/tmp/b/bootstrap-demo-bastion.sh," ] || { ok=false; echo "bundle: $got"; }
+    [ "$got" = "standalone,./bootstrap-demo-standalone.sh," ] || { ok=false; echo "single: $got"; }
+    got=$(
+        set_baseline
+        OUTPUT_ANSIBLE="./ansible-demo"
+        TARGET_ROLES=(bastion backend)
+        build_output_plan
+        printf '%s,' "${_PLAN_SHELL[@]}"
+    )
+    [ "$got" = ",," ] || { ok=false; echo "ansible only: $got"; }
     $ok && test_pass "build_output_plan: installers named bootstrap-<slug>-<role>.sh in --output-shell DIR" \
          || test_fail "build_output_plan derived wrong paths"
+}
+
+# --bundle is gone: it only prefixed one role with another. It stays
+# recognised so old build scripts fail with the replacement, not with
+# "unknown option".
+test_bundle_removed() {
+    local out rc=0
+    out=$(bash "$BUILDER" --bundle 2>&1) || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        test_fail "--bundle still accepted" "$out"
+        return
+    fi
+    if grep -q 'target_role' <<< "$out"; then
+        test_pass "--bundle refused, pointing at the target_role list"
+    else
+        test_fail "--bundle refused without a migration hint" "$out"
+    fi
 }
 
 # --output-shell names a directory; a file name is refused rather than
@@ -298,7 +314,8 @@ test_cli_refuses_shell_file() {
 # Whole run through main(): DIR created, files named by ob-builder, checklists
 # in DIR and not in the current directory.
 test_main_writes_into_dir() {
-    local ok=true cfg="$TEST_TMPDIR/maindir.yml" dir="$TEST_TMPDIR/shell-out/sub" cwd="$TEST_TMPDIR/cwd" rc=0 f
+    local ok=true cfg="$TEST_TMPDIR/maindir.yml" dir="$TEST_TMPDIR/shell-out/sub" \
+          tree="$TEST_TMPDIR/ansible-out" cwd="$TEST_TMPDIR/cwd" rc=0 f
     mkdir -p "$cwd"
     cat > "$cfg" <<YML
 deployment_slug: demo
@@ -307,7 +324,7 @@ portal_url: https://sso.example.com
 client_id: pam-access
 client_secret_mode: prompt
 server_group: default
-target_role: bastion
+target_role: "bastion,backend"
 YML
     (
         cd "$cwd" || exit 1
@@ -315,7 +332,8 @@ YML
             WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
             printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
         }
-        main --config "$cfg" --bundle --repo-keyring "$FAKE_KEYRING" --output-shell "$dir"
+        main --config "$cfg" --repo-keyring "$FAKE_KEYRING" \
+             --output-shell "$dir" --output-ansible "$tree"
     ) >"$TEST_TMPDIR/maindir.log" 2>&1 || rc=$?
     [ "$rc" -eq 0 ] || { ok=false; echo "main failed (rc=$rc)"; tail -5 "$TEST_TMPDIR/maindir.log"; }
     for f in bootstrap-demo-bastion.sh bootstrap-demo-backend.sh \
@@ -324,10 +342,23 @@ YML
     done
     [ -x "$dir/bootstrap-demo-bastion.sh" ] || { ok=false; echo "installer not executable"; }
     [ -z "$(ls -A "$cwd")" ] || { ok=false; echo "written in the cwd: $(ls -A "$cwd")"; }
+    # One tree for the whole run: a playbook and a role directory per role, a
+    # per-role checklist, and site.yml chaining the playbooks in order.
+    for f in site.yml playbook-bastion.yml playbook-backend.yml \
+             PORTAL-CHECKLIST-bastion.md PORTAL-CHECKLIST-backend.md \
+             roles/open-bastion-bastion/tasks/main.yml \
+             roles/open-bastion-backend/tasks/main.yml; do
+        [ -f "$tree/$f" ] || { ok=false; echo "missing $tree/$f"; }
+    done
+    # A tree only ships the task file of the role it configures.
+    [ ! -e "$tree/roles/open-bastion-bastion/tasks/backend.yml" ] \
+        || { ok=false; echo "the bastion tree ships backend.yml"; }
+    grep -qF 'import_playbook: playbook-bastion.yml' "$tree/site.yml" 2>/dev/null \
+        || { ok=false; echo "site.yml does not import the bastion playbook"; }
     grep -qF "Portal checklist: $dir/PORTAL-CHECKLIST-backend.md" "$TEST_TMPDIR/maindir.log" \
         || { ok=false; echo "summary does not name the checklist in DIR"; }
-    $ok && test_pass "main: --output-shell DIR created, bootstrap-<slug>-<role>.sh and checklists inside it" \
-         || test_fail "main did not write the shell artefacts into --output-shell DIR"
+    $ok && test_pass "main: shell installers in DIR, one Ansible tree with both roles and site.yml" \
+         || test_fail "main did not write the artefacts into the requested outputs"
 }
 
 # Full questionnaire, two roles, outputs and repo options asked.
@@ -463,7 +494,8 @@ test_rendered_ansible() {
         TEMPLATES_DIR="$REPO_ROOT/admin-builder/templates"
         render_ansible_role "$out" bastion
     ) >/dev/null 2>&1 || { ok=false; desc="render failed"; }
-    local r="$out/roles/open-bastion"
+    local r="$out/roles/open-bastion-bastion"
+    [ -f "$out/playbook-bastion.yml" ] || { ok=false; desc="no per-role playbook"; }
     grep -q '^ob_verify_ssl: false$' "$r/defaults/main.yml" 2>/dev/null || { ok=false; desc="ob_verify_ssl not false"; }
     grep -q 'verify_ssl = {{' "$r/templates/openbastion.conf.j2" 2>/dev/null || { ok=false; desc="conf.j2 verify_ssl not templated"; }
     [ "$(grep -c "else \['-k'\]" "$r/tasks/_enroll.yml" 2>/dev/null)" = 2 ] || { ok=false; desc="ob-enroll -k missing"; }
@@ -521,7 +553,7 @@ test_ansible_conf_reference() {
         TEMPLATES_DIR="$REPO_ROOT/admin-builder/templates"
         render_ansible_role "$out" bastion
     ) >/dev/null 2>&1 || { ok=false; desc="render failed"; }
-    local r="$out/roles/open-bastion"
+    local r="$out/roles/open-bastion-bastion"
     awk '/ansible.builtin.slurp:/ { s = NR }
          /src: \/usr\/share\/open-bastion\/openbastion.conf.reference/ && s { e = 1 }
          /register: ob_conf_reference/ && e { g = NR }
@@ -560,24 +592,32 @@ PY
     fi
 }
 
-test_recap_bundle_recorder() {
+test_recap_recorder_state() {
     local ok=true out
     out=$(
         set_baseline
-        TARGET_ROLE=backend; TARGET_ROLES=(backend); BUNDLE=1
+        TARGET_ROLE=bastion; TARGET_ROLES=(bastion backend)
         DISABLE_SESSION_RECORDER="yes"
         build_output_plan
         print_recap 2>&1
     )
+    grep -q 'Target role(s):      bastion backend' <<< "$out" || { ok=false; echo "roles not listed: $out"; }
     grep -q 'disabled (opt-out)' <<< "$out" || { ok=false; echo "$out" | grep -i recording; }
+    out=$(
+        set_baseline
+        TARGET_ROLE=backend; TARGET_ROLES=(backend)
+        build_output_plan
+        print_recap 2>&1
+    )
+    grep -q 'n/a (backend role)' <<< "$out" || { ok=false; echo "$out" | grep -i recording; }
     set_baseline
     DISABLE_SESSION_RECORDER="yes"
     build_placeholder_map bastion
     [ "$(ph_get DISABLE_SESSION_RECORDER)" = "yes" ] || ok=false
     build_placeholder_map backend
     [ "$(ph_get DISABLE_SESSION_RECORDER)" = "no" ] || ok=false
-    $ok && test_pass "recap: bundle with backend primary reports the companion bastion's recorder opt-out" \
-         || test_fail "recap ignores the bundled bastion's recorder opt-out"
+    $ok && test_pass "recap: recorder state per role; a backend tree never records" \
+         || test_fail "recap or placeholder map mishandles the recorder state"
 }
 
 # "&" in a value must not expand to the match (bash >= 5.2 patsub_replacement).
@@ -639,6 +679,7 @@ test_validate_http_needs_insecure
 test_ask_secret_confirm
 test_multi_role_loop
 test_output_plan
+test_bundle_removed
 test_check_output_shell_dir
 test_cli_refuses_shell_file
 test_main_writes_into_dir
@@ -649,7 +690,7 @@ test_installer_runtime
 test_rendered_ansible
 test_installer_conf_reference
 test_ansible_conf_reference
-test_recap_bundle_recorder
+test_recap_recorder_state
 test_ampersand_values
 test_prompt_eof
 

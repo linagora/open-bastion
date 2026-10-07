@@ -127,9 +127,29 @@ here.
   or not, with its `.sig` and `PORTAL-CHECKLIST-<role>.md` (the checklist used
   to land in the current directory). A path ending in `.sh` or naming an
   existing file is refused. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C1).
+- **The generated Ansible artefacts are one tree per run, and a role only
+  configures its own hosts** (#338). A host joins in when its `ob_role` names
+  that role; a host without one, or with another role, is skipped untouched,
+  so the tree's `site.yml` plays every role over one inventory with no
+  `--limit`. The tree holds `playbook-<role>.yml` and
+  `roles/open-bastion-<role>/` per role, and one `PORTAL-CHECKLIST-<role>.md`
+  each; the per-role output directories (`PATH-bastion`, `PATH-backend`) are
+  gone. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C2, C3).
+- **A backend derives its `allowed_bastions` from the bastions** (#338). The
+  play delegates `ob-bastion-id` to every host of `ob_bastion_group`
+  (`bastions` by default) and configures `/etc/open-bastion/allowed_bastions`
+  with the ids it reads; it stops if one of them does not answer, rather than
+  leaving the list empty or short. `ob_bastion_allowed_bastions` overrides the
+  collection, `""` meaning "accept any vouched bastion". See the
+  [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
 
 ### Removed
 
+- **`ob-builder --bundle`** (#338): list the roles to generate in
+  `target_role: "bastion,backend"` instead. Both roles then come from the same
+  run and share the CA, as the bundle did; the flag only left the first role's
+  tree unsuffixed. A script still passing it stops with that replacement
+  rather than with "unknown option".
 - **`secret_store`** (#225): `secrets_encrypted` never worked; secrets in
   `openbastion.conf` are protected by file permissions only.
 - **The token cache, `client_context` and the kernel-keyring settings**
