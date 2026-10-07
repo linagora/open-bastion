@@ -84,6 +84,9 @@ typedef struct {
     char *ca_cert;
     char *signing_secret;  /* Optional HMAC secret for request signing */
     char *cert_pin;        /* Certificate pin (sha256//base64 format, optional) */
+    int response_signing;  /* ob_response_signing_t, see ob_jws.h */
+    char *sso_jwks_file;   /* JWKS the signed answers are checked against */
+    char *sso_issuer;      /* Expected issuer; NULL means portal_url */
 } ob_client_config_t;
 
 /* Client handle */

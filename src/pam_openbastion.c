@@ -1435,22 +1435,19 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
                          "(expected true/yes/1/on or false/no/0/off); see syslog for the key");
         goto error;
     }
+    if (validate_result == -7) {
+        OB_LOG_ERR(pamh, "Configuration error: response_signing must be off, "
+                         "prefer or required");
+        goto error;
+    }
     if (validate_result != 0) {
         OB_LOG_ERR(pamh, "Invalid configuration");
         goto error;
     }
 
-    /* Initialize LLNG client */
-    ob_client_config_t client_config = {
-        .portal_url = data->config.portal_url,
-        .client_id = data->config.client_id,
-        .client_secret = data->config.client_secret,
-        .server_token = NULL,  /* Will be loaded from file */
-        .server_group = data->config.server_group,
-        .timeout = data->config.timeout,
-        .verify_ssl = data->config.verify_ssl,
-        .ca_cert = data->config.ca_cert,
-    };
+    /* Initialize LLNG client; the server token is loaded from file below */
+    ob_client_config_t client_config;
+    config_client_settings(&data->config, &client_config);
 
     /* Load server token from file if specified */
     if (data->config.server_token_file) {

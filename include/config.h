@@ -10,6 +10,8 @@
 
 #include <stdbool.h>
 
+#include "ob_client.h"
+
 /* Configuration structure */
 typedef struct {
     /* Required settings */
@@ -65,6 +67,11 @@ typedef struct {
 
     /* Request signing (optional, defense in depth) */
     char *request_signing_secret;   /* HMAC secret for request signatures (optional) */
+
+    /* Signed answers from the portal (see ob_jws.h) */
+    int response_signing;           /* ob_response_signing_t (default: off) */
+    char *sso_jwks_file;            /* JWKS the answers are checked against */
+    char *sso_issuer;               /* Expected issuer (default: portal_url) */
 
     /* Auto-create Unix accounts */
     bool create_user_enabled;       /* Enable auto user creation (default: false) */
@@ -146,6 +153,9 @@ typedef struct {
      * warning. config_validate() now refuses the whole configuration instead.
      */
     bool invalid_bool_value;
+
+    /* Same latch for response_signing: neither off, prefer nor required. */
+    bool invalid_response_signing;
 } pam_openbastion_config_t;
 
 /*
@@ -177,11 +187,13 @@ void config_init(pam_openbastion_config_t *config);
  *   -4  portal_url is not HTTPS while verify_ssl is enabled
  *   -5  incomplete or invalid CrowdSec configuration
  *   -6  a boolean setting had an unparseable value (see syslog for the key)
+ *   -7  response_signing is neither off, prefer nor required
  *
  * API contract for callers
  * ------------------------
  * Every negative return code is fatal: the configuration MUST be refused and
- * the caller MUST NOT fall back to defaults. This matters most for -6.
+ * the caller MUST NOT fall back to defaults. This matters most for -6 and -7:
+ * a mistyped `response_signing = requried` must not run with signatures off.
  *
  * -6 means at least one boolean key carried a value that is neither a
  * recognised true nor a recognised false (#183). The affected field kept its
@@ -203,6 +215,13 @@ void config_init(pam_openbastion_config_t *config);
  * so a caller that skips config_validate() will not notice the problem at all.
  */
 int config_validate(const pam_openbastion_config_t *config);
+
+/*
+ * Fill the client settings that come from the configuration. The server
+ * token is the caller's: it is read from server_token_file.
+ */
+void config_client_settings(const pam_openbastion_config_t *config,
+                            ob_client_config_t *client);
 
 /*
  * Validate shell path against approved shells list
@@ -231,5 +250,8 @@ int config_validate_skel(const char *skel_path);
 
 /* Default service accounts configuration file */
 #define DEFAULT_SERVICE_ACCOUNTS_FILE "/etc/open-bastion/service-accounts.conf"
+
+/* Default JWKS the portal's signed answers are checked against */
+#define DEFAULT_SSO_JWKS_FILE "/etc/open-bastion/sso-jwks.json"
 
 #endif /* CONFIG_H */
