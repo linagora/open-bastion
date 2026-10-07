@@ -1270,11 +1270,13 @@ EOF
         *) die "Invalid self_delete: $SELF_DELETE" ;;
     esac
 
-    # q10. (Ansible only) Offer auto-approval of the device code via an LLNG cookie
-    # Only asked when the user requested an Ansible output — the shell installer
-    # is designed for one machine at a time, where a manual browser approval is
-    # acceptable. Ansible deploys to fleets, where it's the value-add.
-    if [ -n "$OUTPUT_ANSIBLE" ] && [ -z "$ANSIBLE_AUTO_APPROVE" ]; then
+    # q10. (Ansible only) Offer auto-approval of the device code via an LLNG
+    # cookie. Asked when an Ansible output was requested AND the play will
+    # enrol at all: `no` and `prompt` leave ob_auto_enroll false in the tree
+    # (`prompt` is a question only the shell installer asks), so a cookie would
+    # approve codes nobody asks for. Still usable after the fact with
+    # -e ob_ansible_auto_approve=true -e ob_llng_cookie=...
+    if [ -n "$OUTPUT_ANSIBLE" ] && [ "$AUTO_ENROLL_SETUP" = "yes" ] && [ -z "$ANSIBLE_AUTO_APPROVE" ]; then
         explain "When enabled, the generated Ansible role can approve the device code automatically by POSTing to LLNG with a session cookie. The cookie is asked for at every play run (vars_prompt) and never stored. Disable if you prefer manual browser approval, or if your operators don't have permission to run the LLNG verification endpoint."
         ANSIBLE_AUTO_APPROVE=$(ask_choice "Enable Ansible auto-approval via LLNG cookie?" "yes|no" "no")
     fi

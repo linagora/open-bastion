@@ -484,7 +484,7 @@ test_questionnaire_full() {
             "" ""                   # hardening, audit trace
             "yes"                   # disable recorder (bastion present)
             "n"                     # no service accounts
-            "" ""                   # auto enroll, self-delete
+            "yes" ""                # auto enroll (the cookie question needs it), self-delete
             ""                      # ansible auto-approve
             "" "" "" "$FAKE_KEYRING" ""   # apt url/suite/component, keyring, sign-with
             "n"                     # do not save the answers
@@ -503,6 +503,51 @@ test_questionnaire_full() {
     else
         test_fail "questionnaire result mismatch" "got:  $got
   want: $want"
+    fi
+}
+
+# The cookie question is asked only when the play will enrol at all: `no` and
+# `prompt` leave the role's enrolment off, so the question must not consume an
+# answer meant for the questions that follow. The fake keyring is the sentinel:
+# if the question were asked, it would take that answer and the default keyring
+# would win.
+test_questionnaire_skips_auto_approve() {
+    local got
+    got=$(
+        set_baseline
+        DEPLOYMENT_SLUG=""; SCENARIO=""; PORTAL_URL=""; CLIENT_ID=""; CLIENT_ID_POLICY=""
+        CLIENT_SECRET_MODE=""; SERVER_GROUP_POLICY=""; unset SERVER_GROUP
+        TARGET_ROLE=""; AUTO_ENROLL_SETUP=""; SELF_DELETE=""; ENABLE_HARDENING=""
+        ENABLE_AUDIT_TRACE=""; DISABLE_SESSION_RECORDER=""; ANSIBLE_AUTO_APPROVE=""
+        unset ALLOWED_BASTIONS
+        REPO_KEYRING=""; INSECURE=0
+        local -a a=(
+            "lab"                   # slug
+            "ansible" ""            # artefacts: ansible, default path
+            ""                      # scenario (default)
+            "http://sso.lab" "n"    # http refused once...
+            "http://sso.lab" "y"    # ...then accepted with --insecure
+            "" ""                   # client_id policy, client_id
+            "prompt"                # secret mode (no secret questions)
+            "" "grp"                # server_group policy, server_group
+            "bastion" "backend" ""  # roles
+            "b1"                    # allowed bastions (backend present)
+            "" ""                   # hardening, audit trace
+            "yes"                   # disable recorder (bastion present)
+            "n"                     # no service accounts
+            "prompt" ""             # auto enroll: prompt, so no cookie question
+            "" "" "" "$FAKE_KEYRING" ""   # apt url/suite/component, keyring, sign-with
+            "n"                     # do not save the answers
+        )
+        set_answers "${a[@]}"
+        run_questionnaire >/dev/null 2>&1
+        validate_inputs >/dev/null 2>&1
+        printf '%s|%s' "$ANSIBLE_AUTO_APPROVE" "$REPO_KEYRING"
+    )
+    if [ "$got" = "no|$FAKE_KEYRING" ]; then
+        test_pass "questionnaire: no cookie question when auto-launch is off"
+    else
+        test_fail "questionnaire asked the cookie question with auto-launch off" "$got"
     fi
 }
 
@@ -783,6 +828,7 @@ test_cli_refuses_shell_file
 test_main_writes_into_dir
 test_allowed_bastions_modes
 test_questionnaire_full
+test_questionnaire_skips_auto_approve
 test_questionnaire_skips_cli_values
 test_rendered_installer
 test_installer_runtime
