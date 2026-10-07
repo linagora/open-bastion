@@ -361,6 +361,94 @@ YML
          || test_fail "main did not write the artefacts into the requested outputs"
 }
 
+# Render a backend-only tree for the given extra config lines, through main(),
+# with the SSO fetch stubbed. Output goes to $TEST_TMPDIR/allow.log.
+_render_backend_tree() {
+    local extra="$1"; shift
+    local cfg="$TEST_TMPDIR/allow.yml"
+    cat > "$cfg" <<YML
+deployment_slug: demo
+scenario: max-security
+portal_url: https://sso.example.com
+client_id: pam-access
+client_secret_mode: prompt
+server_group: default
+target_role: backend
+$extra
+YML
+    (
+        fetch_sso_assets() {
+            WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
+            printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
+        }
+        main --config "$cfg" --repo-keyring "$FAKE_KEYRING" "$@"
+    ) > "$TEST_TMPDIR/allow.log" 2>&1
+}
+
+# `allowed_bastions` has three modes and the tree must reflect each: a list,
+# "" (any bastion -- written out so the collection stays off), and null
+# (collect the ids from the bastions: ob_bastion_group, no allowlist value).
+# The shell installer has nowhere to collect from, so null needs the Ansible
+# output. And `auto_enroll_setup: prompt` has no meaning in a play: it is
+# warned about at build time.
+test_allowed_bastions_modes() {
+    local ok=true out="$TEST_TMPDIR/allow-out" d
+    rm -rf "$out"
+
+    _render_backend_tree 'allowed_bastions: ""' --output-ansible "$out" \
+        || { ok=false; echo "empty: build failed"; tail -3 "$TEST_TMPDIR/allow.log"; }
+    d="$out/roles/open-bastion-backend/defaults/main.yml"
+    grep -qx 'ob_bastion_allowed_bastions: ""' "$d" 2>/dev/null \
+        || { ok=false; echo "empty: not written as an explicit empty value"; }
+    grep -q '^ob_bastion_group:' "$d" 2>/dev/null \
+        && { ok=false; echo "empty: the collection was left armed"; }
+
+    rm -rf "$out"
+    _render_backend_tree 'allowed_bastions: null' --output-ansible "$out" \
+        || { ok=false; echo "null: build failed"; tail -3 "$TEST_TMPDIR/allow.log"; }
+    d="$out/roles/open-bastion-backend/defaults/main.yml"
+    grep -q '^ob_bastion_group: bastions$' "$d" 2>/dev/null \
+        || { ok=false; echo "null: no ob_bastion_group to collect from"; }
+    grep -q '^ob_bastion_allowed_bastions:' "$d" 2>/dev/null \
+        && { ok=false; echo "null: an allowlist value was written anyway"; }
+
+    rm -rf "$out"
+    _render_backend_tree 'allowed_bastions: bastion-1,bastion-2' --output-ansible "$out" \
+        || { ok=false; echo "list: build failed"; }
+    d="$out/roles/open-bastion-backend/defaults/main.yml"
+    grep -qx 'ob_bastion_allowed_bastions: "bastion-1,bastion-2"' "$d" 2>/dev/null \
+        || { ok=false; echo "list: not rendered"; }
+
+    rm -rf "$out" "$TEST_TMPDIR/allow-shell" "$TEST_TMPDIR/allow-saved.yml"
+    if _render_backend_tree 'allowed_bastions: null' --output-shell "$TEST_TMPDIR/allow-shell" \
+            --save-config "$TEST_TMPDIR/allow-saved.yml"; then
+        ok=false; echo "null accepted without an Ansible output"
+    elif [ -e "$TEST_TMPDIR/allow-saved.yml" ]; then
+        ok=false; echo "a refused null build still saved a config to replay"
+    elif ! grep -q 'output-ansible' "$TEST_TMPDIR/allow.log"; then
+        ok=false; echo "null refusal does not name the way out"
+    fi
+
+    # Both outputs from the one config: the Ansible role collects, the shell
+    # installer has nowhere to read the ids from -- it must be told, and it is.
+    rm -rf "$out" "$TEST_TMPDIR/allow-both"
+    _render_backend_tree 'allowed_bastions: null' --output-ansible "$out" \
+        --output-shell "$TEST_TMPDIR/allow-both" || { ok=false; echo "null+both: build failed"; }
+    grep -q 'shell installer cannot' "$TEST_TMPDIR/allow.log" \
+        || { ok=false; echo "null+both: the divergence on the shell side is not warned about"; }
+    grep -qx 'ALLOWED_BASTIONS=""' "$TEST_TMPDIR/allow-both/bootstrap-demo-backend.sh" 2>/dev/null \
+        || { ok=false; echo "null+both: the installer did not get an empty allowlist"; }
+
+    rm -rf "$out"
+    _render_backend_tree 'allowed_bastions: ""
+auto_enroll_setup: prompt' --output-ansible "$out" || { ok=false; echo "prompt: build failed"; }
+    grep -q 'ob_auto_enroll=true' "$TEST_TMPDIR/allow.log" \
+        || { ok=false; echo "prompt: nothing warns that the play will do neither step"; }
+
+    $ok && test_pass "allowed_bastions: list, \"\" (any), null (collect); prompt warned about" \
+         || test_fail "allowed_bastions modes mishandled"
+}
+
 # Full questionnaire, two roles, outputs and repo options asked.
 test_questionnaire_full() {
     local got
@@ -683,6 +771,7 @@ test_bundle_removed
 test_check_output_shell_dir
 test_cli_refuses_shell_file
 test_main_writes_into_dir
+test_allowed_bastions_modes
 test_questionnaire_full
 test_questionnaire_skips_cli_values
 test_rendered_installer

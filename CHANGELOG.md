@@ -135,13 +135,20 @@ here.
   `roles/open-bastion-<role>/` per role, and one `PORTAL-CHECKLIST-<role>.md`
   each; the per-role output directories (`PATH-bastion`, `PATH-backend`) are
   gone. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C2, C3).
-- **A backend derives its `allowed_bastions` from the bastions** (#338). The
-  play delegates `ob-bastion-id` to every host of `ob_bastion_group`
-  (`bastions` by default) and configures `/etc/open-bastion/allowed_bastions`
-  with the ids it reads; it stops if one of them does not answer, rather than
-  leaving the list empty or short. `ob_bastion_allowed_bastions` overrides the
-  collection, `""` meaning "accept any vouched bastion". See the
-  [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
+- **`allowed_bastions: null` makes the Ansible role collect the backend
+  allowlist** (#338). The play delegates `ob-bastion-id` to every host of
+  `ob_bastion_group` (`bastions` by default) and configures
+  `/etc/open-bastion/allowed_bastions` with the ids it reads; it stops if one
+  of them does not answer, rather than leaving the list empty or short. The
+  empty string — and no key at all — still accepts any vouched bastion, as
+  before, and `ob_bastion_allowed_bastions` in the inventory overrides both.
+  See the [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
+- **`ob-builder` warns when `auto_enroll_setup: prompt` is built into an
+  Ansible output** (#338). `prompt` is the shell installer asking before
+  ob-enroll and ob-*-setup; the role has no such question, so the play would
+  install the package and stop there. The warning names the two ways out
+  (`auto_enroll_setup: yes`, or `-e ob_auto_enroll=true -e ob_auto_setup=true`
+  at play time).
 
 ### Removed
 

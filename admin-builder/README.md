@@ -94,7 +94,12 @@ client_secret_mode: prompt # none | prompt | embedded
 server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend # bastion | standalone | backend, or several: "bastion,backend"
-auto_enroll_setup: prompt
+# backend only: the bastions allowed to reach it. "" or no key = any vouched
+# bastion; null = the Ansible role reads the ids from the bastions themselves
+# allowed_bastions: ""
+auto_enroll_setup: prompt # shell installer only: the Ansible role has no such
+                          # prompt -- use yes, or -e ob_auto_enroll=true
+                          # -e ob_auto_setup=true at play time
 ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 # insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)

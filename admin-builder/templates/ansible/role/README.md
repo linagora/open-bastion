@@ -55,7 +55,7 @@ Backend-only "accept only this bastion" variables:
 
 | Variable                      | Description                                                                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. Baked in by ob-builder when an allowlist was given at build time. Undefined = the play collects the ids from the bastions itself; `""` = accept any vouched bastion. Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
+| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
 | `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. |
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):

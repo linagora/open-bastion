@@ -94,10 +94,11 @@ ob_apt_sources_list_line: "@@APT_SOURCES_LIST@@"
 @@MODE_SETTINGS_YAML@@
 
 # ── Backend-only: "accept only this bastion" ──────────────────────────────────
-# Absent for bastion/standalone roles, where nothing hops in. On a backend:
+# Absent for bastion/standalone roles, where nothing hops in. On a backend,
 # ob_bastion_allowed_bastions (comma/space-separated bastion_id, as printed by
-# ob-bastion-id on each bastion) when an allowlist was given at build time;
-# without it, the play collects the ids from the bastion hosts of
+# ob-bastion-id on each bastion) is what ob-backend-setup writes; the empty
+# string means "any vouched bastion". When it is absent instead -- ob-builder's
+# `allowed_bastions: null` -- the play reads the ids from the bastion hosts of
 # ob_bastion_group and fails rather than write a partial list. Enforcement is
 # via ob-backend-setup (AuthorizedPrincipalsCommand + cert source-address), not
 # the old broken bastion_jwt config.

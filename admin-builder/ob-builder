@@ -116,6 +116,9 @@ AUTO_ENROLL_SETUP=""
 SERVICE_KEYS_SETUP=""
 SELF_DELETE=""
 ALLOWED_BASTIONS=""
+# `allowed_bastions: null` in the config: no list to write, the Ansible role
+# collects the bastion ids itself (ob_bastion_group).
+ALLOWED_BASTIONS_COLLECT=0
 ANSIBLE_AUTO_APPROVE=""
 # Optional opt-in features (yes/no). Hardening and audit-trace are intrusive
 # and OFF by default; session recording is ON by default on bastion/standalone
@@ -369,11 +372,24 @@ load_config() {
 
     log_step "Loading config from $f"
 
+    # A null value is how a config asks for the collection, and both yq
+    # flavours drop it along with the absent keys: read that one intent from
+    # the file itself. `allowed_bastions: ""` stays the explicit "any bastion".
+    if grep -qE '^[[:space:]]*allowed_bastions:[[:space:]]*(null|~)?[[:space:]]*(#.*)?$' "$f"; then
+        ALLOWED_BASTIONS_COLLECT=1
+    fi
+
     if command -v yq >/dev/null 2>&1; then
         _load_config_yq "$f"
     else
         log_info "yq not found, using awk-based parser (flat keys only)"
         _load_config_awk "$f"
+    fi
+
+    # The flat parser reads the literal "null" as the value; the intent is the
+    # absence of a list, not a bastion called null.
+    if [ "$ALLOWED_BASTIONS_COLLECT" = "1" ]; then
+        ALLOWED_BASTIONS=""
     fi
 
     # Service accounts are a nested list, which neither flat parser handles.
@@ -1487,6 +1503,18 @@ validate_inputs() {
         die "Invalid allowed_bastions (only letters, digits, '.', '_', '-', ',' and spaces allowed): $ALLOWED_BASTIONS"
     fi
 
+    # The collection is an Ansible-role feature: it delegates ob-bastion-id to
+    # the bastions. The shell installer has nowhere to collect from, and an
+    # empty allowlist there means "any bastion" -- refused rather than
+    # silently delivered.
+    if [ "$ALLOWED_BASTIONS_COLLECT" = "1" ]; then
+        [ -n "$OUTPUT_ANSIBLE" ] \
+            || die "allowed_bastions: null asks the Ansible role to collect the bastion ids; it needs an --output-ansible tree. Give the ids, or use \"\" to accept any vouched bastion."
+        if [ -n "$OUTPUT_SHELL" ]; then
+            log_warn "allowed_bastions: null: the Ansible role collects the ids, but a shell installer cannot -- the backend it configures will accept any vouched bastion."
+        fi
+    fi
+
     : "${AUTO_ENROLL_SETUP:=prompt}"
     case "$AUTO_ENROLL_SETUP" in yes|no|prompt) ;; *) die "Invalid auto_enroll_setup: $AUTO_ENROLL_SETUP" ;; esac
 
@@ -1606,7 +1634,7 @@ print_recap() {
   Hardening:           $ENABLE_HARDENING
   Audit trace:         $ENABLE_AUDIT_TRACE
   Session recording:   $rec
-  Allowed bastions:    ${ALLOWED_BASTIONS:-<any bastion of the project>}
+  Allowed bastions:    $([ "$ALLOWED_BASTIONS_COLLECT" = 1 ] && echo "<collected from the bastions>" || echo "${ALLOWED_BASTIONS:-<any bastion of the project>}")
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
@@ -1626,6 +1654,13 @@ EOF
     if [ "$CLIENT_SECRET_MODE" = "embedded" ]; then
         log_warn "Embedded client_secret will be written in clear text into every generated artefact."
         log_warn "Treat the resulting files as confidential — anyone who reads them reads the secret."
+    fi
+    if [ "$AUTO_ENROLL_SETUP" = "prompt" ] && [ -n "$OUTPUT_ANSIBLE" ]; then
+        log_warn "auto_enroll_setup: prompt makes the shell installer ask before ob-enroll"
+        log_warn "and ob-*-setup. The Ansible role has no such question: its ob_auto_enroll"
+        log_warn "and ob_auto_setup are false, so the play installs and configures nothing"
+        log_warn "else. Use auto_enroll_setup: yes, or pass at play time:"
+        log_warn "  -e ob_auto_enroll=true -e ob_auto_setup=true"
     fi
 }
 
@@ -1715,9 +1750,14 @@ render_config_yaml() {
     printf '\n# bastion | standalone | backend; several, comma-separated, give one\n'
     printf '# artefact each, suffixed with the role\n'
     _yaml_kv target_role "$(IFS=,; printf '%s' "${TARGET_ROLES[*]}")"
-    printf '# backend only: bastion ids allowed to reach it, comma-separated (empty =\n'
-    printf '# any vouched bastion of the project)\n'
-    _yaml_kv allowed_bastions "$ALLOWED_BASTIONS"
+    printf '# backend only: bastion ids allowed to reach it, comma-separated.\n'
+    printf '# "" accepts any vouched bastion of the project; null asks the Ansible\n'
+    printf '# role to collect the ids from the bastions themselves (ob_bastion_group)\n'
+    if [ "$ALLOWED_BASTIONS_COLLECT" = "1" ]; then
+        printf 'allowed_bastions: null\n'
+    else
+        _yaml_kv allowed_bastions "$ALLOWED_BASTIONS"
+    fi
     printf '# yes | no: logind/nproc/at/cron containment (system-wide, see SECURITY.md)\n'
     _yaml_kv enable_hardening "$ENABLE_HARDENING"
     printf '# yes | no: auditd rules and their rotation timer\n'
@@ -2022,16 +2062,18 @@ build_placeholder_map() {
     # Role-scoped: the allowlist is meaningful only for a backend. Keep it empty
     # for bastion/standalone artefacts: one config produces every role of the
     # run, and the bastion installer must NOT embed the allowlist. A backend
-    # without a build-time allowlist still gets ob_bastion_group, the inventory
-    # group the play collects the ids from.
+    # either gets the ids to write (the empty string included: an explicit "any
+    # bastion"), or -- with `allowed_bastions: null` -- no value at all and the
+    # inventory group the play collects them from.
     local allowlist_for_role=""
     bastion_allowlist_yaml=""
     if [ "$role" = "backend" ]; then
-        if [ -n "${ALLOWED_BASTIONS:-}" ]; then
+        if [ "$ALLOWED_BASTIONS_COLLECT" = "1" ]; then
+            bastion_allowlist_yaml="ob_bastion_group: bastions"
+        else
             allowlist_for_role="$ALLOWED_BASTIONS"
-            bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""$'\n'
+            bastion_allowlist_yaml="ob_bastion_allowed_bastions: \"${ALLOWED_BASTIONS}\""
         fi
-        bastion_allowlist_yaml+="ob_bastion_group: bastions"
     fi
 
     mode_settings=$(_mode_settings_conf "$pam_mode")

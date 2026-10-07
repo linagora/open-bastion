@@ -152,6 +152,12 @@ Generating every role in one run, rather than in two independent ones,
 means the CA and the JWKS are fetched once: a rotation between two runs
 would leave the bastion and its backends trusting different keys.
 
+``auto_enroll_setup: prompt`` asks the *shell installer* whether to run
+``ob-enroll`` and the setup command; the generated playbook has no such
+question, so a tree built with it installs the package and stops there.
+Use ``auto_enroll_setup: yes``, or answer at play time with ``-e
+ob_auto_enroll=true -e ob_auto_setup=true``.
+
 .. _ansible-deployment-step-2--declare-your-hosts-and-their-ips:
 
 Step 2 — declare your hosts and their IPs
@@ -208,12 +214,12 @@ Notes:
   maps a ``client_id`` to one server group, see :ref:`Server groups
   <llng-configuration-server-groups>` — hence the per-group values
   above. They override the role's baked-in ones.
-- The backend's allowlist is not in the inventory by default: the play
-  reads each bastion's ``bastion_id`` from the bastion itself
-  (``ob-bastion-id``, over the ``bastions`` group) and configures
-  ``/etc/open-bastion/allowed_bastions`` with them. Set
-  ``ob_bastion_allowed_bastions`` to take over — ``""`` accepts any
-  vouched bastion. See :ref:`allowed bastions
+- The backend's allowlist is decided by ``build.yml``, not by the
+  inventory: ``allowed_bastions: "id[,id…]"`` writes those ids, ``""``
+  (or no key) accepts any vouched bastion, and ``allowed_bastions:
+  null`` makes the play collect the ids from the bastions themselves.
+  An ``ob_bastion_allowed_bastions`` in the inventory overrides
+  whatever the build produced. See :ref:`allowed bastions
   <ansible-deployment-allowed-bastions>`.
 - Keep the OIDC client secret in ``ansible-vault``, not in clear text.
   The role also never persists the LLNG approval cookie (it is asked
@@ -228,19 +234,25 @@ The backend's allowlist
 keeps a backend from accepting a hop voucher minted by a host that
 merely enrolled in the project: it lists the ``bastion_id`` of every
 bastion allowed to hop there, as assigned by the portal at enrolment
-(``ob-bastion-id`` prints it). Those ids only exist on the bastions, so
-the play collects them by delegating ``ob-bastion-id`` to each host of
-``ob_bastion_group`` (default ``bastions``) while configuring the
-backend:
+(``ob-bastion-id`` prints it). ``build.yml`` says where that list comes
+from:
 
-- every host of the group must answer, otherwise the play stops — an
-  empty or short list would accept any bastion, or deny the missing
-  ones, without saying so;
-- ``ob_bastion_allowed_bastions`` overrides the collection entirely.
-  An empty string is the explicit "accept any vouched bastion", the
-  same answer as ``--allow-any-bastion``;
-- re-enrolling a bastion assigns it a new id, so re-run the play after
-  one: the collection picks the new value up.
+- ``allowed_bastions: "id[,id…]"`` writes exactly those ids;
+- ``allowed_bastions: ""``, or no ``allowed_bastions`` key at all,
+  accepts any vouched bastion — the same answer as
+  ``--allow-any-bastion``, and the historical behaviour;
+- ``allowed_bastions: null`` asks the Ansible role to **collect** the
+  ids. They exist only on the bastions, so the play delegates
+  ``ob-bastion-id`` to every host of ``ob_bastion_group`` (default
+  ``bastions``) while configuring the backend. It requires an Ansible
+  output — a shell installer has nowhere to collect from — and every
+  host of the group must answer: the play stops otherwise, because an
+  empty or a short list would accept any bastion, or deny the missing
+  ones, without saying so.
+
+``ob_bastion_allowed_bastions`` in the inventory overrides all three
+(``""`` there means "any"). Re-enrolling a bastion assigns it a new id,
+so re-run the play after one: the collection picks the new value up.
 
 .. _ansible-deployment-step-3--apply:
 
