@@ -350,9 +350,19 @@ YML
              roles/open-bastion-backend/tasks/main.yml; do
         [ -f "$tree/$f" ] || { ok=false; echo "missing $tree/$f"; }
     done
-    # A tree only ships the task file of the role it configures.
+    # A tree only ships the task files of the role it configures.
     [ ! -e "$tree/roles/open-bastion-bastion/tasks/backend.yml" ] \
         || { ok=false; echo "the bastion tree ships backend.yml"; }
+    [ -f "$tree/roles/open-bastion-backend/tasks/_bastion-id.yml" ] \
+        || { ok=false; echo "the backend tree lacks the bastion-id collector"; }
+    [ ! -e "$tree/roles/open-bastion-bastion/tasks/_bastion-id.yml" ] \
+        || { ok=false; echo "the bastion tree ships the backend-only collector"; }
+    # ansible-core 2.19+ does not give a task the loop variable written in its
+    # own delegate_to (ansible/ansible#85849): the delegation lives in an
+    # included task for that reason. A bare `delegate_to: "{{ item }}"` here
+    # would fail at run time, and --syntax-check would not see it.
+    ! grep -rqF 'delegate_to: "{{ item }}"' "$tree" \
+        || { ok=false; echo "a loop variable is used in delegate_to (fails on ansible-core >= 2.19)"; }
     grep -qF 'import_playbook: playbook-bastion.yml' "$tree/site.yml" 2>/dev/null \
         || { ok=false; echo "site.yml does not import the bastion playbook"; }
     grep -qF "Portal checklist: $dir/PORTAL-CHECKLIST-backend.md" "$TEST_TMPDIR/maindir.log" \

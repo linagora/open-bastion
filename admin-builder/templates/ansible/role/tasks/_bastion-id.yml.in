@@ -1,0 +1,26 @@
+---
+# One bastion, one id: included once per host of ob_bastion_group by the
+# backend role. Its own file because delegate_to must see the loop variable of
+# the include that created this task -- ansible-core 2.19+ does not resolve a
+# loop variable written in delegate_to itself (ansible/ansible#85849).
+#
+# The probe is read-only and needs root on the bastion (the 0600 server
+# token), which the play's become provides on the delegated host.
+
+- name: "Read the id of {{ ob_bastion_host }}"
+  ansible.builtin.command: ob-bastion-id
+  delegate_to: "{{ ob_bastion_host }}"
+  register: _ob_bastion_id
+  changed_when: false
+  # Skipped in check mode, the module would not run and the caller's assert
+  # would read a missing 'stdout' rather than preview the run.
+  check_mode: false
+  # An unreachable or unenrolled bastion must not fail here: the caller's
+  # assert names every missing id at once, with the way out.
+  failed_when: false
+
+- name: "Keep the id of {{ ob_bastion_host }}"
+  ansible.builtin.set_fact:
+    ob_bastion_id_list: >-
+      {{ (ob_bastion_id_list | default([]))
+         + [(_ob_bastion_id.stdout | default('')) | trim] }}

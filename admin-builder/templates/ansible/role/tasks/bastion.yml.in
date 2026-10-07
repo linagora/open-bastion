@@ -10,7 +10,7 @@
 # instead, so the play can run unattended on a fleet.
 - name: "Run enrollment flow (auto-approve or manual)"
   ansible.builtin.include_tasks: _enroll.yml
-  when: ob_auto_enroll
+  when: ob_auto_enroll | bool
   vars:
     ob_role: bastion
 
@@ -31,5 +31,5 @@
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
-  when: ob_auto_setup
+  when: ob_auto_setup | bool
   changed_when: true

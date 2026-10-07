@@ -2427,11 +2427,15 @@ render_ansible_role() {
         rel="${f#"$src"/}"
         # Drop the trailing ".in" suffix on templated files.
         rel="${rel%.in}"
-        # Only this role's task file is ever run (main.yml dispatches on
-        # ob_artefact_role): shipping the others would be dead weight.
+        # Only the task files this role runs are worth shipping: main.yml
+        # dispatches on ob_artefact_role, and the bastion-id collector is
+        # backend-only (_enroll.yml is shared by all three roles).
         case "$rel" in
             role/tasks/bastion.yml|role/tasks/backend.yml|role/tasks/standalone.yml)
                 [ "$rel" = "role/tasks/${role}.yml" ] || continue
+                ;;
+            role/tasks/_bastion-id.yml)
+                [ "$role" = "backend" ] || continue
                 ;;
         esac
         case "$rel" in
