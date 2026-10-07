@@ -65,6 +65,13 @@ ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
 # servers. Empty content + enabled:false means no service accounts are deployed.
 @@SERVICE_ACCOUNTS_DEFAULTS_YAML@@
 
+# Pass --enable-service-keys to the setup run: it writes the sshd drop-in that
+# serves ob_service_account_keys. On by default when an account carries a key
+# -- deploying a key nothing serves is the state #263 was reported for -- and
+# `service_keys: false` at build time turns it off. Without the flag, sshd has
+# no AuthorizedKeysCommand and the accounts cannot log in.
+ob_service_keys_setup: @@SERVICE_KEYS_SETUP_BOOL@@
+
 # ── Device-code auto-approval (Ansible-only, opt-in at build time) ───────────
 # When ob_ansible_auto_approve is true AND ob_llng_cookie is non-empty, the
 # enrollment task auto-approves the user_code via the LLNG /device endpoint

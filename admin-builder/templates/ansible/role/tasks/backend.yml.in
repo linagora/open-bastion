@@ -80,6 +80,7 @@
          '-c', ob_client_id,
          '--yes']
         + (['--insecure'] if not (ob_verify_ssl | default(true) | bool) else [])
+        + (['--enable-service-keys'] if ob_service_keys_setup | default(false) | bool else [])
         + (['--allowed-bastions', ob_bastion_allowed_bastions]
            if ob_bastion_allowed_bastions is defined else [])
         + (['--max-security'] if ob_max_security else [])

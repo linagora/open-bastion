@@ -177,6 +177,12 @@
 # commented-out line, a .bak left beside a drop-in, or a pre-#265 two-directive
 # file with no ExposeAuthInfo -- all of which silence the warning while nothing
 # is actually served or verified.
+- name: Dispatch role-specific tasks
+  ansible.builtin.include_tasks: "{{ ob_artefact_role }}.yml"
+
+# After the dispatch, not before: the setup run it includes is what installs
+# the drop-in that serves the keys (--enable-service-keys), so checking first
+# warned on every fresh deployment.
 - name: Check sshd serves the service-account keys
   ansible.builtin.shell: |
     set -eu
@@ -200,6 +206,3 @@
   when:
     - ob_service_accounts_enabled | default(false)
     - ob_svc_keys_sshd.rc | default(1) != 0
-
-- name: Dispatch role-specific tasks
-  ansible.builtin.include_tasks: "{{ ob_artefact_role }}.yml"

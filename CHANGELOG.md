@@ -245,6 +245,12 @@ here.
   (#322). On a host with `rpmbuild` it was written to `build/noarch/`, and on
   Debian rpmbuild printed `cannot open Packages database` errors; the target
   now also fails when the RPM is not written.
+- **The generated Ansible role passes `--enable-service-keys` to the setup**
+  (#338). It deployed `/etc/open-bastion/service-accounts.d/<name>.pub` and
+  warned that sshd served nothing, but only the shell installer passed the
+  flag that installs the drop-in serving them, so the accounts still could not
+  log in — the state #263 was reported for. The check behind that warning also
+  runs after the setup now, instead of on every fresh deployment.
 
 ### Security
 
