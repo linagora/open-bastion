@@ -225,9 +225,17 @@ A ``service_accounts:`` entry carrying the key itself
 then derived from the key; supply it as well only to have it checked, and a
 value that does not describe the key stops the build.
 
-The bundle does not turn on the ``AuthorizedKeysCommand`` for you: that is
-a host-wide ``sshd`` change, so it stays with ``--enable-service-keys``,
-and the generated artefacts say so when they find no such command.
+When any account carries a key, the shell installer also passes
+``--enable-service-keys`` to the setup it runs, which writes the
+``AuthorizedKeysCommand`` drop-in; ``service_keys: false`` in the
+configuration opts out, ``true`` forces it. When the setup is skipped, the
+installer says so if it finds sshd not serving the keys.
+
+``key_fingerprint`` alone is not an alternative to the key. It tells
+``pam_openbastion`` what to expect and gives ``sshd`` nothing to accept: the
+account can log in only if its key reaches ``sshd`` some other way, an
+``authorized_keys`` file you deploy yourself. Under maximum security
+(``AuthorizedKeysFile none``) there is no other way, so give the key.
 
 The account must be resolvable (fixed uid and gid)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
