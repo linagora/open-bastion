@@ -105,7 +105,7 @@ Main configuration file
 
    # Signed answers (optional): off (default), prefer or required
    # response_signing = prefer
-   # sso_jwks_file = /etc/open-bastion/sso-jwks.json
+   # sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
    # sso_issuer = https://auth.example.com
 
 Request signing

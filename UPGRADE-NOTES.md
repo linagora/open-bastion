@@ -330,7 +330,7 @@ manual in this release; automatic distribution comes later.
 
 1. On each host, fetch the portal's keys over a trusted channel from
    `/oauth2/jwks?client_id=<client_id>` and install them as root:
-   `install -m 0644 -o root -g root jwks.json /etc/open-bastion/sso-jwks.json`
+   `install -D -m 0644 -o root -g root jwks.json /var/lib/open-bastion/jwks/sso-jwks.json`
    (not a symlink, not group/world writable). Set `client_id` too.
 2. Set `response_signing = prefer` in `openbastion.conf` and
    `nss_openbastion.conf`.

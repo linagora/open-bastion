@@ -425,7 +425,7 @@ static int test_response_signing_defaults(void)
 
     int ok = (config.response_signing == OB_RESPONSE_SIGNING_OFF);
     ok = ok && config.sso_jwks_file
-            && strcmp(config.sso_jwks_file, "/etc/open-bastion/sso-jwks.json") == 0;
+            && strcmp(config.sso_jwks_file, "/var/lib/open-bastion/jwks/sso-jwks.json") == 0;
     ok = ok && (config.sso_issuer == NULL);
 
     config_free(&config);

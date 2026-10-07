@@ -122,7 +122,7 @@
 #define DEFAULT_SERVICE_ACCOUNTS_CONF_FILE "/etc/open-bastion/service-accounts.conf"
 
 /* Same trust anchor as pam_openbastion's sso_jwks_file default */
-#define DEFAULT_SSO_JWKS_FILE "/etc/open-bastion/sso-jwks.json"
+#define DEFAULT_SSO_JWKS_FILE "/var/lib/open-bastion/jwks/sso-jwks.json"
 #define DEFAULT_MAX_UID 60000
 
 /* Reserved UID for 'nobody' user - must never be assigned */

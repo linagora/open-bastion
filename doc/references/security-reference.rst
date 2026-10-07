@@ -99,7 +99,7 @@ Claim               Meaning
 
 **Algorithms.** ``RS256``, ``RS384``, ``RS512``, ``PS256``, ``PS384``, ``PS512``, ``ES256``, ``ES384``, ``ES512`` and ``EdDSA`` (Ed25519). ``none`` and the HMAC algorithms have no entry, so a header cannot downgrade the check. RSA keys under 2048 bits, ``oct`` keys, keys with ``use`` other than ``sig`` and unsupported curves in the JWKS are skipped.
 
-**Trust anchor.** ``sso_jwks_file`` (default ``/etc/open-bastion/sso-jwks.json``) holds the portal's public keys; the portal publishes them on ``/oauth2/jwks?client_id=<client_id>``. The file is the trust anchor, so it is checked on every load: a regular file (opened without following symlinks), owned by root, writable by neither group nor others, non-empty and under 256 KiB. The host never fetches keys over the network to verify an answer: a key obtained through the channel being protected would protect nothing.
+**Trust anchor.** ``sso_jwks_file`` (default ``/var/lib/open-bastion/jwks/sso-jwks.json``) holds the portal's public keys; the portal publishes them on ``/oauth2/jwks?client_id=<client_id>``. The file is the trust anchor, so it is checked on every load: a regular file (opened without following symlinks), owned by root, writable by neither group nor others, non-empty and under 256 KiB. The host never fetches keys over the network to verify an answer: a key obtained through the channel being protected would protect nothing.
 
 .. note::
 

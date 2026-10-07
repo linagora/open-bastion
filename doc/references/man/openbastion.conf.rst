@@ -169,7 +169,7 @@ Signed answers
    must be a regular file, not a symlink, owned by root and not writable by
    group or others. It is not fetched automatically yet: provision it from
    ``/oauth2/jwks?client_id=<client_id>``. Default:
-   ``/etc/open-bastion/sso-jwks.json``.
+   ``/var/lib/open-bastion/jwks/sso-jwks.json``.
 
 .. option:: sso_issuer
 

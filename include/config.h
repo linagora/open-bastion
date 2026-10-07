@@ -252,6 +252,6 @@ int config_validate_skel(const char *skel_path);
 #define DEFAULT_SERVICE_ACCOUNTS_FILE "/etc/open-bastion/service-accounts.conf"
 
 /* Default JWKS the portal's signed answers are checked against */
-#define DEFAULT_SSO_JWKS_FILE "/etc/open-bastion/sso-jwks.json"
+#define DEFAULT_SSO_JWKS_FILE "/var/lib/open-bastion/jwks/sso-jwks.json"
 
 #endif /* CONFIG_H */

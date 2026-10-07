@@ -116,7 +116,7 @@
 # The portal's public keys, the trust anchor: a regular file, not a symlink,
 # owned by root, not writable by group or others. Provision it by hand from
 # <portal>/oauth2/jwks?client_id=<client_id>; automatic provisioning comes later.
-# sso_jwks_file = /etc/open-bastion/sso-jwks.json
+# sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
 
 # Expected issuer of signed answers. Default: portal_url without trailing slash.
 # sso_issuer =

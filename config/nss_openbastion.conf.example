@@ -24,7 +24,7 @@ cache_ttl = 300
 # is treated as required. Needs client_id (the expected audience).
 #response_signing = off
 #client_id = pam-access
-#sso_jwks_file = /etc/open-bastion/sso-jwks.json
+#sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
 #sso_issuer = https://auth.example.com
 
 # Default shell for users without loginShell attribute. With force_shell, the
