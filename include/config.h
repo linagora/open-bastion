@@ -188,6 +188,7 @@ void config_init(pam_openbastion_config_t *config);
  *   -5  incomplete or invalid CrowdSec configuration
  *   -6  a boolean setting had an unparseable value (see syslog for the key)
  *   -7  response_signing is neither off, prefer nor required
+ *   -8  cert_pin is not a pin libcurl can enforce (see ob_cert_pin_valid)
  *
  * API contract for callers
  * ------------------------

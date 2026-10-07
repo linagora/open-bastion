@@ -867,3 +867,45 @@ replace || base64_string "$keys" #
 suite   || tests/test_ob_builder_service_accounts.sh
 why     || #334: the key blob must end with a newline, or `while read` drops the
 why     || last account on any installer that does not compensate.
+
+id      || pam-client-request-signing-secret
+file    || src/config.c
+search  || client->signing_secret = config->request_signing_secret;
+replace || client->signing_secret = NULL;
+suite   || tests/test_ob_portal_sign_pin.sh
+why     || #332: the module parsed request_signing_secret and never handed it to
+why     || its HTTP client, so /pam/verify, /pam/authorize and /pam/heartbeat went
+why     || out unsigned and pamAccessRequestSigningMode=required locked out the
+why     || fleet.
+
+id      || pam-client-cert-pin
+file    || src/config.c
+search  || ? config->cert_pin : NULL;
+replace || ? NULL : NULL;
+suite   || tests/test_ob_portal_sign_pin.sh
+why     || #332: cert_pin was parsed and never applied; the documentation and the
+why     || EBIOS study credit it as MITM protection even against a rogue CA.
+
+id      || nss-userinfo-request-signed
+file    || nss/libnss_openbastion.c
+search  ||     if (signature[0]) {
+replace ||     if (0) {
+suite   || tests/test_ob_portal_sign_pin.sh
+why     || #332: /pam/userinfo goes through the portal's caller gate; unsigned
+why     || under pamAccessRequestSigningMode=required, no SSO user resolves.
+
+id      || nss-userinfo-cert-pin
+file    || nss/libnss_openbastion.c
+search  || curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, cert_pin);
+replace || (void)cert_pin;
+suite   || tests/test_ob_portal_sign_pin.sh
+why     || #332: the uid the NSS module hands out comes from the portal; a pin
+why     || the PAM module enforces and NSS does not is a weak control.
+
+id      || nss-portal-settings-fail-closed
+file    || nss/libnss_openbastion.c
+search  || if (!st || ob_sign_load_settings(NSS_OB_PAM_CONF, &s, &p) != 0) {
+replace || if (!st) {
+suite   || tests/test_ob_portal_sign_pin.sh
+why     || #332: an openbastion.conf the module cannot read must stop the call,
+why     || not send it unsigned and unpinned.
