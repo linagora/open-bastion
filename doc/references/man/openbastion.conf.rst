@@ -149,6 +149,36 @@ Request signing
    identifying a caller. Generate one with ``openssl rand -hex 32``. The
    value is taken literally, ``#`` included.
 
+Signed answers
+~~~~~~~~~~~~~~
+
+.. option:: response_signing
+
+   Ask the portal for signed answers on ``/pam/authorize``, ``/pam/verify``,
+   ``/pam/heartbeat`` (and ``/pam/userinfo`` for the NSS module) and check
+   them against ``sso_jwks_file``. ``off``: do nothing. ``prefer``: verify,
+   but accept an unsigned answer with a warning. ``required``: refuse an
+   unsigned or invalid answer, and every answer when the JWKS is unusable.
+   A refused answer counts as a transport error. Any other value refuses
+   the configuration (the NSS module treats it as ``required``). Default:
+   ``off``.
+
+.. option:: sso_jwks_file
+
+   The portal's public keys (JWKS), the trust anchor of signed answers. It
+   must be a regular file, not a symlink, owned by root and not writable by
+   group or others. It is not fetched automatically yet: provision it from
+   ``/oauth2/jwks?client_id=<client_id>``. Default:
+   ``/etc/open-bastion/sso-jwks.json``.
+
+.. option:: sso_issuer
+
+   Expected ``iss`` of a signed answer. Default: ``portal_url`` without a
+   trailing slash.
+
+``client_id`` must be set: it is the expected ``aud``. The NSS module reads
+these four keys from ``nss_openbastion.conf``.
+
 Authorization cache (offline mode)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

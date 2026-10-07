@@ -103,6 +103,25 @@
 # request_signing_secret =
 
 # ==============================================================================
+# Signed answers
+# ==============================================================================
+
+# Ask the portal to sign its /pam/ answers and verify them against
+# sso_jwks_file: off (default), prefer (verify, accept unsigned with a warning)
+# or required (refuse unsigned or invalid answers; a wrong JWKS then refuses
+# everything). Needs client_id. The NSS module reads the same keys from
+# nss_openbastion.conf. See UPGRADE-NOTES.md before enabling.
+# response_signing = off
+
+# The portal's public keys, the trust anchor: a regular file, not a symlink,
+# owned by root, not writable by group or others. Provision it by hand from
+# <portal>/oauth2/jwks?client_id=<client_id>; automatic provisioning comes later.
+# sso_jwks_file = /etc/open-bastion/sso-jwks.json
+
+# Expected issuer of signed answers. Default: portal_url without trailing slash.
+# sso_issuer =
+
+# ==============================================================================
 # Authorization cache (offline mode)
 # ==============================================================================
 

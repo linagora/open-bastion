@@ -75,6 +75,60 @@ Every caller signs: the PAM module (``/pam/verify``, ``/pam/authorize``, ``/pam/
 
 The shell callers sign through ``ob-sign-request``, never through ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL takes the HMAC key on the command line and offers no form that reads it from a file or the environment; ``/proc/<pid>/cmdline`` is world-readable, so on a bastion that one-liner would hand the fleet-wide signing secret to every user with a shell, every few minutes, forever. ``ob-sign-request`` reads the secret from the root-only configuration file and takes the body on stdin — which matters too, since ``ob-heartbeat`` signs a body carrying the host's ``refresh_token``.
 
+Signed answers (optional)
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Without this, the portal's answers are trusted on TLS alone: whoever terminates or impersonates TLS (a compromised CA, a reverse proxy, a ``verify_ssl = false`` left behind) can forge ``authorized: true`` or a user's attributes. With ``response_signing`` enabled, ``/pam/authorize``, ``/pam/verify`` and ``/pam/heartbeat`` (PAM module) and ``/pam/userinfo`` (NSS module) must be answered with a JWS signed by a key the host already holds.
+
+**Format.** The host sends ``Accept: application/ob-pam-response+jwt`` and an ``X-Nonce``. The portal answers with the same HTTP status and that media type, the body being a compact JWS (at most 64 KiB) whose header has ``typ: ob-pam-response+jwt``, a ``kid`` and an ``alg``. Claims:
+
+=================== ===================================================
+Claim               Meaning
+=================== ===================================================
+``iss``             The portal; must equal ``sso_issuer``
+``aud``             The ``client_id`` of the caller
+``endpoint``        ``authorize``, ``verify``, ``userinfo`` or ``heartbeat``
+``iat`` / ``exp``   Validity window
+``req_nonce``       The ``X-Nonce`` of the request
+``req_sha256``      SHA-256 (hex) of the request body as sent
+``http_status``     The status of the answer
+``resp``            The plain JSON answer, as without signing
+=================== ===================================================
+
+**Checks.** The answer is refused unless all of these hold: the signature verifies with the key named by ``kid`` (the key must suit ``alg``: type, curve, and the JWK's own ``alg`` when it has one); ``typ`` is the expected one and no ``crit`` header is present; ``iss``, ``endpoint``, ``req_nonce`` and ``req_sha256`` match the request; ``exp`` is not past and ``iat`` not in the future (60 seconds of clock skew tolerated); ``http_status`` equals the HTTP status curl received; ``resp`` is an object. Binding to the nonce and body means a captured answer cannot be replayed for another request, endpoint or user.
+
+**Algorithms.** ``RS256``, ``RS384``, ``RS512``, ``PS256``, ``PS384``, ``PS512``, ``ES256``, ``ES384``, ``ES512`` and ``EdDSA`` (Ed25519). ``none`` and the HMAC algorithms have no entry, so a header cannot downgrade the check. RSA keys under 2048 bits, ``oct`` keys, keys with ``use`` other than ``sig`` and unsupported curves in the JWKS are skipped.
+
+**Trust anchor.** ``sso_jwks_file`` (default ``/etc/open-bastion/sso-jwks.json``) holds the portal's public keys; the portal publishes them on ``/oauth2/jwks?client_id=<client_id>``. The file is the trust anchor, so it is checked on every load: a regular file (opened without following symlinks), owned by root, writable by neither group nor others, non-empty and under 256 KiB. The host never fetches keys over the network to verify an answer: a key obtained through the channel being protected would protect nothing.
+
+.. note::
+
+   In this release the JWKS file must be provisioned by hand (for instance ``curl`` from a trusted network, then ``install -m 0644 -o root``). Distribution by ``ob-builder``, the setup scripts and Ansible, and key rotation through the heartbeat, come in a later release.
+
+**The no-``aud`` rule.** The portal omits ``aud`` on the answers it gives before it has identified the caller (for instance a 401 for an unknown token). Such an answer is signed and valid, but it may only deny: a ``/pam/verify`` with ``active: true`` or a ``/pam/authorize`` with ``authorized: true`` carrying no ``aud`` is refused as a transport error. An answer that has an ``aud`` must match the host's ``client_id``.
+
+**Modes** (``response_signing``):
+
+=============== =======================================================================
+Mode            Behaviour
+=============== =======================================================================
+``off``         Default. Nothing is asked, nothing is checked.
+``prefer``      Signed answers are asked for and verified when the JWKS loads. An
+                unsigned answer is accepted with a warning in syslog; a signed
+                answer that does not verify is refused. With no usable JWKS the host
+                asks for plain answers and logs a warning.
+``required``    An unsigned answer, an invalid signed answer, or a missing or unsafe
+                JWKS file refuses the answer.
+=============== =======================================================================
+
+A refused answer is handled as a transport error, like a network failure: the host does not act on its content (an unverified ``401`` does not trigger a token refresh), and the usual offline rules apply, so a user already in the authorization cache can still log in while ``offline`` mode allows it. Nothing that fails verification can create or extend a cache entry. ``prefer`` protects against nothing by itself, since an attacker can strip the signature: it is a way to check that the JWKS and the portal agree before moving to ``required``.
+
+**NSS module.** ``libnss_openbastion`` applies the same rules to ``/pam/userinfo``. It reads ``response_signing``, ``sso_jwks_file``, ``sso_issuer`` and ``client_id`` from ``nss_openbastion.conf`` (not ``openbastion.conf``), and loads the JWKS on each query. An invalid ``response_signing`` value is logged and treated as ``required`` rather than ``off``; with ``required`` and no ``client_id`` in the file, lookups are refused. A refused lookup returns a transport failure and is never negatively cached.
+
+.. warning::
+
+   Under ``required``, a wrong, stale or unreadable JWKS refuses every portal answer: SSO logins fail on that host (only users in the offline cache still get in). Test with ``prefer`` and read the syslog first.
+
 Server authentication
 ---------------------
 

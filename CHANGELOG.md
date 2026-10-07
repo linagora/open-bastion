@@ -19,6 +19,15 @@ here.
 
 ### Added
 
+- **Signed portal answers** (#339, `response_signing`): the PAM module
+  (`/pam/authorize`, `/pam/verify`, `/pam/heartbeat`) and the NSS module
+  (`/pam/userinfo`) can require the answer to be a JWS signed by the portal,
+  bound to the request's nonce and body and checked against a local JWKS
+  (`sso_jwks_file`, `sso_issuer`). Modes `off` (default), `prefer`, `required`;
+  a refused answer is a transport error. The JWKS must be provisioned by hand
+  for now; distribution and rotation come in a later release. Needs plugins
+  with signed responses (lemonldap-ng-plugins#101). See
+  [doc/references/security-reference.rst](doc/references/security-reference.rst).
 - **`ob-uninstall`(8)** un-configures a bastion, standalone host or backend
   before the package is removed. Removing the package alone left sshd and PAM
   pointing at deleted files, which refused every SSH login. See
