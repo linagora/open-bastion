@@ -91,6 +91,17 @@ It writes the tree to the ``ansible-<slug>`` directory:
        ├── open-bastion-bastion/      # defaults/, tasks/, templates/, files/
        └── open-bastion-backend/
 
+Every answer — given to the questionnaire or read from the configuration file —
+has its runtime counterpart in the tree: the ``ob_*`` variables held by
+``roles/open-bastion-<role>/defaults/main.yml``, one such file per role, each
+variable documented in that role's ``README.md``. They are ordinary role
+defaults, so they can be overridden without rebuilding anything: per host or
+per group in the inventory (``inventory.yml``, ``host_vars/*.yml``,
+``group_vars/*.yml``), or for a single run with ``--extra-vars``. That is what
+allows a fine-grained execution of the playbook — the same tree replays with
+``-e ob_auto_setup=true`` to run the setup, or with one optional feature turned
+on for one host, and no regeneration.
+
 The ``PORTAL-CHECKLIST-<role>.md`` next to the playbooks lists the
 portal settings that role expects.
 
@@ -236,7 +247,8 @@ From the directory ``ob-builder`` wrote:
    ansible-playbook -i inventory.yml site.yml --ask-vault-pass
 
 That is the whole run. ``site.yml`` plays each role in turn over the
-inventory.
+inventory. ``--ask-vault-pass`` is for a client secret held in
+``ansible-vault``, adapt to your use case.
 
 If the build enabled ``ansible_auto_approve``, add the LLNG session cookie so
 the play approves the device codes itself. The ``llng`` CLI comes from
@@ -257,28 +269,30 @@ cookie is only ever sent back to the host that issued it. If the portal offers
 a choice of authentication backends, name the one to use with ``--choice``,
 e.g. ``--choice lmAuth=1_LDAP`` (replace ``1_LDAP`` with your backend's key).
 
-Without auto-approve, the same play cannot show you the codes it is waiting
-for: run it, and enrol each host from another terminal while it waits — that
-is where the code is printed:
+Without auto-approve, the play waits for a human on every host, and it cannot
+show you the code while it waits (Ansible only prints a finished task's
+output). Enrol the hosts by hand instead, once per host:
 
 .. code:: bash
 
-   ansible-playbook -i inventory.yml site.yml --ask-vault-pass
-
-   # another terminal, once per host. -k is for a plain http:// portal;
-   # OB_CLIENT_SECRET is the ob_client_secret of that host's group, and is
-   # only needed when the relying party has a secret (client_secret_mode
-   # other than none):
+   # -k is for a plain http:// portal, and OB_CLIENT_SECRET is the
+   # ob_client_secret of that host's group — needed only when the relying
+   # party has a secret (client_secret_mode other than none):
    ssh -t bastion-1 'sudo OB_CLIENT_SECRET=<secret> ob-enroll -g bastion'
    ssh -t web-1     'sudo OB_CLIENT_SECRET=<secret> ob-enroll -g backend'
 
-Then re-run the play with the enrolment behind you, so it goes straight to the
-setup:
+Then run the play with the setup turned on:
 
 .. code:: bash
 
-   ansible-playbook -i inventory.yml site.yml --ask-vault-pass \
-     -e ob_auto_enroll=false
+   ansible-playbook -i inventory.yml site.yml -e ob_auto_setup=true
+
+Enrolment and setup are one answer in the questionnaire, but two variables at
+play time. A build that answered ``no``, or ``prompt``, leaves
+``ob_auto_enroll`` and ``ob_auto_setup`` false: the play installs the package
+and writes the configuration, and stops there — hence the variable above.
+A build that answered ``yes`` enrols again on every run, so add
+``-e ob_auto_enroll=false`` there once the hosts are enrolled.
 
 A run can be narrowed to one group or one host while iterating, with
 ``--limit``:
