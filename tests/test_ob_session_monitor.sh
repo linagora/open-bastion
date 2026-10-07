@@ -62,6 +62,10 @@ class H(BaseHTTPRequestHandler):
             body, code = json.dumps({"found": True}), 200
         elif MODE == "revoked":
             body, code = json.dumps({"found": False}), 200
+        elif MODE.startswith("bearer="):
+            ok = self.headers.get("Authorization") == "Bearer " + MODE[7:]
+            body, code = (json.dumps({"found": True}), 200) if ok else \
+                (json.dumps({"error": "invalid_token"}), 401)
         elif MODE == "unauthorized":
             body, code = json.dumps({"error": "invalid_token"}), 401
         elif MODE == "forbidden":
@@ -306,6 +310,88 @@ test_unknown_still_bounded() {
     fi
 }
 run_test test_unknown_still_bounded
+
+# --- #342: the Bearer is the access token, not the token file ----------------
+# Runs read_config + check_user_valid from the shipped script against a portal
+# that only answers found:true to the exact expected Bearer (401 otherwise).
+token_case() {
+    local expected="$1"
+    PORT=$((PORT + 1))
+    python3 "$WORK/mock.py" "bearer=$expected" "$PORT" & MOCK_PID=$!
+    for _ in $(seq 1 50); do
+        (echo > "/dev/tcp/127.0.0.1/$PORT") 2>/dev/null && break
+        sleep 0.1
+    done
+    {
+        echo 'set -uo pipefail'
+        echo "PORTAL_URL='http://127.0.0.1:$PORT'"
+        echo "CONFIG_FILE='$WORK/tok.conf'"
+        echo 'SERVER_TOKEN=""'
+        echo 'SIGN_HEADERS=()'
+        echo 'ob_sign_request() { SIGN_HEADERS=(); return 0; }'
+        echo 'log_warn() { echo "WARN: $*" >&2; }'
+        echo 'log_crit() { echo "CRIT: $*" >&2; }'
+        echo 'log_info() { :; }'
+        echo 'log_debug() { :; }'
+        awk '/^read_server_token\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$SCRIPT"
+        awk '/^read_config\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$SCRIPT"
+        extract_function
+        echo 'read_config; PORTAL_URL="http://127.0.0.1:'"$PORT"'"'
+        echo 'check_user_valid alice; echo "VERDICT=$?"'
+    } > "$WORK/case.sh"
+    CASE_OUT=$(bash "$WORK/case.sh" 2>&1)
+    kill "$MOCK_PID" 2>/dev/null; wait "$MOCK_PID" 2>/dev/null; MOCK_PID=""
+    CASE_VERDICT=$(printf '%s' "$CASE_OUT" | sed -n 's/^VERDICT=//p' | tail -1)
+}
+
+expect_token() {
+    local desc="$1" expected="$2"
+    token_case "$expected"
+    if [ "$CASE_VERDICT" = "0" ]; then
+        pass "$desc"
+    else
+        fail "$desc" "verdict=$CASE_VERDICT out=$CASE_OUT"
+    fi
+}
+
+printf '%s\n' '{"access_token":"AT-json","refresh_token":"RT","expires_at":4102444800}' > "$WORK/tok.json"
+printf '  AT-plain  \n' > "$WORK/tok.txt"
+printf '\n' > "$WORK/tok.empty"
+
+test_json_token_file() {
+    printf 'portal_url = http://x\nserver_token_file = %s\n' "$WORK/tok.json" > "$WORK/tok.conf"
+    expect_token "JSON token file -> Bearer is .access_token" "AT-json"
+}
+run_test test_json_token_file
+
+test_plain_token_file() {
+    printf 'server_token_file = "%s"\n' "$WORK/tok.txt" > "$WORK/tok.conf"
+    expect_token "plain-text token file -> trimmed raw content" "AT-plain"
+}
+run_test test_plain_token_file
+
+test_token_file_alias() {
+    printf 'token_file = %s\n' "$WORK/tok.json" > "$WORK/tok.conf"
+    expect_token "token_file alias is honoured" "AT-json"
+}
+run_test test_token_file_alias
+
+test_token_file_last_wins() {
+    printf 'server_token_file = %s\ntoken_file = %s\n' "$WORK/tok.json" "$WORK/tok.txt" > "$WORK/tok.conf"
+    expect_token "last of server_token_file/token_file wins" "AT-plain"
+}
+run_test test_token_file_last_wins
+
+test_empty_token_not_sent() {
+    printf 'server_token_file = %s\n' "$WORK/tok.empty" > "$WORK/tok.conf"
+    token_case "anything"
+    if [ "$CASE_VERDICT" = "2" ]; then
+        pass "empty token file -> no Bearer sent (portal 401 -> unknown)"
+    else
+        fail "empty token file" "verdict=$CASE_VERDICT"
+    fi
+}
+run_test test_empty_token_not_sent
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

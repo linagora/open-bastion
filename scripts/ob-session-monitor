@@ -61,6 +61,19 @@ log_debug() {
     logger -t ob-session-monitor -p auth.debug "$@"
 }
 
+# Same rules as token_manager_load_file(): the file is the JSON ob-enroll writes
+# ({"access_token": ...}) or a plain-text token. Prints the bearer token, or
+# nothing (the caller then sends no Authorization header at all).
+read_server_token() {
+    local file="$1" tok=""
+    if jq -e . "$file" >/dev/null 2>&1; then
+        tok=$(jq -r 'if type == "object" then (.access_token // "") else "" end' "$file" 2>/dev/null) || tok=""
+    else
+        tok=$(cat "$file" 2>/dev/null) || tok=""
+    fi
+    printf '%s' "$tok" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 read_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         log_warn "Configuration file not found: $CONFIG_FILE"
@@ -73,10 +86,11 @@ read_config() {
         PORTAL_URL="$portal_url_val"
     fi
 
+    # server_token_file and its alias token_file (config.c); last one wins.
     local server_token_file_val
-    server_token_file_val=$(grep -E '^\s*server_token_file\s*=' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    server_token_file_val=$(grep -E '^\s*(server_token_file|token_file)\s*=' "$CONFIG_FILE" 2>/dev/null | tail -1 | sed 's/.*=\s*//' | tr -d '"'"'" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     if [ -n "$server_token_file_val" ] && [ -f "$server_token_file_val" ]; then
-        SERVER_TOKEN=$(cat "$server_token_file_val" 2>/dev/null)
+        SERVER_TOKEN=$(read_server_token "$server_token_file_val")
     fi
 
     local reval_enabled
