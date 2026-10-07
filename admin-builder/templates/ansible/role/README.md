@@ -27,6 +27,8 @@ The `files/` directory (not shipped here) must contain:
 - `open-bastion.gpg` — APT signing key
 - `open-bastion-ca.pub` — SSH CA public key (downloaded from LLNG portal)
 - `open-bastion-krl` — Key Revocation List (Mode E only)
+- `sso-jwks.json` — the portal's JWKS for `ob_sso_jwks_client_id`, fetched
+  from `jwks_uri?client_id=<client_id>` (trust anchor of signed answers)
 
 ## Variables
 
@@ -56,6 +58,20 @@ Backend-only "accept only this bastion" variables:
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
 | `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. |
+
+Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
+
+| Variable                | Description                                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_response_signing`   | `off`, `prefer` (default: unsigned answers still accepted) or `required` (only once the portal signs; a wrong JWKS then locks out) |
+| `ob_sso_jwks_src`       | JWKS file deployed by the role (`sso-jwks.json` in `files/`); empty = none, which requires `ob_response_signing: off`              |
+| `ob_sso_jwks_sha256`    | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                               |
+| `ob_sso_jwks_client_id` | The client_id the JWKS belongs to; the play refuses a signing mode when it differs from `ob_client_id`                             |
+| `ob_sso_jwks_file`      | Where it is deployed, root:root 0644 (default `/var/lib/open-bastion/jwks/sso-jwks.json`); ob-heartbeat rotates it only under `/var/lib/open-bastion` |
+
+Every run deploys `ob_sso_jwks_src` again, over the JWKS ob-heartbeat may have
+rotated since on the host: after a key rotation on the portal, rebuild the role
+(ob-builder fetches the current JWKS) before running it on existing hosts.
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):
 

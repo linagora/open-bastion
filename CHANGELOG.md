@@ -19,15 +19,34 @@ here.
 
 ### Added
 
-- **Signed portal answers** (#339, `response_signing`): the PAM module
-  (`/pam/authorize`, `/pam/verify`, `/pam/heartbeat`) and the NSS module
-  (`/pam/userinfo`) can require the answer to be a JWS signed by the portal,
-  bound to the request's nonce and body and checked against a local JWKS
-  (`sso_jwks_file`, `sso_issuer`). Modes `off` (default), `prefer`, `required`;
-  a refused answer is a transport error. The JWKS must be provisioned by hand
-  for now; distribution and rotation come in a later release. Needs plugins
-  with signed responses (lemonldap-ng-plugins#101). See
-  [doc/references/security-reference.rst](doc/references/security-reference.rst).
+- **Signed portal answers** (#339, `response_signing = off|prefer|required`):
+  the PAM module (`/pam/authorize`, `/pam/verify`, `/pam/heartbeat`), the NSS
+  module (`/pam/userinfo`) and the scripts `ob-heartbeat`, `ob-session-monitor`
+  and `ob-bastion-id` (`/pam/heartbeat`, `/pam/userinfo`, `/pam/whoami`) can
+  require the portal's answer to be a JWS bound to the request's nonce and
+  body, checked against a local JWKS (`sso_jwks_file`, default
+  `/var/lib/open-bastion/jwks/sso-jwks.json`). Under `required` an unsigned,
+  forged, replayed or `aud`-less granting answer is refused like a transport
+  error; `prefer` accepts unsigned answers with a warning. Needs plugins with
+  signed responses (lemonldap-ng-plugins#101, in the next plugins release).
+  See [doc/references/security-reference.rst](doc/references/security-reference.rst).
+  - **Distribution**: ob-builder fetches the JWKS for every role from
+    `jwks_uri?client_id=<client_id>` (before: backend/bundle only, without
+    `client_id`, and never deployed), embeds it in the shell installer with its
+    SHA-256 and deploys it from the Ansible role (`files/sso-jwks.json`,
+    renamed from `jwks.json`). New `--response-signing` (YAML
+    `response_signing`, default `prefer`). `ob-*-setup` get
+    `--response-signing`, `--sso-jwks FILE` and `--sso-jwks-sha256 HEX`; a
+    fetched JWKS is installed only on a matching fingerprint or an explicit
+    confirmation. Without a JWKS, `prefer` becomes `off` and `required` is
+    refused. The fingerprint is everywhere the SHA-256 of `jq -S -c .`.
+  - **Rotation**: a verified `/pam/heartbeat` answer (signed by a key of the
+    current JWKS, `aud` = `client_id`, HTTP 200) carrying a different usable
+    `jwks` replaces the file atomically, logged with the old and new kids. Never
+    from an unsigned answer, never by a network fetch: a host that misses a
+    whole rotation must be re-provisioned.
+  - **`ob-verify-response`(8)**: verifies a signed answer for the shell
+    callers, and lists the usable keys of a JWKS (`check-jwks`).
 - **`ob-uninstall`(8)** un-configures a bastion, standalone host or backend
   before the package is removed. Removing the package alone left sshd and PAM
   pointing at deleted files, which refused every SSH login. See

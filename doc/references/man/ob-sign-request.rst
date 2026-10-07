@@ -112,4 +112,5 @@ See also
 :doc:`ob-heartbeat(8) <ob-heartbeat>`,
 :doc:`ob-bastion-id(1) <ob-bastion-id>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
-:doc:`ob-cert-daemon(8) <ob-cert-daemon>`
+:doc:`ob-cert-daemon(8) <ob-cert-daemon>`,
+:doc:`ob-verify-response(8) <ob-verify-response>`

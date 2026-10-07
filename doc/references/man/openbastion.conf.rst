@@ -167,9 +167,15 @@ Signed answers
 
    The portal's public keys (JWKS), the trust anchor of signed answers. It
    must be a regular file, not a symlink, owned by root and not writable by
-   group or others. It is not fetched automatically yet: provision it from
-   ``/oauth2/jwks?client_id=<client_id>``. Default:
+   group or others. :doc:`ob-bastion-setup(8) <ob-bastion-setup>`
+   installs it (``--sso-jwks``, ``--sso-jwks-sha256``), as do the
+   :doc:`ob-builder(1) <ob-builder>` installer and Ansible role; it comes
+   from ``/oauth2/jwks?client_id=<client_id>``. Default:
    ``/var/lib/open-bastion/jwks/sso-jwks.json``.
+   :doc:`ob-heartbeat(8) <ob-heartbeat>` replaces it on a verified key
+   rotation, which only works under ``/var/lib/open-bastion``, the one
+   place its unit may write: elsewhere (``/etc`` included) the file is
+   still read, but a rotation fails.
 
 .. option:: sso_issuer
 
