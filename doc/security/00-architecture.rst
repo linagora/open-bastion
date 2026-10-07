@@ -94,7 +94,7 @@ terminateur TLS 1.3.
 | ``cert_pin``        | aucun        | Épinglage de certificat (format sha256//base64) |
 +---------------------+--------------+-------------------------------------------------+
 
-**Épinglage de Certificat** : Lorsqu'il est configuré, le module valide la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA.
+**Épinglage de Certificat** : Lorsqu'il est configuré, le module PAM, le module NSS et ``ob-cert-daemon`` valident la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA. Les commandes (``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll``…) n'épinglent pas : elles s'appuient sur TLS et, avec ``response_signing``, sur les réponses signées. Un épinglage invalide est refusé, jamais ignoré. Avant la 0.7.0, rien n'appliquait ``cert_pin`` (#332).
 
 .. code:: ini
 
@@ -120,7 +120,7 @@ Le nonce fait partie du message signé : l'omettre permettrait de rejouer une re
 
 Cela fournit une défense en profondeur contre la falsification de requêtes, même si TLS est d'une façon ou d'une autre compromis.
 
-Tous les appelants signent : le module PAM (``/pam/verify``, ``/pam/authorize``, ``/pam/heartbeat``), ``ob-cert-daemon`` (``/pam/bastion-cert``), et les appelants shell ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` et ``ob-session-monitor``. Dès que ``pamAccessRequestSigningMode`` vaut ``required``, le portail refuse tout appel non signé sur chacun d'eux : en oublier un n'est pas un durcissement manquant, c'est une panne de flotte en attente de l'expiration d'un token.
+Tous les appelants signent : le module PAM (``/pam/verify``, ``/pam/authorize``, ``/pam/heartbeat``), le module NSS (``/pam/userinfo``), ``ob-cert-daemon`` (``/pam/bastion-cert``), et les appelants shell ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` et ``ob-session-monitor``. Dès que ``pamAccessRequestSigningMode`` vaut ``required``, le portail refuse tout appel non signé sur chacun d'eux : en oublier un n'est pas un durcissement manquant, c'est une panne de flotte en attente de l'expiration d'un token.
 
 Les appelants shell signent via ``ob-sign-request``, jamais via ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL prend la clé HMAC sur la ligne de commande et n'offre aucune forme qui la lise depuis un fichier ou l'environnement ; ``/proc/<pid>/cmdline`` est lisible par tous, donc sur un bastion ce one-liner livrerait le secret de signature de toute la flotte à chaque utilisateur ayant un shell, toutes les quelques minutes, indéfiniment. ``ob-sign-request`` lit le secret dans le fichier de configuration réservé à root et prend le corps sur stdin — ce qui compte aussi, puisque ``ob-heartbeat`` signe un corps contenant le ``refresh_token`` de l'hôte.
 
