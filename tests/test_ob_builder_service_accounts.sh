@@ -321,10 +321,22 @@ test_templates_deploy_and_warn() {
     grep -q 'ob_service_account_keys' "$an_t"            || bad="$bad ansible(no-var)"
     grep -q 'service-accounts.d/' "$an_t"                || bad="$bad ansible(no-deploy)"
     grep -q 'enable-service-keys' "$an_t"                || bad="$bad ansible(no-sshd-warning)"
+    # Naming the flag in the warning is not passing it to the setup: without
+    # this, the role deploys <name>.pub, tells the admin to serve it, and
+    # leaves the host exactly as #263 described it.
+    local role_tasks="$OB_REPO_ROOT/admin-builder/templates/ansible/role/tasks"
+    grep -q 'ob_service_keys_setup' "$OB_REPO_ROOT/admin-builder/templates/ansible/role/defaults/main.yml.in" \
+        || bad="$bad ansible(no-flag-variable)"
+    local t
+    for t in bastion backend standalone; do
+        grep -qE "^\s+\+ \(\['--enable-service-keys'\] if ob_service_keys_setup" \
+            "$role_tasks/$t.yml.in" \
+            || bad="$bad ansible($t-does-not-pass-the-flag)"
+    done
     if [ -z "$bad" ]; then
-        test_pass "both templates deploy <name>.pub and warn when sshd cannot serve it"
+        test_pass "both templates deploy <name>.pub, pass --enable-service-keys and warn when sshd cannot serve it"
     else
-        test_fail "both templates deploy <name>.pub and warn when sshd cannot serve it" "$bad"
+        test_fail "both templates deploy <name>.pub, pass --enable-service-keys and warn when sshd cannot serve it" "$bad"
     fi
 }
 

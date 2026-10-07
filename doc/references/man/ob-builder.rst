@@ -34,10 +34,9 @@ Options
 
 .. option:: --config FILE
 
-   Read all answers from a YAML config file (non-interactive). The
-   accepted keys are listed in the README shipped with the package;
-   ``--save-config`` writes such a file with every key, defaults
-   included.
+   Read all answers from a YAML config file (non-interactive). The file
+   carries a comment for every key, accepted values included;
+   ``--save-config`` writes one with every key, defaults included.
 
 .. option:: --save-config PATH
 
