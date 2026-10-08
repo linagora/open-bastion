@@ -15,9 +15,9 @@ ob_scenario: "@@SCENARIO@@"
 ob_pam_mode: "@@PAM_MODE@@"
 # The role this tree configures. A host is only touched when the inventory
 # declares the same role in ob_role (host_vars/group_vars): a host whose
-# ob_role is missing or different is skipped untouched, so one tree can be
-# played over a mixed inventory. site.yml plays every tree of the deployment
-# in order.
+# ob_role is missing or different ends the play before the first task that
+# would contact it, so one tree can be played over a mixed inventory. site.yml
+# plays every tree of the deployment in order.
 ob_artefact_role: "@@TARGET_ROLE@@"  # bastion | standalone | backend
 ob_max_security: @@MAX_SECURITY_BOOL@@  # true when ob_pam_mode == E
 

@@ -196,8 +196,7 @@ connects to. The ``inventory.yml.example`` in the tree is a starting point:
      children:
        bastions:
          vars:
-           # A role tree only configures the hosts that declare its role; a
-           # host without ob_role is skipped untouched.
+           # A role tree only configures the hosts that declare its role.
            ob_role: bastion
            ob_server_group: bastion
            ob_client_id: ob-client-bastion
@@ -307,8 +306,8 @@ A run can be narrowed to one group or one host while iterating, with
 What the play does on each host
 -------------------------------
 
-1. Skips the host when its ``ob_role`` is missing or is not the tree's own
-   role — the whole fleet can be listed under every tree.
+1. Skips the host when its ``ob_role`` is missing or is not the tree's
+   own role; the whole fleet can be listed under every tree.
 2. Configures the APT/YUM repo and installs the ``open-bastion`` package.
 3. Writes ``/etc/open-bastion/openbastion.conf`` from the baked-in scenario.
 4. Runs :doc:`ob-enroll(8) </references/man/ob-enroll>` to obtain the server's
@@ -336,8 +335,8 @@ Re-running ``site.yml`` is idempotent: bump the package in your repo and run
 again to upgrade, or change a host's ``ob_*`` vars and re-apply to reconfigure.
 
 Adding a host is one new inventory entry plus a run narrowed to it — each role
-tree only configures the hosts whose ``ob_role`` is its own, so the others are
-left untouched:
+tree only configures the hosts whose ``ob_role`` is its own, and the others are
+not contacted at all:
 
 .. code:: bash
 

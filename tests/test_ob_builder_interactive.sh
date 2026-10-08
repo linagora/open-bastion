@@ -371,6 +371,14 @@ YML
     # ... and the assert must name the bastions that failed, not only the group.
     grep -qF 'ob_bastion_missing_list' "$tree/roles/open-bastion-backend/tasks/backend.yml" \
         || { ok=false; echo "the allowlist assert does not name the bastions that failed"; }
+    # A host the tree does not own must cost no connection: fact gathering is
+    # what opens it, so the play turns it off and the role gathers facts itself
+    # once its controller-side guard has ended the play for those hosts.
+    grep -q 'gather_facts: false' "$tree/playbook-bastion.yml" \
+        || { ok=false; echo "the playbook gathers facts before the guard can skip a host"; }
+    awk '/end_host/{e=NR} /ansible\.builtin\.setup/{s=NR; exit} END{exit !(e && s && e < s)}' \
+        "$tree/roles/open-bastion-bastion/tasks/main.yml" \
+        || { ok=false; echo "facts are gathered before the host is known to be ours"; }
     grep -qF 'import_playbook: playbook-bastion.yml' "$tree/site.yml" 2>/dev/null \
         || { ok=false; echo "site.yml does not import the bastion playbook"; }
     grep -qF "Portal checklist: $dir/PORTAL-CHECKLIST-backend.md" "$TEST_TMPDIR/maindir.log" \

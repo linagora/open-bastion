@@ -4,7 +4,9 @@
 # Scenario: @@SCENARIO@@ (Mode @@PAM_MODE@@) | Role: @@TARGET_ROLE@@
 
 # This tree configures one role. A host that declares none, or another one, is
-# left untouched: site.yml plays every tree over the same inventory, and each
+# never contacted: the guards below are controller-side evaluations, and the
+# play sets gather_facts: false, so no connection is opened before the host is
+# known to be ours. site.yml plays every tree over the same inventory, and each
 # host belongs to exactly one of them. Skipping rather than failing is what
 # makes that work; a wrong VALUE still fails (below), so a typo is not
 # mistaken for "not my host".
@@ -24,6 +26,13 @@
 - name: Skip the hosts another role tree configures
   ansible.builtin.meta: end_host
   when: ob_role != ob_artefact_role
+
+# The play sets gather_facts: false, so this is the first task that contacts
+# the host -- and the guards above are controller-side, which is what lets a
+# host that is not ours end the play without a connection ever being opened to
+# it. Everything below reads ansible_facts['os_family'].
+- name: Gather facts
+  ansible.builtin.setup:
 
 - name: Pre-checks
   ansible.builtin.assert:

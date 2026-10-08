@@ -34,7 +34,7 @@ all:
     bastions:
       vars:
         # A role tree only configures the hosts that declare its role; a host
-        # without ob_role is skipped untouched.
+        # without ob_role is never contacted.
         ob_role: bastion
       hosts:
         bastion-01.example.com:

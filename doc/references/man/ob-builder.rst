@@ -76,8 +76,8 @@ Options
    standalone, then backend — when there are several, whatever order they
    were asked for: a backend that collects the bastion ids needs the
    bastions played first. A generated playbook only configures the hosts
-   whose ``ob_role`` is its own role; the others are skipped, which is what
-   lets ``site.yml`` run over the whole inventory.
+   whose ``ob_role`` is its own role; the others are not contacted, which is
+   what lets ``site.yml`` run over the whole inventory.
 
    With ``--config``, at least one output is required; the questionnaire
    asks for them otherwise (default ``.`` and ``./ansible-<slug>``).

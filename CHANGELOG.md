@@ -129,9 +129,11 @@ here.
   existing file is refused. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C1).
 - **The generated Ansible artefacts are one tree per run, and a role only
   configures its own hosts** (#338). A host joins in when its `ob_role` names
-  that role; a host without one, or with another role, is skipped untouched,
-  so the tree's `site.yml` plays every role over one inventory with no
-  `--limit`. The tree holds `playbook-<role>.yml` and
+  that role; a host without one, or with another role, is skipped without ever
+  being contacted — the play gathers facts after the role's guard rather than
+  before it, so an unrelated host in the inventory costs no connection and a
+  host that is down does not show up as unreachable. The tree's `site.yml`
+  plays every role over one inventory with no `--limit`. The tree holds `playbook-<role>.yml` and
   `roles/open-bastion-<role>/` per role, and one `PORTAL-CHECKLIST-<role>.md`
   each; the per-role output directories (`PATH-bastion`, `PATH-backend`) are
   gone. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C2, C3).
