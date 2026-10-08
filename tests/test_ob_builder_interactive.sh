@@ -363,6 +363,14 @@ YML
     # would fail at run time, and --syntax-check would not see it.
     ! grep -rqF 'delegate_to: "{{ item }}"' "$tree" \
         || { ok=false; echo "a loop variable is used in delegate_to (fails on ansible-core >= 2.19)"; }
+    # failed_when does not cover an unreachable delegate: without
+    # ignore_unreachable the backend is dropped from the play before the
+    # assert that names the missing bastion can run.
+    grep -qF 'ignore_unreachable: true' "$tree/roles/open-bastion-backend/tasks/_bastion-id.yml" \
+        || { ok=false; echo "the bastion-id collector does not ignore an unreachable bastion"; }
+    # ... and the assert must name the bastions that failed, not only the group.
+    grep -qF 'ob_bastion_missing_list' "$tree/roles/open-bastion-backend/tasks/backend.yml" \
+        || { ok=false; echo "the allowlist assert does not name the bastions that failed"; }
     grep -qF 'import_playbook: playbook-bastion.yml' "$tree/site.yml" 2>/dev/null \
         || { ok=false; echo "site.yml does not import the bastion playbook"; }
     grep -qF "Portal checklist: $dir/PORTAL-CHECKLIST-backend.md" "$TEST_TMPDIR/maindir.log" \

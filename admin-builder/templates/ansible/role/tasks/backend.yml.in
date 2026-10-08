@@ -29,6 +29,7 @@
 - name: Start collecting the bastion ids
   ansible.builtin.set_fact:
     ob_bastion_id_list: []
+    ob_bastion_missing_list: []
   when:
     - ob_auto_setup | bool
     - ob_bastion_allowed_bastions is not defined
@@ -45,8 +46,9 @@
 
 # A missing group loops over nothing, and nothing is an allowlist too: the
 # file would be written empty, which accepts any vouched bastion. Refuse
-# instead. An unreachable or unenrolled bastion yields an empty id above, so
-# this reports every one of them at once.
+# instead. A bastion Ansible cannot reach (the included task ignores the
+# unreachable result so the play gets here) or one that cannot produce its id
+# lands in ob_bastion_missing_list, named below.
 - name: Check every bastion answered
   ansible.builtin.assert:
     that:
@@ -55,10 +57,12 @@
       - (ob_bastion_id_list | default([])) | select('eq', '') | length == 0
     fail_msg: >-
       Could not collect the bastion ids from ob_bastion_group
-      ('{{ ob_bastion_group }}'): the group must exist, hold every bastion of
-      this deployment, and each of them must answer ob-bastion-id (enrolled,
-      reachable, root). Set ob_bastion_allowed_bastions explicitly to skip the
-      collection; the empty string accepts any vouched bastion.
+      ('{{ ob_bastion_group }}'){% if (ob_bastion_missing_list | default([])) | length > 0 %}:
+      {{ ob_bastion_missing_list | join(', ') }} did not answer ob-bastion-id
+      (not enrolled, unreachable, or no root){% endif %}. The group must exist,
+      hold every bastion of this deployment, and each of them must answer.
+      Set ob_bastion_allowed_bastions explicitly to skip the collection; the
+      empty string accepts any vouched bastion.
   when:
     - ob_auto_setup | bool
     - ob_bastion_allowed_bastions is not defined
