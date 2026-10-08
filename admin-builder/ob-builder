@@ -2400,7 +2400,7 @@ EOF
 #   <out>/roles/open-bastion-<role>/files/open-bastion-ca.pub
 #   <out>/roles/open-bastion-<role>/files/open-bastion-krl  (if max-security)
 #   <out>/roles/open-bastion-<role>/files/open-bastion.gpg
-#   <out>/roles/open-bastion-<role>/files/jwks.json       (backend roles)
+#   <out>/roles/open-bastion-<role>/files/jwks.json       (if fetched)
 #   <out>/roles/open-bastion-<role>/templates/openbastion.conf.j2
 #   <out>/roles/open-bastion-<role>/tasks/main.yml
 #   <out>/roles/open-bastion-<role>/tasks/<role>.yml
@@ -2482,8 +2482,7 @@ render_ansible_role() {
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    # Backend-only, like the fetch: a bastion verifies nothing with it.
-    if [ "$role" = "backend" ] && [ -f "$WORK_DIR/jwks.json" ]; then
+    if [ -f "$WORK_DIR/jwks.json" ]; then
         atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
 
@@ -2579,7 +2578,7 @@ EOF
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ "$role" = "backend" ] && [ -f "$WORK_DIR/jwks.json" ]; then
+    if [ -f "$WORK_DIR/jwks.json" ]; then
         atomic_write_from "$files_dir/jwks.json" "0644" "$WORK_DIR/jwks.json"
     fi
     _tighten_if_embedded "$defaults_dir/main.yml" "0600"

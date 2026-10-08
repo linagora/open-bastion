@@ -215,15 +215,14 @@ sso_fetch_krl() {
 }
 
 # sso_fetch_jwks URL OUTFILE
-# Shipped to the backend role; the module verifies the signature of the tokens
-# the portal signs with those keys. Returns non-zero on failure.
+# Required for backend mode (JWT verification). Returns non-zero on failure.
 sso_fetch_jwks() {
     local url="$1"
     local outfile="$2"
     local -a opts
     mapfile -t opts < <(_sso_curl_opts)
 
-    log_step "Fetching SSO JWKS (for backend token verification)"
+    log_step "Fetching SSO JWKS (for backend JWT verification)"
 
     # Prefer the URL advertised by OIDC discovery if we already have it,
     # falling back to the conventional path otherwise.

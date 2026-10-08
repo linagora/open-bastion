@@ -27,7 +27,6 @@ The `files/` directory (not shipped here) must contain:
 - `open-bastion.gpg` — APT signing key
 - `open-bastion-ca.pub` — SSH CA public key (downloaded from LLNG portal)
 - `open-bastion-krl` — Key Revocation List (Mode E only)
-- `jwks.json` — portal signing keys, for token verification (backend roles)
 
 ## Variables
 
