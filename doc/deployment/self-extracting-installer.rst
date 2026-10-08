@@ -11,7 +11,7 @@ on that page; this one covers what differs.
 The flow is always the same three steps:
 
 1. Generate one self-extracting installer per role — bastion or
-backend — with ``ob-builder``.
+   backend — with ``ob-builder``.
 
 2. Transfer an installer per target with ``scp``.
 
@@ -56,7 +56,7 @@ with your slug):
    Instead of answering prompts you can pass every answer through a
    YAML file and generate installers non-interactively, with the same
    ``build.yml`` as the :ref:`Ansible path
-   <ansible-deployment-option-a--bundle>`. The questionnaire writes that
+   <ansible-deployment-non-interactive-use>`. The questionnaire writes that
    file for you: answer yes to its last question, or start ``ob-builder``
    with ``--save-config build.yml``:
 

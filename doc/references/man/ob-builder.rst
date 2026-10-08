@@ -34,10 +34,9 @@ Options
 
 .. option:: --config FILE
 
-   Read all answers from a YAML config file (non-interactive). The
-   accepted keys are listed in the README shipped with the package;
-   ``--save-config`` writes such a file with every key, defaults
-   included.
+   Read all answers from a YAML config file (non-interactive). The file
+   carries a comment for every key, accepted values included;
+   ``--save-config`` writes one with every key, defaults included.
 
 .. option:: --save-config PATH
 
@@ -64,25 +63,24 @@ Options
 
    Write the self-extracting shell installers in the directory ``DIR``,
    created if missing. ob-builder names the files: one
-   ``bootstrap-<slug>-<role>.sh`` per target role (``--bundle`` included),
-   its ``.sig`` with :option:`--sign-with`, and the
-   ``PORTAL-CHECKLIST-<role>.md`` listing the portal settings to make.
-   A ``DIR`` ending in ``.sh``, or naming an existing file, is refused:
-   older releases took a file name there.
+   ``bootstrap-<slug>-<role>.sh`` per target role, its ``.sig`` with
+   :option:`--sign-with`, and the ``PORTAL-CHECKLIST-<role>.md`` listing
+   the portal settings to make. A ``DIR`` ending in ``.sh``, or naming an
+   existing file, is refused: older releases took a file name there.
 
 .. option:: --output-ansible PATH
 
-   Write an Ansible role tree to ``PATH`` (a directory).
+   Write an Ansible tree to ``PATH`` (a directory), one tree per run: a
+   ``playbook-<role>.yml`` and a ``roles/open-bastion-<role>/`` per target
+   role, plus a ``site.yml`` playing them in deployment order — bastion,
+   standalone, then backend — when there are several, whatever order they
+   were asked for: a backend that collects the bastion ids needs the
+   bastions played first. A generated playbook only configures the hosts
+   whose ``ob_role`` is its own role; the others are not contacted, which is
+   what lets ``site.yml`` run over the whole inventory.
 
    With ``--config``, at least one output is required; the questionnaire
-   asks for them otherwise (default ``.`` and ``./ansible-<slug>``). When
-   several target roles are chosen, each role tree gets the role as
-   suffix (``ansible-<slug>-backend``).
-
-.. option:: --bundle
-
-   Generate paired bastion + backend artefacts in one run, sharing the
-   same SSO context.
+   asks for them otherwise (default ``.`` and ``./ansible-<slug>``).
 
 .. option:: --repo-keyring PATH
 

@@ -10,7 +10,7 @@
 # instead, so the play can run unattended on a fleet.
 - name: "Run enrollment flow (auto-approve or manual)"
   ansible.builtin.include_tasks: _enroll.yml
-  when: ob_auto_enroll
+  when: ob_auto_enroll | bool
   vars:
     ob_role: bastion
 
@@ -24,6 +24,7 @@
          '-c', ob_client_id,
          '--yes']
         + (['--insecure'] if not (ob_verify_ssl | default(true) | bool) else [])
+        + (['--enable-service-keys'] if ob_service_keys_setup | default(false) | bool else [])
         + (['--max-security'] if ob_max_security else [])
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
@@ -31,5 +32,5 @@
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
-  when: ob_auto_setup
+  when: ob_auto_setup | bool
   changed_when: true

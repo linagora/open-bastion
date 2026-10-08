@@ -6,8 +6,8 @@
 # With client_secret_mode=embedded, the secret is written verbatim into the
 # shell installer (0755) and into the Ansible role's defaults/main.yml (0644).
 # Two accidents follow, and both were observed on a real build host: any local
-# account could read the secret, and a bundle generated inside a git working
-# tree was one `git add -A` away from being published.
+# account could read the secret, and a tree generated inside a git working
+# directory was one `git add -A` away from being published.
 #
 # These tests pin both guards, and pin that they stay out of the way for
 # client_secret_mode=prompt/none, where no secret reaches the disk at all.
@@ -115,21 +115,21 @@ test_tighten_dry_run() {
     fi
 }
 
-# ── _write_bundle_gitignore ─────────────────────────────────────────────────
+# ── _write_embedded_secret_gitignore ────────────────────────────────────────
 
 test_gitignore_written() {
-    local out="$TEST_TMPDIR/bundle-embedded"
+    local out="$TEST_TMPDIR/tree-embedded"
     mkdir -p "$out"
 
     CLIENT_SECRET_MODE=embedded
-    _write_bundle_gitignore "$out"
+    _write_embedded_secret_gitignore "$out"
 
     if [ ! -f "$out/.gitignore" ]; then
         test_fail "embedded: no .gitignore written"
         return
     fi
     if grep -qx '\*' "$out/.gitignore"; then
-        test_pass "embedded: bundle .gitignore ignores the whole directory"
+        test_pass "embedded: the tree .gitignore ignores the whole directory"
     else
         test_fail "embedded: .gitignore does not ignore everything" \
                   "$(cat "$out/.gitignore")"
@@ -150,11 +150,11 @@ test_gitignore_actually_ignores() {
     }
 
     local out="$repo/acme-setup-bastion"
-    mkdir -p "$out/roles/open-bastion/defaults"
-    echo 'ob_client_secret: "s3cr3t"' > "$out/roles/open-bastion/defaults/main.yml"
+    mkdir -p "$out/roles/open-bastion-bastion/defaults"
+    echo 'ob_client_secret: "s3cr3t"' > "$out/roles/open-bastion-bastion/defaults/main.yml"
 
     CLIENT_SECRET_MODE=embedded
-    _write_bundle_gitignore "$out"
+    _write_embedded_secret_gitignore "$out"
 
     git -C "$repo" add -A 2>/dev/null
     if git -C "$repo" diff --cached --name-only | grep -q 'main.yml'; then
@@ -168,23 +168,23 @@ test_gitignore_actually_ignores() {
 test_gitignore_not_written_when_not_embedded() {
     local ok=true out
     for mode in prompt none; do
-        out="$TEST_TMPDIR/bundle-$mode"
+        out="$TEST_TMPDIR/tree-$mode"
         mkdir -p "$out"
         CLIENT_SECRET_MODE="$mode"
-        _write_bundle_gitignore "$out"
+        _write_embedded_secret_gitignore "$out"
         [ -f "$out/.gitignore" ] && ok=false
     done
-    $ok && test_pass "prompt/none: no .gitignore (the bundle is safe to version)" \
+    $ok && test_pass "prompt/none: no .gitignore (the tree is safe to version)" \
          || test_fail "prompt/none: an unnecessary .gitignore was written"
 }
 
 test_gitignore_dry_run() {
-    local out="$TEST_TMPDIR/bundle-dryrun"
+    local out="$TEST_TMPDIR/tree-dryrun"
     mkdir -p "$out"
 
     CLIENT_SECRET_MODE=embedded
     DRY_RUN=1
-    _write_bundle_gitignore "$out"
+    _write_embedded_secret_gitignore "$out"
     DRY_RUN=0
 
     if [ -f "$out/.gitignore" ]; then

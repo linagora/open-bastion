@@ -595,7 +595,7 @@ OB_CONF_EOF
     # is never checked. Anchored and over *.conf only: a plain `grep -r` matched
     # a commented-out line or a .bak beside a drop-in and stayed silent while
     # nothing was served. Reported whenever service accounts are configured, not
-    # only when this bundle carried keys -- a fingerprint-only bundle has the
+    # only when this installer carried keys -- a fingerprint-only one has the
     # same problem and used to say nothing.
     if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
         _sa_served=1
@@ -820,7 +820,7 @@ step_setup() {
             [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
             # Without this the setup run below REMOVES the drop-in we just
             # deployed: a run without the flag cleans up its own generated file
-            # (#265), so the bundle would tear down its own work and end green.
+            # (#265), so the installer would tear down its own work and end green.
             [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             [ "${DISABLE_SESSION_RECORDER}" = "yes" ] && _setup_opts+=("--disable-session-recorder")
@@ -851,7 +851,7 @@ step_setup() {
             [ "${ENABLE_HARDENING}" = "yes" ] && _setup_opts+=("--enable-hardening")
             # Without this the setup run below REMOVES the drop-in we just
             # deployed: a run without the flag cleans up its own generated file
-            # (#265), so the bundle would tear down its own work and end green.
+            # (#265), so the installer would tear down its own work and end green.
             [ "@@SERVICE_KEYS_SETUP_BOOL@@" = "true" ] && _setup_opts+=("--enable-service-keys")
             [ "${ENABLE_AUDIT_TRACE}" = "yes" ] && _setup_opts+=("--enable-audit-trace")
             if [ "${OPT_DRY_RUN}" = "true" ]; then

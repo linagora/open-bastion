@@ -6,17 +6,28 @@
 # Role:     @@TARGET_ROLE@@
 #
 # Run with:
-#   ansible-playbook -i inventory.yml playbook.yml
+#   ansible-playbook -i inventory.yml playbook-@@TARGET_ROLE@@.yml
+# or, to play every role of the deployment in order:
+#   ansible-playbook -i inventory.yml site.yml
+#
+# Only the hosts that declare ob_role: @@TARGET_ROLE@@ (host_vars/group_vars)
+# are configured. The others are not contacted at all: fact gathering is off
+# here and the role gathers facts itself, once its guard has ended the play
+# for them.
 #
 # To pass the client secret at runtime (recommended):
-#   ansible-playbook -i inventory.yml playbook.yml \
+#   ansible-playbook -i inventory.yml playbook-@@TARGET_ROLE@@.yml \
 #     --extra-vars "ob_client_secret=$(cat /path/to/secret)"
 #
 # Or use ansible-vault:
-#   ansible-playbook -i inventory.yml playbook.yml --ask-vault-pass
+#   ansible-playbook -i inventory.yml playbook-@@TARGET_ROLE@@.yml --ask-vault-pass
 
 - hosts: all
   become: true
+  # A host this tree does not own must not be contacted, and gathering facts
+  # is what opens the connection: the role gathers them itself, after its
+  # first guard. See roles/open-bastion-@@TARGET_ROLE@@/tasks/main.yml.
+  gather_facts: false
 @@ANSIBLE_VARS_PROMPT_BLOCK@@
   roles:
-    - role: open-bastion
+    - role: open-bastion-@@TARGET_ROLE@@

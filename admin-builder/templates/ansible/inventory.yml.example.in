@@ -32,6 +32,10 @@ all:
 
     # Bastion hosts — accept inbound SSH from users
     bastions:
+      vars:
+        # A role tree only configures the hosts that declare its role; a host
+        # without ob_role is never contacted.
+        ob_role: bastion
       hosts:
         bastion-01.example.com:
           # ansible_host: 203.0.113.10
@@ -44,6 +48,8 @@ all:
 
     # Backend (target) hosts — accept SSH forwarded from bastions
     backends:
+      vars:
+        ob_role: backend
       hosts:
         backend-01.example.com:
           ob_server_group: "@@SERVER_GROUP@@"
@@ -53,6 +59,8 @@ all:
 
     # Standalone hosts — act as bastion and backend simultaneously
     standalones:
+      vars:
+        ob_role: standalone
       hosts:
         standalone-01.example.com:
           ob_server_group: "@@SERVER_GROUP@@"

@@ -87,6 +87,7 @@ reset_state() {
     CLIENT_ID=""; CLIENT_ID_POLICY=""; CLIENT_SECRET_MODE=""; EMBEDDED_CLIENT_SECRET=""
     SERVER_GROUP=""; SERVER_GROUP_POLICY=""; TARGET_ROLE=""; TARGET_ROLES=()
     AUTO_ENROLL_SETUP=""; SERVICE_KEYS_SETUP=""; SELF_DELETE=""; ALLOWED_BASTIONS=""
+    ALLOWED_BASTIONS_COLLECT=0
     ANSIBLE_AUTO_APPROVE=""; ENABLE_HARDENING=""; ENABLE_AUDIT_TRACE=""
     DISABLE_SESSION_RECORDER=""; SERVICE_ACCOUNTS_RECORDS=()
     REPO_KEYRING=""; REPO_KEYRING_SET=0
@@ -96,7 +97,7 @@ reset_state() {
     SIGN_WITH=""; SIGN_WITH_SET=0
     INSECURE=0; CONFIG_INSECURE=""; unset OB_BUILDER_INSECURE
     SAVE_CONFIG=""; SAVE_CONFIG_SECRET=0
-    OUTPUT_SHELL=""; OUTPUT_ANSIBLE=""; BUNDLE=0; DRY_RUN=0
+    OUTPUT_SHELL=""; OUTPUT_ANSIBLE=""; DRY_RUN=0
 }
 
 # A state that exercises every key: several roles, --insecure, an embedded
@@ -315,14 +316,53 @@ test_target_role_list() {
     ( reset_state; TARGET_ROLE="bastion,bastion"; DEPLOYMENT_SLUG=x; SCENARIO=max-security
       PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
         | grep -q 'twice' || { ok=false; echo "  duplicate accepted"; }
-    ( reset_state; TARGET_ROLE="bastion,standalone"; BUNDLE=1; DEPLOYMENT_SLUG=x; SCENARIO=max-security
-      PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
-        | grep -q 'single target_role' || { ok=false; echo "  bundle with two roles accepted"; }
     ( reset_state; TARGET_ROLE=""; DEPLOYMENT_SLUG=x; SCENARIO=max-security
       PORTAL_URL=https://s.test; REPO_KEYRING="$FAKE_KEYRING"; validate_inputs ) 2>&1 \
         | grep -q 'target_role is required' || { ok=false; echo "  empty role accepted"; }
-    $ok && test_pass "target_role: comma/space list, duplicates, --bundle and empty refused" \
+    $ok && test_pass "target_role: comma/space list accepted, duplicates and empty refused" \
          || test_fail "target_role list handling"
+}
+
+# `allowed_bastions: null` is the explicit "collect the ids from the bastions"
+# (Ansible output only); `""` stays "accept any vouched bastion". The spelling
+# survives a save/reload round trip.
+test_allowed_bastions_null() {
+    local cfg="$TEST_TMPDIR/collect.yml" got
+    # A build that is not collecting -- a shell-only one, or any run without
+    # `allowed_bastions: null` -- saves the empty string, which the shell
+    # installer can replay. `null` would be refused there, so writing it would
+    # break the file it just produced.
+    got=$( reset_state; ALLOWED_BASTIONS=""
+           render_config_yaml "$cfg" 2>/dev/null | grep -c '^allowed_bastions: ""$' )
+    [ "$got" = "1" ] || { test_fail 'allowed_bastions: not saved as "" outside the collect mode'; return; }
+
+    got=$( reset_state; ALLOWED_BASTIONS_COLLECT=1
+           render_config_yaml "$cfg" 2>/dev/null | grep -c '^allowed_bastions: null$' )
+    [ "$got" = "1" ] || { test_fail "allowed_bastions null: written back as something else"; return; }
+
+    printf 'deployment_slug: x\nallowed_bastions: null\n' > "$cfg"
+    got=$( reset_state; load_config "$cfg" >/dev/null 2>&1
+           echo "$ALLOWED_BASTIONS_COLLECT|${ALLOWED_BASTIONS:-}" )
+    [ "$got" = "1|" ] || { test_fail "allowed_bastions null: not read back as collect" "$got"; return; }
+
+    printf 'deployment_slug: x\nallowed_bastions: ""\n' > "$cfg"
+    got=$( reset_state; load_config "$cfg" >/dev/null 2>&1
+           echo "$ALLOWED_BASTIONS_COLLECT|${ALLOWED_BASTIONS:-}" )
+    [ "$got" = "0|" ] || { test_fail 'allowed_bastions "": read as collect or given a value' "$got"; return; }
+
+    printf 'deployment_slug: x\nallowed_bastions: bastion-1\n' > "$cfg"
+    got=$( reset_state; load_config "$cfg" >/dev/null 2>&1
+           echo "$ALLOWED_BASTIONS_COLLECT|${ALLOWED_BASTIONS:-}" )
+    [ "$got" = "0|bastion-1" ] || { test_fail "allowed_bastions list: misread" "$got"; return; }
+
+    # Quoted, "null" is the string (same rule as server_group): an id, not the
+    # collect keyword.
+    printf 'deployment_slug: x\nallowed_bastions: "null"\n' > "$cfg"
+    got=$( reset_state; load_config "$cfg" >/dev/null 2>&1
+           echo "$ALLOWED_BASTIONS_COLLECT|${ALLOWED_BASTIONS:-}" )
+    [ "$got" = "0|null" ] || { test_fail 'allowed_bastions "null": read as the collect keyword' "$got"; return; }
+
+    test_pass "allowed_bastions: null = collect, \"\" = any, ids = the list"
 }
 
 # ── Questionnaire and CLI ──────────────────────────────────────────────────
@@ -555,6 +595,7 @@ test_yaml_booleans
 test_insecure_key
 test_sign_with_cli_wins
 test_target_role_list
+test_allowed_bastions_null
 test_questionnaire_offer
 test_cli_refuses_overwrite
 test_dry_run_writes_nothing

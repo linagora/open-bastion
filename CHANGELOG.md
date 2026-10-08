@@ -127,9 +127,43 @@ here.
   or not, with its `.sig` and `PORTAL-CHECKLIST-<role>.md` (the checklist used
   to land in the current directory). A path ending in `.sh` or naming an
   existing file is refused. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C1).
+- **The generated Ansible artefacts are one tree per run, and a role only
+  configures its own hosts** (#338). A host joins in when its `ob_role` names
+  that role; a host without one, or with another role, is skipped without ever
+  being contacted — the play gathers facts after the role's guard rather than
+  before it, so an unrelated host in the inventory costs no connection and a
+  host that is down does not show up as unreachable. The tree's `site.yml`
+  plays every role over one inventory with no `--limit`. The tree holds `playbook-<role>.yml` and
+  `roles/open-bastion-<role>/` per role, and one `PORTAL-CHECKLIST-<role>.md`
+  each; the per-role output directories (`PATH-bastion`, `PATH-backend`) are
+  gone. See [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C2, C3).
+- **`allowed_bastions: null` makes the Ansible role collect the backend
+  allowlist** (#338). The play delegates `ob-bastion-id` to every host of
+  `ob_bastion_group` (`bastions` by default) and configures
+  `/etc/open-bastion/allowed_bastions` with the ids it reads; it stops if one
+  of them does not answer, rather than leaving the list empty or short. An
+  explicit `""` — and no key at all — still accepts any vouched bastion, as
+  before, and `ob_bastion_allowed_bastions` in the inventory overrides both.
+  A **bare** `allowed_bastions:` (or `~`) is YAML for null too, so a
+  hand-written file that left the value empty for "any" now asks for the
+  collection instead, and a build with no `--output-ansible` stops on it
+  rather than accepting any bastion silently. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C4) and the
+  [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
+- **`ob-builder` warns when `auto_enroll_setup: prompt` is built into an
+  Ansible output** (#338). `prompt` is the shell installer asking before
+  ob-enroll and ob-*-setup; the role has no such question, so the play would
+  install the package and stop there. The warning names the two ways out
+  (`auto_enroll_setup: yes`, or `-e ob_auto_enroll=true -e ob_auto_setup=true`
+  at play time).
 
 ### Removed
 
+- **`ob-builder --bundle`** (#338): list the roles to generate in
+  `target_role: "bastion,backend"` instead. Both roles then come from the same
+  run and share the CA, as the bundle did; the flag only left the first role's
+  tree unsuffixed. A script still passing it stops with that replacement
+  rather than with "unknown option".
 - **`secret_store`** (#225): `secrets_encrypted` never worked; secrets in
   `openbastion.conf` are protected by file permissions only.
 - **The token cache, `client_context` and the kernel-keyring settings**
@@ -143,6 +177,11 @@ here.
 
 ### Fixed
 
+- **`site.yml` plays the roles in deployment order** (#338), not in the order
+  the config asked for them: bastion, then standalone, then backend. With
+  `allowed_bastions: null` a backend collects the bastion ids while it
+  configures itself, so a `target_role: "backend,bastion"` run had it collect
+  from bastions that had not enrolled yet.
 - **The shell installer deploys every service account's key** (#334). The
   last account of the build got no
   `/etc/open-bastion/service-accounts.d/<name>.pub` (with one account, none
@@ -227,6 +266,12 @@ here.
   (#322). On a host with `rpmbuild` it was written to `build/noarch/`, and on
   Debian rpmbuild printed `cannot open Packages database` errors; the target
   now also fails when the RPM is not written.
+- **The generated Ansible role passes `--enable-service-keys` to the setup**
+  (#338). It deployed `/etc/open-bastion/service-accounts.d/<name>.pub` and
+  warned that sshd served nothing, but only the shell installer passed the
+  flag that installs the drop-in serving them, so the accounts still could not
+  log in — the state #263 was reported for. The check behind that warning also
+  runs after the setup now, instead of on every fresh deployment.
 
 ### Security
 

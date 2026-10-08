@@ -1,0 +1,40 @@
+---
+# One bastion, one id: included once per host of ob_bastion_group by the
+# backend role. Its own file because delegate_to must see the loop variable of
+# the include that created this task -- ansible-core 2.19+ does not resolve a
+# loop variable written in delegate_to itself (ansible/ansible#85849).
+#
+# The probe is read-only and needs root on the bastion (the 0600 server
+# token), which the play's become provides on the delegated host.
+
+- name: "Read the id of {{ ob_bastion_host }}"
+  ansible.builtin.command: ob-bastion-id
+  delegate_to: "{{ ob_bastion_host }}"
+  register: _ob_bastion_id
+  changed_when: false
+  # Skipped in check mode, the module would not run and the caller's assert
+  # would read a missing 'stdout' rather than preview the run.
+  check_mode: false
+  # An unreachable or unenrolled bastion must not fail here: the caller's
+  # assert names every bastion that did not answer, with the way out. The two
+  # failure modes need two keywords:
+  #  - failed_when: the bastion answered but could not produce the id
+  #    (unenrolled, no root) -- the task "fails" with an empty stdout;
+  #  - ignore_unreachable: Ansible could not reach the bastion at all. Without
+  #    it the *delegating* host is the one reported unreachable and dropped
+  #    from the play, so the assert below never runs and the backend silently
+  #    leaves the run instead of being told which bastion is missing.
+  failed_when: false
+  ignore_unreachable: true
+
+- name: "Keep the id of {{ ob_bastion_host }}"
+  ansible.builtin.set_fact:
+    ob_bastion_id_list: >-
+      {{ (ob_bastion_id_list | default([]))
+         + [(_ob_bastion_id.stdout | default('')) | trim] }}
+    # Named apart so the caller's fail_msg can list the bastions to fix, not
+    # only the group to look in.
+    ob_bastion_missing_list: >-
+      {{ (ob_bastion_missing_list | default([]))
+         + ([ob_bastion_host]
+            if ((_ob_bastion_id.stdout | default('')) | trim) == '' else []) }}

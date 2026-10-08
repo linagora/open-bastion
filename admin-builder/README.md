@@ -94,7 +94,12 @@ client_secret_mode: prompt # none | prompt | embedded
 server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend # bastion | standalone | backend, or several: "bastion,backend"
-auto_enroll_setup: prompt
+# backend only: the bastions allowed to reach it. "" or no key = any vouched
+# bastion; null = the Ansible role reads the ids from the bastions themselves
+# allowed_bastions: ""
+auto_enroll_setup: prompt # shell installer only: the Ansible role has no such
+                          # prompt -- use yes, or -e ob_auto_enroll=true
+                          # -e ob_auto_setup=true at play time
 ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 # insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)
@@ -134,7 +139,7 @@ ob-builder \
 ```
 
 With `deployment_slug: prod` and `target_role: backend`, the shell installer
-is `./bootstrap-prod-backend.sh`. The builder fetches the CA SSH key and JWKS from the SSO server, validates the configuration, and produces both a shell installer and Ansible role with all credentials pre-loaded (except the client secret, which is handled separately on the target).
+is `./bootstrap-prod-backend.sh`. The builder fetches the CA SSH key and JWKS from the SSO server, validates the configuration, and produces both a shell installer and Ansible tree with all credentials pre-loaded (except the client secret, which is handled separately on the target).
 
 ## Outputs
 
@@ -166,10 +171,11 @@ The generated Ansible role is ready for fleet deployments. It includes:
 - SSH CA and signing keys embedded as files
 - Support for per-host variable overrides via `host_vars/`, `group_vars/`, or extra-vars
 
-Use the role in a playbook:
+Use the role in a playbook — `playbook-<role>.yml` for a single role,
+`site.yml` when the build produced several:
 
 ```bash
-ansible-playbook -i inventory.yml playbook.yml \
+ansible-playbook -i inventory.yml playbook-backend.yml \
   --vault-password-file ~/.vault_pass
 ```
 
@@ -188,10 +194,10 @@ without human interaction.
 ob-builder --config build.yml --output-ansible /tmp/role/
 
 # Run the playbook — paste the cookie when prompted
-ansible-playbook -i inventory.yml /tmp/role/playbook.yml
+ansible-playbook -i inventory.yml /tmp/role/playbook-backend.yml
 
 # Or pass the cookie non-interactively (CI)
-ansible-playbook -i inventory.yml /tmp/role/playbook.yml \
+ansible-playbook -i inventory.yml /tmp/role/playbook-backend.yml \
   --extra-vars "ob_llng_cookie=$(llng --llng-server https://sso.example.com llng_cookie)"
 ```
 
@@ -233,19 +239,26 @@ The `info` subcommand displays the scenario, SSO URL, role, and CA SSH fingerpri
 ./bootstrap-prod-backend.sh info
 ```
 
-## Bundle Mode
+## Several roles in one run
 
-To generate a matched set of bastion and backend artifacts that share the same SSH CA and JWKS, use `--bundle`:
+`target_role` takes a list, so one `build.yml` produces the whole
+deployment — and one CA, fetched once:
+
+```yaml
+target_role: "bastion,backend"
+```
 
 ```bash
 ob-builder \
   --config build.yml \
-  --bundle \
-  --output-shell /tmp/bundle/ \
-  --output-ansible /tmp/role-bundle/
+  --output-shell /tmp/shell/ \
+  --output-ansible /tmp/roles/
 ```
 
-This is useful when deploying an entire PAC at once: a single `build.yml` produces both bastion and backend configurations with synchronized keys.
+The Ansible output is one tree holding a `playbook-<role>.yml` and a
+`roles/open-bastion-<role>/` per role, plus a `site.yml` that plays them in
+order over the inventory. Each playbook only configures the hosts whose
+`ob_role` matches its role; the others are skipped untouched.
 
 ## Security Notes
 
