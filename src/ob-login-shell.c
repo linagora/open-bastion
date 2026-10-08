@@ -347,6 +347,9 @@ int main(int argc, char **argv)
     env_keep("XDG_SESSION_ID", ok_word);
     env_keep("XDG_SESSION_TYPE", ok_word);
     env_keep("XDG_SESSION_CLASS", ok_word);
+    /* Set by pam_openbastion on a bastion: ob-ssh presents it to mint the
+     * certificate of the next hop. A UUID; without it no hop is possible. */
+    env_keep("LLNG_BASTION_VOUCHER", ok_word);
     {
         const char *v = getenv("XDG_RUNTIME_DIR");
         char want[64];

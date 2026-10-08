@@ -82,6 +82,10 @@ The recorder does not inherit the caller's environment. It gets:
 ``XDG_RUNTIME_DIR``, ``XDG_SESSION_ID``, ``XDG_SESSION_TYPE``, ``XDG_SESSION_CLASS``
    when well-formed (the runtime directory only as ``/run/user/UID``);
 
+``LLNG_BASTION_VOUCHER``
+   when well-formed: the voucher **pam_openbastion** sets on a bastion, which
+   **ob-ssh**\(1) needs to obtain the certificate of the next hop;
+
 ``SSH_ORIGINAL_COMMAND``
    as described under **Invocations**.
 
