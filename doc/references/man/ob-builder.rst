@@ -136,11 +136,14 @@ The builder can declare SSH-key-only local accounts (ansible, backup,
 CI/CD, ...) that authenticate by SSH key fingerprint without OIDC. The
 questionnaire prompts for them interactively; a ``--config`` YAML
 provides them under a ``service_accounts:`` list (keys: ``name``,
-``key_fingerprint``, ``sudo_allowed``, ``sudo_nopasswd``, ``shell``,
-``home``, ``gecos``, ``uid``, ``gid``). Each entry is validated at build
-time and rendered into ``/etc/open-bastion/service-accounts.conf``
-(``0600 root:root``) on the target, with ``service_accounts_file`` set in
-``openbastion.conf``. They apply to every role. See ``open-bastion`` and
+``public_key`` or ``public_key_file``, ``key_fingerprint``,
+``sudo_allowed``, ``sudo_nopasswd``, ``shell``, ``home``, ``gecos``,
+``uid``, ``gid``). Each entry is validated at build time and rendered into
+``/etc/open-bastion/service-accounts.conf`` (``0600 root:root``) on the
+target, with ``service_accounts_file`` set in ``openbastion.conf``; its key
+goes to ``/etc/open-bastion/service-accounts.d/<name>.pub``. Give the key:
+``key_fingerprint`` is derived from it, and on its own leaves ``sshd`` no
+key to accept. They apply to every role. See ``open-bastion`` and
 the project's :doc:`/service-accounts`, shipped as
 ``/usr/share/doc/open-bastion-doc/html/service-accounts.html`` in the
 HTML documentation.

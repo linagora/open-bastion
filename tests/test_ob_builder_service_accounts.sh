@@ -425,6 +425,82 @@ test_rendered_artifacts() {
     fi
 }
 
+# Test: the key-deploy block of the rendered installer, RUN rather than grepped
+# (#334). Every assertion above read the installer's text, and the bug lived in
+# its execution: the blob ended without a newline, `while read` never returned
+# the last line, the last account got no key and the stale sweep then deleted
+# the key it already had. The block is cut out of the rendered installer, its
+# target directory moved under the test's tmpdir, and run.
+_run_key_block() {
+    # $1: the base64 blob the installer carries; $2: the target directory
+    local tpl="$OB_REPO_ROOT/admin-builder/templates/shell/installer.sh.in"
+    local blk="$TEST_TMPDIR/keyblock.sh"
+    sed -n '/install -d -m 0755 -o root -g root \/etc\/open-bastion\/service-accounts.d/,/# sshd must actually serve them/p' "$tpl" \
+        | sed -e "s|@@SERVICE_ACCOUNT_KEYS_B64@@|$1|g" \
+              -e "s|/etc/open-bastion/service-accounts.d|$2|g" > "$blk"
+    (
+        set -euo pipefail
+        install() { mkdir -p "${@: -1}"; }
+        chown() { :; }
+        log_info() { echo "$*"; }
+        die() { echo "DIE: $*"; exit 1; }
+        # shellcheck disable=SC1090
+        . "$blk"
+    )
+}
+
+test_key_block_runs() {
+    local d="$TEST_TMPDIR/keyrun/sa.d" out bad=""
+    mkdir -p "$d"
+    SERVICE_ACCOUNTS_RECORDS=(
+        "$(_sa_pack alpha "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 AAAA alpha@h")"
+        "$(_sa_pack nokey "SHA256:2" false false "" "" "" "" "" "")"
+        "$(_sa_pack omega "SHA256:3" false false "" "" "" "" "" "ssh-ed25519 BBBB omega@h")"
+    )
+    # The last account already has its key: a second run must keep it.
+    printf 'ssh-ed25519 BBBB omega@h\n' > "$d/omega.pub"
+    printf 'ssh-ed25519 CCCC gone@h\n' > "$d/gone.pub"
+
+    # The builder's half: the blob ends with a newline, whatever the installer.
+    [ "$(_service_account_keys_b64 | base64 -d | tail -c1 | od -An -tx1 | tr -d ' ')" = "0a" ] \
+        || bad="$bad blob-without-final-newline"
+    out=$(_run_key_block "$(_service_account_keys_b64)" "$d" 2>&1) || bad="$bad block-failed($out)"
+    [ "$(cat "$d/alpha.pub" 2>/dev/null)" = "ssh-ed25519 AAAA alpha@h" ] || bad="$bad alpha-missing"
+    [ "$(cat "$d/omega.pub" 2>/dev/null)" = "ssh-ed25519 BBBB omega@h" ] || bad="$bad last-account-missing"
+    [ ! -e "$d/nokey.pub" ] || bad="$bad fingerprint-only-got-a-file"
+    [ ! -e "$d/gone.pub" ]  || bad="$bad undeclared-key-kept"
+    case "$out" in *"Removed stale $d/omega.pub"*) bad="$bad last-key-swept" ;; esac
+    if [ -z "$bad" ]; then
+        test_pass "the installer writes every account's key, the last one included, and sweeps only undeclared ones"
+    else
+        test_fail "the installer writes every account's key, the last one included, and sweeps only undeclared ones" "$bad"
+    fi
+
+    # A blob from a builder older than #334 (no final newline): the installer
+    # alone must still deploy the last key.
+    rm -f "$d"/*.pub
+    local old_blob
+    old_blob=$(base64_string "$(_render_service_account_keys)")
+    _run_key_block "$old_blob" "$d" >/dev/null 2>&1
+    if [ -f "$d/alpha.pub" ] && [ -f "$d/omega.pub" ]; then
+        test_pass "a blob without a final newline still deploys the last key"
+    else
+        test_fail "a blob without a final newline still deploys the last key" "$(ls "$d")"
+    fi
+
+    # One account only: the shape the report started from (an empty directory).
+    rm -f "$d"/*.pub
+    SERVICE_ACCOUNTS_RECORDS=(
+        "$(_sa_pack solo "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 DDDD solo@h")"
+    )
+    _run_key_block "$(_service_account_keys_b64)" "$d" >/dev/null 2>&1
+    if [ "$(cat "$d/solo.pub" 2>/dev/null)" = "ssh-ed25519 DDDD solo@h" ]; then
+        test_pass "a single account gets its key"
+    else
+        test_fail "a single account gets its key" "$(ls "$d")"
+    fi
+}
+
 # A name here that is not a defined function used to be a shell error the script
 # walked past, leaving the suite green with a test that never ran -- it happened
 # while adding the last three. Fail loudly instead.
@@ -433,7 +509,7 @@ for _t in test_syntax test_validators test_parse_block test_parse_none \
           test_fingerprint_derived_from_key test_mismatch_is_rejected \
           test_public_key_file test_bad_key_is_dropped test_render_keys \
           test_templates_deploy_and_warn test_help_has_no_substitution \
-          test_rendered_artifacts; do
+          test_rendered_artifacts test_key_block_runs; do
     if declare -F "$_t" >/dev/null; then
         "$_t"
     else

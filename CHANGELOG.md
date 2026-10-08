@@ -182,6 +182,15 @@ here.
   `allowed_bastions: null` a backend collects the bastion ids while it
   configures itself, so a `target_role: "backend,bastion"` run had it collect
   from bastions that had not enrolled yet.
+- **The shell installer deploys every service account's key** (#334). The
+  last account of the build got no
+  `/etc/open-bastion/service-accounts.d/<name>.pub` (with one account, none
+  did), and a second run deleted the key that account already had as
+  "stale": `ob-builder` sent the keys without a final newline and the
+  installer's `while read` dropped that line. Both sides are fixed; an
+  installer built before the fix keeps the bug, so rebuild it. The Ansible
+  role was not affected. The documentation no longer presents `key_fingerprint` as an alternative
+  to the key.
 - **The `ob-builder` allowed-bastions question points at the right file**
   (#333). It said to tighten the list later in `openbastion.conf`, which has
   no such setting: the list lives in `/etc/open-bastion/allowed_bastions`.

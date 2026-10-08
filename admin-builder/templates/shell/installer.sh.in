@@ -561,7 +561,11 @@ OB_CONF_EOF
         # so some accounts had keys and the rest never would, and the error named
         # no account.
         printf '%s' "@@SERVICE_ACCOUNT_KEYS_B64@@" | base64 -d > /tmp/.ob-sa-keys.$$
-        while read -r _sa_name _sa_key; do
+        # `|| [ -n ... ]`: a last line without its newline is still a line.
+        # Installers built before #334 carried no final newline, and this loop
+        # silently skipped the last account -- then the sweep below removed
+        # the key that account already had.
+        while read -r _sa_name _sa_key || [ -n "${_sa_name}" ]; do
             [ -n "${_sa_name}" ] || continue
             _sa_dst="/etc/open-bastion/service-accounts.d/${_sa_name}.pub"
             _sa_tmpk=$(mktemp "${_sa_dst}.XXXXXX") || die "cannot create a temp file for ${_sa_name}.pub"

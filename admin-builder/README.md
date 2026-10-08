@@ -114,7 +114,9 @@ apt_component: main
 # a fixed uid+gid (required so NSS can resolve the account for sshd pre-auth).
 # service_accounts:
 #   - name: ci-ansible
-#     key_fingerprint: "SHA256:..."   # ssh-keygen -lf key.pub
+#     public_key_file: keys/ci-ansible.pub   # relative to this file; or public_key: "ssh-ed25519 …"
+#     # key_fingerprint is derived from the key. Alone, it gives sshd no key to
+#     # accept: the account cannot log in (never, under maximum security).
 #     sudo_allowed: true
 #     sudo_nopasswd: true
 #     shell: /bin/bash
