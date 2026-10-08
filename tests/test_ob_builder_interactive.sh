@@ -438,6 +438,18 @@ test_allowed_bastions_modes() {
     grep -q '^ob_bastion_allowed_bastions:' "$d" 2>/dev/null \
         && { ok=false; echo "null: an allowlist value was written anyway"; }
 
+    # A bare key is YAML's third spelling of null, and ob-builder reads it that
+    # way whatever parser runs -- where a hand-written config could once leave
+    # the value empty to mean "any bastion".
+    rm -rf "$out"
+    _render_backend_tree 'allowed_bastions:' --output-ansible "$out" \
+        || { ok=false; echo "bare key: build failed"; tail -3 "$TEST_TMPDIR/allow.log"; }
+    d="$out/roles/open-bastion-backend/defaults/main.yml"
+    grep -q '^ob_bastion_group: bastions$' "$d" 2>/dev/null \
+        || { ok=false; echo "bare key: no ob_bastion_group to collect from"; }
+    grep -q '^ob_bastion_allowed_bastions:' "$d" 2>/dev/null \
+        && { ok=false; echo "bare key: an allowlist value was written anyway"; }
+
     rm -rf "$out"
     _render_backend_tree 'allowed_bastions: bastion-1,bastion-2' --output-ansible "$out" \
         || { ok=false; echo "list: build failed"; }
@@ -453,6 +465,16 @@ test_allowed_bastions_modes() {
         ok=false; echo "a refused null build still saved a config to replay"
     elif ! grep -q 'output-ansible' "$TEST_TMPDIR/allow.log"; then
         ok=false; echo "null refusal does not name the way out"
+    fi
+
+    # The bare key collects, so it stops a shell-only build the same way --
+    # an old hand-written file with that line must not go through quietly as
+    # "any bastion".
+    rm -rf "$TEST_TMPDIR/allow-shell"
+    if _render_backend_tree 'allowed_bastions:' --output-shell "$TEST_TMPDIR/allow-shell"; then
+        ok=false; echo "a bare allowed_bastions: was accepted without an Ansible output"
+    elif ! grep -q 'output-ansible' "$TEST_TMPDIR/allow.log"; then
+        ok=false; echo "bare-key refusal does not name the way out"
     fi
 
     # Both outputs from the one config: the Ansible role collects, the shell

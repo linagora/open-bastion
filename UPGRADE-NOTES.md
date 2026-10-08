@@ -398,3 +398,27 @@ ansible-playbook -i inventory.yml site.yml
 
 `--limit bastions` / `--limit backends` are no longer needed to keep a tree
 off the hosts of the other role; they only narrow a run.
+
+### C4. A bare `allowed_bastions:` now asks for the collection
+
+`ob-builder` reads `allowed_bastions: null`, `~`, **and a bare key with no
+value** — YAML's three spellings of null — as "let the Ansible role collect
+the ids from the bastions" (#338). A hand-written `build.yml` that carried
+
+```yaml
+allowed_bastions:            # used to mean "accept any bastion"
+```
+
+now means the opposite, and a build without `--output-ansible` **stops** on
+it: a shell installer has nowhere to collect from, and an empty allowlist
+there would accept any vouched bastion without saying so.
+
+Write `""` for "any bastion" (or drop the key):
+
+```yaml
+allowed_bastions: ""
+```
+
+Configs saved by the questionnaire or `--save-config` are unaffected: they
+always write `""` or `null` explicitly, and the key's absence still means
+"any".

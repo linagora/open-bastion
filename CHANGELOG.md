@@ -141,10 +141,15 @@ here.
   allowlist** (#338). The play delegates `ob-bastion-id` to every host of
   `ob_bastion_group` (`bastions` by default) and configures
   `/etc/open-bastion/allowed_bastions` with the ids it reads; it stops if one
-  of them does not answer, rather than leaving the list empty or short. The
-  empty string — and no key at all — still accepts any vouched bastion, as
+  of them does not answer, rather than leaving the list empty or short. An
+  explicit `""` — and no key at all — still accepts any vouched bastion, as
   before, and `ob_bastion_allowed_bastions` in the inventory overrides both.
-  See the [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
+  A **bare** `allowed_bastions:` (or `~`) is YAML for null too, so a
+  hand-written file that left the value empty for "any" now asks for the
+  collection instead, and a build with no `--output-ansible` stops on it
+  rather than accepting any bastion silently. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (C4) and the
+  [Ansible deployment](doc/deployment/ansible-deployment.rst) page.
 - **`ob-builder` warns when `auto_enroll_setup: prompt` is built into an
   Ansible output** (#338). `prompt` is the shell installer asking before
   ob-enroll and ob-*-setup; the role has no such question, so the play would

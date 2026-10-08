@@ -149,13 +149,14 @@ key:
 
 - the ids themselves — one or more, comma-separated: only those bastions may
   hop in;
-- nothing at all, or an empty value: any vouched bastion is accepted, the same
-  answer as ``--allow-any-bastion``, and the weaker one;
-- an explicit ``null``: the play **collects** the ids. They exist only on the
-  bastions, so the play reads ``ob-bastion-id`` on every host of
-  ``ob_bastion_group`` (``bastions`` by default) while configuring the backend,
-  and stops if one of them cannot answer: an empty or a short list would accept
-  any bastion, or deny the missing ones, without saying so.
+- nothing at all, or an explicit empty string (``""``): any vouched bastion is
+  accepted, the same answer as ``--allow-any-bastion``, and the weaker one;
+- an explicit ``null`` — and a bare ``allowed_bastions:`` with nothing after
+  the colon, which YAML reads as null: the play **collects** the ids. They
+  exist only on the bastions, so the play reads ``ob-bastion-id`` on every host
+  of ``ob_bastion_group`` (``bastions`` by default) while configuring the
+  backend, and stops if one of them cannot answer: an empty or a short list
+  would accept any bastion, or deny the missing ones, without saying so.
 
 An ``ob_bastion_allowed_bastions`` in the inventory overrides whatever the
 build decided (an empty value there means "any"). Re-enrolling a bastion
