@@ -952,6 +952,17 @@ _render_service_account_keys() {
     return 0
 }
 
+# The keys as the installer carries them: base64 of the rendered lines, ending
+# with a newline. Through $(...) the last line lost its newline, and the
+# installer's `while read` never returned that line -- so the last account got
+# no key, and the stale-key sweep then deleted the one already in place (#334).
+_service_account_keys_b64() {
+    local keys
+    keys=$(_render_service_account_keys)
+    [ -n "$keys" ] || return 0
+    base64_string "$keys"$'\n'
+}
+
 # Interactively collect service accounts into SERVICE_ACCOUNTS_RECORDS. Loops
 # until the admin declines to add another. Each field is validated on entry.
 collect_service_accounts_interactive() {
@@ -2151,7 +2162,7 @@ build_placeholder_map() {
         _indented=$(printf '%s\n' "$_sa_conf" | sed 's/^/  /')
         _sa_defaults_yaml=$'ob_service_accounts_enabled: true\nob_service_accounts_content: |\n'"$_indented"
         _sa_keys=$(_render_service_account_keys)
-        _sa_keys_b64=$(base64_string "$_sa_keys")
+        _sa_keys_b64=$(_service_account_keys_b64)
         if [ -n "$_sa_keys" ]; then
             local _kindent
             _kindent=$(printf '%s\n' "$_sa_keys" | sed 's/^/  /')

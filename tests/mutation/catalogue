@@ -851,3 +851,19 @@ replace || true
 suite   || tests/test_ob_setup_login_shell.sh
 why     || #293: a removed launcher left in /etc/shells is a valid login shell
 why     || that does not exist.
+
+id      || installer-service-key-last-line
+file    || admin-builder/templates/shell/installer.sh.in
+search  || while read -r _sa_name _sa_key || [ -n "${_sa_name}" ]; do
+replace || while read -r _sa_name _sa_key; do
+suite   || tests/test_ob_builder_service_accounts.sh
+why     || #334: an installer reading a blob without a final newline skipped the
+why     || last account's key, and its stale sweep then deleted that key.
+
+id      || builder-service-keys-final-newline
+file    || admin-builder/ob-builder
+search  || base64_string "$keys"$'
+replace || base64_string "$keys" #
+suite   || tests/test_ob_builder_service_accounts.sh
+why     || #334: the key blob must end with a newline, or `while read` drops the
+why     || last account on any installer that does not compensate.
