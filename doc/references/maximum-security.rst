@@ -124,8 +124,11 @@ If your policy requires a token prompt for **every** ``sudo``, pass
 ``--enable-sudo-fresh-otp`` to ``ob-bastion-setup`` or
 ``ob-backend-setup``. It scopes ``timestamp_timeout=0`` to the SSO group in
 ``/etc/sudoers.d/open-bastion``, so SSO users go through the PAM ``auth``
-phase — and therefore the LLNG token — on every elevation, while local
-break-glass admins keep normal ``sudo`` behaviour:
+phase — and therefore the LLNG token — on every elevation. Accounts outside
+that group are not affected by the line. Under maximum security, local
+accounts, ``root`` included, have no ``sudo`` at all (see
+:ref:`Sudo in the maximum security scenario <max-security-scenario-sudo>`);
+in the other scenarios, local admins keep normal ``sudo`` behaviour:
 
 .. code:: bash
 

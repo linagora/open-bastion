@@ -45,7 +45,9 @@ Prerequisites
 -------------
 
 - ``ob-builder`` on your Ansible control node, and SSH access from it to every
-  target as an account that can ``sudo``.
+  target as an account whose ``sudo`` works non-interactively, with no
+  password: the playbook uses ``become: true``. Otherwise, pass
+  ``--ask-become-pass`` to ``ansible-playbook``.
 - A package repository (APT or YUM/DNF) carrying the ``open-bastion`` package,
   reachable by the targets.
 - The SSO portal reachable from the control node (at build time, for OIDC
@@ -191,7 +193,7 @@ connects to. The ``inventory.yml.example`` in the tree is a starting point:
 
    all:
      vars:
-       ansible_user: admin # a sudo-capable account on the targets
+       ansible_user: admin # an account with passwordless sudo on the targets
        ansible_ssh_private_key_file: ~/.ssh/id_fleet
 
      children:
@@ -357,3 +359,11 @@ ways out:
 
 An allowlist left empty accepts any vouched bastion and needs neither. The same
 applies after re-enrolling a bastion, which assigns it a new id.
+
+Under :doc:`maximum security </security-scenarios/max-security-scenario>`,
+the account of the first run can no longer connect: the hosts accept
+only SSO certificates, and ``sudo`` only SSO users and service accounts.
+Declare the account Ansible uses as a :doc:`service account
+</service-accounts>` with its key, ``sudo_allowed`` and
+``sudo_nopasswd`` before you apply the scenario, and set it as
+``ansible_user``.
