@@ -332,8 +332,26 @@ Updating the fleet
 
 Re-running ``site.yml`` is idempotent: bump the package in your repo and run
 again to upgrade, or change a host's ``ob_*`` vars and re-apply to reconfigure.
-Adding a server is one new inventory entry plus a ``--limit <newhost>`` run.
 
-After re-enrolling a bastion — or adding or removing one — re-run ``site.yml``
-so the backends collect the ids again: a backend sitting on a stale list
-refuses the hops from the bastion that changed.
+Adding a host is one new inventory entry plus a run narrowed to it — each role
+tree only configures the hosts whose ``ob_role`` is its own, so the others are
+left untouched:
+
+.. code:: bash
+
+   ansible-playbook -i inventory.yml site.yml --limit bastion-2
+
+For a new bastion, that run stops at the bastion: the backends keep
+the allowlist they have, and a backend refuses the hops from a
+``bastion_id`` it does not list (see `The backend's allowlist`_). Two
+ways out:
+
+- the build asked the play to collect the ids (``allowed_bastions: null``): run
+  ``site.yml`` over the whole fleet, so the backends collect them again;
+- the build gave the ids: ``ob-bastion-id`` prints the new one on the bastion,
+  and it is left to the administrator to give it to the backends — as
+  ``ob_bastion_allowed_bastions`` in the inventory, followed by a
+  ``--limit backends`` run, or in their ``/etc/open-bastion/allowed_bastions``.
+
+An allowlist left empty accepts any vouched bastion and needs neither. The same
+applies after re-enrolling a bastion, which assigns it a new id.
