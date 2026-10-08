@@ -148,7 +148,7 @@ test_builder_fetch_invalid() {
 
 # fetch_sso_assets for each role, with the CA/KRL/discovery steps stubbed.
 fetch_for() {
-    local roles="$1" bundle="$2" mode="${3:-prefer}" client="${4-pam-access}"
+    local roles="$1" mode="${2:-prefer}" client="${3-pam-access}"
     with_builder eval '
         log_step() { :; }; log_info() { :; }; log_warn() { echo "WARN $*"; }
         mktemp_dir() { mkdir -p "$WORK/wd"; printf "%s" "$WORK/wd"; }
@@ -157,25 +157,24 @@ fetch_for() {
         sso_fetch_krl() { : > "$2"; }
         rm -rf "$WORK/wd"
         IFS=" " read -r -a TARGET_ROLES <<< "'"$roles"'"
-        BUNDLE='"$bundle"'; RESPONSE_SIGNING='"$mode"'; CLIENT_ID="'"$client"'"
+        RESPONSE_SIGNING='"$mode"'; CLIENT_ID="'"$client"'"
         PORTAL_URL=https://sso.example.com; SCENARIO=token-only; PAM_MODE=A
         fetch_sso_assets
         echo "EFFECTIVE=$(effective_response_signing)"'
 }
 
 test_builder_fetch_every_role() {
-    local spec roles bundle out bad=""
-    for spec in "bastion:0" "standalone:0" "backend:0" "bastion:1" "bastion standalone:0"; do
-        roles="${spec%:*}"; bundle="${spec#*:}"
+    local spec out bad=""
+    for spec in "bastion" "standalone" "backend" "bastion backend" "bastion standalone"; do
         : > "$WORK/curl.log"
-        out=$(FAKE_JWKS="$JWKS_GOOD" fetch_for "$roles" "$bundle" 2>&1)
+        out=$(FAKE_JWKS="$JWKS_GOOD" fetch_for "$spec" 2>&1)
         grep -qx 'https://sso.example.com/oauth2/jwks?client_id=pam-access' "$WORK/curl.log" \
             || bad="$bad [$spec:no-fetch]"
         [ -s "$WORK/wd/jwks.json" ] || bad="$bad [$spec:no-file]"
         grep -q '^EFFECTIVE=prefer$' <<<"$out" || bad="$bad [$spec:$out]"
     done
     if [ -z "$bad" ]; then
-        pass "ob-builder: the JWKS is fetched with client_id for every role (bastion, standalone, backend, bundle)"
+        pass "ob-builder: the JWKS is fetched with client_id for every role (bastion, standalone, backend, several at once)"
     else
         fail "ob-builder: JWKS not fetched for every role" "$bad"
     fi
@@ -183,25 +182,25 @@ test_builder_fetch_every_role() {
 
 test_builder_fetch_failure() {
     local out rc=0 bad=""
-    out=$(FAKE_JWKS="" fetch_for bastion 0 required 2>&1) || rc=$?
+    out=$(FAKE_JWKS="" fetch_for bastion required 2>&1) || rc=$?
     { [ "$rc" -ne 0 ] && grep -q 'response_signing = required needs it' <<<"$out"; } || bad="$bad required-not-fatal(rc=$rc)"
     rc=0
-    out=$(FAKE_JWKS='{"keys":[]}' fetch_for bastion 0 required 2>&1) || rc=$?
+    out=$(FAKE_JWKS='{"keys":[]}' fetch_for bastion required 2>&1) || rc=$?
     [ "$rc" -ne 0 ] || bad="$bad required-unusable-not-fatal"
     rc=0
-    out=$(FAKE_JWKS="" fetch_for bastion 0 prefer 2>&1) || rc=$?
+    out=$(FAKE_JWKS="" fetch_for bastion prefer 2>&1) || rc=$?
     { [ "$rc" -eq 0 ] && grep -q '^EFFECTIVE=off$' <<<"$out" && grep -q 'No usable JWKS' <<<"$out" \
       && [ ! -e "$WORK/wd/jwks.json" ]; } || bad="$bad prefer-down(rc=$rc)"
     rc=0
-    out=$(FAKE_JWKS='{"keys":[{"kty":"RSA","n":"x","e":"AQAB"}]}' fetch_for bastion 0 prefer 2>&1) || rc=$?
+    out=$(FAKE_JWKS='{"keys":[{"kty":"RSA","n":"x","e":"AQAB"}]}' fetch_for bastion prefer 2>&1) || rc=$?
     { [ "$rc" -eq 0 ] && grep -q '^EFFECTIVE=off$' <<<"$out"; } || bad="$bad prefer-no-kid(rc=$rc)"
     rc=0
-    out=$(FAKE_JWKS="" fetch_for bastion 0 off 2>&1) || rc=$?
+    out=$(FAKE_JWKS="" fetch_for bastion off 2>&1) || rc=$?
     { [ "$rc" -eq 0 ] && grep -q '^EFFECTIVE=off$' <<<"$out" && [ ! -e "$WORK/wd/jwks.json" ]; } \
         || bad="$bad off-fatal(rc=$rc)"
     rc=0
     : > "$WORK/curl.log"
-    out=$(FAKE_JWKS="$JWKS_GOOD" fetch_for bastion 0 prefer "" 2>&1) || rc=$?
+    out=$(FAKE_JWKS="$JWKS_GOOD" fetch_for bastion prefer "" 2>&1) || rc=$?
     { [ "$rc" -eq 0 ] && grep -q '^EFFECTIVE=off$' <<<"$out" && ! grep -q jwks "$WORK/curl.log"; } \
         || bad="$bad no-client-id(rc=$rc,$out)"
     if [ -z "$bad" ]; then
@@ -349,7 +348,7 @@ test_installer_other_client_id() {
 }
 
 test_ansible_role_jwks() {
-    local bad="" r="$WORK/art-emb/role/roles/open-bastion" f
+    local bad="" r="$WORK/art-emb/role/roles/open-bastion-bastion" f t
     [ -d "$r" ] || render_artefacts pam-access prefer emb
     cmp -s "$r/files/sso-jwks.json" "$WORK/art-emb/wd/jwks.json" || bad="$bad files/sso-jwks.json"
     [ -e "$r/files/jwks.json" ] && bad="$bad old-name"
@@ -367,19 +366,22 @@ test_ansible_role_jwks() {
     [ "$(grep -n "Deploy the portal.s JWKS" "$r/tasks/main.yml" | cut -d: -f1)" -lt \
       "$(grep -n "name: Deploy openbastion.conf" "$r/tasks/main.yml" | cut -d: -f1)" ] || bad="$bad task-order"
     grep -q "name: Check the signed-answers settings" "$r/tasks/main.yml" || bad="$bad no-assert"
+    # One tree per role: each carries only its own tasks/<role>.yml.
     for f in bastion backend standalone; do
-        grep -q "'--response-signing', ob_response_signing" "$r/tasks/$f.yml" || bad="$bad $f-mode"
-        grep -q "'--sso-jwks', ob_sso_jwks_file" "$r/tasks/$f.yml" || bad="$bad $f-jwks"
-        grep -q "'--sso-jwks-sha256', ob_sso_jwks_sha256" "$r/tasks/$f.yml" || bad="$bad $f-sha"
+        t="$WORK/art-emb/role/roles/open-bastion-$f/tasks/$f.yml"
+        [ "$f" = bastion ] || { [ -f "$t" ] || render_artefacts pam-access prefer "emb-$f" "$f"; t="$WORK/art-emb-$f/role/roles/open-bastion-$f/tasks/$f.yml"; }
+        grep -q "'--response-signing', ob_response_signing" "$t" || bad="$bad $f-mode"
+        grep -q "'--sso-jwks', ob_sso_jwks_file" "$t" || bad="$bad $f-jwks"
+        grep -q "'--sso-jwks-sha256', ob_sso_jwks_sha256" "$t" || bad="$bad $f-sha"
     done
     grep -q "^response_signing = {{ ob_response_signing" "$r/templates/openbastion.conf.j2" || bad="$bad j2-mode"
     grep -q "^sso_jwks_file = {{ ob_sso_jwks_file" "$r/templates/openbastion.conf.j2" || bad="$bad j2-file"
     grep -q 'ob_bastion_jwt' "$r/README.md" && bad="$bad stale-jwt-vars-in-readme"
     # No JWKS: off, nothing to copy.
     [ -d "$WORK/art-none/role" ] || render_artefacts "" prefer none
-    grep -qx 'ob_response_signing: "off"' "$WORK/art-none/role/roles/open-bastion/defaults/main.yml" || bad="$bad none-mode"
-    grep -qx 'ob_sso_jwks_src: ""' "$WORK/art-none/role/roles/open-bastion/defaults/main.yml" || bad="$bad none-src"
-    [ -e "$WORK/art-none/role/roles/open-bastion/files/sso-jwks.json" ] && bad="$bad none-file"
+    grep -qx 'ob_response_signing: "off"' "$WORK/art-none/role/roles/open-bastion-bastion/defaults/main.yml" || bad="$bad none-mode"
+    grep -qx 'ob_sso_jwks_src: ""' "$WORK/art-none/role/roles/open-bastion-bastion/defaults/main.yml" || bad="$bad none-src"
+    [ -e "$WORK/art-none/role/roles/open-bastion-bastion/files/sso-jwks.json" ] && bad="$bad none-file"
     if [ -z "$bad" ]; then
         pass "ansible: role ships files/sso-jwks.json, deploys it root:root 0644 and passes it to setup"
     else
@@ -398,12 +400,14 @@ test_ansible_runtime() {
     python3 - "$d" <<'PY'
 import sys, yaml
 d = sys.argv[1]
-tasks = yaml.safe_load(open(d + '/roles/open-bastion/tasks/main.yml'))
+tasks = yaml.safe_load(open(d + '/roles/open-bastion-bastion/tasks/main.yml'))
 check = [t for t in tasks if t.get('name') == 'Check the signed-answers settings'][0]
 render = {'name': 'render', 'ansible.builtin.template': {
-    'src': d + '/roles/open-bastion/templates/openbastion.conf.j2', 'dest': d + '/rendered.conf'}}
+    'src': d + '/roles/open-bastion-bastion/templates/openbastion.conf.j2', 'dest': d + '/rendered.conf'}}
+# The inventory declares ob_role since a tree only configures its own hosts.
 pb = [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False,
-       'vars_files': [d + '/roles/open-bastion/defaults/main.yml'], 'tasks': [check, render]}]
+       'vars': {'ob_role': 'bastion'},
+       'vars_files': [d + '/roles/open-bastion-bastion/defaults/main.yml'], 'tasks': [check, render]}]
 yaml.safe_dump(pb, open(d + '/check.yml', 'w'))
 PY
     out=$(ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" 2>&1) || bad="$bad default-failed"
