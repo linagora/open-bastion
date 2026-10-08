@@ -103,6 +103,11 @@ Main configuration file
    # pamAccessRequestSigningSecret. One value for the whole fleet.
    # request_signing_secret = 0123456789abcdef...
 
+   # Signed answers (optional): off (default), prefer or required
+   # response_signing = prefer
+   # sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
+   # sso_issuer = https://auth.example.com
+
 Request signing
 ~~~~~~~~~~~~~~~
 
@@ -113,6 +118,13 @@ The secret is fleet-wide and must equal the portal's ``pamAccessRequestSigningSe
 Do not switch the portal to ``required`` before every host holds the secret and has been seen signing. ``/pam/heartbeat`` is how a host renews its access token, so an unsigned host does not fail when you flip the switch: it fails hours later, when the token it is still holding expires. The full order is in `UPGRADE-NOTES.md <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__.
 
 The value is taken literally, ``#`` included (see the comment rules above).
+
+Signed answers
+~~~~~~~~~~~~~~
+
+``response_signing`` makes the host ask the portal for signed answers and check them against a JWKS it already holds (``off`` by default, ``prefer`` or ``required``). ``sso_jwks_file`` is that trust anchor: a regular file owned by root, not writable by group or others, not a symlink. ``sso_issuer`` is the expected ``iss``, the portal URL without trailing slash when unset. The NSS module reads the same three keys, plus ``client_id``, from ``nss_openbastion.conf``.
+
+The JWKS file must be provisioned by hand for now (from ``<portal>/oauth2/jwks?client_id=<client_id>``); automatic provisioning comes in a later release. Under ``required`` a wrong JWKS refuses every portal answer. Formats, checks and the roll-out order: :doc:`security-reference` ("Signed answers") and `UPGRADE-NOTES.md <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__.
 
 For detailed documentation on specific features:
 

@@ -14,6 +14,7 @@
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include "ob_client.h"
+#include "ob_jws.h"
 #include "ob_sign.h"
 #include "jwt_utils.h"
 #include "str_utils.h"
@@ -57,7 +58,23 @@ struct ob_client {
     char *ca_cert;
     char *signing_secret;  /* Optional HMAC secret for request signing */
     char *cert_pin;        /* Certificate pin for CURLOPT_PINNEDPUBLICKEY */
+    ob_response_signing_t response_signing;
+    char *sso_issuer;              /* expected `iss` of a signed answer */
+    ob_jws_keyset_t *sso_keys;     /* NULL: the JWKS could not be loaded */
+    char sso_keys_error[256];
 };
+
+/*
+ * One /pam/ request and what its answer must be bound to (see ob_jws.h).
+ * The same nonce serves the request signature and the signed answer.
+ */
+typedef struct {
+    const char *path;          /* "/pam/verify" */
+    const char *endpoint;      /* "verify", the `endpoint` claim */
+    const char *body;          /* request body, as sent */
+    bool ask_signed;           /* Accept and X-Nonce were sent */
+    char nonce[OB_SIGN_NONCE_SIZE];
+} pam_call_t;
 
 /* Buffer for curl responses with exponential growth */
 typedef struct {
@@ -65,6 +82,15 @@ typedef struct {
     size_t size;
     size_t capacity;
 } response_buffer_t;
+
+/* Signed answers, defined with the /pam/ requests further below */
+static int pam_call_headers(ob_client_t *client, pam_call_t *call,
+                            struct curl_slist **headers);
+static int pam_call_answer(ob_client_t *client, const pam_call_t *call,
+                           response_buffer_t *buf, long *http_code,
+                           char **body, bool *anonymous);
+static int refuse_anonymous_grant(ob_client_t *client, const char *path);
+static void free_answer_body(char *body);
 
 #define INITIAL_BUFFER_SIZE 4096
 
@@ -152,7 +178,8 @@ static char *strdup_or_null(const char *s)
  * The nonce provides replay protection - server should reject
  * requests with previously seen nonces within a time window. It is covered
  * by the signature (see ob_sign_compute) so it cannot be swapped
- * for a fresh value on a replayed request.
+ * for a fresh value on a replayed request. It is the caller's, because a
+ * signed answer must echo the very nonce the request was signed with.
  *
  * A secret that is configured but yields no signature is a hard failure, not
  * a reason to fall back to an unsigned request: the portal reads a partially
@@ -161,6 +188,7 @@ static char *strdup_or_null(const char *s)
  */
 static int add_signing_headers(struct curl_slist **headers,
                                const char *signing_secret,
+                               const char *nonce,
                                const char *method,
                                const char *path,
                                const char *body)
@@ -181,16 +209,12 @@ static int add_signing_headers(struct curl_slist **headers,
 
     long timestamp = (long)time(NULL);
 
-    /* Generate unique nonce */
-    char nonce[OB_SIGN_NONCE_SIZE];
-    ob_sign_generate_nonce(nonce, sizeof(nonce));
-
     /* Generate signature over timestamp.nonce.method.path.body (#188) */
     char signature[OB_SIGN_SIGNATURE_SIZE];
     ob_sign_compute(signing_secret, timestamp, nonce, method, path, body,
                     signature, sizeof(signature));
 
-    if (!*nonce || !*signature) {
+    if (!nonce || !*nonce || !*signature) {
         syslog(LOG_ERR, "open-bastion: cannot sign %s %s "
                         "(request_signing_secret is set but signing failed)",
                method, path);
@@ -353,6 +377,42 @@ ob_client_t *ob_client_init(const ob_client_config_t *config)
         client->cert_pin = strdup(config->cert_pin);
     }
 
+    client->response_signing = config->response_signing;
+    if (client->response_signing != OB_RESPONSE_SIGNING_OFF) {
+        if (config->sso_issuer && *config->sso_issuer) {
+            client->sso_issuer = strdup(config->sso_issuer);
+        } else {
+            /* portal_url is used as "%s/pam/...", so it may end with '/' */
+            size_t len = strlen(config->portal_url);
+            while (len > 0 && config->portal_url[len - 1] == '/') len--;
+            client->sso_issuer = strndup(config->portal_url, len);
+        }
+        if (!client->sso_issuer) {
+            ob_client_destroy(client);
+            return NULL;
+        }
+
+        /*
+         * Not fatal here: a client that cannot be created fails every
+         * request at once, offline cache included. Each request reports it
+         * instead, and with `prefer` simply does not ask for signed answers.
+         */
+        client->sso_keys = ob_jws_keyset_load(config->sso_jwks_file,
+                                              client->sso_keys_error,
+                                              sizeof(client->sso_keys_error));
+        if (!client->sso_keys) {
+            if (client->response_signing == OB_RESPONSE_SIGNING_REQUIRED) {
+                syslog(LOG_ERR, "open-bastion: response_signing = required but "
+                       "no usable JWKS (%s): every portal answer will be refused",
+                       client->sso_keys_error);
+            } else {
+                syslog(LOG_WARNING, "open-bastion: response_signing = prefer but "
+                       "no usable JWKS (%s): asking for unsigned answers",
+                       client->sso_keys_error);
+            }
+        }
+    }
+
     return client;
 }
 
@@ -381,6 +441,8 @@ void ob_client_destroy(ob_client_t *client)
     free(client->server_group);
     free(client->ca_cert);
     free(client->cert_pin);
+    free(client->sso_issuer);
+    ob_jws_keyset_free(client->sso_keys);
     explicit_bzero(client->error, sizeof(client->error));
     free(client);
 }
@@ -460,10 +522,9 @@ int ob_client_refresh_via_heartbeat(ob_client_t *client,
      */
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    if (add_signing_headers(&headers, client->signing_secret,
-                            "POST", "/pam/heartbeat", req_body) != 0) {
-        snprintf(client->error, sizeof(client->error),
-                 "Failed to sign the /pam/heartbeat request");
+    pam_call_t call = { .path = "/pam/heartbeat", .endpoint = "heartbeat",
+                        .body = req_body };
+    if (pam_call_headers(client, &call, &headers) != 0) {
         json_object_put(req_json);
         curl_slist_free_all(headers);
         return -1;
@@ -480,29 +541,38 @@ int ob_client_refresh_via_heartbeat(ob_client_t *client,
 
     CURLcode res = curl_easy_perform(client->curl);
 
-    json_object_put(req_json);
     curl_slist_free_all(headers);
 
     if (res != CURLE_OK) {
         snprintf(client->error, sizeof(client->error),
                  "Curl error: %s", curl_easy_strerror(res));
+        json_object_put(req_json);
         free_buffer(&buf);
         return -1;
     }
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    char *body;
+    bool anonymous;
+    int arc = pam_call_answer(client, &call, &buf, &http_code, &body, &anonymous);
+    json_object_put(req_json);
+    free_buffer(&buf);
+    if (arc != 0) {
+        return -1;
+    }
     client->last_http_code = http_code;
 
     if (http_code != 200) {
         snprintf(client->error, sizeof(client->error),
                  "Heartbeat refresh failed: HTTP %ld", http_code);
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
-    struct json_object *json = json_tokener_parse(buf.data);
-    free_buffer(&buf);
+    struct json_object *json = json_tokener_parse(body);
+    free_answer_body(body);
     if (!json) {
         snprintf(client->error, sizeof(client->error),
                  "Invalid JSON in heartbeat response");
@@ -516,6 +586,10 @@ int ob_client_refresh_via_heartbeat(ob_client_t *client,
                  "Heartbeat response missing access_token");
         json_object_put(json);
         return -1;
+    }
+    if (anonymous) {
+        json_object_put(json);
+        return refuse_anonymous_grant(client, call.path);
     }
     *new_access_token = strdup(json_object_get_string(val));
 
@@ -585,6 +659,181 @@ static void setup_curl(ob_client_t *client)
     curl_easy_setopt(client->curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
 }
 
+/*
+ * Headers that depend on the security settings: the request signature, and
+ * the request for a signed answer. Returns -1, with client->error set, when
+ * the request must not be sent.
+ */
+static int pam_call_headers(ob_client_t *client, pam_call_t *call,
+                            struct curl_slist **headers)
+{
+    bool hmac = client->signing_secret && *client->signing_secret;
+
+    call->ask_signed = false;
+    call->nonce[0] = '\0';
+
+    if (client->response_signing != OB_RESPONSE_SIGNING_OFF) {
+        if (client->sso_keys) {
+            call->ask_signed = true;
+        } else if (client->response_signing == OB_RESPONSE_SIGNING_REQUIRED) {
+            snprintf(client->error, sizeof(client->error),
+                     "response_signing = required but no usable JWKS (%.180s)",
+                     client->sso_keys_error);
+            return -1;
+        }
+    }
+
+    if (call->ask_signed || hmac) {
+        ob_sign_generate_nonce(call->nonce, sizeof(call->nonce));
+    }
+
+    if (add_signing_headers(headers, client->signing_secret, call->nonce,
+                            "POST", call->path, call->body) != 0) {
+        snprintf(client->error, sizeof(client->error),
+                 "Failed to sign the %s request", call->path);
+        return -1;
+    }
+
+    if (call->ask_signed) {
+        if (!call->nonce[0]) {
+            snprintf(client->error, sizeof(client->error),
+                     "Cannot generate a nonce for the %s request", call->path);
+            return -1;
+        }
+        struct curl_slist *tmp = curl_slist_append(*headers,
+                                                   "Accept: " OB_JWS_MEDIA_TYPE);
+        if (!tmp) return -1;
+        *headers = tmp;
+        /* add_signing_headers already sent it when the request is signed */
+        if (!hmac) {
+            char nonce_header[128];
+            snprintf(nonce_header, sizeof(nonce_header), "X-Nonce: %s", call->nonce);
+            tmp = curl_slist_append(*headers, nonce_header);
+            if (!tmp) return -1;
+            *headers = tmp;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Open the portal's answer once curl_easy_perform() has succeeded: verify a
+ * signed one, apply response_signing to a plain one.
+ *
+ * On success, *body is the plain JSON answer (caller frees), *http_code its
+ * status -- the signed one for a signed answer -- and *anonymous tells that a
+ * signed answer carries no `aud`, so it must grant nothing.
+ *
+ * -1 is a transport error, like a network failure: client->error says why and
+ * last_http_code stays 0, so an unverified 401 triggers no token refresh.
+ */
+static int pam_call_answer(ob_client_t *client, const pam_call_t *call,
+                           response_buffer_t *buf, long *http_code,
+                           char **body, bool *anonymous)
+{
+    char *ctype = NULL;
+    *body = NULL;
+    *anonymous = false;
+    curl_easy_getinfo(client->curl, CURLINFO_CONTENT_TYPE, &ctype);
+
+    if (!ob_jws_is_media_type(ctype)) {
+        if (client->response_signing == OB_RESPONSE_SIGNING_REQUIRED) {
+            syslog(LOG_ERR, "open-bastion: unsigned answer to %s (HTTP %ld) "
+                   "refused: response_signing = required", call->path, *http_code);
+            snprintf(client->error, sizeof(client->error),
+                     "Unsigned answer to %s refused (response_signing = required)",
+                     call->path);
+            return -1;
+        }
+        if (client->response_signing == OB_RESPONSE_SIGNING_PREFER) {
+            syslog(LOG_WARNING, "open-bastion: unsigned answer to %s accepted "
+                   "(response_signing = prefer%s)", call->path,
+                   call->ask_signed ? "" : ", no usable JWKS");
+        }
+        *body = strdup(buf->data ? buf->data : "");
+        if (!*body) {
+            snprintf(client->error, sizeof(client->error), "Out of memory");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (!call->ask_signed) {
+        snprintf(client->error, sizeof(client->error),
+                 "Signed answer to %s that was not asked for", call->path);
+        return -1;
+    }
+
+    size_t len = buf->data ? buf->size : 0;
+    while (len > 0 && (buf->data[len - 1] == '\n' || buf->data[len - 1] == '\r'
+                       || buf->data[len - 1] == ' ')) {
+        len--;
+    }
+
+    ob_jws_expect_t expect = {
+        .issuer = client->sso_issuer,
+        .audience = client->client_id,
+        .endpoint = call->endpoint,
+        .nonce = call->nonce,
+        .body = call->body,
+        .body_len = call->body ? strlen(call->body) : 0,
+        .now = time(NULL),
+        .skew = OB_JWS_DEFAULT_SKEW,
+    };
+    ob_jws_answer_t answer;
+    char why[200];
+    if (ob_jws_verify_answer(client->sso_keys, buf->data ? buf->data : "", len,
+                             &expect, &answer, why, sizeof(why)) != 0) {
+        syslog(LOG_ERR, "open-bastion: signed answer to %s rejected: %s",
+               call->path, why);
+        snprintf(client->error, sizeof(client->error),
+                 "Signed answer to %s rejected: %s", call->path, why);
+        return -1;
+    }
+    if (answer.http_status != *http_code) {
+        syslog(LOG_ERR, "open-bastion: signed answer to %s rejected: HTTP %ld "
+               "but signed for %ld", call->path, *http_code, answer.http_status);
+        snprintf(client->error, sizeof(client->error),
+                 "Signed answer to %s rejected: HTTP status mismatch", call->path);
+        ob_jws_answer_free(&answer);
+        return -1;
+    }
+
+    const char *plain = json_object_to_json_string_ext(answer.resp,
+                                                       JSON_C_TO_STRING_PLAIN);
+    *body = plain ? strdup(plain) : NULL;
+    *anonymous = !answer.has_aud;
+    ob_jws_answer_free(&answer);
+    if (!*body) {
+        snprintf(client->error, sizeof(client->error), "Out of memory");
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * A granting answer must name this client. Refused like an answer that does
+ * not verify: a transport error, so last_http_code goes back to 0.
+ */
+static int refuse_anonymous_grant(ob_client_t *client, const char *path)
+{
+    client->last_http_code = 0;
+    syslog(LOG_ERR, "open-bastion: signed answer to %s grants access but "
+           "carries no aud: refused", path);
+    snprintf(client->error, sizeof(client->error),
+             "Signed answer to %s grants access without aud", path);
+    return -1;
+}
+
+/* Free a body that may carry a voucher or an access token. */
+static void free_answer_body(char *body)
+{
+    if (body) {
+        explicit_bzero(body, strlen(body));
+        free(body);
+    }
+}
+
 int ob_verify_token(ob_client_t *client,
                       const char *user_token,
                       const char *fingerprint,
@@ -634,11 +883,9 @@ int ob_verify_token(ob_client_t *client,
     headers = curl_slist_append(headers, auth_header);
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    /* Add request signing headers if configured */
-    if (add_signing_headers(&headers, client->signing_secret,
-                            "POST", "/pam/verify", req_body) != 0) {
-        snprintf(client->error, sizeof(client->error),
-                 "Failed to sign the /pam/verify request");
+    pam_call_t call = { .path = "/pam/verify", .endpoint = "verify",
+                        .body = req_body };
+    if (pam_call_headers(client, &call, &headers) != 0) {
         json_object_put(req_json);
         curl_slist_free_all(headers);
         explicit_bzero(auth_header, sizeof(auth_header));
@@ -655,46 +902,59 @@ int ob_verify_token(ob_client_t *client,
 
     CURLcode res = curl_easy_perform(client->curl);
 
-    json_object_put(req_json);
     curl_slist_free_all(headers);
     explicit_bzero(auth_header, sizeof(auth_header));
 
     if (res != CURLE_OK) {
         snprintf(client->error, sizeof(client->error),
                  "Curl error: %s", curl_easy_strerror(res));
+        json_object_put(req_json);
         free_buffer(&buf);
         return -1;
     }
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    char *body;
+    bool anonymous;
+    int arc = pam_call_answer(client, &call, &buf, &http_code, &body, &anonymous);
+    json_object_put(req_json);
+    free_buffer(&buf);
+    if (arc != 0) {
+        return -1;
+    }
     client->last_http_code = http_code;
 
     if (http_code == 401) {
         snprintf(client->error, sizeof(client->error),
                  "Server token invalid or expired. Re-enrollment required.");
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
     if (http_code == 403) {
         snprintf(client->error, sizeof(client->error),
                  "Server not enrolled. Run enrollment first.");
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
     if (http_code != 200) {
         snprintf(client->error, sizeof(client->error),
                  "HTTP error: %ld", http_code);
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
     /* Parse JSON response (extracted for unit testing the response contract) */
-    int prc = ob_parse_verify_response(buf.data, response,
+    int prc = ob_parse_verify_response(body, response,
                                        client->error, sizeof(client->error));
-    free_buffer(&buf);
+    free_answer_body(body);
+    if (prc == 0 && anonymous && response->active) {
+        ob_response_free(response);
+        return refuse_anonymous_grant(client, call.path);
+    }
     return prc;
 }
 
@@ -1052,11 +1312,9 @@ static int ob_authorize_user_internal(ob_client_t *client,
     headers = curl_slist_append(headers, auth_header);
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    /* Add request signing headers if configured */
-    if (add_signing_headers(&headers, client->signing_secret,
-                            "POST", "/pam/authorize", req_body) != 0) {
-        snprintf(client->error, sizeof(client->error),
-                 "Failed to sign the /pam/authorize request");
+    pam_call_t call = { .path = "/pam/authorize", .endpoint = "authorize",
+                        .body = req_body };
+    if (pam_call_headers(client, &call, &headers) != 0) {
         json_object_put(req_json);
         curl_slist_free_all(headers);
         explicit_bzero(auth_header, sizeof(auth_header));
@@ -1073,45 +1331,58 @@ static int ob_authorize_user_internal(ob_client_t *client,
 
     CURLcode res = curl_easy_perform(client->curl);
 
-    json_object_put(req_json);
     curl_slist_free_all(headers);
     explicit_bzero(auth_header, sizeof(auth_header));
 
     if (res != CURLE_OK) {
         snprintf(client->error, sizeof(client->error),
                  "Curl error: %s", curl_easy_strerror(res));
+        json_object_put(req_json);
         free_buffer(&buf);
         return -1;
     }
 
     long http_code;
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    char *body;
+    bool anonymous;
+    int arc = pam_call_answer(client, &call, &buf, &http_code, &body, &anonymous);
+    json_object_put(req_json);
+    free_buffer(&buf);
+    if (arc != 0) {
+        return -1;
+    }
     client->last_http_code = http_code;
 
     if (http_code == 401) {
         snprintf(client->error, sizeof(client->error),
                  "Server token invalid or expired. Re-enrollment required.");
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
     if (http_code == 403) {
         snprintf(client->error, sizeof(client->error),
                  "Server not enrolled. Run enrollment first.");
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
     if (http_code != 200) {
         snprintf(client->error, sizeof(client->error),
                  "HTTP error: %ld", http_code);
-        free_buffer(&buf);
+        free_answer_body(body);
         return -1;
     }
 
-    int prc = ob_parse_authorize_response(buf.data, response,
+    int prc = ob_parse_authorize_response(body, response,
                                           client->error, sizeof(client->error));
-    free_buffer(&buf);
+    free_answer_body(body);
+    if (prc == 0 && anonymous && response->authorized) {
+        ob_response_free(response);
+        return refuse_anonymous_grant(client, call.path);
+    }
     return prc;
 }
 

@@ -27,6 +27,7 @@ endif()
 set(PAM_MODULE_SOURCES
     src/pam_openbastion.c
     src/ob_client.c
+    src/ob_jws.c
     src/ob_sign.c
     src/config.c
     src/audit_log.c

@@ -114,6 +114,9 @@ static void free_config(nss_llng_config_t *c)
     free(c->force_shell);
     free(c->default_home_base);
     free(c->service_accounts_file);
+    free(c->client_id);
+    free(c->sso_jwks_file);
+    free(c->sso_issuer);
     memset(c, 0, sizeof(*c));
 }
 

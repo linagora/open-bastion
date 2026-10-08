@@ -33,6 +33,10 @@
 /* Shared string helpers (str_parse_bool_strict, issue #183) */
 #include "str_utils.h"
 
+/* Signed answers from the portal, and the X-Nonce they are bound to */
+#include "ob_jws.h"
+#include "ob_sign.h"
+
 /* Mark NSS entry points as visible when using -fvisibility=hidden */
 #define NSS_VISIBLE __attribute__((visibility("default")))
 
@@ -116,6 +120,9 @@
  * view of which file is authoritative.
  */
 #define DEFAULT_SERVICE_ACCOUNTS_CONF_FILE "/etc/open-bastion/service-accounts.conf"
+
+/* Same trust anchor as pam_openbastion's sso_jwks_file default */
+#define DEFAULT_SSO_JWKS_FILE "/var/lib/open-bastion/jwks/sso-jwks.json"
 #define DEFAULT_MAX_UID 60000
 
 /* Reserved UID for 'nobody' user - must never be assigned */
@@ -173,6 +180,10 @@ typedef struct {
     gid_t max_gid;
     gid_t default_gid;
     char *service_accounts_file;  /* Local service accounts config */
+    char *client_id;              /* expected `aud` of a signed answer */
+    int response_signing;         /* ob_response_signing_t */
+    char *sso_jwks_file;          /* JWKS the signed answers are checked against */
+    char *sso_issuer;             /* expected `iss`; NULL: portal_url */
 } nss_llng_config_t;
 
 /* Cache entry */
@@ -748,6 +759,30 @@ static int load_config(nss_llng_config_t *config)
             free(config->service_accounts_file);
             config->service_accounts_file = strdup(value);
         }
+        else if (strcmp(key, "client_id") == 0) {
+            free(config->client_id);
+            config->client_id = strdup(value);
+        }
+        else if (strcmp(key, "response_signing") == 0) {
+            ob_response_signing_t mode;
+            if (ob_response_signing_parse(value, &mode) == 0) {
+                config->response_signing = mode;
+            } else {
+                /* Same reasoning as nss_parse_bool_or_safe: keep the safe value. */
+                syslog(LOG_ERR, "libnss_openbastion: invalid value for "
+                       "'response_signing': '%s' (expected off, prefer or "
+                       "required); using 'required'", value);
+                config->response_signing = OB_RESPONSE_SIGNING_REQUIRED;
+            }
+        }
+        else if (strcmp(key, "sso_jwks_file") == 0) {
+            free(config->sso_jwks_file);
+            config->sso_jwks_file = strdup(value);
+        }
+        else if (strcmp(key, "sso_issuer") == 0) {
+            free(config->sso_issuer);
+            config->sso_issuer = strdup(value);
+        }
     }
 
     fclose(f);
@@ -767,6 +802,9 @@ static int load_config(nss_llng_config_t *config)
     }
     if (!config->service_accounts_file) {
         config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_CONF_FILE);
+    }
+    if (!config->sso_jwks_file) {
+        config->sso_jwks_file = strdup(DEFAULT_SSO_JWKS_FILE);
     }
 
     return (config->portal_url && config->server_token) ? 0 : -1;
@@ -2002,6 +2040,118 @@ static const char *select_login_shell(struct json_object *json)
     return login_shell(shell_to_use);
 }
 
+/*
+ * Signed answers (ob_jws.h). The JWKS is read on every query rather than kept
+ * in g_config: a query is an HTTPS round trip anyway, and no key material is
+ * then shared between the threads of a consumer such as nscd.
+ *
+ * Returns 1 to ask for a signed answer (*keys set, caller frees), 0 to ask
+ * for a plain one, -1 when the query must not be made at all.
+ */
+static int userinfo_keys(ob_jws_keyset_t **keys)
+{
+    char why[256] = "";
+
+    *keys = NULL;
+    if (g_config.response_signing == OB_RESPONSE_SIGNING_OFF) {
+        return 0;
+    }
+    if (!g_config.client_id || !*g_config.client_id) {
+        snprintf(why, sizeof(why), "no client_id in %s", NSS_OB_CONF);
+    } else {
+        *keys = ob_jws_keyset_load(g_config.sso_jwks_file, why, sizeof(why));
+    }
+    if (*keys) {
+        return 1;
+    }
+    if (g_config.response_signing == OB_RESPONSE_SIGNING_REQUIRED) {
+        syslog(LOG_ERR, "libnss_openbastion: response_signing = required but "
+               "signed answers cannot be checked (%s): user lookups refused", why);
+        return -1;
+    }
+    syslog(LOG_WARNING, "libnss_openbastion: response_signing = prefer but "
+           "signed answers cannot be checked (%s): asking for unsigned answers", why);
+    return 0;
+}
+
+/*
+ * The /pam/userinfo answer as a JSON object, or NULL when it must be treated
+ * as a transport failure: unsigned under `required`, or a signed answer that
+ * does not verify. *http_code becomes the signed status; *anonymous tells
+ * that a signed answer carries no `aud` and so must grant nothing.
+ */
+static struct json_object *open_userinfo_answer(const ob_jws_keyset_t *keys,
+                                                const char *content_type,
+                                                const char *data, size_t len,
+                                                const char *nonce,
+                                                const char *req_body,
+                                                long *http_code, int *anonymous)
+{
+    *anonymous = 0;
+
+    if (!ob_jws_is_media_type(content_type)) {
+        if (g_config.response_signing == OB_RESPONSE_SIGNING_REQUIRED) {
+            syslog(LOG_ERR, "libnss_openbastion: unsigned /pam/userinfo answer "
+                   "(HTTP %ld) refused: response_signing = required", *http_code);
+            return NULL;
+        }
+        if (g_config.response_signing == OB_RESPONSE_SIGNING_PREFER) {
+            syslog(LOG_WARNING, "libnss_openbastion: unsigned /pam/userinfo "
+                   "answer accepted (response_signing = prefer%s)",
+                   keys ? "" : ", no usable JWKS");
+        }
+        return json_tokener_parse(data);
+    }
+    if (!keys) {
+        syslog(LOG_ERR, "libnss_openbastion: signed /pam/userinfo answer that "
+               "was not asked for: refused");
+        return NULL;
+    }
+
+    char issuer[512];
+    if (g_config.sso_issuer && *g_config.sso_issuer) {
+        snprintf(issuer, sizeof(issuer), "%s", g_config.sso_issuer);
+    } else {
+        size_t n = strlen(g_config.portal_url);
+        while (n > 0 && g_config.portal_url[n - 1] == '/') n--;
+        snprintf(issuer, sizeof(issuer), "%.*s", (int)n, g_config.portal_url);
+    }
+    while (len > 0 && (data[len - 1] == '\n' || data[len - 1] == '\r'
+                       || data[len - 1] == ' ')) {
+        len--;
+    }
+
+    ob_jws_expect_t expect = {
+        .issuer = issuer,
+        .audience = g_config.client_id,
+        .endpoint = "userinfo",
+        .nonce = nonce,
+        .body = req_body,
+        .body_len = strlen(req_body),
+        .now = time(NULL),
+        .skew = OB_JWS_DEFAULT_SKEW,
+    };
+    ob_jws_answer_t answer;
+    char why[200];
+    if (ob_jws_verify_answer(keys, data, len, &expect, &answer,
+                             why, sizeof(why)) != 0) {
+        syslog(LOG_ERR, "libnss_openbastion: signed /pam/userinfo answer "
+               "rejected: %s", why);
+        return NULL;
+    }
+    if (answer.http_status != *http_code) {
+        syslog(LOG_ERR, "libnss_openbastion: signed /pam/userinfo answer "
+               "rejected: HTTP %ld but signed for %ld", *http_code,
+               answer.http_status);
+        ob_jws_answer_free(&answer);
+        return NULL;
+    }
+    struct json_object *resp = json_object_get(answer.resp);
+    *anonymous = !answer.has_aud;
+    ob_jws_answer_free(&answer);
+    return resp;
+}
+
 /* Query LLNG server for user info */
 static int query_llng_userinfo(const char *username, struct passwd *pw,
                                 char *buffer, size_t buflen)
@@ -2024,8 +2174,22 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
         return -1;
     }
 
+    ob_jws_keyset_t *keys = NULL;
+    char nonce[OB_SIGN_NONCE_SIZE] = "";
+    int ask_signed = userinfo_keys(&keys);
+    if (ask_signed > 0) {
+        ob_sign_generate_nonce(nonce, sizeof(nonce));
+    }
+    if (ask_signed < 0 || (ask_signed > 0 && !nonce[0])) {
+        ob_jws_keyset_free(keys);
+        explicit_bzero(server_token, strlen(server_token));
+        free(server_token);
+        return -1;
+    }
+
     CURL *curl = curl_easy_init();
     if (!curl) {
+        ob_jws_keyset_free(keys);
         free(server_token);
         return -1;
     }
@@ -2063,12 +2227,19 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
         explicit_bzero(auth_header, sizeof(auth_header));
         json_object_put(req_json);
         curl_easy_cleanup(curl);
+        ob_jws_keyset_free(keys);
         return -1;
     }
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, auth_header);
+    if (ask_signed) {
+        char nonce_header[128];
+        snprintf(nonce_header, sizeof(nonce_header), "X-Nonce: %s", nonce);
+        headers = curl_slist_append(headers, "Accept: " OB_JWS_MEDIA_TYPE);
+        headers = curl_slist_append(headers, nonce_header);
+    }
 
     http_response_t response = {0};
 
@@ -2096,35 +2267,40 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
+    char *content_type = NULL;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &content_type);
 
     curl_slist_free_all(headers);
-    json_object_put(req_json);
-    curl_easy_cleanup(curl);
     /* auth_header held the Bearer token; curl has its own copy and is done. */
     explicit_bzero(auth_header, sizeof(auth_header));
 
     /* Return convention: 0 = found, 1 = authoritatively not found (HTTP 200
      * with found=false), -1 = transient/unavailable (network error, 401/403
-     * from a stale token, 5xx, unparseable). Only an authoritative not-found
-     * may be negatively cached; -1 must NOT poison the cache and lets the
-     * caller reload the token and retry. */
-    if (res != CURLE_OK || !response.data) {
-        free(response.data);
-        return -1;
+     * from a stale token, 5xx, unparseable, an answer that is not signed as
+     * response_signing requires). Only an authoritative not-found may be
+     * negatively cached; -1 must NOT poison the cache and lets the caller
+     * reload the token and retry. */
+    struct json_object *json = NULL;
+    int anonymous = 0;
+    if (res == CURLE_OK && response.data) {
+        json = open_userinfo_answer(keys, content_type, response.data,
+                                    response.size, nonce, req_body,
+                                    &http_code, &anonymous);
     }
-    if (http_code != 200) {
-        /* 401/403 = stale/invalid token, 5xx = server, 404/other = unexpected:
-         * all transient from NSS's point of view. */
-        free(response.data);
-        return -1;
-    }
-
-    /* Parse response */
-    struct json_object *json = json_tokener_parse(response.data);
+    /* content_type and req_body live in curl and req_json */
+    json_object_put(req_json);
+    curl_easy_cleanup(curl);
+    ob_jws_keyset_free(keys);
     free(response.data);
 
     if (!json) return -1;
+    if (http_code != 200) {
+        /* 401/403 = stale/invalid token, 5xx = server, 404/other = unexpected:
+         * all transient from NSS's point of view. */
+        json_object_put(json);
+        return -1;
+    }
 
     struct json_object *val;
     int found = 0;
@@ -2137,6 +2313,13 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     if (!found) {
         json_object_put(json);
         return 1;    /* authoritative "no such user" → safe to negative-cache */
+    }
+
+    if (anonymous) {
+        syslog(LOG_ERR, "libnss_openbastion: signed /pam/userinfo answer for "
+               "%s carries no aud: refused", username);
+        json_object_put(json);
+        return -1;
     }
 
     /* Extract user info with safe bounds checking */

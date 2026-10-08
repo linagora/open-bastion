@@ -31,23 +31,25 @@ add_test(NAME test_nss_openbastion COMMAND test_nss_openbastion)
 
 # Includes libnss_openbastion.c directly to drive the static cache helpers, so it
 # needs the same libs as the module itself (curl/json-c/pthread).
-add_executable(test_nss_cache test_nss_cache.c ../src/str_utils.c)
+add_executable(test_nss_cache test_nss_cache.c ../src/str_utils.c ../src/ob_jws.c ../src/ob_sign.c)
 target_compile_definitions(test_nss_cache PRIVATE _GNU_SOURCE)
 target_include_directories(test_nss_cache PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
 )
 target_link_libraries(test_nss_cache
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
     pthread
 )
 add_test(NAME test_nss_cache COMMAND test_nss_cache)
 
 # Same pattern as test_nss_cache: includes libnss_openbastion.c directly to
 # reach the static helper, so it needs the module's own libs.
-add_executable(test_nss_config test_nss_config.c ../src/str_utils.c)
+add_executable(test_nss_config test_nss_config.c ../src/str_utils.c ../src/ob_jws.c ../src/ob_sign.c)
 # Same -D_GNU_SOURCE the shipped module is built with (nss/CMakeLists.txt): the
 # file cache opens its directories with O_PATH, which glibc only declares under
 # _GNU_SOURCE. Including libnss_openbastion.c without it fails to compile.
@@ -56,10 +58,12 @@ target_include_directories(test_nss_config PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
 )
 target_link_libraries(test_nss_config
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
     pthread
 )
 add_test(NAME test_nss_config COMMAND test_nss_config)
@@ -76,7 +80,7 @@ add_executable(test_ob_cert_proto test_ob_cert_proto.c ../src/ob_cert_proto.c)
 target_include_directories(test_ob_cert_proto PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_ob_cert_proto COMMAND test_ob_cert_proto)
 
-add_executable(test_ob_client test_ob_client.c ../src/ob_client.c ../src/jwt_utils.c ../src/ob_sign.c)
+add_executable(test_ob_client test_ob_client.c ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c)
 target_include_directories(test_ob_client PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
@@ -90,6 +94,39 @@ target_link_libraries(test_ob_client
     pthread
 )
 add_test(NAME test_ob_client COMMAND test_ob_client)
+
+# The verifier of the portal's signed answers, against tokens signed here.
+add_executable(test_ob_jws test_ob_jws.c ../src/ob_jws.c)
+target_include_directories(test_ob_jws PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_compile_definitions(test_ob_jws PRIVATE _GNU_SOURCE)
+target_link_libraries(test_ob_jws ${JSON_C_LIBRARIES} ${OPENSSL_LIBRARIES})
+add_test(NAME test_ob_jws COMMAND test_ob_jws)
+
+# The client asks for and checks signed answers, against a mock portal on
+# 127.0.0.1 (tests/mock_portal.h), with a client built from a parsed
+# openbastion.conf. Includes config.c to reach the per-line parser, like
+# test_config_line.
+add_executable(test_ob_client_signed test_ob_client_signed.c
+    ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c
+    ../src/str_utils.c)
+target_compile_definitions(test_ob_client_signed PRIVATE _GNU_SOURCE)
+target_include_directories(test_ob_client_signed PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_ob_client_signed
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_ob_client_signed COMMAND test_ob_client_signed)
 
 # Covers the wire format the portal verifies.
 add_executable(test_ob_sign test_ob_sign.c ../src/ob_sign.c ../src/str_utils.c)
@@ -308,16 +345,36 @@ target_compile_options(ob-login-shell-strictuid PRIVATE -Wall -Wextra -Werror -D
 # force_shell in libnss_openbastion (#293): read from the configuration, and
 # applied on every path an entry is served from. Includes the module source,
 # like test_nss_cache, with the configuration and cache paths redirected.
-add_executable(test_nss_force_shell test_nss_force_shell.c ../src/str_utils.c)
+add_executable(test_nss_force_shell test_nss_force_shell.c ../src/str_utils.c ../src/ob_jws.c ../src/ob_sign.c)
 target_compile_definitions(test_nss_force_shell PRIVATE _GNU_SOURCE)
 target_include_directories(test_nss_force_shell PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
 )
 target_link_libraries(test_nss_force_shell
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
     pthread
 )
 add_test(NAME test_nss_force_shell COMMAND test_nss_force_shell)
+
+# Signed /pam/userinfo answers (#339): only a verified answer is served or
+# cached. Same pattern as test_nss_force_shell, against tests/mock_portal.h.
+add_executable(test_nss_signed test_nss_signed.c ../src/str_utils.c ../src/ob_jws.c ../src/ob_sign.c)
+target_compile_definitions(test_nss_signed PRIVATE _GNU_SOURCE)
+target_include_directories(test_nss_signed PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_nss_signed
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_nss_signed COMMAND test_nss_signed)

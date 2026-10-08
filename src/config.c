@@ -19,6 +19,7 @@
 #include <syslog.h>
 
 #include "config.h"
+#include "ob_jws.h"
 #include "str_utils.h"
 
 /*
@@ -112,6 +113,9 @@ void config_init(pam_openbastion_config_t *config)
     /* Service accounts */
     config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
 
+    /* Signed answers: response_signing stays off (0) */
+    config->sso_jwks_file = strdup(DEFAULT_SSO_JWKS_FILE);
+
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication - disabled by default */
     config->oauth2_token_auth = false;
@@ -204,6 +208,10 @@ void config_free(pam_openbastion_config_t *config)
 
     /* Request signing */
     secure_free_str(config->request_signing_secret);
+
+    /* Signed answers */
+    free(config->sso_jwks_file);
+    free(config->sso_issuer);
 
     /* User creation */
     free(config->create_user_shell);
@@ -651,6 +659,23 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     /* Request signing settings */
     else if (strcmp(key, "request_signing_secret") == 0) {
         SET_STRING_FIELD(config->request_signing_secret, value, key);
+    }
+    /* Signed answers */
+    else if (strcmp(key, "response_signing") == 0) {
+        ob_response_signing_t mode;
+        if (ob_response_signing_parse(value, &mode) == 0) {
+            config->response_signing = mode;
+        } else {
+            syslog(LOG_ERR, "open-bastion: invalid value for 'response_signing': "
+                   "'%s' (expected off, prefer or required)", value);
+            config->invalid_response_signing = true;
+        }
+    }
+    else if (strcmp(key, "sso_jwks_file") == 0) {
+        SET_STRING_FIELD(config->sso_jwks_file, value, key);
+    }
+    else if (strcmp(key, "sso_issuer") == 0) {
+        SET_STRING_FIELD(config->sso_issuer, value, key);
     }
     /* User creation settings */
     else if (strcmp(key, "create_user") == 0 || strcmp(key, "create_user_enabled") == 0) {
@@ -1111,6 +1136,9 @@ int config_validate(const pam_openbastion_config_t *config)
     if (config->invalid_bool_value) {
         return -6;  /* Unparseable boolean value in configuration */
     }
+    if (config->invalid_response_signing) {
+        return -7;
+    }
 
     if (!config->portal_url || strlen(config->portal_url) == 0) {
         return -1;  /* portal_url is required */
@@ -1156,6 +1184,22 @@ int config_validate(const pam_openbastion_config_t *config)
     /* But it's okay to not have one if only doing authentication */
 
     return 0;
+}
+
+void config_client_settings(const pam_openbastion_config_t *config,
+                            ob_client_config_t *client)
+{
+    memset(client, 0, sizeof(*client));
+    client->portal_url = config->portal_url;
+    client->client_id = config->client_id;
+    client->client_secret = config->client_secret;
+    client->server_group = config->server_group;
+    client->timeout = config->timeout;
+    client->verify_ssl = config->verify_ssl;
+    client->ca_cert = config->ca_cert;
+    client->response_signing = config->response_signing;
+    client->sso_jwks_file = config->sso_jwks_file;
+    client->sso_issuer = config->sso_issuer;
 }
 
 /*

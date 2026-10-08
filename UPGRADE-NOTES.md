@@ -324,6 +324,29 @@ once the portal restarts on 0.6.0. Set it **alongside** the vhost
 The full portal-side list is in the plugins'
 [UPGRADING.md](https://github.com/linagora/lemonldap-ng-plugins/blob/main/UPGRADING.md).
 
+### B6. Optional: signed portal answers (`response_signing`)
+
+Needs a portal on plugins with signed responses (lemonldap-ng-plugins#101).
+The default is `off`: skip this and nothing changes. Provisioning the JWKS is
+manual in this release; automatic distribution comes later.
+
+1. On each host, fetch the portal's keys over a trusted channel from
+   `/oauth2/jwks?client_id=<client_id>` and install them as root:
+   `install -D -m 0644 -o root -g root jwks.json /var/lib/open-bastion/jwks/sso-jwks.json`
+   (not a symlink, not group/world writable). Set `client_id` too.
+2. Set `response_signing = prefer` in `openbastion.conf` and
+   `nss_openbastion.conf`.
+3. Log in, run `getent passwd <sso-user>` and `sudo`, and watch syslog for
+   `unsigned answer ... accepted` and `signed answer ... rejected`. Both must
+   stay silent.
+4. Only then set `required`.
+
+A wrong, stale or unreadable JWKS under `required` refuses every portal
+answer: no new SSO login, no NSS lookup, no token refresh, only the offline
+cache lets known users in. Keep a root session open while switching, and
+re-provision the JWKS after any portal key change (rotation is not automatic
+yet).
+
 ---
 
 ## Part C — scripts that call `ob-builder`, and Ansible inventories

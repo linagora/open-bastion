@@ -19,6 +19,14 @@ verify_ssl = true
 # Cache TTL in seconds (how long to cache user info)
 cache_ttl = 300
 
+# Signed answers (off, prefer or required): same meaning and rules as in
+# openbastion.conf, see doc/references/security-reference.rst. An invalid value
+# is treated as required. Needs client_id (the expected audience).
+#response_signing = off
+#client_id = pam-access
+#sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
+#sso_issuer = https://auth.example.com
+
 # Default shell for users without loginShell attribute. With force_shell, the
 # shell of the recorded session.
 default_shell = /bin/bash

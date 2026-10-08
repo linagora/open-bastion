@@ -124,6 +124,11 @@ Tous les appelants signent : le module PAM (``/pam/verify``, ``/pam/authorize``,
 
 Les appelants shell signent via ``ob-sign-request``, jamais via ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL prend la clé HMAC sur la ligne de commande et n'offre aucune forme qui la lise depuis un fichier ou l'environnement ; ``/proc/<pid>/cmdline`` est lisible par tous, donc sur un bastion ce one-liner livrerait le secret de signature de toute la flotte à chaque utilisateur ayant un shell, toutes les quelques minutes, indéfiniment. ``ob-sign-request`` lit le secret dans le fichier de configuration réservé à root et prend le corps sur stdin — ce qui compte aussi, puisque ``ob-heartbeat`` signe un corps contenant le ``refresh_token`` de l'hôte.
 
+Réponses Signées (Optionnel)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sans ``response_signing``, les réponses du portail ne reposent que sur TLS : qui termine ou usurpe TLS peut forger un ``authorized: true`` ou les attributs d'un utilisateur. Avec ``response_signing`` (``off``, ``prefer`` ou ``required``), les réponses de ``/pam/authorize``, ``/pam/verify``, ``/pam/heartbeat`` (module PAM) et ``/pam/userinfo`` (module NSS) sont des JWS vérifiées contre un JWKS local (``sso_jwks_file``, fichier de confiance appartenant à root), liées au nonce et au corps de la requête. Une réponse refusée est traitée comme une erreur de transport (règles du mode hors-ligne). Le JWKS doit être déployé à la main dans cette version ; la distribution automatique viendra plus tard. Voir la :doc:`référence de sécurité </references/security-reference>` (« Signed answers »).
+
 Authentification du Serveur
 ---------------------------
 

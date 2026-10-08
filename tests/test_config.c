@@ -11,6 +11,7 @@
 #include <fcntl.h>
 
 #include "config.h"
+#include "ob_jws.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -416,6 +417,109 @@ static int test_bad_bool_other_key_is_fatal(void)
     return ok;
 }
 
+/* Signed answers: off by default, the JWKS path, no issuer override */
+static int test_response_signing_defaults(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+
+    int ok = (config.response_signing == OB_RESPONSE_SIGNING_OFF);
+    ok = ok && config.sso_jwks_file
+            && strcmp(config.sso_jwks_file, "/var/lib/open-bastion/jwks/sso-jwks.json") == 0;
+    ok = ok && (config.sso_issuer == NULL);
+
+    config_free(&config);
+    return ok;
+}
+
+static int test_parse_response_signing(void)
+{
+    static const struct { const char *arg; int expected; } cases[] = {
+        { "response_signing=off",      OB_RESPONSE_SIGNING_OFF },
+        { "response_signing=prefer",   OB_RESPONSE_SIGNING_PREFER },
+        { "response_signing=required", OB_RESPONSE_SIGNING_REQUIRED },
+    };
+    int ok = 1;
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        pam_openbastion_config_t config;
+        config_init(&config);
+        config.portal_url = strdup("https://test.example.com");
+        config.client_id = strdup("test-client");
+        config.client_secret = strdup("test-secret");
+
+        const char *argv[] = { cases[i].arg, "sso_jwks_file=/etc/x/jwks.json",
+                               "sso_issuer=https://issuer.example.com" };
+        config_parse_args(3, argv, &config);
+
+        ok = ok && (config.response_signing == cases[i].expected);
+        ok = ok && (config_validate(&config) == 0);
+        ok = ok && strcmp(config.sso_jwks_file, "/etc/x/jwks.json") == 0;
+        ok = ok && strcmp(config.sso_issuer, "https://issuer.example.com") == 0;
+
+        config_free(&config);
+    }
+    return ok;
+}
+
+/*
+ * A mistyped mode must not run with signatures off: like an invalid boolean
+ * (#183), it makes the whole configuration invalid.
+ */
+static int test_bad_response_signing_is_fatal(void)
+{
+    static const char *bad_values[] = {
+        "response_signing=requried", "response_signing=Required",
+        "response_signing=", "response_signing=true", "response_signing=on",
+    };
+    int ok = 1;
+
+    for (size_t i = 0; i < sizeof(bad_values) / sizeof(bad_values[0]); i++) {
+        pam_openbastion_config_t config;
+        config_init(&config);
+        config.portal_url = strdup("https://test.example.com");
+        config.client_id = strdup("test-client");
+        config.client_secret = strdup("test-secret");
+
+        const char *argv[] = { bad_values[i] };
+        config_parse_args(1, argv, &config);
+
+        ok = ok && config.invalid_response_signing;
+        ok = ok && (config_validate(&config) == -7);
+
+        config_free(&config);
+    }
+    return ok;
+}
+
+/* What the PAM module hands to ob_client_init() */
+static int test_client_settings(void)
+{
+    pam_openbastion_config_t config;
+    config_init(&config);
+    config.portal_url = strdup("https://test.example.com");
+    config.client_id = strdup("test-client");
+    config.client_secret = strdup("test-secret");
+    const char *argv[] = { "response_signing=required", "timeout=7" };
+    config_parse_args(2, argv, &config);
+
+    ob_client_config_t client;
+    config_client_settings(&config, &client);
+
+    int ok = client.portal_url == config.portal_url
+          && client.client_id == config.client_id
+          && client.client_secret == config.client_secret
+          && client.timeout == 7
+          && client.verify_ssl
+          && client.response_signing == OB_RESPONSE_SIGNING_REQUIRED
+          && client.sso_jwks_file == config.sso_jwks_file
+          && client.sso_issuer == NULL
+          && client.server_token == NULL;
+
+    config_free(&config);
+    return ok;
+}
+
 /* Test insecure PAM flag disables SSL verification */
 static int test_parse_insecure_flag(void)
 {
@@ -649,6 +753,10 @@ int main(void)
     TEST(bad_bool_is_fatal);
     TEST(good_bool_values_accepted);
     TEST(bad_bool_other_key_is_fatal);
+    TEST(response_signing_defaults);
+    TEST(parse_response_signing);
+    TEST(bad_response_signing_is_fatal);
+    TEST(client_settings);
     TEST(parse_insecure_flag);
     TEST(create_user_defaults);
     TEST(parse_create_user_args);

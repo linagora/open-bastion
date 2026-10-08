@@ -1,19 +1,25 @@
 # str_utils.c is shared with the PAM module: the NSS config loader reuses
 # str_parse_bool_strict() so both parsers agree on what a boolean is.
+# ob_jws.c and ob_sign.c verify the portal's signed answers, as in the PAM
+# module.
 add_library(nss_openbastion SHARED
     libnss_openbastion.c
     ../src/str_utils.c
+    ../src/ob_jws.c
+    ../src/ob_sign.c
 )
 
 target_include_directories(nss_openbastion PRIVATE
     ${CURL_INCLUDE_DIRS}
     ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 target_link_libraries(nss_openbastion
     ${CURL_LIBRARIES}
     ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
     pthread
 )
 
