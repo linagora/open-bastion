@@ -81,7 +81,7 @@ It writes the tree to the ``ansible-<slug>`` directory:
 .. code:: text
 
    ansible-<slug>/
-   ├── site.yml                       # plays the roles in order
+   ├── site.yml                       # plays them in deployment order
    ├── playbook-bastion.yml           # hosts: all, skips the other roles' hosts
    ├── playbook-backend.yml
    ├── inventory.yml.example
@@ -246,8 +246,10 @@ From the directory ``ob-builder`` wrote:
    cd roles-acme
    ansible-playbook -i inventory.yml site.yml --ask-vault-pass
 
-That is the whole run. ``site.yml`` plays each role in turn over the
-inventory. ``--ask-vault-pass`` is for a client secret held in
+That is the whole run. ``site.yml`` plays the roles in deployment
+order — bastion first: a backend that collects the bastion ids while
+it configures itself needs the bastions played
+first. ``--ask-vault-pass`` is for a client secret held in
 ``ansible-vault``, adapt to your use case.
 
 If the build enabled ``ansible_auto_approve``, add the LLNG session cookie so

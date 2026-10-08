@@ -170,6 +170,11 @@ here.
 
 ### Fixed
 
+- **`site.yml` plays the roles in deployment order** (#338), not in the order
+  the config asked for them: bastion, then standalone, then backend. With
+  `allowed_bastions: null` a backend collects the bastion ids while it
+  configures itself, so a `target_role: "backend,bastion"` run had it collect
+  from bastions that had not enrolled yet.
 - **The `ob-builder` allowed-bastions question points at the right file**
   (#333). It said to tighten the list later in `openbastion.conf`, which has
   no such setting: the list lives in `/etc/open-bastion/allowed_bastions`.

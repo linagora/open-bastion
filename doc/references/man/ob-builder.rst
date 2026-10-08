@@ -72,10 +72,12 @@ Options
 
    Write an Ansible tree to ``PATH`` (a directory), one tree per run: a
    ``playbook-<role>.yml`` and a ``roles/open-bastion-<role>/`` per target
-   role, plus a ``site.yml`` playing the roles in order when there are
-   several. A generated playbook only configures the hosts whose
-   ``ob_role`` is its own role; the others are skipped, which is what lets
-   ``site.yml`` run over the whole inventory.
+   role, plus a ``site.yml`` playing them in deployment order — bastion,
+   standalone, then backend — when there are several, whatever order they
+   were asked for: a backend that collects the bastion ids needs the
+   bastions played first. A generated playbook only configures the hosts
+   whose ``ob_role`` is its own role; the others are skipped, which is what
+   lets ``site.yml`` run over the whole inventory.
 
    With ``--config``, at least one output is required; the questionnaire
    asks for them otherwise (default ``.`` and ``./ansible-<slug>``).

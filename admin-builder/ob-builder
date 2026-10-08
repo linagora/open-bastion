@@ -2497,6 +2497,15 @@ render_ansible_role() {
 # role, in the order they were asked for. Each playbook skips the hosts that
 # declare another role, so the file is the entry point for a mixed inventory:
 # `ansible-playbook -i inventory.yml site.yml`.
+# True when $1 is one of the planned roles (build_output_plan's _PLAN_ROLES).
+_in_plan() {
+    local r
+    for r in "${_PLAN_ROLES[@]}"; do
+        [ "$r" = "$1" ] && return 0
+    done
+    return 1
+}
+
 render_site_playbook() {
     local outpath="$1" r content=""
     [ -n "$outpath" ] || return 0
@@ -2507,7 +2516,13 @@ render_site_playbook() {
         return 0
     fi
 
-    for r in "${_PLAN_ROLES[@]}"; do
+    # Fixed deployment order, not the order the roles were asked for: on a
+    # fresh deployment a backend collects the bastion ids from ob_bastion_group
+    # while it configures itself, and only the bastions' own play enrols them.
+    # A standalone host stands alone and nothing collects from it.
+    local -a order=(bastion standalone backend)
+    for r in "${order[@]}"; do
+        _in_plan "$r" || continue
         content="${content}- import_playbook: playbook-${r}.yml"$'\n'
     done
     atomic_write "$outpath/site.yml" "0644" "$content"

@@ -467,6 +467,54 @@ auto_enroll_setup: prompt' --output-ansible "$out" || { ok=false; echo "prompt: 
          || test_fail "allowed_bastions modes mishandled"
 }
 
+# site.yml plays the roles in the order a deployment needs, not the order they
+# were asked for: with `allowed_bastions: null` a backend collects the bastion
+# ids from the bastions while it configures itself, and on a fresh deployment
+# only the bastions' own play has enrolled them by then.
+test_site_playbook_deployment_order() {
+    local ok=true cfg="$TEST_TMPDIR/order.yml" out="$TEST_TMPDIR/order-out" got
+    cat > "$cfg" <<'YML'
+deployment_slug: demo
+scenario: max-security
+portal_url: https://sso.example.com
+client_id: pam-access
+client_secret_mode: prompt
+server_group: default
+target_role: "backend,bastion"
+allowed_bastions: null
+YML
+    rm -rf "$out"
+    (
+        fetch_sso_assets() {
+            WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
+            printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
+        }
+        main --config "$cfg" --repo-keyring "$FAKE_KEYRING" --output-ansible "$out"
+    ) > "$TEST_TMPDIR/order.log" 2>&1 \
+        || { ok=false; echo "build failed"; tail -3 "$TEST_TMPDIR/order.log"; }
+    got=$(grep -o 'playbook-[a-z]*\.yml' "$out/site.yml" 2>/dev/null | tr '\n' ' ')
+    [ "$got" = "playbook-bastion.yml playbook-backend.yml " ] \
+        || { ok=false; echo "asked backend,bastion: site.yml holds '$got'"; }
+
+    # A standalone host, when asked, plays between the two.
+    rm -rf "$out"
+    sed 's/^target_role:.*/target_role: "backend,standalone,bastion"/' "$cfg" > "$cfg.three"
+    (
+        fetch_sso_assets() {
+            WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
+            printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
+        }
+        main --config "$cfg.three" --repo-keyring "$FAKE_KEYRING" --output-ansible "$out"
+    ) > "$TEST_TMPDIR/order.log" 2>&1 \
+        || { ok=false; echo "three-role build failed"; tail -3 "$TEST_TMPDIR/order.log"; }
+    got=$(grep -o 'playbook-[a-z]*\.yml' "$out/site.yml" 2>/dev/null | tr '\n' ' ')
+    [ "$got" = "playbook-bastion.yml playbook-standalone.yml playbook-backend.yml " ] \
+        || { ok=false; echo "asked backend,standalone,bastion: site.yml holds '$got'"; }
+
+    $ok && test_pass "site.yml: bastion, standalone then backend whatever the config order" \
+         || test_fail "site.yml follows the order the roles were asked for"
+}
+
 # Full questionnaire, two roles, outputs and repo options asked.
 test_questionnaire_full() {
     local got
@@ -835,6 +883,7 @@ test_check_output_shell_dir
 test_cli_refuses_shell_file
 test_main_writes_into_dir
 test_allowed_bastions_modes
+test_site_playbook_deployment_order
 test_questionnaire_full
 test_questionnaire_skips_auto_approve
 test_questionnaire_skips_cli_values
