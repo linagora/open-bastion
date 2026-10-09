@@ -284,6 +284,18 @@ here.
 
 ### Security
 
+- **The PAM and NSS modules sign their requests and pin the portal as
+  configured** (#332). The PAM module parsed `request_signing_secret` and
+  `cert_pin` and never handed them to its HTTP client: `/pam/verify`,
+  `/pam/authorize` and `/pam/heartbeat` went out unsigned, so
+  `pamAccessRequestSigningMode = required` refused every SSH login and `sudo`,
+  and `cert_pin` had no effect anywhere. The NSS module did not sign
+  `/pam/userinfo` either, which `required` refuses too. Both modules and
+  `ob-cert-daemon` now sign and pin; the NSS module reads both keys from
+  `openbastion.conf` and makes no portal call when that file cannot be read.
+  An invalid `cert_pin` is refused rather than ignored. The commands
+  (`ob-heartbeat`, `ob-bastion-id`, …) sign but do not pin. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A10).
 - **Every connection to the portal requires TLS 1.3** (#330): the token
   refresh, `ob-cert-daemon`, the NSS module and every command (`ob-enroll`,
   `ob-heartbeat`, `ob-krl-refresh`, `ob-bastion-id`, `ob-bastion-setup`,

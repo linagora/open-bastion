@@ -234,6 +234,32 @@ A portal that fails it goes behind a TLS 1.3 terminator; there is no setting
 to lower the minimum. `min_tls_version` is no longer one: an existing line is
 ignored, and logged when it asks for anything but `13`.
 
+### A10. `cert_pin` is enforced now — check it before upgrading
+
+Until 0.7.0 nothing applied `cert_pin` (#332). It is now enforced by the PAM
+module, the NSS module and `ob-cert-daemon`, so a pin set long ago and never
+updated refuses every call to the portal after the upgrade: no SSH login, no
+`sudo`, no SSO user resolved. On a host with a `cert_pin` line in
+`/etc/open-bastion/openbastion.conf`, compare it with the portal's key first:
+
+```sh
+openssl s_client -connect auth.example.com:443 -servername auth.example.com </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256 -binary | base64
+# must equal the part after sha256// in cert_pin
+```
+
+Put both the current and the next key in the line (`sha256//A;sha256//B`)
+before renewing the portal's certificate, or remove the line. An invalid
+value (anything but `sha256//<base64>` or the path of a public key) is now
+refused, by the PAM module at load time and by the NSS module and
+`ob-cert-daemon` at their next call.
+
+The NSS module also reads `request_signing_secret` and `cert_pin` from
+`openbastion.conf` now, and makes no portal call when that file is missing or
+readable by group or others: keep it `0600 root`, as every setup writes it.
+
 ---
 
 ## Part B — before moving the portal to plugins 0.6.0
@@ -296,6 +322,13 @@ cleaned up, so only a fresh one proves anything.
 3. Deploy the same `request_signing_secret` on every host.
 4. Confirm every host signs.
 5. Only then set `required`.
+
+Step 1 is not optional: before 0.7.0 only the commands signed, and the PAM
+and NSS modules sent `/pam/verify`, `/pam/authorize`, `/pam/heartbeat` and
+`/pam/userinfo` unsigned whatever the secret (#332). Such a host looks
+confirmed in step 4 — `ob-heartbeat` succeeds — and loses every login at
+step 5. `optional` does not log unsigned calls, so check the version of every
+host rather than the portal's log.
 
 Skipping step 4 fails late: an unsigned host keeps working until its access
 token expires, hours later (`/pam/heartbeat` renews it), and the whole fleet

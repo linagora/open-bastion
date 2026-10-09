@@ -111,13 +111,17 @@ Main configuration file
 Request signing
 ~~~~~~~~~~~~~~~
 
-``request_signing_secret`` turns on the ``X-Signature-256`` / ``X-Timestamp`` / ``X-Nonce`` headers on every ``/pam/`` call this host makes — the PAM module, ``ob-cert-daemon``, ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` and ``ob-session-monitor``. It is defence in depth on top of TLS, not a substitute for it.
+``request_signing_secret`` turns on the ``X-Signature-256`` / ``X-Timestamp`` / ``X-Nonce`` headers on every ``/pam/`` call this host makes — the PAM module, the NSS module (``/pam/userinfo``), ``ob-cert-daemon``, ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` and ``ob-session-monitor``. It is defence in depth on top of TLS, not a substitute for it.
 
 The secret is fleet-wide and must equal the portal's ``pamAccessRequestSigningSecret``: the signature proves that the caller is part of the fleet, it does not identify which host is calling. The portal's ``pamAccessRequestSigningMode`` decides what happens to an unsigned call — ``off``, ``optional`` (a signature that is present must verify) or ``required``.
 
 Do not switch the portal to ``required`` before every host holds the secret and has been seen signing. ``/pam/heartbeat`` is how a host renews its access token, so an unsigned host does not fail when you flip the switch: it fails hours later, when the token it is still holding expires. The full order is in `UPGRADE-NOTES.md <https://github.com/linagora/open-bastion/blob/main/UPGRADE-NOTES.md>`__.
 
 The value is taken literally, ``#`` included (see the comment rules above).
+
+The NSS module reads ``request_signing_secret`` and ``cert_pin`` from ``openbastion.conf``, not from ``nss_openbastion.conf``: the secret must stay in a ``0600`` root file. When ``openbastion.conf`` cannot be read (missing, or readable by group or others) or holds an invalid ``cert_pin``, the NSS module makes no portal call, rather than send one unsigned or unpinned.
+
+``cert_pin`` is enforced by the PAM module, the NSS module and ``ob-cert-daemon``, even with ``verify_ssl = false``; the commands do not pin.
 
 Signed answers
 ~~~~~~~~~~~~~~

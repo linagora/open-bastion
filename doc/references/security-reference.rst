@@ -45,7 +45,7 @@ Setting             Default      Description
 ``cert_pin``        none         Certificate pin (sha256//base64 format)
 =================== ============ =======================================
 
-**Certificate Pinning**: When configured, the module validates the server's public key against the pinned value, preventing MITM attacks even with compromised CAs.
+**Certificate Pinning**: When configured, the PAM module, the NSS module and ``ob-cert-daemon`` validate the server's public key against the pinned value, preventing MITM attacks even with compromised CAs. The commands (``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll``…) do not pin: they rely on TLS and, with ``response_signing``, on signed answers. An invalid pin is refused, never ignored. Before 0.7.0 nothing applied ``cert_pin`` (#332).
 
 .. code:: ini
 
@@ -71,7 +71,7 @@ The nonce is part of the signed message: leaving it out would let an attacker re
 
 This provides defense-in-depth against request tampering, even if TLS is somehow compromised.
 
-Every caller signs: the PAM module (``/pam/verify``, ``/pam/authorize``, ``/pam/heartbeat``), ``ob-cert-daemon`` (``/pam/bastion-cert``), and the shell callers ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` and ``ob-session-monitor``. The portal refuses an unsigned call on any of them once ``pamAccessRequestSigningMode`` is ``required``, so leaving one out is a fleet-wide outage waiting on a token to expire, not a missing hardening measure.
+Every caller signs: the PAM module (``/pam/verify``, ``/pam/authorize``, ``/pam/heartbeat``), the NSS module (``/pam/userinfo``), ``ob-cert-daemon`` (``/pam/bastion-cert``), and the shell callers ``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll`` and ``ob-session-monitor``. The portal refuses an unsigned call on any of them once ``pamAccessRequestSigningMode`` is ``required``, so leaving one out is a fleet-wide outage waiting on a token to expire, not a missing hardening measure.
 
 The shell callers sign through ``ob-sign-request``, never through ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL takes the HMAC key on the command line and offers no form that reads it from a file or the environment; ``/proc/<pid>/cmdline`` is world-readable, so on a bastion that one-liner would hand the fleet-wide signing secret to every user with a shell, every few minutes, forever. ``ob-sign-request`` reads the secret from the root-only configuration file and takes the body on stdin — which matters too, since ``ob-heartbeat`` signs a body carrying the host's ``refresh_token``.
 

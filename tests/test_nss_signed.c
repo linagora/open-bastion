@@ -1,6 +1,7 @@
 /*
  * test_nss_signed.c - libnss_openbastion and the portal's signed /pam/userinfo
- * answers (#339).
+ * answers (#339); and its own requests, signed and pinned as openbastion.conf
+ * says (#332).
  *
  * The NSS module hands out passwd entries, uid included, straight from the
  * portal's answer, and caches them on disk for every other process. Behind a
@@ -16,7 +17,11 @@
  *     then served from the caches without the portal;
  *   - `required` without a usable JWKS or without client_id sends nothing;
  *   - `prefer` takes an unsigned answer, `off` asks for nothing new;
- *   - an unparseable response_signing means `required`.
+ *   - an unparseable response_signing means `required`;
+ *   - request_signing_secret and cert_pin are read from openbastion.conf: the
+ *     request carries a valid X-Signature-256, the pin is enforced against a
+ *     TLS portal (mock_tls.h), and an openbastion.conf that cannot be used
+ *     (missing, readable by others, invalid pin) means no portal call at all.
  *
  * The module source is included, as in test_nss_force_shell.c, with the
  * configuration and cache paths redirected to a private directory. The portal
@@ -36,18 +41,22 @@
 const char *test_cache_root(void);
 const char *test_cache_byname(void);
 const char *test_conf_path(void);
+const char *test_pam_conf_path(void);
 #define CACHE_DIR            test_cache_root()
 #define CACHE_DIR_BYNAME     test_cache_byname()
 #define CACHE_TRUSTED_UID    (getuid())
 #define NSS_OB_CONF          test_conf_path()
 #define NSS_CONF_TRUSTED_UID (getuid())
+#define NSS_OB_PAM_CONF      test_pam_conf_path()
 
 #include "../nss/libnss_openbastion.c"
 
 #include "mock_portal.h"
+#include "mock_tls.h"
 
 #define CLIENT  "bastion-test"
 #define KID     "portal-sig-1"
+#define HMAC_KEY "fleet-request-signing-secret"
 #define DWHO    "{\"found\":true,\"uid\":20001,\"gid\":20001,\"gecos\":\"D Who\"," \
                 "\"home\":\"/home/dwho\",\"shell\":\"/bin/bash\"}"
 #define ROOTISH "{\"found\":true,\"uid\":20666,\"gid\":20666,\"gecos\":\"Mallory\"," \
@@ -91,6 +100,13 @@ const char *test_conf_path(void)
 {
     static char p[192];
     snprintf(p, sizeof(p), "%s/nss_openbastion.conf", base());
+    return p;
+}
+
+const char *test_pam_conf_path(void)
+{
+    static char p[192];
+    snprintf(p, sizeof(p), "%s/openbastion.conf", base());
     return p;
 }
 
@@ -151,24 +167,31 @@ static void config_reset(void)
     free(g_config.client_id);
     free(g_config.sso_jwks_file);
     free(g_config.sso_issuer);
+    free(g_config.signing_secret);
+    free(g_config.cert_pin);
     memset(&g_config, 0, sizeof(g_config));
 }
 
 /*
  * The module as it starts on a host whose nss_openbastion.conf carries these
- * lines, with both caches empty.
+ * lines and whose openbastion.conf carries `pam_lines` (NULL: no such file),
+ * with both caches empty.
  */
-static void configure(const char *lines)
+static void configure_at(const char *portal_url, const char *lines,
+                         const char *pam_lines)
 {
     char conf[2048];
 
+    unlink(test_pam_conf_path());
+    if (pam_lines) write_file(test_pam_conf_path(), pam_lines, 0600);
+
     snprintf(conf, sizeof(conf),
-             "portal_url = http://127.0.0.1:%d\n"
+             "portal_url = %s\n"
              "server_token_file = %s/server_token.json\n"
              "service_accounts_file = %s/no-service-accounts.conf\n"
              "cache_ttl = 300\n"
              "%s",
-             mp.port, base(), base(), lines);
+             portal_url, base(), base(), lines);
     write_file(test_conf_path(), conf, 0644);
 
     config_reset();
@@ -176,6 +199,14 @@ static void configure(const char *lines)
     g_config.server_token = strdup("server-access-token");
     g_initialized = 1;
     cache_reset();
+}
+
+/* The same against mock_portal.h, with an openbastion.conf that neither signs nor pins. */
+static void configure(const char *lines)
+{
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", mp.port);
+    configure_at(url, lines, "# openbastion.conf: no request_signing_secret, no cert_pin\n");
 }
 
 static char *conf_lines(const char *mode, const char *jwks, int with_client)
@@ -410,6 +441,128 @@ static void test_prefer_off(void)
     expect_refused("off: a signed answer nobody asked for", &a, "dwho", 20001);
 }
 
+/* ── 4. request_signing_secret and cert_pin (#332) ──────────────────────── */
+
+/* The X-Signature-256 the portal would compute for what it received. */
+static int signature_ok(const mp_seen_t *s)
+{
+    char expected[OB_SIGN_SIGNATURE_SIZE], header[OB_SIGN_SIGNATURE_SIZE + 16];
+    if (!s->timestamp[0] || !s->nonce[0]) return 0;
+    ob_sign_compute(HMAC_KEY, atol(s->timestamp), s->nonce, "POST",
+                    "/pam/userinfo", s->body, expected, sizeof(expected));
+    snprintf(header, sizeof(header), "sha256=%s", expected);
+    return expected[0] && strcmp(s->signature, header) == 0;
+}
+
+/* Nothing reaches the portal, and the lookup is UNAVAIL with nothing cached. */
+static void expect_not_sent(const char *what)
+{
+    struct passwd pw;
+    char buf[4096], msg[192];
+    mp_answer_t a = plain_answer(DWHO);
+
+    mp_set(&a);                     /* also zeroes what was seen */
+    enum nss_status st = lookup("dwho", &pw, buf, sizeof(buf));
+    snprintf(msg, sizeof(msg), "%s -> NSS_STATUS_UNAVAIL", what);
+    check(msg, st == NSS_STATUS_UNAVAIL);
+    check("  ... nothing sent to the portal, nothing cached",
+          mp_get_seen().requests == 0 && !in_memory("dwho")
+          && !on_disk("dwho", 20001));
+}
+
+static void test_request_signing(void)
+{
+    struct passwd pw;
+    char buf[4096], url[64], nss[512], pam[256];
+    mp_answer_t a;
+    mp_seen_t s;
+    enum nss_status st;
+
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", mp.port);
+
+    printf("request_signing_secret in openbastion.conf (response_signing = off):\n");
+    configure_at(url, conf_lines(NULL, g_jwks, 1),
+                 "request_signing_secret = " HMAC_KEY "\n");
+    a = plain_answer(DWHO);
+    mp_set(&a);
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    s = mp_get_seen();
+    check("lookup served", st == NSS_STATUS_SUCCESS && pw.pw_uid == 20001);
+    check("  ... the request carries a valid X-Signature-256 over its body",
+          signature_ok(&s));
+    check("  ... one X-Nonce, no Accept for a signed answer",
+          s.nonce_count == 1 && strcmp(s.accept, OB_JWS_MEDIA_TYPE) != 0);
+
+    printf("With response_signing = required as well:\n");
+    configure_at(url, conf_lines("required", g_jwks, 1),
+                 "request_signing_secret = " HMAC_KEY "\n");
+    a = signed_answer(DWHO);
+    mp_set(&a);
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    s = mp_get_seen();
+    check("signed answer bound to the signed request's nonce served",
+          st == NSS_STATUS_SUCCESS && pw.pw_uid == 20001);
+    check("  ... one X-Nonce for both, and the HMAC covers it",
+          s.nonce_count == 1 && signature_ok(&s));
+
+    printf("Without request_signing_secret:\n");
+    configure(conf_lines(NULL, g_jwks, 1));
+    a = plain_answer(DWHO);
+    mp_set(&a);
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    s = mp_get_seen();
+    check("lookup served, unsigned",
+          st == NSS_STATUS_SUCCESS && !s.signature[0] && !s.timestamp[0]
+          && s.nonce_count == 0);
+
+    printf("An openbastion.conf the module cannot use:\n");
+    configure_at(url, conf_lines(NULL, g_jwks, 1), NULL);
+    expect_not_sent("missing");
+    /* A long-lived process (nscd) that started before the setup wrote it. */
+    write_file(test_pam_conf_path(), "request_signing_secret = " HMAC_KEY "\n", 0600);
+    a = plain_answer(DWHO);
+    mp_set(&a);
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    s = mp_get_seen();
+    check("written afterwards: the next lookup is served, and signed",
+          st == NSS_STATUS_SUCCESS && signature_ok(&s));
+    configure_at(url, conf_lines(NULL, g_jwks, 1), "request_signing_secret = x\n");
+    if (chmod(test_pam_conf_path(), 0644) != 0) perror("chmod");
+    expect_not_sent("readable by others (0644)");
+    configure_at(url, conf_lines(NULL, g_jwks, 1), "cert_pin = md5//AAAA\n");
+    expect_not_sent("invalid cert_pin");
+
+    printf("cert_pin against a TLS portal (verify_ssl = false):\n");
+    char other[64];
+    mt_start(200, DWHO);
+    mt_pin_of(k_rogue, other, sizeof(other));
+    snprintf(url, sizeof(url), "https://127.0.0.1:%d", mt.port);
+    snprintf(nss, sizeof(nss), "%sverify_ssl = false\n", conf_lines(NULL, g_jwks, 1));
+
+    snprintf(pam, sizeof(pam), "cert_pin = %s\n", mt.pin);
+    configure_at(url, nss, pam);
+    int before = mt_requests();
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    check("the portal key's pin: served",
+          st == NSS_STATUS_SUCCESS && pw.pw_uid == 20001 && mt_requests() == before + 1);
+
+    snprintf(pam, sizeof(pam), "cert_pin = %s\n", other);
+    write_file(test_pam_conf_path(), pam, 0600);   /* rewritten: same process */
+    cache_reset();
+    before = mt_requests();
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    check("pin changed in place to another key's: the change is seen, nothing sent",
+          st == NSS_STATUS_UNAVAIL && mt_requests() == before);
+
+    configure_at(url, nss, pam);
+    before = mt_requests();
+    st = lookup("dwho", &pw, buf, sizeof(buf));
+    check("another key's pin: UNAVAIL, nothing sent",
+          st == NSS_STATUS_UNAVAIL && mt_requests() == before
+          && !in_memory("dwho") && !on_disk("dwho", 20001));
+    mt_stop();
+}
+
 int main(void)
 {
     char cmd[256];
@@ -434,6 +587,8 @@ int main(void)
     test_required_unusable();
     printf("\n");
     test_prefer_off();
+    printf("\n");
+    test_request_signing();
 
     mp_stop();
     if (g_cache.entries) {

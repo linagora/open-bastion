@@ -139,4 +139,12 @@ static inline void str_bytes_to_hex(const unsigned char *bytes, size_t len,
  */
 unsigned char *str_base64url_decode(const char *input, size_t input_len, size_t *out_len);
 
+/*
+ * Whether `pin` is something CURLOPT_PINNEDPUBLICKEY can enforce:
+ * "sha256//<base64 of 32 bytes>" or the path of a DER/PEM public key, several
+ * separated by ';'. Returns 1 if valid, 0 otherwise. Every portal client
+ * refuses to run with an invalid pin rather than run unpinned (#47, #332).
+ */
+int str_cert_pin_valid(const char *pin);
+
 #endif /* STR_UTILS_H */

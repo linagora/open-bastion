@@ -1,10 +1,13 @@
 /*
  * test_ob_client_signed.c - The PAM client asks for and checks the portal's
- * signed answers (#339), on /pam/verify, /pam/authorize and /pam/heartbeat.
+ * signed answers (#339), on /pam/verify, /pam/authorize and /pam/heartbeat;
+ * and it signs its requests and pins the portal as openbastion.conf says
+ * (#332).
  *
- * Why through a parsed openbastion.conf: #332 shipped request signing that the
- * unit tests covered and the module never used, because nothing copied
- * request_signing_secret from the configuration to the HTTP client. So every
+ * Why through a parsed openbastion.conf: request signing and cert_pin were
+ * unit-tested in ob_client.c and never used by the module, because nothing
+ * copied request_signing_secret and cert_pin from the configuration to the
+ * HTTP client (#332). So every
  * client here is built the way pam_openbastion.c builds it: the file is
  * parsed by config.c, checked by config_validate() and turned into client
  * settings by config_client_settings(). Only the server token is set by hand
@@ -26,7 +29,13 @@
  *   - a signed answer for another request (replayed, other nonce, other
  *     body), another client, another endpoint, another issuer, with a wrong
  *     key or kid, or whose HTTP status differs from the signed one, is
- *     rejected; one without aud must not grant.
+ *     rejected; one without aud must not grant;
+ *   - request_signing_secret signs /pam/verify, /pam/authorize and
+ *     /pam/heartbeat whatever response_signing says, and nothing is signed
+ *     without it;
+ *   - cert_pin is enforced against a TLS portal (mock_tls.h): the right pin
+ *     reaches it, another key's pin does not, and config_validate() refuses
+ *     one libcurl could not enforce.
  *
  * config.c is included, as in test_config_line.c, to reach the per-line
  * parser config_load() runs once it has checked that the file is root's.
@@ -47,6 +56,7 @@
 #include "ob_jws.h"
 #include "ob_sign.h"
 #include "mock_portal.h"
+#include "mock_tls.h"
 
 static int tests_run;
 static int tests_passed;
@@ -108,14 +118,15 @@ static int load_conf(const char *path, pam_openbastion_config_t *config)
 
 /*
  * A client built as pam_openbastion.c builds it, from an openbastion.conf
- * with this response_signing and these extra lines.
+ * with this portal, this response_signing and these extra lines.
  */
-static ob_client_t *new_client(const char *mode, const char *jwks, const char *extra)
+static ob_client_t *new_client_at(const char *portal_url, const char *mode,
+                                  const char *jwks, const char *extra)
 {
     char conf[2048];
     snprintf(conf, sizeof(conf),
              "# openbastion.conf, as the setup scripts write it\n"
-             "portal_url = http://127.0.0.1:%d\n"
+             "portal_url = %s\n"
              "client_id = " CLIENT "\n"
              "client_secret = client-secret\n"
              "server_group = default\n"
@@ -124,7 +135,7 @@ static ob_client_t *new_client(const char *mode, const char *jwks, const char *e
              "response_signing = %s\n"
              "sso_jwks_file = %s\n"
              "%s",
-             mp.port, mode, jwks, extra ? extra : "");
+             portal_url, mode, jwks, extra ? extra : "");
     write_file(g_conf, conf, 0600);
 
     pam_openbastion_config_t cfg;
@@ -138,17 +149,19 @@ static ob_client_t *new_client(const char *mode, const char *jwks, const char *e
     ob_client_config_t cc;
     config_client_settings(&cfg, &cc);
     cc.server_token = (char *)"server-access-token";
-    /*
-     * #332 is still open: config_client_settings() does not carry
-     * request_signing_secret to the client yet. Pass it here so the shared
-     * nonce is tested now; this line becomes a no-op once #332 is fixed.
-     */
-    if (!cc.signing_secret) cc.signing_secret = cfg.request_signing_secret;
 
     ob_client_t *client = ob_client_init(&cc);
     config_free(&cfg);
     if (!client) printf("  FAIL ob_client_init (%s)\n", mode);
     return client;
+}
+
+/* The same, against mock_portal.h. */
+static ob_client_t *new_client(const char *mode, const char *jwks, const char *extra)
+{
+    char url[64];
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", mp.port);
+    return new_client_at(url, mode, jwks, extra);
 }
 
 /* A signed answer of the portal, honest unless the test bends it. */
@@ -609,6 +622,134 @@ static void test_heartbeat(void)
     ob_client_destroy(c);
 }
 
+/* ── 7. request_signing_secret reaches the client (#332) ─────────────────── */
+
+/* The X-Signature-256 the portal would compute for what it received at `path`. */
+static bool signature_ok(const mp_seen_t *s, const char *path)
+{
+    char expected[OB_SIGN_SIGNATURE_SIZE], header[OB_SIGN_SIGNATURE_SIZE + 16];
+    if (!s->timestamp[0] || !s->nonce[0]) return false;
+    ob_sign_compute(HMAC_KEY, atol(s->timestamp), s->nonce, "POST", path,
+                    s->body, expected, sizeof(expected));
+    snprintf(header, sizeof(header), "sha256=%s", expected);
+    return expected[0] && strcmp(s->signature, header) == 0;
+}
+
+static void test_request_signing(void)
+{
+    ob_client_t *c;
+    mp_answer_t a;
+    mp_seen_t s;
+    bool ok;
+    long http;
+    char *tok;
+
+    printf("request_signing_secret, with response_signing = off:\n");
+    c = new_client("off", g_jwks, "request_signing_secret = " HMAC_KEY "\n");
+    a = plain_answer(VERIFY_OK, 200);
+    mp_set(&a);
+    CHECK(do_verify(c, &ok, &http) == 0 && ok, "verify answered");
+    s = mp_get_seen();
+    CHECK(signature_ok(&s, "/pam/verify"),
+          "  ... the request carries a valid X-Signature-256 over its body");
+    CHECK(strcmp(s.accept, OB_JWS_MEDIA_TYPE) != 0,
+          "  ... and asks for no signed answer");
+
+    a = plain_answer(AUTHZ_OK, 200);
+    mp_set(&a);
+    CHECK(do_authorize(c, &ok, &http) == 0 && ok, "authorize answered");
+    s = mp_get_seen();
+    CHECK(signature_ok(&s, "/pam/authorize"), "  ... signed");
+
+    a = plain_answer(HB_OK, 200);
+    mp_set(&a);
+    CHECK(do_heartbeat(c, &tok, &http) == 0, "heartbeat refresh answered");
+    free(tok);
+    s = mp_get_seen();
+    CHECK(signature_ok(&s, "/pam/heartbeat"), "  ... signed");
+    ob_client_destroy(c);
+
+    printf("Without request_signing_secret:\n");
+    c = new_client("off", g_jwks, NULL);
+    a = plain_answer(AUTHZ_OK, 200);
+    mp_set(&a);
+    CHECK(do_authorize(c, &ok, &http) == 0 && ok, "authorize answered");
+    s = mp_get_seen();
+    CHECK(!s.signature[0] && !s.timestamp[0] && s.nonce_count == 0,
+          "  ... with no signature header at all");
+    ob_client_destroy(c);
+
+    printf("An empty request_signing_secret is no secret:\n");
+    c = new_client("off", g_jwks, "request_signing_secret =\n");
+    mp_set(&a);
+    CHECK(do_authorize(c, &ok, &http) == 0 && ok, "authorize answered");
+    s = mp_get_seen();
+    CHECK(!s.signature[0], "  ... unsigned");
+    ob_client_destroy(c);
+}
+
+/* ── 8. cert_pin reaches the client (#332) ───────────────────────────────── */
+static void test_cert_pin(void)
+{
+    char url[64], line[160], other[64];
+    ob_client_t *c;
+    bool ok;
+    long http;
+    int before;
+
+    mt_start(200, AUTHZ_OK);
+    snprintf(url, sizeof(url), "https://127.0.0.1:%d", mt.port);
+    mt_pin_of(k_rogue, other, sizeof(other));
+
+    printf("cert_pin against a TLS portal (verify_ssl = false):\n");
+    c = new_client_at(url, "off", g_jwks, NULL);
+    before = mt_requests();
+    CHECK(c && do_authorize(c, &ok, &http) == 0 && ok && mt_requests() == before + 1,
+          "no cert_pin: the portal is reached");
+    ob_client_destroy(c);
+
+    snprintf(line, sizeof(line), "cert_pin = %s\n", mt.pin);
+    c = new_client_at(url, "off", g_jwks, line);
+    before = mt_requests();
+    CHECK(c && do_authorize(c, &ok, &http) == 0 && ok && mt_requests() == before + 1,
+          "the portal key's pin: the portal is reached");
+    ob_client_destroy(c);
+
+    snprintf(line, sizeof(line), "cert_pin = %s\n", other);
+    c = new_client_at(url, "off", g_jwks, line);
+    before = mt_requests();
+    CHECK(c && do_authorize(c, &ok, &http) != 0 && mt_requests() == before,
+          "another key's pin: nothing is sent");
+    CHECK(c && http == 0, "  ... a transport error, not an HTTP answer");
+    ob_client_destroy(c);
+
+    snprintf(line, sizeof(line), "cert_pin = %s;%s\n", other, mt.pin);
+    c = new_client_at(url, "off", g_jwks, line);
+    before = mt_requests();
+    CHECK(c && do_authorize(c, &ok, &http) == 0 && ok && mt_requests() == before + 1,
+          "a list holding the portal key's pin (rotation): reached");
+    ob_client_destroy(c);
+
+    mt_stop();
+
+    printf("A cert_pin libcurl cannot enforce:\n");
+    const char *bad[] = { "md5//AAAA", "sha256//tooshort", "pinned" };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        pam_openbastion_config_t cfg;
+        char conf[512], msg[128];
+        snprintf(conf, sizeof(conf),
+                 "portal_url = https://sso.example.com\n"
+                 "client_id = " CLIENT "\nclient_secret = s\n"
+                 "cert_pin = %s\n", bad[i]);
+        write_file(g_conf, conf, 0600);
+        config_init(&cfg);
+        int rc = load_conf(g_conf, &cfg) == 0 ? config_validate(&cfg) : 99;
+        snprintf(msg, sizeof(msg), "'%s' refused by config_validate (-8)", bad[i]);
+        CHECK(rc == -8, msg);
+        config_free(&cfg);
+    }
+}
+
 int main(void)
 {
     char cmd[128];
@@ -632,7 +773,7 @@ int main(void)
 
     mp_start(CLIENT);
 
-    printf("=== ob_client: signed portal answers (#339) ===\n\n");
+    printf("=== ob_client: signed portal answers (#339), signed and pinned requests (#332) ===\n\n");
     test_headers();
     printf("\n");
     test_unsigned();
@@ -644,6 +785,10 @@ int main(void)
     test_authorize();
     printf("\n");
     test_heartbeat();
+    printf("\n");
+    test_request_signing();
+    printf("\n");
+    test_cert_pin();
 
     mp_stop();
     EVP_PKEY_free(k_portal);
