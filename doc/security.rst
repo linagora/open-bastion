@@ -406,9 +406,9 @@ On a host that records, the login shell of SSO users is therefore
   execs the recorder with an environment it builds itself: identity
   from the passwd entry, a fixed ``PATH``, and only ``SSH_CLIENT``,
   ``SSH_CONNECTION``, ``SSH_TTY``, ``SSH_ORIGINAL_COMMAND``, ``TERM``,
-  ``SSH_AUTH_SOCK``, locale names and the ``XDG_SESSION_*`` variables,
-  each validated. ``BASH_ENV``, ``ENV``, exported functions, ``LD_*``
-  and ``OB_*`` never reach it.
+  ``SSH_AUTH_SOCK``, ``LLNG_BASTION_VOUCHER``, locale names and the
+  ``XDG_SESSION_*`` variables, each validated. ``BASH_ENV``, ``ENV``,
+  exported functions, ``LD_*`` and ``OB_*`` never reach it.
 - The recorder then starts the user's real shell inside ``script(1)``:
   ``default_shell`` from ``nss_openbastion.conf`` (``/bin/bash`` as the
   setup writes it). The recorded session is an ordinary bash, and
