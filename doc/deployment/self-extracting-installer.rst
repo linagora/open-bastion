@@ -99,7 +99,7 @@ it when configuring the backends, to limit the accepted bastions.
 
 .. code:: bash
 
-   ssh bastion-1 sudo ob-bastion-id
+   ssh -t bastion-1 sudo ob-bastion-id
 
 .. warning::
 
@@ -108,7 +108,8 @@ it when configuring the backends, to limit the accepted bastions.
    privileges before you run the installer. The setup step locks port
    22 down to SSO certificates, so the local admin account can no
    longer access it through SSH without a signed certificate
-   afterwards.
+   afterwards. Under maximum security it loses ``sudo`` too, and so does
+   ``root``: see :ref:`max-security-scenario-sudo`.
 
    You can also split the deployment in multiple steps, e.g. to
    inspect the host, see :ref:`usefull_installer_flags`.
