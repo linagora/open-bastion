@@ -629,13 +629,27 @@ static bool audience_matches(struct json_object *aud, const char *want)
     return false;
 }
 
+/*
+ * LLNG's issuer is its `portal` setting, which normally ends with '/'
+ * ("https://auth.example.com/"), while the clients derive the expected issuer
+ * from portal_url without it. Compare both without their trailing slashes;
+ * anything else must match exactly.
+ */
+static bool issuer_matches(const char *got, const char *want)
+{
+    size_t lg = strlen(got), lw = strlen(want);
+    while (lg > 0 && got[lg - 1] == '/') lg--;
+    while (lw > 0 && want[lw - 1] == '/') lw--;
+    return lg > 0 && lg == lw && memcmp(got, want, lg) == 0;
+}
+
 static int check_claims(struct json_object *claims, const ob_jws_expect_t *x,
                         ob_jws_answer_t *answer, char *err, size_t errlen)
 {
     const char *s;
 
     s = get_string(claims, "iss");
-    if (!s || strcmp(s, x->issuer) != 0) {
+    if (!s || !issuer_matches(s, x->issuer)) {
         SET_ERR("unexpected issuer '%.80s' (expected '%.80s')", s ? s : "", x->issuer);
         return -1;
     }

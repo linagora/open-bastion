@@ -412,6 +412,21 @@ static void test_claims(void)
     refused(k_rsa, "RS256", "rsa", c, "issuer", "a wrong iss is refused");
     c = claims(); json_object_object_del(c, "iss");
     refused(k_rsa, "RS256", "rsa", c, "issuer", "a missing iss is refused");
+    c = claims(); json_object_object_add(c, "iss", json_object_new_string(ISSUER ".evil"));
+    refused(k_rsa, "RS256", "rsa", c, "issuer", "an iss extending the portal's host is refused");
+    c = claims(); json_object_object_add(c, "iss", json_object_new_string(ISSUER "/x"));
+    refused(k_rsa, "RS256", "rsa", c, "issuer", "an iss with another path is refused");
+    c = claims(); json_object_object_add(c, "iss", json_object_new_string("/"));
+    refused(k_rsa, "RS256", "rsa", c, "issuer", "an iss of a bare slash is refused");
+    {
+        /* LLNG's issuer is `portal`, normally with a trailing '/' (#339 e2e) */
+        ob_jws_answer_t a;
+        char *t;
+        c = claims(); json_object_object_add(c, "iss", json_object_new_string(ISSUER "/"));
+        t = tj_sign(k_rsa, "RS256", "rsa", json_object_to_json_string(c));
+        CHECK(verify(t, &a) == 0, "the portal's issuer with a trailing slash is accepted");
+        ob_jws_answer_free(&a); free(t); json_object_put(c);
+    }
     c = claims(); json_object_object_add(c, "aud", json_object_new_string("other-client"));
     refused(k_rsa, "RS256", "rsa", c, "(aud)", "an answer for another client (aud) is refused");
     c = claims(); json_object_object_add(c, "aud", json_tokener_parse("[\"other\"]"));
