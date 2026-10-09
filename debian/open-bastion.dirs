@@ -1,4 +1,5 @@
 var/lib/open-bastion
+var/lib/open-bastion/jwks
 var/cache/open-bastion
 var/cache/nss_llng
 var/cache/nss_llng/byname

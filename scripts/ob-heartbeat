@@ -17,6 +17,9 @@ CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/var/lib/open-bastion/token"
 STATS_FILE="/var/lib/open-bastion/stats.json"
 TIMEOUT=10
+# How long a run waits for another one to finish, in seconds (see lock_run).
+LOCK_WAIT="${OB_HEARTBEAT_LOCK_WAIT:-60}"
+[[ "$LOCK_WAIT" =~ ^[0-9]+$ ]] || LOCK_WAIT=60
 
 log_info() {
     logger -t "$PROG_NAME" -p auth.info "$*"
@@ -228,8 +231,10 @@ EOF
     fi
 }
 
+# No -f: a refusal (401, 403) must reach ob_pam_post, which verifies it when
+# it is signed, and the branches below that name its cause.
 build_curl_opts() {
-    CURL_OPTS=("-s" "-f" "--tlsv1.3" "--connect-timeout" "$TIMEOUT")
+    CURL_OPTS=("-s" "--tlsv1.3" "--connect-timeout" "$TIMEOUT")
 
     if [ "$VERIFY_SSL" = "false" ] || [ "$VERIFY_SSL" = "0" ]; then
         CURL_OPTS+=("-k")
@@ -244,13 +249,78 @@ if [ -r "$_OB_SIGN_LIB" ]; then
     # shellcheck source=scripts/ob-sign-lib.sh
     . "$_OB_SIGN_LIB"
 else
-    # A broken install must not stop a bastion from renewing its token: send
-    # the request unsigned, which a portal in `required` refuses visibly.
-    SIGN_HEADERS=()
-    # OB_SIGN_NOTE is read by the call sites below, not here.
+    # Without the library nothing can check the portal's signed answers
+    # (#339). Under response_signing = off nothing was going to be checked:
+    # call the portal unsigned, as before #339, so that a broken install does
+    # not let the bastion's token expire. Anything else -- prefer, required,
+    # an unknown value, an unreadable configuration -- refuses to call it
+    # rather than take its answer on trust.
+    #
+    # response_signing from openbastion.conf, read like ob_conf_get in the
+    # library: the last occurrence wins, one layer of quotes is removed, an
+    # unquoted value ends at a '#' that starts it or follows a blank. Prints
+    # "off" when the key is absent or empty, "unreadable" when the file is.
+    _ob_nolib_response_signing() {
+        [ -r "$1" ] || { echo unreadable; return 0; }
+        awk '
+            function trim(s) { sub(/^[ \t\r\n\v\f]+/, "", s); sub(/[ \t\r\n\v\f]+$/, "", s); return s }
+            {
+                line = trim($0)
+                c = substr(line, 1, 1)
+                if (line == "" || c == "#" || c == ";" || c == "[") next
+                eq = index(line, "=")
+                if (!eq || trim(substr(line, 1, eq - 1)) != "response_signing") next
+                v = trim(substr(line, eq + 1))
+                q = substr(v, 1, 1)
+                if (q == "\"" || q == "\047") {
+                    v = substr(v, 2)
+                    for (i = length(v); i > 0; i--) {
+                        if (substr(v, i, 1) == q) { v = substr(v, 1, i - 1); break }
+                    }
+                } else {
+                    for (i = 1; i <= length(v); i++) {
+                        if (substr(v, i, 1) == "#" && (i == 1 || substr(v, i - 1, 1) ~ /[ \t]/)) {
+                            v = trim(substr(v, 1, i - 1)); break
+                        }
+                    }
+                }
+                mode = v
+            }
+            END { print (mode == "" ? "off" : mode) }
+        ' "$1" 2>/dev/null || echo unreadable
+    }
+    # Same contract as the library's ob_pam_post, minus the checks. Each
+    # caller reads only part of the OB_PAM_* variables.
     # shellcheck disable=SC2034
-    ob_sign_request() { SIGN_HEADERS=(); OB_SIGN_ERROR=""; \
-        OB_SIGN_NOTE="ob-sign-lib.sh not found; sending $2 unsigned"; return 0; }
+    ob_pam_post() {
+        local base="$1" path="$2" payload="$3" mode raw rc=0
+        shift 3
+        OB_PAM_STATUS="" OB_PAM_BODY="" OB_PAM_SIGNED="" OB_PAM_ANONYMOUS=false
+        OB_PAM_ERROR="" OB_PAM_WARNING="" OB_PAM_CURL_RC=0 OB_SIGN_NOTE=""
+        mode=$(_ob_nolib_response_signing "${OB_SIGN_CONFIG:-/etc/open-bastion/openbastion.conf}")
+        if [ "$mode" != "off" ]; then
+            OB_PAM_ERROR="ob-sign-lib.sh not found and response_signing is not off ($mode): $path not sent"
+            return 1
+        fi
+        OB_SIGN_NOTE="ob-sign-lib.sh not found; sending $path unsigned"
+        # The body on stdin, not argv: ob-heartbeat's carries the refresh_token.
+        raw=$(printf '%s' "$payload" | curl --tlsv1.3 "$@" -X POST \
+            -H "Content-Type: application/json" --data-binary @- \
+            -w '\n__OB_HTTP__:%{http_code}' "${base}${path}" 2>&1) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            OB_PAM_CURL_RC=$rc
+            OB_PAM_ERROR="request to $path failed (curl exit $rc)"
+            return 1
+        fi
+        case "$raw" in
+            *$'\n'__OB_HTTP__:*) ;;
+            *) OB_PAM_ERROR="no HTTP status for $path"; return 1 ;;
+        esac
+        OB_PAM_STATUS="${raw##*$'\n'__OB_HTTP__:}"
+        OB_PAM_BODY="${raw%$'\n'__OB_HTTP__:*}"
+        OB_PAM_SIGNED=unsigned
+        return 0
+    }
 fi
 
 # Keeps the existing refresh_token / enrolled_at.
@@ -314,30 +384,35 @@ send_heartbeat() {
 
     build_curl_opts
 
+    # Receives the `jwks` claim of a verified answer (see rotate_jwks).
+    # PrivateTmp in the unit: nobody else sees this /tmp.
+    local jwks_claim
+    jwks_claim=$(mktemp) || jwks_claim=""
+    # shellcheck disable=SC2064  # expand now: the trap outlives the local
+    trap "rm -f '$jwks_claim'" EXIT
+
     # Read by ob-sign-lib.sh, which shellcheck cannot follow across the `.`.
     # shellcheck disable=SC2034
     OB_SIGN_CONFIG="$CONFIG_FILE"
-    if ! ob_sign_request POST /pam/heartbeat "$payload"; then
-        log_error "$OB_SIGN_ERROR"
+    # shellcheck disable=SC2034
+    OB_PAM_JWKS_OUT="$jwks_claim"
+    if ! ob_pam_post "$PORTAL_URL" /pam/heartbeat "$payload" "${CURL_OPTS[@]}"; then
+        if [ "${OB_PAM_CURL_RC:-0}" -ne 0 ]; then
+            log_error "Failed to send heartbeat to ${PORTAL_URL}/pam/heartbeat: $OB_PAM_ERROR"
+        else
+            log_error "Heartbeat answer refused: $OB_PAM_ERROR"
+        fi
         exit 1
     fi
     if [ -n "${OB_SIGN_NOTE:-}" ]; then
         log_debug "$OB_SIGN_NOTE"
     fi
+    if [ -n "${OB_PAM_WARNING:-}" ]; then
+        log_warn "$OB_PAM_WARNING"
+    fi
 
-    local response
-    local http_code
-
-    response=$(curl "${CURL_OPTS[@]}" "${SIGN_HEADERS[@]}" -w "\n%{http_code}" \
-        -X POST "${PORTAL_URL}/pam/heartbeat" \
-        -H "Content-Type: application/json" \
-        -d "$payload" 2>&1) || {
-        log_error "Failed to send heartbeat to ${PORTAL_URL}/pam/heartbeat"
-        exit 1
-    }
-
-    http_code=$(echo "$response" | tail -1)
-    response=$(echo "$response" | sed '$d')
+    local response="$OB_PAM_BODY"
+    local http_code="$OB_PAM_STATUS"
 
     if [ "$http_code" = "200" ]; then
         log_debug "Heartbeat sent successfully to $PORTAL_URL"
@@ -355,6 +430,10 @@ send_heartbeat() {
         if [ -n "$new_at" ]; then
             update_access_token "$new_at" "${new_ttl:-3600}" || exit 1
         fi
+
+        if [ -n "$jwks_claim" ]; then
+            rotate_jwks "$jwks_claim" || exit 1
+        fi
     elif [ "$http_code" = "401" ]; then
         log_error "Heartbeat rejected: invalid or expired refresh_token"
         exit 1
@@ -363,6 +442,109 @@ send_heartbeat() {
         exit 1
     else
         log_error "Heartbeat failed with HTTP $http_code: $response"
+        exit 1
+    fi
+}
+
+# The kids of a JWKS file, comma-separated, for the log.
+jwks_kids() {
+    jq -r '[.keys[]? | .kid? // "?" | tostring] | join(",")' "$1" 2>/dev/null || echo "?"
+}
+
+# The fingerprint of a JWKS, given its canonical form (`jq -S -c .` output
+# without its final newline): the SHA-256 of `jq -S -c . FILE`, the value
+# ob-builder, the setup scripts and the installer use (--sso-jwks-sha256,
+# PORTAL-CHECKLIST), which an operator gets with `jq -S -c . FILE | sha256sum`.
+jwks_sha256() {
+    printf '%s\n' "$1" | sha256sum | cut -d' ' -f1
+}
+
+# JWKS rotation (#339). The portal's signed heartbeat answer carries its
+# current signature keys (`jwks`). They replace sso_jwks_file only when they
+# arrived in an answer that verified against that very file: signed by a key
+# this host already trusts, addressed to this client (`aud`), HTTP 200. A
+# chain of trust from the provisioned keys, never a fetch: a key set taken on
+# TLS alone would bring the protection back down to TLS. ob_pam_post writes
+# the claim only for such an answer; the checks are repeated here so that this
+# function stands on its own.
+#
+# Returns non-zero only when a key set that should be installed could not be:
+# the host would then refuse every answer once the portal signs with its new
+# key, and the unit failing is how that shows.
+rotate_jwks() {
+    local candidate="$1" target dir tmp info old_kids new_kids cur_c new_c old_fp
+
+    [ "${OB_PAM_SIGNED:-}" = "verified" ] || return 0
+    [ "${OB_PAM_ANONYMOUS:-true}" = "false" ] || return 0
+    [ "${OB_PAM_STATUS:-}" = "200" ] || return 0
+    case "${OB_RS_MODE:-off}" in prefer|required|invalid) ;; *) return 0 ;; esac
+    [ -s "$candidate" ] || return 0
+
+    target="$OB_RS_JWKS"
+    # Verified against this file a moment ago; if it is gone or no longer a
+    # regular file, the setup owns it now.
+    if [ ! -f "$target" ] || [ -L "$target" ]; then
+        return 0
+    fi
+
+    if ! new_c=$(jq -S -c . "$candidate" 2>/dev/null) || [ -z "$new_c" ]; then
+        log_warn "The heartbeat answer carries a jwks claim that is not JSON; $target kept"
+        return 0
+    fi
+    cur_c=$(jq -S -c . "$target" 2>/dev/null) || cur_c=""
+    [ "$new_c" = "$cur_c" ] && return 0
+
+    # Never install a key set that would refuse every answer.
+    if ! info=$("$OB_RS_HELPER" check-jwks "$candidate" 2>&1); then
+        log_warn "The portal sent a JWKS with no usable signature key ($info); $target kept"
+        return 0
+    fi
+
+    # Written next to the file and renamed over it, so that the modules never
+    # read half a trust anchor. ob-heartbeat.service lets the script write
+    # under /var/lib/open-bastion only (ProtectSystem=strict): a sso_jwks_file
+    # anywhere else, /etc included, cannot be rotated, and the run fails here.
+    dir=$(dirname "$target")
+    if ! tmp=$(mktemp "$dir/.sso-jwks.XXXXXX" 2>/dev/null); then
+        log_error "Cannot create a file in $dir: the portal's new JWKS is not installed, $target kept. ob-heartbeat.service may only write under /var/lib/open-bastion: keep sso_jwks_file there (default /var/lib/open-bastion/jwks/sso-jwks.json)"
+        return 1
+    fi
+    # Canonical form, as the setup scripts write it: its sha256sum is the
+    # fingerprint.
+    if ! printf '%s\n' "$new_c" > "$tmp" \
+        || ! chmod 0644 "$tmp" \
+        || { [ "$(id -u)" = "0" ] && ! chown 0:0 "$tmp"; } \
+        || ! "$OB_RS_HELPER" check-jwks --anchor --quiet "$tmp" >/dev/null 2>&1; then
+        rm -f "$tmp"
+        log_error "Cannot write the portal's new JWKS next to $target; $target kept"
+        return 1
+    fi
+
+    old_kids=$(jwks_kids "$target")
+    new_kids=$(jwks_kids "$tmp")
+    old_fp="?"
+    [ -z "$cur_c" ] || old_fp=$(jwks_sha256 "$cur_c")
+    if ! mv -f "$tmp" "$target"; then
+        rm -f "$tmp"
+        log_error "Cannot replace $target with the portal's new JWKS"
+        return 1
+    fi
+    log_info "Signature keys of the portal rotated in $target: kids [$old_kids] -> [$new_kids], SHA-256 (jq -S -c . | sha256sum) $old_fp -> $(jwks_sha256 "$new_c")"
+    return 0
+}
+
+# One run at a time: a manual run and the timer's must not interleave their
+# token and JWKS updates -- an older answer's key set installed over a newer
+# one could leave the host trusting a key the portal no longer signs with.
+# Held on the token file's directory, which the unit may already write.
+lock_run() {
+    local dir
+    command -v flock >/dev/null 2>&1 || return 0
+    dir=$(dirname "$TOKEN_FILE")
+    [ -d "$dir" ] || return 0
+    exec 9<"$dir" || return 0
+    if ! flock -w "$LOCK_WAIT" 9; then
+        log_error "Another ob-heartbeat has held the lock on $dir for ${LOCK_WAIT}s; giving up"
         exit 1
     fi
 }
@@ -417,6 +599,7 @@ parse_args() {
 main() {
     parse_args "$@"
     load_config
+    lock_run
     read_token
     send_heartbeat
 }

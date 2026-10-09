@@ -128,6 +128,13 @@ target_link_libraries(test_ob_client_signed
 )
 add_test(NAME test_ob_client_signed COMMAND test_ob_client_signed)
 
+# Not a test: the portal's signing side for tests/test_ob_verify_response.sh
+# (keys, JWKs, signed answers), through jws_test_util.h like the C tests.
+add_executable(jws-sign-fixture jws_sign_fixture.c)
+target_include_directories(jws-sign-fixture PRIVATE ${OPENSSL_INCLUDE_DIRS})
+target_compile_options(jws-sign-fixture PRIVATE -Wno-unused-function)
+target_link_libraries(jws-sign-fixture ${OPENSSL_LIBRARIES})
+
 # Covers the wire format the portal verifies.
 add_executable(test_ob_sign test_ob_sign.c ../src/ob_sign.c ../src/str_utils.c)
 target_include_directories(test_ob_sign PRIVATE

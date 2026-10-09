@@ -114,8 +114,11 @@
 # response_signing = off
 
 # The portal's public keys, the trust anchor: a regular file, not a symlink,
-# owned by root, not writable by group or others. Provision it by hand from
-# <portal>/oauth2/jwks?client_id=<client_id>; automatic provisioning comes later.
+# owned by root, not writable by group or others. Installed by ob-*-setup
+# (--sso-jwks, --sso-jwks-sha256), the ob-builder installer and Ansible role;
+# by hand: <portal>/oauth2/jwks?client_id=<client_id>, through `jq -S -c .`.
+# State, not configuration: ob-heartbeat rotates it, and can only do so under
+# /var/lib/open-bastion.
 # sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
 
 # Expected issuer of signed answers. Default: portal_url without trailing slash.

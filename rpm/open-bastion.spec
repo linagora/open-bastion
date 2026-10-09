@@ -110,6 +110,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_sbindir}/ob-fp-daemon
 %{_sbindir}/ob-fp-submit
 %{_sbindir}/ob-sign-request
+%{_sbindir}/ob-verify-response
 %{_sbindir}/ob-client-jwt
 %{_sbindir}/ob-post-upgrade
 %{_sbindir}/ob-uninstall
@@ -177,6 +178,7 @@ mkdir -p %{buildroot}/var/cache/nss_llng/byname
 %{_mandir}/man8/ob-fp-submit.8*
 %{_mandir}/man8/ob-record-sink.8*
 %{_mandir}/man8/ob-sign-request.8*
+%{_mandir}/man8/ob-verify-response.8*
 %{_mandir}/man8/ob-client-jwt.8*
 %{_mandir}/man8/ob-post-upgrade.8*
 %{_mandir}/man8/ob-uninstall.8*
@@ -228,6 +230,12 @@ mkdir -p /var/cache/open-bastion
 chmod 700 /var/cache/open-bastion
 mkdir -p /var/lib/open-bastion
 chmod 711 /var/lib/open-bastion
+# The portal's JWKS (sso_jwks_file default): state, rotated by ob-heartbeat
+# through a rename in this directory. root:root 0755: the NSS module of any
+# process reads the file by its path.
+mkdir -p /var/lib/open-bastion/jwks
+chown root:root /var/lib/open-bastion/jwks
+chmod 755 /var/lib/open-bastion/jwks
 # Re-assert 0711 on upgrade from a version that shipped it 0755 (the module
 # also does this at runtime on its next write).
 mkdir -p /var/cache/nss_llng/byname

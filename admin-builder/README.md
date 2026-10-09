@@ -4,7 +4,7 @@
 
 ## How it Fits in the Project
 
-Administrators use `ob-builder` to answer a single questionnaire once, capturing deployment parameters (SSO URL, authentication scenario, target role, etc.). The builder fetches the SSH CA key and JWKS from the SSO server and generates two types of artifacts:
+Administrators use `ob-builder` to answer a single questionnaire once, capturing deployment parameters (SSO URL, authentication scenario, target role, etc.). The builder fetches the SSH CA key and the portal's JWKS (for the `client_id` relying party, whatever the role) from the SSO server and generates two types of artifacts:
 
 1. **Self-extracting shell installer** (`bootstrap-<slug>-<role>.sh`) — can be copied to target servers and executed; handles package installation, configuration, and enrollment
 2. **Ansible role tree** — for playbook-based deployments across fleets
@@ -104,6 +104,7 @@ ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG 
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 # insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)
 # sign_with: "0xKEYID"  # same as --sign-with (the command line wins); keep the quotes
+response_signing: prefer # off | prefer | required, same as --response-signing (see Signed portal answers)
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main
@@ -156,11 +157,12 @@ The script performs:
 
 - Repository configuration (APT sources + GPG key)
 - Deployment of Open Bastion configuration to `/etc/open-bastion/openbastion.conf`
+- Deployment of the portal's JWKS to `/var/lib/open-bastion/jwks/sso-jwks.json` (root:root 0644), after checking it against its build-time SHA-256
 - Installation of the `open-bastion` package
 - Optionally, automatic enrollment via `ob-enroll` and service setup via `ob-bastion-setup` or `ob-backend-setup`
 - On a bastion/standalone, a final summary with its bastion ID (`ob-bastion-id`), the value backends list in `allowed_bastions`
 
-Run with `./bootstrap-prod-backend.sh info` to inspect embedded metadata (scenario, SSO URL, CA fingerprint) without making changes.
+Run with `./bootstrap-prod-backend.sh info` to inspect embedded metadata (scenario, SSO URL, CA fingerprint, JWKS SHA-256, signing mode) without making changes.
 
 ### Ansible Role Tree
 
@@ -168,7 +170,7 @@ The generated Ansible role is ready for fleet deployments. It includes:
 
 - Pre-populated defaults (configuration from the build)
 - Tasks for repository setup, package installation, and enrollment
-- SSH CA and signing keys embedded as files
+- SSH CA and signing keys embedded as files, and the portal's JWKS (`files/sso-jwks.json`) with the task that deploys it
 - Support for per-host variable overrides via `host_vars/`, `group_vars/`, or extra-vars
 
 Use the role in a playbook — `playbook-<role>.yml` for a single role,
@@ -223,6 +225,7 @@ The generated shell installer accepts CLI flags to override embedded defaults. P
 | `--force`                   | -                       | Overwrite existing `/etc/open-bastion` (normally refused)                    |
 | `--non-interactive`         | -                       | Fail instead of prompting (for CI strict mode)                               |
 | `--insecure`                | -                       | `verify_ssl = false`, `ob-enroll`/setup `-k` (default when built with `--insecure`) |
+| `--response-signing MODE`   | -                       | `off`, `prefer` or `required` (default: the build's `response_signing`)      |
 | `-h, --help`                | -                       | Show help and embedded scenario details                                      |
 
 Example: deploy with a secret from a file and auto-enroll:
@@ -259,6 +262,18 @@ The Ansible output is one tree holding a `playbook-<role>.yml` and a
 `roles/open-bastion-<role>/` per role, plus a `site.yml` that plays them in
 order over the inventory. Each playbook only configures the hosts whose
 `ob_role` matches its role; the others are skipped untouched.
+
+## Signed portal answers
+
+The hosts can check that the portal's answers to `/pam/authorize`, `/pam/verify`, `/pam/heartbeat` and `/pam/userinfo` are signed by the portal (`response_signing` in `openbastion.conf(5)`), against a JWKS deployed at install time. `ob-builder` fetches that JWKS for every role from the discovery's `jwks_uri` (or `<portal>/oauth2/jwks`) with `?client_id=<client_id>`, refuses a document the hosts could not use, and keeps it in canonical form (`jq -S -c .`). The build summary and `PORTAL-CHECKLIST*.md` print its SHA-256; compare it, from a network you trust, with:
+
+```bash
+curl -s 'https://sso.example.com/oauth2/jwks?client_id=backend-prod' | jq -S -c . | sha256sum
+```
+
+`response_signing` (YAML) or `--response-signing` chooses the mode the targets get: `prefer` by default, which still accepts the unsigned answers of a portal whose `pam-access` plugin does not sign yet and logs them; `required` once the plugin release that signs is deployed (see `UPGRADE-NOTES.md`: a host whose JWKS is wrong then refuses every SSO login); `off` to leave it out. Without a usable JWKS (fetch failure, or no signature key with a `kid` for that RP), `required` stops the build and `prefer` builds with `off`, with a warning.
+
+The JWKS belongs to the build's `client_id`. A target installed with another `--client-id` gets `response_signing = off` (with a warning); run `ob-*-setup --sso-jwks-sha256 <hex>` there later. In the Ansible role, overriding `ob_client_id` requires `ob_sso_jwks_src`, `ob_sso_jwks_sha256` and `ob_sso_jwks_client_id` for that client (or `ob_response_signing: off`), and the play says so.
 
 ## Security Notes
 

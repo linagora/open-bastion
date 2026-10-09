@@ -43,7 +43,9 @@ a ``PORTAL-CHECKLIST-<role>.md``, in the directory given at the
 artefacts question (the current one by default).
 
 The generated scripts are self-contained: they embed the SSO CA key,
-the scenario, the ``client_id`` and the APT repo config. You can
+the portal's JWKS (checked against its SHA-256 before it is written to
+``/var/lib/open-bastion/jwks/sso-jwks.json``, then handed to the setup), the
+scenario, the ``client_id`` and the APT repo config. You can
 inspect what is baked in with the ``info`` command (replace ``acme``
 with your slug):
 
@@ -169,7 +171,8 @@ The self-extracting installer accepts the following options (see
    * - ``--server-group GROUP``
      - override the ``server_group``
    * - ``--force``
-     - overwrite an existing ``/etc/open-bastion`` (normally refused)
+     - overwrite an existing ``/etc/open-bastion`` (normally refused),
+       and the host's JWKS with the embedded one (see below)
    * - ``--insecure``
      - skip TLS verification — debug/test only, never against prod
        SSO
@@ -186,3 +189,11 @@ installed package and configuration. Bump the package in your
 repository and re-run to upgrade. To reconfigure a host that setup has
 already locked down, reach it over a path that setup did not close,
 then run the installer with ``--force``.
+
+``--force`` also writes the portal's JWKS embedded at build time
+(``/var/lib/open-bastion/jwks/sso-jwks.json``) over the host's, even if
+:doc:`ob-heartbeat(8) </references/man/ob-heartbeat>` has rotated it since. After a key
+rotation on the portal, rebuild the installer first: under
+``response_signing = required`` a host given a JWKS without the key the
+portal now signs with refuses every answer. Re-running
+``ob-*-setup`` alone, without ``--sso-jwks``, keeps the host's JWKS.

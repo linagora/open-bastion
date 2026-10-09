@@ -105,6 +105,17 @@ on for one host, and no regeneration.
 The ``PORTAL-CHECKLIST-<role>.md`` next to the playbooks lists the
 portal settings that role expects.
 
+Each role's ``files/`` directory holds what was fetched from the portal:
+the SSH CA public key and the JWKS of the build's ``client_id``
+(``sso-jwks.json``). The role deploys the JWKS as
+``/var/lib/open-bastion/jwks/sso-jwks.json`` (root:root 0644) and writes
+``response_signing`` (``ob_response_signing``, ``prefer`` unless the
+build chose otherwise). Every run deploys that build-time JWKS again,
+over one :doc:`ob-heartbeat(8) </references/man/ob-heartbeat>` may have
+rotated since: after a key rotation on the portal, rebuild the tree
+before running it on existing hosts (under ``required``, a host given a
+JWKS without the key the portal now signs with refuses every answer).
+
 Non-interactively, the same build is ``ob-builder --config build.yml
 --output-ansible ./ansible-acme/``.
 
@@ -230,6 +241,11 @@ Notes:
   ``client_id`` to one server group (:ref:`Server groups
   <llng-configuration-server-groups>`) — hence the per-group values above,
   which override the role's baked-in ones.
+- The JWKS in ``files/`` is the one of the build's ``client_id``. A host
+  whose ``ob_client_id`` differs needs its own: set ``ob_sso_jwks_src``,
+  ``ob_sso_jwks_sha256`` and ``ob_sso_jwks_client_id`` for it, or
+  ``ob_response_signing: off``. The play stops on the first task otherwise,
+  rather than deploy keys that do not sign that client's answers.
 - Keep the client secret in ``ansible-vault``, not in clear text. The role
   never persists the LLNG approval cookie either: it is asked per run and kept
   in memory.

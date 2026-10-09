@@ -43,6 +43,21 @@
       Required variables are missing or invalid.
       Set ob_portal_url and ob_pam_mode (A-E) in the role's defaults.
 
+# Signed answers need the JWKS of the relying party the host enrols as: the
+# one in files/ belongs to ob_sso_jwks_client_id.
+- name: Check the signed-answers settings
+  ansible.builtin.assert:
+    that:
+      - ob_response_signing | default('off') in ['off', 'prefer', 'required']
+      - (ob_response_signing | default('off')) == 'off' or (ob_sso_jwks_src | default('')) | length > 0
+      - (ob_response_signing | default('off')) == 'off' or ob_client_id == (ob_sso_jwks_client_id | default(''))
+    fail_msg: >-
+      ob_response_signing is {{ ob_response_signing | default('off') }}, which
+      needs the portal's JWKS for client_id {{ ob_client_id }}: the role carries
+      {{ (ob_sso_jwks_src | default('')) | ternary('the one of client_id ' ~ (ob_sso_jwks_client_id | default('')), 'none') }}.
+      Set ob_sso_jwks_src, ob_sso_jwks_sha256 and ob_sso_jwks_client_id for
+      that client_id, or ob_response_signing to off.
+
 - name: Install prerequisites
   ansible.builtin.apt:
     name:
@@ -96,6 +111,33 @@
     owner: root
     group: root
     mode: '0644'
+
+# The trust anchor of signed portal answers (#339) is state, not configuration:
+# ob-heartbeat replaces it on a verified key rotation, and may only write under
+# /var/lib/open-bastion. The package makes this directory; asserted here for an
+# ob_sso_jwks_file elsewhere under /var/lib/open-bastion. root:root 0755.
+- name: Create the directory of the portal's JWKS
+  ansible.builtin.file:
+    path: "{{ ob_sso_jwks_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: (ob_sso_jwks_src | default('')) | length > 0
+
+# A regular file, root:root, not writable by group or others, or the PAM and
+# NSS modules refuse to load it. Deployed before openbastion.conf, which names
+# it. Every run deploys this build-time JWKS again, over one ob-heartbeat may
+# have rotated since: rebuild the role after a key rotation on the portal.
+- name: Deploy the portal's JWKS
+  ansible.builtin.copy:
+    src: "{{ ob_sso_jwks_src }}"
+    dest: "{{ ob_sso_jwks_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    follow: false
+  when: (ob_sso_jwks_src | default('')) | length > 0
 
 # KRL (Key Revocation List) is mandatory in Mode E — certificate revocation
 # requires an up-to-date KRL on every bastion and backend.

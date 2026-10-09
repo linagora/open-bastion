@@ -867,3 +867,68 @@ replace || base64_string "$keys" #
 suite   || tests/test_ob_builder_service_accounts.sh
 why     || #334: the key blob must end with a newline, or `while read` drops the
 why     || last account on any installer that does not compensate.
+
+# ── Signed answers checked by the shell callers (#339) ───────────────────────
+
+id      || shell-response-required-refuses-unsigned
+file    || scripts/ob-sign-lib.sh
+search  || required|invalid)\n                OB_PAM_ERROR="unsigned answer
+replace || __never_matches__)\n                OB_PAM_ERROR="unsigned answer
+suite   || tests/test_ob_verify_response.sh
+why     || #339: under response_signing = required an unsigned answer is a
+why     || transport error, or a TLS impersonator answers for the portal.
+
+id      || shell-response-invalid-mode-is-required
+file    || scripts/ob-sign-lib.sh
+search  || *) OB_RS_MODE=invalid ;;
+replace || *) OB_RS_MODE=off ;;
+suite   || tests/test_ob_verify_response.sh
+why     || #339: a mistyped response_signing must not turn the checks off.
+
+id      || shell-response-no-aud-grants-nothing
+file    || scripts/ob-sign-lib.sh
+search  || case "$OB_PAM_STATUS" in\n                2*)
+replace || case "$OB_PAM_STATUS" in\n                __never_matches__)
+suite   || tests/test_ob_verify_response.sh
+why     || #339: anyone can get a signed aud-less refusal for a nonce and body
+why     || of their choice; one with a 2xx status must not grant (nor revoke).
+
+id      || shell-response-one-nonce
+file    || scripts/ob-sign-lib.sh
+search  || X-Nonce:*) nonce="${h#X-Nonce:}"; nonce="${nonce# }" ;;
+replace || X-Nonce:*) ;;
+suite   || tests/test_ob_verify_response.sh
+why     || #339: with request signing on, the answer is bound to the HMAC's
+why     || X-Nonce; a second nonce makes every signed answer fail.
+
+id      || verify-response-jwks-claim-needs-aud
+file    || src/ob-verify-response.c
+search  || if (jwks_out && answer.has_aud && answer.jwks
+replace || if (jwks_out && answer.jwks
+suite   || tests/test_ob_verify_response.sh
+why     || #339: the key set that replaces the trust anchor travels only with
+why     || an answer addressed to this client.
+
+id      || heartbeat-jwks-rotation-usable-keys
+file    || scripts/ob-heartbeat
+search  || if ! info=$("$OB_RS_HELPER" check-jwks "$candidate" 2>&1); then
+replace || if false; then
+suite   || tests/test_ob_verify_response.sh
+why     || #339: a rotated JWKS with no usable key would refuse every answer
+why     || from then on; it must be turned down before it is installed.
+
+id      || heartbeat-nolib-fails-closed
+file    || scripts/ob-heartbeat
+search  || if [ "$mode" != "off" ]; then
+replace || if false; then
+suite   || tests/test_ob_verify_response.sh
+why     || #339: without ob-sign-lib.sh nothing can check an answer; only
+why     || response_signing = off may fall back to the unsigned call.
+
+id      || session-monitor-nolib-fails-closed
+file    || scripts/ob-session-monitor
+search  || if [ "$mode" != "off" ]; then
+replace || if false; then
+suite   || tests/test_ob_verify_response.sh
+why     || #339: without ob-sign-lib.sh, an unchecked found:false under
+why     || response_signing = required would terminate sessions.

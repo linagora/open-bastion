@@ -60,6 +60,13 @@ What it does
 - User and group resolution — configures NSS so users and groups come
   from LLNG.
 
+- Signed portal answers — installs the portal's JWKS as
+  ``/var/lib/open-bastion/jwks/sso-jwks.json`` (from ``--sso-jwks``, or fetched
+  and checked against ``--sso-jwks-sha256`` or your confirmation) and
+  writes ``response_signing`` (``prefer`` by default; ``off`` when no
+  JWKS could be installed) into ``openbastion.conf`` and
+  ``nss_openbastion.conf``. A JWKS already on the host is kept.
+
 - ``sudo`` — writes the ``sudoers`` drop-in and, where the role and
   the options call for it, the PAM stack that governs ``sudo``.
 

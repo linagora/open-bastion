@@ -58,6 +58,30 @@ ob-backend-setup --allowed-bastions <bastion_id>[,<id>...]
 `/etc/open-bastion/allowed_bastions` accepts a voucher from any bastion the
 SSO vouched for — which, until 1 to 3 are done, is any enrolled host.
 
+## 6. Signed answers — check the JWKS, then plan `required`
+
+The hosts check the portal's `/pam/*` answers against the JWKS this artefact
+carries (`response_signing = @@RESPONSE_SIGNING@@`). It is the JWKS of
+`client_id` `@@CLIENT_ID@@`, deployed as `/var/lib/open-bastion/jwks/sso-jwks.json`:
+
+| | |
+| --- | --- |
+| fetched for `client_id` | `@@SSO_JWKS_CLIENT_ID@@` |
+| SHA-256 (canonical form) | `@@SSO_JWKS_SHA256@@` |
+
+An empty SHA-256 means no JWKS was embedded and signed answers are off.
+Compare it, from a network you trust, with:
+
+```sh
+curl --tlsv1.3 -s '<portal>/oauth2/jwks?client_id=@@CLIENT_ID@@' | jq -S -c . | sha256sum
+```
+
+Answers are signed only from the `pam-access` plugin release that signs them
+(lemonldap-ng-plugins#100). `prefer` accepts unsigned answers meanwhile and
+logs them; switch to `required` only once that release is deployed and the
+logs show no unsigned answer — a host under `required` with a stale JWKS
+refuses every SSO login (UPGRADE-NOTES.md).
+
 ---
 
 References: `doc/security/09-portail-llng.rst` (R-P1) and

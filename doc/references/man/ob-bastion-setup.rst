@@ -142,6 +142,36 @@ Common options
    the rules and restarts auditd. ``/etc/audit/auditd.conf`` is not
    modified. Requires the auditd package. Off by default.
 
+.. option:: --response-signing MODE
+
+   ``off``, ``prefer`` or ``required``: have the PAM and NSS modules ask
+   the portal for signed answers and check them against its JWKS (see
+   ``response_signing`` in :doc:`openbastion.conf(5) <openbastion.conf>`
+   and "Signed portal answers" below). Without the option the host keeps
+   the value it has, so a re-run never turns ``required`` back into
+   ``prefer``; a host without one gets ``prefer``. ``prefer`` accepts the
+   unsigned answers of a portal whose plugin does not sign yet; use
+   ``required`` only once it does.
+
+.. option:: --sso-jwks FILE
+
+   Install ``FILE`` as the portal's JWKS
+   (``/var/lib/open-bastion/jwks/sso-jwks.json``), replacing the host's,
+   even one rotated since by :doc:`ob-heartbeat(8) <ob-heartbeat>`. It
+   must be a JWKS the modules can use, and match
+   :option:`--sso-jwks-sha256` when that is given; otherwise the setup
+   stops. This is how the self-extracting installer and the Ansible role
+   hand over the JWKS they carry.
+
+.. option:: --sso-jwks-sha256 HEX
+
+   SHA-256 of the portal's JWKS in canonical form, as printed by
+   ``curl --tlsv1.3 -s '<portal>/oauth2/jwks?client_id=<client_id>' | jq -S -c . |
+   sha256sum`` (case, a ``sha256:`` prefix and colons are ignored).
+   Without :option:`--sso-jwks`, the host's JWKS is kept when it
+   matches; otherwise the portal's is fetched and installed only when it
+   matches, and a mismatch stops the setup.
+
 .. option:: -n, --dry-run
 
    Show what would be done without making changes.
@@ -200,13 +230,61 @@ The script works in three phases, so that a failed enrollment never
 leaves the host locked down:
 
 1. Inert preparation, rolled back on failure: downloads the SSH CA public
-   key (/ssh/ca), installs the principals helper (and, on a backend, the
-   allowed-bastions list), writes ``openbastion.conf``, and on a bastion
-   configures the session recorder.
+   key (/ssh/ca), installs the portal's JWKS (see below), installs the
+   principals helper (and, on a backend, the allowed-bastions list),
+   writes ``openbastion.conf``, and on a bastion configures the session
+   recorder.
 2. Checks the portal and enrolls the server.
 3. Lockdown: sshd drop-in, PAM for SSH, sudo (backend: LLNG rules; Mode
    E: token only), ob-ssh configuration (bastion), NSS, optional
    hardening and audit trace, then restarts sshd.
+
+Signed portal answers
+---------------------
+
+Every role writes ``response_signing`` into ``openbastion.conf`` and,
+with ``client_id`` (the expected audience), into
+``nss_openbastion.conf``, plus ``sso_jwks_file`` when it is not ``off``.
+An ``sso_issuer`` already set in either file is kept. The trust anchor,
+``/var/lib/open-bastion/jwks/sso-jwks.json``, is the portal's JWKS for the
+relying party ``client_id``, written ``root:root 0644`` through a
+temporary file and a rename, in canonical form (``jq -S -c .``: the
+portal does not sort its JSON keys, so only that form has a stable
+SHA-256). It lives under ``/var/lib/open-bastion`` because it is state:
+:doc:`ob-heartbeat(8) <ob-heartbeat>` replaces it on a verified key
+rotation, and its unit may write nowhere else. The directory
+``/var/lib/open-bastion/jwks`` (``root:root 0755``, made by the package)
+is created if missing. The JWKS comes from, in this order:
+
+1. :option:`--sso-jwks`;
+2. the JWKS already on the host, when the modules would load it (a
+   regular file owned by root, not writable by group or others) and it
+   matches :option:`--sso-jwks-sha256` if given: the host may have
+   received it through the signed heartbeat, and a fetch over TLS alone
+   must not undo that;
+3. ``<portal>/oauth2/jwks?client_id=<client_id>``, trusted only when it
+   matches :option:`--sso-jwks-sha256` or, run by hand, once its keys and
+   SHA-256 have been shown and confirmed. With ``--yes`` and no
+   fingerprint, nothing is fetched.
+
+A JWKS that is not usable (no RSA, EC or OKP signature key with a
+``kid``, a private key, over 256 KiB) is refused. When no JWKS ends up
+installed, ``prefer`` is written as ``off``, with a warning: without a
+trust anchor it would only log a warning on every portal call.
+``required`` stops the setup instead, before anything is locked down.
+
+Re-running the setup without :option:`--sso-jwks` and
+:option:`--sso-jwks-sha256` therefore keeps the host's current JWKS,
+including one :doc:`ob-heartbeat(8) <ob-heartbeat>` rotated since it was
+installed. :option:`--sso-jwks` always replaces it, and
+:option:`--sso-jwks-sha256` does when the host's file does not match it.
+The ``ob-builder`` artefacts pass both with the JWKS fetched when they
+were built: running the self-extracting installer again with ``--force``,
+or the Ansible role again, puts that build-time JWKS back over a rotated
+one. If the portal's keys rotated since the build, and the old key no
+longer signs, a host under ``required`` then refuses every answer:
+rebuild the artefact first (it fetches the current JWKS), or re-run the
+setup alone, without these two options.
 
 Changing a host's role
 ----------------------
@@ -292,6 +370,11 @@ Files
 ``/etc/open-bastion/openbastion.conf``
    PAM module configuration, including ``node_role``.
 
+``/var/lib/open-bastion/jwks/sso-jwks.json``
+   The portal's JWKS, trust anchor of signed answers (root:root 0644, in
+   a root:root 0755 directory); kept by a re-run without
+   :option:`--sso-jwks`, rotated by :doc:`ob-heartbeat(8) <ob-heartbeat>`.
+
 ``/etc/open-bastion/nss_openbastion.conf``, ``/etc/nsswitch.conf``
    NSS module configuration. On a bastion or standalone host that records
    sessions it sets ``force_shell = /usr/sbin/ob-login-shell``: sshd runs
@@ -335,6 +418,15 @@ after enrolling a new bastion:
 ::
 
    sudo ob-backend-setup --allowed-bastions bastion-01,bastion-03
+
+Bastion fetching the portal's JWKS non-interactively, checked against
+its SHA-256 obtained on a trusted channel:
+
+::
+
+   sudo ob-bastion-setup --portal https://auth.example.com \
+       --server-group bastion --client-id pam-access --yes \
+       --sso-jwks-sha256 <sha256>
 
 Standalone host, dry run:
 
