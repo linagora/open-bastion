@@ -21,8 +21,12 @@ target_role: standalone
 auto_enroll_setup: yes
 ansible_auto_approve: yes
 apt_url: http://192.168.122.1:8088
-apt_suite: ./
-apt_component: ""
+# The lab repo is flat ("deb ... ./"), which ob-builder refuses since e5569bd
+# (suite and component must be names). These values only fill the generated
+# sources line: the harness bypasses it (Ansible: ob_apt_sources_list_line;
+# shell: the package is pre-installed and the installer runs --skip-install).
+apt_suite: lab
+apt_component: main
 enable_hardening: no
 enable_audit_trace: no
 disable_session_recorder: no
