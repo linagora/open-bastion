@@ -17,6 +17,13 @@ server_group = ##SERVER_GROUP##
 # for a plain-http or self-signed test portal)
 verify_ssl = ##VERIFY_SSL##
 
+# Signed portal answers (#339), checked against the portal's JWKS deployed
+# with this artefact (/var/lib/open-bastion/jwks/sso-jwks.json). prefer still accepts
+# the unsigned answers of a portal whose plugin does not sign yet; switch to
+# required once it does (see UPGRADE-NOTES.md). off when no JWKS was deployed.
+response_signing = ##RESPONSE_SIGNING##
+sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json
+
 # Mode-specific settings — scenario: @@SCENARIO@@ (PAM Mode @@PAM_MODE@@)
 @@MODE_SETTINGS@@
 

@@ -78,6 +78,10 @@ Besides enrolling the host with LLNG, the setup writes:
   binding <pam-modes-ssh-fingerprint-binding-on-pamauthorize-and-pamverify>`.
 * ``/etc/pam.d/systemd-user`` — an ``account`` bridge so SSO users can
   start ``user@.service`` (:doc:`/permissions`).
+* ``/var/lib/open-bastion/jwks/sso-jwks.json`` — the portal's JWKS, against which
+  the PAM and NSS modules check the portal's signed answers
+  (``response_signing``, see
+  :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`).
 
 .. _pam-modes-pam-configuration-for-sshd:
 

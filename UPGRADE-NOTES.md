@@ -324,28 +324,41 @@ once the portal restarts on 0.6.0. Set it **alongside** the vhost
 The full portal-side list is in the plugins'
 [UPGRADING.md](https://github.com/linagora/lemonldap-ng-plugins/blob/main/UPGRADING.md).
 
-### B6. Optional: signed portal answers (`response_signing`)
+### B6. Signed portal answers (`response_signing`)
 
-Needs a portal on plugins with signed responses (lemonldap-ng-plugins#101).
-The default is `off`: skip this and nothing changes. Provisioning the JWKS is
-manual in this release; automatic distribution comes later.
+Needs a portal on plugins with signed responses (lemonldap-ng-plugins#101,
+next plugins release). Until that release is deployed, keep `required` off:
+it would refuse every answer.
 
-1. On each host, fetch the portal's keys over a trusted channel from
-   `/oauth2/jwks?client_id=<client_id>` and install them as root:
-   `install -D -m 0644 -o root -g root jwks.json /var/lib/open-bastion/jwks/sso-jwks.json`
-   (not a symlink, not group/world writable). Set `client_id` too.
-2. Set `response_signing = prefer` in `openbastion.conf` and
-   `nss_openbastion.conf`.
+**Existing hosts** keep `off` after the upgrade: nothing changes until you
+act. **New artefacts and setup runs** write `response_signing = prefer` with
+the JWKS installed in `/var/lib/open-bastion/jwks/sso-jwks.json`; without a
+JWKS they write `off`.
+
+1. Get the fingerprint of the portal's keys over a trusted channel:
+   `curl --tlsv1.3 -s '<portal>/oauth2/jwks?client_id=<client_id>' | jq -S -c . | sha256sum`
+2. Install them on each host: re-run the setup with
+   `--sso-jwks-sha256 <hex>` (or `--sso-jwks FILE`), rebuild the ob-builder
+   artefacts, or re-run the Ansible play. This sets `prefer` in
+   `openbastion.conf` and `nss_openbastion.conf` (which also gets
+   `client_id`). By hand: `install -D -m 0644 -o root -g root jwks.json /var/lib/open-bastion/jwks/sso-jwks.json`.
 3. Log in, run `getent passwd <sso-user>` and `sudo`, and watch syslog for
    `unsigned answer ... accepted` and `signed answer ... rejected`. Both must
    stay silent.
-4. Only then set `required`.
+4. Only then set `--response-signing required`.
 
 A wrong, stale or unreadable JWKS under `required` refuses every portal
-answer: no new SSO login, no NSS lookup, no token refresh, only the offline
-cache lets known users in. Keep a root session open while switching, and
-re-provision the JWKS after any portal key change (rotation is not automatic
-yet).
+answer: no new SSO login, no NSS lookup, no token refresh; only the offline
+cache lets known users in. Keep a root session open while switching.
+
+Portal key rotation: add the new key to the RP's signing keys, wait longer
+than the longest heartbeat gap (offline hosts included) so every host gets it
+in a signed heartbeat, then sign with it, and drop the old key later. A host
+that missed the whole window must be re-provisioned as in step 2. Re-running
+a setup without `--sso-jwks`/`--sso-jwks-sha256` keeps the host's (rotated)
+JWKS; the installer's `--force` and every Ansible play install the build-time
+one again. An RP whose signing algorithm is HMAC (`HS*`) cannot sign these
+answers: check the RP uses an asymmetric key before setting `prefer`.
 
 ---
 
@@ -445,3 +458,13 @@ allowed_bastions: ""
 Configs saved by the questionnaire or `--save-config` are unaffected: they
 always write `""` or `null` explicitly, and the key's absence still means
 "any".
+
+### C5. The Ansible role's JWKS is `files/sso-jwks.json`
+
+ob-builder now fetches the JWKS for every role and the role deploys it (it
+was `files/jwks.json`, fetched for backends only and never deployed), in
+`roles/open-bastion-<role>/files/` like the rest of the tree. A
+playbook that copied `files/jwks.json` must use the new name. A host whose
+`ob_client_id` differs from the build's needs `ob_sso_jwks_src`,
+`ob_sso_jwks_sha256` and `ob_sso_jwks_client_id` for its own client, or
+`ob_response_signing: off`: the play stops otherwise.

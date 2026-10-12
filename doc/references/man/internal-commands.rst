@@ -43,6 +43,9 @@ Users sign their SSH key on the portal's ``/ssh`` page, described in the
    * - :doc:`ob-sign-request(8) <ob-sign-request>`
      - Computes the signing headers of a ``/pam/`` call, with the secret on
        stdin.
+   * - :doc:`ob-verify-response(8) <ob-verify-response>`
+     - Verifies a signed answer of the portal for the shell callers, and
+       checks a JWKS file.
 
 .. toctree::
    :hidden:
@@ -57,3 +60,4 @@ Users sign their SSH key on the portal's ``/ssh`` page, described in the
    ob-fp-submit
    ob-client-jwt
    ob-sign-request
+   ob-verify-response

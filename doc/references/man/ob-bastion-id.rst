@@ -31,6 +31,21 @@ The ``bastion_id`` is a synthetic **per-device** identity, not the OIDC
 Two bastions sharing a ``client_id`` therefore have different
 ``bastion_ids``, and re-enrolling a bastion assigns it a new one.
 
+The request is signed (``request_signing_secret``) and the answer checked
+according to ``response_signing`` in
+:doc:`openbastion.conf(5) <openbastion.conf>`, through
+:doc:`ob-verify-response(8) <ob-verify-response>`: under ``required`` an
+unsigned or forged answer is refused (exit status 2), so the identity
+printed is the portal's, not that of whoever answered on its TLS
+certificate. The legacy ``/pam/bastion-token`` fallback is never signed:
+under ``required`` it is refused like any unsigned answer.
+
+Without ``/usr/lib/open-bastion/ob-sign-lib.sh`` (a broken install) no
+answer can be checked: under ``response_signing = off``, or with no such
+key, the request is sent unsigned as before signed answers existed;
+under any other value, an unknown one or an unreadable configuration
+included, nothing is sent and the exit status is 2.
+
 Backends list these values in ``/etc/open-bastion/allowed_bastions``,
 normally via :doc:`ob-backend-setup(8) <ob-bastion-setup>`
 ``--allowed-bastions``. ``ob-ssh-principals``, run by sshd as
@@ -91,8 +106,9 @@ Exit status
    Configuration or token file missing / unreadable.
 
 ``2``
-   The portal request failed or was refused (network error, or an HTTP
-   status other than 200 from the endpoint that was tried last).
+   The portal request failed or was refused (network error, an answer
+   refused under ``response_signing``, or an HTTP status other than 200
+   from the endpoint that was tried last).
 
 ``3``
    The portal answered, but with no identity in it (also returned when a
@@ -110,4 +126,5 @@ See also
 :doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-enroll(8) <ob-enroll>`,
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>`,
+:doc:`ob-verify-response(8) <ob-verify-response>`,
 :doc:`ob-builder(1) <ob-builder>`

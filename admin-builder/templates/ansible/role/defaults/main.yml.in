@@ -38,6 +38,23 @@ ob_client_secret_mode: "@@CLIENT_SECRET_MODE@@"
 ob_client_secret: "@@EMBEDDED_CLIENT_SECRET@@"
 ob_server_group: "@@SERVER_GROUP@@"
 
+# ── Signed portal answers (#339) ──────────────────────────────────────────────
+# response_signing on the hosts: off | prefer | required. prefer still accepts
+# the unsigned answers of a portal whose pam-access plugin does not sign yet;
+# switch to required only once it does (see UPGRADE-NOTES.md: a wrong JWKS
+# under required refuses every SSO login). off when the build had no JWKS.
+ob_response_signing: "@@RESPONSE_SIGNING@@"
+# The trust anchor: the portal's JWKS for ob_sso_jwks_client_id, fetched by
+# ob-builder (role files/), deployed root:root 0644 at ob_sso_jwks_file.
+# Overriding ob_client_id means another relying party, so another JWKS: set
+# ob_sso_jwks_src (a file the copy module finds), ob_sso_jwks_sha256 (its
+# SHA-256, `jq -S -c . FILE | sha256sum`, or "" to skip the check) and
+# ob_sso_jwks_client_id with it, or set ob_response_signing to off.
+ob_sso_jwks_src: "@@SSO_JWKS_SRC@@"
+ob_sso_jwks_sha256: "@@SSO_JWKS_SHA256@@"
+ob_sso_jwks_client_id: "@@SSO_JWKS_CLIENT_ID@@"
+ob_sso_jwks_file: /var/lib/open-bastion/jwks/sso-jwks.json
+
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.
 # Note: ob-enroll uses Device Authorization Grant. By default the admin must

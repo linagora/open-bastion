@@ -17,6 +17,14 @@ server_group = {{ ob_server_group }}
 # ── TLS ───────────────────────────────────────────────────────────────────────
 verify_ssl = {{ 'true' if (ob_verify_ssl | default(true) | bool) else 'false' }}
 
+# ── Signed portal answers (#339) ──────────────────────────────────────────────
+# Checked against the portal's JWKS (ob_sso_jwks_file). See UPGRADE-NOTES.md
+# before switching to required.
+response_signing = {{ ob_response_signing | default('off') }}
+{% if (ob_response_signing | default('off')) != 'off' %}
+sso_jwks_file = {{ ob_sso_jwks_file | default('/var/lib/open-bastion/jwks/sso-jwks.json') }}
+{% endif %}
+
 # ── Authorization cache ───────────────────────────────────────────────────────
 cache_enabled = true
 cache_dir = /var/cache/open-bastion

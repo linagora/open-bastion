@@ -22,8 +22,10 @@ paths, security scenario, SSO URL, OIDC client_id and client_secret
 handling, server group, one or more target roles, optional bastion
 whitelist for backends, optional features, service accounts, auto-launch
 policy, APT repository and signing key) and then fetches the SSH CA
-public key and JWKS from the chosen SSO. The generated artefacts deposit
-``/etc/open-bastion/openbastion.conf``, install the ``open-bastion``
+public key and the JWKS of the ``client_id`` relying party from the
+chosen SSO. The generated artefacts deposit
+``/etc/open-bastion/openbastion.conf`` and the JWKS
+(``/var/lib/open-bastion/jwks/sso-jwks.json``), install the ``open-bastion``
 package via the bundled APT keyring, and prompt step-by-step for
 :doc:`ob-enroll(8) <ob-enroll>` followed by
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>` or
@@ -105,6 +107,17 @@ Options
 
    GPG-sign the shell output with this key (produces a ``.sig`` sidecar).
 
+.. option:: --response-signing MODE
+
+   ``off``, ``prefer`` (default) or ``required``: the
+   ``response_signing`` the targets get, in ``openbastion.conf`` and
+   ``nss_openbastion.conf``. Also the ``response_signing`` key of the
+   ``--config`` YAML (the option wins), and written by
+   ``--save-config``. See "Signed portal answers" below. ``required``
+   refuses every unsigned portal answer: use it only once the portal's
+   ``pam-access`` plugin signs them, or the targets refuse every SSO
+   login. ``required`` needs a ``client_id``.
+
 .. option:: --insecure
 
    Allow an ``http://`` SSO URL and skip TLS verification, both when
@@ -147,6 +160,51 @@ key to accept. They apply to every role. See ``open-bastion`` and
 the project's :doc:`/service-accounts`, shipped as
 ``/usr/share/doc/open-bastion-doc/html/service-accounts.html`` in the
 HTML documentation.
+
+Signed portal answers
+---------------------
+
+For every role (bastion, standalone, backend), the builder
+fetches the portal's JWKS from the ``jwks_uri`` of the OIDC discovery,
+or ``<portal>/oauth2/jwks`` when none is advertised, with
+``?client_id=<client_id>``: the keys the portal signs that relying
+party's answers with. It refuses a document the hosts could not use (no
+RSA, EC or OKP signature key with a ``kid``, a private key, over 256
+KiB) and keeps it in canonical form (``jq -S -c .``), whose SHA-256 the
+build summary and ``PORTAL-CHECKLIST*.md`` print. Anyone can reproduce
+it with ``curl --tlsv1.3 -s '<portal>/oauth2/jwks?client_id=<client_id>' | jq -S
+-c . | sha256sum``.
+
+The shell installer embeds the JWKS and its SHA-256: it checks the
+SHA-256 before writing ``/var/lib/open-bastion/jwks/sso-jwks.json`` (root:root
+0644), then passes ``--sso-jwks`` and ``--sso-jwks-sha256`` to the setup
+it runs, with ``--response-signing``. The installer's own
+``--response-signing`` overrides the built-in mode. The Ansible role
+carries it as ``files/sso-jwks.json``, deploys it with a task
+(``ob_sso_jwks_src``, ``ob_sso_jwks_file``) and passes the same options
+to the setup.
+
+That JWKS is the one of the build. On the hosts,
+:doc:`ob-heartbeat(8) <ob-heartbeat>` follows the portal's key rotations
+afterwards; running the installer again with ``--force``, or the
+Ansible role again, puts the build-time JWKS back over a rotated one
+(re-running ``ob-*-setup`` by hand without ``--sso-jwks`` keeps the
+host's). Rebuild the artefacts after a key rotation on the portal before
+using them on existing hosts: under ``required``, a host given a JWKS
+without the key the portal now signs with refuses every answer.
+
+The JWKS belongs to the ``client_id`` of the build. A target enrolled
+under another ``client_id`` (policy ``modifiable``) gets
+``response_signing = off`` from the installer, with a warning (its
+``required`` is refused); the Ansible play stops until
+``ob_sso_jwks_src``, ``ob_sso_jwks_sha256`` and ``ob_sso_jwks_client_id``
+are set for it, or ``ob_response_signing`` is ``off``. Without a
+``client_id`` no JWKS is fetched and the artefacts get ``off``. When the
+fetch fails or the portal publishes no usable key (an RSA, EC or OKP
+signature key with a ``kid``) for the relying party, ``required`` stops
+the build; ``prefer`` builds artefacts with ``off`` and a warning, as
+the setup script does: the portal could not sign that client's answers
+anyway.
 
 Files
 -----
@@ -194,6 +252,12 @@ Replayable build from YAML (e.g. for CI):
 ::
 
    ob-builder --config build.yml --output-shell /tmp/boot --output-ansible /tmp/role
+
+Same, once the portal signs its answers:
+
+::
+
+   ob-builder --config build.yml --response-signing required --output-shell /tmp/boot
 
 See also
 --------

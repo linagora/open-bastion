@@ -22,6 +22,8 @@ cache_ttl = 300
 # Signed answers (off, prefer or required): same meaning and rules as in
 # openbastion.conf, see doc/references/security-reference.rst. An invalid value
 # is treated as required. Needs client_id (the expected audience).
+# ob-bastion-setup / ob-backend-setup write these three keys and install the
+# JWKS (--response-signing, --sso-jwks, --sso-jwks-sha256).
 #response_signing = off
 #client_id = pam-access
 #sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json

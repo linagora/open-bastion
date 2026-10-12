@@ -54,6 +54,22 @@ carries the host's server token as a Bearer credential, like the other
 ``/pam/`` calls; see :doc:`openbastion.conf(5) <openbastion.conf>` for the
 settings involved.
 
+Its answer is checked according to ``response_signing``, through
+:doc:`ob-verify-response(8) <ob-verify-response>`, like the NSS module's
+(which reads its own copy of the settings from ``nss_openbastion.conf``;
+this service reads ``openbastion.conf``). Under ``required`` an unsigned
+answer, an answer that does not verify, and a signed answer without
+``aud`` all count as "no answer": a forged ``found: false`` can therefore
+not terminate anybody. Under ``prefer`` an unsigned answer is still a
+verdict, with a warning in syslog.
+
+Without ``/usr/lib/open-bastion/ob-sign-lib.sh`` (a broken install) no
+answer can be checked: under ``response_signing = off``, or with no such
+key, the request is sent unsigned and its answer used as before signed
+answers existed; under any other value, an unknown one or an unreadable
+configuration included, nothing is sent and every user's status is
+unknown, so nobody is terminated.
+
 Each decision is logged through :manpage:`syslog(3)` under the
 ``ob-session-monitor`` tag: informational lines at ``auth.info``,
 transient failures at ``auth.warning`` and terminations at ``auth.crit``,
@@ -134,4 +150,5 @@ See also
 :doc:`openbastion.conf(5) <openbastion.conf>`,
 :doc:`ob-desktop-setup(8) <ob-desktop-setup>`,
 :doc:`ob-cache-admin(8) <ob-cache-admin>`,
+:doc:`ob-verify-response(8) <ob-verify-response>`,
 :manpage:`loginctl(1)`

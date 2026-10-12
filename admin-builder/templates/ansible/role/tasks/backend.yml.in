@@ -90,6 +90,12 @@
         + (['--max-security'] if ob_max_security else [])
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
+        + ['--response-signing', ob_response_signing | default('off')]
+        + (['--sso-jwks', ob_sso_jwks_file]
+           if (ob_sso_jwks_src | default('')) | length > 0 else [])
+        + (['--sso-jwks-sha256', ob_sso_jwks_sha256]
+           if (ob_sso_jwks_src | default('')) | length > 0
+              and (ob_sso_jwks_sha256 | default('')) | length > 0 else [])
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"

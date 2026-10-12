@@ -336,10 +336,12 @@ test_every_caller_signs() {
         "/pam/authorize|src/ob_client.c|add_signing_headers"
         "/pam/heartbeat|src/ob_client.c|add_signing_headers"
         "/pam/bastion-cert|src/ob-cert-daemon.c|ob_sign_compute"
-        "/pam/heartbeat|scripts/ob-heartbeat|ob_sign_request"
-        "/pam/whoami|scripts/ob-bastion-id|ob_sign_request"
+        "/pam/heartbeat|scripts/ob-heartbeat|ob_pam_post"
+        "/pam/whoami|scripts/ob-bastion-id|ob_pam_post"
         "/pam/authorize|scripts/ob-enroll|ob_sign_request"
-        "/pam/userinfo|scripts/ob-session-monitor|ob_sign_request"
+        "/pam/userinfo|scripts/ob-session-monitor|ob_pam_post"
+        # ob_pam_post (signed answers, #339) signs through ob_sign_request.
+        "/pam/|scripts/ob-sign-lib.sh|ob_sign_request POST \"\$path\""
     )
     local row endpoint file marker ok=1 detail=""
     for row in "${rows[@]}"; do

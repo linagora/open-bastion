@@ -155,6 +155,9 @@ man_pages = [
     ("references/man/ob-uninstall", "ob-uninstall",
      "Take Open Bastion off this host, ready for package removal",
      man_author, 8),
+    ("references/man/ob-verify-response", "ob-verify-response",
+     "Verify a signed answer of the portal for the shell callers",
+     man_author, 8),
     ("references/man/openbastion.conf", "openbastion.conf",
      "Configuration file of the Open Bastion PAM module", man_author, 5),
 ]

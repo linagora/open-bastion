@@ -121,6 +121,18 @@ jobs:
             exit 1 ;;
         esac
 
+    # The shell callers' checks of the portal's signed answers and the JWKS
+    # rotation (#339). It skips when ob-verify-response or the signing fixture
+    # is not built, and a skip would leave the trust anchor's only guard silent.
+    - name: The signed-answer suite must actually run
+      run: |
+        out=$(bash tests/test_ob_verify_response.sh 2>&1); echo "$out"
+        case "$out" in
+          *SKIP*)
+            echo "::error::tests/test_ob_verify_response.sh skipped; it must run in CI"
+            exit 1 ;;
+        esac
+
     # The loop above treats a SKIP as success, which is right for suites that
     # need docker or a portal. It is wrong for the fingerprint sink: that suite
     # is the only thing guarding the trust root moved in #249, and if it skipped
