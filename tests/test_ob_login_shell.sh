@@ -250,9 +250,10 @@ test_environment_is_scrubbed() {
         LC_TIME=en_GB.UTF-8 LC_BOGUS=x \
         SSH_AUTH_SOCK=/tmp/ssh-XXXXabcd/agent.123 \
         XDG_RUNTIME_DIR="/run/user/$uid" XDG_SESSION_ID=c42 XDG_SESSION_TYPE=tty \
-        XDG_SESSION_CLASS=user -- -c "$REC"
+        XDG_SESSION_CLASS=user LLNG_BASTION_VOUCHER=0f3b2c1d-4e5f-4a6b-8c7d-9e0f1a2b3c4d \
+        -- -c "$REC"
     recorder_ran || { fail "the recorder's environment is built from scratch" "the recorder did not run"; return; }
-    local allowed=" HOME LANG LANGUAGE LC_TIME LOGNAME PATH SHELL SSH_AUTH_SOCK SSH_CLIENT SSH_CONNECTION SSH_ORIGINAL_COMMAND SSH_TTY TERM USER XDG_RUNTIME_DIR XDG_SESSION_CLASS XDG_SESSION_ID XDG_SESSION_TYPE "
+    local allowed=" HOME LANG LANGUAGE LC_TIME LLNG_BASTION_VOUCHER LOGNAME PATH SHELL SSH_AUTH_SOCK SSH_CLIENT SSH_CONNECTION SSH_ORIGINAL_COMMAND SSH_TTY TERM USER XDG_RUNTIME_DIR XDG_SESSION_CLASS XDG_SESSION_ID XDG_SESSION_TYPE "
     names=$(env_names)
     for n in $names; do
         case "$allowed" in
@@ -266,6 +267,9 @@ test_environment_is_scrubbed() {
     [ "$(env_of LC_TIME)" = en_GB.UTF-8 ]                 || bad="$bad LC_TIME"
     [ "$(env_of SSH_AUTH_SOCK)" = /tmp/ssh-XXXXabcd/agent.123 ] || bad="$bad SSH_AUTH_SOCK"
     [ "$(env_of XDG_RUNTIME_DIR)" = "/run/user/$uid" ]    || bad="$bad XDG_RUNTIME_DIR"
+    # #347: without the voucher, ob-ssh cannot mint the next hop's certificate
+    [ "$(env_of LLNG_BASTION_VOUCHER)" = 0f3b2c1d-4e5f-4a6b-8c7d-9e0f1a2b3c4d ] \
+                                                          || bad="$bad LLNG_BASTION_VOUCHER"
     if [ -z "$bad" ]; then
         pass "the recorder's environment holds only the allow-listed, validated variables (BASH_ENV, LD_*, OB_*, a locale path... dropped)"
     else
@@ -279,7 +283,8 @@ test_kept_variables_are_validated() {
     for kv in "TERM=../../tmp/x" "TERM=xterm;id" "SSH_TTY=/tmp/tty" "SSH_TTY=/dev/../tmp/x" \
               "SSH_CLIENT=1.2.3.4 5 22;id" "SSH_CONNECTION=\$(id)" "LANG=/tmp/locale" \
               "LC_MESSAGES=../x" "SSH_AUTH_SOCK=relative/sock" "SSH_AUTH_SOCK=/tmp/../x" \
-              "XDG_RUNTIME_DIR=/tmp/runtime" "XDG_SESSION_ID=a b"; do
+              "XDG_RUNTIME_DIR=/tmp/runtime" "XDG_SESSION_ID=a b" \
+              "LLNG_BASTION_VOUCHER=\$(id)" "LLNG_BASTION_VOUCHER=../x"; do
         name=${kv%%=*}
         run_ls "$kv" -- -c "$REC"
         [ "$(env_of "$name")" = '<unset>' ] || bad="$bad [$kv]"

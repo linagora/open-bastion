@@ -277,6 +277,8 @@ helper, which is what writes it; on a host without one, the account's
 ``sudo`` is refused. ``sudo_nopasswd = true`` grants ``sudo`` with no proof
 of identity at all.
 
+.. _service-accounts-sudo-bypass:
+
 sudo bypasses the SSO token (including under maximum security)
 --------------------------------------------------------------
 
@@ -285,6 +287,19 @@ A service account's ``sudo`` rights come entirely from
 maximum security, where human users must present a fresh token. A service
 key with ``sudo_allowed``, and above all with
 ``sudo_nopasswd``, is therefore a standing local privilege outside the
-SSO-gated model: grant it sparingly, prefer no ``sudo`` or tightly-scoped
-``sudoers`` rules, and rotate these keys like any other long-lived
-credential.
+SSO-gated model: grant it sparingly, prefer no ``sudo``, and rotate these
+keys like any other long-lived credential.
+
+``sudo_allowed`` is all or nothing. With ``true``, the module adds the
+account to ``open-bastion-sudo`` at login, and that group's rule in
+``/etc/sudoers.d/open-bastion`` grants every command: a narrower
+``sudoers`` rule for the account changes nothing. To grant only a few
+commands:
+
+- **Maximum security**: not possible. The ``sudo`` stack asks the module
+  for every ``sudo``, and with ``sudo_allowed = false`` it refuses them
+  all, whatever ``sudoers`` says.
+- **The other scenarios**: leave ``sudo_allowed = false`` and write a
+  ``NOPASSWD`` rule for the account in your own ``/etc/sudoers.d`` file.
+  Their ``sudo`` stack lets accounts in ``/etc/passwd``, service accounts
+  included, through on ``sudoers`` alone.

@@ -47,6 +47,16 @@ here.
     whole rotation must be re-provisioned.
   - **`ob-verify-response`(8)**: verifies a signed answer for the shell
     callers, and lists the usable keys of a JWKS (`check-jwks`).
+- **Signed portal answers** (#339, `response_signing`): the PAM module
+  (`/pam/authorize`, `/pam/verify`, `/pam/heartbeat`) and the NSS module
+  (`/pam/userinfo`) can require the answer to be a JWS signed by the portal,
+  bound to the request's nonce and body and checked against a local JWKS
+  (`sso_jwks_file`, `sso_issuer`; a trailing `/` is ignored on both sides,
+  since LLNG's issuer is its `portal` URL). Modes `off` (default), `prefer`, `required`;
+  a refused answer is a transport error. The JWKS must be provisioned by hand
+  for now; distribution and rotation come in a later release. Needs plugins
+  with signed responses (lemonldap-ng-plugins#101). See
+  [doc/references/security-reference.rst](doc/references/security-reference.rst).
 - **`ob-uninstall`(8)** un-configures a bastion, standalone host or backend
   before the package is removed. Removing the package alone left sshd and PAM
   pointing at deleted files, which refused every SSH login. See
@@ -219,6 +229,12 @@ here.
   installer built before the fix keeps the bug, so rebuild it. The Ansible
   role was not affected. The documentation no longer presents `key_fingerprint` as an alternative
   to the key.
+- **`ob-session-monitor` sends the access token as its Bearer** (#342). It
+  sent the whole server token file, which `ob-enroll` writes as JSON, so
+  every `/pam/userinfo` call was refused and offline sessions never got a
+  real verdict from the portal. It now reads `.access_token` from a JSON file
+  (or the trimmed content of a plain-text one), like the PAM module, and
+  honours the `token_file` alias of `server_token_file`, last one winning.
 - **The `ob-builder` allowed-bastions question points at the right file**
   (#333). It said to tighten the list later in `openbastion.conf`, which has
   no such setting: the list lives in `/etc/open-bastion/allowed_bastions`.
