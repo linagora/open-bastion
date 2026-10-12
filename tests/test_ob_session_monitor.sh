@@ -334,6 +334,7 @@ token_case() {
         echo "PORTAL_URL='http://127.0.0.1:$PORT'"
         echo "CONFIG_FILE='$WORK/tok.conf'"
         echo 'SERVER_TOKEN=""'
+        echo ". '$ROOT_DIR/scripts/ob-sign-lib.sh'"
         echo 'SIGN_HEADERS=()'
         echo 'ob_sign_request() { SIGN_HEADERS=(); return 0; }'
         echo 'log_warn() { echo "WARN: $*" >&2; }'
