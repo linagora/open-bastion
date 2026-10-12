@@ -200,10 +200,21 @@ static int ob_sign_check_fd(int fd)
     return 0;
 }
 
-int ob_sign_load_secret(const char *conf_path, char **secret)
+/* Free a loaded value, wiping it first: the signing secret goes through here. */
+static void ob_sign_drop(char **value)
 {
-    if (!conf_path || !secret) return -1;
-    *secret = NULL;
+    if (*value) {
+        explicit_bzero(*value, strlen(*value));
+        free(*value);
+        *value = NULL;
+    }
+}
+
+int ob_sign_load_settings(const char *conf_path, char **secret, char **cert_pin)
+{
+    if (!conf_path || (!secret && !cert_pin)) return -1;
+    if (secret) *secret = NULL;
+    if (cert_pin) *cert_pin = NULL;
 
     int fd = open(conf_path, O_RDONLY | O_NOFOLLOW);
     if (fd < 0) return -1;
@@ -220,15 +231,15 @@ int ob_sign_load_secret(const char *conf_path, char **secret)
     }
 
     char line[OB_SIGN_CONF_LINE];
-    int rc = 1;  /* no secret in the file */
+    int rc = 0;
 
     while (fgets(line, sizeof(line), f)) {
         /*
          * A line that filled the buffer without a newline was truncated. For
-         * any other key that is someone else's problem, but truncating THIS
-         * value yields a wrong secret and therefore a signature the portal
-         * refuses -- a failure that looks like a portal problem and is not.
-         * Refuse to guess.
+         * any other key that is someone else's problem, but truncating one of
+         * THESE values yields a wrong secret -- a signature the portal refuses
+         * -- or a wrong pin -- a portal this host refuses. Either failure
+         * looks like a portal problem and is not. Refuse to guess.
          */
         bool complete = (strchr(line, '\n') != NULL) || feof(f);
 
@@ -238,7 +249,15 @@ int ob_sign_load_secret(const char *conf_path, char **secret)
 
         char *key = ob_sign_trim(line);
         if (*key == '#' || *key == ';') continue;
-        if (strcmp(key, "request_signing_secret") != 0) continue;
+
+        char **out = NULL;
+        if (secret && strcmp(key, "request_signing_secret") == 0) {
+            out = secret;
+        } else if (cert_pin && strcmp(key, "cert_pin") == 0) {
+            out = cert_pin;
+        } else {
+            continue;
+        }
 
         if (!complete) {
             rc = -1;
@@ -247,23 +266,19 @@ int ob_sign_load_secret(const char *conf_path, char **secret)
 
         /*
          * No inline-comment stripping: '#' is an ordinary character in a
-         * generated secret, and config.c exempts this exact key for the same
-         * reason (key_holds_opaque_secret).
+         * generated secret, and config.c exempts these exact keys for the
+         * same reason (key_holds_opaque_secret).
          */
         char *value = ob_sign_strip_quotes(ob_sign_trim(eq + 1));
 
-        /* Last assignment wins, as in config.c. */
-        free(*secret);
-        *secret = NULL;
+        /* Last assignment wins, as in config.c; empty counts as absent. */
+        ob_sign_drop(out);
         if (*value) {
-            *secret = strdup(value);
-            if (!*secret) {
+            *out = strdup(value);
+            if (!*out) {
                 rc = -1;
                 break;
             }
-            rc = 0;
-        } else {
-            rc = 1;
         }
     }
 
@@ -271,12 +286,16 @@ int ob_sign_load_secret(const char *conf_path, char **secret)
     fclose(f);
 
     if (rc != 0) {
-        if (*secret) {
-            explicit_bzero(*secret, strlen(*secret));
-            free(*secret);
-            *secret = NULL;
-        }
+        if (secret) ob_sign_drop(secret);
+        if (cert_pin) ob_sign_drop(cert_pin);
     }
 
     return rc;
+}
+
+int ob_sign_load_secret(const char *conf_path, char **secret)
+{
+    if (!secret) return -1;
+    if (ob_sign_load_settings(conf_path, secret, NULL) != 0) return -1;
+    return *secret ? 0 : 1;
 }

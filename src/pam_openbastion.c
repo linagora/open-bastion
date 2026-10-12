@@ -1440,6 +1440,11 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
                          "prefer or required");
         goto error;
     }
+    if (validate_result == -8) {
+        OB_LOG_ERR(pamh, "Configuration error: cert_pin must be sha256//<base64> "
+                         "or the path of a public key, several separated by ';'");
+        goto error;
+    }
     if (validate_result != 0) {
         OB_LOG_ERR(pamh, "Invalid configuration");
         goto error;

@@ -80,7 +80,8 @@ add_executable(test_ob_cert_proto test_ob_cert_proto.c ../src/ob_cert_proto.c)
 target_include_directories(test_ob_cert_proto PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_ob_cert_proto COMMAND test_ob_cert_proto)
 
-add_executable(test_ob_client test_ob_client.c ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c)
+add_executable(test_ob_client test_ob_client.c ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c
+    ../src/str_utils.c)
 target_include_directories(test_ob_client PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CURL_INCLUDE_DIRS}

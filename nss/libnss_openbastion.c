@@ -46,6 +46,14 @@
 #ifndef NSS_OB_CONF
 #define NSS_OB_CONF "/etc/open-bastion/nss_openbastion.conf"
 #endif
+/*
+ * request_signing_secret and cert_pin are read from the PAM module's file,
+ * not duplicated here: the secret must stay in a 0600 file, and one pin per
+ * host is what an operator rotates (#332).
+ */
+#ifndef NSS_OB_PAM_CONF
+#define NSS_OB_PAM_CONF "/etc/open-bastion/openbastion.conf"
+#endif
 #ifndef NSS_CONF_TRUSTED_UID
 #define NSS_CONF_TRUSTED_UID ((uid_t)0)
 #endif
@@ -184,6 +192,13 @@ typedef struct {
     int response_signing;         /* ob_response_signing_t */
     char *sso_jwks_file;          /* JWKS the signed answers are checked against */
     char *sso_issuer;             /* expected `iss`; NULL: portal_url */
+    /* From NSS_OB_PAM_CONF, (re)loaded at a portal call (#332) */
+    int portal_settings;          /* 0: not loaded, 1: loaded, -1: unusable */
+    char *signing_secret;         /* request_signing_secret, or NULL */
+    char *cert_pin;               /* cert_pin, or NULL */
+    ino_t portal_settings_ino;    /* the file they were read from */
+    off_t portal_settings_size;
+    struct timespec portal_settings_mtime;  /* to the ns: a pin is fixed-size */
 } nss_llng_config_t;
 
 /* Cache entry */
@@ -2152,6 +2167,112 @@ static struct json_object *open_userinfo_answer(const ob_jws_keyset_t *keys,
     return resp;
 }
 
+/* Forget the loaded secret and pin. Called under g_init_lock. */
+static void portal_settings_drop(void)
+{
+    if (g_config.signing_secret) {
+        explicit_bzero(g_config.signing_secret, strlen(g_config.signing_secret));
+        free(g_config.signing_secret);
+        g_config.signing_secret = NULL;
+    }
+    free(g_config.cert_pin);
+    g_config.cert_pin = NULL;
+}
+
+/* (Re)read NSS_OB_PAM_CONF. Called under g_init_lock. */
+static void portal_settings_load(const struct stat *st)
+{
+    char *s = NULL, *p = NULL;
+    int was = g_config.portal_settings;
+
+    portal_settings_drop();
+    if (!st || ob_sign_load_settings(NSS_OB_PAM_CONF, &s, &p) != 0) {
+        /* Logged once per failure, not on every lookup while it lasts. */
+        if (was != -1) {
+            syslog(LOG_ERR, "libnss_openbastion: cannot read request_signing_secret "
+                   "and cert_pin from %s (missing, unreadable, or readable by "
+                   "group/other); not querying the portal", NSS_OB_PAM_CONF);
+        }
+        g_config.portal_settings = -1;
+        return;
+    }
+    if (p && !str_cert_pin_valid(p)) {
+        if (was != -1) {
+            syslog(LOG_ERR, "libnss_openbastion: invalid cert_pin in %s (expected "
+                   "sha256//<base64> or the path of a public key); not querying "
+                   "the portal", NSS_OB_PAM_CONF);
+        }
+        if (s) {
+            explicit_bzero(s, strlen(s));
+            free(s);
+        }
+        free(p);
+        g_config.portal_settings = -1;
+        return;
+    }
+    g_config.signing_secret = s;
+    g_config.cert_pin = p;
+    g_config.portal_settings = 1;
+    g_config.portal_settings_ino = st->st_ino;
+    g_config.portal_settings_size = st->st_size;
+    g_config.portal_settings_mtime = st->st_mtim;
+}
+
+/*
+ * Copy the request-signing secret and the certificate pin for one portal call
+ * (#332). Both live in the PAM module's openbastion.conf, which only root can
+ * read -- like the server token, so a process that got this far can.
+ *
+ * Read at a portal call rather than in load_config(), and again whenever the
+ * file changes, as the server token is: a long-lived process (nscd) must not
+ * keep refusing the portal because it started before the setup wrote the
+ * file, nor keep an old pin after the operator rotated it.
+ *
+ * Returns -1 when the file cannot be used: the call must then not be made.
+ * Sending it unsigned would be refused by a portal in
+ * pamAccessRequestSigningMode=required, and sending it unpinned would drop the
+ * one protection cert_pin exists for -- both silently.
+ */
+static int portal_call_settings(char **secret, char **pin)
+{
+    struct stat st;
+    int have = stat(NSS_OB_PAM_CONF, &st) == 0;
+
+    *secret = NULL;
+    *pin = NULL;
+
+    pthread_mutex_lock(&g_init_lock);
+    if (g_config.portal_settings != 1 || !have
+        || st.st_ino != g_config.portal_settings_ino
+        || st.st_size != g_config.portal_settings_size
+        || st.st_mtim.tv_sec != g_config.portal_settings_mtime.tv_sec
+        || st.st_mtim.tv_nsec != g_config.portal_settings_mtime.tv_nsec) {
+        portal_settings_load(have ? &st : NULL);
+    }
+    int ok = g_config.portal_settings == 1;
+    if (ok && g_config.signing_secret) {
+        *secret = strdup(g_config.signing_secret);
+        if (!*secret) ok = 0;
+    }
+    if (ok && g_config.cert_pin) {
+        *pin = strdup(g_config.cert_pin);
+        if (!*pin) ok = 0;
+    }
+    pthread_mutex_unlock(&g_init_lock);
+
+    if (!ok) {
+        if (*secret) {
+            explicit_bzero(*secret, strlen(*secret));
+            free(*secret);
+            *secret = NULL;
+        }
+        free(*pin);
+        *pin = NULL;
+        return -1;
+    }
+    return 0;
+}
+
 /* Query LLNG server for user info */
 static int query_llng_userinfo(const char *username, struct passwd *pw,
                                 char *buffer, size_t buflen)
@@ -2174,24 +2295,50 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
         return -1;
     }
 
+    char *signing_secret = NULL, *cert_pin = NULL;
+    if (portal_call_settings(&signing_secret, &cert_pin) != 0) {
+        explicit_bzero(server_token, strlen(server_token));
+        free(server_token);
+        return -1;
+    }
+
     ob_jws_keyset_t *keys = NULL;
     char nonce[OB_SIGN_NONCE_SIZE] = "";
     int ask_signed = userinfo_keys(&keys);
-    if (ask_signed > 0) {
+    /* One nonce for both: the portal echoes the signed request's X-Nonce. */
+    if (ask_signed > 0 || signing_secret) {
         ob_sign_generate_nonce(nonce, sizeof(nonce));
     }
-    if (ask_signed < 0 || (ask_signed > 0 && !nonce[0])) {
+    if (ask_signed < 0 || ((ask_signed > 0 || signing_secret) && !nonce[0])) {
         ob_jws_keyset_free(keys);
         explicit_bzero(server_token, strlen(server_token));
         free(server_token);
+        if (signing_secret) {
+            explicit_bzero(signing_secret, strlen(signing_secret));
+            free(signing_secret);
+        }
+        free(cert_pin);
         return -1;
     }
 
     CURL *curl = curl_easy_init();
     if (!curl) {
         ob_jws_keyset_free(keys);
+        explicit_bzero(server_token, strlen(server_token));
         free(server_token);
+        if (signing_secret) {
+            explicit_bzero(signing_secret, strlen(signing_secret));
+            free(signing_secret);
+        }
+        free(cert_pin);
         return -1;
+    }
+
+    /* libcurl keeps its own copy of a string option. */
+    if (cert_pin) {
+        curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, cert_pin);
+        free(cert_pin);
+        cert_pin = NULL;
     }
 
     /* Build URL */
@@ -2202,6 +2349,33 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     struct json_object *req_json = json_object_new_object();
     json_object_object_add(req_json, "user", json_object_new_string(username));
     const char *req_body = json_object_to_json_string(req_json);
+
+    /*
+     * Sign the call when the deployment has a secret (#332). /pam/userinfo
+     * goes through the portal's caller gate like every /pam/ endpoint, so
+     * under pamAccessRequestSigningMode=required an unsigned lookup is refused
+     * and no SSO user resolves. Over the exact bytes sent as the body.
+     */
+    long sign_ts = 0;
+    char signature[OB_SIGN_SIGNATURE_SIZE] = "";
+    if (signing_secret) {
+        sign_ts = (long)time(NULL);
+        ob_sign_compute(signing_secret, sign_ts, nonce, "POST", "/pam/userinfo",
+                        req_body, signature, sizeof(signature));
+        explicit_bzero(signing_secret, strlen(signing_secret));
+        free(signing_secret);
+        signing_secret = NULL;
+        if (!signature[0]) {
+            /* Never unsigned: the portal reads a partial signature as malformed. */
+            syslog(LOG_ERR, "libnss_openbastion: cannot sign the /pam/userinfo request");
+            explicit_bzero(server_token, strlen(server_token));
+            free(server_token);
+            json_object_put(req_json);
+            curl_easy_cleanup(curl);
+            ob_jws_keyset_free(keys);
+            return -1;
+        }
+    }
 
     /* Build Authorization header from the snapshot, then drop the token copy:
      * auth_header now holds its own bytes and server_token is no longer needed.
@@ -2234,11 +2408,21 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, auth_header);
-    if (ask_signed) {
+    if (ask_signed || signature[0]) {
         char nonce_header[128];
         snprintf(nonce_header, sizeof(nonce_header), "X-Nonce: %s", nonce);
-        headers = curl_slist_append(headers, "Accept: " OB_JWS_MEDIA_TYPE);
         headers = curl_slist_append(headers, nonce_header);
+    }
+    if (ask_signed) {
+        headers = curl_slist_append(headers, "Accept: " OB_JWS_MEDIA_TYPE);
+    }
+    if (signature[0]) {
+        char sig_header[160];
+        snprintf(sig_header, sizeof(sig_header), "X-Timestamp: %ld", sign_ts);
+        headers = curl_slist_append(headers, sig_header);
+        snprintf(sig_header, sizeof(sig_header), "X-Signature-256: sha256=%s",
+                 signature);
+        headers = curl_slist_append(headers, sig_header);
     }
 
     http_response_t response = {0};

@@ -100,6 +100,10 @@ mkdir -p /etc/open-bastion /var/lib/open-bastion /var/cache/nss_llng/byname
 chmod 711 /var/cache/nss_llng /var/cache/nss_llng/byname
 echo test-token > /var/lib/open-bastion/token
 chmod 600 /var/lib/open-bastion/token
+# NSS reads request_signing_secret and cert_pin here and refuses the portal
+# without it (#332); neither is set, so requests go unsigned and unpinned.
+echo "portal_url = http://127.0.0.1:8080" > /etc/open-bastion/openbastion.conf
+chmod 600 /etc/open-bastion/openbastion.conf
 
 nss_conf() {  # $1 = default_shell, $2 = force_shell ("" for none)
     {
