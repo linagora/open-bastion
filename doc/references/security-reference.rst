@@ -75,6 +75,8 @@ Every caller signs: the PAM module (``/pam/verify``, ``/pam/authorize``, ``/pam/
 
 The shell callers sign through ``ob-sign-request``, never through ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL takes the HMAC key on the command line and offers no form that reads it from a file or the environment; ``/proc/<pid>/cmdline`` is world-readable, so on a bastion that one-liner would hand the fleet-wide signing secret to every user with a shell, every few minutes, forever. ``ob-sign-request`` reads the secret from the root-only configuration file and takes the body on stdin — which matters too, since ``ob-heartbeat`` signs a body carrying the host's ``refresh_token``.
 
+**Why a shared HMAC secret rather than mTLS.** The secret is one key for the whole portal (``pamAccessRequestSigningSecret``), so it identifies no host: the per-host token obtained at enrollment does. The signature only adds integrity and replay protection on top of TLS, and a compromised host leaks that layer, not the identity of the other hosts. mTLS would need a per-host X.509 client certificate, hence a second PKI to issue, rotate and revoke at enrollment, which today yields only OAuth tokens. It would also be enforced wherever TLS terminates, often a reverse proxy that then hands the portal a header to trust, whereas the HMAC is checked by the pam-access plugin itself. mTLS remains a track for R5 in :doc:`/security/99-risk-reduce`.
+
 Signed answers (optional)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
