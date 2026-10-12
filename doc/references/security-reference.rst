@@ -85,7 +85,7 @@ Without this, the portal's answers are trusted on TLS alone: whoever terminates 
 =================== ===================================================
 Claim               Meaning
 =================== ===================================================
-``iss``             The portal; must equal ``sso_issuer``
+``iss``             The portal; must equal ``sso_issuer`` (trailing ``/`` ignored)
 ``aud``             The ``client_id`` of the caller
 ``endpoint``        ``authorize``, ``verify``, ``userinfo`` or ``heartbeat``
 ``iat`` / ``exp``   Validity window

@@ -173,8 +173,9 @@ Signed answers
 
 .. option:: sso_issuer
 
-   Expected ``iss`` of a signed answer. Default: ``portal_url`` without a
-   trailing slash.
+   Expected ``iss`` of a signed answer. Default: ``portal_url``. Trailing
+   slashes are ignored on both sides, since LLNG's issuer is its ``portal``
+   setting, which normally ends with ``/``.
 
 ``client_id`` must be set: it is the expected ``aud``. The NSS module reads
 these four keys from ``nss_openbastion.conf``.

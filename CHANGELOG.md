@@ -23,7 +23,8 @@ here.
   (`/pam/authorize`, `/pam/verify`, `/pam/heartbeat`) and the NSS module
   (`/pam/userinfo`) can require the answer to be a JWS signed by the portal,
   bound to the request's nonce and body and checked against a local JWKS
-  (`sso_jwks_file`, `sso_issuer`). Modes `off` (default), `prefer`, `required`;
+  (`sso_jwks_file`, `sso_issuer`; a trailing `/` is ignored on both sides,
+  since LLNG's issuer is its `portal` URL). Modes `off` (default), `prefer`, `required`;
   a refused answer is a transport error. The JWKS must be provisioned by hand
   for now; distribution and rotation come in a later release. Needs plugins
   with signed responses (lemonldap-ng-plugins#101). See
