@@ -107,9 +107,9 @@ publique et enregistre le certificat signé à côté de sa clé privée :
        Note over Bastion: 6. Génère paire de clés éphémère ed25519<br/>(clé privée ne quitte pas le bastion)
        Bastion->>LLNG: 7. ob-cert-request via socket Unix<br/>→ ob-cert-daemon déduit user via SO_PEERCRED<br/>POST /pam/bastion-cert<br/>Bearer=jeton_serveur_bastion<br/>body={user, target_host, clé_pub_éphémère, voucher}
        Note over LLNG: 8. Vérifie le voucher (bastion_id, user)<br/>+ gardes du jeton (grant device_code, scope pam)<br/>PAS de vérif de groupe ici — le voucher fait foi<br/>Signe clé_pub_éphémère avec CA ssh-ca
-       LLNG-->>Bastion: 9. Certificat éphémère (~120s)<br/>principal=user, source-address=IP_bastion<br/>key-id=bastion=<id>;user=<u>;target=<h>
+       LLNG-->>Bastion: 9. Certificat éphémère (~120s)<br/>principal=user, source-address=IP_bastion<br/>key-id=bastion=<id>#59;user=<u>#59;target=<h>
        Bastion->>Backend: 10. ssh -i <clé_éph> -o CertificateFile=<cert><br/>(ré-origination : le bastion s'authentifie)
-       Note over Backend: 11. sshd : vérifie CA, fenêtre de validité,<br/>source-address (IP bastion), principal<br/>AuthorizedPrincipalsCommand : key-id bastion=<id>;<br/>bastion_id ∈ /etc/open-bastion/allowed_bastions
+       Note over Backend: 11. sshd : vérifie CA, fenêtre de validité,<br/>source-address (IP bastion), principal<br/>AuthorizedPrincipalsCommand : key-id bastion=<id>#59;<br/>bastion_id ∈ /etc/open-bastion/allowed_bastions
        Backend->>LLNG: 12. PAM: /pam/authorize<br/>user=X, host=backend
        LLNG-->>Backend: 13. authorized: true
        Backend-->>Client: 14. Session SSH établie

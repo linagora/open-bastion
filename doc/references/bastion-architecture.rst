@@ -162,7 +162,7 @@ The bastion vouches for the user by obtaining a short-lived LLNG-signed SSH cert
        Bastion->>Bastion: ob-cert-request via Unix socket /run/open-bastion/cert.sock
        Bastion->>LLNG: POST /pam/bastion-cert (Bearer=server token,<br/>body={voucher, pubkey, user, target_host, target_group})
        Note over LLNG: Re-checks gates: device-code grant, pam:server scope,<br/>per-(bastion_id,user) voucher (group already enforced at voucher mint)
-       LLNG-->>Bastion: Signed user cert (principal=user, ttl≈120s,<br/>key-id=bastion=<id>;user=<u>;target=<host>,<br/>source-address=bastion IP)
+       LLNG-->>Bastion: Signed user cert (principal=user, ttl≈120s,<br/>key-id=bastion=<id>#59;user=<u>#59;target=<host>,<br/>source-address=bastion IP)
 
        Bastion->>Backend: ssh -i <eph> -o CertificateFile=<cert> user@backend
        Note over Backend: sshd: TrustedUserCAKeys validates CA sig,<br/>source-address critical option rejects off-bastion IPs,<br/>AuthorizedPrincipalsCommand checks key-id bastion=<id> ∈ allowed_bastions
@@ -546,8 +546,8 @@ Architecture
        proxy -->|1. Call via Unix socket| client
        client -->|2. /run/open-bastion/cert.sock| daemon
        daemon -->|3. SO_PEERCRED: derive user| daemon
-       daemon -->|4. POST {voucher, pubkey, user, target}| bastion_cert
-       bastion_cert -->|5. Signed cert (~120s)| daemon
+       daemon -->|"4. POST {voucher, pubkey, user, target}"| bastion_cert
+       bastion_cert -->|"5. Signed cert (~120s)"| daemon
        daemon -->|6. cert| client
        client -->|7. cert| proxy
        proxy -->|8. ssh -i eph -o CertificateFile=cert| sshd

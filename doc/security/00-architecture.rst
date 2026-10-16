@@ -26,28 +26,28 @@ Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open 
 
    flowchart TB
        subgraph Client["Client SSH"]
-           cert["Certificat signé\npar CA LLNG (1 an)"]
+           cert["Certificat signé<br/>par CA LLNG (1 an)"]
        end
 
        subgraph Infra["Infrastructure"]
            subgraph Bastion["Bastion"]
-               sshd_b["sshd\nTrustedCA + KRL\nAuthorizedKeysFile none"]
-               pam_b["PAM\n/pam/authorize"]
+               sshd_b["sshd<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none"]
+               pam_b["PAM<br/>/pam/authorize"]
            end
 
            subgraph Backend["Backend"]
-               sshd_be["sshd\nTrustedCA + KRL\nAuthorizedKeysFile none"]
-               pam_be["PAM\n/pam/authorize\n+ allowlist bastions"]
-               sudo_be["sudo\nToken LLNG\n(réauth SSO)"]
+               sshd_be["sshd<br/>TrustedCA + KRL<br/>AuthorizedKeysFile none"]
+               pam_be["PAM<br/>/pam/authorize<br/>+ allowlist bastions"]
+               sudo_be["sudo<br/>Token LLNG<br/>(réauth SSO)"]
            end
        end
 
-       LLNG["Portail LLNG\n(CA, authorize, bastion-cert, KRL)"]
+       LLNG["Portail LLNG<br/>(CA, authorize, bastion-cert, KRL)"]
 
        Client -->|SSH + certificat| Bastion
-       Bastion -->|SSH + cert éphémère (source-address épinglée)| Backend
+       Bastion -->|"SSH + cert éphémère (source-address épinglée)"| Backend
        pam_b -->|/pam/authorize → voucher| LLNG
-       pam_be -->|/pam/authorize\n/pam/verify (sudo)| LLNG
+       pam_be -->|"/pam/authorize<br/>/pam/verify (sudo)"| LLNG
 
 D'autres architectures moins restrictives sont possibles (serveur isolé, sans CA, sans bastion), mais cette étude se concentre sur la configuration offrant le meilleur profil de risque.
 
@@ -175,24 +175,24 @@ Architecture
 
    flowchart LR
        subgraph Bastion["Serveur Bastion"]
-           proxy["ob-ssh\n(utilisateur)"]
-           client["ob-cert-request\n(non privilégié)"]
-           daemon["ob-cert-daemon\n(root, socket-activé)"]
-           voucher["LLNG_BASTION_VOUCHER\n(pam_putenv, tmpfs)"]
+           proxy["ob-ssh<br/>(utilisateur)"]
+           client["ob-cert-request<br/>(non privilégié)"]
+           daemon["ob-cert-daemon<br/>(root, socket-activé)"]
+           voucher["LLNG_BASTION_VOUCHER<br/>(pam_putenv, tmpfs)"]
        end
 
        subgraph LLNG["Portail LLNG"]
-           authorize["/pam/authorize\n(émet le voucher)"]
-           bastion_cert["/pam/bastion-cert\n(signe le cert éphémère)"]
+           authorize["/pam/authorize<br/>(émet le voucher)"]
+           bastion_cert["/pam/bastion-cert<br/>(signe le cert éphémère)"]
            sshca["CA ssh-ca"]
        end
 
        subgraph Backend["Serveur Backend"]
-           sshd_be["sshd\nTrustedUserCAKeys + source-address\nAuthorizedPrincipalsCommand →\nob-ssh-principals (key-id + allowed_bastions)"]
-           pam_be["pam_openbastion\n/pam/authorize (autorisation LLNG)"]
+           sshd_be["sshd<br/>TrustedUserCAKeys + source-address<br/>AuthorizedPrincipalsCommand →<br/>ob-ssh-principals (key-id + allowed_bastions)"]
+           pam_be["pam_openbastion<br/>/pam/authorize (autorisation LLNG)"]
        end
 
-       authorize -->|voucher lié à (bastion_id, user)| voucher
+       authorize -->|"voucher lié à (bastion_id, user)"| voucher
        proxy -->|1. voucher + clé pub éphémère| client
        client -->|2. socket /run/open-bastion/cert.sock| daemon
        daemon -->|3. SO_PEERCRED: dérive user| daemon
