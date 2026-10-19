@@ -212,8 +212,9 @@
 # User creation
 # ==============================================================================
 
-# Create the Unix account on first login when it does not exist yet. The
-# primary group must already exist locally. Alias: create_user_enabled
+# Create an SSO user's Unix account on first login when it does not exist yet.
+# The primary group must already exist locally. Service accounts are never
+# created. Alias: create_user_enabled
 # create_user = false
 
 # Login shell of a created account when the portal supplies none or an
