@@ -321,7 +321,10 @@ got the `shell` of `service-accounts.conf`, or the module's default.
 `uid`, `gid`, `shell`, `home`, `gecos`, `sudo_allowed` and `sudo_nopasswd` in
 `service-accounts.conf` are ignored, with a warning in the logs; nothing is
 refused. Remove them once the local account and the `sudoers` rule match what
-they said: only the section name and `key_fingerprint` remain.
+they said: only the section name and `key_fingerprint` remain. A section the
+old module dropped for a `shell` or `home` outside the approved lists is now
+loaded, so its name is exempt from the SSO: delete the sections you do not
+want.
 
 ---
 

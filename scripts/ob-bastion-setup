@@ -1405,10 +1405,13 @@ _ob_drop_service_keys_dropin() {
 
 # A service account is a plain local account the operator creates (#353).
 # Report every name service-accounts.conf lists that `files` does not know --
-# sshd refuses such a login before any key is looked up -- and never create
-# one: the uid, the shell and the sudo rights are the operator's.
+# its login is refused, by sshd or by pam_openbastion -- and never create one:
+# the uid, the shell and the sudo rights are the operator's.
 _ob_warn_missing_service_accounts() {
-    local conf="${OB_SERVICE_ACCOUNTS_CONF:-/etc/open-bastion/service-accounts.conf}"
+    local conf="${OB_SERVICE_ACCOUNTS_CONF:-}"
+    [ -n "$conf" ] || conf=$(conf_value "$OB_CONFIG" service_accounts_file)
+    [ -n "$conf" ] || conf=$(conf_value "$OB_CONFIG" service_accounts)
+    [ -n "$conf" ] || conf=/etc/open-bastion/service-accounts.conf
     local name missing="" shell="/bin/bash"
     [ -r "$conf" ] || return 0
     while IFS= read -r name; do
@@ -1418,10 +1421,15 @@ _ob_warn_missing_service_accounts() {
     # bash reads ~/.bashrc before the recorder ForceCommand when sshd starts it.
     if records_sessions; then shell="/usr/sbin/ob-login-shell"; fi
     warn "Service account(s) listed in $conf but not in /etc/passwd:$missing"
-    warn "Open Bastion does not create them; until you do, sshd refuses their"
-    warn "logins. For each one:"
+    warn "Open Bastion does not create them; until you do, their logins are"
+    warn "refused. For each one:"
     warn "    useradd --system --create-home --shell $shell <name>"
-    warn "sudo, if they need it, is a sudoers rule of yours: Open Bastion grants none."
+    if [ "$MAX_SECURITY" = "true" ]; then
+        warn "The maximum-security sudo stack refuses every local account,"
+        warn "service accounts included: a sudoers rule alone grants them nothing."
+    else
+        warn "sudo, if they need it, is a sudoers rule of yours: Open Bastion grants none."
+    fi
 }
 
 # ExposeAuthInfo comes with the AuthorizedKeysCommand, not left to Mode E.
