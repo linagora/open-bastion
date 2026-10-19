@@ -215,6 +215,11 @@ here.
 
 ### Fixed
 
+- **A recorded session exits with its command's status again** (#355), as
+  `ob-session-recorder(8)` says. The 0.4.0 fix (`script -e`) was lost when
+  0.5.0 moved the recorder to the sink (#151), so since 0.5.0 every recorded
+  session — a service account's command, or `ob-ssh` to a backend that refused
+  the user — exited 0 on the client side. An end-to-end test now guards it.
 - **`site.yml` plays the roles in deployment order** (#338), not in the order
   the config asked for them: bastion, then standalone, then backend. With
   `allowed_bastions: null` a backend collects the bastion ids while it
