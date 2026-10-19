@@ -117,6 +117,20 @@ here.
   `ob-bastion-setup --enable-service-keys` names the listed accounts missing
   from `/etc/passwd`, without creating them. See
   [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
+- **`ob-builder`: service accounts are created by the operator** (#353, builder
+  side). A `service_accounts:` entry now carries `name`, `key_fingerprint` and
+  `public_key`/`public_key_file` only, and the rendered
+  `service-accounts.conf` holds a section and `key_fingerprint` per account.
+  `uid`, `gid`, `shell`, `home`, `gecos`, `sudo_allowed` and `sudo_nopasswd`
+  in an existing YAML are ignored with one warning per account naming them
+  (the config still loads), and `--save-config` no longer writes them. The
+  questionnaire no longer asks for them and says the accounts must exist on
+  the target. The shell installer and the Ansible role check
+  (`getent passwd`) that each declared account exists and warn with the
+  `useradd` to run when it does not, suggesting
+  `--shell /usr/sbin/ob-login-shell` on a host that records sessions
+  (bastion/standalone with the recorder); they never create it, and the check
+  never fails the run (also in Ansible check mode).
 - **One setup script for the three roles** (#288): `ob-backend-setup` and
   `ob-standalone-setup` are symlinks to `ob-bastion-setup`, documented in
   `ob-bastion-setup`(8). **`--node-role` now configures the role it names**

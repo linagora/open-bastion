@@ -136,6 +136,14 @@ replace || if false; then
 suite   || tests/test_ob_builder_service_accounts.sh
 why     || #263: the bundle must deploy <name>.pub, or the account cannot log in.
 
+id      || builder-missing-account-warning
+file    || admin-builder/templates/shell/installer.sh.in
+search  || getent passwd "${_sa_name}" >/dev/null 2>&1 && continue
+replace || true && continue
+suite   || tests/test_ob_builder_service_accounts.sh
+why     || #353: open-bastion never creates a service account, so the installer
+why     || must say a declared one is missing, or its login is refused silently.
+
 id      || systemd-units-one-place
 create  || debian/open-bastion-mutant.service
 replace || [Unit]\nDescription=a duplicate unit, as before #254

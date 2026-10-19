@@ -122,10 +122,10 @@ set_rich_state() {
     SIGN_WITH="0xDEADBEEF"
     SAVE_CONFIG_SECRET=1
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack ci-ansible "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" true true /bin/bash /home/ci-ansible "Ansible \"CI\" bot" 6001 6001 "")"
+        "$(_sa_pack ci-ansible "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" "")"
     )
     if [ -n "$PUBKEY" ]; then
-        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack backup "$PUBKEY_FP" false false "" "" "" "" "" "$PUBKEY")")
+        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack backup "$PUBKEY_FP" "$PUBKEY")")
     fi
 }
 
@@ -448,9 +448,9 @@ test_pubkey_comment_dropped() {
     [ -n "$PUBKEY" ] || { echo "SKIP: ssh-keygen required"; return; }
     local cfg="$TEST_TMPDIR/keycomment.yml" got rc
     ( set_rich_state
-      SERVICE_ACCOUNTS_RECORDS=("$(_sa_pack backup "$PUBKEY_FP" false false "" "" "" "" "" "${PUBKEY% *} host #3")")
+      SERVICE_ACCOUNTS_RECORDS=("$(_sa_pack backup "$PUBKEY_FP" "${PUBKEY% *} host #3")")
       validate_inputs >/dev/null 2>&1; save_config "$cfg" >/dev/null 2>&1 ); rc=$?
-    got=$( reset_state; load_with awk "$cfg" 2>/dev/null; _sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]}" )
+    got=$( reset_state; load_with awk "$cfg" 2>/dev/null; _sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]}" )
     if [ "$rc" -eq 0 ] && [ "$got" = "$(cut -d' ' -f1,2 <<<"$PUBKEY")" ]; then
         test_pass "public key with an unwritable comment: saved without the comment"
     else
@@ -458,15 +458,28 @@ test_pubkey_comment_dropped() {
     fi
 }
 
-test_gecos_checked_on_entry() {
+# #353: the account is created by hand, so the questionnaire asks for a name and
+# a fingerprint and nothing else (no sudo, shell, home, GECOS, uid, gid).
+test_questionnaire_asks_name_and_fingerprint_only() {
     local got
     got=$( reset_state
-           set_answers "y" "svc" "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" "n" \
-               "Ops #2" "Ops 2" "" "" "" "" "n"
+           set_answers "y" "svc" "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" "n"
            collect_service_accounts_interactive >/dev/null 2>&1
-           printf '%s|%s' "$(_sa_field 7 "${SERVICE_ACCOUNTS_RECORDS[0]}")" "$(answers_left)" )
-    [ "$got" = "Ops 2|0" ] && test_pass "questionnaire: a GECOS the config cannot carry is asked again" \
-                           || test_fail "GECOS not re-asked: '$got'"
+           printf '%s|%s|%s' "${#SERVICE_ACCOUNTS_RECORDS[@]}" "$(_sa_field 1 "${SERVICE_ACCOUNTS_RECORDS[0]}")" "$(answers_left)" )
+    [ "$got" = "1|svc|0" ] && test_pass "questionnaire: service accounts ask name and fingerprint only" \
+                           || test_fail "questionnaire asked more (or less): '$got'"
+}
+
+# #353: a saved config carries none of the pre-#353 account keys.
+test_saved_config_has_no_creation_keys() {
+    local cfg="$TEST_TMPDIR/nocreate.yml" rc
+    ( set_rich_state; validate_inputs >/dev/null 2>&1; save_config "$cfg" >/dev/null 2>&1 ); rc=$?
+    if [ "$rc" -eq 0 ] && grep -q '^  - name: "ci-ansible"$' "$cfg" \
+       && ! grep -qE '^[[:space:]]+(sudo_allowed|sudo_nopasswd|shell|home|gecos|uid|gid):' "$cfg"; then
+        test_pass "save-config: service accounts carry no sudo/shell/home/gecos/uid/gid"
+    else
+        test_fail "saved config still writes pre-#353 account keys (rc=$rc)" "$(cat "$cfg" 2>/dev/null)"
+    fi
 }
 
 test_sign_with_checked_early() {
@@ -602,7 +615,8 @@ test_dry_run_writes_nothing
 test_replay_command_in_header
 test_secret_unquotable_warns
 test_pubkey_comment_dropped
-test_gecos_checked_on_entry
+test_questionnaire_asks_name_and_fingerprint_only
+test_saved_config_has_no_creation_keys
 test_sign_with_checked_early
 test_null_string_round_trip
 test_keyring_saved_absolute
