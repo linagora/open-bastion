@@ -447,6 +447,56 @@ test_service_account_bad_key_rejected() {
     pass "A non-registered SSH key is rejected for ${SVC_ACCOUNT}"
 }
 
+# A service-account name the operator has not created yet, but which the
+# portal knows: NSS resolves it as that SSO user, and the exemption must not
+# go to them. TEST_USER stands for the colliding name.
+test_service_account_sso_namesake_refused() {
+    local fp output rc=0
+    if ! docker exec ob-token-svc-bastion getent passwd "${TEST_USER}" >/dev/null 2>&1; then
+        log_warn "NSS does not resolve ${TEST_USER} on the bastion: namesake case not testable"
+        return 0
+    fi
+    if docker exec ob-token-svc-bastion grep -q "^${TEST_USER}:" /etc/passwd; then
+        log_warn "${TEST_USER} is a local account on the bastion: namesake case not testable"
+        return 0
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Declaring ${TEST_USER}, known to the portal only, as a service account..."
+
+    fp=$(ssh-keygen -l -E sha256 -f "${SVC_KEY}.pub" | awk '{print $2}')
+    docker exec -i ob-token-svc-bastion sh -c \
+        "cat >> /etc/open-bastion/service-accounts.conf" <<EOF
+
+[${TEST_USER}]
+key_fingerprint = ${fp}
+EOF
+    docker exec -i ob-token-svc-bastion sh -c \
+        "cat > /etc/open-bastion/service-accounts.d/${TEST_USER}.pub" < "${SVC_KEY}.pub"
+    docker exec ob-token-svc-bastion chmod 644 \
+        "/etc/open-bastion/service-accounts.d/${TEST_USER}.pub"
+
+    output=$(ssh -i "${SVC_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${TEST_USER}@localhost" "echo SHOULD_NEVER_PRINT" 2>&1) || rc=$?
+    docker exec ob-token-svc-bastion sh -c "
+        rm -f /etc/open-bastion/service-accounts.d/${TEST_USER}.pub
+        sed -i '/^\[${TEST_USER}\]\$/,\$d' /etc/open-bastion/service-accounts.conf
+    "
+    log_verbose "SSH(namesake) rc=$rc output: $output"
+
+    if grep -q "SHOULD_NEVER_PRINT" <<< "$output"; then
+        fail "The SSO user ${TEST_USER} got the service-account exemption" "$output"
+        return 1
+    fi
+
+    pass "A service-account name with no local account is refused, even when the portal knows it"
+}
+
 # ---------------------------------------------------------------------
 
 main() {
@@ -474,6 +524,7 @@ main() {
     test_service_account_groups_untouched
     test_service_account_sudo
     test_service_account_bad_key_rejected
+    test_service_account_sso_namesake_refused
 
     echo ""
     echo "=========================================================="

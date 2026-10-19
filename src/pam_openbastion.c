@@ -2833,6 +2833,21 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
 
             return PAM_AUTH_ERR;
         }
+        /* Same rule as pam_sm_acct_mgmt: only the local account is exempt. */
+        if (!user_exists_locally(user)) {
+            OB_LOG_WARN(pamh, "Service account %s is not in /etc/passwd: "
+                        "refused (create it with useradd)", user);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Service account: no local account";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTH_ERR;
+        }
         /*
          * Hoisted so the single success event below can say where the proof
          * came from. It used to be emitted as an extra audit_log_event() from
@@ -3644,6 +3659,17 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             OB_LOG_ERR(pamh,
                        "Service account '%s' reported as present but not found in configuration",
                        user);
+            return PAM_PERM_DENIED;
+        }
+
+        /*
+         * The exemption is for the local account the operator created. Until
+         * it exists, NSS may resolve the same name through the portal, and
+         * that SSO user must not inherit it.
+         */
+        if (!user_exists_locally(user)) {
+            OB_LOG_WARN(pamh, "Service account %s is not in /etc/passwd: "
+                        "refused (create it with useradd)", user);
             return PAM_PERM_DENIED;
         }
 
