@@ -239,7 +239,8 @@ target_link_libraries(test_crowdsec
 )
 add_test(NAME test_crowdsec COMMAND test_crowdsec)
 
-add_executable(test_service_account test_service_account.c ../src/service_account.c ../src/config.c ../src/str_utils.c)
+# The parser is included by the test (SA_TRUSTED_UID), not linked.
+add_executable(test_service_account test_service_account.c ../src/str_utils.c)
 target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_service_account COMMAND test_service_account)
 

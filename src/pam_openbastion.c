@@ -2282,13 +2282,12 @@ static char *extract_ssh_key_fingerprint(pam_handle_t *pamh)
  * source that can carry it.
  *
  * SSH_USER_AUTH exists only inside an SSH PAM handle, and only when sshd was
- * built/configured to expose it. Under `sudo` -- a different PAM service, run
- * long after the SSH authentication -- it is never set, so a caller that only
- * looked there could never authenticate a service account with sudo, leaving
- * sudo_nopasswd=true (no proof of identity at all) as the only workable
- * configuration (#194). The out-of-band spool written by the principals helper
- * is keyed on the sshd-session anchor of the process tree, which `sudo`
- * inherits, so it answers in both contexts.
+ * built/configured to expose it; OpenSSH does not export it during
+ * pam_acct_mgmt. The out-of-band spool written by the principals helper is
+ * keyed on the sshd-session anchor of the process tree (#194), but only the
+ * AuthorizedPrincipalsCommand feeds it, i.e. certificate logins: a plain-key
+ * login usually has neither source, and the root-owned key served by
+ * AuthorizedKeysCommand is then the only control.
  *
  * Returns an allocated string (caller frees), or NULL when neither source has
  * one.
@@ -2726,6 +2725,20 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
     }
     service = canonical_service(service);
 
+    /*
+     * A service account under sudo is not Open Bastion's to decide (#353): it
+     * has no SSO identity to check, and its sudo rights are the operator's
+     * sudoers rule. PAM_IGNORE neither grants nor denies, so the rest of the
+     * local stack decides. Ahead of the rate limiter and CrowdSec for the same
+     * reason: a refusal from either would be a decision too.
+     */
+    if (strcmp(service, "sudo") == 0 &&
+        service_accounts_is_service_account(&data->service_accounts, user)) {
+        OB_LOG_INFO(pamh, "Service account %s: sudo authentication left to the "
+                    "local PAM stack", user);
+        return PAM_IGNORE;
+    }
+
     /* Initialize audit event */
     if (data->audit) {
         audit_event_init(&audit_event, AUDIT_AUTH_FAILURE);  /* Default to failure */
@@ -2821,20 +2834,6 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
             return PAM_AUTH_ERR;
         }
         /*
-         * Sudo context: sudo_nopasswd is the admin's declaration that a valid
-         * existing Unix session is sufficient, so skip the fingerprint check.
-         * pam_sm_acct_mgmt will still enforce sudo_allowed below.
-         *
-         * With sudo_nopasswd=false the check now runs and can succeed: sudo has
-         * no SSH_USER_AUTH, but resolve_ssh_key_fingerprint() falls back to the
-         * principals spool, which is keyed on the sshd anchor that sudo
-         * inherits (#194). Before that fallback the branch could only ever
-         * return PAM_AUTH_ERR, which made sudo_nopasswd=true -- no proof of
-         * identity at all -- the sole usable setting.
-         */
-        bool skip_fp_check =
-            (strcmp(service, "sudo") == 0) && sa->sudo_nopasswd;
-        /*
          * Hoisted so the single success event below can say where the proof
          * came from. It used to be emitted as an extra audit_log_event() from
          * inside the block, which inherited event_type AUDIT_AUTH_FAILURE from
@@ -2844,113 +2843,82 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh,
          */
         bool fp_from_spool = false;
 
-        if (skip_fp_check) {
-            OB_LOG_INFO(pamh,
-                        "Service account %s: sudo with sudo_nopasswd, "
-                        "skipping SSH fingerprint check", user);
-        } else {
-            OB_LOG_DEBUG(pamh, "User %s is a service account, validating SSH key fingerprint", user);
+        OB_LOG_DEBUG(pamh, "User %s is a service account, validating SSH key fingerprint", user);
 
-            /*
-             * Security: Validate SSH key fingerprint.
-             * Extract the fingerprint from SSH_USER_AUTH and compare with configured value.
-             * This requires ExposeAuthInfo=yes in sshd_config.
-             */
-            char *ssh_fingerprint = resolve_ssh_key_fingerprint(pamh, &fp_from_spool);
-            if (!ssh_fingerprint) {
-                OB_LOG_ERR(pamh, "Service account %s: cannot determine the SSH key "
-                        "fingerprint -- neither SSH_USER_AUTH nor the principals "
-                        "spool has one for this session", user);
+        /*
+         * Security: Validate SSH key fingerprint.
+         * Extract the fingerprint from SSH_USER_AUTH and compare with configured value.
+         * This requires ExposeAuthInfo=yes in sshd_config.
+         */
+        char *ssh_fingerprint = resolve_ssh_key_fingerprint(pamh, &fp_from_spool);
+        if (!ssh_fingerprint) {
+            OB_LOG_ERR(pamh, "Service account %s: cannot determine the SSH key "
+                    "fingerprint -- neither SSH_USER_AUTH nor the principals "
+                    "spool has one for this session", user);
 
-                if (audit_initialized) {
-                    audit_event.event_type = AUDIT_AUTH_FAILURE;
-                    audit_event.result_code = PAM_AUTH_ERR;
-                    audit_event.reason = "Service account: no SSH fingerprint available";
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                }
-
-                return PAM_AUTH_ERR;
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Service account: no SSH fingerprint available";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
             }
 
-            /* Validate fingerprint against configured value */
-            int fp_result = service_accounts_validate_key(&data->service_accounts, user, ssh_fingerprint);
-            if (fp_result != 0) {
-                OB_LOG_ERR(pamh, "Service account %s: SSH key fingerprint mismatch "
-                        "(got %s, expected %s)", user, ssh_fingerprint,
-                        sa->key_fingerprint ? sa->key_fingerprint : "(none)");
-                free(ssh_fingerprint);
+            return PAM_AUTH_ERR;
+        }
 
-                if (audit_initialized) {
-                    audit_event.event_type = AUDIT_AUTH_FAILURE;
-                    audit_event.result_code = PAM_AUTH_ERR;
-                    audit_event.reason = "Service account: SSH key fingerprint mismatch";
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                }
-
-                return PAM_AUTH_ERR;
-            }
-
-            /*
-             * Say where the proof came from. SSH_USER_AUTH is asserted by sshd
-             * itself; a spool drop is asserted by whatever owns
-             * /run/open-bastion/ssh-fp. Since #249 that is root: ob-fp-daemon
-             * writes the drops and the principals helper, which sshd forces to
-             * run unprivileged, only deposits through it. The gap this warning
-             * was written for is therefore closed on a migrated host -- but a
-             * host that upgraded the package without re-running
-             * ob-bastion-setup still has the old nobody-owned directory (the
-             * separate warning in read_spool_drop() names that case), and in
-             * either world the audit trail should be able to say after the fact
-             * that the fingerprint came from the spool rather than from sshd.
-             */
-            if (fp_from_spool) {
-                OB_LOG_WARN(pamh,
-                            "Service account %s authenticated with fingerprint %s "
-                            "taken from the principals spool, not from sshd: the "
-                            "binding is only as trustworthy as the spool owner",
-                            user, ssh_fingerprint);
-            } else {
-                OB_LOG_INFO(pamh, "Service account %s authenticated with fingerprint %s",
-                        user, ssh_fingerprint);
-            }
+        /* Validate fingerprint against configured value */
+        int fp_result = service_accounts_validate_key(&data->service_accounts, user, ssh_fingerprint);
+        if (fp_result != 0) {
+            OB_LOG_ERR(pamh, "Service account %s: SSH key fingerprint mismatch "
+                    "(got %s, expected %s)", user, ssh_fingerprint,
+                    sa->key_fingerprint ? sa->key_fingerprint : "(none)");
             free(ssh_fingerprint);
+
+            if (audit_initialized) {
+                audit_event.event_type = AUDIT_AUTH_FAILURE;
+                audit_event.result_code = PAM_AUTH_ERR;
+                audit_event.reason = "Service account: SSH key fingerprint mismatch";
+                audit_event_set_end_time(&audit_event);
+                audit_log_event(data->audit, &audit_event);
+            }
+
+            return PAM_AUTH_ERR;
         }
 
-        /* Store service account attributes for pam_sm_open_session (user creation) */
-        if (sa->gecos) {
-            char *gecos_copy = strdup(sa->gecos);
-            if (gecos_copy) {
-                pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
-            }
+        /*
+         * Say where the proof came from. SSH_USER_AUTH is asserted by sshd
+         * itself; a spool drop is asserted by whatever owns
+         * /run/open-bastion/ssh-fp. Since #249 that is root: ob-fp-daemon
+         * writes the drops and the principals helper, which sshd forces to
+         * run unprivileged, only deposits through it. The gap this warning
+         * was written for is therefore closed on a migrated host -- but a
+         * host that upgraded the package without re-running
+         * ob-bastion-setup still has the old nobody-owned directory (the
+         * separate warning in read_spool_drop() names that case), and in
+         * either world the audit trail should be able to say after the fact
+         * that the fingerprint came from the spool rather than from sshd.
+         */
+        if (fp_from_spool) {
+            OB_LOG_WARN(pamh,
+                        "Service account %s authenticated with fingerprint %s "
+                        "taken from the principals spool, not from sshd: the "
+                        "binding is only as trustworthy as the spool owner",
+                        user, ssh_fingerprint);
+        } else {
+            OB_LOG_INFO(pamh, "Service account %s authenticated with fingerprint %s",
+                    user, ssh_fingerprint);
         }
-        if (sa->shell) {
-            char *shell_copy = strdup(sa->shell);
-            if (shell_copy) {
-                pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
-            }
-        }
-        if (sa->home) {
-            char *home_copy = strdup(sa->home);
-            if (home_copy) {
-                pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
-            }
-        }
-
-        /* Mark as service account for pam_sm_acct_mgmt */
-        pam_set_data(pamh, "ob_service_account", (void *)1, NULL);
+        free(ssh_fingerprint);
 
         /* Log success */
         if (audit_initialized) {
             audit_event.event_type = AUDIT_AUTH_SUCCESS;
             audit_event.result_code = PAM_SUCCESS;
-            audit_event.reason = skip_fp_check
-                ? "Service account (sudo_nopasswd, fingerprint check skipped)"
-                : (fp_from_spool
-                   ? "Service account (SSH key validated from the principals "
-                     "spool, not from sshd)"
-                   : "Service account (SSH key validated)");
+            audit_event.reason = fp_from_spool
+                ? "Service account (SSH key validated from the principals "
+                  "spool, not from sshd)"
+                : "Service account (SSH key validated)";
             audit_event_set_end_time(&audit_event);
             audit_log_event(data->audit, &audit_event);
         }
@@ -3666,8 +3634,9 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
 
     /*
      * Handle service accounts (ansible, backup, etc.)
-     * These accounts are authorized locally based on their presence in the
-     * service accounts configuration file.
+     * These accounts are exempt from the SSO based on their presence in the
+     * service accounts configuration file. The Unix account and its sudo
+     * rights are the operator's (#353).
      */
     if (service_accounts_is_service_account(&data->service_accounts, user)) {
         const service_account_t *sa = service_accounts_find(&data->service_accounts, user);
@@ -3678,6 +3647,18 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             return PAM_PERM_DENIED;
         }
 
+        /*
+         * sudo: neither grant nor deny, as in pam_sm_authenticate. With the
+         * stock stack `account sufficient pam_localuser` then lets a sudoers
+         * rule decide; a stack made of pam_openbastion alone refuses, which is
+         * the operator's to adapt.
+         */
+        if (strcmp(service, "sudo") == 0) {
+            OB_LOG_INFO(pamh, "Service account %s: sudo authorization left to "
+                        "the local PAM stack and sudoers", user);
+            return PAM_IGNORE;
+        }
+
         /* Initialize audit event for service accounts */
         if (data->audit) {
             audit_event_init(&audit_event, AUDIT_AUTHZ_SUCCESS);
@@ -3686,32 +3667,6 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             audit_event.client_ip = client_ip;
             audit_event.tty = tty;
             audit_initialized = true;
-        }
-
-        /*
-         * Mark as service account for pam_sm_open_session and propagate the
-         * user attributes from service-accounts.conf. For SSH pubkey auth
-         * sshd does NOT invoke pam_authenticate, so this is the only place
-         * where we can stash this information for the session phase.
-         */
-        pam_set_data(pamh, "ob_service_account", (void *)1, NULL);
-        if (sa->gecos) {
-            char *gecos_copy = strdup(sa->gecos);
-            if (gecos_copy) {
-                pam_set_data(pamh, "ob_gecos", gecos_copy, cleanup_string);
-            }
-        }
-        if (sa->shell) {
-            char *shell_copy = strdup(sa->shell);
-            if (shell_copy) {
-                pam_set_data(pamh, "ob_shell", shell_copy, cleanup_string);
-            }
-        }
-        if (sa->home) {
-            char *home_copy = strdup(sa->home);
-            if (home_copy) {
-                pam_set_data(pamh, "ob_home", home_copy, cleanup_string);
-            }
         }
 
         /*
@@ -3775,37 +3730,6 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             }
         }
 
-        /*
-         * Handle sudo authorization for service accounts.
-         * Check if the service account has sudo_allowed permission.
-         */
-        if (strcmp(service, "sudo") == 0) {
-            if (!sa->sudo_allowed) {
-                OB_LOG_INFO(pamh, "Service account %s not authorized for sudo", user);
-
-                if (audit_initialized) {
-                    audit_event.event_type = AUDIT_AUTHZ_DENIED;
-                    audit_event.result_code = PAM_PERM_DENIED;
-                    audit_event.reason = "Service account sudo not allowed";
-                    audit_event_set_end_time(&audit_event);
-                    audit_log_event(data->audit, &audit_event);
-                }
-
-                return PAM_PERM_DENIED;
-            }
-
-            /* Store sudo_nopasswd flag if applicable */
-            if (sa->sudo_nopasswd) {
-                pam_putenv(pamh, "LLNG_SUDO_NOPASSWD=1");
-                OB_LOG_DEBUG(pamh, "Service account %s granted sudo without password", user);
-            }
-        }
-
-        /* Store permissions in PAM environment */
-        if (sa->sudo_allowed) {
-            pam_putenv(pamh, "LLNG_SUDO_ALLOWED=1");
-        }
-
         /* Success */
         if (audit_initialized) {
             audit_event.result_code = PAM_SUCCESS;
@@ -3814,8 +3738,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
             audit_log_event(data->audit, &audit_event);
         }
 
-        OB_LOG_INFO(pamh, "Service account %s authorized for access%s", user,
-                      sa->sudo_allowed ? " (sudo allowed)" : "");
+        OB_LOG_INFO(pamh, "Service account %s authorized for access", user);
         return PAM_SUCCESS;
     }
 
@@ -4225,9 +4148,7 @@ static int create_unix_user(pam_handle_t *pamh,
                             const pam_openbastion_config_t *config,
                             const char *gecos,
                             const char *shell,
-                            const char *home,
-                            uid_t forced_uid,
-                            gid_t forced_gid)
+                            const char *home)
 {
     uid_t uid = 0;
     gid_t gid = 0;
@@ -4246,64 +4167,21 @@ static int create_unix_user(pam_handle_t *pamh,
         return -1;
     }
 
-    if (forced_uid != 0) {
-        /*
-         * Service-account path: the account only exists in
-         * service-accounts.conf, not in LLNG, so NSS cannot resolve it.
-         * Use the uid/gid explicitly configured by the admin and auto-create
-         * the matching primary group on the fly.
-         */
-        uid = forced_uid;
-        gid = (forced_gid != 0) ? forced_gid : forced_uid;
-
-        if (!group_exists_locally(gid)) {
-            OB_LOG_INFO(pamh, "Creating primary group %s (gid=%lu) for service account",
-                        user, (unsigned long)gid);
-            pid_t pid = fork();
-            if (pid < 0) {
-                OB_LOG_ERR(pamh, "Cannot fork for groupadd: %s", strerror(errno));
-                return -1;
-            }
-            if (pid == 0) {
-                char gid_str[16];
-                snprintf(gid_str, sizeof(gid_str), "%lu", (unsigned long)gid);
-                int null_fd = open("/dev/null", O_WRONLY);
-                if (null_fd >= 0) {
-                    dup2(null_fd, STDOUT_FILENO);
-                    dup2(null_fd, STDERR_FILENO);
-                    close(null_fd);
-                }
-                execl("/usr/sbin/groupadd", "groupadd", "-g", gid_str, user, NULL);
-                _exit(127);
-            }
-            int status;
-            if (waitpid(pid, &status, 0) < 0) {
-                OB_LOG_ERR(pamh, "Cannot wait for groupadd: %s", strerror(errno));
-                return -1;
-            }
-            if (!group_exists_locally(gid)) {
-                OB_LOG_ERR(pamh, "Failed to create primary group %s (gid=%lu)",
-                           user, (unsigned long)gid);
-                return -1;
-            }
-        }
+    /* Get UID/GID from NSS (libnss_openbastion) */
+    struct passwd *nss_pw = getpwnam(user);
+    if (nss_pw) {
+        uid = nss_pw->pw_uid;
+        gid = nss_pw->pw_gid;
     } else {
-        /* Get UID/GID from NSS (libnss_openbastion) */
-        struct passwd *nss_pw = getpwnam(user);
-        if (nss_pw) {
-            uid = nss_pw->pw_uid;
-            gid = nss_pw->pw_gid;
-        } else {
-            OB_LOG_ERR(pamh, "Cannot get user info from NSS for %s", user);
-            return -1;
-        }
+        OB_LOG_ERR(pamh, "Cannot get user info from NSS for %s", user);
+        return -1;
+    }
 
-        /* Verify that the primary group exists */
-        if (!group_exists_locally(gid)) {
-            OB_LOG_ERR(pamh, "Primary group %lu does not exist for user %s",
-                       (unsigned long)gid, user);
-            return -1;
-        }
+    /* Verify that the primary group exists */
+    if (!group_exists_locally(gid)) {
+        OB_LOG_ERR(pamh, "Primary group %lu does not exist for user %s",
+                   (unsigned long)gid, user);
+        return -1;
     }
 
     /* Determine and validate home directory */
@@ -4576,6 +4454,17 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
     }
 
     /*
+     * A service account is a local account the operator created and manages
+     * (#353): no account creation, and no group change -- open-bastion-sudo
+     * included. The sudo sync below would otherwise REMOVE it from that group
+     * on every login, since no SSO answer ever sets LLNG_SUDO_ALLOWED for it.
+     */
+    if (service_accounts_is_service_account(&data->service_accounts, user)) {
+        OB_LOG_DEBUG(pamh, "Service account %s: session left untouched", user);
+        return PAM_SUCCESS;
+    }
+
+    /*
      * Defense-in-depth: sync open-bastion-sudo group membership.
      * This runs regardless of create_user_enabled, because sudo authorization
      * is independent of user creation. The sudoers rule requires membership
@@ -4653,29 +4542,10 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         shell = (const char *)ob_shell;
         home = (const char *)ob_home;
 
-        /*
-         * If the user is a service account (only in service-accounts.conf,
-         * unknown to LLNG), NSS cannot resolve it. Use the explicit uid/gid
-         * from the service-account configuration.
-         */
-        uid_t forced_uid = 0;
-        gid_t forced_gid = 0;
-        const void *ob_sa_marker = NULL;
-        if (pam_get_data(pamh, "ob_service_account", &ob_sa_marker) == PAM_SUCCESS &&
-            ob_sa_marker != NULL) {
-            const service_account_t *sa =
-                service_accounts_find(&data->service_accounts, user);
-            if (sa) {
-                forced_uid = (uid_t)sa->uid;
-                forced_gid = (gid_t)sa->gid;
-            }
-        }
-
         /* Create the user */
         OB_LOG_INFO(pamh, "User %s does not exist, creating account", user);
 
-        if (create_unix_user(pamh, user, &data->config, gecos, shell, home,
-                             forced_uid, forced_gid) != 0) {
+        if (create_unix_user(pamh, user, &data->config, gecos, shell, home) != 0) {
             OB_LOG_ERR(pamh, "Failed to create Unix user: %s", user);
             return PAM_SESSION_ERR;
         }
