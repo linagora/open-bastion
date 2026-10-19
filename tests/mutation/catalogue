@@ -97,6 +97,22 @@ suite   || tests/test_ob_service_account_keys.sh
 why     || #263: the flag must not be one-way; a run without it removes the
 why     || drop-in it generated.
 
+id      || setup-reports-missing-service-account
+file    || scripts/ob-bastion-setup
+search  || getent -s files passwd "$name" >/dev/null 2>&1 || missing="$missing $name"
+replace || :
+suite   || tests/test_ob_service_account_keys.sh
+why     || #353: Open Bastion no longer creates service accounts; an account
+why     || the operator has not created yet must at least be named.
+
+id      || setup-service-account-launcher-hint
+file    || scripts/ob-bastion-setup
+search  || if records_sessions; then shell="/usr/sbin/ob-login-shell"; fi
+replace || :
+suite   || tests/test_ob_service_account_keys.sh
+why     || #353: on a recording host bash reads ~/.bashrc ahead of the recorder
+why     || ForceCommand; the suggested useradd must give the launcher.
+
 id      || exposeauthinfo-guard
 file    || scripts/ob-bastion-setup
 search  || configure_max_security_sshd() {
