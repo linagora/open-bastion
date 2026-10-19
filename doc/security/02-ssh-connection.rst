@@ -1225,7 +1225,8 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Mesure                           | Description                                                                                                                                                                                                                    |
 +==================================+================================================================================================================================================================================================================================+
-| **Compte de service de secours** | Le paquet bootstrap ``open-bastion-linagora`` pré-configure un compte ``linagora`` dans ``service-accounts.conf`` avec clé RSA et ``sudo_allowed = true``, stockée en coffre-fort                                              |
+| **Compte de service de secours** | Le paquet bootstrap ``open-bastion-linagora`` pré-configure un compte ``linagora`` dans ``service-accounts.conf`` avec clé RSA stockée en coffre-fort. Depuis la 0.7.0, ``sudo_allowed`` est ignoré : le compte local et sa    |
+|                                  | règle ``sudoers`` relèvent de l'exploitant, et en Mode E son ``sudo`` est refusé tant que la pile PAM n'est pas modifiée à la main (voir la note ci-dessous)                                                                   |
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | **Accès console via ttyS0**      | Le paquet bootstrap configure ``/etc/securetty`` avec ``ttyS0`` pour l'accès root via la console OVH/hors-bande. ``PermitRootLogin no`` dans sshd bloque l'accès root SSH, la console reste le filet de sécurité               |
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -1235,6 +1236,8 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 ..
 
    **Automatisation bootstrap :** Le paquet ``open-bastion-linagora`` prend en charge la configuration initiale de ``securetty``, du compte de service ``linagora`` et de ``PermitRootLogin no``. Ces éléments n'ont pas besoin d'être configurés manuellement sur les déploiements utilisant ce paquet.
+
+   **Compte de secours et élévation (#353).** Depuis la 0.7.0, Open Bastion ne crée plus un compte de service et ne gère plus son ``sudo`` : le compte doit exister dans ``/etc/passwd``, et son élévation, s'il en faut une, vient d'une règle ``sudoers`` ``NOPASSWD`` écrite par l'exploitant. Hors Mode E, cette règle suffit. **En Mode E, la pile ``sudo`` refuse tout compte local, comptes de service compris** : le compte de secours ouvre une session SSH pendant la panne, mais n'obtient pas ``root`` sans modification manuelle de ``/etc/pam.d/sudo``, qui renonce à la promesse du Mode E (toute élévation passe par le SSO) et relève de la décision de l'administrateur. Sans cette décision, ``root`` en Mode E vient de la console hors-bande.
 
    **Écarter la « clé SSH personnelle sur le bastion » comme filet.** Une réponse souvent proposée à ce risque est de laisser chaque administrateur déposer une clé SSH personnelle dans son ``~/.ssh`` sur le bastion, pour continuer à rebondir vers les backends pendant une panne du portail. **En Mode E, c'est impossible par construction** : les backends posent ``AuthorizedKeysFile none`` et n'acceptent qu'un certificat signé par la CA dont le key-id porte ``bastion=<id>;user=<u>`` — ``sshd`` refuse une clé nue avant même que PAM ne soit consulté, et ``ob-ssh`` ne peut pas aider puisque l'émission du certificat éphémère exige le portail.
 
@@ -1249,7 +1252,7 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 - Monitoring avec alerte quand le cache offline approche de l'expiration
 - Aucun démon de cache NSS externe n'est requis ni souhaitable. Le module NSS gère son propre cache (mémoire + fichiers sous ``/var/cache/nss_llng``) : ``nscd`` ne ferait qu'interposer un second cache redondant devant celui-ci, et il est déprécié en amont et absent des distributions récentes (Fedora compile la glibc avec ``--disable-nscd`` et a retiré le paquet). PAM invalide directement les entrées concernées lors d'un changement d'utilisateur ou de groupe, donc la résolution est immédiate. Conserver ``nscd`` reste supporté : il n'est plus une dépendance mais n'est pas désactivé non plus, et PAM lance toujours ``nscd --invalidate passwd group`` quand le binaire est présent — nécessaire, car ``nscd`` cache aussi la base ``group`` que ce module n'implémente pas.
 - **Dimensionner ``cache_ttl`` (``/etc/open-bastion/nss_openbastion.conf``) en conséquence — point critique pour ce risque.** Depuis le retrait de ``nscd``, ce paramètre est le seul tampon entre une panne LLNG et un hôte qui ne résout plus ses utilisateurs. Le module ne sert **jamais** de données périmées : une entrée de cache fichier au-delà de ``cache_ttl`` est supprimée à la lecture, et un échec transitoire renvoie ``NSS_STATUS_UNAVAIL`` sans se rabattre sur l'entrée expirée. Au défaut de **300 s**, ``getent passwd <user>`` cesse donc de résoudre ~5 minutes après la dernière résolution réussie, et ``sshd`` ne peut plus mapper le compte : c'est une falaise, pas une pente. Le cache persistant de ``nscd`` (avec ``reload-count``) offrait auparavant un tampon de plusieurs dizaines de minutes. Porter ``cache_ttl`` à ``3600`` (1 h) ou ``86400`` (maximum) sur les hôtes où une courte panne LLNG ne doit pas bloquer les nouvelles connexions ; le seul effet d'un TTL plus long est le délai avant qu'un utilisateur **supprimé** disparaisse de ``getent passwd``, l'autorisation étant revérifiée par PAM à chaque connexion et la révocation des certificats passant par la KRL.
-- Un compte de service déclaré dans ``/etc/open-bastion/service-accounts.conf`` est résolu localement sans contacter LLNG : il reste donc joignable quel que soit ``cache_ttl``, et constitue le filet de sécurité recommandé pour une panne prolongée.
+- Un compte de service est un compte local (``/etc/passwd``), déclaré dans ``/etc/open-bastion/service-accounts.conf`` et autorisé sans contacter LLNG : il reste donc joignable quel que soit ``cache_ttl``, et constitue le filet de sécurité recommandé pour une panne prolongée — pour l'accès SSH ; pour ``root``, voir la note ci-dessus sur le Mode E.
 
 **Procédure de recouvrement via console :**
 
@@ -1262,16 +1265,22 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
       # Le compte linagora est déjà dans service-accounts.conf (paquet bootstrap)
       # Se connecter depuis un poste disposant de la clé de secours :
       ssh linagora@server
+      # En Mode E, ce compte n'a pas de sudo : root reste la console
 
 4. Option B — Ajouter un compte de service temporaire depuis la console root :
 
    .. code:: bash
 
-      # Ajouter une clé de recouvrement dans service-accounts.conf
+      # Créer le compte local (shell ob-login-shell sur un hôte qui enregistre)
+      useradd --system --create-home --shell /usr/sbin/ob-login-shell recovery
+      # Sa clé, servie par l'AuthorizedKeysCommand (--enable-service-keys)
+      install -m 0644 -o root -g root recovery.pub /etc/open-bastion/service-accounts.d/recovery.pub
+      # Son exemption du SSO
       cat >> /etc/open-bastion/service-accounts.conf << 'EOF'
       [recovery]
-      ssh_keys = ssh-ed25519 AAAA... recovery@emergency
+      key_fingerprint = SHA256:...
       EOF
+      # À la fin de l'incident : retirer l'entrée et le .pub, puis userdel -r recovery
 
 5. Option C — Désactiver temporairement le module PAM (dernier recours) :
 
@@ -1598,7 +1607,7 @@ Avant remédiation
 
 ..
 
-   **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (``AuthorizedKeysFile none`` + certificat CA requis) : ils n'ont pas de fiche et n'apparaissent donc dans aucune matrice. R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18). Les risques de comptes de service (R-SA1, R-SA2, R-S24, R-S25) sont analysés en section 6 et figurent ici avec les autres, pour que la matrice couvre l'intégralité de l'étude.
+   **Note :** R-S1 (brute-force mot de passe) et R-S2 (vol de clé SSH simple) sont **éliminés** par la cible de sécurité maximale (``AuthorizedKeysFile none`` + certificat CA requis) : ils n'ont pas de fiche et n'apparaissent donc dans aucune matrice. R-S5 démarre à P=1 grâce aux certificats CA obligatoires. R-S18 est ici à P=2 (et non P=3) car le wrapper setgid empêche l'accès aux recordings d'autres utilisateurs, ce qui réduit la probabilité d'un effacement « croisé » même avant remédiation complète ; l'effacement de ses propres recordings reste possible (cf. fiche R-S18). Les risques de comptes de service (R-SA1, R-SA2, R-S24, R-S25) sont analysés en section 8 et figurent ici avec les autres, pour que la matrice couvre l'intégralité de l'étude.
 
 Après remédiation complète
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1629,7 +1638,7 @@ Après remédiation complète
 - **Conditions d'activation :** ces nouveaux risques (R-S19, R-S20, R-S21) ne sont mitigés à leur niveau résiduel **que si** le hardening (PR1) ET la trace auditd (PR2) sont activés via ``ob-bastion-setup --enable-hardening --enable-audit-trace``. En l'absence d'activation, ces risques restent en zone jaune (P=3, I=3 pour R-S19 ; P=2, I=3 pour R-S20 et R-S21). Voir :doc:`/hardening` et :doc:`/audit` (documentations techniques en anglais) pour les détails opérationnels.
 - R-S22 (certificat vouché réutilisé vers un autre backend) : **P=1, I=2** — ``target=`` non vérifié par ``ob-ssh-principals``, mais ``source-address`` impose le contrôle du bastion et l'allowlist par backend cloisonne les zones (piste : vérifier ``target=`` contre le FQDN local)
 - R-S23 (backend en mode hérité, ``allowed_bastions`` absent) : **P=1, I=3** — ``ob-backend-setup`` écrit toujours le fichier et ``ob-ssh-principals`` est fail-closed si illisible ; le risque résiduel ne concerne qu'un backend jamais configuré par le setup (piste : postinst écrivant un fichier vide par défaut)
-- R-S24 (sudo de compte de service hors token SSO) : **P=1, I=3** — le droit vient de ``service-accounts.conf`` seul, sans appel LLNG ; ``sudo_nopasswd = false`` reste la configuration recommandée (l'empreinte de la clé y est revérifiée à chaque ``sudo``)
+- R-S24 (sudo de compte de service hors token SSO) : **P=1, I=3** — depuis la 0.7.0 (#353), Open Bastion n'accorde plus aucun ``sudo`` à un compte de service : seule une règle ``sudoers`` de l'exploitant le fait, et en Mode E seulement après modification manuelle de la pile PAM ``sudo`` ; le score évalue ce cas, le risque n'existe pas sur un hôte sans une telle règle
 - R-S25 (hop de compte de service via ProxyJump) : **P=1, I=2** — non enregistré par le ``ForceCommand`` (canal ``direct-tcpip``) ; à traiter par ``AllowTcpForwarding no`` ou par un accès direct aux cibles
 - Risques résiduels en zone jaune (PR1 et PR2 activées) : R-S4 et R-SA2 (P=1, I=4), R-SA1 (P=2, I=3), R-S6 (P=2, I=3), R-S8 (P=2, I=2)
 
@@ -1817,7 +1826,7 @@ Ce comportement est intentionnel : l'escalade de privilèges requiert toujours u
 
    **Nuance vérifiée au code.** Toute escalade ne traverse pas la phase ``auth``. ``sudo`` conserve son propre timestamp (``timestamp_timeout``, 15 min par défaut, réarmé à chaque usage) et, tant qu'il est valide, n'appelle pas ``pam_authenticate()`` : aucun token n'est demandé. La phase ``account``, elle, s'exécute bien, et pendant une panne elle répond depuis le cache d'autorisation (``sudo_allowed`` y est stocké). Un utilisateur SSO qui vient d'élever ses privilèges continue donc de le faire pendant la panne ; le refus tombe à la première élévation après expiration du timestamp.
 
-   L'option ``--enable-sudo-fresh-otp`` (``timestamp_timeout=0``, cf. #178) supprime cette fenêtre : chaque élévation traverse la phase ``auth``, donc **aucun sudo SSO n'est possible pendant une panne** sur un hôte ainsi configuré. C'est le compromis assumé — une preuve fraîche par élévation, payée en disponibilité — et c'est une hypothèse dont R-S17 dépend. Les comptes de service de secours ne sont affectés dans aucun des deux cas.
+   L'option ``--enable-sudo-fresh-otp`` (``timestamp_timeout=0``, cf. #178) supprime cette fenêtre : chaque élévation traverse la phase ``auth``, donc **aucun sudo SSO n'est possible pendant une panne** sur un hôte ainsi configuré. C'est le compromis assumé — une preuve fraîche par élévation, payée en disponibilité — et c'est une hypothèse dont R-S17 dépend. Les comptes de service de secours ne sont concernés dans aucun des deux cas : leur ``sudo``, s'ils en ont un, vient d'une règle ``sudoers`` de l'exploitant, et en Mode E ils n'en ont pas sans modification manuelle de la pile (cf. R-S24).
 
 --------------
 
@@ -1831,7 +1840,15 @@ Ce comportement est intentionnel : l'escalade de privilèges requiert toujours u
 Description
 ~~~~~~~~~~~
 
-Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comptes techniques qui s'authentifient uniquement par clé SSH, **sans passer par LLNG**. Ils sont définis localement dans un fichier de configuration sur chaque serveur.
+Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comptes techniques qui s'authentifient uniquement par clé SSH, **sans passer par LLNG**. Depuis la 0.7.0 (#353), ce sont des **comptes Unix locaux créés par l'exploitant** (``useradd``) : le SSO ne les connaît pas, et le rôle d'Open Bastion s'arrête là où le SSO n'intervient pas.
+
+Open Bastion fournit :
+
+- la clé : l'``AuthorizedKeysCommand`` de sshd sert ``/etc/open-bastion/service-accounts.d/<nom>.pub``, propriété de root (``--enable-service-keys``, ou la clé dans un build ``ob-builder``) ;
+- l'exemption du SSO : ``pam_openbastion`` autorise localement, sans appel LLNG, les noms listés dans ``/etc/open-bastion/service-accounts.conf`` ;
+- l'enregistrement de session sur un bastion, par le ``ForceCommand`` de l'enregistreur, comme pour toute session.
+
+L'exploitant fournit le compte (home, shell — ``/usr/sbin/ob-login-shell`` sur un hôte qui enregistre), ses groupes, son ``sudo`` éventuel (règle ``sudoers``) et sa suppression (``userdel``). Open Bastion ne crée jamais le compte, ne lui donne aucun groupe et ne gère pas son ``sudo``, Mode E compris.
 
 .. mermaid::
 
@@ -1844,7 +1861,7 @@ Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comp
 
        subgraph Service["Compte de service"]
            direction TB
-           B1[Authentification:<br/>Clé SSH uniquement]
+           B1[Authentification:<br/>Clé SSH servie par<br/>AuthorizedKeysCommand]
            B2[Autorisation:<br/>Fichier local<br/>pas d'appel LLNG]
        end
 
@@ -1856,6 +1873,14 @@ Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comp
 Configuration
 ~~~~~~~~~~~~~
 
+.. code:: bash
+
+   # Le compte local, créé par l'exploitant (hôte qui enregistre)
+   useradd --system --create-home --shell /usr/sbin/ob-login-shell ansible
+
+   # Sa clé, servie à sshd par ob-service-account-keys
+   install -m 0644 -o root -g root ansible.pub /etc/open-bastion/service-accounts.d/ansible.pub
+
 .. code:: ini
 
    # /etc/open-bastion/service-accounts.conf
@@ -1863,18 +1888,11 @@ Configuration
 
    [ansible]
    key_fingerprint = SHA256:abc123def456...
-   sudo_allowed = true
-   sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
    [backup]
    key_fingerprint = SHA256:xyz789...
-   sudo_allowed = false
-   gecos = Backup Service
-   shell = /bin/sh
-   home = /var/lib/backup
+
+Seuls le nom de section et ``key_fingerprint`` sont lus. Les clés ``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed`` et ``sudo_nopasswd`` des versions antérieures sont ignorées avec un avertissement, sans refus : une mise à jour ne verrouille personne.
 
 Flux d'authentification
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -1884,37 +1902,51 @@ Flux d'authentification
    sequenceDiagram
        participant Client as Client SSH<br/>(clé service)
        participant Srv as Serveur SSH
+       participant AKC as ob-service-account-keys
        participant PAM as PAM Open Bastion
 
        Client->>Srv: 1. ssh ansible@server
-       Note over Srv: 2. Authentification SSH<br/>(clé publique/privée)
-       Note over Srv: 3. ExposeAuthInfo expose<br/>fingerprint dans SSH_USER_AUTH
-       Srv->>PAM: 4. pam_sm_authenticate
-       Note over PAM: 5. Extrait fingerprint de<br/>SSH_USER_AUTH
-       Note over PAM: 6. Détecte compte de service<br/>(présent dans config)
-       Note over PAM: 7. Valide fingerprint clé SSH<br/>contre config
-       PAM-->>Srv: 8. PAM_SUCCESS
-       Note over Srv: 9. PAS d'appel à LLNG<br/>(autorisation locale)
-       Srv-->>Client: 10. Session établie
+       Note over Srv: 2. Compte résolu depuis /etc/passwd<br/>(inconnu = refusé)
+       Srv->>AKC: 3. AuthorizedKeysCommand %u
+       AKC-->>Srv: 4. ansible.pub (propriété de root)
+       Note over Srv: 5. Authentification par clé
+       Srv->>PAM: 6. pam_sm_acct_mgmt
+       Note over PAM: 7. Nom présent dans<br/>service-accounts.conf
+       Note over PAM: 8. Pas d'empreinte transmise<br/>(clé nue) : rien à comparer
+       PAM-->>Srv: 9. PAM_SUCCESS
+       Note over Srv: 10. PAS d'appel à LLNG<br/>(autorisation locale)
+       Srv-->>Client: 11. Session établie<br/>(enregistrée sur un bastion)
+
+**Contrôle d'empreinte : ce qui est réellement vérifié.** ``pam_openbastion`` ne compare ``key_fingerprint`` à l'empreinte de la clé ayant ouvert la session que s'il connaît cette empreinte. Ses deux sources sont ``SSH_USER_AUTH`` dans l'environnement PAM, que sshd ne renseigne pas pendant ``pam_acct_mgmt`` sur un OpenSSH actuel, et le spool ``/run/open-bastion/ssh-fp``, alimenté par l'``AuthorizedPrincipalsCommand``, que sshd n'exécute que pour un certificat. Un compte de service se connectant par clé nue, la comparaison n'a lieu en pratique jamais : **le contrôle d'accès effectif est la clé publique propriété de root**, ``service-accounts.d/<nom>.pub``, servie par l'``AuthorizedKeysCommand`` (ou un ``authorized_keys``, modifiable par le compte lui-même). Avec ``fingerprint_required = true`` ou ``ssh_key_policy_enabled = true``, la connexion par clé nue d'un compte de service est refusée faute d'empreinte.
+
+**Shell sur un hôte qui enregistre.** sshd exécute le ``ForceCommand`` par le shell de connexion : ``<shell> -c /usr/sbin/ob-session-recorder``. Avec ``/bin/bash``, bash lit d'abord ``~/.bashrc``, fichier qui appartient au compte : quiconque détient la clé peut y placer de quoi sortir de l'enregistrement (``exec``) avant que l'enregistreur ne démarre. Le shell du compte doit donc être ``/usr/sbin/ob-login-shell``, qui ne lit aucun fichier du compte et exécute directement l'enregistreur (cf. R-S21, MT23). Un compte de service étant résolu par ``/etc/passwd`` et non par ``libnss_openbastion``, ``force_shell`` ne s'y applique pas : c'est à l'exploitant de le créer avec ce shell, et **rien ne l'impose** (ni le setup, ni PAM).
+
+**sudo.** Open Bastion ne gère pas le ``sudo`` d'un compte de service, Mode E compris : dans les services ``sudo`` et ``sudo-i``, ``pam_openbastion`` ne l'accorde ni ne le refuse (``PAM_IGNORE``), et ne touche pas à ses groupes (``open-bastion-sudo`` compris). La pile PAM locale et ``sudoers`` décident. Hors Mode E, une règle ``sudoers`` ``NOPASSWD`` écrite par l'exploitant suffit (pile de la distribution sur bastion et standalone, ``account sufficient pam_localuser.so`` sur backend). En Mode E, la pile ``sudo`` ne contient que ``pam_openbastion`` et refuse tout compte local : l'élévation d'un compte de service y est impossible tant que l'administrateur n'a pas modifié la pile à la main — ce qui affaiblit la promesse du Mode E (toute élévation passe par le SSO) et relève de sa seule décision. Voir R-S24.
 
 Sécurité
 ~~~~~~~~
 
-+----------------------------+-----------------------------------------------------+
-| Aspect                     | Mesure                                              |
-+============================+=====================================================+
-| **Fichier config**         | Propriétaire root, mode 0600, pas de symlink        |
-+----------------------------+-----------------------------------------------------+
-| **Validation fingerprint** | Fingerprint SSH validé contre valeur configurée     |
-+----------------------------+-----------------------------------------------------+
-| **ExposeAuthInfo**         | Requis dans sshd_config pour validation fingerprint |
-+----------------------------+-----------------------------------------------------+
-| **Shells autorisés**       | Liste blanche configurable                          |
-+----------------------------+-----------------------------------------------------+
-| **Home autorisés**         | Préfixes autorisés uniquement                       |
-+----------------------------+-----------------------------------------------------+
-| **Noms de compte**         | Validation stricte (lowercase, max 32 chars)        |
-+----------------------------+-----------------------------------------------------+
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| Aspect                          | Mesure                                                                                        |
++=================================+===============================================================================================+
+| **Fichier config**              | Propriétaire root, mode 0600, pas de symlink                                                  |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Clé**                         | ``service-accounts.d/<nom>.pub`` servie seulement si propriété de root                        |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Validation fingerprint**      | Comparée seulement si une empreinte parvient à PAM : jamais pour une clé nue                  |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **ExposeAuthInfo**              | Écrit par ``--enable-service-keys`` ; ne transmet pas l'empreinte à la phase ``account``      |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Compte local**                | Créé par l'exploitant ; sshd refuse un nom absent de ``/etc/passwd``                          |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Shell (hôte qui enregistre)** | ``/usr/sbin/ob-login-shell``, posé par l'exploitant, non imposé                               |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **sudo**                        | Non géré par Open Bastion (``PAM_IGNORE``) ; règle ``sudoers`` de l'exploitant                |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Shells / home autorisés**     | Ne s'appliquent plus aux comptes de service (``approved_shells``, ``approved_home_prefixes``) |
++---------------------------------+-----------------------------------------------------------------------------------------------+
+| **Noms de compte**              | Validation stricte (lowercase, max 32 chars)                                                  |
++---------------------------------+-----------------------------------------------------------------------------------------------+
 
 Risques spécifiques
 ~~~~~~~~~~~~~~~~~~~
@@ -1929,15 +1961,15 @@ R-SA1 - Vol de clé de compte de service
 **Impact**      4
 =============== =====
 
-**Description :** Si la clé privée d'un compte de service est compromise, l'attaquant obtient un accès permanent tant que la clé publique n'est pas retirée du fichier de configuration.
+**Description :** Si la clé privée d'un compte de service est compromise, l'attaquant obtient un accès permanent tant que la clé publique n'est pas retirée de ``service-accounts.d/<nom>.pub`` (ou de l'``authorized_keys`` du compte). Changer ``key_fingerprint`` dans ``service-accounts.conf`` ne suffit pas : l'empreinte n'est pas comparée lors d'une connexion par clé nue (cf. « Contrôle d'empreinte » ci-dessus), c'est la clé servie à sshd qui ouvre l'accès.
 
-**Différence avec les utilisateurs OIDC :** Contrairement aux utilisateurs avec certificat CA, la révocation côté LLNG ne bloque **pas** les comptes de service car ils n'utilisent pas ``/pam/authorize``. La révocation nécessite une modification manuelle du fichier ``service-accounts.conf``.
+**Différence avec les utilisateurs OIDC :** Contrairement aux utilisateurs avec certificat CA, la révocation côté LLNG ne bloque **pas** les comptes de service car ils n'utilisent pas ``/pam/authorize``. La révocation est un geste d'exploitation sur chaque serveur : retirer le ``.pub`` et l'entrée de ``service-accounts.conf`` coupe l'accès SSH ; le compte local lui-même est supprimé par l'exploitant (``userdel``). Voir :doc:`/security/03-offboarding`.
 
 **Remédiation :**
 
-1. Rotation régulière des clés de service (6-12 mois)
+1. Rotation régulière des clés de service (6-12 mois), en remplaçant le ``.pub`` servi à sshd
 2. Stockage sécurisé des clés (Ansible Vault, HashiCorp Vault)
-3. Audit des accès avec fingerprint dans les logs
+3. Audit des accès avec fingerprint dans les logs (l'empreinte de la clé acceptée figure dans le journal de sshd)
 4. Alerte si même clé utilisée depuis IP inattendue
 
 =============== ===================
@@ -1957,17 +1989,18 @@ R-SA2 - Compromission du fichier de configuration
 **Impact**      4
 =============== =====
 
-**Description :** Si un attaquant peut modifier ``/etc/open-bastion/service-accounts.conf``, il peut ajouter son propre compte de service avec sudo.
+**Description :** Si un attaquant peut modifier ``/etc/open-bastion/service-accounts.conf`` et ``service-accounts.d/``, il peut exempter du SSO un compte local de son choix et lui donner une clé. Depuis la 0.7.0, le fichier n'accorde plus de ``sudo`` ni ne crée de compte : l'élévation passe par ``/etc/sudoers.d/`` et le compte par ``/etc/passwd``, qu'il faut alors aussi modifier. Ces écritures demandent root ; la gravité reste celle d'un accès privilégié persistant hors SSO.
 
 **Remédiation embarquée :**
 
 - Vérification propriétaire = root (uid 0)
 - Vérification permissions 0600
 - Refus des symlinks (O_NOFOLLOW)
+- ``ob-service-account-keys`` ne sert qu'un ``.pub`` propriété de root
 
 **Remédiation complémentaire :**
 
-- File integrity monitoring (AIDE, Tripwire)
+- File integrity monitoring (AIDE, Tripwire) sur ``/etc/open-bastion/``, ``/etc/sudoers.d/`` et ``/etc/passwd``
 - Audit des modifications sur ``/etc/open-bastion/``
 
 =============== ==============
@@ -1987,25 +2020,26 @@ R-S24 - Sudo de compte de service hors token SSO
 **Impact**      4
 =============== =====
 
-**Description :** Le droit sudo d'un compte de service provient **uniquement** de ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``) : ``pam_openbastion`` l'accorde localement et renvoie un succès **sans aucun appel LLNG**, **y compris en Mode E** où un humain doit présenter un token LLNG frais. Une clé de service avec ``sudo_allowed`` est donc un privilège local permanent qui échappe à la porte sudo gouvernée par le SSO.
+**Description :** Un compte de service n'a pas de token SSO : s'il élève ses privilèges, c'est **sans aucun appel LLNG**. Jusqu'à la 0.7.0, ce droit venait de ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``) et ``pam_openbastion`` l'accordait localement, y compris en Mode E. **Depuis la 0.7.0 (#353), Open Bastion n'accorde plus aucun sudo à un compte de service** : ces clés sont ignorées, le module renvoie ``PAM_IGNORE`` dans les services ``sudo`` et ``sudo-i`` et ne touche plus au groupe ``open-bastion-sudo``. Le risque ne subsiste que là où l'exploitant écrit une règle ``sudoers`` ``NOPASSWD`` pour le compte — et, en Mode E, modifie aussi à la main la pile PAM ``sudo``, qui refuse sinon tout compte local. Une clé de service ainsi dotée reste un privilège local permanent qui échappe à la porte sudo gouvernée par le SSO ; en Mode E, cette modification renonce explicitement à la promesse que toute élévation passe par le SSO. Les scores ci-dessous évaluent ce cas ; sur un hôte sans une telle règle, le risque n'existe pas.
 
 **Vecteurs d'attaque :**
 
-- Vol de la clé privée d'un compte de service disposant de ``sudo_allowed``
+- Vol de la clé privée d'un compte de service disposant d'une règle ``sudoers``
 - Réutilisation d'une clé d'automatisation exposée dans un dépôt, un artefact CI ou une sauvegarde
-- Prestataire ou outil sorti du périmètre sans retrait de sa clé du fichier
+- Prestataire ou outil sorti du périmètre sans retrait de sa clé
+- Appartenance résiduelle à ``open-bastion-sudo`` héritée d'une version antérieure (laissée en place par la mise à jour, sans effet seule : la règle de ce groupe exige une authentification que le compte ne peut fournir)
 
 **Facteurs atténuants structurels :**
 
-- Le fichier est local à chaque serveur : la portée d'une clé est bornée aux serveurs qui la déclarent
-- ``service-accounts.conf`` est root:root 0600, refusé s'il est un lien symbolique (``O_NOFOLLOW``)
-- PAM n'autorise que la **tentative** : ``sudoers`` décide encore *quelles* commandes
-- Avec ``sudo_nopasswd = false``, l'empreinte de la clé SSH est revérifiée à chaque ``sudo`` (voir #194) — le compte doit prouver la clé qui a ouvert la session
+- Le fichier et les clés sont locaux à chaque serveur : la portée d'une clé est bornée aux serveurs qui la déclarent
+- ``service-accounts.conf`` est root:root 0600, refusé s'il est un lien symbolique (``O_NOFOLLOW``) ; il n'accorde plus rien
+- Aucun ``sudo`` par défaut : il faut une règle ``sudoers`` explicite, qui décide aussi *quelles* commandes
+- En Mode E, la pile ``sudo`` livrée refuse tout compte local ; l'élévation d'un compte de service exige une modification manuelle, visible à l'audit, et effacée par un nouveau passage du setup
 
 **Remédiation :**
 
-1. **Minimiser** : n'accorder ``sudo_allowed`` qu'aux comptes qui en ont réellement besoin ; préférer ``sudo_nopasswd = false`` et des règles ``sudoers`` restreintes à des commandes précises
-2. **Inventaire et rotation** : traiter chaque clé de service comme un secret de longue durée (coffre-fort, rotation périodique, révocation à la sortie d'un prestataire)
+1. **Minimiser** : n'écrire de règle ``sudoers`` que pour les comptes qui en ont réellement besoin, restreinte à des commandes précises plutôt qu'un ``ALL`` ; en Mode E, ne modifier la pile ``sudo`` que par décision formelle, pour les seuls comptes nommés (``pam_succeed_if.so user in ...``)
+2. **Inventaire et rotation** : traiter chaque clé de service comme un secret de longue durée (coffre-fort, rotation périodique, révocation à la sortie d'un prestataire) ; retirer les comptes de service de ``open-bastion-sudo`` après la mise à jour
 3. **Audit dédié** : journaliser et alerter sur l'usage sudo des comptes de service (clé auditd ``-k`` distincte), puisqu'il n'apparaît pas dans les logs d'autorisation LLNG
 
 +-----------------+-------------------------------------------------------------------------------+
@@ -2013,7 +2047,7 @@ R-S24 - Sudo de compte de service hors token SSO
 +=================+===============================================================================+
 | **Probabilité** | 1 (clé en coffre-fort, périmètre borné aux serveurs déclarants)               |
 +-----------------+-------------------------------------------------------------------------------+
-| **Impact**      | 3 (root sur les serveurs déclarant la clé, sans passer par la porte sudo SSO) |
+| **Impact**      | 3 (root sur les serveurs où une règle ``sudoers`` le permet, hors porte SSO)  |
 +-----------------+-------------------------------------------------------------------------------+
 
 R-S25 - Hop de compte de service via ProxyJump non enregistré
@@ -2030,14 +2064,14 @@ R-S25 - Hop de compte de service via ProxyJump non enregistré
 
 **Vecteurs d'attaque :**
 
-- Compte de service déclaré à la fois sur le bastion et sur un backend, avec ``AllowTcpForwarding`` laissé à ``yes``
+- Compte de service créé et déclaré à la fois sur le bastion et sur un backend, avec ``AllowTcpForwarding`` laissé à ``yes``
 - Usage légitime détourné : l'automatisation traverse le bastion sans laisser de trace de session
 
 **Facteurs atténuants structurels :**
 
 - Le hop reste tracé par ``sshd`` des deux côtés (ouverture de canal, authentification par clé, empreinte)
 - Les logs d'audit du backend (auditd, ``journald``) s'appliquent normalement à la session résultante
-- La clé doit être déclarée **explicitement** sur les deux hôtes
+- Le compte doit être créé et sa clé déclarée **explicitement** sur les deux hôtes
 
 **Remédiation :**
 
@@ -2056,11 +2090,12 @@ R-S25 - Hop de compte de service via ProxyJump non enregistré
 Recommandations
 ~~~~~~~~~~~~~~~
 
-1. **Principe du moindre privilège** : Ne configurer que les comptes de service strictement nécessaires sur chaque serveur
-2. **sudo_nopasswd** : Utiliser avec précaution, uniquement pour les comptes d'automatisation qui ne peuvent pas fournir de mot de passe
-3. **Rotation des clés** : Planifier une rotation périodique (6-12 mois)
-4. **Monitoring** : Logger les connexions des comptes de service avec leur fingerprint
-5. **Ségrégation** : Utiliser des clés différentes par environnement (prod/staging/dev)
+1. **Principe du moindre privilège** : Ne créer et ne déclarer que les comptes de service strictement nécessaires sur chaque serveur
+2. **sudo** : Ne l'accorder, par une règle ``sudoers`` ``NOPASSWD`` restreinte, qu'aux comptes d'automatisation qui en ont besoin ; en Mode E, ne pas modifier la pile ``sudo`` sans décision formelle (R-S24)
+3. **Shell** : ``/usr/sbin/ob-login-shell`` pour tout compte de service d'un hôte qui enregistre (``useradd --shell`` ou ``usermod -s``)
+4. **Rotation des clés** : Planifier une rotation périodique (6-12 mois), en remplaçant le ``.pub`` servi à sshd
+5. **Monitoring** : Logger les connexions des comptes de service avec leur fingerprint
+6. **Ségrégation** : Utiliser des clés différentes par environnement (prod/staging/dev)
 
 --------------
 

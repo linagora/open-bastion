@@ -139,9 +139,9 @@ SS6 — Détournement d'une clé d'automatisation
 
 **Parties prenantes traversées :** automatisation → backends.
 
-**Ce que l'architecture oppose :** le fichier ``service-accounts.conf`` est local à chaque serveur (portée bornée), root-only, et l'empreinte de la clé est vérifiée ; avec ``sudo_nopasswd = false``, l'empreinte est revérifiée à chaque ``sudo``.
+**Ce que l'architecture oppose :** le fichier ``service-accounts.conf`` et les clés de ``service-accounts.d/`` sont locaux à chaque serveur (portée bornée) et propriété de root ; le compte ne peut pas ajouter de clé servie par l'``AuthorizedKeysCommand``. Depuis la 0.7.0, Open Bastion n'accorde aucun ``sudo`` à un compte de service, et la pile ``sudo`` du Mode E refuse tout compte local.
 
-**Ce qu'elle n'oppose pas :** le droit ``sudo`` d'un compte de service ne passe pas par LLNG, même en Mode E. C'est un privilège local permanent, assumé et tracé.
+**Ce qu'elle n'oppose pas :** l'empreinte déclarée n'est pas comparée lors d'une connexion par clé nue : la clé fuitée suffit tant que son ``.pub`` est servi. Un ``sudo`` accordé par une règle ``sudoers`` de l'exploitant (et, en Mode E, par une modification manuelle de la pile) ne passe pas par LLNG : c'est un privilège local permanent, assumé et tracé sur l'hôte.
 
 **Gravité : 4.** Fiches détaillées : R-S24, R-S25, R-SA1, R-SA2.
 

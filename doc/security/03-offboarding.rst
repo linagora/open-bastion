@@ -331,9 +331,11 @@ Comptes de Service
 Particularité
 ~~~~~~~~~~~~~
 
-Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG** pour l'autorisation. Ils sont définis localement dans ``/etc/open-bastion/service-accounts.conf``.
+Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG** pour l'autorisation. Ce sont des comptes Unix locaux créés par l'exploitant ; sur chaque serveur, leur clé est servie à sshd depuis ``/etc/open-bastion/service-accounts.d/<nom>.pub`` et leur nom est exempté du SSO par ``/etc/open-bastion/service-accounts.conf``.
 
 **Conséquence importante :** La révocation du compte LLNG (Phase 1.1) ne bloque **pas** les comptes de service.
+
+**Ce qui coupe l'accès :** retirer le ``.pub`` de ``service-accounts.d/`` (et toute clé de l'``authorized_keys`` du compte) coupe l'accès SSH dès la connexion suivante ; retirer l'entrée de ``service-accounts.conf`` renvoie en outre le nom vers le portail, qui le refuse. Changer seulement ``key_fingerprint`` **ne coupe rien** : l'empreinte n'est pas comparée lors d'une connexion par clé nue, c'est la clé servie à sshd qui ouvre l'accès. Le compte local lui-même, sa règle ``sudoers`` éventuelle et ses groupes ne sont pas gérés par Open Bastion : l'exploitant les retire (``userdel``, ``/etc/sudoers.d/``). Les sessions déjà ouvertes survivent (``pkill -u <nom>`` pour les fermer).
 
 .. mermaid::
 
@@ -349,7 +351,7 @@ Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG
        end
 
        subgraph Service["Comptes de Service"]
-           S1[service-accounts.conf]
+           S1[service-accounts.d/nom.pub<br/>+ service-accounts.conf]
            S2[✅ Accès maintenu]
            R1 -.->|Pas d'effet| S1 --> S2
        end
@@ -396,7 +398,8 @@ Phase 1 : Actions Immédiates (Jour J)
    .. code:: bash
 
       # Sur chaque serveur
-      cat /etc/open-bastion/service-accounts.conf
+      sudo cat /etc/open-bastion/service-accounts.conf
+      ls -l /etc/open-bastion/service-accounts.d/
 
 2. **Rotation des clés de service** (si A avait accès aux clés privées) :
 
@@ -409,19 +412,38 @@ Phase 1 : Actions Immédiates (Jour J)
       ssh-keygen -lf /secure/ansible_new_key.pub
       # Exemple: 256 SHA256:NEW_FINGERPRINT ansible@server (ED25519)
 
-3. **Mettre à jour le fichier de configuration** :
+3. **Remplacer la clé servie à sshd**, c'est elle qui ouvre l'accès :
+
+   .. code:: bash
+
+      sudo install -m 0644 -o root -g root /secure/ansible_new_key.pub \
+          /etc/open-bastion/service-accounts.d/ansible.pub
+      # Et retirer l'ancienne clé de ~ansible/.ssh/authorized_keys s'il y en a un
+
+4. **Mettre à jour le fichier de configuration** :
 
    .. code:: bash
 
       sudo vim /etc/open-bastion/service-accounts.conf
       # Remplacer key_fingerprint par le nouveau fingerprint
 
-4. **Déployer la nouvelle clé** :
+5. **Déployer la nouvelle clé privée** auprès de l'automatisation :
 
    .. code:: bash
 
       # Mettre à jour Ansible Vault / HashiCorp Vault
       # Ou déployer via le système de gestion de configuration
+
+6. **Retirer un compte de service qui n'a plus d'usage** (au lieu de 2 à 5) :
+
+   .. code:: bash
+
+      sudo rm /etc/open-bastion/service-accounts.d/obbackup.pub
+      sudo vim /etc/open-bastion/service-accounts.conf   # supprimer la section [obbackup]
+      sudo rm -f /etc/sudoers.d/obbackup                   # règle sudoers éventuelle
+      sudo pkill -u obbackup; sudo userdel -r obbackup
+
+   Avec ``ob-builder``, retirer aussi le compte de la liste ``service_accounts:`` avant la génération suivante.
 
 .. _phase-2--vérification-j1:
 
@@ -430,7 +452,7 @@ Phase 2 : Vérification (J+1)
 
 - ☐ Tester que les comptes de service fonctionnent avec les nouvelles clés
 - ☐ Supprimer les anciennes clés de tous les systèmes de stockage (Vault, etc.)
-- ☐ Vérifier que l'ancienne clé ne permet plus l'accès
+- ☐ Vérifier que l'ancienne clé ne permet plus l'accès (``ssh -i ancienne_clé compte@serveur`` doit échouer)
 
 Tableau récapitulatif - Comptes de Service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -452,7 +474,9 @@ Jour J (si clés compromises)
 
 - ☐ Identifier les comptes de service sur chaque serveur
 - ☐ Générer de nouvelles clés pour les comptes concernés
+- ☐ Remplacer les ``.pub`` dans ``service-accounts.d/`` (c'est ce qui coupe l'ancienne clé)
 - ☐ Mettre à jour les fingerprints dans service-accounts.conf
+- ☐ Supprimer (``userdel``) les comptes qui n'ont plus d'usage, avec leur ``.pub``, leur entrée et leur règle ``sudoers``
 - ☐ Déployer les nouvelles clés dans le système de stockage sécurisé
 - ☐ Tester le fonctionnement des automatisations
 
