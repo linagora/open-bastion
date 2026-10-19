@@ -101,6 +101,22 @@ here.
 
 ### Changed
 
+- **Service accounts are local accounts the operator creates** (#353):
+  `useradd` them (with `--shell /usr/sbin/ob-login-shell` on a host that
+  records sessions, since bash reads `~/.bashrc` ahead of the recorder).
+  Open Bastion no longer creates them, sets their groups or grants them sudo;
+  listing one in `service-accounts.conf` exempts it from the SSO, and its key
+  is still served from `service-accounts.d/<name>.pub`. Under `sudo` and
+  `sudo -i`, pam_openbastion returns `PAM_IGNORE` for a service account in
+  both phases, so the local stack and sudoers decide: with the stock stack a
+  sudoers rule is enough, a Mode E stack (pam_openbastion alone) refuses until
+  adapted by hand. The session no longer adds a service account to, or
+  removes it from, `open-bastion-sudo`; existing memberships stay as they are.
+  An account that already logged in was written to `/etc/passwd` and keeps
+  working; one that never did must be created.
+  `ob-bastion-setup --enable-service-keys` names the listed accounts missing
+  from `/etc/passwd`, without creating them. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md).
 - **One setup script for the three roles** (#288): `ob-backend-setup` and
   `ob-standalone-setup` are symlinks to `ob-bastion-setup`, documented in
   `ob-bastion-setup`(8). **`--node-role` now configures the role it names**
@@ -197,6 +213,16 @@ here.
 
 ### Removed
 
+- **Service-account attributes and sudo settings** (#353): `uid`, `gid`,
+  `shell`, `home`/`home_dir`, `gecos`/`description`,
+  `sudo_allowed`/`sudo` and `sudo_nopasswd`/`nopasswd` in
+  `service-accounts.conf` are ignored, with one warning per load; they never
+  make an account or the file invalid, including the shell and home values
+  that used to drop an account. `service-accounts.conf` keeps the section name
+  and `key_fingerprint` (aliases `fingerprint`, `ssh_key`).
+- **Service accounts in the NSS module** (#353): it no longer reads
+  `service-accounts.conf`; `service_accounts_file` in `nss_openbastion.conf`
+  is still accepted and ignored.
 - **`ob-builder --bundle`** (#338): list the roles to generate in
   `target_role: "bastion,backend"` instead. Both roles then come from the same
   run and share the CA, as the bundle did; the flag only left the first role's
@@ -215,6 +241,11 @@ here.
 
 ### Fixed
 
+- **A service account can log in on a recording host** (#353). The NSS module
+  synthesised it out of the root-only `service-accounts.conf` for `getpwnam`
+  only, so sshd's lookup worked but the session's own `getpwuid(getuid())`
+  did not, and `ob-login-shell` refused it with "cannot resolve your account,
+  access refused". As a local account it now resolves through `files`.
 - **A recorded session exits with its command's status again** (#355), as
   `ob-session-recorder(8)` says. The 0.4.0 fix (`script -e`) was lost when
   0.5.0 moved the recorder to the sink (#151), so since 0.5.0 every recorded
