@@ -109,26 +109,22 @@ if [ -n "$STANDALONE_VM" ]; then
     # Exercise the ob-builder service-keys feature: declare a service account
     # ($SVC_NAME, a non-system name) whose fingerprint is the lab key's, so the
     # generated installer deposits a matching service-accounts.conf.
-    # verify_service_accounts then logs in as $SVC_NAME with that key. home is
-    # under /home (an approved prefix) so pam_openbastion does not drop it.
+    # verify_service_accounts then logs in as $SVC_NAME with that key. Name and
+    # fingerprint only: the Unix account is created by hand in
+    # provision_service_helper, as an operator would (#353).
     if [ -n "$SVC_FP" ]; then
         cat >> "$WORK/build-standalone.yml" <<EOF
 
 service_accounts:
   - name: $SVC_NAME
     key_fingerprint: "$SVC_FP"
-    sudo_allowed: false
-    shell: /bin/bash
-    home: /home/$SVC_NAME
-    gecos: Lab Deploy Service Account
-    uid: 6100
-    gid: 6100
 EOF
     fi
     obbuild --config "$WORK/build-standalone.yml" --output-shell "$BOOT_DIR" >"$WORK/gen-standalone.log" 2>&1 \
         && ok "generated standalone installer (incl. service account)" || { bad "ob-builder standalone failed"; cat "$WORK/gen-standalone.log"; }
-    # SSH-layer authorization for the service account — the documented manual step
-    # ob-builder does not do. Must run before setup locks port 22.
+    # The Unix account and the SSH-layer authorization for the service account —
+    # the documented manual steps ob-builder does not do. Must run before setup
+    # locks port 22.
     provision_service_helper "$STANDALONE_VM"
     get_cookie   # refresh before enrolling: the initial cookie may have expired by now (short lab TTLs)
     ( approve_device "${IP[$STANDALONE_VM]}" ) &
