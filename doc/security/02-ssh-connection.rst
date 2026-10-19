@@ -1225,17 +1225,19 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Mesure                           | Description                                                                                                                                                                                                                    |
 +==================================+================================================================================================================================================================================================================================+
-| **Compte de service de secours** | Le paquet bootstrap ``open-bastion-linagora`` pré-configure un compte ``linagora`` dans ``service-accounts.conf`` avec clé RSA stockée en coffre-fort. Depuis la 0.7.0, ``sudo_allowed`` est ignoré : le compte local et sa    |
-|                                  | règle ``sudoers`` relèvent de l'exploitant, et en Mode E son ``sudo`` est refusé tant que la pile PAM n'est pas modifiée à la main (voir la note ci-dessous)                                                                   |
+| **Compte de service de secours** | Un compte local (par exemple ``secours``) préparé à l'avance par l'exploitant : créé avec ``useradd``, déclaré dans ``service-accounts.conf``, sa clé publique servie par l'AuthorizedKeysCommand                              |
+|                                  | (``service-accounts.d/secours.pub``) et sa clé privée en coffre-fort. Open Bastion ne le fournit pas et ne le crée pas. Son ``sudo``, s'il en faut un, est une règle ``sudoers`` de l'exploitant, refusée en Mode E tant que   |
+|                                  | la pile PAM n'est pas modifiée à la main (voir la note ci-dessous)                                                                                                                                                             |
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Accès console via ttyS0**      | Le paquet bootstrap configure ``/etc/securetty`` avec ``ttyS0`` pour l'accès root via la console OVH/hors-bande. ``PermitRootLogin no`` dans sshd bloque l'accès root SSH, la console reste le filet de sécurité               |
+| **Accès console hors-bande**     | ``ob-bastion-setup`` pose ``PermitRootLogin no`` : ``root`` n'entre pas par SSH. L'accès ``root`` par la console (KVM, IPMI, console OVH sur ``ttyS0``) est à vérifier par l'exploitant : getty sur la console série et, si    |
+|                                  | ``pam_securetty`` est actif dans la pile ``login``, ``ttyS0`` dans ``/etc/securetty``. Open Bastion ne le configure pas                                                                                                        |
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | **Cache offline suffisant**      | Configurer ``pamAccessOfflineTtl`` (côté LLNG) à une valeur couvrant la durée maximale d'indisponibilité tolérée, et activer ``auth_cache = true`` sur les hôtes. Sans valeur renvoyée par le portail, le module applique 24 h |
 +----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 
 ..
 
-   **Automatisation bootstrap :** Le paquet ``open-bastion-linagora`` prend en charge la configuration initiale de ``securetty``, du compte de service ``linagora`` et de ``PermitRootLogin no``. Ces éléments n'ont pas besoin d'être configurés manuellement sur les déploiements utilisant ce paquet.
+   **Prérequis d'exploitation.** Le compte de secours et l'accès console ne sont fournis par aucun paquet : l'exploitant les met en place et les teste avant la mise en production. Seul ``PermitRootLogin no`` est posé par ``ob-bastion-setup``. Sans eux, les deux mesures ci-dessus n'existent pas et la cotation résiduelle de R-S17 ne tient pas.
 
    **Compte de secours et élévation (#353).** Depuis la 0.7.0, Open Bastion ne crée plus un compte de service et ne gère plus son ``sudo`` : le compte doit exister dans ``/etc/passwd``, et son élévation, s'il en faut une, vient d'une règle ``sudoers`` ``NOPASSWD`` écrite par l'exploitant. Hors Mode E, cette règle suffit. **En Mode E, la pile ``sudo`` refuse tout compte local, comptes de service compris** : le compte de secours ouvre une session SSH pendant la panne, mais n'obtient pas ``root`` sans modification manuelle de ``/etc/pam.d/sudo``, qui renonce à la promesse du Mode E (toute élévation passe par le SSO) et relève de la décision de l'administrateur. Sans cette décision, ``root`` en Mode E vient de la console hors-bande.
 
@@ -1258,13 +1260,13 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 
 1. Accéder à la console hors-bande du serveur (KVM, IPMI, console OVH via ttyS0)
 2. Se connecter en root via la console (root login SSH est bloqué par ``PermitRootLogin no``)
-3. Option A — Utiliser le compte de service ``linagora`` pré-configuré :
+3. Option A — Utiliser le compte de service de secours préparé à l'avance :
 
    .. code:: bash
 
-      # Le compte linagora est déjà dans service-accounts.conf (paquet bootstrap)
+      # Le compte secours existe (useradd) et figure dans service-accounts.conf
       # Se connecter depuis un poste disposant de la clé de secours :
-      ssh linagora@server
+      ssh secours@server
       # En Mode E, ce compte n'a pas de sudo : root reste la console
 
 4. Option B — Ajouter un compte de service temporaire depuis la console root :
