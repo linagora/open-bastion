@@ -578,7 +578,7 @@ The encryption key for the authorization cache and the desktop offline credentia
 Service accounts security
 -------------------------
 
-Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, bypassing OIDC authentication. They are defined in a local configuration file.
+Service accounts (ansible, backup, deploy, etc.) are local Unix accounts, created by the operator, that log in with an SSH key alone and are exempted from the SSO. Open Bastion serves their key to sshd, authorizes the names listed in a local configuration file without calling the portal, and records their sessions on a recording host. It does not create the accounts, manage their groups or grant their ``sudo``. See :doc:`/service-accounts`.
 
 Configuration file security
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -592,10 +592,10 @@ Symlinks    File must not be a symlink (O_NOFOLLOW)
 Location    ``/etc/open-bastion/service-accounts.conf`` (configurable)
 =========== ==========================================================
 
+The keys themselves are in ``/etc/open-bastion/service-accounts.d/<name>.pub``; ``ob-service-account-keys`` serves a file only when it is owned by root.
+
 Account validation
 ~~~~~~~~~~~~~~~~~~
-
-Service accounts are validated against the same security rules as regular users:
 
 +---------------------+------------------------------------------------------------------+
 | Field               | Validation                                                       |
@@ -604,26 +604,15 @@ Service accounts are validated against the same security rules as regular users:
 +---------------------+------------------------------------------------------------------+
 | ``key_fingerprint`` | Must start with ``SHA256:`` or ``MD5:``, valid base64 chars only |
 +---------------------+------------------------------------------------------------------+
-| ``shell``           | Must be in ``approved_shells`` list                              |
-+---------------------+------------------------------------------------------------------+
-| ``home``            | Must match ``approved_home_prefixes``                            |
-+---------------------+------------------------------------------------------------------+
-| ``uid``/``gid``     | Must be in valid range (0-65534)                                 |
-+---------------------+------------------------------------------------------------------+
+
+An entry that fails validation is dropped at load. The keys of earlier releases (``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed``, ``sudo_nopasswd``) are ignored with a warning: the shell, home and ids are those of the local account.
 
 SSH server requirement
 ~~~~~~~~~~~~~~~~~~~~~~
 
-**Important:** The SSH server must have ``ExposeAuthInfo yes`` in ``/etc/ssh/sshd_config``:
+sshd must accept the key: ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (written by ``--enable-service-keys``, and the only way under maximum security, which sets ``AuthorizedKeysFile none``), or an ``authorized_keys`` file in the account's home.
 
-.. code:: bash
-
-   # /etc/ssh/sshd_config
-   ExposeAuthInfo yes
-
-This setting allows the PAM module to access the SSH key fingerprint via the ``SSH_USER_AUTH`` environment variable, which is required for fingerprint validation.
-
-On OpenSSH >= 9.8 ``ExposeAuthInfo`` is not sufficient on its own: sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``. ``ob-bastion-setup`` / ``ob-backend-setup`` therefore also install the ``ob-ssh-principals`` helper as ``AuthorizedPrincipalsCommand ... %u %f %t %k``, which spools the fingerprint, the key type and the key blob under ``/run/open-bastion/ssh-fp/``. That spool is what feeds both the fingerprint binding and the optional SSH key policy (``ssh_key_policy_enabled``, see :doc:`/security`); the key policy is enforced fail-closed and denies a login whose key cannot be identified.
+``ExposeAuthInfo yes`` does not make the fingerprint check work. On current OpenSSH, sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``, and the spool under ``/run/open-bastion/ssh-fp/`` is written by the ``AuthorizedPrincipalsCommand`` helper, which sshd runs for certificates only. A service account logs in with a plain key, so no fingerprint reaches PAM and ``key_fingerprint`` is not compared: the access control is the key sshd accepts. ``fingerprint_required = true`` and ``ssh_key_policy_enabled = true``, which both need that spool, refuse a service account's plain-key login.
 
 Authentication flow
 ~~~~~~~~~~~~~~~~~~~
@@ -633,54 +622,58 @@ Authentication flow
    sequenceDiagram
        participant SA as Service Account
        participant SSH as SSH Server
+       participant AKC as ob-service-account-keys
        participant PAM as PAM Module
 
        SA->>SSH: SSH key authentication
-       SSH->>PAM: pam_sm_authenticate
-       Note over SSH: ExposeAuthInfo provides<br/>SSH_USER_AUTH with fingerprint
-       PAM->>PAM: Extract fingerprint from SSH_USER_AUTH
-       PAM->>PAM: Check service_accounts.conf
-       PAM->>PAM: Validate fingerprint matches config
-       Note over PAM: Fingerprint OK = authorized
+       Note over SSH: Account resolved from /etc/passwd
+       SSH->>AKC: AuthorizedKeysCommand %u
+       AKC-->>SSH: service-accounts.d/<name>.pub (root-owned)
+       Note over SSH: Key accepted
+       SSH->>PAM: pam_sm_acct_mgmt
+       PAM->>PAM: Name listed in service-accounts.conf
+       Note over PAM: Authorized locally, no LLNG call
        PAM-->>SSH: PAM_SUCCESS
-       SSH-->>SA: Session established
+       SSH-->>SA: Session established (recorded on a recording host)
 
-1. Service account connects via SSH with its configured key
-2. SSH server exposes key fingerprint via ``SSH_USER_AUTH`` (requires ``ExposeAuthInfo yes``)
-3. PAM module extracts fingerprint and checks if user is in ``service_accounts.conf``
-4. PAM module validates that the SSH key fingerprint matches the configured value
-5. If fingerprint matches, account is authorized locally (no LLNG call needed)
-6. sudo permissions are checked from the same configuration file
+1. sshd resolves the account from ``/etc/passwd``; an unknown user is refused before any key is looked at
+2. sshd gets the account's key from ``ob-service-account-keys`` (or ``authorized_keys``) and checks the client holds it
+3. The PAM module finds the name in ``service-accounts.conf`` and authorizes it locally (no LLNG call)
+4. A fingerprint, if one reaches PAM, is compared with ``key_fingerprint``; on a plain-key login none does
+5. On a recording host the session runs through the recorder; the account's login shell must be ``/usr/sbin/ob-login-shell`` for nothing to run before it
+6. ``sudo`` is not decided by the module (``PAM_IGNORE``): the local PAM stack and ``sudoers`` decide
 
 .. _security-reference-security-benefits-1:
 
 Security benefits
 ~~~~~~~~~~~~~~~~~
 
-+---------------------+-------------------------------------------------------+
-| Feature             | Benefit                                               |
-+=====================+=======================================================+
-| Local configuration | No network dependency for service accounts            |
-+---------------------+-------------------------------------------------------+
-| Per-server control  | Each server explicitly lists allowed service accounts |
-+---------------------+-------------------------------------------------------+
-| SSH key binding     | Fingerprint validation prevents key substitution      |
-+---------------------+-------------------------------------------------------+
-| Audit logging       | All service account access is logged                  |
-+---------------------+-------------------------------------------------------+
-| sudo control        | Fine-grained sudo permissions per account             |
-+---------------------+-------------------------------------------------------+
++---------------------+---------------------------------------------------------------+
+| Feature             | Benefit                                                       |
++=====================+===============================================================+
+| Local configuration | No network dependency for service accounts                    |
++---------------------+---------------------------------------------------------------+
+| Per-server control  | Each server explicitly lists allowed service accounts         |
++---------------------+---------------------------------------------------------------+
+| Root-owned keys     | The account cannot add a key (``AuthorizedKeysCommand``)      |
++---------------------+---------------------------------------------------------------+
+| Audit logging       | All service account access is logged                          |
++---------------------+---------------------------------------------------------------+
+| No implicit sudo    | Open Bastion grants none; ``sudoers`` is the only source      |
++---------------------+---------------------------------------------------------------+
 
 Limitations
 ~~~~~~~~~~~
 
-========================= ==============================================
-Limitation                Mitigation
-========================= ==============================================
-No centralized management Use configuration management (Ansible, Puppet)
-Manual key rotation       Implement key rotation procedures
-Local file dependency     Monitor file integrity with AIDE/Tripwire
-========================= ==============================================
+==================================== ===============================================================
+Limitation                           Mitigation
+==================================== ===============================================================
+No centralized management            Use configuration management (Ansible, Puppet)
+No portal revocation                 Remove the ``.pub`` and the entry on every server; ``userdel``
+Manual key rotation                  Implement key rotation procedures
+Local file dependency                Monitor file integrity with AIDE/Tripwire
+Shell not enforced on recording host Create the account with ``/usr/sbin/ob-login-shell``
+==================================== ===============================================================
 
 Example configuration
 ~~~~~~~~~~~~~~~~~~~~~
@@ -689,11 +682,6 @@ Example configuration
 
    [ansible]
    key_fingerprint = SHA256:abc123def456
-   sudo_allowed = true
-   sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
 .. _security-reference-offline-credential-cache-security:
 

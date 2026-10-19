@@ -167,7 +167,8 @@ What it does not do
 
 It does not delete recordings, ``service-accounts.conf`` or
 ``service-accounts.d/`` (operator data, inert once sshd and PAM are
-restored), SSO users' home directories, or the package. It does not
+restored), the service accounts' Unix accounts (the operator's, like
+their ``sudoers`` rules), SSO users' home directories, or the package. It does not
 revert ``ob-desktop-setup``: a display-manager stack that still loads
 ``pam_openbastion`` is listed and the exit status is 2. It does not touch
 the LemonLDAP::NG Manager: delete the host's device entry there. Leave

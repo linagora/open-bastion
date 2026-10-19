@@ -31,6 +31,10 @@ What works offline, and what needs the portal
      - ✅ in the key modes only
      - Maximum security sets ``AuthorizedKeysFile none``, so ``sshd``
        refuses a plain key.
+   * - SSH login of a :doc:`service account </service-accounts>`
+     - ✅
+     - A local account, its key served from a local file, and no portal
+       call in PAM.
    * - ``sudo`` for an SSO user, once sudo's own timestamp has lapsed
      - ❌
      - The ``auth`` phase wants a fresh token from ``/pam/verify``: the
@@ -40,8 +44,10 @@ What works offline, and what needs the portal
      - ``sudo`` runs no ``auth`` while its credential is fresh; the
        ``account`` phase then answers from the cache.
    * - ``sudo`` for a service account
-     - ✅
-     - Its rights come from ``service-accounts.conf``, read locally.
+     - ✅ if granted
+     - Only a ``sudoers`` rule grants it, with no portal call; under
+       maximum security only if the ``sudo`` stack was edited by hand (see
+       :ref:`service-accounts-sudo`).
    * - Hopping to a backend with :doc:`ob-ssh(1) </references/man/ob-ssh>`,
        :doc:`ob-scp(1) </references/man/ob-scp>` or
        :doc:`ob-sftp(1) </references/man/ob-sftp>`
@@ -68,8 +74,8 @@ elevated recently therefore keeps elevating, and the failure lands on the
 first ``sudo`` after the timestamp lapses.
 ``--enable-sudo-fresh-otp`` sets ``timestamp_timeout=0`` for the SSO group,
 deliberately trading that availability for a fresh proof on every
-elevation: the ⚠️ row becomes a ❌, and the designed answer is a break-glass
-service account.
+elevation: the ⚠️ row becomes a ❌, and the designed answer is out-of-band
+console access, or a break-glass service account where it has ``sudo``.
 
 Two caches are involved, and they must be sized together:
 
@@ -250,8 +256,11 @@ command never sees, the gap R-S25 describes in
 :doc:`the risk study </security/99-risk-reduce>`.
 
 Prefer the two mechanisms designed for the outage: a break-glass service
-account, whose rights are read locally with no portal call, and out-of-band
-console access. Both are what R-S17 prescribes for a total lockout.
+account, which logs in with no portal call, and out-of-band console access.
+Both are what R-S17 prescribes for a total lockout. Under maximum security
+the service account gets a shell but no ``sudo`` unless the ``sudo`` stack
+was edited by hand (see :ref:`service-accounts-sudo`): there, root comes
+from the console.
 
 Limitations
 -----------

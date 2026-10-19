@@ -145,19 +145,25 @@ Options
 Service accounts
 ----------------
 
-The builder can declare SSH-key-only local accounts (ansible, backup,
-CI/CD, ...) that authenticate by SSH key fingerprint without OIDC. The
+The builder can declare service accounts (ansible, backup, CI/CD, ...):
+local accounts that log in with an SSH key, without OIDC. The
 questionnaire prompts for them interactively; a ``--config`` YAML
 provides them under a ``service_accounts:`` list (keys: ``name``,
-``public_key`` or ``public_key_file``, ``key_fingerprint``,
-``sudo_allowed``, ``sudo_nopasswd``, ``shell``, ``home``, ``gecos``,
-``uid``, ``gid``). Each entry is validated at build time and rendered into
+``public_key`` or ``public_key_file``, ``key_fingerprint``). Each entry is
+validated at build time and rendered into
 ``/etc/open-bastion/service-accounts.conf`` (``0600 root:root``) on the
 target, with ``service_accounts_file`` set in ``openbastion.conf``; its key
 goes to ``/etc/open-bastion/service-accounts.d/<name>.pub``. Give the key:
 ``key_fingerprint`` is derived from it, and on its own leaves ``sshd`` no
-key to accept. They apply to every role. See ``open-bastion`` and
-the project's :doc:`/service-accounts`, shipped as
+key to accept. They apply to every role.
+
+The artefacts do not create the Unix accounts, add them to groups or
+give them ``sudo``: create each account on the targets
+(``/usr/sbin/ob-login-shell`` as its shell where sessions are recorded),
+and write its ``sudoers`` rule yourself. The keys ``sudo_allowed``,
+``sudo_nopasswd``, ``shell``, ``home``, ``gecos``, ``uid`` and ``gid`` of
+earlier releases are ignored with a warning. See the project's
+:doc:`/service-accounts`, shipped as
 ``/usr/share/doc/open-bastion-doc/html/service-accounts.html`` in the
 HTML documentation.
 

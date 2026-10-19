@@ -121,7 +121,9 @@ Common options
    Write the sshd drop-in that serves service-account keys from
    ``/etc/open-bastion/service-accounts.d/`` (AuthorizedKeysCommand, plus
    ExposeAuthInfo). Off by default; a run without it removes a drop-in it
-   generated earlier.
+   generated earlier. It does not create the accounts: each must exist in
+   ``/etc/passwd``, with ``/usr/sbin/ob-login-shell`` as its shell on a
+   host that records.
 
 .. option:: --enable-sudo-fresh-otp
 

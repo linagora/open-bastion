@@ -123,8 +123,12 @@ logged. Consequences:
   behaviour is unchanged.
 
 ``ExposeAuthInfo yes`` in ``sshd_config`` remains useful as a fallback
-for sshd variants that do propagate the information, and is required
-for :doc:`Service accounts </service-accounts>` fingerprint validation.
+for sshd variants that do propagate the information. It does not give
+PAM the fingerprint of a plain key on a stock OpenSSH, so it does not make
+the ``key_fingerprint`` of a :doc:`service account </service-accounts>`
+checked either (see :ref:`service-accounts-fingerprint`). For the same
+reason, a service account's plain-key login is refused while the policy is
+enabled: the helper above runs for certificates only.
 
 Rejections
 ~~~~~~~~~~
@@ -437,7 +441,10 @@ Local accounts in ``/etc/passwd`` are not resolved by
 ``libnss_openbastion`` and keep the shell you gave them. Any of them
 that logs in over SSH on a recording host goes through the same
 ``ForceCommand``, with the same exposure; give it the launcher with
-``chsh -s /usr/sbin/ob-login-shell <user>``.
+``chsh -s /usr/sbin/ob-login-shell <user>``. That includes the
+:doc:`service accounts </service-accounts>`, which are local accounts
+you create: on a recording host, create them with this shell
+(:ref:`service-accounts-recording-shell`).
 
 .. _session-recording-availability:
 

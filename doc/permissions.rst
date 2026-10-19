@@ -135,15 +135,16 @@ standalone host.
   ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A
   host can also keep its own classic ``sudoers`` in parallel.
 
-- Service accounts — key-only local accounts that bypass OIDC,
-  with a local sudo grant. Powerful and local: see the trade-offs
-  (sudo without token, reachability requirements) in :doc:`Service
-  Accounts </service-accounts>`.
+- Service accounts — local accounts you create, which log in with a
+  key and bypass the SSO. Open Bastion serves the key and exempts the
+  account from the SSO; their ``sudo``, if any, is your own ``sudoers``
+  rule. See the trade-offs (no portal revocation, ``sudo`` under maximum
+  security) in :doc:`Service Accounts </service-accounts>`.
 
 - User provisioning — shell, home, UID/GID ranges, skeleton
   directory, plus the ``approved_shells`` / ``approved_home_prefixes``
-  allow-lists that bound what a provisioned (or service) account may
-  use. See :doc:`Configuration </references/configuration>`.
+  allow-lists that bound what a provisioned account may use. See
+  :doc:`Configuration </references/configuration>`.
 
 - Account existence — a bastion or standalone host creates no account:
   ``libnss_openbastion`` resolves SSO users from LLNG on the fly (a
@@ -151,7 +152,8 @@ standalone host.
   directory. A backend writes the account instead: ``create_user`` is on
   by default there (``--no-create-user`` disables it), and the module
   appends the account to ``/etc/passwd`` and ``/etc/shadow`` on first
-  login and creates its home.
+  login and creates its home. Neither creates a service account: you
+  do.
 
 - Group-sync whitelist — ``allowed_managed_groups`` limits which
   LLNG-managed groups may be created/modified locally

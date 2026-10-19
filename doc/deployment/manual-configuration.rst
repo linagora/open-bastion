@@ -121,8 +121,9 @@ Each of these is off unless the option is given:
   effective together with ``--max-security`` for the bastion and
   standalone roles.
 
-- SSH access for service accounts (``--enable-service-keys``) — see
-  :doc:`/service-accounts`.
+- SSH access for service accounts (``--enable-service-keys``) — serves
+  their keys to ``sshd``; the local accounts themselves are yours to
+  create. See :doc:`/service-accounts`.
 
 - Session containment hardening (``--enable-hardening``) — see
   :doc:`hardening </hardening>`.

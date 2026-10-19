@@ -1,46 +1,119 @@
 Service accounts
 ================
 
-Service accounts are local Unix accounts that authenticate with an SSH key
-alone, without OIDC. They are declared in a per-server configuration file,
-which also grants them ``sudo``.
+A service account is a local Unix account that logs in with an SSH key
+alone, without the SSO. You create the account; Open Bastion serves its
+key to ``sshd``, exempts it from the SSO in PAM and, on a host that records
+sessions, records it like any other session.
 
 Why service accounts?
 ---------------------
 
 Some accounts do not correspond to people and cannot go through a browser
 login: automation tools, backup systems, CI/CD pipelines, monitoring
-agents, and anything else that needs an SSH key, a fixed account and
-possibly ``sudo``, but no interactive login.
+agents, and anything else that needs an SSH key and a fixed account, but
+no interactive login.
 
-How it works
-------------
+What Open Bastion does, and what it leaves to you
+-------------------------------------------------
 
-1. The account connects with its SSH key.
-2. ``sshd`` accepts the key, which must therefore be authorized for that
-   account.
-3. The PAM module matches the connection against the account's entry in
-   ``/etc/open-bastion/service-accounts.conf``.
-4. An authorized account is created on first login if it does not exist
-   yet, and its ``sudo`` rights come from that same entry — no portal call.
+The SSO knows nothing of these accounts, and Open Bastion's part ends
+where the SSO is not involved.
 
-Enforcing the fingerprint an account declares takes two things: ``sshd``
-must accept its key, and PAM must receive the fingerprint to compare it
-with.
+Open Bastion provides:
+
+- the key: ``sshd``'s ``AuthorizedKeysCommand`` serves the root-owned
+  ``/etc/open-bastion/service-accounts.d/<name>.pub``
+  (``--enable-service-keys``, or the key in an ``ob-builder`` build);
+- the SSO exemption: ``pam_openbastion`` authorizes an account listed in
+  ``/etc/open-bastion/service-accounts.conf`` locally, with no portal call;
+- session recording: on a bastion or standalone host that records, the
+  session goes through the recorder's ``ForceCommand`` like any other.
+
+You provide, with your configuration management:
+
+- the Unix account itself (``useradd``), its home and its shell, which
+  must be ``/usr/sbin/ob-login-shell`` on a host that records (see
+  :ref:`service-accounts-recording-shell`);
+- its groups, if it needs any;
+- its ``sudo``, if it needs any: a ``sudoers`` rule (see
+  :ref:`service-accounts-sudo`);
+- its removal (``userdel``) when it is retired.
+
+Open Bastion never creates the account, never adds it to a group and
+does not touch its ``sudo``.
+
+How a login works
+-----------------
+
+1. ``sshd`` looks the account up. It must be in ``/etc/passwd``:
+   ``sshd`` refuses an unknown user before it looks at any key.
+2. ``sshd`` runs ``ob-service-account-keys``, which prints
+   ``service-accounts.d/<name>.pub`` when the file exists and is owned
+   by root.
+3. ``sshd`` accepts the connection if the client holds the matching
+   private key.
+4. In the PAM ``account`` phase, ``pam_openbastion`` finds the name in
+   ``service-accounts.conf`` and authorizes it without calling the
+   portal. A name that is not listed goes to the portal, which does not
+   know it and refuses it.
+5. On a host that records, the session runs through the recorder.
+
+The account therefore needs all three: the local account, the key, and
+the entry in ``service-accounts.conf``.
+
+Creating the account
+--------------------
+
+.. code:: bash
+
+   # A host that records sessions (bastion, standalone)
+   useradd --system --create-home --shell /usr/sbin/ob-login-shell obbackup
+
+   # A backend, or a host set up with --disable-session-recorder
+   useradd --system --create-home --shell /bin/bash obbackup
+
+The account needs no password: it logs in with its key, and
+``sudo``, if you grant it, must be ``NOPASSWD``. Give it the same uid on
+every host if files it writes travel between them.
+
+.. _service-accounts-recording-shell:
+
+The shell on a host that records
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``sshd`` does not run the recorder's ``ForceCommand`` itself: it runs
+``<login shell> -c /usr/sbin/ob-session-recorder``. With ``/bin/bash`` as
+the login shell, bash sources ``~/.bashrc`` first, because sshd started
+it. That file belongs to the account, so whoever holds the key can make
+it run anything, ``exec`` included, before the recorder starts and
+outside the recording.
+
+``/usr/sbin/ob-login-shell`` reads no file of the account and executes
+the recorder directly; the recorder then starts the real shell
+(``default_shell`` in ``nss_openbastion.conf``) inside the recording. See
+:doc:`ob-login-shell(8) </references/man/ob-login-shell>`.
+
+SSO users get that shell from ``libnss_openbastion``. A service account
+is resolved from ``/etc/passwd``, so its shell is the one you gave it,
+and nothing checks it: neither the setup nor PAM refuses a service
+account whose shell is ``/bin/bash``. To fix an existing account:
+
+.. code:: bash
+
+   usermod -s /usr/sbin/ob-login-shell obbackup
 
 Configuration
 -------------
 
-Service accounts are described in the
-``/etc/open-bastion/service-accounts.conf`` configuration file; it's
-INI-style with one ``[name]`` section per account, ``name`` being the
-Unix account name. The file must be owned by root and have 0600
+Service accounts are listed in ``/etc/open-bastion/service-accounts.conf``,
+an INI-style file with one ``[name]`` section per account, ``name`` being
+the Unix account name. The file must be owned by root and have 0600
 permissions.
 
-This configuration file is local to each server, so an account is
-accepted only where it is listed; deploy the right file per server
-with your configuration management tool.
-
+The file is local to each server, so an account is exempted from the SSO
+only where it is listed; deploy the right file per server with your
+configuration management tool.
 
 Example:
 
@@ -49,48 +122,18 @@ Example:
    # Ansible automation account
    [ansible]
    key_fingerprint = SHA256:abc123def456...
-   sudo_allowed = true
-   sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
    # Backup service account
-   [backup]
+   [obbackup]
    key_fingerprint = SHA256:xyz789...
-   sudo_allowed = false
-   gecos = Backup Service Account
-   shell = /bin/sh
-   home = /var/lib/backup
 
-.. note::
+Get ``key_fingerprint`` from the public key:
 
-   The ``home`` and ``shell`` values must be under
-   ``approved_home_prefixes`` and ``approved_shells`` keys of the
-   :doc:`openbastion.conf(5) </references/man/openbastion.conf>`
-   configuration file.
+.. code:: bash
 
-   An account with values outside those lists is dropped at load and
-   its login falls through to LLNG, which refuses it with "user not
-   found": widen the lists for it, or keep its home under ``/home``.
-
-   The default values are ``/home:/var/home:/var/lib`` for
-   ``approved_home_prefixes``, and ``/bin/bash``, ``/bin/sh``,
-   ``/usr/bin/bash``, ``/usr/bin/sh``, ``/bin/zsh``, ``/usr/bin/zsh``,
-   ``/bin/dash``, ``/usr/bin/dash``, ``/bin/fish`` and ``/usr/bin/fish``
-   for ``approved_shells``.
-
-.. note::
-
-   Get ``key_fingerprint`` value from the public key:
-
-   .. code:: bash
-
-      ssh-keygen -lf /path/to/key.pub
-      # 256 SHA256:abc123def456 user@host (ED25519)
-      # -> key_fingerprint = SHA256:abc123def456
-
-   It is what the PAM module checks the connecting key against.
+   ssh-keygen -lf /path/to/key.pub
+   # 256 SHA256:abc123def456 user@host (ED25519)
+   # -> key_fingerprint = SHA256:abc123def456
 
 .. _service-accounts-options:
 
@@ -107,37 +150,45 @@ Options
    * - ``key_fingerprint``
      - Yes
      - Fingerprint of the account's key, ``SHA256:...`` or ``MD5:...``.
-   * - ``public_key``
-     - No
-     - The account's public key. It is deployed to
-       ``service-accounts.d/<name>.pub``, and ``key_fingerprint`` is derived
-       from it, so giving one of the two suffices.
-   * - ``public_key_file``
-     - No
-     - Path to that key, resolved against the configuration file's
-       directory and read when the bundle is built. Mutually exclusive with
-       ``public_key``.
-   * - ``sudo_allowed``
-     - No
-     - Allow ``sudo`` (default: false).
-   * - ``sudo_nopasswd``
-     - No
-     - ``sudo`` without re-proving the key (default: false), see
-       :ref:`sudo and the key check <service-accounts-sudo-and-the-key-check>`.
-   * - ``gecos``
-     - No
-     - User description.
-   * - ``shell``
-     - No
-     - Login shell, within ``approved_shells``.
-   * - ``home``
-     - No
-     - Home directory, under ``approved_home_prefixes``.
-   * - ``uid`` / ``gid``
-     - For a new account
-     - Fixed UID and GID. NSS resolves an account that does not exist yet
-       only when both are set; ``0`` auto-assigns, which works only if the
-       account already exists.
+       Aliases: ``fingerprint``, ``ssh_key``. An entry without a valid one
+       is dropped at load, with a syslog warning, and its logins go to the
+       portal. See :ref:`service-accounts-fingerprint` for what it is
+       checked against.
+
+Keys that earlier releases read — ``uid``, ``gid``, ``shell``, ``home``
+(``home_dir``), ``gecos`` (``description``), ``sudo_allowed`` (``sudo``)
+and ``sudo_nopasswd`` (``nopasswd``) — are ignored with a warning in the
+logs. The account they described is yours now: set its shell and home
+with ``useradd``/``usermod``, and its ``sudo`` in ``sudoers``. Remove the
+lines once that is done.
+
+.. _service-accounts-fingerprint:
+
+What ``key_fingerprint`` does, and does not do
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``pam_openbastion`` compares ``key_fingerprint`` with the fingerprint of
+the key that opened the session only when it learns that fingerprint. It
+has two sources: ``SSH_USER_AUTH`` in the PAM environment, which OpenSSH
+does not set during the ``account`` phase, and the spool under
+``/run/open-bastion/ssh-fp``, which the ``AuthorizedPrincipalsCommand``
+helper writes, and which ``sshd`` runs only for a certificate. A service
+account logs in with a plain key, so in practice there is nothing to
+compare, and the check is skipped.
+
+What controls access is the key ``sshd`` accepts: the root-owned
+``service-accounts.d/<name>.pub`` served by ``AuthorizedKeysCommand``, or
+an ``authorized_keys`` file. Treat that file as the credential, and keep
+``key_fingerprint`` equal to it.
+
+The same absence has two consequences:
+
+- ``fingerprint_required = true`` in ``openbastion.conf`` refuses a login
+  whose fingerprint cannot be determined. On a host that sets it, service
+  accounts cannot log in with a plain key.
+- ``ssh_key_policy_enabled = true`` refuses a key it cannot identify, for
+  the same reason (see :ref:`the SSH key policy
+  <security-ssh-key-policy>`).
 
 Generating with ob-builder
 --------------------------
@@ -156,41 +207,30 @@ list in a YAML file passed with ``--config``.
    service_accounts:
      - name: ci-ansible
        public_key_file: keys/ci-ansible.pub # the fingerprint comes from it
-       sudo_allowed: true
-       sudo_nopasswd: true
-       shell: /bin/bash
-       home: /home/ci-ansible
-       gecos: Ansible Automation
-       uid: 6001 # fixed uid and gid: resolvable, hence reachable
-       gid: 6001
      - name: obbackup
        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… backup@ops"
-       sudo_allowed: false
-       shell: /bin/sh
-       home: /home/obbackup
-       uid: 6002
-       gid: 6002
 
 Service accounts can also be defined when using ``ob-builder``
 interactive mode.
 
+The artefacts write ``service-accounts.conf`` and the keys; they do not
+create the Unix accounts. Create them on every target, with the shell
+their role needs (``/usr/sbin/ob-login-shell`` on a bastion or standalone
+host that records), before the accounts are used. The keys ``uid``,
+``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed`` and
+``sudo_nopasswd`` of earlier releases are ignored with a warning.
+
 Authorizing the public key at the SSH layer
 -------------------------------------------
 
-The PAM module validates the fingerprint after ``sshd`` has accepted
-the key, so ``sshd`` has to be told the key is acceptable, by one of:
-
-- ``authorized_keys`` — works with every security scenario but maximum
-  security. Put the key in ``~<name>/.ssh/authorized_keys`` (``0600``,
-  owned by the account).  This implies to create the account and its
-  home directory.
+``sshd`` has to be told the key is acceptable, by one of:
 
 - ``AuthorizedKeysCommand`` — required under maximum security, and
   works in other security scenarios. Maximum security sets
   ``AuthorizedKeysFile none``, so ``authorized_keys`` is ignored. The
   ``ob-service-account-keys`` helper serves the key from
-  ``/etc/open-bastion/service-accounts.d/<name>.pub`` and does not
-  depend on the account existing yet:
+  ``/etc/open-bastion/service-accounts.d/<name>.pub``, and only from a
+  file owned by root, so the account cannot add a key of its own:
 
   ::
 
@@ -199,22 +239,24 @@ the key, so ``sshd`` has to be told the key is acceptable, by one of:
      AuthorizedKeysCommandUser nobody
      ExposeAuthInfo yes
 
-  All three lines are needed: without ``ExposeAuthInfo yes``, sshd
-  accepts the key and the fingerprint check never runs. Drop each key
-  in ``/etc/open-bastion/service-accounts.d/`` and restart the
-  ``sshd`` service.
+  Install each key in ``/etc/open-bastion/service-accounts.d/``
+  (``install -m 0644 -o root -g root key.pub
+  /etc/open-bastion/service-accounts.d/<name>.pub``); ``sshd`` runs the
+  helper at every login, so no restart is needed for a new key.
+  ``ExposeAuthInfo yes`` exposes the authentication details to the
+  session (``SSH_USER_AUTH``); it does not bring the fingerprint to the
+  PAM ``account`` phase (see :ref:`service-accounts-fingerprint`).
 
-  When no fingerprint reaches PAM, the check is skipped rather than
-  failed.  Set ``fingerprint_required = true`` in ``openbastion.conf``
-  to refuse such a login instead; the setting applies to every SSH
-  login on the host, not only to service accounts.
+- ``authorized_keys`` — works with every security scenario but maximum
+  security. Put the key in ``~<name>/.ssh/authorized_keys`` (``0600``,
+  owned by the account). The account owns that file and can add keys to
+  it, and since ``key_fingerprint`` is not compared on a plain-key login,
+  such a key works too: prefer ``AuthorizedKeysCommand``.
 
 The command :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`
 ``--enable-service-keys`` (and the same flag on
 :doc:`ob-backend-setup(8) </references/man/ob-bastion-setup>`) writes the
-whole drop-in and creates the directory, and reports whether
-``fingerprint_required`` is set rather than setting it. Under maximum
-security alone, it also writes the ``AuthorizedKeysCommand``.
+whole drop-in and creates the directory.
 
 Letting ob-builder deploy the key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -231,24 +273,11 @@ When any account carries a key, the shell installer also passes
 configuration opts out, ``true`` forces it. When the setup is skipped, the
 installer says so if it finds sshd not serving the keys.
 
-``key_fingerprint`` alone is not an alternative to the key. It tells
-``pam_openbastion`` what to expect and gives ``sshd`` nothing to accept: the
-account can log in only if its key reaches ``sshd`` some other way, an
-``authorized_keys`` file you deploy yourself. Under maximum security
-(``AuthorizedKeysFile none``) there is no other way, so give the key.
-
-The account must be resolvable (fixed uid and gid)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``sshd`` looks the user up before authenticating and refuses unknown users.
-A brand-new service account therefore has to be resolvable up front, which
-``nss_openbastion`` does only when the account has a fixed ``uid`` and
-``gid``. So, for an account that does not already exist locally:
-
-- set both ``uid`` and ``gid`` (which also gives stable ownership across
-  the fleet), or
-- pre-create the account (``useradd``) so the ``files`` NSS source resolves
-  it.
+``key_fingerprint`` alone is not an alternative to the key: it gives
+``sshd`` nothing to accept. The account can log in only if its key reaches
+``sshd`` some other way, an ``authorized_keys`` file you deploy yourself.
+Under maximum security (``AuthorizedKeysFile none``) there is no other way,
+so give the key.
 
 Reaching servers through a bastion
 ----------------------------------
@@ -265,41 +294,59 @@ vouching human users rely on:
   session recorder does not cover the forwarded channel: such a hop is not
   recorded. Treat it as a deliberate audit bypass.
 
-.. _service-accounts-sudo-and-the-key-check:
+.. _service-accounts-sudo:
 
-sudo and the key check
-----------------------
+sudo
+----
 
-With ``sudo_nopasswd = false``, a service account's ``sudo`` re-proves the
-key that opened the session, reading the fingerprint the session left in
-``/run/open-bastion/ssh-fp``. That requires the host to run the principals
-helper, which is what writes it; on a host without one, the account's
-``sudo`` is refused. ``sudo_nopasswd = true`` grants ``sudo`` with no proof
-of identity at all.
+Open Bastion does not manage a service account's ``sudo``, under any
+security scenario, maximum security included. In the ``sudo`` and
+``sudo-i`` services, ``pam_openbastion`` neither grants nor refuses it
+(``PAM_IGNORE``): the rest of the PAM stack and ``sudoers`` decide. It
+does not add the account to ``open-bastion-sudo`` or remove it from that
+group either.
 
-.. _service-accounts-sudo-bypass:
+To give an account ``sudo``, write a ``sudoers`` rule for it. The rule
+must be ``NOPASSWD``: the account has no password and no SSO token to
+present, and ``NOPASSWD`` makes ``sudo`` skip the ``auth`` phase.
 
-sudo bypasses the SSO token (including under maximum security)
---------------------------------------------------------------
+.. code:: bash
 
-A service account's ``sudo`` rights come entirely from
-``service-accounts.conf``: the PAM module grants them locally, even under
-maximum security, where human users must present a fresh token. A service
-key with ``sudo_allowed``, and above all with
-``sudo_nopasswd``, is therefore a standing local privilege outside the
-SSO-gated model: grant it sparingly, prefer no ``sudo``, and rotate these
-keys like any other long-lived credential.
+   # visudo -f /etc/sudoers.d/service-accounts
+   obbackup ALL=(root) NOPASSWD: /usr/local/sbin/run-backup
+   ansible  ALL=(ALL)  NOPASSWD: ALL
 
-``sudo_allowed`` is all or nothing. With ``true``, the module adds the
-account to ``open-bastion-sudo`` at login, and that group's rule in
-``/etc/sudoers.d/open-bastion`` grants every command: a narrower
-``sudoers`` rule for the account changes nothing. To grant only a few
-commands:
+Do not use ``open-bastion-sudo`` for it: that group's rule asks for
+authentication, and the module maintains the group for SSO users. Take
+out of it an account that an earlier release put there
+(``gpasswd -d ansible open-bastion-sudo``): ``sudoers`` applies the last
+rule that matches, so that group's rule in ``/etc/sudoers.d/open-bastion``
+overrides yours whenever your file sorts before it.
 
-- **Maximum security**: not possible. The ``sudo`` stack asks the module
-  for every ``sudo``, and with ``sudo_allowed = false`` it refuses them
-  all, whatever ``sudoers`` says.
-- **The other scenarios**: leave ``sudo_allowed = false`` and write a
-  ``NOPASSWD`` rule for the account in your own ``/etc/sudoers.d`` file.
-  Their ``sudo`` stack lets accounts in ``/etc/passwd``, service accounts
-  included, through on ``sudoers`` alone.
+Whether the rule is enough depends on the ``sudo`` PAM stack:
+
+- **Every scenario but maximum security**: it is. A bastion or
+  standalone host keeps the distribution's stack, and the backend stack
+  passes an account of ``/etc/passwd`` with
+  ``account sufficient pam_localuser.so``; ``sudoers`` alone decides.
+- **Maximum security**: it is not. That stack is ``pam_openbastion``
+  alone and refuses every local account, service accounts included (see
+  :ref:`max-security-scenario-sudo`). Giving one ``sudo`` there means
+  editing ``/etc/pam.d/sudo`` and ``/etc/pam.d/sudo-i`` by hand, for
+  instance:
+
+  .. code:: text
+
+     account    sufficient   pam_succeed_if.so quiet user in ansible:obbackup
+     account    required     pam_openbastion.so
+
+  That is your decision to take, not a supported configuration of the
+  scenario. Those accounts then elevate with no SSO involvement, which is
+  exactly what maximum security promises does not happen: there, every
+  elevation goes through the SSO. A key with such a rule is a standing
+  root credential; keep the rule as narrow as the job allows, and rotate
+  the key like any other long-lived secret. A setup re-run rewrites both
+  files and drops the line.
+
+A service account's ``sudo`` is never seen by the portal: audit it on the
+host (``sudo`` logs to syslog, and :doc:`/audit` can trace it).
