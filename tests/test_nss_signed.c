@@ -163,7 +163,6 @@ static void config_reset(void)
     free(g_config.default_shell);
     free(g_config.force_shell);
     free(g_config.default_home_base);
-    free(g_config.service_accounts_file);
     free(g_config.client_id);
     free(g_config.sso_jwks_file);
     free(g_config.sso_issuer);
@@ -188,10 +187,9 @@ static void configure_at(const char *portal_url, const char *lines,
     snprintf(conf, sizeof(conf),
              "portal_url = %s\n"
              "server_token_file = %s/server_token.json\n"
-             "service_accounts_file = %s/no-service-accounts.conf\n"
              "cache_ttl = 300\n"
              "%s",
-             portal_url, base(), base(), lines);
+             portal_url, base(), lines);
     write_file(test_conf_path(), conf, 0644);
 
     config_reset();

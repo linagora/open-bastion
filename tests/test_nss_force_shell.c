@@ -12,7 +12,9 @@
  *     for `zsh -c`) and over default_shell;
  *   - it applies on every path an entry is SERVED from: a portal answer, the
  *     on-disk cache (including a record written before the key was set), the
- *     in-memory cache, by name and by uid, and a local service account;
+ *     in-memory cache, by name and by uid;
+ *   - a service account is no longer one of those paths (#353): the module
+ *     does not read service-accounts.conf, `files` resolves the account;
  *   - the in-memory copy sizes its buffer for the forced shell, not for the
  *     shell it stored.
  *
@@ -123,7 +125,6 @@ static void free_config(nss_llng_config_t *c)
     free(c->default_shell);
     free(c->force_shell);
     free(c->default_home_base);
-    free(c->service_accounts_file);
     free(c->client_id);
     free(c->sso_jwks_file);
     free(c->sso_issuer);
@@ -166,6 +167,11 @@ static void test_config_key(void)
     check_str("force_shell = \"/usr/local/sbin/site-shell\" (quoted)",
               load_with("force_shell = \"/usr/local/sbin/site-shell\"\n", &c),
               "/usr/local/sbin/site-shell");
+    free_config(&c);
+    /* #353: the key is obsolete, but an existing file must still parse. */
+    check_str("service_accounts_file before force_shell (ignored, not fatal)",
+              load_with("service_accounts_file = /etc/open-bastion/service-accounts.conf\n"
+                        "force_shell = " LAUNCHER "\n", &c), LAUNCHER);
     free_config(&c);
 
     printf("An unusable value forces the launcher, it does not turn forcing off:\n");
@@ -339,9 +345,6 @@ static void test_serving_paths(void)
     g_config.default_gid = 100;
     g_config.default_shell = strdup("/bin/bash");
     g_config.default_home_base = strdup("/home");
-    char sa[256];
-    snprintf(sa, sizeof(sa), "%s/no-service-accounts.conf", base());
-    g_config.service_accounts_file = strdup(sa);
     /* An openbastion.conf that neither signs nor pins (#332). */
     write_file(test_pam_conf_path(), "# no request_signing_secret, no cert_pin\n", 0600);
     g_initialized = 1;
@@ -409,22 +412,22 @@ static void test_serving_paths(void)
               NSS_STATUS_TRYAGAIN);
     free(small);
 
-    printf("A local service account (service-accounts.conf):\n");
-    if (getuid() != 0) {
-        /* The module takes that file only when it is root:root 0600. */
-        printf("  --   not exercised unprivileged (the file must be root's)\n");
-    } else {
-        write_file(sa, "[svc]\nuid = 20004\ngid = 20004\nshell = /bin/bash\n", 0600);
-        if (chown(sa, 0, 0) != 0) {
-            perror("chown");
-            failures++;
-        }
-        cache_reset();
-        check_str("getpwnam of a service account",
-                  by_name("svc", &pw, buf, sizeof(buf)) == NSS_STATUS_SUCCESS
-                  ? pw.pw_shell : "(lookup failed)", LAUNCHER);
-        unlink(sa);
-    }
+    /*
+     * #353: the module used to synthesise a service account out of
+     * service-accounts.conf, for getpwnam only and only for a caller that could
+     * read the 0600 file, so the session's own getpwuid(getuid()) failed. The
+     * account is now a plain local one; this module must answer for it exactly
+     * as for any name the portal does not know.
+     */
+    printf("A service account is not served by this module (#353):\n");
+    cache_reset();
+    port = start_portal("{\"found\":false}");
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", port);
+    free(g_config.portal_url);
+    g_config.portal_url = strdup(url);
+    check_int("getpwnam of a name the portal does not know",
+              by_name("svc", &pw, buf, sizeof(buf)), NSS_STATUS_NOTFOUND);
+    stop_portal();
 
     cache_reset();
     free(g_config.force_shell);
@@ -433,7 +436,6 @@ static void test_serving_paths(void)
     free(g_config.server_token);
     free(g_config.default_shell);
     free(g_config.default_home_base);
-    free(g_config.service_accounts_file);
     memset(&g_config, 0, sizeof(g_config));
 }
 
