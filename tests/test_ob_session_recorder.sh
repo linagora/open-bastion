@@ -766,6 +766,24 @@ test_e2e_bypass_recorded() {
     fi
 }
 
+# ── E2E 2b: the command's exit status reaches the client (#355) ──
+# ssh hands the ForceCommand's status back to the client; a recorder that
+# always exits 0 hides a failed command, or a backend's refusal under ob-ssh.
+test_e2e_exit_status() {
+    local cmd want rc bad=0
+    e2e_driver
+    for cmd in 'true:0' 'exit 3:3' '[ -d /ob-355-nonexistent ]:1'; do
+        want=${cmd##*:}; cmd=${cmd%:*}
+        rc=0
+        e2e_run "$cmd" </dev/null >/dev/null 2>&1 || rc=$?
+        if [ "$rc" != "$want" ]; then
+            fail "E2E: '$cmd' exited $rc through the recorder, expected $want"
+            bad=1
+        fi
+    done
+    [ "$bad" = 0 ] && pass "E2E: the recorded command's exit status is the recorder's"
+}
+
 # A stand-in for ssh, for rsync -e / scp -S / sftp -S: it runs the recorder as
 # sshd would under ForceCommand, with the remote command (or, for a subsystem
 # request, the Subsystem command) as SSH_ORIGINAL_COMMAND, and no PTY.
@@ -1120,6 +1138,7 @@ echo "--- end to end (real recorder, connector and sink) ---"
 if e2e_setup; then
     run_test test_e2e_command_recorded
     run_test test_e2e_bypass_recorded
+    run_test test_e2e_exit_status
     run_test test_e2e_transfers
     run_test test_e2e_private_channel_dir
     run_test test_e2e_max_duration

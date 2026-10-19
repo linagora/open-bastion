@@ -776,9 +776,11 @@ record_script() {
     fi
     start_watchdog
 
-    # -f flushes each write so live monitors see output promptly.
+    # -f flushes each write so live monitors see output promptly. -e returns
+    # the command's exit status, which ssh hands back to the client (#355);
+    # without it script(1) exits 0 whatever the command did.
     local rc=0
-    script -q -f -c "$target" "$OB_REC_FIFO" || rc=$?
+    script -q -e -f -c "$target" "$OB_REC_FIFO" || rc=$?
     close_record_channel
     return $rc
 }
