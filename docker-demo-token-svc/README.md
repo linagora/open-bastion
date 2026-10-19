@@ -13,9 +13,13 @@ signature, no LLNG involvement on the auth path**.
 | Human           | Password (token) | Paste LLNG access token as the SSH password                                                                                 |
 | Service account | Public key       | sshd accepts the key via `AuthorizedKeysCommand` → pam_openbastion verifies the fingerprint against `service-accounts.conf` |
 
+A service account is a plain local account: you create it with `useradd`,
+Open Bastion does not. It exempts the account from the SSO and serves its
+key, nothing more.
+
 Regular users can still `sudo` by re-entering their token (stock
-behaviour). Service accounts get `sudo` via `sudo_nopasswd = true`
-combined with a per-user `NOPASSWD:` rule in `/etc/sudoers`.
+behaviour). Open Bastion grants service accounts no `sudo` right: a
+`NOPASSWD:` rule of yours in `/etc/sudoers` is what does.
 
 ## Quick start
 
@@ -43,18 +47,16 @@ ssh -p 2222 dwho@localhost
 # Generate an SSH key locally
 ssh-keygen -t ed25519 -f ~/.ssh/ansible-ci -N ""
 
-# Install fingerprint + metadata on the bastion
+# Create the Unix account. This demo does not record sessions; on a host
+# that does, use --shell /usr/sbin/ob-login-shell.
+docker exec ob-token-svc-bastion \
+    useradd --system --create-home --shell /bin/bash ansible-ci
+
+# Register its key fingerprint with Open Bastion
 docker exec -i ob-token-svc-bastion sh -c \
     'cat > /etc/open-bastion/service-accounts.conf' <<EOF
 [ansible-ci]
 key_fingerprint = $(ssh-keygen -l -E sha256 -f ~/.ssh/ansible-ci.pub | awk '{print $2}')
-sudo_allowed = true
-sudo_nopasswd = true
-gecos = Ansible Automation
-shell = /bin/bash
-home = /home/ansible-ci
-uid = 5000
-gid = 5000
 EOF
 docker exec ob-token-svc-bastion chmod 600 /etc/open-bastion/service-accounts.conf
 
@@ -64,7 +66,7 @@ docker cp ~/.ssh/ansible-ci.pub \
 docker exec ob-token-svc-bastion \
     chmod 644 /etc/open-bastion/service-accounts.d/ansible-ci.pub
 
-# Allow passwordless sudo for this account
+# If it needs sudo: your rule, not Open Bastion's
 docker exec ob-token-svc-bastion sh -c \
     'echo "ansible-ci ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers'
 ```
@@ -73,7 +75,6 @@ docker exec ob-token-svc-bastion sh -c \
 
 ```bash
 ssh -i ~/.ssh/ansible-ci -p 2222 ansible-ci@localhost
-# First login materialises /etc/passwd, /etc/group and /home/ansible-ci
 sudo id
 # uid=0(root) ...
 ```
@@ -84,9 +85,11 @@ sudo id
 ./tests/test_integration_token_svc.sh --verbose
 ```
 
-Covers: human-user LLNG auth, service-account provisioning, SSH login
-with plain key, local account materialisation, `sudo -n` via nopasswd,
-rejection of non-registered keys.
+Covers: human-user LLNG auth, service-account registration (NSS does not
+serve it, a login before `useradd` is refused and creates nothing), SSH
+login with plain key once created, groups left alone by the session, no
+`sudo` from Open Bastion and `sudo -n` through an operator `NOPASSWD:`
+rule, rejection of non-registered keys.
 
 ## See also
 

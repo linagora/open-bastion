@@ -328,9 +328,8 @@ cache_ttl = 300
 # public key in /etc/open-bastion/service-accounts.d/.
 service_accounts_file = /etc/open-bastion/service-accounts.conf
 
-# Auto-create the local Unix account on first login. Required for service
-# accounts unknown to LLNG: pam_openbastion uses the uid/gid declared in
-# service-accounts.conf instead of NSS.
+# Auto-create the local Unix account of an SSO user on first login. Service
+# accounts are never created: the operator runs useradd (#353).
 create_user = true
 create_home = true
 default_shell = /bin/bash
@@ -396,14 +395,13 @@ echo "NSS configured"
 # Configure PAM for SSH (Mode E)
 # The "auth" phase runs pam_openbastion with authorize_only=yes so that:
 #   - for service accounts: the SSH key fingerprint is re-validated against
-#     service-accounts.conf (defense-in-depth on top of sshd's
-#     AuthorizedKeysCommand) and the ob_service_account marker is stored
-#     for pam_sm_open_session;
+#     service-accounts.conf where one is available (defense-in-depth on top
+#     of sshd's AuthorizedKeysCommand);
 #   - for regular users: the cert has already been validated by sshd, the
 #     module just returns success without asking for a password.
-# The "session" phase runs pam_openbastion with create_user=true so that
-# service accounts unknown to LLNG are materialised in /etc/passwd using
-# the uid/gid declared in service-accounts.conf.
+# The "session" phase runs pam_openbastion with create_user=true so that SSO
+# users get a local account on first login. Service accounts are local
+# accounts the operator created, and the session leaves them alone (#353).
 cat > /etc/pam.d/sshd << EOF
 # PAM configuration for SSH with Open Bastion (Mode E - Maximum Security)
 auth       required     pam_openbastion.so authorize_only
