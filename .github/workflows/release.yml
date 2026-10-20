@@ -132,7 +132,10 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           # Render the .in spec with the right version
-          sed "s/@PROJECT_VERSION@/${VERSION}/g" \
+          # and the man page lines CMake fills in (BUILD_MAN case)
+          sed -e "s/@PROJECT_VERSION@/${VERSION}/g" \
+            -e 's|@BUILDER_MAN_INSTALL@|install -Dm 0644 man/ob-builder.1 %{buildroot}/usr/share/man/man1/ob-builder.1|' \
+            -e 's|@BUILDER_MAN_FILES@|%{_mandir}/man1/ob-builder.1*|' \
             admin-builder/rpm/open-bastion-builder.spec.in \
             > ~/rpmbuild/SPECS/open-bastion-builder.spec
           # ob-builder(1) is generated from doc/, and the spec installs it from

@@ -107,9 +107,10 @@ systemd/ob-audit-rotate.service lib/systemd/system/
 # the enable/cleanup blocks from debian/rules for it. The @.service templates
 # are never "enabled" -- the .socket spawns instances -- but must be present,
 # or the socket cannot start one ("Connection refused").
-systemd/ob-cert.socket usr/lib/systemd/system/
-systemd/ob-cert@.service usr/lib/systemd/system/
-systemd/ob-record.socket usr/lib/systemd/system/
-systemd/ob-record@.service usr/lib/systemd/system/
-systemd/ob-fp.socket usr/lib/systemd/system/
-systemd/ob-fp@.service usr/lib/systemd/system/
+# lib/, not usr/lib/: bookworm's dh_installsystemd only looks there.
+systemd/ob-cert.socket lib/systemd/system/
+systemd/ob-cert@.service lib/systemd/system/
+systemd/ob-record.socket lib/systemd/system/
+systemd/ob-record@.service lib/systemd/system/
+systemd/ob-fp.socket lib/systemd/system/
+systemd/ob-fp@.service lib/systemd/system/
