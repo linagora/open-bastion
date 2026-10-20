@@ -27,8 +27,10 @@ enforce them on every server.
   [audit trace](doc/audit.rst).
 - **Fleet deployment in one command** — `ob-builder --output-ansible <role>` (or
   a self-extracting shell installer), then roll it out to every host.
-- **A "backup" account with access everywhere** — with or without `sudo` — via
-  [service accounts](doc/service-accounts.rst).
+- **A "backup" account with access everywhere** — a local account you create,
+  whose key open-bastion serves and exempts from the SSO — via
+  [service accounts](doc/service-accounts.rst); its `sudo`, if any, is your
+  `sudoers` rule.
 - **Self-service onboarding** — a new admin signs their SSH key at the portal and
   instantly has every right their groups grant.
 - **One-click offboarding** — close the SSO account and access is gone.
@@ -68,9 +70,9 @@ artefacts), which is also what assigns its server group. Once enrolled:
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
    server group, and `sudo` is gated the same way; an encrypted local cache keeps
    this working during an SSO outage.
-3. The **NSS** module resolves SSO users _(and key-only service accounts)_ so the
-   system sees them as real Unix accounts; provisioning creates the home on first
-   login.
+3. The **NSS** module resolves SSO users so the system sees them as real Unix
+   accounts; provisioning creates the home on first login. Key-only service
+   accounts are ordinary local accounts you create.
 4. To reach a **backend behind a bastion**, the bastion mints a short-lived,
    LLNG-signed certificate and re-originates the connection with `ob-ssh` /
    `ob-scp` / `ob-sftp` — no user key or agent on the bastion. Backends accept
@@ -108,10 +110,11 @@ See [Bastion Architecture](doc/references/bastion-architecture.rst) and the
   - Local whitelist for defense-in-depth _(`allowed_managed_groups`)_
   - Groups outside managed pool are never modified
 - **[Service accounts](doc/service-accounts.rst)** _(ansible, backup, etc.)_:
-  - SSH key authentication without OIDC
-  - Per-server configuration file
-  - Fine-grained sudo permissions
-  - Automatic account creation
+  - SSH key authentication without OIDC, for local accounts you create
+  - Per-server configuration file; root-owned keys served by
+    `AuthorizedKeysCommand`
+  - Sessions recorded on bastions like any other
+  - No `sudo` or groups granted by open-bastion: `sudoers` stays yours
 - **[Bastion-to-backend authentication](doc/references/bastion-architecture.rst)**:
   - Certificate-based proof of connection origin _(LLNG-signed ephemeral SSH cert, ~120 s)_
   - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)

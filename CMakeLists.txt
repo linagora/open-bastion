@@ -289,7 +289,7 @@ install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-bastion-id
 )
 
 # sshd AuthorizedKeysCommand helper: serves a service account's public key
-# without the Unix account having to exist yet.
+# from service-accounts.d, so the account needs no authorized_keys.
 install(PROGRAMS ${CMAKE_SOURCE_DIR}/scripts/ob-service-account-keys
     DESTINATION ${CMAKE_INSTALL_SBINDIR}
 )

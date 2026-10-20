@@ -374,9 +374,10 @@ Service accounts
 
 .. option:: service_accounts_file
 
-   File declaring the key-only local accounts. Default:
-   ``/etc/open-bastion/service-accounts.conf``. Alias:
-   ``service_accounts``.
+   File listing the service accounts: local accounts, created by the
+   operator, that log in with a key and are authorized without the
+   portal. Default: ``/etc/open-bastion/service-accounts.conf``. Alias:
+   ``service_accounts``. Format: :doc:`/service-accounts`.
 
 Notifications
 ~~~~~~~~~~~~~
@@ -497,8 +498,9 @@ SSH key policy
    Refuse an SSH login whose key fingerprint cannot be recovered, instead
    of authorizing it without the binding. Only for hosts that run the
    principals helper (the certificate scenarios): where there is never a
-   fingerprint, every login would be denied. Default: ``false``. Alias:
-   ``ssh_fingerprint_required``.
+   fingerprint, every login would be denied. The helper runs for
+   certificates only, so a service account's plain-key login is denied
+   too. Default: ``false``. Alias: ``ssh_fingerprint_required``.
 
 Cache brute-force protection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -631,7 +633,8 @@ Files
    but not read from this file".
 
 ``/etc/open-bastion/service-accounts.conf``
-   Key-only local accounts, declared by ``service_accounts_file``.
+   Service accounts exempted from the SSO, declared by
+   ``service_accounts_file``.
 
 ``/var/lib/open-bastion/token``
    Server access token, written by ``ob-enroll``.

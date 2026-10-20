@@ -720,6 +720,27 @@ OB_CONF_EOF
         fi
     fi
 
+    # open-bastion never creates a service account (#353): the operator does,
+    # with useradd. Say so for each declared account the host does not know yet,
+    # since sshd would refuse the login with everything else looking deployed.
+    # Names are read back from the conf just written, never created here.
+    if [ -n "@@SERVICE_ACCOUNTS_CONF_B64@@" ]; then
+        local _sa_shell="/bin/bash"
+        case "${TARGET_ROLE}" in
+            bastion|standalone)
+                # sshd runs the account's shell with the recorder as its
+                # command: with bash its rc files run first and could escape it.
+                [ "${DISABLE_SESSION_RECORDER}" = "yes" ] || _sa_shell="/usr/sbin/ob-login-shell"
+                ;;
+        esac
+        while read -r _sa_name; do
+            [ -n "${_sa_name}" ] || continue
+            getent passwd "${_sa_name}" >/dev/null 2>&1 && continue
+            log_warn "service account '${_sa_name}' does not exist on this host; open-bastion does not create it."
+            log_warn "Run:  useradd --system --create-home --shell ${_sa_shell} ${_sa_name}"
+        done < <(sed -n 's/^\[\(.*\)\]$/\1/p' /etc/open-bastion/service-accounts.conf)
+    fi
+
     # Deposit SSH CA public key
     base64 -d > /etc/ssh/open-bastion_ca.pub.tmp << 'OB_CA_EOF'
 @@CA_SSH_PUB_B64@@

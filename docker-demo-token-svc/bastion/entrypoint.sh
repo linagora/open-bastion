@@ -226,9 +226,8 @@ cache_ttl = 300
 # public key in /etc/open-bastion/service-accounts.d/.
 service_accounts_file = /etc/open-bastion/service-accounts.conf
 
-# Auto-create the local Unix account on first login. Required for service
-# accounts unknown to LLNG (pam_openbastion uses the uid/gid declared in
-# service-accounts.conf instead of NSS).
+# Auto-create the local Unix account of an SSO user on first login. Service
+# accounts are never created: the operator runs useradd (#353).
 create_user = true
 create_home = true
 default_shell = /bin/bash
@@ -301,11 +300,10 @@ echo "NSS configured to use Open Bastion"
 
 # Configure PAM for token-based authentication + service accounts.
 # Human users: pam_openbastion validates the LLNG token (password auth).
-# Service accounts: sshd accepted the key via AuthorizedKeysCommand; for
-# pubkey auth sshd does NOT call pam_authenticate, so the marker and
-# gecos/shell/home data are populated in pam_sm_acct_mgmt. The session
-# phase materialises the local Unix account using the uid/gid declared
-# in service-accounts.conf (pam_openbastion.so create_user=true).
+# Service accounts: local accounts the operator created; sshd accepted the
+# key via AuthorizedKeysCommand (pubkey auth skips pam_authenticate) and
+# pam_sm_acct_mgmt exempts them from the SSO. The session phase leaves them
+# alone: no account creation, no group change (#353).
 cat > /etc/pam.d/sshd << EOF
 # PAM configuration for SSH with Open Bastion
 # (Token Auth Mode + Service Accounts)
@@ -318,7 +316,7 @@ auth       required     pam_deny.so
 # Authorization: LLNG / service-account check
 account    required     pam_openbastion.so
 
-# Session: auto-create the Unix account on first login
+# Session: auto-create an SSO user's Unix account on first login
 session    required     pam_openbastion.so create_user=true
 session    required     pam_unix.so
 session    optional     pam_mkhomedir.so skel=/etc/skel umask=0022

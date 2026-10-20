@@ -630,7 +630,7 @@ La clé de chiffrement pour les tokens et secrets en cache est dérivée de ``/e
 Sécurité des Comptes de Service
 -------------------------------
 
-Les comptes de service (ansible, backup, deploy, etc.) sont des comptes locaux qui s'authentifient uniquement par clé SSH, contournant l'authentification OIDC. Ils sont définis dans un fichier de configuration local.
+Les comptes de service (ansible, backup, deploy, etc.) sont des comptes Unix locaux, **créés par l'exploitant** (``useradd``), qui s'authentifient uniquement par clé SSH et sont exemptés du SSO. Open Bastion sert leur clé à sshd, autorise localement, sans appel au portail, les noms listés dans un fichier de configuration local, et enregistre leurs sessions sur un hôte qui enregistre. Il ne crée pas ces comptes, ne gère ni leurs groupes ni leur ``sudo``. Voir :doc:`/service-accounts`.
 
 Sécurité du Fichier de Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -644,10 +644,10 @@ Liens sym.  Le fichier ne doit pas être un lien symbolique (O_NOFOLLOW)
 Emplacement ``/etc/open-bastion/service-accounts.conf`` (configurable)
 =========== ===========================================================
 
+Les clés elles-mêmes sont dans ``/etc/open-bastion/service-accounts.d/<nom>.pub`` ; ``ob-service-account-keys`` ne sert qu'un fichier appartenant à root.
+
 Validation des Comptes
 ~~~~~~~~~~~~~~~~~~~~~~
-
-Les comptes de service sont validés selon les mêmes règles de sécurité que les utilisateurs réguliers :
 
 +---------------------+--------------------------------------------------------------------------------------+
 | Champ               | Validation                                                                           |
@@ -656,24 +656,15 @@ Les comptes de service sont validés selon les mêmes règles de sécurité que 
 +---------------------+--------------------------------------------------------------------------------------+
 | ``key_fingerprint`` | Doit commencer par ``SHA256:`` ou ``MD5:``, uniquement des caractères base64 valides |
 +---------------------+--------------------------------------------------------------------------------------+
-| ``shell``           | Doit figurer dans la liste ``approved_shells``                                       |
-+---------------------+--------------------------------------------------------------------------------------+
-| ``home``            | Doit correspondre à ``approved_home_prefixes``                                       |
-+---------------------+--------------------------------------------------------------------------------------+
-| ``uid``/``gid``     | Doit être dans la plage valide (0-65534)                                             |
-+---------------------+--------------------------------------------------------------------------------------+
+
+Une entrée invalide est écartée au chargement. Les clés des versions antérieures (``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed``, ``sudo_nopasswd``) sont ignorées avec un avertissement : le shell, le home et les identifiants sont ceux du compte local, et le ``sudo`` relève de ``sudoers``.
 
 Exigence du Serveur SSH
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-**Important :** Le serveur SSH doit avoir ``ExposeAuthInfo yes`` dans ``/etc/ssh/sshd_config`` :
+sshd doit accepter la clé : ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (écrit par ``--enable-service-keys`` ; seule voie en Mode E, qui pose ``AuthorizedKeysFile none``), ou un fichier ``authorized_keys`` dans le home du compte — que le compte peut alors modifier lui-même.
 
-.. code:: bash
-
-   # /etc/ssh/sshd_config
-   ExposeAuthInfo yes
-
-Ce paramètre permet au module PAM d'accéder à l'empreinte de clé SSH via la variable d'environnement ``SSH_USER_AUTH``, qui est requise pour la validation de l'empreinte.
+``ExposeAuthInfo yes`` ne suffit pas à faire vérifier l'empreinte. Sur un OpenSSH actuel, sshd ne transmet pas ``SSH_USER_AUTH`` à l'environnement PAM pendant ``pam_acct_mgmt``, et le spool ``/run/open-bastion/ssh-fp/`` n'est alimenté que par l'``AuthorizedPrincipalsCommand``, que sshd n'exécute que pour un certificat. Un compte de service se connecte avec une clé nue : aucune empreinte n'atteint PAM et ``key_fingerprint`` n'est pas comparé. **Le contrôle d'accès effectif est la clé publique propriété de root** que sert l'``AuthorizedKeysCommand``. Pour la même raison, ``fingerprint_required = true`` et ``ssh_key_policy_enabled = true`` refusent la connexion par clé nue d'un compte de service.
 
 .. _security-00-architecture-flux-dauthentification-1:
 
@@ -685,56 +676,62 @@ Flux d'Authentification
    sequenceDiagram
        participant SA as Compte de Service
        participant SSH as Serveur SSH
+       participant AKC as ob-service-account-keys
        participant PAM as Module PAM
 
        SA->>SSH: Authentification par clé SSH
-       SSH->>PAM: pam_sm_authenticate
-       Note over SSH: ExposeAuthInfo fournit<br/>SSH_USER_AUTH avec l'empreinte
-       PAM->>PAM: Extrait l'empreinte de SSH_USER_AUTH
-       PAM->>PAM: Vérifie service_accounts.conf
-       PAM->>PAM: Valide que l'empreinte correspond à la config
-       Note over PAM: Empreinte OK = autorisé
+       Note over SSH: Compte résolu depuis /etc/passwd
+       SSH->>AKC: AuthorizedKeysCommand %u
+       AKC-->>SSH: service-accounts.d/<nom>.pub (root)
+       Note over SSH: Clé acceptée
+       SSH->>PAM: pam_sm_acct_mgmt
+       PAM->>PAM: Nom présent dans service-accounts.conf
+       Note over PAM: Autorisé localement, pas d'appel LLNG
        PAM-->>SSH: PAM_SUCCESS
-       SSH-->>SA: Session établie
+       SSH-->>SA: Session établie (enregistrée sur un hôte qui enregistre)
 
-1. Le compte de service se connecte via SSH avec sa clé configurée
-2. Le serveur SSH expose l'empreinte de clé via ``SSH_USER_AUTH`` (nécessite ``ExposeAuthInfo yes``)
-3. Le module PAM extrait l'empreinte et vérifie si l'utilisateur est dans ``service_accounts.conf``
-4. Le module PAM valide que l'empreinte de clé SSH correspond à la valeur configurée
-5. Si l'empreinte correspond, le compte est autorisé localement (pas d'appel LLNG nécessaire)
-6. Les permissions sudo sont vérifiées depuis le même fichier de configuration
+1. sshd résout le compte depuis ``/etc/passwd`` ; un utilisateur inconnu est refusé avant tout examen de clé
+2. sshd obtient la clé du compte par ``ob-service-account-keys`` (ou ``authorized_keys``) et vérifie que le client la détient
+3. Le module PAM trouve le nom dans ``service-accounts.conf`` et l'autorise localement (pas d'appel LLNG)
+4. Une empreinte, si elle parvient à PAM, est comparée à ``key_fingerprint`` ; lors d'une connexion par clé nue, aucune n'y parvient
+5. Sur un hôte qui enregistre, la session passe par l'enregistreur ; le shell de connexion du compte doit être ``/usr/sbin/ob-login-shell`` pour que rien ne s'exécute avant lui (responsabilité de l'exploitant, rien ne l'impose)
+6. ``sudo`` n'est pas décidé par le module (``PAM_IGNORE``) : la pile PAM locale et ``sudoers`` décident
 
 .. _bénéfices-de-sécurité-1:
 
 Bénéfices de Sécurité
 ~~~~~~~~~~~~~~~~~~~~~
 
-+------------------------+---------------------------------------------------------------------+
-| Fonctionnalité         | Bénéfice                                                            |
-+========================+=====================================================================+
-| Configuration locale   | Pas de dépendance réseau pour les comptes de service                |
-+------------------------+---------------------------------------------------------------------+
-| Contrôle par serveur   | Chaque serveur liste explicitement les comptes de service autorisés |
-+------------------------+---------------------------------------------------------------------+
-| Liaison par clé SSH    | La validation de l'empreinte empêche la substitution de clé         |
-+------------------------+---------------------------------------------------------------------+
-| Journalisation d'audit | Tous les accès de comptes de service sont journalisés               |
-+------------------------+---------------------------------------------------------------------+
-| Contrôle sudo          | Permissions sudo fines par compte                                   |
-+------------------------+---------------------------------------------------------------------+
++------------------------+----------------------------------------------------------------------+
+| Fonctionnalité         | Bénéfice                                                             |
++========================+======================================================================+
+| Configuration locale   | Pas de dépendance réseau pour les comptes de service                 |
++------------------------+----------------------------------------------------------------------+
+| Contrôle par serveur   | Chaque serveur liste explicitement les comptes de service autorisés  |
++------------------------+----------------------------------------------------------------------+
+| Clés propriété de root | Le compte ne peut pas ajouter de clé (``AuthorizedKeysCommand``)     |
++------------------------+----------------------------------------------------------------------+
+| Journalisation d'audit | Tous les accès de comptes de service sont journalisés                |
++------------------------+----------------------------------------------------------------------+
+| Pas de sudo implicite  | Open Bastion n'en accorde aucun ; ``sudoers`` en est la seule source |
++------------------------+----------------------------------------------------------------------+
 
 Limitations
 ~~~~~~~~~~~
 
-+-----------------------------+--------------------------------------------------------+
-| Limitation                  | Atténuation                                            |
-+=============================+========================================================+
-| Pas de gestion centralisée  | Utiliser la gestion de configuration (Ansible, Puppet) |
-+-----------------------------+--------------------------------------------------------+
-| Rotation manuelle des clés  | Mettre en œuvre des procédures de rotation des clés    |
-+-----------------------------+--------------------------------------------------------+
-| Dépendance au fichier local | Surveiller l'intégrité des fichiers avec AIDE/Tripwire |
-+-----------------------------+--------------------------------------------------------+
++---------------------------------------------+------------------------------------------------------------------+
+| Limitation                                  | Atténuation                                                      |
++=============================================+==================================================================+
+| Pas de gestion centralisée                  | Utiliser la gestion de configuration (Ansible, Puppet)           |
++---------------------------------------------+------------------------------------------------------------------+
+| Pas de révocation par le portail            | Retirer le ``.pub`` et l'entrée sur chaque serveur ; ``userdel`` |
++---------------------------------------------+------------------------------------------------------------------+
+| Rotation manuelle des clés                  | Mettre en œuvre des procédures de rotation des clés              |
++---------------------------------------------+------------------------------------------------------------------+
+| Dépendance au fichier local                 | Surveiller l'intégrité des fichiers avec AIDE/Tripwire           |
++---------------------------------------------+------------------------------------------------------------------+
+| Shell non imposé sur un hôte qui enregistre | Créer le compte avec ``/usr/sbin/ob-login-shell``                |
++---------------------------------------------+------------------------------------------------------------------+
 
 Exemple de Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -743,11 +740,6 @@ Exemple de Configuration
 
    [ansible]
    key_fingerprint = SHA256:abc123def456
-   sudo_allowed = true
-   sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
 Politique de Clés SSH
 ---------------------

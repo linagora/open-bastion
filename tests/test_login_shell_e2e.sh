@@ -22,6 +22,9 @@
 #   D  the same with default_shell = /bin/zsh: the recorded shell is zsh.
 #   E  an interactive login with a terminal (ssh -tt).
 #   F  su - / su -c / sudo -i: through the recorder as well.
+#   G  a service account (#353): NSS does not serve it from
+#      service-accounts.conf; created with useradd and the launcher as its
+#      shell, it goes through the recorder like anyone else.
 #
 # A and B are what make C to F mean something: the same markers, the same
 # sshd, with the fix removed, do fire.
@@ -281,6 +284,39 @@ if grep -q RECORDER-RAN /tmp/e2e/out && [ -z "$(before)" ]; then
     ok "F: sudo -i -u dwho: through the recorder ($(env_of SSH_ORIGINAL_COMMAND))"
 else
     bad "F: sudo -i -u dwho" "before='$(before)' $(cat /tmp/e2e/out)"
+fi
+
+# ── G. A service account, created the way the documentation says (#353) ─────
+# The NSS module used to synthesise it out of service-accounts.conf, for
+# getpwnam only, so the launcher's getpwuid(getuid()) failed: "cannot resolve
+# your account". It no longer reads that file at all -- not even for root, who
+# can -- and the account is a local one, with the launcher as its shell.
+printf '[svc]\nkey_fingerprint = SHA256:abc\nuid = 5000\ngid = 5000\nshell = /bin/bash\n' \
+    > /etc/open-bastion/service-accounts.conf
+chmod 600 /etc/open-bastion/service-accounts.conf
+nss_conf /bin/bash /usr/sbin/ob-login-shell
+if getent passwd svc >/dev/null 2>&1; then
+    bad "G: NSS no longer serves an account from service-accounts.conf" "$(getent passwd svc)"
+else
+    ok "G: NSS does not serve the account out of service-accounts.conf, even to root"
+fi
+useradd --system --create-home --shell /usr/sbin/ob-login-shell svc
+# This sshd runs UsePAM no, which refuses a locked ("!") account outright; a
+# real host runs UsePAM yes and never looks at the password field.
+usermod -p '*' svc
+for f in .bashrc .bash_profile .profile; do
+    printf 'touch %s/svc%s 2>/dev/null\n' "$M" "$f" > "/home/svc/$f"
+done
+chown -R svc: /home/svc
+install -m 0644 /tmp/id.pub /etc/ssh/keys/svc
+reset_markers
+ssh -q -i /tmp/id -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    svc@127.0.0.1 'echo the client command' </dev/null >/tmp/e2e/out 2>&1
+if grep -q RECORDER-RAN /tmp/e2e/out && [ -z "$(before)" ] \
+   && [ "$(env_of SSH_ORIGINAL_COMMAND)" = "echo the client command" ]; then
+    ok "G: useradd --shell /usr/sbin/ob-login-shell: the recorder runs first for the service account"
+else
+    bad "G: a local service account through the recorder" "before='$(before)' $(cat /tmp/e2e/out)"
 fi
 
 echo

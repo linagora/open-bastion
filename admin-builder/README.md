@@ -40,7 +40,8 @@ asked again):
    several roles, each Ansible role tree is suffixed with the role
    (`ansible-<slug>-backend`, …)
 9. Allowed bastions (backend), hardening, audit trace, session recording
-10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …)
+10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …),
+    which you create by hand on the targets
 11. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`), self-delete
 12. APT repository (URL, suite, component, keyring) and optional GPG signing key
 13. Save the answers as a YAML config for `--config` (default
@@ -109,26 +110,32 @@ apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main
 
-# Optional SSH-key-only local accounts (no OIDC), rendered into
-# /etc/open-bastion/service-accounts.conf (0600) on every target.
-# Use a dedicated name (not a system user), a home under /home or /var/home, and
-# a fixed uid+gid (required so NSS can resolve the account for sshd pre-auth).
+# Optional SSH-key-only local accounts (no OIDC): their names and key
+# fingerprints go to /etc/open-bastion/service-accounts.conf (0600) on every
+# target, their keys to /etc/open-bastion/service-accounts.d/<name>.pub.
+# open-bastion does NOT create the accounts: run useradd on each target (see
+# below). uid, gid, shell, home, gecos, sudo_allowed and sudo_nopasswd from
+# older configs are ignored, with a warning.
 # service_accounts:
 #   - name: ci-ansible
 #     public_key_file: keys/ci-ansible.pub   # relative to this file; or public_key: "ssh-ed25519 …"
 #     # key_fingerprint is derived from the key. Alone, it gives sshd no key to
 #     # accept: the account cannot log in (never, under maximum security).
-#     sudo_allowed: true
-#     sudo_nopasswd: true
-#     shell: /bin/bash
-#     home: /home/ci-ansible
-#     gecos: Ansible Automation
-#     uid: 6001
-#     gid: 6001
 ```
 
-See [`doc/service-accounts.rst`](../doc/service-accounts.rst) for the full schema
-and how service accounts are matched and created on the target.
+Service accounts are never created by open-bastion: create each one by hand on
+every target, with `/usr/sbin/ob-login-shell` as its shell on a host that
+records sessions (bastion, standalone), so that the recorder cannot be escaped
+through the account's rc files:
+
+```bash
+useradd --system --create-home --shell /usr/sbin/ob-login-shell ci-ansible
+```
+
+The shell installer and the Ansible role warn when an account does not exist on
+the target. sudo is configured in sudoers, not by open-bastion. See
+[`doc/service-accounts.rst`](../doc/service-accounts.rst) for the full schema
+and how service accounts are matched on the target.
 
 Generate the artifacts:
 

@@ -203,6 +203,40 @@
   loop_control:
     label: "{{ item.split(' ', 1)[0] }}"
 
+# open-bastion never creates a service account (#353): the operator does, with
+# useradd. Check each declared account exists and say so when it does not, since
+# sshd refuses the login of a missing account with everything else deployed.
+# Names are read from the conf (its [section] lines), so a host_vars override is
+# followed. Read-only, so it also runs in check mode, and it never fails the play.
+- name: Check the service accounts exist on the host
+  ansible.builtin.command:
+    argv: ['getent', 'passwd', "{{ item }}"]
+  loop: >-
+    {{ (ob_service_accounts_content | default('')).splitlines()
+       | reject('match', '^(#|$)') | reject('search', '=')
+       | map('regex_replace', '^.', '') | map('regex_replace', '.$', '') | list }}
+  register: ob_svc_accounts_getent
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ob_service_accounts_enabled | default(false)
+
+# A host that records sessions runs the account's shell with the recorder as its
+# command: with bash its rc files run first and could escape the recording.
+- name: Warn about service accounts missing on the host
+  ansible.builtin.debug:
+    msg: >-
+      Service account '{{ item.item }}' does not exist on this host and
+      open-bastion does not create it. Run: useradd --system --create-home
+      --shell {{ '/usr/sbin/ob-login-shell'
+                 if (ob_artefact_role in ['bastion', 'standalone']
+                     and not (ob_disable_session_recorder | default(false) | bool))
+                 else '/bin/bash' }} {{ item.item }}
+  loop: "{{ ob_svc_accounts_getent.results | default([]) | selectattr('rc', 'ne', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: ob_service_accounts_enabled | default(false)
+
 # The keys are only half of it: sshd needs the AuthorizedKeysCommand that serves
 # them, which is a host-wide change and therefore opt-in.
 # Remove keys for accounts no longer declared. Without this the directory is

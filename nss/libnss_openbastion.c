@@ -121,14 +121,6 @@
 #define DEFAULT_HOME_BASE "/home"
 #define DEFAULT_MIN_UID 10000
 
-/*
- * Default path to the Open Bastion service-accounts configuration. Can be
- * overridden in nss_openbastion.conf with `service_accounts_file = …`
- * (same key name pam_openbastion uses) so both modules keep a consistent
- * view of which file is authoritative.
- */
-#define DEFAULT_SERVICE_ACCOUNTS_CONF_FILE "/etc/open-bastion/service-accounts.conf"
-
 /* Same trust anchor as pam_openbastion's sso_jwks_file default */
 #define DEFAULT_SSO_JWKS_FILE "/var/lib/open-bastion/jwks/sso-jwks.json"
 #define DEFAULT_MAX_UID 60000
@@ -187,7 +179,6 @@ typedef struct {
     gid_t min_gid;                /* policy range for a server-supplied gid */
     gid_t max_gid;
     gid_t default_gid;
-    char *service_accounts_file;  /* Local service accounts config */
     char *client_id;              /* expected `aud` of a signed answer */
     int response_signing;         /* ob_response_signing_t */
     char *sso_jwks_file;          /* JWKS the signed answers are checked against */
@@ -414,8 +405,7 @@ static void finalize_force_shell(nss_llng_config_t *config)
 }
 
 /*
- * Applied where an entry is served (portal, service account, disk and memory
- * caches), not where it is stored: entries cached before force_shell was set
+ * Applied where an entry is served (portal, disk and memory caches), not where it is stored: entries cached before force_shell was set
  * come out right without purging the cache.
  */
 static const char *login_shell(const char *shell)
@@ -771,8 +761,9 @@ static int load_config(nss_llng_config_t *config)
             }
         }
         else if (strcmp(key, "service_accounts_file") == 0) {
-            free(config->service_accounts_file);
-            config->service_accounts_file = strdup(value);
+            /* Accepted and ignored: service accounts are plain local
+             * accounts resolved by `files` (#353). Kept so an existing
+             * nss_openbastion.conf still parses. */
         }
         else if (strcmp(key, "client_id") == 0) {
             free(config->client_id);
@@ -814,9 +805,6 @@ static int load_config(nss_llng_config_t *config)
     finalize_force_shell(config);
     if (!config->default_home_base) {
         config->default_home_base = strdup(DEFAULT_HOME_BASE);
-    }
-    if (!config->service_accounts_file) {
-        config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_CONF_FILE);
     }
     if (!config->sso_jwks_file) {
         config->sso_jwks_file = strdup(DEFAULT_SSO_JWKS_FILE);
@@ -918,8 +906,8 @@ static cache_entry_t *cache_find_by_uid(uid_t uid)
 /*
  * Validate that a username is safe to use as a single path component.
  *
- * Usernames are already validated upstream (LLNG directory and
- * query_service_account() enforce `[a-z_][a-z0-9_-]*`), but the file cache
+ * Usernames are already validated upstream (the LLNG directory enforces
+ * `[a-z_][a-z0-9_-]*`), but the file cache
  * turns the name into a filesystem path, so this is defense in depth against
  * path traversal and unexpected bytes.
  *
@@ -1376,8 +1364,7 @@ static void file_cache_write_atomic_at(int dirfd, const char *leaf,
      * and is what /etc/passwd exposes world-readably on every Unix; the real
      * exposure — bulk enumeration of the SSO user directory, made sharper here
      * because the byname filenames ARE the login names — is what the 0711
-     * directory stops (refs #189). Genuinely sensitive service accounts are
-     * already never written here (see _nss_openbastion_getpwnam_r).
+     * directory stops (refs #189).
      *
      * fchmod() on the temp fd before the rename closes the TOCTOU window and
      * normalises an entry created under a restrictive umask.
@@ -1450,11 +1437,7 @@ static void file_cache_save(const struct passwd *pw)
 }
 
 /* Save user info to per-name file cache (atomically, via a verified dir fd).
- *
- * SECURITY: service accounts must NEVER reach this function — only the
- * LLNG-success path in getpwnam_r calls it. The byname directory is unlistable
- * (0711) but its entries are 0644, so persisting service-account metadata there
- * would still leak it to any unprivileged user who guesses the account name. */
+ * Only the LLNG-success path in getpwnam_r calls it. */
 static void file_cache_save_by_name(const struct passwd *pw)
 {
     if (!pw || !pw->pw_name) return;
@@ -1760,7 +1743,7 @@ static void cache_add_at(const char *username, const struct passwd *pw,
     pthread_mutex_unlock(&g_cache.lock);
 }
 
-/* Add a record obtained right now (the LLNG and service-account paths). */
+/* Add a record obtained right now (the LLNG path). */
 static void cache_add(const char *username, const struct passwd *pw, int valid)
 {
     cache_add_at(username, pw, valid, time(NULL));
@@ -1796,182 +1779,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     resp->data[resp->size] = '\0';
 
     return realsize;
-}
-
-/* Minimal in-place trim used by the .conf parser below. */
-static char *sa_trim(char *s)
-{
-    if (!s) return s;
-    while (*s && isspace((unsigned char)*s)) s++;
-    char *end = s + strlen(s);
-    while (end > s && isspace((unsigned char)end[-1])) end--;
-    *end = '\0';
-    return s;
-}
-
-/*
- * Service-account NSS lookup.
- *
- * Resolves a local service account (ansible, backup, deploy, ...) out of
- * /etc/open-bastion/service-accounts.conf without contacting LLNG. This
- * is what unblocks sshd's pre-auth getpwnam() check for usernames that
- * only ever live in the bastion's own config (they are deliberately
- * unknown to the LLNG directory).
- *
- * Returns 0 on success, -1 on any failure (file unreadable, user not
- * found, uid/gid missing or out of range, buffer too small, etc.).
- *
- * Only looks at the [uid] and [gid] numeric fields plus gecos/shell/home
- * strings. Authentication material (key_fingerprint, sudo_*, ...) is not
- * our business here: pam_openbastion still owns auth and authorization.
- */
-static int query_service_account(const char *username, struct passwd *pw,
-                                  char *buffer, size_t buflen)
-{
-    if (!username || !*username || !pw || !buffer) return -1;
-
-    /* Length cap (matches MAX_SERVICE_ACCOUNT_NAME in service_account.h). */
-    size_t ulen = strlen(username);
-    if (ulen == 0 || ulen > 32) return -1;
-
-    /* First char must be [a-z_]; remaining [a-z0-9_-]. Matches
-     * validate_username() in service_account.c and the SSHD-side
-     * ob-service-account-keys helper. */
-    if (!(islower((unsigned char)username[0]) || username[0] == '_')) return -1;
-    for (size_t i = 1; i < ulen; i++) {
-        unsigned char c = (unsigned char)username[i];
-        if (!islower(c) && !isdigit(c) && c != '_' && c != '-') return -1;
-    }
-
-    const char *conf_path = g_config.service_accounts_file
-                            ? g_config.service_accounts_file
-                            : DEFAULT_SERVICE_ACCOUNTS_CONF_FILE;
-
-    int fd = open(conf_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (fd < 0) return -1;
-
-    /*
-     * Strict guard: must be a regular root:root file with exact 0600
-     * permissions. Anything more permissive is refused — unprivileged
-     * callers must NOT be able to pull service-account data out of this
-     * file via a misconfigured mode, and pam_openbastion applies the
-     * same contract on its side.
-     */
-    struct stat st;
-    if (fstat(fd, &st) != 0 ||
-        !S_ISREG(st.st_mode) ||
-        st.st_uid != 0 ||
-        st.st_gid != 0 ||
-        (st.st_mode & 0777) != (S_IRUSR | S_IWUSR)) {
-        close(fd);
-        return -1;
-    }
-
-    FILE *f = fdopen(fd, "r");
-    if (!f) {
-        close(fd);
-        return -1;
-    }
-
-    char line[1024];
-    int in_target_section = 0;
-    int found = 0;
-    uid_t uid = 0;
-    gid_t gid = 0;
-    int have_uid = 0, have_gid = 0;
-    char gecos[256] = "";
-    char shell[128] = "";
-    char home[256] = "";
-
-    while (fgets(line, sizeof(line), f)) {
-        char *t = sa_trim(line);
-        if (*t == '\0' || *t == '#' || *t == ';') continue;
-
-        if (*t == '[') {
-            char *end = strchr(t, ']');
-            if (!end) continue;
-            *end = '\0';
-            char *name = sa_trim(t + 1);
-            if (in_target_section && found) break;  /* already captured */
-            in_target_section = (strcmp(name, username) == 0);
-            if (in_target_section) found = 1;
-            continue;
-        }
-
-        if (!in_target_section) continue;
-
-        char *eq = strchr(t, '=');
-        if (!eq) continue;
-        *eq = '\0';
-        char *key = sa_trim(t);
-        char *val = sa_trim(eq + 1);
-
-        if (strcmp(key, "uid") == 0) {
-            char *ep;
-            errno = 0;
-            unsigned long v = strtoul(val, &ep, 10);
-            if (errno == 0 && ep != val && *ep == '\0' && v > 0 && v <= 65534) {
-                uid = (uid_t)v;
-                have_uid = 1;
-            }
-        } else if (strcmp(key, "gid") == 0) {
-            char *ep;
-            errno = 0;
-            unsigned long v = strtoul(val, &ep, 10);
-            if (errno == 0 && ep != val && *ep == '\0' && v > 0 && v <= 65534) {
-                gid = (gid_t)v;
-                have_gid = 1;
-            }
-        } else if (strcmp(key, "gecos") == 0 || strcmp(key, "description") == 0) {
-            strncpy(gecos, val, sizeof(gecos) - 1);
-            gecos[sizeof(gecos) - 1] = '\0';
-        } else if (strcmp(key, "shell") == 0) {
-            strncpy(shell, val, sizeof(shell) - 1);
-            shell[sizeof(shell) - 1] = '\0';
-        } else if (strcmp(key, "home") == 0 || strcmp(key, "home_dir") == 0) {
-            strncpy(home, val, sizeof(home) - 1);
-            home[sizeof(home) - 1] = '\0';
-        }
-    }
-    fclose(f);
-
-    if (!found || !have_uid || !have_gid) return -1;
-
-    /* Fill in sensible defaults when optional fields are unset. */
-    const char *shell_to_use = (*shell) ? shell : DEFAULT_SHELL;
-    char home_default[320];
-    const char *home_to_use;
-    if (*home) {
-        home_to_use = home;
-    } else {
-        snprintf(home_default, sizeof(home_default), "%s/%s",
-                 DEFAULT_HOME_BASE, username);
-        home_to_use = home_default;
-    }
-
-    /* Populate the passwd struct using the caller-provided buffer. */
-    char *p = buffer;
-    size_t remaining = buflen;
-
-    pw->pw_name = p;
-    if (safe_strcpy(&p, &remaining, username) != 0) return -1;
-
-    pw->pw_passwd = p;
-    if (safe_strcpy(&p, &remaining, "x") != 0) return -1;
-
-    pw->pw_uid = uid;
-    pw->pw_gid = gid;
-
-    pw->pw_gecos = p;
-    if (safe_strcpy(&p, &remaining, gecos) != 0) return -1;
-
-    pw->pw_dir = p;
-    if (safe_strcpy(&p, &remaining, home_to_use) != 0) return -1;
-
-    pw->pw_shell = p;
-    if (safe_strcpy(&p, &remaining, login_shell(shell_to_use)) != 0) return -1;
-
-    return 0;
 }
 
 /*
@@ -2723,34 +2530,14 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
     pthread_mutex_unlock(&g_cache.lock);
 
     /*
-     * Try the local service-accounts.conf first: these users are
-     * deliberately unknown to LLNG and exist only on this host. We only
-     * get an answer when the calling process can read the 0600 config
-     * file (typically sshd during pre-auth getpwnam()).
-     *
-     * Deliberately skip file_cache_save() here: the shared file cache
-     * lives under /var/cache/nss_llng with a 0711 dir and 0644 entries
-     * (unlistable, but an entry is readable by any process that knows the
-     * key — see file_cache_write_atomic_at for why entries cannot be 0600),
-     * so persisting service-account metadata there would expose it to
-     * unprivileged users on the host (including the uid → name reverse
-     * lookup). Keeping it in the per-process in-memory cache only is
-     * sufficient for the one-shot sshd pre-auth getpwnam() path.
-     */
-    if (query_service_account(name, result, buffer, buflen) == 0) {
-        cache_add(name, result, 1);
-        g_in_nss_lookup = 0;
-        return NSS_STATUS_SUCCESS;
-    }
-
-    /*
      * Try the cross-process name file cache before going to the network.
      * With no nscd in front of us this is what keeps getpwnam() answers shared
      * between processes (sshd pre-auth, login, sudo, ...) without an HTTPS round
      * trip.
-     * Only LLNG-resolved users land here (service accounts are kept
-     * memory-only on purpose), so a hit is safe to promote into the in-memory
-     * cache exactly like the getpwuid file-cache-hit path does.
+     * Only LLNG-resolved users land here, so a hit is safe to promote into
+     * the in-memory cache exactly like the getpwuid file-cache-hit path does.
+     * Service accounts are plain local accounts that `files` answers before
+     * this module is asked (#353).
      */
     time_t file_created = 0;
     if (file_cache_load_by_name(name, result, buffer, buflen, &file_created) == 0) {

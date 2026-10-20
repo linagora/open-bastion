@@ -92,11 +92,13 @@ the cookie land in `local-test/.work/` (git-ignored).
    service account in the standalone `ob-builder` config (fingerprint = a
    lab-generated key), so the generated installer deposits a matching
    `service-accounts.conf`. Because `ob-builder` writes only the fingerprint, the
-   harness performs the **documented manual SSH-layer step** before setup locks
-   port 22 — it installs the `ob-service-account-keys` `AuthorizedKeysCommand`
-   helper + `service-accounts.d/backup.pub` (this also covers Mode E's
-   `AuthorizedKeysFile none`). Then it asserts `backup` logs in with its key,
-   with no SSO and no bastion certificate. See
+   harness performs the **documented manual steps** before setup locks port 22
+   — it creates the Unix account with `useradd` (shell
+   `/usr/sbin/ob-login-shell`, the standalone records sessions; Open Bastion
+   never creates it), and installs the `ob-service-account-keys`
+   `AuthorizedKeysCommand` helper + `service-accounts.d/<name>.pub` (this also
+   covers Mode E's `AuthorizedKeysFile none`). Then it asserts the account logs
+   in with its key, with no SSO and no bastion certificate. See
    [`doc/service-accounts.rst`](../doc/service-accounts.rst).
 
 ## Lab-only quirks

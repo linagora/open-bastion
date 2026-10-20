@@ -18,8 +18,8 @@ move independently, so each part below says when it applies.
 If you do both: Part A on every host first, then Part B.
 
 **Part C — scripts that call `ob-builder`, and Ansible inventories.** Only if
-a script passes `--output-shell` or `--bundle`, or if a generated role tree is
-driven by your own inventory.
+a script passes `--output-shell` or `--bundle`, if a generated role tree is
+driven by your own inventory, or if a build declares `service_accounts:`.
 
 ---
 
@@ -259,6 +259,72 @@ refused, by the PAM module at load time and by the NSS module and
 The NSS module also reads `request_signing_secret` and `cert_pin` from
 `openbastion.conf` now, and makes no portal call when that file is missing or
 readable by group or others: keep it `0600 root`, as every setup writes it.
+
+### A11. Service accounts are local accounts you manage
+
+Only on hosts with a `/etc/open-bastion/service-accounts.conf`.
+
+Open Bastion no longer creates a service account, resolves it through NSS, or
+manages its `sudo` (#353). It still serves its key
+(`/etc/open-bastion/service-accounts.d/<name>.pub`), exempts the names in
+`service-accounts.conf` from the SSO, and records their sessions on a bastion.
+See [doc/service-accounts.rst](doc/service-accounts.rst).
+
+**An account that logged in before the upgrade keeps working**: the old module
+wrote it to `/etc/passwd` at its first login. **One that never logged in must
+be created by hand**, before or after the upgrade; sshd refuses it until then.
+List the missing ones:
+
+```sh
+sudo sed -n 's/^[[:space:]]*\[\(.*\)\][[:space:]]*$/\1/p' /etc/open-bastion/service-accounts.conf \
+  | while read -r u; do getent -s files passwd "$u" >/dev/null || echo "missing: $u"; done
+sudo useradd --system --create-home --shell /usr/sbin/ob-login-shell <name>   # bastion, standalone
+sudo useradd --system --create-home --shell /bin/bash <name>                  # backend
+```
+
+**`sudo` for a service account stops working at the upgrade** unless a
+`sudoers` rule of yours grants it. The module no longer grants or refuses it,
+under any scenario. Memberships of `open-bastion-sudo` are left as they are, but
+the module no longer adds or removes service accounts there, and that group's
+rule asks for an authentication they cannot provide. Before upgrading, give
+each account that needs `sudo` a `NOPASSWD` rule, for instance for Ansible's
+`become`, and take it out of the group:
+
+```sh
+sudo visudo -f /etc/sudoers.d/service-accounts   # ansible ALL=(ALL) NOPASSWD: ALL
+sudo gpasswd -d ansible open-bastion-sudo
+```
+
+`sudoers` applies the last rule that matches: while the account is still in
+`open-bastion-sudo`, a rule in a file that sorts before `open-bastion` loses to
+that group's.
+
+That is enough on every scenario but maximum security. **Under maximum
+security** the `sudo` stack refuses every local account, service accounts now
+included: they keep SSH access and lose `sudo`. Restoring it takes a hand edit
+of `/etc/pam.d/sudo` and `/etc/pam.d/sudo-i`, which gives up the scenario's
+promise that every elevation goes through the SSO and is undone by a setup
+re-run: see the `sudo` section of the service accounts documentation before
+deciding.
+
+**On a bastion or standalone host that records**, check each account's shell:
+
+```sh
+getent passwd <name> | cut -d: -f7     # expect: /usr/sbin/ob-login-shell
+sudo usermod -s /usr/sbin/ob-login-shell <name>
+```
+
+With `/bin/bash`, the account's `~/.bashrc` runs before the recorder, outside
+the recording. Nothing enforces the shell; the accounts the old module created
+got the `shell` of `service-accounts.conf`, or the module's default.
+
+`uid`, `gid`, `shell`, `home`, `gecos`, `sudo_allowed` and `sudo_nopasswd` in
+`service-accounts.conf` are ignored, with a warning in the logs; nothing is
+refused. Remove them once the local account and the `sudoers` rule match what
+they said: only the section name and `key_fingerprint` remain. A section the
+old module dropped for a `shell` or `home` outside the approved lists is now
+loaded, so its name is exempt from the SSO: delete the sections you do not
+want.
 
 ---
 
@@ -501,3 +567,16 @@ playbook that copied `files/jwks.json` must use the new name. A host whose
 `ob_client_id` differs from the build's needs `ob_sso_jwks_src`,
 `ob_sso_jwks_sha256` and `ob_sso_jwks_client_id` for its own client, or
 `ob_response_signing: off`: the play stops otherwise.
+
+### C6. `service_accounts:` keeps `name` and the key
+
+Only for a build that declares `service_accounts:`.
+
+`sudo_allowed`, `sudo_nopasswd`, `shell`, `home`, `gecos`, `uid` and `gid` are
+ignored, with a warning; the build does not stop. Keep `name`, `public_key` or
+`public_key_file`, and `key_fingerprint`. The artefacts never created the
+accounts — the PAM module did, at their first login — and nothing does now:
+create them on the targets with a task of your own, with
+`/usr/sbin/ob-login-shell` as their shell on the bastions and standalone hosts
+that record, and write their `sudoers` rules there too
+([A11](#a11-service-accounts-are-local-accounts-you-manage)).

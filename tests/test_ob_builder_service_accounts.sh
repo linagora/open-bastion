@@ -63,10 +63,7 @@ test_validators() {
     is_valid_fingerprint "MD5:aa:bb:cc"  || ok=false
     is_valid_fingerprint "abc123"        && ok=false   # no prefix
     is_valid_fingerprint "SHA256:bad spaces" && ok=false
-    is_valid_abs_path ""                 || ok=false   # empty OK
-    is_valid_abs_path "/bin/bash"        || ok=false
-    is_valid_abs_path "relative/path"    && ok=false
-    $ok && test_pass "validators: username / fingerprint / path" \
+    $ok && test_pass "validators: username / fingerprint" \
          || test_fail "validators returned wrong result"
 }
 
@@ -84,25 +81,30 @@ service_accounts:
     shell: /bin/bash
     home: /var/lib/ansible
     gecos: Ansible Automation
+    uid: 6001
   - name: backup
     key_fingerprint: "SHA256:xyz789"
-    sudo_allowed: false
     shell: /bin/sh
 auto_enroll_setup: prompt
 YML
     SERVICE_ACCOUNTS_RECORDS=()
-    _parse_service_accounts_block "$cfg"
+    local warns
+    warns=$(_parse_service_accounts_block "$cfg" 2>&1)
+    _parse_service_accounts_block "$cfg" 2>/dev/null
 
     local ok=true
     [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -eq 2 ] || { ok=false; echo "  count=${#SERVICE_ACCOUNTS_RECORDS[@]}"; }
     [ "$(_sa_field 1 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "ansible" ] || ok=false
     [ "$(_sa_field 2 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "SHA256:abc123" ] || ok=false
-    [ "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "true" ] || ok=false
-    [ "$(_sa_field 5 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "/bin/bash" ] || ok=false
-    [ "$(_sa_field 7 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "Ansible Automation" ] || ok=false
     [ "$(_sa_field 1 "${SERVICE_ACCOUNTS_RECORDS[1]}")" = "backup" ] || ok=false
-    [ "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[1]}")" = "false" ] || ok=false
-    $ok && test_pass "parse: service_accounts block → 2 records, fields correct" \
+    # The pre-#353 keys load, one warning per account names the ignored ones,
+    # and nothing of them survives in the record.
+    grep -q "service account 'ansible': ignoring sudo_allowed, sudo_nopasswd, shell, home, gecos, uid" <<<"$warns" || ok=false
+    grep -q "service account 'backup': ignoring shell " <<<"$warns" || ok=false
+    grep -q 'useradd' <<<"$warns" || ok=false
+    [[ "${SERVICE_ACCOUNTS_RECORDS[0]}" != *"/bin/bash"* && "${SERVICE_ACCOUNTS_RECORDS[0]}" != *Automation* ]] || ok=false
+    [ -z "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]}")" ] || ok=false
+    $ok && test_pass "parse: service_accounts block → 2 records, old keys ignored with a warning" \
          || test_fail "parse: block parsing wrong"
 }
 
@@ -123,10 +125,9 @@ YML
 # Test 5: record validation
 test_record_validation() {
     local ok=true
-    validate_service_account_record "$(_sa_pack ansible SHA256:abc true false /bin/bash /var/lib/ansible '' '' '')" || ok=false
-    validate_service_account_record "$(_sa_pack BadName SHA256:abc false false '' '' '' '' '')" && ok=false
-    validate_service_account_record "$(_sa_pack svc nofingerprint false false '' '' '' '' '')" && ok=false
-    validate_service_account_record "$(_sa_pack svc SHA256:abc false false relpath '' '' '' '')" && ok=false
+    validate_service_account_record "$(_sa_pack ansible SHA256:abc '')" || ok=false
+    validate_service_account_record "$(_sa_pack BadName SHA256:abc '')" && ok=false
+    validate_service_account_record "$(_sa_pack svc nofingerprint '')" && ok=false
     $ok && test_pass "validate_service_account_record: accepts valid, rejects bad" \
          || test_fail "record validation wrong"
 }
@@ -134,26 +135,23 @@ test_record_validation() {
 # Test 6: INI rendering
 test_render_conf() {
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack ansible SHA256:abc123 true true /bin/bash /var/lib/ansible 'Ansible Automation' '' '')"
-        "$(_sa_pack backup SHA256:xyz789 false false /bin/sh '' '' '' '')"
+        "$(_sa_pack ansible SHA256:abc123 '')"
+        "$(_sa_pack backup SHA256:xyz789 '')"
     )
     local out rc
     out=$(_render_service_accounts_conf); rc=$?
     local ok=true
-    # Must return 0 even when the last account has no uid/gid — otherwise the
-    # `$(...)` assignment trips `set -e` in ob-builder (regression guard).
+    # Must return 0 whatever the last account is -- otherwise the `$(...)`
+    # assignment trips `set -e` in ob-builder (regression guard).
     [ "$rc" -eq 0 ] || { ok=false; echo "  non-zero return: $rc"; }
     grep -q '^\[ansible\]$'                      <<<"$out" || ok=false
     grep -q '^key_fingerprint = SHA256:abc123$'  <<<"$out" || ok=false
-    grep -q '^sudo_allowed = true$'              <<<"$out" || ok=false
-    grep -q '^sudo_nopasswd = true$'             <<<"$out" || ok=false
-    grep -q '^gecos = Ansible Automation$'       <<<"$out" || ok=false
-    grep -q '^home = /var/lib/ansible$'          <<<"$out" || ok=false
     grep -q '^\[backup\]$'                       <<<"$out" || ok=false
-    grep -q '^sudo_allowed = false$'             <<<"$out" || ok=false
-    # backup has no home/gecos → those keys absent in its section is not trivially
-    # grep-able, but the file must not carry an empty 'home =' line anywhere.
-    grep -q '^home = $'                          <<<"$out" && ok=false
+    # Section + key_fingerprint only (#353): nothing of what the module used to
+    # need to create the account.
+    local body
+    body=$(grep -v '^#' <<<"$out" | grep -v '^$' | grep -v '^\[' | grep -v '^key_fingerprint = ')
+    [ -z "$body" ] || { ok=false; echo "  extra keys: $body"; }
     $ok && test_pass "render: INI output well-formed" \
          || test_fail "render: INI output wrong" "$out"
 }
@@ -193,7 +191,7 @@ YML
 
     local got_fp got_pub
     got_fp=$(_sa_field 2 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
-    got_pub=$(_sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
+    got_pub=$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
     if [ "$got_fp" = "$expected" ] && [ "$got_pub" = "$pub" ]; then
         test_pass "key_fingerprint is derived from public_key, and the key is kept"
     else
@@ -258,7 +256,7 @@ YML
     local got
     got=$( cd / && SERVICE_ACCOUNTS_RECORDS=() ; \
            _parse_service_accounts_block "$cfg" >/dev/null 2>&1 ; \
-           _sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]:-}" )
+           _sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]:-}" )
     case "$got" in
         ssh-ed25519\ *svc@file)
             test_pass "public_key_file is read at build time, relative to the config file" ;;
@@ -293,9 +291,9 @@ YML
 # Test: the renderer emits one "<name> <key>" line per account that has a key.
 test_render_keys() {
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack a "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 AAAA a@h")"
-        "$(_sa_pack b "SHA256:2" false false "" "" "" "" "" "")"
-        "$(_sa_pack c "SHA256:3" false false "" "" "" "" "" "ssh-rsa BBBB c@h")"
+        "$(_sa_pack a "SHA256:1" "ssh-ed25519 AAAA a@h")"
+        "$(_sa_pack b "SHA256:2" "")"
+        "$(_sa_pack c "SHA256:3" "ssh-rsa BBBB c@h")"
     )
     local out; out=$(_render_service_account_keys)
     local n; n=$(printf '%s\n' "$out" | grep -c .)
@@ -386,7 +384,7 @@ test_rendered_artifacts() {
 
     # Minimal placeholder set: enough for the service-account paths.
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack svc "SHA256:x" false false "" "" "" "" "" "ssh-ed25519 AAAAB svc@h")"
+        "$(_sa_pack svc "SHA256:x" "ssh-ed25519 AAAAB svc@h")"
     )
     local keys keys_b64 conf conf_b64
     keys=$(_render_service_account_keys); keys_b64=$(base64_string "$keys")
@@ -453,9 +451,9 @@ test_key_block_runs() {
     local d="$TEST_TMPDIR/keyrun/sa.d" out bad=""
     mkdir -p "$d"
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack alpha "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 AAAA alpha@h")"
-        "$(_sa_pack nokey "SHA256:2" false false "" "" "" "" "" "")"
-        "$(_sa_pack omega "SHA256:3" false false "" "" "" "" "" "ssh-ed25519 BBBB omega@h")"
+        "$(_sa_pack alpha "SHA256:1" "ssh-ed25519 AAAA alpha@h")"
+        "$(_sa_pack nokey "SHA256:2" "")"
+        "$(_sa_pack omega "SHA256:3" "ssh-ed25519 BBBB omega@h")"
     )
     # The last account already has its key: a second run must keep it.
     printf 'ssh-ed25519 BBBB omega@h\n' > "$d/omega.pub"
@@ -491,13 +489,72 @@ test_key_block_runs() {
     # One account only: the shape the report started from (an empty directory).
     rm -f "$d"/*.pub
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack solo "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 DDDD solo@h")"
+        "$(_sa_pack solo "SHA256:1" "ssh-ed25519 DDDD solo@h")"
     )
     _run_key_block "$(_service_account_keys_b64)" "$d" >/dev/null 2>&1
     if [ "$(cat "$d/solo.pub" 2>/dev/null)" = "ssh-ed25519 DDDD solo@h" ]; then
         test_pass "a single account gets its key"
     else
         test_fail "a single account gets its key" "$(ls "$d")"
+    fi
+}
+
+# #353: open-bastion never creates the account; the installer says it is missing
+# and which useradd to run. Runs the real block out of the template, with the
+# conf path and getent stubbed.
+test_installer_warns_missing_account() {
+    local tpl="$OB_REPO_ROOT/admin-builder/templates/shell/installer.sh.in"
+    local d="$TEST_TMPDIR/missing"; mkdir -p "$d"
+    SERVICE_ACCOUNTS_RECORDS=(
+        "$(_sa_pack present "SHA256:1" "")"
+        "$(_sa_pack absent "SHA256:2" "")"
+    )
+    _render_service_accounts_conf > "$d/sa.conf"
+    local conf_b64; conf_b64=$(base64_string "$(cat "$d/sa.conf")")
+    local blk="$d/block.sh"
+    sed -n '/# open-bastion never creates a service account (#353)/,/^    # Deposit SSH CA public key/p' "$tpl" \
+        | sed -e '$d' -e "s|@@SERVICE_ACCOUNTS_CONF_B64@@|$conf_b64|g" \
+              -e "s|/etc/open-bastion/service-accounts.conf|$d/sa.conf|g" > "$blk"
+    local bad="" role rec out want
+    for role in bastion standalone backend; do
+        for rec in no yes; do
+            out=$(
+                log_warn() { echo "WARN $*"; }
+                getent() { [ "$2" = present ]; }
+                TARGET_ROLE="$role"; DISABLE_SESSION_RECORDER="$rec"
+                f() { local _x; . "$blk"; }
+                f 2>&1
+            )
+            want="/usr/sbin/ob-login-shell"
+            { [ "$role" = backend ] || [ "$rec" = yes ]; } && want="/bin/bash"
+            grep -q "service account 'absent' does not exist" <<<"$out" || bad="$bad $role/$rec:no-warning"
+            grep -q "present" <<<"$out" && bad="$bad $role/$rec:warned-for-existing"
+            grep -q -- "useradd --system --create-home --shell $want absent" <<<"$out" || bad="$bad $role/$rec:wrong-useradd($want)"
+        done
+    done
+    # Never creates it: no account-creating command outside a log message.
+    grep -vE '^\s*(#|log_warn)' "$blk" | grep -qE '(^|[^a-z])(useradd|adduser|groupadd)[^a-z]' \
+        && bad="$bad creates-an-account"
+    if [ -z "$bad" ]; then
+        test_pass "the installer warns about a missing account, suggests ob-login-shell on recording hosts, never creates it"
+    else
+        test_fail "the installer warns about a missing account" "$bad"
+    fi
+}
+
+# #353: same for the Ansible role -- a non-failing, check-mode-safe check.
+test_ansible_checks_account_exists() {
+    local an_t="$OB_REPO_ROOT/admin-builder/templates/ansible/role/tasks/main.yml.in"
+    local bad=""
+    grep -q "argv: \['getent', 'passwd'" "$an_t" || bad="$bad no-getent"
+    grep -A12 'Check the service accounts exist' "$an_t" | grep -q 'failed_when: false' || bad="$bad can-fail"
+    grep -A12 'Check the service accounts exist' "$an_t" | grep -q 'check_mode: false' || bad="$bad not-check-mode-safe"
+    grep -q '/usr/sbin/ob-login-shell' "$an_t" || bad="$bad no-login-shell-hint"
+    grep -qE 'ansible.builtin.(user|group):' "$an_t" && bad="$bad creates-an-account"
+    if [ -z "$bad" ]; then
+        test_pass "the Ansible role checks that each account exists and never creates it"
+    else
+        test_fail "the Ansible role account check" "$bad"
     fi
 }
 
@@ -509,7 +566,8 @@ for _t in test_syntax test_validators test_parse_block test_parse_none \
           test_fingerprint_derived_from_key test_mismatch_is_rejected \
           test_public_key_file test_bad_key_is_dropped test_render_keys \
           test_templates_deploy_and_warn test_help_has_no_substitution \
-          test_rendered_artifacts test_key_block_runs; do
+          test_rendered_artifacts test_key_block_runs \
+          test_installer_warns_missing_account test_ansible_checks_account_exists; do
     if declare -F "$_t" >/dev/null; then
         "$_t"
     else

@@ -5,9 +5,10 @@
 #
 # scripts/ob-service-account-keys is the AuthorizedKeysCommand helper that
 # makes a service account usable: it serves the account's public key from
-# /etc/open-bastion/service-accounts.d/<name>.pub without the Unix account
-# having to exist yet. Without it sshd has no key for the account and refuses
-# at the protocol layer, before pam_openbastion runs at all.
+# /etc/open-bastion/service-accounts.d/<name>.pub, so the account needs no
+# ~/.ssh/authorized_keys. Without it sshd has no key for the account and refuses
+# at the protocol layer, before pam_openbastion runs at all. The Unix account
+# itself is the operator's to create (#353).
 #
 # It was in the tree and in **none** of the three packaging paths, so there was
 # no copy on a host to point AuthorizedKeysCommand at. Everyone who needed it
@@ -405,6 +406,60 @@ test_service_keys_flag() {
     fi
 }
 
+# ── 8. A missing account is reported, never created (#353) ──────────────────
+#
+# Service accounts are plain local accounts the operator creates. The setup may
+# say one is missing; it must not create it, and the useradd line it suggests
+# must give a recording host the launcher, whose shell reads no startup file
+# ahead of the recorder ForceCommand.
+test_missing_account_is_reported() {
+    local conf out bad="" role
+    SCRATCH=${SCRATCH:-$(mktemp -d)}
+    conf="$SCRATCH/service-accounts.conf"
+    printf '[root]\nkey_fingerprint = SHA256:abc\n\n[ob-no-such-svc]\nkey_fingerprint = SHA256:def\nuid = 990\n' \
+        >"$conf"
+
+    for role in ob-bastion-setup ob-backend-setup; do
+        out=$(
+            # shellcheck source=tests/lib_setup_script.sh
+            . "$ROOT_DIR/tests/lib_setup_script.sh"
+            load_setup_as "$role" || exit 99
+            useradd() { echo "CALLED useradd $*"; }
+            groupadd() { echo "CALLED groupadd $*"; }
+            OB_SERVICE_ACCOUNTS_CONF="$conf" _ob_warn_missing_service_accounts 2>&1
+        )
+        case "$out" in *ob-no-such-svc*) ;; *) bad="$bad $role(missing-not-reported)" ;; esac
+        printf '%s\n' "$out" | grep 'not in /etc/passwd' | grep -qw root \
+            && bad="$bad $role(existing-account-reported)"
+        case "$out" in *CALLED*) bad="$bad $role(created-something)" ;; esac
+        if [ "$role" = ob-bastion-setup ]; then
+            case "$out" in
+                *"useradd --system --create-home --shell /usr/sbin/ob-login-shell"*) ;;
+                *) bad="$bad $role(no-launcher-in-hint)" ;;
+            esac
+        else
+            case "$out" in
+                *"--shell /usr/sbin/ob-login-shell"*) bad="$bad $role(launcher-on-non-recording-host)" ;;
+            esac
+        fi
+    done
+
+    # Nothing to say when every account exists.
+    printf '[root]\nkey_fingerprint = SHA256:abc\n' >"$conf"
+    out=$(
+        . "$ROOT_DIR/tests/lib_setup_script.sh"
+        load_setup_as ob-bastion-setup || exit 99
+        OB_SERVICE_ACCOUNTS_CONF="$conf" _ob_warn_missing_service_accounts 2>&1
+    )
+    [ -z "$out" ] || bad="$bad not-silent-when-all-exist"
+
+    if [ -z "$bad" ]; then
+        pass "a service account missing from /etc/passwd is reported, not created"
+    else
+        fail "a service account missing from /etc/passwd is reported, not created" "$bad"
+    fi
+}
+
 run_test test_helper_is_packaged
 run_test test_one_path_everywhere
 run_test test_doc_does_not_claim_pam_is_enough
@@ -412,6 +467,7 @@ run_test test_exposeauthinfo_is_always_guarded
 run_test test_helper_refusals
 run_test test_keys_dir_is_shipped
 run_test test_service_keys_flag
+run_test test_missing_account_is_reported
 
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"

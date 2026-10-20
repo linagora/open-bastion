@@ -74,8 +74,8 @@ via OIDC— Open Bastion is feature rich. It provides:
 
 * Server groups for granular access control
 
-* :doc:`service-accounts`: SSH key authentication without OIDC, with
-  per-server configuration and fine-grained ``sudo`` permissions
+* :doc:`service-accounts`: SSH key authentication without OIDC for local
+  accounts you create, exempted from the SSO per server
 
 * Bastion-to-backend authentication: Certificate-based proof of
   connection origin, so backends only accept SSH from authorized

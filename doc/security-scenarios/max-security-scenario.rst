@@ -155,10 +155,10 @@ the SSO's ``sudo_allowed`` flag while the session is set up, so a user
 removed from the group in LLNG loses ``sudo`` at the next login.
 
 The ``account`` phase has no fallback for local accounts: every ``sudo``
-is authorized by ``pam_openbastion``, which knows only SSO users and the
-declared :doc:`service accounts </service-accounts>`. Every other account
-is refused, whatever ``sudoers`` grants it: local admins, the default user
-of a cloud image with its ``NOPASSWD`` rule, and ``root`` itself.
+is authorized by ``pam_openbastion``, which authorizes only SSO users.
+Every other account is refused, whatever ``sudoers`` grants it: local
+admins, the default user of a cloud image with its ``NOPASSWD`` rule,
+:doc:`service accounts </service-accounts>`, and ``root`` itself.
 
 .. code:: console
 
@@ -170,14 +170,17 @@ In practice:
 - ``root`` does not need ``sudo``. A root script or cron job that runs a
   command as another user must call ``runuser -u USER -- COMMAND``, which
   does not go through the ``sudo`` stack, instead of ``sudo -u USER``.
-- Configuration management such as Ansible must connect as a service
-  account with ``sudo_allowed`` and ``sudo_nopasswd``. The local account
-  it used for the first deployment has neither SSH access nor ``sudo``
-  once the scenario is applied.
-- The break-glass path for an SSO outage is a service account or
-  out-of-band console access, not a local admin.
-- A service account's ``sudo`` is all or nothing; see
-  :ref:`service-accounts-sudo-bypass`.
+- Configuration management such as Ansible can keep SSH access through
+  a service account, but not ``sudo``: the module neither grants nor
+  refuses a service account's ``sudo``, and this stack has nothing else
+  to grant it. The local account used for the first deployment has
+  neither SSH access nor ``sudo`` once the scenario is applied. Giving a
+  service account ``sudo`` takes a hand edit of this stack, which breaks
+  the scenario's promise that every elevation goes through the SSO; see
+  :ref:`service-accounts-sudo`.
+- The break-glass path for an SSO outage is out-of-band console access.
+  A service account still logs in during an outage, but gets ``sudo``
+  only with that hand edit.
 
 ``sudo`` keeps its own timestamp cache — 15 minutes by default on Debian,
 re-armed on each use — so an operator working continuously is not prompted

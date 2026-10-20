@@ -263,10 +263,10 @@ Pistes pour réduire encore I (couvrir root du bastion, déjà hors périmètre)
 R-S17 *(P=1, I=2)* - Verrouillage total (lockout)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation le ramène à P=1/I=2 via :
+Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation le ramène à P=1/I=2 via les mesures suivantes, dont les deux premières sont des prérequis d'exploitation, mis en place et testés par l'exploitant :
 
-- Compte de service de secours (``service-accounts.conf``) avec clé stockée en coffre-fort — **pré-configuré par le paquet ``open-bastion-linagora``** (compte ``linagora``, clé RSA, ``sudo_allowed = true``)
-- Procédure de recouvrement console documentée et testée — **accès root via ttyS0 pré-configuré** dans ``/etc/securetty`` par le paquet bootstrap (``PermitRootLogin no`` bloque SSH, console OVH reste le filet de sécurité)
+- Compte de service de secours avec clé stockée en coffre-fort — **préparé par l'exploitant** : compte local créé avec ``useradd``, déclaré dans ``service-accounts.conf``, sa clé publique dans ``service-accounts.d/``. Aucun paquet ne le fournit et Open Bastion ne le crée pas (#353). Son ``sudo`` est une règle ``sudoers`` de l'exploitant, et en Mode E la pile ``sudo`` refuse tout compte local : le compte de secours garantit l'accès SSH pendant la panne, ``root`` vient de la console, sauf décision de modifier la pile à la main (cf. R-S24)
+- Procédure de recouvrement console documentée et testée — **accès root par la console hors-bande à vérifier par l'exploitant** (getty sur ``ttyS0``, ``/etc/securetty`` si ``pam_securetty`` est actif) ; ``ob-bastion-setup`` pose ``PermitRootLogin no``, la console OVH reste le filet de sécurité
 - LLNG en haute disponibilité
 
 ..
@@ -285,7 +285,7 @@ Pistes pour réduire davantage :
 
 1. **Test de recouvrement périodique** : Simuler un lockout (désactiver LLNG en environnement de test) et valider la procédure console + compte de service de secours au moins une fois par an
 2. **Alerte proactive** : Monitorer l'âge du cache offline et alerter quand il atteint 80% du TTL configuré, avant l'expiration
-3. **Cache offline étendu pour le compte de secours** : Configurer un TTL offline plus long spécifiquement pour le compte de service de recouvrement
+3. [STRIKEOUT:Cache offline étendu pour le compte de secours] — **sans objet** : un compte de service est autorisé localement, sans appel LLNG ni cache d'autorisation, et résolu par ``/etc/passwd`` ; aucun TTL ne le concerne
 4. **Runbook automatisé** : Script de recouvrement pré-positionné sur le serveur (accessible uniquement via console) pour réactiver l'accès en une commande
 
 --------------
@@ -330,25 +330,25 @@ Pistes pour réduire I à 1 :
 Pistes d'Amélioration - Comptes de service
 ------------------------------------------
 
-Les comptes de service (``service-accounts.conf``) s'authentifient par **clé SSH directe**, en **local** sur chaque serveur, hors du modèle SSO/vouching. Ce sont des dérogations volontaires au contrôle centralisé : utiles pour l'automatisation (ansible, sauvegarde, CI/CD), mais ils ouvrent deux écarts à tracer.
+Les comptes de service (``service-accounts.conf``) sont des comptes locaux créés par l'exploitant, qui s'authentifient par **clé SSH directe**, en **local** sur chaque serveur, hors du modèle SSO/vouching. Ce sont des dérogations volontaires au contrôle centralisé : utiles pour l'automatisation (ansible, sauvegarde, CI/CD), mais ils ouvrent deux écarts à tracer.
 
 R-S24 *(P=1, I=3)* - Sudo de compte de service hors token SSO
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   **Fiche de risque :** l'analyse complète de R-S24 (vecteurs, facteurs atténuants, remédiation, score résiduel) est en section 6 de :doc:`/security/02-ssh-connection` ; la section ci-dessous n'est que le volet « pistes » du plan de traitement.
+   **Fiche de risque :** l'analyse complète de R-S24 (vecteurs, facteurs atténuants, remédiation, score résiduel) est en section 8 de :doc:`/security/02-ssh-connection` ; la section ci-dessous n'est que le volet « pistes » du plan de traitement.
 
-Le droit sudo d'un compte de service provient **uniquement** de ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``) : ``pam_openbastion`` l'accorde localement et renvoie un succès **sans aucun appel LLNG**, **y compris en Mode E** où un humain doit présenter un token LLNG frais. Une clé de service avec ``sudo_allowed`` (a fortiori ``sudo_nopasswd``) est donc un **privilège local permanent qui échappe à la porte sudo gouvernée par le SSO**.
+**Livré (0.7.0, #353) — Open Bastion n'accorde plus de sudo aux comptes de service.** Jusqu'ici, le droit venait de ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``) et ``pam_openbastion`` l'accordait localement, y compris en Mode E. Ces clés sont désormais ignorées ; dans les services ``sudo`` et ``sudo-i``, le module renvoie ``PAM_IGNORE`` pour un compte de service et ne touche plus à ses groupes. Un ``sudo`` de compte de service n'existe plus que par une règle ``sudoers`` de l'exploitant — et, en Mode E, par une modification manuelle de la pile PAM ``sudo``, qui renonce à la promesse que toute élévation passe par le SSO. Là où il existe, il reste un **privilège local permanent qui échappe à la porte sudo gouvernée par le SSO** ; le score de la fiche évalue ce cas.
 
 Pistes :
 
-1. **Minimiser** : n'accorder ``sudo_allowed`` qu'aux comptes qui en ont réellement besoin ; préférer ``sudo_nopasswd = false`` et des règles ``sudoers`` restreintes à des commandes précises plutôt qu'un sudo total. ``sudo_nopasswd = false`` est réellement utilisable depuis la 0.6.3 : le contrôle d'empreinte ne lisait que ``SSH_USER_AUTH``, absent d'un handle PAM ``sudo``, si bien qu'il échouait toujours et que ``sudo_nopasswd = true`` — c'est-à-dire aucune preuve d'identité — était la seule configuration qui fonctionnait. L'empreinte est désormais reprise du spool des principals, que ``sudo`` hérite par l'arbre de processus.
+1. **Minimiser** : n'écrire de règle ``sudoers`` (nécessairement ``NOPASSWD`` : le compte n'a ni mot de passe ni token) que pour les comptes qui en ont réellement besoin, restreinte à des commandes précises plutôt qu'un sudo total. La piste antérieure (préférer ``sudo_nopasswd = false``, l'empreinte étant reprise du spool des principals) est **sans objet** : la clé n'existe plus, et le spool n'est alimenté que pour une connexion par certificat, jamais pour la clé nue d'un compte de service.
 2. **Inventaire et rotation** : traiter chaque clé de service comme un secret de longue durée (coffre-fort, rotation périodique, révocation à la sortie d'un prestataire/outil). Recoupe le compte de secours de :ref:`R-S17 <security-99-risk-reduce-r-s17-p1-i2---verrouillage-total-lockout>`.
 3. **Audit dédié** : journaliser/alerter sur l'usage sudo des comptes de service (auditd ``-k`` distinct), puisqu'il n'apparaît pas dans les logs d'autorisation LLNG.
 
 R-S25 *(P=1, I=2)* - Hop de compte de service via ProxyJump non enregistré
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   **Fiche de risque :** l'analyse complète de R-S25 (vecteurs, facteurs atténuants, remédiation, score résiduel) est en section 6 de :doc:`/security/02-ssh-connection` ; la section ci-dessous n'est que le volet « pistes » du plan de traitement.
+   **Fiche de risque :** l'analyse complète de R-S25 (vecteurs, facteurs atténuants, remédiation, score résiduel) est en section 8 de :doc:`/security/02-ssh-connection` ; la section ci-dessous n'est que le volet « pistes » du plan de traitement.
 
 Un compte de service ne peut pas utiliser ``ob-ssh`` (pas de voucher SSO), mais un ``ssh -J bastion compte@backend`` natif fonctionne s'il est configuré des deux côtés et que le bastion autorise le forwarding TCP. Or le ``ForceCommand`` (enregistreur de session) **ne couvre pas le canal ``direct-tcpip``** : un tel hop **n'est pas enregistré** sur le bastion.
 
@@ -356,4 +356,4 @@ Pistes :
 
 1. **Accès direct** : faire pointer les comptes de service directement sur les serveurs cibles (la traçabilité repose alors sur l'auditd/les logs de la cible) plutôt que de les relayer par le bastion.
 2. **``AllowTcpForwarding no`` sur le bastion** : interdire explicitement le forwarding pour fermer le canal de hop non enregistré (à arbitrer selon les usages légitimes de forwarding sur le parc).
-3. **Ne pas configurer les comptes de service sur le bastion** lui-même quand ils n'y ont pas de tâche locale, pour retirer la première marche du ProxyJump.
+3. **Ne pas créer ni déclarer les comptes de service sur le bastion** lui-même quand ils n'y ont pas de tâche locale, pour retirer la première marche du ProxyJump. Sur un bastion où ils en ont une, leur shell doit être ``/usr/sbin/ob-login-shell`` pour que leurs sessions soient enregistrées sans échappatoire par ``~/.bashrc``.

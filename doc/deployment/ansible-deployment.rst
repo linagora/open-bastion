@@ -378,8 +378,14 @@ applies after re-enrolling a bastion, which assigns it a new id.
 
 Under :doc:`maximum security </security-scenarios/max-security-scenario>`,
 the account of the first run can no longer connect: the hosts accept
-only SSO certificates, and ``sudo`` only SSO users and service accounts.
-Declare the account Ansible uses as a :doc:`service account
-</service-accounts>` with its key, ``sudo_allowed`` and
-``sudo_nopasswd`` before you apply the scenario, and set it as
-``ansible_user``.
+only SSO certificates, and ``sudo`` only SSO users. A :doc:`service
+account </service-accounts>` keeps SSH access — create the local
+account on every target and give its key in ``service_accounts:``
+before you apply the scenario — but not ``sudo``, which the play needs
+(``become: true``). Open Bastion does not grant a service account
+``sudo``; under maximum security it takes a ``NOPASSWD`` ``sudoers`` rule
+**and** a hand edit of ``/etc/pam.d/sudo``, which gives up the scenario's
+promise that every elevation goes through the SSO (see
+:ref:`service-accounts-sudo`). If you take that decision, apply the edit
+from your own task after the role: the role re-runs the setup, which
+rewrites the file and drops it.

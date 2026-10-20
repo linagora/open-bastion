@@ -137,7 +137,9 @@ Local accounts in ``/etc/passwd`` are not resolved by ``libnss_openbastion``,
 and keep the shell the administrator gave them. On a recording host, an
 account that logs in over SSH goes through the same ``ForceCommand`` and has
 the same exposure; give it this shell with
-``chsh -s /usr/sbin/ob-login-shell`` *USER*.
+``chsh -s /usr/sbin/ob-login-shell`` *USER*. Service accounts are such
+local accounts: create them with ``--shell /usr/sbin/ob-login-shell`` on a
+recording host. Nothing enforces it.
 
 See also
 --------

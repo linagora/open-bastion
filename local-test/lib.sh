@@ -297,9 +297,10 @@ verify_standalone(){
 # ── service-account verification ──────────────────────────────────────────────
 # Validates the ob-builder service-keys feature end-to-end: ob-builder deposits
 # service-accounts.conf (fingerprint only), and we perform the documented manual
+# steps -- useradd of the account (Open Bastion never creates it, #353) and the
 # SSH-layer authorization (the ob-service-account-keys AuthorizedKeysCommand
-# helper, which also covers Mode E's `AuthorizedKeysFile none`), then assert the
-# 'backup' service account logs in with its own key — no SSO, no bastion cert.
+# helper, which also covers Mode E's `AuthorizedKeysFile none`) -- then assert
+# the service account logs in with its own key — no SSO, no bastion cert.
 
 # Generate the lab service key once and compute its SHA256 fingerprint.
 gen_service_key(){
@@ -307,9 +308,11 @@ gen_service_key(){
     SVC_FP=$(ssh-keygen -lf "$SVC_KEY.pub" 2>/dev/null | awk '{print $2}')
 }
 
-# Provision the SSH-layer authorization for the 'backup' service account on <vm>.
-# This is the manual step ob-builder deliberately does NOT do (it only writes the
-# fingerprint to service-accounts.conf): deploy the ob-service-account-keys
+# Provision the service account on <vm>: the manual steps ob-builder
+# deliberately does NOT do (it only writes the fingerprint to
+# service-accounts.conf). Create the Unix account by hand -- with the launcher as
+# its shell, since the standalone records sessions and bash would read ~/.bashrc
+# ahead of the recorder -- then deploy the ob-service-account-keys
 # AuthorizedKeysCommand helper + the account's public key so sshd will present
 # it. Works in all PAM modes, including Mode E (AuthorizedKeysFile none). MUST
 # run while the debian mgmt user can still SSH — i.e. before *-setup locks port 22.
@@ -323,6 +326,11 @@ provision_service_helper(){
     local pub; pub=$(cat "$SVC_KEY.pub")
     if dssh "$ip" "sudo OB_SVC_PUB='$pub' OB_SVC_NAME='$SVC_NAME' bash -s" <<'BS' >/dev/null 2>&1
 set -e
+# The account first: sshd refuses a user it cannot resolve before any key is
+# looked up. The launcher arrives with the package, after this runs; useradd
+# only warns about a shell that is not there yet.
+getent -s files passwd "$OB_SVC_NAME" >/dev/null ||
+    useradd --system --create-home --shell /usr/sbin/ob-login-shell "$OB_SVC_NAME"
 # /usr/sbin, the packaged path (#263): this runs before the installer puts the
 # package on the VM, so the helper still has to be copied -- but to the path
 # the package owns, so apt later refreshes this very file instead of leaving a
@@ -340,7 +348,7 @@ AuthorizedKeysCommandUser nobody
 ExposeAuthInfo yes
 CONF
 BS
-    then ok "$v: provisioned service-account SSH authorization (${SVC_NAME}.pub + AuthorizedKeysCommand)"
+    then ok "$v: provisioned service account (useradd + ${SVC_NAME}.pub + AuthorizedKeysCommand)"
     else bad "$v: failed to provision service-account SSH authorization"; fi
 }
 
@@ -358,11 +366,12 @@ verify_service_accounts(){
     local S=(ssh -i "$SVC_KEY" -o IdentityAgent=none -o IdentitiesOnly=yes
              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
              -o NumberOfPasswordPrompts=0 -o ConnectTimeout=15)
-    # Exit 0 ⇒ sshd accepted the key (AuthorizedKeysCommand) AND pam_openbastion
-    # matched the fingerprint in service-accounts.conf and authorized the account
-    # (auto-creating it). A wrong/unknown key would fail with 255.
+    # Exit 0 ⇒ sshd accepted the key (AuthorizedKeysCommand), pam_openbastion
+    # exempted the account from the SSO, and the recorder ForceCommand ran
+    # through ob-login-shell, which must resolve the account it runs as (#353).
+    # A wrong/unknown key would fail with 255.
     if "${S[@]}" "$SVC_NAME@$ip" true >/dev/null 2>&1; then
-        ok "service account '$SVC_NAME' logs in with its key (fingerprint matched, no SSO)"
+        ok "service account '$SVC_NAME' logs in with its key (no SSO)"
     else
         bad "service account '$SVC_NAME' login failed — see sshd/pam logs on $v"
     fi
