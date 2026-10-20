@@ -1,3 +1,9 @@
+open-bastion (0.7.0) unstable; urgency=medium
+
+  * New release (See CHANGELOG.md)
+
+ -- Xavier Guimard <yadd@debian.org>  Tue, 20 Oct 2026 15:58:45 +0200
+
 open-bastion (0.6.3) unstable; urgency=high
 
   * Backport of #263: a service account could not log in

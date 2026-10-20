@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] _(2026-10-20)_
 
-Will ship as 0.7.0. Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before
+Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before
 deploying: every host needs `ob-post-upgrade`, certificate-mode PAM stacks
 and `cache.key` permissions must be checked, and bastions now end sessions at
 `max_duration`. The #263 fix, released as 0.6.3, is included and not repeated
