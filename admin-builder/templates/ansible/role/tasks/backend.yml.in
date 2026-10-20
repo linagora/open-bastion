@@ -16,11 +16,11 @@
 
 # The allowlist is the bastion_ids the portal assigned at enrolment, and the
 # only place they exist is on the bastions. With no build-time list, read them
-# there instead of asking the admin to copy them around: ob-bastion-id needs
-# root (it reads the 0600 server token), which the play's become provides on
-# the delegated host. An explicit ob_bastion_allowed_bastions wins, empty
-# string included ("" = accept any vouched bastion, as ob-backend-setup's
-# --allow-any-bastion).
+# there instead of asking the admin to copy them around: the bastion play of
+# the same run keeps each id as a host fact, and a bastion it did not reach is
+# probed with ob-bastion-id, which needs root there (the 0600 server token).
+# An explicit ob_bastion_allowed_bastions wins, empty string included ("" =
+# accept any vouched bastion, as ob-backend-setup's --allow-any-bastion).
 #
 # One include per bastion: a loop variable in delegate_to is not something
 # ansible-core 2.19+ hands to the task (ansible/ansible#85849), while a task
@@ -60,7 +60,11 @@
       ('{{ ob_bastion_group }}'){% if (ob_bastion_missing_list | default([])) | length > 0 %}:
       {{ ob_bastion_missing_list | join(', ') }} did not answer ob-bastion-id
       (not enrolled, unreachable, or no root){% endif %}. The group must exist,
-      hold every bastion of this deployment, and each of them must answer.
+      hold every bastion of this deployment, and each of them must answer.{% if ob_max_security | bool %}
+      Under maximum security a bastion's sudo only takes SSO tokens once it is
+      deployed, so Ansible reads its id only in the run that deploys it
+      (site.yml): for a later run, set ob_bastion_allowed_bastions in the
+      inventory to the ids ob-bastion-id prints on the bastions.{% endif %}
       Set ob_bastion_allowed_bastions explicitly to skip the collection; the
       empty string accepts any vouched bastion.
   when:
@@ -78,11 +82,12 @@
   ansible.builtin.command:
     argv: >-
       {{
-        ['/usr/sbin/ob-backend-setup',
-         '--portal', ob_portal_url,
-         '-g', ob_server_group,
-         '-c', ob_client_id,
-         '--yes']
+        ob_setup_cmd
+        + ['/usr/sbin/ob-backend-setup',
+           '--portal', ob_portal_url,
+           '-g', ob_server_group,
+           '-c', ob_client_id,
+           '--yes']
         + (['--insecure'] if not (ob_verify_ssl | default(true) | bool) else [])
         + (['--enable-service-keys'] if ob_service_keys_setup | default(false) | bool else [])
         + (['--allowed-bastions', ob_bastion_allowed_bastions]
@@ -99,5 +104,6 @@
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+  register: ob_setup_run
   when: ob_auto_setup | bool
   changed_when: true

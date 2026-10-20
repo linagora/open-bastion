@@ -15,6 +15,7 @@ the build, and each of them only touches the hosts that declare that role.
 └── roles/open-bastion-<role>/     # one per target role of the build
     ├── defaults/main.yml          # Build-time defaults (baked in by ob-builder)
     ├── handlers/main.yml          # Restart sshd on config change
+    ├── vars/main.yml              # Internal: setup wrapper, sshd service-keys check
     ├── tasks/
     │   ├── main.yml               # Role guard, prerequisites, APT, CA key, config
     │   └── <role>.yml             # ob-enroll + ob-*-setup
@@ -57,7 +58,7 @@ Backend-only "accept only this bastion" variables:
 | Variable                      | Description                                                                                                                                                                                                         |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
-| `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. |
+| `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. A bastion configured in the same run (`site.yml`) hands its id over as a host fact; under maximum security a later run cannot read it (see below). |
 
 Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
 
@@ -82,6 +83,18 @@ Mode-specific variables (populated by ob-builder from the selected PAM mode):
 | `ob_ssh_key_allowed_types`         | `ed25519,rsa`    |
 | `ob_cache_rate_limit_enabled`      | `true`           |
 | `ob_cache_rate_limit_max_attempts` | `3`              |
+
+## Maximum security: one run per host
+
+Under maximum security (Mode E) the setup run locks `sudo` to SSO tokens on
+every role: from then on the account Ansible connects with cannot become root.
+The role does what needs root before that point or in the setup's own task,
+so the run that deploys a host completes. A later run reads
+`/etc/pam.d/sudo` without `become`, finds the lock and skips the host with a
+warning: reconfigure it by hand from an SSO session allowed to `sudo`, or
+reinstall it. For backends configured by a later run, set
+`ob_bastion_allowed_bastions` in the inventory: the locked bastions cannot be
+asked for their id.
 
 ## Protecting the client secret with ansible-vault
 

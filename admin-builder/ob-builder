@@ -2405,6 +2405,7 @@ EOF
 #   <out>/roles/open-bastion-<role>/tasks/main.yml
 #   <out>/roles/open-bastion-<role>/tasks/<role>.yml
 #   <out>/roles/open-bastion-<role>/handlers/main.yml
+#   <out>/roles/open-bastion-<role>/vars/main.yml
 # Each template at $TEMPLATES_DIR/ansible/... ending in .in is expanded;
 # other files are copied as-is.
 # ─────────────────────────────────────────────────────────────────────────

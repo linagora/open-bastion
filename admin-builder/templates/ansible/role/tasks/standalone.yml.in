@@ -22,11 +22,12 @@
   ansible.builtin.command:
     argv: >-
       {{
-        ['/usr/sbin/ob-bastion-setup',
-         '--portal', ob_portal_url,
-         '-g', ob_server_group,
-         '-c', ob_client_id,
-         '--yes']
+        ob_setup_cmd
+        + ['/usr/sbin/ob-bastion-setup',
+           '--portal', ob_portal_url,
+           '-g', ob_server_group,
+           '-c', ob_client_id,
+           '--yes']
         + (['--insecure'] if not (ob_verify_ssl | default(true) | bool) else [])
         + (['--enable-service-keys'] if ob_service_keys_setup | default(false) | bool else [])
         + (['--max-security'] if ob_max_security else [])
@@ -42,5 +43,6 @@
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+  register: ob_setup_run
   when: ob_auto_setup | bool
   changed_when: true

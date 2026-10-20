@@ -14,15 +14,37 @@
   vars:
     ob_role: bastion
 
+# Read here, before the setup: under maximum security the setup locks sudo to
+# SSO tokens (#361), and a backend play probing this host afterwards could not
+# become root to read the 0600 server token. The token is in place by now (the
+# enrolment above, or an earlier one: a --yes setup does not enrol) and the
+# setup reuses it, so the id does not change. Kept as a host fact for the
+# backend play of the same run (its tasks/_bastion-id.yml); a bastion that
+# cannot answer yet leaves it unset and the backend probes it itself.
+- name: Read the bastion id
+  ansible.builtin.command: ob-bastion-id
+  register: _ob_bastion_id_self
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Keep the bastion id for the backends
+  ansible.builtin.set_fact:
+    ob_bastion_id: "{{ _ob_bastion_id_self.stdout | trim }}"
+  when:
+    - _ob_bastion_id_self.rc | default(1) == 0
+    - (_ob_bastion_id_self.stdout | default('') | trim) | length > 0
+
 - name: Configure bastion (ob-bastion-setup)
   ansible.builtin.command:
     argv: >-
       {{
-        ['/usr/sbin/ob-bastion-setup',
-         '--portal', ob_portal_url,
-         '-g', ob_server_group,
-         '-c', ob_client_id,
-         '--yes']
+        ob_setup_cmd
+        + ['/usr/sbin/ob-bastion-setup',
+           '--portal', ob_portal_url,
+           '-g', ob_server_group,
+           '-c', ob_client_id,
+           '--yes']
         + (['--insecure'] if not (ob_verify_ssl | default(true) | bool) else [])
         + (['--enable-service-keys'] if ob_service_keys_setup | default(false) | bool else [])
         + (['--max-security'] if ob_max_security else [])
@@ -38,5 +60,15 @@
       }}
   environment:
     OB_CLIENT_SECRET: "{{ ob_client_secret }}"
+  register: ob_setup_run
   when: ob_auto_setup | bool
   changed_when: true
+
+# Nothing that needs root runs on this host after a maximum-security setup:
+# tell the backend play of the same run not to probe it.
+- name: Note that sudo now only takes SSO tokens
+  ansible.builtin.set_fact:
+    ob_sudo_locked: true
+  when:
+    - ob_max_security | bool
+    - ob_setup_run is not skipped

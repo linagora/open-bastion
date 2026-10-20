@@ -4,8 +4,11 @@
 # the include that created this task -- ansible-core 2.19+ does not resolve a
 # loop variable written in delegate_to itself (ansible/ansible#85849).
 #
-# The probe is read-only and needs root on the bastion (the 0600 server
-# token), which the play's become provides on the delegated host.
+# The bastion play of the same run reads its id before its setup and keeps it
+# as ob_bastion_id: under maximum security that setup locks sudo to SSO tokens
+# (#361), and the probe below, which needs root on the bastion (the 0600
+# server token), could no longer become it. The probe is for the bastions that
+# play did not reach; it is not tried on one known to be locked.
 
 - name: "Read the id of {{ ob_bastion_host }}"
   ansible.builtin.command: ob-bastion-id
@@ -16,25 +19,33 @@
   # would read a missing 'stdout' rather than preview the run.
   check_mode: false
   # An unreachable or unenrolled bastion must not fail here: the caller's
-  # assert names every bastion that did not answer, with the way out. The two
-  # failure modes need two keywords:
+  # assert names every bastion that did not answer, with the way out. The
+  # failure modes need three keywords:
   #  - failed_when: the bastion answered but could not produce the id
-  #    (unenrolled, no root) -- the task "fails" with an empty stdout;
+  #    (unenrolled) -- the task "fails" with an empty stdout;
+  #  - ignore_errors: sudo refused the become (a maximum-security bastion
+  #    deployed by an earlier run). That error is raised before failed_when
+  #    is evaluated, and would drop the backend from the play;
   #  - ignore_unreachable: Ansible could not reach the bastion at all. Without
   #    it the *delegating* host is the one reported unreachable and dropped
   #    from the play, so the assert below never runs and the backend silently
   #    leaves the run instead of being told which bastion is missing.
   failed_when: false
+  ignore_errors: true
   ignore_unreachable: true
+  when:
+    - (hostvars[ob_bastion_host].ob_bastion_id | default('')) | length == 0
+    - not (hostvars[ob_bastion_host].ob_sudo_locked | default(false) | bool)
 
 - name: "Keep the id of {{ ob_bastion_host }}"
   ansible.builtin.set_fact:
-    ob_bastion_id_list: >-
-      {{ (ob_bastion_id_list | default([]))
-         + [(_ob_bastion_id.stdout | default('')) | trim] }}
+    ob_bastion_id_list: "{{ (ob_bastion_id_list | default([])) + [_ob_this_id] }}"
     # Named apart so the caller's fail_msg can list the bastions to fix, not
     # only the group to look in.
     ob_bastion_missing_list: >-
       {{ (ob_bastion_missing_list | default([]))
-         + ([ob_bastion_host]
-            if ((_ob_bastion_id.stdout | default('')) | trim) == '' else []) }}
+         + ([ob_bastion_host] if _ob_this_id == '' else []) }}
+  vars:
+    _ob_this_id: >-
+      {{ (hostvars[ob_bastion_host].ob_bastion_id
+          | default(_ob_bastion_id.stdout | default(''), true)) | trim }}

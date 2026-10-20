@@ -255,6 +255,15 @@ here.
 
 ### Fixed
 
+- **The Ansible role completes a maximum-security deployment** (#361). The
+  setup locks `sudo` to SSO tokens, and the role still used `become` after
+  it: the sshd service-keys check and the backends' read of the bastion ids
+  failed with "Missing sudo password". The check now runs in the setup's own
+  task, and each bastion reads its id before its setup and hands it to the
+  backends of the same run. A later run finds the lock without `become` and
+  skips the host with a warning; set `ob_bastion_allowed_bastions` for the
+  backends it deploys. The check no longer prints "Permission denied" on a
+  root-only drop-in.
 - **A service account can log in on a recording host** (#353). The NSS module
   synthesised it out of the root-only `service-accounts.conf` for `getpwnam`
   only, so sshd's lookup worked but the session's own `getpwuid(getuid())`
