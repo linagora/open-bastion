@@ -36,38 +36,38 @@ The `files/` directory (not shipped here) must contain:
 All variables are prefixed with `ob_`. Build-time defaults live in
 `defaults/main.yml`; override them via host_vars, group_vars, or extra-vars.
 
-| Variable                   | Description                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------ |
-| `ob_portal_url`            | LLNG portal URL (required)                                                                       |
-| `ob_client_id`             | OIDC client_id for enrollment                                                                    |
-| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false` |
-| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                           |
-| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                           |
+| Variable                   | Description                                                                                                                                                                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_portal_url`            | LLNG portal URL (required)                                                                                                                                                                                              |
+| `ob_client_id`             | OIDC client_id for enrollment                                                                                                                                                                                           |
+| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false`                                                                                                          |
+| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                                                                                                                                                  |
+| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                                                                                                                                                  |
 | `ob_role`                  | `bastion`, `backend`, or `standalone` — declared by the inventory (host_vars/group_vars). A host whose `ob_role` is missing or differs from the tree's is **skipped**, so one tree can be played over a mixed inventory |
-| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                       |
-| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                              |
-| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                      |
-| `ob_auto_enroll`           | Run ob-enroll during the play                                                                    |
-| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                          |
-| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                           |
-| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                  |
-| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored |
+| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                              |
+| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                     |
+| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                             |
+| `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                           |
+| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                 |
+| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                  |
+| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                         |
+| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                        |
 
 Backend-only "accept only this bastion" variables:
 
-| Variable                      | Description                                                                                                                                                                                                         |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address. |
+| Variable                      | Description                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address.                                            |
 | `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. A bastion configured in the same run (`site.yml`) hands its id over as a host fact; under maximum security a later run cannot read it (see below). |
 
 Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
 
-| Variable                | Description                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_response_signing`   | `off`, `prefer` (default: unsigned answers still accepted) or `required` (only once the portal signs; a wrong JWKS then locks out) |
-| `ob_sso_jwks_src`       | JWKS file deployed by the role (`sso-jwks.json` in `files/`); empty = none, which requires `ob_response_signing: off`              |
-| `ob_sso_jwks_sha256`    | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                               |
-| `ob_sso_jwks_client_id` | The client_id the JWKS belongs to; the play refuses a signing mode when it differs from `ob_client_id`                             |
+| Variable                | Description                                                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_response_signing`   | `off`, `prefer` (default: unsigned answers still accepted) or `required` (only once the portal signs; a wrong JWKS then locks out)                    |
+| `ob_sso_jwks_src`       | JWKS file deployed by the role (`sso-jwks.json` in `files/`); empty = none, which requires `ob_response_signing: off`                                 |
+| `ob_sso_jwks_sha256`    | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                                                  |
+| `ob_sso_jwks_client_id` | The client_id the JWKS belongs to; the play refuses a signing mode when it differs from `ob_client_id`                                                |
 | `ob_sso_jwks_file`      | Where it is deployed, root:root 0644 (default `/var/lib/open-bastion/jwks/sso-jwks.json`); ob-heartbeat rotates it only under `/var/lib/open-bastion` |
 
 Every run deploys `ob_sso_jwks_src` again, over the JWKS ob-heartbeat may have

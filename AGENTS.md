@@ -5,18 +5,18 @@ block merges, corrupt the codebase or make the maintainers unhappy.
 
 ## Presentation
 
-* The goal of Open Bastion is to provide centralized SSH and ``sudo``
+- The goal of Open Bastion is to provide centralized SSH and `sudo`
   access control to Linux servers with SSO integration.
 
-* The code base is composite implementing a PAM module, an NSS module,
+- The code base is composite implementing a PAM module, an NSS module,
   systemd units, a configuration script `ob-bastion-setup`, and
   deployment helpers targeting shell users and Ansible.
 
-* The toolchain is based on CMake.
+- The toolchain is based on CMake.
 
-* A test suite is integrated to the toolchain.
+- A test suite is integrated to the toolchain.
 
-* Packaging is provided in DEB and RPM format.
+- Packaging is provided in DEB and RPM format.
 
 ## Contribution rules
 

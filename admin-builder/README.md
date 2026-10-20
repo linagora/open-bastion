@@ -98,9 +98,10 @@ target_role: backend # bastion | standalone | backend, or several: "bastion,back
 # backend only: the bastions allowed to reach it. "" or no key = any vouched
 # bastion; null = the Ansible role reads the ids from the bastions themselves
 # allowed_bastions: ""
-auto_enroll_setup: prompt # shell installer only: the Ansible role has no such
-                          # prompt -- use yes, or -e ob_auto_enroll=true
-                          # -e ob_auto_setup=true at play time
+auto_enroll_setup:
+  prompt # shell installer only: the Ansible role has no such
+  # prompt -- use yes, or -e ob_auto_enroll=true
+  # -e ob_auto_setup=true at play time
 ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG cookie
 # repo_keyring: /etc/apt/keyrings/your-own.gpg   # optional; defaults to the Linagora keyring
 # insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)
@@ -218,22 +219,22 @@ manual browser-approval flow.
 
 The generated shell installer accepts CLI flags to override embedded defaults. Precedence: **CLI flag > environment variable > embedded default > interactive prompt**.
 
-| Flag                        | Environment             | Description                                                                  |
-| --------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
-| `--client-id ID`            | `OB_CLIENT_ID`          | Override OIDC client_id (if policy allows)                                   |
-| `--client-secret SECRET`    | `OB_CLIENT_SECRET`      | Provide secret directly (insecure; visible in `/proc`)                       |
-| `--client-secret-file PATH` | `OB_CLIENT_SECRET_FILE` | Read secret from file (use `-` for stdin); recommended for fleet deployments |
-| `--server-group GROUP`      | `OB_SERVER_GROUP`       | Override server group                                                        |
-| `--portal-url URL`          | `OB_PORTAL_URL`         | Override SSO URL (rare; mainly for testing)                                  |
-| `-y, --yes`                 | -                       | Answer yes to all prompts (auto-enroll and auto-setup)                       |
-| `--skip-enroll`             | -                       | Install package and config, but skip `ob-enroll`                             |
-| `--skip-setup`              | -                       | Run `ob-enroll` but skip `ob-bastion-setup` / `ob-backend-setup`             |
-| `--dry-run`                 | -                       | Print actions without executing them                                         |
-| `--force`                   | -                       | Overwrite existing `/etc/open-bastion` (normally refused)                    |
-| `--non-interactive`         | -                       | Fail instead of prompting (for CI strict mode)                               |
+| Flag                        | Environment             | Description                                                                         |
+| --------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `--client-id ID`            | `OB_CLIENT_ID`          | Override OIDC client_id (if policy allows)                                          |
+| `--client-secret SECRET`    | `OB_CLIENT_SECRET`      | Provide secret directly (insecure; visible in `/proc`)                              |
+| `--client-secret-file PATH` | `OB_CLIENT_SECRET_FILE` | Read secret from file (use `-` for stdin); recommended for fleet deployments        |
+| `--server-group GROUP`      | `OB_SERVER_GROUP`       | Override server group                                                               |
+| `--portal-url URL`          | `OB_PORTAL_URL`         | Override SSO URL (rare; mainly for testing)                                         |
+| `-y, --yes`                 | -                       | Answer yes to all prompts (auto-enroll and auto-setup)                              |
+| `--skip-enroll`             | -                       | Install package and config, but skip `ob-enroll`                                    |
+| `--skip-setup`              | -                       | Run `ob-enroll` but skip `ob-bastion-setup` / `ob-backend-setup`                    |
+| `--dry-run`                 | -                       | Print actions without executing them                                                |
+| `--force`                   | -                       | Overwrite existing `/etc/open-bastion` (normally refused)                           |
+| `--non-interactive`         | -                       | Fail instead of prompting (for CI strict mode)                                      |
 | `--insecure`                | -                       | `verify_ssl = false`, `ob-enroll`/setup `-k` (default when built with `--insecure`) |
-| `--response-signing MODE`   | -                       | `off`, `prefer` or `required` (default: the build's `response_signing`)      |
-| `-h, --help`                | -                       | Show help and embedded scenario details                                      |
+| `--response-signing MODE`   | -                       | `off`, `prefer` or `required` (default: the build's `response_signing`)             |
+| `-h, --help`                | -                       | Show help and embedded scenario details                                             |
 
 Example: deploy with a secret from a file and auto-enroll:
 

@@ -14,7 +14,7 @@ The man pages build by default, with the `man` target when `sphinx-build`
 (`python3-sphinx`) is installed; without Sphinx they are skipped, and
 asking for them explicitly with `-DBUILD_MAN=ON` makes their absence
 fatal. The HTML documentation is off by default: use `-DBUILD_DOC=ON`
-and the `doc` target.  [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for
+and the `doc` target. [.github/workflows/ci.yml](.github/workflows/ci.yml) is the reference for
 what CI runs.
 
 To build Debian packages from the working tree, use `scripts/build-dev-deb`

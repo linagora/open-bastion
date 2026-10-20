@@ -46,12 +46,12 @@ for exactly which control lives where.
 These quick-starts cover the ways to get going — try it, point it at your SSO,
 then deploy:
 
-| Quick-start                                                  | Use it to…                                                                                                                                                 |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **[Try it in Docker](quick-start/README.md)**                | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work.       |
-| **[Configure your SSO](doc/deployment/llng-configuration.rst)**          | On your real LemonLDAP::NG: activate the plugins and create the OIDC client(s) that carry your machines — the prerequisite before any deployment. |
-| **[Deploy a fleet with Ansible](doc/deployment/ansible-deployment.rst)** | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.         |
-| **[Deploy with a shell installer](doc/deployment/self-extracting-installer.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.         |
+| Quick-start                                                                       | Use it to…                                                                                                                                           |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[Try it in Docker](quick-start/README.md)**                                     | Spin up a LemonLDAP::NG portal + a self-enrolling SSH server in ~2 minutes and log in with an LLNG token — the fastest way to see Open Bastion work. |
+| **[Configure your SSO](doc/deployment/llng-configuration.rst)**                   | On your real LemonLDAP::NG: activate the plugins and create the OIDC client(s) that carry your machines — the prerequisite before any deployment.    |
+| **[Deploy a fleet with Ansible](doc/deployment/ansible-deployment.rst)**          | Generate bastion + backend roles with `ob-builder`, declare your hosts and IPs, and apply with `ansible-playbook` — the path to a real deployment.   |
+| **[Deploy with a shell installer](doc/deployment/self-extracting-installer.rst)** | Generate a self-extracting installer per role with `ob-builder --output-shell`, then `scp` + `sudo`-run it on each host — no Ansible control node.   |
 
 For the underlying concepts and per-step manual configuration, see
 [Security scenarios](doc/security-scenarios/index.rst), the

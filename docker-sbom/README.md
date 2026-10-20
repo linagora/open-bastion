@@ -6,7 +6,7 @@ all packages required by the DEB packages.
 
 Make sure `syft`, `jq` and `docker` are installed, then:
 
-``` sh
+```sh
 $ PACKAGE_PATH=./build/open-bastion_0.6.2_amd64.deb
 $ OUTPUT_DIR=./build
 $ ./docker-sbom/generate-sbom.sh ${PACKAGE_PATH} ${OUTPUT_DIR}
@@ -39,7 +39,7 @@ already holds a version satisfying each of them.
 
 ## Validation
 
-``` sh
+```sh
 $ SBOM=./build/open-bastion_0.6.3_amd64.deb-debian_trixie-slim-cyclonedx.json
 $ docker run \
 	-v ${SBOM}:/src/cyclonedx.json \
@@ -51,7 +51,7 @@ $ docker run \
 
 One can use [grype](https://github.com/anchore/grype) to collect CVEs:
 
-``` sh
+```sh
 $ SBOM=./build/open-bastion_0.6.3_amd64.deb-debian_trixie-slim-cyclonedx.json
 $ grype sbom:${SBOM}
 ```

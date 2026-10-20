@@ -9,10 +9,10 @@ real two-phase admin workflow:
 ob-builder → bastion → deploy → ob-bastion-id → ob-builder → backends → deploy → verify
 ```
 
-| Script                                   | Path it validates                                                                                            |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Script                                   | Path it validates                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | [`deploy-ansible.sh`](deploy-ansible.sh) | `ob-builder --output-ansible` + `ansible-playbook` (the [Ansible quick-start](../doc/deployment/ansible-deployment.rst)) |
-| [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer                                                        |
+| [`deploy-shell.sh`](deploy-shell.sh)     | `ob-builder --output-shell` self-extracting installer                                                                    |
 
 Both use [`lib.sh`](lib.sh) for the shared steps (build the `.deb`, serve the
 repo, bring up the SSO, recreate + bootstrap VMs, fetch the approval cookie,

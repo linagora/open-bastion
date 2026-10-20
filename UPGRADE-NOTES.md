@@ -541,7 +541,7 @@ value** — YAML's three spellings of null — as "let the Ansible role collect
 the ids from the bastions" (#338). A hand-written `build.yml` that carried
 
 ```yaml
-allowed_bastions:            # used to mean "accept any bastion"
+allowed_bastions: # used to mean "accept any bastion"
 ```
 
 now means the opposite, and a build without `--output-ansible` **stops** on
