@@ -177,7 +177,8 @@ In practice:
   neither SSH access nor ``sudo`` once the scenario is applied. Giving a
   service account ``sudo`` takes a hand edit of this stack, which breaks
   the scenario's promise that every elevation goes through the SSO; see
-  :ref:`service-accounts-sudo`.
+  :ref:`service-accounts-sudo`. The Ansible role therefore deploys a host
+  once, and skips it on later runs; see :doc:`/deployment/ansible-deployment`.
 - The break-glass path for an SSO outage is out-of-band console access.
   A service account still logs in during an outage, but gets ``sudo``
   only with that hand edit.

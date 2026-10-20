@@ -46,7 +46,8 @@ jobs:
           rsync \
           openssh-client \
           openssh-sftp-server \
-          python3-sphinx
+          python3-sphinx \
+          ansible-core
 
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON -DINSTALL_DESKTOP=ON

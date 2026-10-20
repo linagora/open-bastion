@@ -176,6 +176,9 @@ build decided (an empty value there means "any"). Re-enrolling a bastion
 assigns it a new id, so re-run the play after one: the collection picks the
 new value up.
 
+Under maximum security, only the run that deploys a bastion can read its id:
+see `Updating the fleet`_.
+
 Approving the enrolments
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -378,14 +381,22 @@ applies after re-enrolling a bastion, which assigns it a new id.
 
 Under :doc:`maximum security </security-scenarios/max-security-scenario>`,
 the account of the first run can no longer connect: the hosts accept
-only SSO certificates, and ``sudo`` only SSO users. A :doc:`service
-account </service-accounts>` keeps SSH access — create the local
-account on every target and give its key in ``service_accounts:``
-before you apply the scenario — but not ``sudo``, which the play needs
-(``become: true``). Open Bastion does not grant a service account
-``sudo``; under maximum security it takes a ``NOPASSWD`` ``sudoers`` rule
-**and** a hand edit of ``/etc/pam.d/sudo``, which gives up the scenario's
-promise that every elevation goes through the SSO (see
-:ref:`service-accounts-sudo`). If you take that decision, apply the edit
-from your own task after the role: the role re-runs the setup, which
-rewrites the file and drops it.
+only SSO certificates, and ``sudo`` only SSO users. The run that deploys
+a host is the only one Ansible completes on it: the role does what needs
+root before the setup locks ``sudo``, and a later run finds the lock in
+``/etc/pam.d/sudo`` (read without ``sudo``) and skips the host with a
+warning. Reconfigure such a host by hand from an SSO session allowed to
+``sudo``, or reinstall it. A backend deployed by a later run cannot read
+the ids of those bastions either: set ``ob_bastion_allowed_bastions`` in
+the inventory to what ``ob-bastion-id`` prints on each of them.
+
+A :doc:`service account </service-accounts>` keeps SSH access — create
+the local account on every target and give its key in
+``service_accounts:`` before you apply the scenario — but not ``sudo``,
+which the play needs (``become: true``). Open Bastion does not grant a
+service account ``sudo``; under maximum security it takes a ``NOPASSWD``
+``sudoers`` rule **and** a hand edit of ``/etc/pam.d/sudo``, which gives
+up the scenario's promise that every elevation goes through the SSO (see
+:ref:`service-accounts-sudo`). If you take that decision, the role plays
+the host again, but its setup run rewrites the file and drops the edit:
+``sudo`` is locked again when the run ends, so re-apply the edit by hand.

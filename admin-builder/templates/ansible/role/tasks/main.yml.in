@@ -27,10 +27,53 @@
   ansible.builtin.meta: end_host
   when: ob_role != ob_artefact_role
 
-# The play sets gather_facts: false, so this is the first task that contacts
-# the host -- and the guards above are controller-side, which is what lets a
-# host that is not ours end the play without a connection ever being opened to
-# it. Everything below reads ansible_facts['os_family'].
+# Maximum security locks sudo to SSO tokens on every role (#361): once the
+# setup has run, the stack refuses every local account, and each task with
+# become would fail with "Missing sudo password". Read the stack without
+# become (it is 0644) and leave such a host alone. Locked means the stack the
+# setup writes: auth and account lines are pam_openbastion and pam_deny only.
+# A hand edit that lets an account through (service-accounts.rst) adds another
+# line, and the host is played as before.
+- name: Read the sudo PAM stack
+  ansible.builtin.slurp:
+    src: /etc/pam.d/sudo
+  become: false
+  register: ob_pam_sudo
+  failed_when: false
+  check_mode: false
+
+- name: Check whether sudo only takes SSO tokens
+  ansible.builtin.set_fact:
+    ob_sudo_locked: >-
+      {{ (_ob_rules | select('match', 'account\s+\S+\s+pam_openbastion\.so(\s|$)') | list | length > 0)
+         and (_ob_rules | reject('match', '-?session\s')
+              | reject('match', '(auth|account)\s+\S+\s+pam_(openbastion|deny)\.so(\s|$)')
+              | list | length == 0) }}
+  vars:
+    _ob_rules: >-
+      {{ ((ob_pam_sudo.content | default('')) | b64decode).splitlines()
+         | map('trim') | reject('match', '(#|$)') | list }}
+
+- name: Warn that the role leaves this host alone
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} runs maximum security: its sudo only takes SSO
+      tokens, so Ansible cannot become root there after the run that deployed
+      it, and the role skips it. To change its configuration, run
+      ob-{{ ob_artefact_role }}-setup by hand from an SSO session allowed to
+      sudo, or reinstall the host and run the play again.{% if ob_artefact_role == 'bastion' %}
+      Backends configured by a later run cannot read its id: set
+      ob_bastion_allowed_bastions in the inventory (ob-bastion-id prints it).{% endif %}
+  when: ob_sudo_locked | bool
+
+- name: Skip the hosts whose sudo only takes SSO tokens
+  ansible.builtin.meta: end_host
+  when: ob_sudo_locked | bool
+
+# The guards above are controller-side or run without become, which is what
+# lets a host that is not ours end the play without a connection ever being
+# opened to it, and a locked one without a sudo attempt. Everything below
+# reads ansible_facts['os_family'].
 - name: Gather facts
   ansible.builtin.setup:
 
@@ -258,29 +301,23 @@
   register: ob_svc_keys_pruned
   changed_when: "'removed ' in ob_svc_keys_pruned.stdout"
 
-# Anchored, and over *.conf only: `grep -r ob-service-account-keys` matched a
-# commented-out line, a .bak left beside a drop-in, or a pre-#265 two-directive
-# file with no ExposeAuthInfo -- all of which silence the warning while nothing
-# is actually served or verified.
 - name: Dispatch role-specific tasks
   ansible.builtin.include_tasks: "{{ ob_artefact_role }}.yml"
 
 # After the dispatch, not before: the setup run it includes is what installs
 # the drop-in that serves the keys (--enable-service-keys), so checking first
-# warned on every fresh deployment.
+# warned on every fresh deployment. When the setup ran, it checked in its own
+# task (ob_setup_cmd, vars/main.yml): under maximum security it has locked
+# sudo, and this task could not become root any more (#361).
 - name: Check sshd serves the service-account keys
   ansible.builtin.shell: |
-    set -eu
-    ok=1
-    for f in /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config; do
-      [ -f "$f" ] || continue
-      grep -qiE '^[[:space:]]*AuthorizedKeysCommand[[:space:]].*ob-service-account-keys' "$f" || continue
-      grep -qiE '^[[:space:]]*ExposeAuthInfo[[:space:]]+yes' "$f" && ok=0
-    done
-    exit $ok
+    set -u
+    {{ ob_svc_keys_sshd_sh }}
+    echo "ob-service-keys-sshd: $served"
   register: ob_svc_keys_sshd
   changed_when: false
   failed_when: false
+  when: ob_setup_run is not defined or ob_setup_run is skipped
 
 - name: Warn when sshd has no AuthorizedKeysCommand for service accounts
   ansible.builtin.debug:
@@ -290,4 +327,5 @@
       ob-backend-setup) on this host, or the accounts cannot log in.
   when:
     - ob_service_accounts_enabled | default(false)
-    - ob_svc_keys_sshd.rc | default(1) != 0
+    - not ((ob_setup_run.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))
+    - not ((ob_svc_keys_sshd.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))
