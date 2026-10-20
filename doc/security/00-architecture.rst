@@ -745,9 +745,6 @@ Exemple de Configuration
    key_fingerprint = SHA256:abc123def456
    sudo_allowed = true
    sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
 Politique de Clés SSH
 ---------------------

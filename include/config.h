@@ -9,6 +9,7 @@
 #define CONFIG_H
 
 #include <stdbool.h>
+#include <sys/types.h>
 
 #include "ob_client.h"
 
@@ -242,6 +243,19 @@ int config_validate_home(const char *home, const char *approved_prefixes);
  * Returns 0 if valid, -1 if invalid
  */
 int config_validate_skel(const char *skel_path);
+
+/*
+ * The login shell nss_openbastion.conf (path) forces with `force_shell`, as
+ * libnss_openbastion applies it: last value, surrounding quotes removed, an
+ * unusable value replaced by the launcher. The file must be a regular file
+ * owned by trusted_uid and writable by nobody else, as the module requires.
+ *
+ * Returns 1 with the shell in buf, 0 if the file is absent or sets no
+ * force_shell, -1 if it cannot be used (symlink, wrong owner or mode, value
+ * too long for buf).
+ */
+int config_nss_force_shell(const char *path, uid_t trusted_uid,
+                           char *buf, size_t buflen);
 
 /* Default approved shells */
 #define DEFAULT_APPROVED_SHELLS "/bin/bash:/bin/sh:/usr/bin/bash:/usr/bin/sh:/bin/zsh:/usr/bin/zsh:/bin/dash:/usr/bin/dash:/bin/fish:/usr/bin/fish"

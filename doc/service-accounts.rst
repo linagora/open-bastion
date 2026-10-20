@@ -2,8 +2,8 @@ Service accounts
 ================
 
 Service accounts are local Unix accounts that authenticate with an SSH key
-alone, without OIDC. They are declared in a per-server configuration file,
-which also grants them ``sudo``.
+alone, without OIDC. The operator creates them; a per-server configuration
+file declares the key each one must use and grants it ``sudo``.
 
 Why service accounts?
 ---------------------
@@ -21,12 +21,63 @@ How it works
    account.
 3. The PAM module matches the connection against the account's entry in
    ``/etc/open-bastion/service-accounts.conf``.
-4. An authorized account is created on first login if it does not exist
-   yet, and its ``sudo`` rights come from that same entry — no portal call.
+4. The account's ``sudo`` rights come from that same entry — no portal
+   call.
 
 Enforcing the fingerprint an account declares takes two things: ``sshd``
 must accept its key, and PAM must receive the fingerprint to compare it
 with.
+
+.. _service-accounts-local-account:
+
+Creating the account
+--------------------
+
+A service account is a real local account, created by the operator like any
+other system account. Open Bastion neither creates it nor resolves it:
+
+.. code:: bash
+
+   useradd --system --create-home --shell /bin/bash ansible
+
+The SSO does not know these accounts, and Open Bastion's job ends where the
+SSO is not involved: its NSS module resolves SSO users only, and its PAM
+module creates accounts (``create_user``) for SSO users only. A service
+account is checked against its declared key and granted ``sudo``, nothing
+more; its uid, gid, home and shell are the operator's.
+
+The PAM module refuses a service account that is not in ``/etc/passwd``,
+and logs that it must be created.
+
+On a host that records sessions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``nss_openbastion.conf`` sets ``force_shell`` (see
+:doc:`ob-login-shell(8) </references/man/ob-login-shell>`), the login shell
+of a service account must be that same value, normally
+``/usr/sbin/ob-login-shell``:
+
+.. code:: bash
+
+   useradd --system --create-home --shell /usr/sbin/ob-login-shell ansible
+   # or, for an existing account:
+   usermod --shell /usr/sbin/ob-login-shell ansible
+
+``sshd`` runs the recording ``ForceCommand`` through the account's login
+shell, and ``bash`` or ``zsh`` read the account's own startup files before
+running it: the account could run anything before, and outside, the
+recorder. The PAM module therefore refuses a service account whose shell
+differs from ``force_shell``, and logs the ``usermod`` to run.
+
+Upgrading from a release that created the account
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Earlier releases resolved a service account through NSS from the ``uid``,
+``gid``, ``gecos``, ``shell`` and ``home`` keys of its entry, and created it
+at first login. Those keys are now ignored, with one warning per account in
+the system log. Before upgrading, create every service account that is not
+yet in ``/etc/passwd``, with the same uid and gid so that the files it owns
+keep their owner, and on a recording host, with the shell above.
 
 Configuration
 -------------
@@ -51,34 +102,11 @@ Example:
    key_fingerprint = SHA256:abc123def456...
    sudo_allowed = true
    sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
    # Backup service account
    [backup]
    key_fingerprint = SHA256:xyz789...
    sudo_allowed = false
-   gecos = Backup Service Account
-   shell = /bin/sh
-   home = /var/lib/backup
-
-.. note::
-
-   The ``home`` and ``shell`` values must be under
-   ``approved_home_prefixes`` and ``approved_shells`` keys of the
-   :doc:`openbastion.conf(5) </references/man/openbastion.conf>`
-   configuration file.
-
-   An account with values outside those lists is dropped at load and
-   its login falls through to LLNG, which refuses it with "user not
-   found": widen the lists for it, or keep its home under ``/home``.
-
-   The default values are ``/home:/var/home:/var/lib`` for
-   ``approved_home_prefixes``, and ``/bin/bash``, ``/bin/sh``,
-   ``/usr/bin/bash``, ``/usr/bin/sh``, ``/bin/zsh``, ``/usr/bin/zsh``,
-   ``/bin/dash``, ``/usr/bin/dash``, ``/bin/fish`` and ``/usr/bin/fish``
-   for ``approved_shells``.
 
 .. note::
 
@@ -124,20 +152,10 @@ Options
      - No
      - ``sudo`` without re-proving the key (default: false), see
        :ref:`sudo and the key check <service-accounts-sudo-and-the-key-check>`.
-   * - ``gecos``
-     - No
-     - User description.
-   * - ``shell``
-     - No
-     - Login shell, within ``approved_shells``.
-   * - ``home``
-     - No
-     - Home directory, under ``approved_home_prefixes``.
-   * - ``uid`` / ``gid``
-     - For a new account
-     - Fixed UID and GID. NSS resolves an account that does not exist yet
-       only when both are set; ``0`` auto-assigns, which works only if the
-       account already exists.
+
+``gecos``, ``shell``, ``home``, ``uid`` and ``gid`` are obsolete: they are
+ignored with a warning, see :ref:`Creating the account
+<service-accounts-local-account>`.
 
 Generating with ob-builder
 --------------------------
@@ -158,21 +176,13 @@ list in a YAML file passed with ``--config``.
        public_key_file: keys/ci-ansible.pub # the fingerprint comes from it
        sudo_allowed: true
        sudo_nopasswd: true
-       shell: /bin/bash
-       home: /home/ci-ansible
-       gecos: Ansible Automation
-       uid: 6001 # fixed uid and gid: resolvable, hence reachable
-       gid: 6001
      - name: obbackup
        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… backup@ops"
        sudo_allowed: false
-       shell: /bin/sh
-       home: /home/obbackup
-       uid: 6002
-       gid: 6002
 
 Service accounts can also be defined when using ``ob-builder``
-interactive mode.
+interactive mode. The artefacts do not create the accounts: create them on
+each target first.
 
 Authorizing the public key at the SSH layer
 -------------------------------------------
@@ -182,15 +192,13 @@ the key, so ``sshd`` has to be told the key is acceptable, by one of:
 
 - ``authorized_keys`` — works with every security scenario but maximum
   security. Put the key in ``~<name>/.ssh/authorized_keys`` (``0600``,
-  owned by the account).  This implies to create the account and its
-  home directory.
+  owned by the account).
 
 - ``AuthorizedKeysCommand`` — required under maximum security, and
   works in other security scenarios. Maximum security sets
   ``AuthorizedKeysFile none``, so ``authorized_keys`` is ignored. The
   ``ob-service-account-keys`` helper serves the key from
-  ``/etc/open-bastion/service-accounts.d/<name>.pub`` and does not
-  depend on the account existing yet:
+  ``/etc/open-bastion/service-accounts.d/<name>.pub``:
 
   ::
 
@@ -236,19 +244,6 @@ installer says so if it finds sshd not serving the keys.
 account can log in only if its key reaches ``sshd`` some other way, an
 ``authorized_keys`` file you deploy yourself. Under maximum security
 (``AuthorizedKeysFile none``) there is no other way, so give the key.
-
-The account must be resolvable (fixed uid and gid)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``sshd`` looks the user up before authenticating and refuses unknown users.
-A brand-new service account therefore has to be resolvable up front, which
-``nss_openbastion`` does only when the account has a fixed ``uid`` and
-``gid``. So, for an account that does not already exist locally:
-
-- set both ``uid`` and ``gid`` (which also gives stable ownership across
-  the fleet), or
-- pre-create the account (``useradd``) so the ``files`` NSS source resolves
-  it.
 
 Reaching servers through a bastion
 ----------------------------------

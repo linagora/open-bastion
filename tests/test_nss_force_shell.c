@@ -11,8 +11,8 @@
  *   - it wins over the shell the portal supplies (zsh reads ~/.zshenv even
  *     for `zsh -c`) and over default_shell;
  *   - it applies on every path an entry is SERVED from: a portal answer, the
- *     on-disk cache (including a record written before the key was set), the
- *     in-memory cache, by name and by uid, and a local service account;
+ *     on-disk cache (including a record written before the key was set) and
+ *     the in-memory cache, by name and by uid;
  *   - the in-memory copy sizes its buffer for the forced shell, not for the
  *     shell it stored.
  *
@@ -123,7 +123,6 @@ static void free_config(nss_llng_config_t *c)
     free(c->default_shell);
     free(c->force_shell);
     free(c->default_home_base);
-    free(c->service_accounts_file);
     free(c->client_id);
     free(c->sso_jwks_file);
     free(c->sso_issuer);
@@ -339,9 +338,6 @@ static void test_serving_paths(void)
     g_config.default_gid = 100;
     g_config.default_shell = strdup("/bin/bash");
     g_config.default_home_base = strdup("/home");
-    char sa[256];
-    snprintf(sa, sizeof(sa), "%s/no-service-accounts.conf", base());
-    g_config.service_accounts_file = strdup(sa);
     /* An openbastion.conf that neither signs nor pins (#332). */
     write_file(test_pam_conf_path(), "# no request_signing_secret, no cert_pin\n", 0600);
     g_initialized = 1;
@@ -409,23 +405,6 @@ static void test_serving_paths(void)
               NSS_STATUS_TRYAGAIN);
     free(small);
 
-    printf("A local service account (service-accounts.conf):\n");
-    if (getuid() != 0) {
-        /* The module takes that file only when it is root:root 0600. */
-        printf("  --   not exercised unprivileged (the file must be root's)\n");
-    } else {
-        write_file(sa, "[svc]\nuid = 20004\ngid = 20004\nshell = /bin/bash\n", 0600);
-        if (chown(sa, 0, 0) != 0) {
-            perror("chown");
-            failures++;
-        }
-        cache_reset();
-        check_str("getpwnam of a service account",
-                  by_name("svc", &pw, buf, sizeof(buf)) == NSS_STATUS_SUCCESS
-                  ? pw.pw_shell : "(lookup failed)", LAUNCHER);
-        unlink(sa);
-    }
-
     cache_reset();
     free(g_config.force_shell);
     g_config.force_shell = NULL;
@@ -433,7 +412,6 @@ static void test_serving_paths(void)
     free(g_config.server_token);
     free(g_config.default_shell);
     free(g_config.default_home_base);
-    free(g_config.service_accounts_file);
     memset(&g_config, 0, sizeof(g_config));
 }
 

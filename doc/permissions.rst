@@ -135,15 +135,14 @@ standalone host.
   ``open-bastion-sudo`` group and ``/etc/sudoers.d/open-bastion``. A
   host can also keep its own classic ``sudoers`` in parallel.
 
-- Service accounts — key-only local accounts that bypass OIDC,
-  with a local sudo grant. Powerful and local: see the trade-offs
-  (sudo without token, reachability requirements) in :doc:`Service
-  Accounts </service-accounts>`.
+- Service accounts — key-only local accounts, created by the operator,
+  that bypass OIDC, with a local sudo grant. Powerful and local: see the
+  trade-offs (sudo without token, shell on a recording host) in
+  :doc:`Service Accounts </service-accounts>`.
 
 - User provisioning — shell, home, UID/GID ranges, skeleton
   directory, plus the ``approved_shells`` / ``approved_home_prefixes``
-  allow-lists that bound what a provisioned (or service) account may
-  use. See :doc:`Configuration </references/configuration>`.
+  allow-lists that bound what a provisioned account may use. See :doc:`Configuration </references/configuration>`.
 
 - Account existence — a bastion or standalone host creates no account:
   ``libnss_openbastion`` resolves SSO users from LLNG on the fly (a

@@ -324,13 +324,13 @@ cache_dir = /var/cache/open-bastion
 cache_ttl = 300
 
 # Service accounts (ansible, backup, ...). Empty by default; the integration
-# test populates this file at runtime with a real fingerprint + matching
-# public key in /etc/open-bastion/service-accounts.d/.
+# test creates the local account (useradd) and populates this file at runtime
+# with a real fingerprint + matching public key in
+# /etc/open-bastion/service-accounts.d/.
 service_accounts_file = /etc/open-bastion/service-accounts.conf
 
-# Auto-create the local Unix account on first login. Required for service
-# accounts unknown to LLNG: pam_openbastion uses the uid/gid declared in
-# service-accounts.conf instead of NSS.
+# Auto-create the local Unix account of an SSO user on first login. Service
+# accounts are never created: they must exist locally.
 create_user = true
 create_home = true
 default_shell = /bin/bash
@@ -402,8 +402,7 @@ echo "NSS configured"
 #   - for regular users: the cert has already been validated by sshd, the
 #     module just returns success without asking for a password.
 # The "session" phase runs pam_openbastion with create_user=true so that
-# service accounts unknown to LLNG are materialised in /etc/passwd using
-# the uid/gid declared in service-accounts.conf.
+# SSO users get a local account; service accounts must already have one.
 cat > /etc/pam.d/sshd << EOF
 # PAM configuration for SSH with Open Bastion (Mode E - Maximum Security)
 auth       required     pam_openbastion.so authorize_only

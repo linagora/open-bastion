@@ -43,18 +43,17 @@ ssh -p 2222 dwho@localhost
 # Generate an SSH key locally
 ssh-keygen -t ed25519 -f ~/.ssh/ansible-ci -N ""
 
-# Install fingerprint + metadata on the bastion
+# Create the local account: Open Bastion does not. This demo does not
+# record sessions; on a host that does, use --shell /usr/sbin/ob-login-shell.
+docker exec ob-token-svc-bastion useradd -m -s /bin/bash ansible-ci
+
+# Install the fingerprint and sudo rights on the bastion
 docker exec -i ob-token-svc-bastion sh -c \
     'cat > /etc/open-bastion/service-accounts.conf' <<EOF
 [ansible-ci]
 key_fingerprint = $(ssh-keygen -l -E sha256 -f ~/.ssh/ansible-ci.pub | awk '{print $2}')
 sudo_allowed = true
 sudo_nopasswd = true
-gecos = Ansible Automation
-shell = /bin/bash
-home = /home/ansible-ci
-uid = 5000
-gid = 5000
 EOF
 docker exec ob-token-svc-bastion chmod 600 /etc/open-bastion/service-accounts.conf
 
@@ -73,7 +72,6 @@ docker exec ob-token-svc-bastion sh -c \
 
 ```bash
 ssh -i ~/.ssh/ansible-ci -p 2222 ansible-ci@localhost
-# First login materialises /etc/passwd, /etc/group and /home/ansible-ci
 sudo id
 # uid=0(root) ...
 ```
@@ -85,7 +83,8 @@ sudo id
 ```
 
 Covers: human-user LLNG auth, service-account provisioning, SSH login
-with plain key, local account materialisation, `sudo -n` via nopasswd,
+with plain key, no account created or changed by Open Bastion, refusal of
+a declared account that does not exist locally, `sudo -n` via nopasswd,
 rejection of non-registered keys.
 
 ## See also

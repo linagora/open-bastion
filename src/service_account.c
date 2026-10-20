@@ -17,11 +17,15 @@
 #include <syslog.h>
 
 #include "service_account.h"
-#include "config.h"
 #include "str_utils.h"
 
 /* Initial capacity for accounts array */
 #define INITIAL_CAPACITY 8
+
+/* Owner the file must have; a test build points it at the caller. */
+#ifndef SERVICE_ACCOUNTS_TRUSTED_UID
+#define SERVICE_ACCOUNTS_TRUSTED_UID ((uid_t)0)
+#endif
 
 /*
  * Security: check file permissions for sensitive files.
@@ -37,7 +41,7 @@ static int check_file_permissions_fd(int fd)
     }
 
     /* File must be owned by root (uid 0) */
-    if (st.st_uid != 0) {
+    if (st.st_uid != SERVICE_ACCOUNTS_TRUSTED_UID) {
         return -2;  /* Not owned by root */
     }
 
@@ -73,28 +77,6 @@ static int check_file_permissions_fd(int fd)
  * has worked for months suddenly fatal.
  */
 #define parse_bool str_parse_bool
-
-/*
- * Safe integer parsing with validation.
- */
-static int parse_int(const char *value, int default_val)
-{
-    if (!value || !*value) return default_val;
-
-    char *endptr;
-    errno = 0;
-    long result = strtol(value, &endptr, 10);
-
-    if (errno != 0 || endptr == value || *endptr != '\0') {
-        return default_val;
-    }
-
-    if (result < 0 || result > 65534) {
-        return default_val;
-    }
-
-    return (int)result;
-}
 
 /*
  * Validate username format
@@ -167,9 +149,6 @@ static void service_account_free(service_account_t *account)
 
     free(account->name);
     free(account->key_fingerprint);
-    free(account->gecos);
-    free(account->shell);
-    free(account->home);
 
     memset(account, 0, sizeof(*account));
 }
@@ -238,10 +217,11 @@ static int ensure_capacity(service_accounts_t *sa)
 } while(0)
 
 /*
- * Parse a line within a section
+ * Parse a line within a section.
+ * Returns 1 for an obsolete account attribute (ignored), 0 otherwise.
  */
-static void parse_account_line(const char *key, const char *value,
-                                service_account_t *account)
+static int parse_account_line(const char *key, const char *value,
+                               service_account_t *account)
 {
     if (strcmp(key, "key_fingerprint") == 0 ||
         strcmp(key, "fingerprint") == 0 ||
@@ -254,22 +234,18 @@ static void parse_account_line(const char *key, const char *value,
     else if (strcmp(key, "sudo_nopasswd") == 0 || strcmp(key, "nopasswd") == 0) {
         account->sudo_nopasswd = parse_bool(value);
     }
-    else if (strcmp(key, "gecos") == 0 || strcmp(key, "description") == 0) {
-        SAFE_STRDUP_FIELD(account->gecos, value);
-    }
-    else if (strcmp(key, "shell") == 0) {
-        SAFE_STRDUP_FIELD(account->shell, value);
-    }
-    else if (strcmp(key, "home") == 0 || strcmp(key, "home_dir") == 0) {
-        SAFE_STRDUP_FIELD(account->home, value);
-    }
-    else if (strcmp(key, "uid") == 0) {
-        account->uid = parse_int(value, 0);
-    }
-    else if (strcmp(key, "gid") == 0) {
-        account->gid = parse_int(value, 0);
+    /*
+     * Attributes older releases used to create the account. The operator
+     * now creates it (useradd), so these are left over from an upgrade.
+     */
+    else if (strcmp(key, "gecos") == 0 || strcmp(key, "description") == 0 ||
+             strcmp(key, "shell") == 0 ||
+             strcmp(key, "home") == 0 || strcmp(key, "home_dir") == 0 ||
+             strcmp(key, "uid") == 0 || strcmp(key, "gid") == 0) {
+        return 1;
     }
     /* Unknown keys are silently ignored */
+    return 0;
 }
 
 #undef SAFE_STRDUP_FIELD
@@ -307,6 +283,7 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
 
     char line[1024];
     service_account_t *current_account = NULL;
+    bool obsolete_warned = false;
     int line_num = 0;
 
     while (fgets(line, sizeof(line), f)) {
@@ -366,6 +343,7 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
 
             current_account = &sa->accounts[sa->count];
             memset(current_account, 0, sizeof(*current_account));
+            obsolete_warned = false;
             current_account->name = strdup(section_name);
             if (!current_account->name) {
                 current_account = NULL;
@@ -397,22 +375,27 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
             if (end) *end = '\0';
         }
 
-        parse_account_line(key, value, current_account);
+        if (parse_account_line(key, value, current_account) && !obsolete_warned) {
+            syslog(LOG_WARNING, "open-bastion: service_accounts: account '%s': "
+                   "'%s' at line %d ignored; gecos, shell, home, uid and gid "
+                   "are obsolete, the account must exist locally (useradd)",
+                   current_account->name, key, line_num);
+            obsolete_warned = true;
+        }
     }
 
     fclose(f);
 
     /*
      * Validate all loaded accounts and remove invalid ones.
-     * This ensures that accounts with missing fingerprints, unapproved shells,
-     * or other invalid configurations are rejected at load time.
+     * This ensures that accounts with a bad name or a missing fingerprint
+     * are rejected at load time.
      */
     size_t i = 0;
     while (i < sa->count) {
         service_account_t *acct = &sa->accounts[i];
 
-        /* Note: Pass NULL for approved_shells/homes to use defaults from config.h */
-        if (service_account_validate(acct, NULL, NULL) != 0) {
+        if (service_account_validate(acct) != 0) {
             syslog(LOG_WARNING, "open-bastion: service_accounts: "
                    "dropping invalid account '%s'",
                    acct->name ? acct->name : "(unnamed)");
@@ -484,12 +467,7 @@ int service_accounts_validate_key(const service_accounts_t *sa,
 int service_accounts_get_authorization(const service_accounts_t *sa,
                                         const char *username,
                                         bool *sudo_allowed,
-                                        bool *sudo_nopasswd,
-                                        const char **gecos,
-                                        const char **shell,
-                                        const char **home,
-                                        int *uid,
-                                        int *gid)
+                                        bool *sudo_nopasswd)
 {
     const service_account_t *account = service_accounts_find(sa, username);
     if (!account) {
@@ -498,18 +476,11 @@ int service_accounts_get_authorization(const service_accounts_t *sa,
 
     if (sudo_allowed) *sudo_allowed = account->sudo_allowed;
     if (sudo_nopasswd) *sudo_nopasswd = account->sudo_nopasswd;
-    if (gecos) *gecos = account->gecos;
-    if (shell) *shell = account->shell;
-    if (home) *home = account->home;
-    if (uid) *uid = account->uid;
-    if (gid) *gid = account->gid;
 
     return 0;
 }
 
-int service_account_validate(const service_account_t *account,
-                              const char *approved_shells,
-                              const char *approved_home_prefixes)
+int service_account_validate(const service_account_t *account)
 {
     if (!account) return -1;
 
@@ -524,32 +495,6 @@ int service_account_validate(const service_account_t *account,
         syslog(LOG_WARNING, "open-bastion: service account '%s' has "
                "invalid or missing key_fingerprint", account->name);
         return -2;
-    }
-
-    /* Shell must be in approved list if specified */
-    if (account->shell && *account->shell) {
-        if (config_validate_shell(account->shell, approved_shells) != 0) {
-            syslog(LOG_WARNING, "open-bastion: service account '%s' has "
-                   "unapproved shell '%s'", account->name, account->shell);
-            return -3;
-        }
-    }
-
-    /* Home must be in approved prefixes if specified */
-    if (account->home && *account->home) {
-        if (config_validate_home(account->home, approved_home_prefixes) != 0) {
-            syslog(LOG_WARNING, "open-bastion: service account '%s' has "
-                   "unapproved home '%s'", account->name, account->home);
-            return -4;
-        }
-    }
-
-    /* UID/GID must be in valid range if specified */
-    if (account->uid < 0 || account->uid > 65534) {
-        return -5;
-    }
-    if (account->gid < 0 || account->gid > 65534) {
-        return -5;
     }
 
     return 0;

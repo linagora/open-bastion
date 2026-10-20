@@ -413,6 +413,21 @@ test_foreign_dropins_kept() {
     fi
 }
 
+# A service account is the operator's: kept, but its launcher shell is named.
+test_service_account_kept() {
+    local r="$WORK/svcacct" bad=""
+    mkroot_bastion "$r"
+    printf 'obdeploy:x:990:990::/var/lib/obdeploy:/usr/sbin/ob-login-shell\n' >> "$r/etc/passwd"
+    run_un "$r" -y
+    grep -q '^obdeploy:' "$r/etc/passwd" || bad="$bad account-removed"
+    grep -q 'ob-login-shell' "$WORK/out" && grep -q ' obdeploy' "$WORK/out" || bad="$bad not-reported"
+    if [ -z "$bad" ]; then
+        pass "a local account with the launcher as shell is kept, and named before package removal"
+    else
+        fail "a local account with the launcher as shell is kept, and named" "$bad"
+    fi
+}
+
 test_still_referenced_kept() {
     local r="$WORK/stillref" bad=""
     mkroot_bastion "$r"
@@ -1141,6 +1156,7 @@ run_test test_full_run
 cp "$WORK/out" "$WORK/full.out"
 run_test test_foreign_dropins_kept
 run_test test_still_referenced_kept
+run_test test_service_account_kept
 run_test test_pam_oldest_clean_backup
 run_test test_pam_oldest_of_two_clean
 run_test test_pam_debconf_orig

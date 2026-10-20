@@ -47,8 +47,8 @@ LLNG="${LLNG:-$(command -v llng || true)}"; [ -n "$LLNG" ] || LLNG="$HOME/bin/ll
 SVC_KEY="${OB_SVC_KEY:-$WORK/svc_backup}"
 SVC_FP=""
 # Service-account username for the check. Must NOT collide with a system user
-# (e.g. 'backup', 'www-data'): pam_openbastion only sets shell/home when it
-# CREATES the account, so an existing system user (nologin) would break login.
+# (e.g. 'backup', 'www-data'): provision_service_helper creates it, and an
+# existing system user (nologin) would break login.
 SVC_NAME="${OB_SVC_NAME:-obdeploy}"
 
 SSH_BASE=(-o IdentityAgent=none -o IdentitiesOnly=yes
@@ -307,12 +307,13 @@ gen_service_key(){
     SVC_FP=$(ssh-keygen -lf "$SVC_KEY.pub" 2>/dev/null | awk '{print $2}')
 }
 
-# Provision the SSH-layer authorization for the 'backup' service account on <vm>.
-# This is the manual step ob-builder deliberately does NOT do (it only writes the
-# fingerprint to service-accounts.conf): deploy the ob-service-account-keys
-# AuthorizedKeysCommand helper + the account's public key so sshd will present
-# it. Works in all PAM modes, including Mode E (AuthorizedKeysFile none). MUST
-# run while the debian mgmt user can still SSH — i.e. before *-setup locks port 22.
+# Provision the service account and its SSH-layer authorization on <vm>.
+# These are the manual steps ob-builder deliberately does NOT do (it only writes
+# the fingerprint to service-accounts.conf): create the local account, as an
+# operator would, then deploy the ob-service-account-keys AuthorizedKeysCommand
+# helper + the account's public key so sshd will present it. Works in all PAM
+# modes, including Mode E (AuthorizedKeysFile none). MUST run while the debian
+# mgmt user can still SSH — i.e. before *-setup locks port 22.
 provision_service_helper(){
     local v="$1" ip="${IP[$1]}"
     local helper="$REPO_ROOT/scripts/ob-service-account-keys"
@@ -323,6 +324,10 @@ provision_service_helper(){
     local pub; pub=$(cat "$SVC_KEY.pub")
     if dssh "$ip" "sudo OB_SVC_PUB='$pub' OB_SVC_NAME='$SVC_NAME' bash -s" <<'BS' >/dev/null 2>&1
 set -e
+# The standalone records sessions: its login shell must be the launcher, or
+# pam_openbastion refuses it. useradd only warns that it is not installed yet.
+id "$OB_SVC_NAME" >/dev/null 2>&1 \
+    || useradd --system --create-home --shell /usr/sbin/ob-login-shell "$OB_SVC_NAME"
 # /usr/sbin, the packaged path (#263): this runs before the installer puts the
 # package on the VM, so the helper still has to be copied -- but to the path
 # the package owns, so apt later refreshes this very file instead of leaving a
@@ -340,7 +345,7 @@ AuthorizedKeysCommandUser nobody
 ExposeAuthInfo yes
 CONF
 BS
-    then ok "$v: provisioned service-account SSH authorization (${SVC_NAME}.pub + AuthorizedKeysCommand)"
+    then ok "$v: provisioned service account $SVC_NAME (useradd + ${SVC_NAME}.pub + AuthorizedKeysCommand)"
     else bad "$v: failed to provision service-account SSH authorization"; fi
 }
 
@@ -359,8 +364,8 @@ verify_service_accounts(){
              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
              -o NumberOfPasswordPrompts=0 -o ConnectTimeout=15)
     # Exit 0 ⇒ sshd accepted the key (AuthorizedKeysCommand) AND pam_openbastion
-    # matched the fingerprint in service-accounts.conf and authorized the account
-    # (auto-creating it). A wrong/unknown key would fail with 255.
+    # matched the fingerprint in service-accounts.conf and authorized the local
+    # account. A wrong/unknown key would fail with 255.
     if "${S[@]}" "$SVC_NAME@$ip" true >/dev/null 2>&1; then
         ok "service account '$SVC_NAME' logs in with its key (fingerprint matched, no SSO)"
     else

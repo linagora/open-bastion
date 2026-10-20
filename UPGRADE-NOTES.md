@@ -208,7 +208,8 @@ What changes for SSO users on a recording host:
   them in the shell's system-wide startup files.
 
 Local accounts keep their shell. To give one that logs in over SSH the same
-protection: `chsh -s /usr/sbin/ob-login-shell <user>`.
+protection: `chsh -s /usr/sbin/ob-login-shell <user>`. Service accounts must
+have it: see [A11](#a11-service-accounts-must-exist-locally--before-upgrading).
 
 ### A8. `openbastion.conf.example` is gone
 
@@ -259,6 +260,34 @@ refused, by the PAM module at load time and by the NSS module and
 The NSS module also reads `request_signing_secret` and `cert_pin` from
 `openbastion.conf` now, and makes no portal call when that file is missing or
 readable by group or others: keep it `0600 root`, as every setup writes it.
+
+### A11. Service accounts must exist locally — before upgrading
+
+Hosts with accounts in `/etc/open-bastion/service-accounts.conf`.
+
+Open Bastion no longer creates service accounts nor resolves them through
+NSS (#353): one that is not in `/etc/passwd` is refused after the upgrade.
+Its `gecos`, `shell`, `home`, `uid` and `gid` keys are ignored, with one
+warning per account in the system log. Before upgrading, create the missing
+ones with the values those keys held, so that the files they own keep their
+owner:
+
+```sh
+grep -o '^\[[a-z_][a-z0-9_-]*\]' /etc/open-bastion/service-accounts.conf \
+  | tr -d '[]' | while read -r u; do getent -s files passwd "$u" >/dev/null || echo "$u"; done
+# for each name printed:
+sudo groupadd --system --gid <gid> <name>
+sudo useradd --system --uid <uid> --gid <gid> --home-dir <home> --create-home \
+     --shell <shell> --comment '<gecos>' <name>
+```
+
+On a bastion or standalone host that records sessions
+([A7](#a7-sso-users-log-in-through-ob-login-shell-on-a-recording-host)), the
+shell must be the `force_shell` value, `/usr/sbin/ob-login-shell`, or the
+login is refused; for an account that already exists:
+`sudo usermod -s /usr/sbin/ob-login-shell <name>`. The keys can then be
+removed from `service-accounts.conf` (and from ob-builder's
+`service_accounts:`).
 
 ---
 

@@ -736,6 +736,77 @@ static int test_parse_fingerprint_required(void)
     return ok;
 }
 
+/* Write `content` to a fresh file under `dir` with `mode`; returns the path */
+static const char *write_nss_conf(const char *dir, const char *content, mode_t mode)
+{
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/nss_openbastion.conf", dir);
+    unlink(path);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return NULL;
+    if (write(fd, content, strlen(content)) != (ssize_t)strlen(content)) {
+        close(fd);
+        return NULL;
+    }
+    fchmod(fd, mode);
+    close(fd);
+    return path;
+}
+
+/* force_shell as libnss_openbastion applies it (service-account guard) */
+static int test_nss_force_shell(void)
+{
+    char dir[] = "/tmp/test_nss_force_shell_XXXXXX";
+    char buf[256], link_path[300];
+    const char *path;
+    uid_t me = geteuid();
+    int ok = 1;
+
+    if (!mkdtemp(dir)) return 0;
+
+    /* Absent file, or no key: nothing forced */
+    snprintf(link_path, sizeof(link_path), "%s/absent.conf", dir);
+    ok = ok && (config_nss_force_shell(link_path, me, buf, sizeof(buf)) == 0);
+    path = write_nss_conf(dir, "portal_url = https://sso\n"
+                               "# force_shell = /bin/bash\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == 0);
+
+    /* Last value wins, quotes stripped */
+    path = write_nss_conf(dir, "force_shell = /bin/bash\n"
+                               "  force_shell = \"/usr/sbin/ob-login-shell\"  \n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == 1) &&
+         strcmp(buf, "/usr/sbin/ob-login-shell") == 0;
+    path = write_nss_conf(dir, "force_shell='/bin/sh'\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == 1) &&
+         strcmp(buf, "/bin/sh") == 0;
+
+    /* An unusable value is the launcher, never "not forced" */
+    path = write_nss_conf(dir, "force_shell = bash\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == 1) &&
+         strcmp(buf, "/usr/sbin/ob-login-shell") == 0;
+    path = write_nss_conf(dir, "force_shell =\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == 1) &&
+         strcmp(buf, "/usr/sbin/ob-login-shell") == 0;
+
+    /* Too long for the buffer */
+    path = write_nss_conf(dir, "force_shell = /usr/sbin/ob-login-shell\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, 8) == -1);
+
+    /* Untrusted: writable by others, wrong owner, symlink */
+    path = write_nss_conf(dir, "force_shell = /bin/sh\n", 0664);
+    ok = ok && path && (config_nss_force_shell(path, me, buf, sizeof(buf)) == -1);
+    path = write_nss_conf(dir, "force_shell = /bin/sh\n", 0644);
+    ok = ok && path && (config_nss_force_shell(path, me + 1, buf, sizeof(buf)) == -1);
+    snprintf(link_path, sizeof(link_path), "%s/link.conf", dir);
+    ok = ok && path && symlink(path, link_path) == 0 &&
+         (config_nss_force_shell(link_path, me, buf, sizeof(buf)) == -1);
+
+    unlink(link_path);
+    if (path) unlink(path);
+    rmdir(dir);
+    return ok;
+}
+
 int main(void)
 {
     printf("Running configuration tests...\n\n");
@@ -774,6 +845,7 @@ int main(void)
     TEST(oauth2_token_min_ttl_bounds);
 #endif /* ENABLE_DESKTOP_SSO */
     TEST(load_config_file);
+    TEST(nss_force_shell);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
 

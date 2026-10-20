@@ -743,15 +743,6 @@ replace || if (cached && cached->valid) {\n        /* Copy from cache with safe 
 suite   || tests/test_ob_nss_force_shell.sh
 why     || #293: getpwuid is what the session's own processes ask.
 
-id      || nss-force-shell-service-account
-file    || nss/libnss_openbastion.c
-search  || if (safe_strcpy(&p, &remaining, login_shell(shell_to_use)) != 0) return -1;
-replace || if (safe_strcpy(&p, &remaining, shell_to_use) != 0) return -1;
-suite   || tests/test_ob_nss_force_shell.sh
-needs   || root
-why     || #293: service accounts go through the same ForceCommand; their
-why     || configuration file is only read when it is root:root 0600.
-
 id      || setup-renders-force-shell
 file    || scripts/ob-bastion-setup
 search  || \n        ob_nss_force_shell_block\n    fi

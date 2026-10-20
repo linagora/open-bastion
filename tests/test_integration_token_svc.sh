@@ -11,9 +11,11 @@
 # Scope:
 #   - bring up the docker-demo-token-svc stack
 #   - verify a human user can still get an LLNG access token
-#   - provision a service account on the bastion at runtime
+#   - provision a service account on the bastion at runtime, creating
+#     the local account as an operator would (useradd)
 #   - SSH as that service account with its plain key
-#   - check that the local Unix account was created on first login
+#   - check that pam_openbastion creates and changes no account, and that a
+#     declared service account with no local account is refused
 #   - check that sudo -n works (sudo_nopasswd path)
 #   - check that a non-registered key is refused
 #
@@ -57,6 +59,8 @@ TEST_PASSWORD="dwho"
 SVC_ACCOUNT="ansible-ci"
 SVC_UID=5000
 SVC_GID=5000
+# Declared and keyed like SVC_ACCOUNT, but never created locally.
+SVC_GHOST="ghost-ci"
 
 log()      { echo -e "${GREEN}[TEST]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -206,26 +210,35 @@ svc_provision_on_bastion() {
     local fp
     fp=$(ssh-keygen -l -E sha256 -f "${SVC_KEY}.pub" | awk '{print $2}')
 
+    # The operator's part: Open Bastion does not create service accounts.
+    # This demo does not record sessions (no force_shell), so any shell does.
+    docker exec ob-token-svc-bastion sh -c "
+        getent group ${SVC_GID} >/dev/null || groupadd -g ${SVC_GID} ${SVC_ACCOUNT}
+        id ${SVC_ACCOUNT} >/dev/null 2>&1 || useradd -u ${SVC_UID} -g ${SVC_GID} \
+            -m -d /home/${SVC_ACCOUNT} -s /bin/bash ${SVC_ACCOUNT}
+    " || return 1
+
     docker exec -i ob-token-svc-bastion sh -c "cat > /etc/open-bastion/service-accounts.conf" <<EOF
 [${SVC_ACCOUNT}]
 key_fingerprint = ${fp}
 sudo_allowed = true
 sudo_nopasswd = true
-gecos = CI service account
-shell = /bin/bash
-home = /home/${SVC_ACCOUNT}
-uid = ${SVC_UID}
-gid = ${SVC_GID}
+
+[${SVC_GHOST}]
+key_fingerprint = ${fp}
 EOF
     docker exec ob-token-svc-bastion chown root:root /etc/open-bastion/service-accounts.conf
     docker exec ob-token-svc-bastion chmod 600 /etc/open-bastion/service-accounts.conf
 
-    docker exec -i ob-token-svc-bastion sh -c \
-        "cat > /etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub" <<< "$pubkey"
-    docker exec ob-token-svc-bastion chown root:root \
-        "/etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub"
-    docker exec ob-token-svc-bastion chmod 644 \
-        "/etc/open-bastion/service-accounts.d/${SVC_ACCOUNT}.pub"
+    local name
+    for name in "${SVC_ACCOUNT}" "${SVC_GHOST}"; do
+        docker exec -i ob-token-svc-bastion sh -c \
+            "cat > /etc/open-bastion/service-accounts.d/${name}.pub" <<< "$pubkey"
+        docker exec ob-token-svc-bastion chown root:root \
+            "/etc/open-bastion/service-accounts.d/${name}.pub"
+        docker exec ob-token-svc-bastion chmod 644 \
+            "/etc/open-bastion/service-accounts.d/${name}.pub"
+    done
 
     # Drop a user-specific NOPASSWD rule at the end of /etc/sudoers so it
     # wins over the demo image's default "ALL ALL=(ALL:ALL) ALL"
@@ -252,9 +265,13 @@ test_service_account_provision() {
         return 1
     fi
 
-    # User must not exist locally yet.
-    if docker exec ob-token-svc-bastion grep -q "^${SVC_ACCOUNT}:" /etc/passwd 2>/dev/null; then
-        fail "Service account already exists locally before first login"
+    # One is local; the other must not resolve at all.
+    if ! docker exec ob-token-svc-bastion grep -q "^${SVC_ACCOUNT}:" /etc/passwd 2>/dev/null; then
+        fail "Service account was not created locally"
+        return 1
+    fi
+    if docker exec ob-token-svc-bastion getent passwd "${SVC_GHOST}" >/dev/null 2>&1; then
+        fail "${SVC_GHOST} resolves without a local account (NSS must not serve service accounts)"
         return 1
     fi
 
@@ -310,38 +327,44 @@ test_service_account_ssh_login() {
     pass "Service account ${SVC_ACCOUNT} logged in with uid=${SVC_UID}, gid=${SVC_GID}"
 }
 
-test_service_account_local_user_created() {
+test_service_account_not_created() {
     TESTS_RUN=$((TESTS_RUN + 1))
-    log "Checking local Unix account was materialised..."
+    log "Checking pam_openbastion left the operator's account as it was..."
 
     local entry
     entry=$(docker exec ob-token-svc-bastion grep -E "^${SVC_ACCOUNT}:" /etc/passwd 2>&1) || true
-    log_verbose "passwd: $entry"
-    if [[ -z "$entry" ]]; then
-        fail "No /etc/passwd entry for ${SVC_ACCOUNT}"
+    if [[ "$(cut -d: -f3,4,7 <<< "$entry")" != "${SVC_UID}:${SVC_GID}:/bin/bash" ]]; then
+        fail "/etc/passwd entry changed" "$entry"
         return 1
     fi
-
-    local u g h s
-    u=$(cut -d: -f3 <<< "$entry")
-    g=$(cut -d: -f4 <<< "$entry")
-    h=$(cut -d: -f6 <<< "$entry")
-    s=$(cut -d: -f7 <<< "$entry")
-
-    [[ "$u" == "${SVC_UID}" ]] || { fail "uid=$u (expected ${SVC_UID})" "$entry"; return 1; }
-    [[ "$g" == "${SVC_GID}" ]] || { fail "gid=$g (expected ${SVC_GID})" "$entry"; return 1; }
-    [[ "$h" == "/home/${SVC_ACCOUNT}" ]] || { fail "home=$h" "$entry"; return 1; }
-    [[ "$s" == "/bin/bash" ]] || { fail "shell=$s" "$entry"; return 1; }
-
-    local group_entry
-    group_entry=$(docker exec ob-token-svc-bastion \
-        awk -F: -v gid="${SVC_GID}" '$3 == gid {print; exit}' /etc/group 2>&1)
-    if [[ -z "$group_entry" ]]; then
-        fail "No /etc/group entry for gid ${SVC_GID}"
+    if docker exec ob-token-svc-bastion grep -q "^${SVC_GHOST}:" /etc/passwd 2>/dev/null; then
+        fail "${SVC_GHOST} was created"
         return 1
     fi
+    pass "service accounts are the operator's: none created, none changed"
+}
 
-    pass "/etc/passwd + /etc/group entries materialised by pam_openbastion"
+test_service_account_missing_refused() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing that a declared but not created service account is refused..."
+
+    local output rc=0
+    output=$(ssh -i "${SVC_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${SVC_GHOST}@localhost" \
+                 "echo SHOULD_NEVER_PRINT" 2>&1) || rc=$?
+    log_verbose "SSH(ghost) rc=$rc output: $output"
+
+    if [[ $rc -eq 0 ]] || grep -q "SHOULD_NEVER_PRINT" <<< "$output"; then
+        fail "${SVC_GHOST} logged in without a local account" "$output"
+        return 1
+    fi
+    pass "A service account without a local account is refused"
 }
 
 test_service_account_sudo() {
@@ -427,7 +450,8 @@ main() {
     echo "=== Phase 3: Service account SSH key + sudo ==="
     test_service_account_provision
     test_service_account_ssh_login
-    test_service_account_local_user_created
+    test_service_account_not_created
+    test_service_account_missing_refused
     test_service_account_sudo
     test_service_account_bad_key_rejected
 

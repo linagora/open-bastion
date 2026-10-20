@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include "ob_jws.h"
+#include "path_validator.h"
 #include "str_utils.h"
 
 /*
@@ -1388,4 +1389,61 @@ int config_validate_skel(const char *skel_path)
     }
 
     return found ? 0 : -1;
+}
+
+/* What libnss_openbastion forces instead of an unusable force_shell. */
+#define NSS_DEFAULT_FORCE_SHELL "/usr/sbin/ob-login-shell"
+
+int config_nss_force_shell(const char *path, uid_t trusted_uid,
+                           char *buf, size_t buflen)
+{
+    struct stat st;
+    char line[1024];
+    int found = 0;
+
+    if (!path || !buf || buflen == 0) return -1;
+
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        return errno == ENOENT ? 0 : -1;
+    }
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_uid != trusted_uid || (st.st_mode & (S_IWGRP | S_IWOTH))) {
+        close(fd);
+        return -1;
+    }
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char *p = str_trim(line);
+        if (*p == '#' || *p == '\0') continue;
+
+        char *eq = strchr(p, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        if (strcmp(str_trim(p), "force_shell") != 0) continue;
+
+        char *val = str_trim(eq + 1);
+        size_t vlen = strlen(val);
+        if (vlen >= 2 && ((val[0] == '"' && val[vlen - 1] == '"') ||
+                          (val[0] == '\'' && val[vlen - 1] == '\''))) {
+            val[vlen - 1] = '\0';
+            val++;
+        }
+        if (path_validator_is_dangerous(val)) {
+            val = NSS_DEFAULT_FORCE_SHELL;
+        }
+        if (strlen(val) >= buflen) {
+            found = -1;
+            continue;
+        }
+        memcpy(buf, val, strlen(val) + 1);
+        found = 1;
+    }
+    fclose(f);
+    return found;
 }

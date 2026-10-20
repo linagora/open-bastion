@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Will ship as 0.7.0. Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before
 deploying: every host needs `ob-post-upgrade`, certificate-mode PAM stacks
-and `cache.key` permissions must be checked, and bastions now end sessions at
-`max_duration`. The #263 fix, released as 0.6.3, is included and not repeated
-here.
+and `cache.key` permissions must be checked, bastions now end sessions at
+`max_duration`, and service accounts must exist locally. The #263 fix,
+released as 0.6.3, is included and not repeated here.
 
 > **Known issue.** The on-disk NSS cache is untested under SELinux `enforcing`
 > (Rocky/RHEL/AlmaLinux) and may silently never populate there; no policy
@@ -101,6 +101,18 @@ here.
 
 ### Changed
 
+- **Service accounts are local accounts the operator creates** (#353).
+  **Upgrade-breaking: create every service account that is not in
+  `/etc/passwd` (`useradd`, same uid and gid) before upgrading**, or its
+  logins are refused. The NSS module no longer resolves them, which left
+  `ob-login-shell` unable to resolve the account and killed its sessions on
+  recording hosts, and the PAM module no longer creates them. `gecos`,
+  `shell`, `home`, `uid` and `gid` are ignored with a warning, in
+  `service-accounts.conf` and in ob-builder's `service_accounts:`. Where
+  `nss_openbastion.conf` sets `force_shell`, a service account whose shell
+  differs is refused: its own shell would run outside the recorder. See
+  [UPGRADE-NOTES.md](UPGRADE-NOTES.md) (A11) and
+  [doc/service-accounts.rst](doc/service-accounts.rst).
 - **One setup script for the three roles** (#288): `ob-backend-setup` and
   `ob-standalone-setup` are symlinks to `ob-bastion-setup`, documented in
   `ob-bastion-setup`(8). **`--node-role` now configures the role it names**

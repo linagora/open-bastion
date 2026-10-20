@@ -122,10 +122,10 @@ set_rich_state() {
     SIGN_WITH="0xDEADBEEF"
     SAVE_CONFIG_SECRET=1
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack ci-ansible "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" true true /bin/bash /home/ci-ansible "Ansible \"CI\" bot" 6001 6001 "")"
+        "$(_sa_pack ci-ansible "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" true true "")"
     )
     if [ -n "$PUBKEY" ]; then
-        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack backup "$PUBKEY_FP" false false "" "" "" "" "" "$PUBKEY")")
+        SERVICE_ACCOUNTS_RECORDS+=("$(_sa_pack backup "$PUBKEY_FP" false false "$PUBKEY")")
     fi
 }
 
@@ -448,9 +448,9 @@ test_pubkey_comment_dropped() {
     [ -n "$PUBKEY" ] || { echo "SKIP: ssh-keygen required"; return; }
     local cfg="$TEST_TMPDIR/keycomment.yml" got rc
     ( set_rich_state
-      SERVICE_ACCOUNTS_RECORDS=("$(_sa_pack backup "$PUBKEY_FP" false false "" "" "" "" "" "${PUBKEY% *} host #3")")
+      SERVICE_ACCOUNTS_RECORDS=("$(_sa_pack backup "$PUBKEY_FP" false false "${PUBKEY% *} host #3")")
       validate_inputs >/dev/null 2>&1; save_config "$cfg" >/dev/null 2>&1 ); rc=$?
-    got=$( reset_state; load_with awk "$cfg" 2>/dev/null; _sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]}" )
+    got=$( reset_state; load_with awk "$cfg" 2>/dev/null; _sa_field 5 "${SERVICE_ACCOUNTS_RECORDS[0]}" )
     if [ "$rc" -eq 0 ] && [ "$got" = "$(cut -d' ' -f1,2 <<<"$PUBKEY")" ]; then
         test_pass "public key with an unwritable comment: saved without the comment"
     else
@@ -458,15 +458,16 @@ test_pubkey_comment_dropped() {
     fi
 }
 
-test_gecos_checked_on_entry() {
+# The account is the operator's: no gecos, shell, home, uid or gid is asked.
+test_no_account_attributes_asked() {
     local got
     got=$( reset_state
-           set_answers "y" "svc" "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" "n" \
-               "Ops #2" "Ops 2" "" "" "" "" "n"
+           set_answers "y" "svc" "SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456" "n" "n"
            collect_service_accounts_interactive >/dev/null 2>&1
-           printf '%s|%s' "$(_sa_field 7 "${SERVICE_ACCOUNTS_RECORDS[0]}")" "$(answers_left)" )
-    [ "$got" = "Ops 2|0" ] && test_pass "questionnaire: a GECOS the config cannot carry is asked again" \
-                           || test_fail "GECOS not re-asked: '$got'"
+           printf '%s|%s' "${SERVICE_ACCOUNTS_RECORDS[0]//$_OB_SA_US/,}" "$(answers_left)" )
+    [ "$got" = "svc,SHA256:abcdefABCDEF0123456789+/abcdefABCDEF0123456,false,false,|0" ] \
+        && test_pass "questionnaire: only name, fingerprint and sudo are asked" \
+        || test_fail "questionnaire asks more than it records: '$got'"
 }
 
 test_sign_with_checked_early() {
@@ -602,7 +603,7 @@ test_dry_run_writes_nothing
 test_replay_command_in_header
 test_secret_unquotable_warns
 test_pubkey_comment_dropped
-test_gecos_checked_on_entry
+test_no_account_attributes_asked
 test_sign_with_checked_early
 test_null_string_round_trip
 test_keyring_saved_absolute

@@ -13,9 +13,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include "service_account.h"
-#include "config.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -49,7 +49,7 @@ static char *create_temp_config(const char *content)
         return NULL;
     }
 
-    /* Set proper permissions (root owned, 0600) */
+    /* 0600; the test build trusts the caller as owner, not only root */
     if (fchmod(fd, 0600) != 0) {
         perror("fchmod");
         close(fd);
@@ -111,74 +111,123 @@ static int test_load_valid_config(void)
         "key_fingerprint = SHA256:abc123def456\n"
         "sudo_allowed = true\n"
         "sudo_nopasswd = true\n"
-        "gecos = Ansible Automation\n"
-        "shell = /bin/bash\n"
-        "home = /var/lib/ansible\n"
         "\n"
         "[backup]\n"
         "key_fingerprint = SHA256:xyz789\n"
-        "sudo_allowed = false\n"
-        "gecos = Backup Service\n"
-        "shell = /bin/sh\n"
-        "home = /var/lib/backup\n";
+        "sudo_allowed = false\n";
 
     char *config_path = create_temp_config(config_content);
-    if (!config_path) {
-        printf("(skipped - cannot create temp file as non-root) ");
-        return 1;  /* Skip test if we can't create file */
-    }
+    if (!config_path) return 0;
 
     service_accounts_t sa;
     service_accounts_init(&sa);
 
-    /*
-     * Note: This test requires specific conditions that may not be met in CI:
-     * - File must be owned by root (uid 0)
-     * - File must have permissions 0600
-     * - We must be running as root to create such files
-     *
-     * In CI containers, /tmp may have different mount options or the user
-     * may not be uid 0 even when running as "root" in the container.
-     */
     int ret = service_accounts_load(config_path, &sa);
 
-    int ok = 1;
-    if (ret != 0) {
-        /* Skip test if loading fails for any reason in CI */
-        printf("(skipped - load returned %d) ", ret);
-        ok = 1;
-    } else if (sa.count != 2) {
-        /* Skip if parsing didn't produce expected results */
-        printf("(skipped - unexpected count %zu) ", sa.count);
-        ok = 1;
-    } else {
-        /* Check ansible account */
-        const service_account_t *ansible = service_accounts_find(&sa, "ansible");
-        ok = ok && (ansible != NULL);
-        if (ansible) {
-            ok = ok && (strcmp(ansible->name, "ansible") == 0);
-            ok = ok && (ansible->key_fingerprint != NULL);
-            ok = ok && (strcmp(ansible->key_fingerprint, "SHA256:abc123def456") == 0);
-            ok = ok && (ansible->sudo_allowed == true);
-            ok = ok && (ansible->sudo_nopasswd == true);
-            ok = ok && (ansible->gecos != NULL);
-            ok = ok && (strcmp(ansible->gecos, "Ansible Automation") == 0);
-            ok = ok && (ansible->shell != NULL);
-            ok = ok && (strcmp(ansible->shell, "/bin/bash") == 0);
-            ok = ok && (ansible->home != NULL);
-            ok = ok && (strcmp(ansible->home, "/var/lib/ansible") == 0);
-        }
-
-        /* Check backup account */
-        const service_account_t *backup = service_accounts_find(&sa, "backup");
-        ok = ok && (backup != NULL);
-        if (backup) {
-            ok = ok && (strcmp(backup->name, "backup") == 0);
-            ok = ok && (backup->sudo_allowed == false);
-            ok = ok && (backup->sudo_nopasswd == false);
-        }
+    int ok = (ret == 0) && (sa.count == 2);
+    const service_account_t *ansible = service_accounts_find(&sa, "ansible");
+    ok = ok && (ansible != NULL);
+    if (ansible) {
+        ok = ok && (strcmp(ansible->name, "ansible") == 0);
+        ok = ok && (ansible->key_fingerprint != NULL);
+        ok = ok && (strcmp(ansible->key_fingerprint, "SHA256:abc123def456") == 0);
+        ok = ok && (ansible->sudo_allowed == true);
+        ok = ok && (ansible->sudo_nopasswd == true);
     }
 
+    const service_account_t *backup = service_accounts_find(&sa, "backup");
+    ok = ok && (backup != NULL);
+    if (backup) {
+        ok = ok && (strcmp(backup->name, "backup") == 0);
+        ok = ok && (backup->sudo_allowed == false);
+        ok = ok && (backup->sudo_nopasswd == false);
+    }
+
+    service_accounts_free(&sa);
+    cleanup_temp_file(config_path);
+    return ok;
+}
+
+/* Lines of `path` containing `needle` */
+static int count_lines_with(const char *path, const char *needle)
+{
+    FILE *f = fopen(path, "r");
+    char line[1024];
+    int n = 0;
+
+    if (!f) return -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, needle)) n++;
+    }
+    fclose(f);
+    return n;
+}
+
+/*
+ * A file from an older release still has the account attributes: they are
+ * ignored with one warning per account, and the accounts still load.
+ */
+static int test_load_obsolete_keys(void)
+{
+    const char *config_content =
+        "[deploy]\n"
+        "key_fingerprint = SHA256:abc123def456\n"
+        "gecos = Deployment\n"
+        "shell = /bin/bash\n"
+        "home = /var/lib/deploy\n"
+        "uid = 20000\n"
+        "gid = 20000\n"
+        "sudo_allowed = true\n"
+        "\n"
+        "[backup]\n"
+        "key_fingerprint = SHA256:xyz789\n"
+        "description = Backups\n"
+        "home_dir = /etc/backup\n"
+        "shell = /usr/bin/not-approved\n"
+        "\n"
+        "[plain]\n"
+        "key_fingerprint = SHA256:plain1\n";
+
+    char *config_path = create_temp_config(config_content);
+    if (!config_path) return 0;
+
+    /* syslog() copies to stderr with LOG_PERROR: capture it in a file. */
+    char log_path[] = "/tmp/service_accounts_log_XXXXXX";
+    int log_fd = mkstemp(log_path);
+    if (log_fd < 0) {
+        cleanup_temp_file(config_path);
+        return 0;
+    }
+    fflush(stderr);
+    int saved_stderr = dup(STDERR_FILENO);
+    dup2(log_fd, STDERR_FILENO);
+    openlog("test_service_account", LOG_PERROR, LOG_USER);
+
+    service_accounts_t sa;
+    service_accounts_init(&sa);
+    int ret = service_accounts_load(config_path, &sa);
+
+    openlog(NULL, 0, LOG_USER);  /* drop LOG_PERROR for later tests */
+    closelog();
+    fflush(stderr);
+    dup2(saved_stderr, STDERR_FILENO);
+    close(saved_stderr);
+    close(log_fd);
+
+    int ok = (ret == 0) && (sa.count == 3);
+    const service_account_t *deploy = service_accounts_find(&sa, "deploy");
+    ok = ok && deploy && deploy->sudo_allowed &&
+         strcmp(deploy->key_fingerprint, "SHA256:abc123def456") == 0;
+    ok = ok && (service_accounts_find(&sa, "backup") != NULL);
+    ok = ok && (service_accounts_find(&sa, "plain") != NULL);
+
+    /* One warning for deploy, one for backup, none for plain. */
+    ok = ok && (count_lines_with(log_path, "obsolete") == 2);
+    ok = ok && (count_lines_with(log_path, "'deploy'") == 1);
+    ok = ok && (count_lines_with(log_path, "'backup'") == 1);
+    ok = ok && (count_lines_with(log_path, "'plain'") == 0);
+
+    unlink(log_path);
     service_accounts_free(&sa);
     cleanup_temp_file(config_path);
     return ok;
@@ -305,8 +354,7 @@ static int test_get_authorization_not_found(void)
     bool sudo_allowed = true;
     bool sudo_nopasswd = true;
     int ret = service_accounts_get_authorization(&sa, "ansible",
-                                                  &sudo_allowed, &sudo_nopasswd,
-                                                  NULL, NULL, NULL, NULL, NULL);
+                                                  &sudo_allowed, &sudo_nopasswd);
 
     int ok = (ret == -1);  /* Account not found */
 
@@ -322,18 +370,9 @@ static int test_account_validate_valid(void)
         .key_fingerprint = "SHA256:abc123def456",
         .sudo_allowed = true,
         .sudo_nopasswd = false,
-        .gecos = "Ansible Automation",
-        .shell = "/bin/bash",
-        .home = "/home/ansible",
-        .uid = 0,
-        .gid = 0
     };
 
-    int ret = service_account_validate(&account,
-                                        DEFAULT_APPROVED_SHELLS,
-                                        DEFAULT_APPROVED_HOME_PREFIXES);
-
-    return (ret == 0);
+    return (service_account_validate(&account) == 0);
 }
 
 /* Test account validation with invalid username */
@@ -342,18 +381,9 @@ static int test_account_validate_invalid_name(void)
     service_account_t account = {
         .name = "Invalid-Name",  /* Uppercase not allowed */
         .key_fingerprint = "SHA256:abc123",
-        .sudo_allowed = false,
-        .sudo_nopasswd = false,
-        .gecos = NULL,
-        .shell = NULL,
-        .home = NULL,
-        .uid = 0,
-        .gid = 0
     };
 
-    int ret = service_account_validate(&account, NULL, NULL);
-
-    return (ret != 0);  /* Should fail */
+    return (service_account_validate(&account) != 0);  /* Should fail */
 }
 
 /* Test account validation with missing fingerprint */
@@ -362,18 +392,9 @@ static int test_account_validate_missing_fingerprint(void)
     service_account_t account = {
         .name = "ansible",
         .key_fingerprint = NULL,  /* Missing fingerprint */
-        .sudo_allowed = false,
-        .sudo_nopasswd = false,
-        .gecos = NULL,
-        .shell = NULL,
-        .home = NULL,
-        .uid = 0,
-        .gid = 0
     };
 
-    int ret = service_account_validate(&account, NULL, NULL);
-
-    return (ret != 0);  /* Should fail */
+    return (service_account_validate(&account) != 0);  /* Should fail */
 }
 
 /* Test account validation with invalid fingerprint format */
@@ -382,62 +403,9 @@ static int test_account_validate_invalid_fingerprint(void)
     service_account_t account = {
         .name = "ansible",
         .key_fingerprint = "invalid-format",  /* Must start with SHA256: or MD5: */
-        .sudo_allowed = false,
-        .sudo_nopasswd = false,
-        .gecos = NULL,
-        .shell = NULL,
-        .home = NULL,
-        .uid = 0,
-        .gid = 0
     };
 
-    int ret = service_account_validate(&account, NULL, NULL);
-
-    return (ret != 0);  /* Should fail */
-}
-
-/* Test account validation with unapproved shell */
-static int test_account_validate_unapproved_shell(void)
-{
-    service_account_t account = {
-        .name = "ansible",
-        .key_fingerprint = "SHA256:abc123",
-        .sudo_allowed = false,
-        .sudo_nopasswd = false,
-        .gecos = NULL,
-        .shell = "/usr/bin/malicious",  /* Not in approved list */
-        .home = NULL,
-        .uid = 0,
-        .gid = 0
-    };
-
-    int ret = service_account_validate(&account,
-                                        DEFAULT_APPROVED_SHELLS,
-                                        DEFAULT_APPROVED_HOME_PREFIXES);
-
-    return (ret != 0);  /* Should fail */
-}
-
-/* Test account validation with unapproved home prefix */
-static int test_account_validate_unapproved_home(void)
-{
-    service_account_t account = {
-        .name = "ansible",
-        .key_fingerprint = "SHA256:abc123",
-        .sudo_allowed = false,
-        .sudo_nopasswd = false,
-        .gecos = NULL,
-        .shell = "/bin/bash",
-        .home = "/etc/ansible",  /* Not in approved prefixes */
-        .uid = 0,
-        .gid = 0
-    };
-
-    int ret = service_account_validate(&account,
-                                        DEFAULT_APPROVED_SHELLS,
-                                        DEFAULT_APPROVED_HOME_PREFIXES);
-
-    return (ret != 0);  /* Should fail */
+    return (service_account_validate(&account) != 0);  /* Should fail */
 }
 
 /* Test NULL handling */
@@ -456,10 +424,9 @@ static int test_null_handling(void)
     ok = ok && (service_accounts_is_service_account(NULL, NULL) == false);
 
     ok = ok && (service_accounts_validate_key(NULL, "test", "fp") == -1);
-    ok = ok && (service_accounts_get_authorization(NULL, "test", NULL, NULL,
-                                                    NULL, NULL, NULL, NULL, NULL) == -1);
+    ok = ok && (service_accounts_get_authorization(NULL, "test", NULL, NULL) == -1);
 
-    ok = ok && (service_account_validate(NULL, NULL, NULL) == -1);
+    ok = ok && (service_account_validate(NULL) == -1);
 
     return ok;
 }
@@ -471,6 +438,7 @@ int main(void)
     TEST(init);
     TEST(load_nonexistent);
     TEST(load_valid_config);
+    TEST(load_obsolete_keys);
     TEST(find);
     TEST(is_service_account);
     TEST(validate_key_not_found);
@@ -483,8 +451,6 @@ int main(void)
     TEST(account_validate_invalid_name);
     TEST(account_validate_missing_fingerprint);
     TEST(account_validate_invalid_fingerprint);
-    TEST(account_validate_unapproved_shell);
-    TEST(account_validate_unapproved_home);
     TEST(null_handling);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);

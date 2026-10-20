@@ -578,7 +578,7 @@ The encryption key for the authorization cache and the desktop offline credentia
 Service accounts security
 -------------------------
 
-Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, bypassing OIDC authentication. They are defined in a local configuration file.
+Service accounts (ansible, backup, deploy, etc.) are local accounts that authenticate via SSH key only, bypassing OIDC authentication. The operator creates them; a local configuration file declares their key and ``sudo`` rights. On a host that records sessions, their login shell must be the ``force_shell`` of ``nss_openbastion.conf``, or the PAM module refuses them.
 
 Configuration file security
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -691,9 +691,6 @@ Example configuration
    key_fingerprint = SHA256:abc123def456
    sudo_allowed = true
    sudo_nopasswd = true
-   gecos = Ansible Automation
-   shell = /bin/bash
-   home = /var/lib/ansible
 
 .. _security-reference-offline-credential-cache-security:
 

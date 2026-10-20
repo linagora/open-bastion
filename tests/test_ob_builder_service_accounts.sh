@@ -63,10 +63,7 @@ test_validators() {
     is_valid_fingerprint "MD5:aa:bb:cc"  || ok=false
     is_valid_fingerprint "abc123"        && ok=false   # no prefix
     is_valid_fingerprint "SHA256:bad spaces" && ok=false
-    is_valid_abs_path ""                 || ok=false   # empty OK
-    is_valid_abs_path "/bin/bash"        || ok=false
-    is_valid_abs_path "relative/path"    && ok=false
-    $ok && test_pass "validators: username / fingerprint / path" \
+    $ok && test_pass "validators: username / fingerprint" \
          || test_fail "validators returned wrong result"
 }
 
@@ -81,13 +78,9 @@ service_accounts:
     key_fingerprint: "SHA256:abc123"
     sudo_allowed: true
     sudo_nopasswd: true
-    shell: /bin/bash
-    home: /var/lib/ansible
-    gecos: Ansible Automation
   - name: backup
     key_fingerprint: "SHA256:xyz789"
     sudo_allowed: false
-    shell: /bin/sh
 auto_enroll_setup: prompt
 YML
     SERVICE_ACCOUNTS_RECORDS=()
@@ -98,12 +91,39 @@ YML
     [ "$(_sa_field 1 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "ansible" ] || ok=false
     [ "$(_sa_field 2 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "SHA256:abc123" ] || ok=false
     [ "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "true" ] || ok=false
-    [ "$(_sa_field 5 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "/bin/bash" ] || ok=false
-    [ "$(_sa_field 7 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "Ansible Automation" ] || ok=false
+    [ "$(_sa_field 4 "${SERVICE_ACCOUNTS_RECORDS[0]}")" = "true" ] || ok=false
     [ "$(_sa_field 1 "${SERVICE_ACCOUNTS_RECORDS[1]}")" = "backup" ] || ok=false
     [ "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[1]}")" = "false" ] || ok=false
     $ok && test_pass "parse: service_accounts block → 2 records, fields correct" \
          || test_fail "parse: block parsing wrong"
+}
+
+# Test 3b: a config written for an older release still carries the account
+# attributes. They are ignored with a warning, and the account is kept.
+test_parse_obsolete_keys() {
+    local cfg="$TEST_TMPDIR/obsolete.yml"
+    cat > "$cfg" <<'YML'
+deployment_slug: demo
+service_accounts:
+  - name: ansible
+    key_fingerprint: "SHA256:abc123"
+    sudo_allowed: true
+    shell: /bin/bash
+    home: /var/lib/ansible
+    gecos: Ansible Automation
+    uid: 6001
+    gid: 6001
+YML
+    local out ok=true
+    SERVICE_ACCOUNTS_RECORDS=()
+    out=$(_parse_service_accounts_block "$cfg" 2>&1; _render_service_accounts_conf)
+    _parse_service_accounts_block "$cfg" >/dev/null 2>&1
+    [ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -eq 1 ] || ok=false
+    [ "$(_sa_field 3 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")" = "true" ] || ok=false
+    grep -q "ignoring shell home gecos uid gid" <<<"$out" || ok=false
+    grep -qE '^(shell|home|gecos|uid|gid) ' <<<"$out" && ok=false
+    $ok && test_pass "parse: obsolete shell/home/gecos/uid/gid ignored with a warning" \
+         || test_fail "parse: obsolete keys not handled" "$out"
 }
 
 # Test 4: a config with no service_accounts yields zero records
@@ -123,10 +143,10 @@ YML
 # Test 5: record validation
 test_record_validation() {
     local ok=true
-    validate_service_account_record "$(_sa_pack ansible SHA256:abc true false /bin/bash /var/lib/ansible '' '' '')" || ok=false
-    validate_service_account_record "$(_sa_pack BadName SHA256:abc false false '' '' '' '' '')" && ok=false
-    validate_service_account_record "$(_sa_pack svc nofingerprint false false '' '' '' '' '')" && ok=false
-    validate_service_account_record "$(_sa_pack svc SHA256:abc false false relpath '' '' '' '')" && ok=false
+    validate_service_account_record "$(_sa_pack ansible SHA256:abc true false '')" || ok=false
+    validate_service_account_record "$(_sa_pack BadName SHA256:abc false false '')" && ok=false
+    validate_service_account_record "$(_sa_pack svc nofingerprint false false '')" && ok=false
+    validate_service_account_record "$(_sa_pack svc SHA256:abc maybe false '')" && ok=false
     $ok && test_pass "validate_service_account_record: accepts valid, rejects bad" \
          || test_fail "record validation wrong"
 }
@@ -134,26 +154,22 @@ test_record_validation() {
 # Test 6: INI rendering
 test_render_conf() {
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack ansible SHA256:abc123 true true /bin/bash /var/lib/ansible 'Ansible Automation' '' '')"
-        "$(_sa_pack backup SHA256:xyz789 false false /bin/sh '' '' '' '')"
+        "$(_sa_pack ansible SHA256:abc123 true true '')"
+        "$(_sa_pack backup SHA256:xyz789 false false '')"
     )
     local out rc
     out=$(_render_service_accounts_conf); rc=$?
     local ok=true
-    # Must return 0 even when the last account has no uid/gid — otherwise the
-    # `$(...)` assignment trips `set -e` in ob-builder (regression guard).
+    # Must return 0, or the `$(...)` assignment trips `set -e` in ob-builder.
     [ "$rc" -eq 0 ] || { ok=false; echo "  non-zero return: $rc"; }
     grep -q '^\[ansible\]$'                      <<<"$out" || ok=false
     grep -q '^key_fingerprint = SHA256:abc123$'  <<<"$out" || ok=false
     grep -q '^sudo_allowed = true$'              <<<"$out" || ok=false
     grep -q '^sudo_nopasswd = true$'             <<<"$out" || ok=false
-    grep -q '^gecos = Ansible Automation$'       <<<"$out" || ok=false
-    grep -q '^home = /var/lib/ansible$'          <<<"$out" || ok=false
     grep -q '^\[backup\]$'                       <<<"$out" || ok=false
     grep -q '^sudo_allowed = false$'             <<<"$out" || ok=false
-    # backup has no home/gecos → those keys absent in its section is not trivially
-    # grep-able, but the file must not carry an empty 'home =' line anywhere.
-    grep -q '^home = $'                          <<<"$out" && ok=false
+    # The account itself is the operator's: no account attribute is emitted.
+    grep -qE '^(gecos|shell|home|uid|gid) ='     <<<"$out" && ok=false
     $ok && test_pass "render: INI output well-formed" \
          || test_fail "render: INI output wrong" "$out"
 }
@@ -193,7 +209,7 @@ YML
 
     local got_fp got_pub
     got_fp=$(_sa_field 2 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
-    got_pub=$(_sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
+    got_pub=$(_sa_field 5 "${SERVICE_ACCOUNTS_RECORDS[0]:-}")
     if [ "$got_fp" = "$expected" ] && [ "$got_pub" = "$pub" ]; then
         test_pass "key_fingerprint is derived from public_key, and the key is kept"
     else
@@ -258,7 +274,7 @@ YML
     local got
     got=$( cd / && SERVICE_ACCOUNTS_RECORDS=() ; \
            _parse_service_accounts_block "$cfg" >/dev/null 2>&1 ; \
-           _sa_field 10 "${SERVICE_ACCOUNTS_RECORDS[0]:-}" )
+           _sa_field 5 "${SERVICE_ACCOUNTS_RECORDS[0]:-}" )
     case "$got" in
         ssh-ed25519\ *svc@file)
             test_pass "public_key_file is read at build time, relative to the config file" ;;
@@ -293,9 +309,9 @@ YML
 # Test: the renderer emits one "<name> <key>" line per account that has a key.
 test_render_keys() {
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack a "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 AAAA a@h")"
-        "$(_sa_pack b "SHA256:2" false false "" "" "" "" "" "")"
-        "$(_sa_pack c "SHA256:3" false false "" "" "" "" "" "ssh-rsa BBBB c@h")"
+        "$(_sa_pack a "SHA256:1" false false "ssh-ed25519 AAAA a@h")"
+        "$(_sa_pack b "SHA256:2" false false "")"
+        "$(_sa_pack c "SHA256:3" false false "ssh-rsa BBBB c@h")"
     )
     local out; out=$(_render_service_account_keys)
     local n; n=$(printf '%s\n' "$out" | grep -c .)
@@ -386,7 +402,7 @@ test_rendered_artifacts() {
 
     # Minimal placeholder set: enough for the service-account paths.
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack svc "SHA256:x" false false "" "" "" "" "" "ssh-ed25519 AAAAB svc@h")"
+        "$(_sa_pack svc "SHA256:x" false false "ssh-ed25519 AAAAB svc@h")"
     )
     local keys keys_b64 conf conf_b64
     keys=$(_render_service_account_keys); keys_b64=$(base64_string "$keys")
@@ -453,9 +469,9 @@ test_key_block_runs() {
     local d="$TEST_TMPDIR/keyrun/sa.d" out bad=""
     mkdir -p "$d"
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack alpha "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 AAAA alpha@h")"
-        "$(_sa_pack nokey "SHA256:2" false false "" "" "" "" "" "")"
-        "$(_sa_pack omega "SHA256:3" false false "" "" "" "" "" "ssh-ed25519 BBBB omega@h")"
+        "$(_sa_pack alpha "SHA256:1" false false "ssh-ed25519 AAAA alpha@h")"
+        "$(_sa_pack nokey "SHA256:2" false false "")"
+        "$(_sa_pack omega "SHA256:3" false false "ssh-ed25519 BBBB omega@h")"
     )
     # The last account already has its key: a second run must keep it.
     printf 'ssh-ed25519 BBBB omega@h\n' > "$d/omega.pub"
@@ -491,7 +507,7 @@ test_key_block_runs() {
     # One account only: the shape the report started from (an empty directory).
     rm -f "$d"/*.pub
     SERVICE_ACCOUNTS_RECORDS=(
-        "$(_sa_pack solo "SHA256:1" false false "" "" "" "" "" "ssh-ed25519 DDDD solo@h")"
+        "$(_sa_pack solo "SHA256:1" false false "ssh-ed25519 DDDD solo@h")"
     )
     _run_key_block "$(_service_account_keys_b64)" "$d" >/dev/null 2>&1
     if [ "$(cat "$d/solo.pub" 2>/dev/null)" = "ssh-ed25519 DDDD solo@h" ]; then
@@ -504,7 +520,8 @@ test_key_block_runs() {
 # A name here that is not a defined function used to be a shell error the script
 # walked past, leaving the suite green with a test that never ran -- it happened
 # while adding the last three. Fail loudly instead.
-for _t in test_syntax test_validators test_parse_block test_parse_none \
+for _t in test_syntax test_validators test_parse_block test_parse_obsolete_keys \
+          test_parse_none \
           test_record_validation test_render_conf \
           test_fingerprint_derived_from_key test_mismatch_is_rejected \
           test_public_key_file test_bad_key_is_dropped test_render_keys \

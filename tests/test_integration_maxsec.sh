@@ -74,8 +74,8 @@ CLIENT_ID="pam-access"
 CLIENT_SECRET="pamsecret"
 
 # Service account used for the SSH-key-only scenario. Intentionally a user
-# unknown to LLNG: only service-accounts.conf + the matching .pub key on
-# the bastion grant access.
+# unknown to LLNG: a local account, service-accounts.conf and the matching
+# .pub key on the bastion grant access.
 SVC_ACCOUNT="ansible-ci"
 SVC_UID=5000
 SVC_GID=5000
@@ -1065,19 +1065,27 @@ test_password_auth_disabled() {
 # =============================================================================
 #
 # Scenario: an ansible-style service account is registered ONLY locally on
-# the bastion (service-accounts.conf + .pub). LLNG does NOT know this user.
-# We then verify:
+# the bastion (useradd + service-accounts.conf + .pub). LLNG does NOT know
+# this user. We then verify:
 #   1. SSH with the plain (non-SSO-signed) key is accepted thanks to
 #      AuthorizedKeysCommand + service-accounts.conf fingerprint matching.
-#   2. pam_openbastion materialises the local Unix account in /etc/passwd
-#      on first login using the uid/gid from service-accounts.conf
-#      (service-account NSS resolution is impossible).
+#   2. pam_openbastion leaves the operator's account as it is.
 #   3. `sudo -n` from that session works without a password (sudo_nopasswd
 #      path in pam_openbastion auth) and yields uid 0.
+#   4. Once nss_openbastion.conf sets force_shell (session recording), an
+#      account whose shell is not that one is refused.
 
 svc_provision_on_bastion() {
     local pubkey
     pubkey=$(cat "${SVC_KEY}.pub")
+
+    # The operator's part: Open Bastion does not create service accounts.
+    # This demo does not record sessions (no force_shell), so any shell does.
+    docker exec ob-maxsec-bastion sh -c "
+        getent group ${SVC_GID} >/dev/null || groupadd -g ${SVC_GID} ${SVC_ACCOUNT}
+        id ${SVC_ACCOUNT} >/dev/null 2>&1 || useradd -u ${SVC_UID} -g ${SVC_GID} \
+            -m -d /home/${SVC_ACCOUNT} -s /bin/bash ${SVC_ACCOUNT}
+    " || return 1
 
     # service-accounts.conf: must be root:root 0600 (pam_openbastion enforces this).
     # NOTE: use `docker exec -i sh -c` and a heredoc so special chars in the key
@@ -1087,11 +1095,6 @@ svc_provision_on_bastion() {
 key_fingerprint = $(ssh-keygen -l -E sha256 -f "${SVC_KEY}.pub" | awk '{print $2}')
 sudo_allowed = true
 sudo_nopasswd = true
-gecos = CI service account
-shell = /bin/bash
-home = /home/${SVC_ACCOUNT}
-uid = ${SVC_UID}
-gid = ${SVC_GID}
 EOF
     docker exec ob-maxsec-bastion chown root:root /etc/open-bastion/service-accounts.conf
     docker exec ob-maxsec-bastion chmod 600 /etc/open-bastion/service-accounts.conf
@@ -1142,10 +1145,8 @@ test_service_account_provision() {
         return 1
     fi
 
-    # Sanity-check: the local Unix account MUST NOT exist yet (whole point
-    # of this test is the on-login auto-creation).
-    if docker exec ob-maxsec-bastion getent -s files passwd "${SVC_ACCOUNT}" >/dev/null 2>&1; then
-        fail "Service account ${SVC_ACCOUNT} already exists locally before first login"
+    if ! docker exec ob-maxsec-bastion getent -s files passwd "${SVC_ACCOUNT}" >/dev/null 2>&1; then
+        fail "Service account ${SVC_ACCOUNT} was not created locally"
         return 1
     fi
 
@@ -1209,56 +1210,23 @@ test_service_account_ssh_login() {
     return 0
 }
 
-test_service_account_local_user_created() {
+test_service_account_local_user_kept() {
     TESTS_RUN=$((TESTS_RUN + 1))
-    log "Checking that the local Unix account was materialised by pam_openbastion..."
+    log "Checking that pam_openbastion left the local account as it was..."
 
-    # Look in /etc/passwd directly: libnss_openbastion could otherwise mask
-    # the question "does a local account exist?".
     local passwd_entry
     passwd_entry=$(docker exec ob-maxsec-bastion \
         grep -E "^${SVC_ACCOUNT}:" /etc/passwd 2>&1) || true
     log_verbose "passwd entry: $passwd_entry"
 
-    if [[ -z "$passwd_entry" ]]; then
-        fail "No /etc/passwd entry for ${SVC_ACCOUNT} after first SSH login"
-        return 1
-    fi
-
     # Format: name:x:uid:gid:gecos:home:shell
-    local entry_uid entry_gid entry_home entry_shell
-    entry_uid=$(cut -d: -f3 <<< "$passwd_entry")
-    entry_gid=$(cut -d: -f4 <<< "$passwd_entry")
-    entry_home=$(cut -d: -f6 <<< "$passwd_entry")
-    entry_shell=$(cut -d: -f7 <<< "$passwd_entry")
-
-    if [[ "$entry_uid" != "${SVC_UID}" ]]; then
-        fail "/etc/passwd uid for ${SVC_ACCOUNT} is $entry_uid, expected ${SVC_UID}" "$passwd_entry"
-        return 1
-    fi
-    if [[ "$entry_gid" != "${SVC_GID}" ]]; then
-        fail "/etc/passwd gid for ${SVC_ACCOUNT} is $entry_gid, expected ${SVC_GID}" "$passwd_entry"
-        return 1
-    fi
-    if [[ "$entry_home" != "/home/${SVC_ACCOUNT}" ]]; then
-        fail "Home directory for ${SVC_ACCOUNT} is $entry_home, expected /home/${SVC_ACCOUNT}" "$passwd_entry"
-        return 1
-    fi
-    if [[ "$entry_shell" != "/bin/bash" ]]; then
-        fail "Login shell for ${SVC_ACCOUNT} is $entry_shell, expected /bin/bash" "$passwd_entry"
+    if [[ "$(cut -d: -f3,4,6,7 <<< "$passwd_entry")" != \
+          "${SVC_UID}:${SVC_GID}:/home/${SVC_ACCOUNT}:/bin/bash" ]]; then
+        fail "/etc/passwd entry for ${SVC_ACCOUNT} changed" "$passwd_entry"
         return 1
     fi
 
-    # Primary group must also have been materialised.
-    local group_entry
-    group_entry=$(docker exec ob-maxsec-bastion \
-        awk -F: -v gid="${SVC_GID}" '$3 == gid {print; exit}' /etc/group 2>&1) || true
-    if [[ -z "$group_entry" ]]; then
-        fail "No /etc/group entry for gid ${SVC_GID} after first login"
-        return 1
-    fi
-
-    pass "Local account ${SVC_ACCOUNT} created in /etc/passwd + matching /etc/group entry"
+    pass "Local account ${SVC_ACCOUNT} unchanged by the login"
     return 0
 }
 
@@ -1308,6 +1276,37 @@ test_service_account_sudo() {
     fi
 
     pass "sudo -n and sudo -n -i from ${SVC_ACCOUNT} run as root (nopasswd path, #152)"
+    return 0
+}
+
+# On a host that records sessions, a service account whose own shell would run
+# outside the recorder is refused.
+test_service_account_shell_guard() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing that force_shell refuses a service account with another shell..."
+
+    local conf=/etc/open-bastion/nss_openbastion.conf
+    local line="force_shell = /usr/sbin/ob-login-shell"
+    docker exec ob-maxsec-bastion sh -c "printf '%s\\n' '$line' >> $conf"
+
+    local output rc=0
+    output=$(ssh -i "${SVC_KEY}" \
+                 -o IdentitiesOnly=yes \
+                 -o StrictHostKeyChecking=no \
+                 -o UserKnownHostsFile=/dev/null \
+                 -o BatchMode=yes \
+                 -o ConnectTimeout=10 \
+                 -p 2222 \
+                 "${SVC_ACCOUNT}@localhost" \
+                 "echo SHOULD_NEVER_PRINT" 2>&1) || rc=$?
+    docker exec ob-maxsec-bastion sed -i "\\|^$line\$|d" "$conf"
+    log_verbose "SSH(svc, force_shell) rc=$rc output: $output"
+
+    if [[ $rc -eq 0 ]] || grep -q "SHOULD_NEVER_PRINT" <<< "$output"; then
+        fail "${SVC_ACCOUNT} (shell /bin/bash) logged in although force_shell is set" "$output"
+        return 1
+    fi
+    pass "force_shell set: a service account with another shell is refused"
     return 0
 }
 
@@ -1406,8 +1405,9 @@ main() {
     # account uses a distinct username unknown to LLNG.
     test_service_account_provision
     test_service_account_ssh_login
-    test_service_account_local_user_created
+    test_service_account_local_user_kept
     test_service_account_sudo
+    test_service_account_shell_guard
     test_service_account_bad_key_rejected
 
     echo ""

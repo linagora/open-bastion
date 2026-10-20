@@ -239,8 +239,10 @@ target_link_libraries(test_crowdsec
 )
 add_test(NAME test_crowdsec COMMAND test_crowdsec)
 
-add_executable(test_service_account test_service_account.c ../src/service_account.c ../src/config.c ../src/str_utils.c)
+add_executable(test_service_account test_service_account.c ../src/service_account.c ../src/str_utils.c)
 target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/include)
+# The file must be root's; here, the caller's.
+target_compile_definitions(test_service_account PRIVATE "SERVICE_ACCOUNTS_TRUSTED_UID=geteuid()")
 add_test(NAME test_service_account COMMAND test_service_account)
 
 add_executable(test_token_manager_io test_token_manager_io.c ../src/token_manager.c ../src/jwt_utils.c)

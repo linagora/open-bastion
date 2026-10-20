@@ -68,9 +68,9 @@ artefacts), which is also what assigns its server group. Once enrolled:
 2. `pam_openbastion` asks LLNG `/pam/authorize` whether this user may access this
    server group, and `sudo` is gated the same way; an encrypted local cache keeps
    this working during an SSO outage.
-3. The **NSS** module resolves SSO users _(and key-only service accounts)_ so the
-   system sees them as real Unix accounts; provisioning creates the home on first
-   login.
+3. The **NSS** module resolves SSO users so the system sees them as real Unix
+   accounts; provisioning creates the home on first login. Key-only service
+   accounts are ordinary local accounts the operator creates.
 4. To reach a **backend behind a bastion**, the bastion mints a short-lived,
    LLNG-signed certificate and re-originates the connection with `ob-ssh` /
    `ob-scp` / `ob-sftp` — no user key or agent on the bastion. Backends accept
@@ -111,7 +111,7 @@ See [Bastion Architecture](doc/references/bastion-architecture.rst) and the
   - SSH key authentication without OIDC
   - Per-server configuration file
   - Fine-grained sudo permissions
-  - Automatic account creation
+  - Plain local accounts, created by the operator
 - **[Bastion-to-backend authentication](doc/references/bastion-architecture.rst)**:
   - Certificate-based proof of connection origin _(LLNG-signed ephemeral SSH cert, ~120 s)_
   - Backends only accept SSH from authorized bastions (`allowed_bastions` + `source-address` critical option)

@@ -150,8 +150,11 @@ CI/CD, ...) that authenticate by SSH key fingerprint without OIDC. The
 questionnaire prompts for them interactively; a ``--config`` YAML
 provides them under a ``service_accounts:`` list (keys: ``name``,
 ``public_key`` or ``public_key_file``, ``key_fingerprint``,
-``sudo_allowed``, ``sudo_nopasswd``, ``shell``, ``home``, ``gecos``,
-``uid``, ``gid``). Each entry is validated at build time and rendered into
+``sudo_allowed``, ``sudo_nopasswd``; ``shell``, ``home``, ``gecos``,
+``uid`` and ``gid`` are obsolete and ignored with a warning). The accounts
+themselves are not created: create them on each target (``useradd``; on a
+host that records sessions, with ``/usr/sbin/ob-login-shell`` as shell).
+Each entry is validated at build time and rendered into
 ``/etc/open-bastion/service-accounts.conf`` (``0600 root:root``) on the
 target, with ``service_accounts_file`` set in ``openbastion.conf``; its key
 goes to ``/etc/open-bastion/service-accounts.d/<name>.pub``. Give the key:

@@ -61,17 +61,6 @@ is_valid_fingerprint() {
     [[ "$s" =~ ^[A-Za-z0-9:+/=]+$ ]]
 }
 
-# is_valid_abs_path <s>
-# Light sanity check for shell / home values: an absolute path with no
-# whitespace or shell metacharacters (the authoritative approved-list check
-# happens on the target in src/service_account.c). Empty is allowed (means
-# "use the default" on the target).
-is_valid_abs_path() {
-    local s="$1"
-    [ -z "$s" ] && return 0
-    [[ "$s" =~ ^/[A-Za-z0-9._/-]+$ ]]
-}
-
 # is_valid_apt_suite <s>
 # APT suite / codename (e.g. trixie, bookworm-backports, stable/updates).
 # Embedded verbatim into the `deb ... <suite> <component>` line that the

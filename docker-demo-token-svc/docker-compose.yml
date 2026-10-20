@@ -16,6 +16,7 @@
 #   #   llng --llng-url http://localhost:80 --login dwho --password dwho llng_cookie
 #   #   ssh -p 2222 dwho@localhost
 #   # Service account (SSH key):
+#   #   docker exec ob-token-svc-bastion useradd -m -s /bin/bash ansible-ci
 #   #   docker exec ob-token-svc-bastion sh -c '...populate service-accounts.conf...'
 #   #   ssh -p 2222 -i ~/.ssh/ansible-ci ansible-ci@localhost
 

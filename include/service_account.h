@@ -2,8 +2,8 @@
  * service_account.h - Service account management for Open Bastion PAM module
  *
  * Service accounts are local accounts (ansible, backup, deploy, etc.) that
- * authenticate via SSH key only, without OIDC. They are defined in a local
- * configuration file and authorized based on their presence in that file.
+ * authenticate via SSH key only, without OIDC. The operator creates them
+ * (useradd); this file only holds their key fingerprint and sudo rights.
  *
  * Copyright (C) 2025 Linagora
  * License: AGPL-3.0
@@ -21,8 +21,6 @@
 /* Maximum length for service account fields */
 #define MAX_SERVICE_ACCOUNT_NAME 32
 #define MAX_SERVICE_ACCOUNT_FINGERPRINT 128
-#define MAX_SERVICE_ACCOUNT_GECOS 256
-#define MAX_SERVICE_ACCOUNT_PATH 256
 
 /* Configuration for a single service account */
 typedef struct {
@@ -30,13 +28,6 @@ typedef struct {
     char *key_fingerprint;      /* SSH key fingerprint (SHA256:xxx) */
     bool sudo_allowed;          /* Allow sudo access */
     bool sudo_nopasswd;         /* Allow sudo without password */
-
-    /* User attributes for automatic account creation */
-    char *gecos;                /* User description (e.g., "Ansible Automation") */
-    char *shell;                /* Login shell (e.g., /bin/bash) */
-    char *home;                 /* Home directory (e.g., /var/lib/ansible) */
-    int uid;                    /* Fixed UID (0 = auto-assign) */
-    int gid;                    /* Fixed GID (0 = auto-assign) */
 } service_account_t;
 
 /* Collection of service accounts */
@@ -64,11 +55,9 @@ void service_accounts_free(service_accounts_t *sa);
  *   key_fingerprint = SHA256:abc123...
  *   sudo_allowed = true
  *   sudo_nopasswd = false
- *   gecos = Service Account Description
- *   shell = /bin/bash
- *   home = /var/lib/accountname
- *   uid = 0
- *   gid = 0
+ *
+ * gecos, shell, home, uid and gid (account attributes of older releases)
+ * are ignored with a warning: the account must exist locally.
  *
  * Returns 0 on success, negative on error:
  *   0:  Success (file loaded, or file does not exist which is OK)
@@ -78,8 +67,8 @@ void service_accounts_free(service_accounts_t *sa);
  *   -4: Not a regular file
  *
  * Note: Malformed lines within the file are logged and skipped.
- * Invalid accounts (missing fingerprint, unapproved shell, etc.)
- * are validated and dropped after loading.
+ * Invalid accounts (bad name, missing fingerprint) are validated and
+ * dropped after loading.
  */
 int service_accounts_load(const char *filename, service_accounts_t *sa);
 
@@ -129,12 +118,7 @@ int service_accounts_validate_key(const service_accounts_t *sa,
 int service_accounts_get_authorization(const service_accounts_t *sa,
                                         const char *username,
                                         bool *sudo_allowed,
-                                        bool *sudo_nopasswd,
-                                        const char **gecos,
-                                        const char **shell,
-                                        const char **home,
-                                        int *uid,
-                                        int *gid);
+                                        bool *sudo_nopasswd);
 
 /*
  * Validate service account configuration
@@ -143,8 +127,6 @@ int service_accounts_get_authorization(const service_accounts_t *sa,
  *
  * Returns 0 if valid, negative on error.
  */
-int service_account_validate(const service_account_t *account,
-                              const char *approved_shells,
-                              const char *approved_home_prefixes);
+int service_account_validate(const service_account_t *account);
 
 #endif /* SERVICE_ACCOUNT_H */

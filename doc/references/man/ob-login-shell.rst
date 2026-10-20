@@ -16,7 +16,9 @@ every user it resolves on a bastion or standalone host that records sessions
 (the ``force_shell`` key of ``nss_openbastion.conf``, written by
 :doc:`ob-bastion-setup(8) <ob-bastion-setup>` and
 :doc:`ob-post-upgrade(8) <ob-post-upgrade>`). It is not meant to be run by
-hand.
+hand. Local accounts the module does not resolve, service accounts, get it
+from ``/etc/passwd``: ``pam_openbastion`` refuses a service account whose
+login shell is not the ``force_shell`` value (see :doc:`/service-accounts`).
 
 sshd never executes a ``ForceCommand`` itself: it runs it through the user's
 login shell, as ``shell -c '/usr/sbin/ob-session-recorder'``. A shell reads

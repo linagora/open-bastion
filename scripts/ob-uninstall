@@ -852,6 +852,17 @@ if [ -n "$SSHD_FOREIGN_REFS" ]; then
     warn "sshd will point at files that no longer exist."
 fi
 
+# Service accounts, typically: the operator's accounts, so never deleted, but
+# their shell goes with the package.
+LAUNCHER_USERS=$(awk -F: '$7 == "/usr/sbin/ob-login-shell" { printf " %s", $1 }' \
+                 "$(P /etc/passwd)" 2>/dev/null || true)
+if [ -n "$LAUNCHER_USERS" ]; then
+    warn "These local accounts log in through /usr/sbin/ob-login-shell:"
+    warn "   $LAUNCHER_USERS"
+    warn "They are left as they are. Change their shell (usermod -s) before"
+    warn "removing the package, or they can no longer log in."
+fi
+
 warn "After this, LemonLDAP::NG certificates are no longer trusted and SSO users"
 warn "no longer resolve. Only LOCAL accounts can log in: through ~/.ssh/authorized_keys"
 warn "or a password, as the restored sshd and PAM defaults allow. Make sure one"
