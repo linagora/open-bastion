@@ -39,6 +39,18 @@ own startup files first. Nothing else in that file changes, and a
 ``force_shell`` set to another value is left alone, with a warning. This too
 is derived from the host: the ``ForceCommand`` says it records.
 
+The helper installed since 0.7.0 reads the key type and blob from the ``%t``
+and ``%k`` tokens of sshd's ``AuthorizedPrincipalsCommand`` line, which a
+setup before 0.7.0 did not write. In the setup's own sshd drop-in
+(``*-open-bastion-bastion.conf`` or ``*-open-bastion-backend.conf``), a line
+exactly as that setup wrote it (``%u %f``, or ``%u %f %i`` on a backend) gets
+``%t %k`` appended: the file is backed up next to itself
+(``.bak-<timestamp>``), checked with ``sshd -t`` — and put back if sshd
+rejects it — and sshd is reloaded. This happens before the new helper is
+installed: the old helper ignores the extra arguments, so no login ever runs
+the new helper under the old line. Any other line without ``%t %k``, or one in
+``sshd_config`` itself, stops the command with what to do; nothing is changed.
+
 It is idempotent. Run it as often as you like; on a host that is already
 current it reports that and changes nothing.
 
@@ -84,7 +96,9 @@ What it does not do
    any PAM stack. Those carry decisions — a server group, a mode, an
    ``--enable-*`` flag — and a command that cannot know them must not guess.
    To change a decision, run the setup script. The one key it may add to
-   ``nss_openbastion.conf`` is described above.
+   ``nss_openbastion.conf``, and the ``%t %k`` it may add to the
+   ``AuthorizedPrincipalsCommand`` line of its own sshd drop-in, are described
+   above.
 
 Options
 -------
