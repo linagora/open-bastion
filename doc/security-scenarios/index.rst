@@ -47,7 +47,7 @@ Two pages describe the scenarios in detail:
 
 .. note::
 
-  Those scenarios used to be designated with letters A, B, C, D, E in
+  Those scenarios used to be designated with letters E, A, B, C, D in
   the above table row order. This documentation no longer names
   scenarios that way, but generated files and the French security
   study still carry them.
