@@ -113,7 +113,7 @@ terminateur TLS 1.3.
      - aucun
      - Épinglage de certificat (format sha256/base64)
 
-**Épinglage de Certificat** : Lorsqu'il est configuré, le module PAM, le module NSS et ``ob-cert-daemon`` valident la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA. Les commandes (``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll``…) n'épinglent pas : elles s'appuient sur TLS et, avec ``response_signing``, sur les réponses signées. Un épinglage invalide est refusé, jamais ignoré. Avant la 0.7.0, rien n'appliquait ``cert_pin`` (#332).
+**Épinglage de Certificat** : Lorsqu'il est configuré, le module PAM, le module NSS et ``ob-cert-daemon`` valident la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA. Les commandes (``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll``…) n'épinglent pas : elles s'appuient sur TLS et, avec ``response_signing``, sur les réponses signées. Un épinglage invalide est refusé, jamais ignoré. 
 
 .. code:: ini
 
@@ -366,7 +366,7 @@ Sécurité du cache d'autorisation
 
 Le **cache d'autorisation** (``auth_cache``) est le seul cache côté PAM du module. Il conserve le résultat d'un appel ``/pam/authorize`` réussi afin qu'un utilisateur déjà autorisé puisse encore se connecter lorsque le portail LLNG est injoignable. Il ne met jamais en cache d'identifiants, de tokens ou de matériel de mot de passe — uniquement un verdict d'autorisation et les attributs de compte associés.
 
-Tous les builds l'alimentent, avec ou sans les composants Desktop SSO. Jusqu'à la 0.6.x, seuls les builds ``-DINSTALL_DESKTOP=ON`` — dont les paquets ``.deb`` et ``.rpm`` — écrivaient les entrées : un build SSH seul lisait le cache sans jamais l'alimenter (#318).
+Tous les builds l'alimentent, avec ou sans les composants Desktop SSO. 
 
 Chiffrement au repos
 ~~~~~~~~~~~~~~~~~~~~
@@ -622,7 +622,7 @@ Gestion des secrets
 
 Les secrets d'``openbastion.conf`` — ``client_secret``, ``notify_secret``, ``crowdsec_password`` — ne sont **pas** chiffrés au repos. Leur seule protection est la permission du fichier : le module refuse de lire ``openbastion.conf`` s'il n'est pas un fichier régulier appartenant à root et interdit au groupe comme aux autres (``0600``). La mesure complémentaire est de ne pas écrire le secret sur l'hôte (``client_secret_mode: prompt`` dans un bundle ``ob-builder``, ou valeur détenue par ``ansible-vault``).
 
-Le paramètre ``secrets_encrypted`` documenté ici jusqu'à la 0.6.2 n'avait aucun effet : il alimentait un module ``secret_store`` dépourvu d'appelant. Les deux ont été supprimés.
+
 
 Permissions des fichiers
 ~~~~~~~~~~~~~~~~~~~~~~~~

@@ -20,7 +20,7 @@ Composants couverts
 
    * - ``pam-access``
      - Autorisation SSH et ``sudo``, vouchers de rebond, cache offline
-     - ``/pam/authorize``, ``/pam/verify``, ``/pam/bastion-cert``, ``/pam/heartbeat``, ``/pam/whoami`` (ajouté par la PR amont ``#94``), ``/pam/bastion-token`` (supprimé par la PR amont ``#86`` — voir R-P6)
+     - ``/pam/authorize``, ``/pam/verify``, ``/pam/bastion-cert``, ``/pam/heartbeat``, ``/pam/whoami``
 
    * - ``ssh-ca``
      - Signature des certificats utilisateur, KRL, administration
@@ -70,16 +70,16 @@ R-P1 - Usurpation de l'appelant sur ``/pam/*``
 2. **Renseigner ``allowed_bastions``** sur chaque backend (CE06).
 3. **Activer ``pamAccessBastionCertPinSourceAddress``**.
 
-**Remédiation plugin (amont) :** liaison d'audience sur les jetons ``/pam/*`` et refus d'un ``server_group`` auto-déclaré. Suivie dans ``linagora/lemonldap-ng-plugins#50`` ; **corrigée en amont**, non publiée à ce jour, par la PR amont ``#92``, qui associe une allowlist de RP (``pamAccessAllowedRps``) au refus du groupe auto-déclaré, une allowlist vide valant « pas de changement » pour ne pas rompre la montée de version. Le correctif n'agit donc que si l'exploitant renseigne cette allowlist, ce qui suppose d'enrôler les bastions sous un ``client_id`` distinct de celui du projet — la mesure reste une **configuration**, pas un acquis de la mise à jour.
+**Remédiation plugin (amont) :** liaison d'audience sur les jetons ``/pam/*`` et refus d'un ``server_group`` auto-déclaré. Suivie dans ``linagora/lemonldap-ng-plugins#50`` ; **corrigée en amont** par la PR amont ``#92``, qui associe une allowlist de RP (``pamAccessAllowedRps``) au refus du groupe auto-déclaré, une allowlist vide valant « pas de changement » pour ne pas rompre la montée de version. Le correctif n'agit donc que si l'exploitant renseigne cette allowlist, ce qui suppose d'enrôler les bastions sous un ``client_id`` distinct de celui du projet — la mesure reste une **configuration**, pas un acquis de la mise à jour.
 
 Deux effets de bord de la PR amont ``#86`` (issues ``#55``, ``#56``) touchent directement cette fiche, sans changer le score :
 
 - un voucher qu'**aucune empreinte** ne lie au certificat SSO de l'utilisateur est désormais plafonné à ``pamAccessBastionVoucherUnboundTtl`` (900 s) au lieu des 12 h, ce qui réduit d'autant la fenêtre d'un backend qui se déclare bastion **sans** présenter d'empreinte — un attaquant qui fournit l'empreinte publique de sa victime reste, lui, dans le cas lié ;
 - l'émission est refusée (403, audit ``PAM_BASTION_CERT_PIN_UNAVAILABLE``) quand le pin est activé et l'adresse inutilisable, ce qui rend la mesure 3 fiable au lieu de silencieusement inopérante.
 
-Aucun de ces correctifs n'est publié à ce jour : le score résiduel ci-dessous suppose toujours la configuration côté exploitant (CE03 + CE06 + CE21).
+le score résiduel ci-dessous suppose toujours la configuration côté exploitant (CE03 + CE06 + CE21).
 
-**Depuis ``0.7.0``, cette configuration n'est plus une hypothèse : c'est un prérequis de publication.** Le comportement par défaut du produit — ``allowed_bastions`` vide vaut « accepter n'importe lequel », ``pamAccessServerGroups`` vide fait lire le ``server_group`` dans la requête — contredit la configuration multi-groupes que :doc:`/security/00-architecture` recommande. Un défaut livré qui contredit l'architecture recommandée n'est pas un risque résiduel acceptable : c'est une condition de mise en service. CE03, CE06, CE16 et CE21 sont donc déclarées **bloquantes** en :ref:`08, §2 <security-08-dossier-homologation-2-conditions-demploi>`.
+**Cette configuration n'est pas une hypothèse : c'est un prérequis de mise en service.** Le comportement par défaut du produit — ``allowed_bastions`` vide vaut « accepter n'importe lequel », ``pamAccessServerGroups`` vide fait lire le ``server_group`` dans la requête — contredit la configuration multi-groupes que :doc:`/security/00-architecture` recommande. Un défaut livré qui contredit l'architecture recommandée n'est pas un risque résiduel acceptable : c'est une condition de mise en service. CE03, CE06, CE16 et CE21 sont donc déclarées **bloquantes** en :ref:`08, §2 <security-08-dossier-homologation-2-conditions-demploi>`.
 
 Le produit ne peut ni poser ni vérifier les trois premières : ce sont des réglages du Manager LLNG, et les lire depuis un hôte supposerait une API qui publierait les bastions, les groupes de serveurs et les RP du projet. La seule application possible est déclarative — ``ob-bastion-setup``, ``ob-backend-setup``, ``ob-desktop-setup`` et ``ob-post-upgrade`` impriment la consigne à chaque exécution, et ``ob-builder`` écrit à côté de chaque artefact une ``PORTAL-CHECKLIST.md`` pré-remplie avec le ``client_id`` et le ``server_group`` du déploiement. C'est une notification, pas un contrôle, et la fiche ne prétend pas l'inverse.
 
@@ -122,7 +122,7 @@ R-P2 - Révocation non autorisée de certificats (``ssh-ca``)
 
 Attention à ne pas écrire ``^/ssh/revoke`` seul : cela capture aussi ``/ssh/revoked``, la KRL **publique** que chaque backend télécharge — la restreindre casserait la propagation des révocations. Voir la section « Step 3 » de :doc:`/deployment/llng-configuration` et la condition d'emploi CE02.
 
-**Remédiation plugin (amont) :** contrôle d'autorisation intégré, par défaut refus tant qu'une règle dédiée n'est pas configurée. ``#58`` est **corrigée en amont** : ``/ssh/admin``, ``/ssh/certs`` et ``/ssh/revoke`` répondent 403 tant que ``sshCaAdminRule`` n'est pas renseignée. Le correctif n'est pas encore publié, et la ``locationRules`` reste la mesure applicable en attendant — elle garde par ailleurs son intérêt en défense en profondeur.
+**Remédiation plugin (amont) :** contrôle d'autorisation intégré, par défaut refus tant qu'une règle dédiée n'est pas configurée. ``#58`` est **corrigée en amont** : ``/ssh/admin``, ``/ssh/certs`` et ``/ssh/revoke`` répondent 403 tant que ``sshCaAdminRule`` n'est pas renseignée. La ``locationRules`` reste la mesure applicable — elle garde par ailleurs son intérêt en défense en profondeur.
 
 +-----------------+--------------------------------------------------------------------+
 |                 | Score résiduel                                                     |
@@ -144,7 +144,7 @@ R-P3 - Corruption de la KRL et indisponibilité de la flotte
 **Impact**      4
 =============== =====
 
-**Description :** Les écritures de la KRL par ``ssh-ca`` sont sérialisées entre générateurs — ``_updateKrl`` prend un ``flock(LOCK_EX)`` sur ``<sshCaKrlPath>.lock`` autour de tout le lire-modifier-écrire depuis la PR amont ``#13`` — mais elles ne sont **pas atomiques** : ``ssh-keygen -u`` réécrit le fichier en place. Deux chemins échappent en outre à ce verrou dans la version publiée : les **lecteurs** (``/ssh/revoked`` et le téléchargement côté open-bastion, qui ne prennent aucun verrou) et le script cron ``sshca-rebuild-krl``, qui réécrit le fichier sans passer par le verrou du portail. Une KRL tronquée mais dont l'en-tête reste valide est servie telle quelle ; elle franchit le contrôle de plausibilité d'open-bastion (``head -c 6 | grep SSHKRL``), est déployée en ``RevokedKeys``, et **``sshd`` échoue alors fermé sur toutes les clés**. Le comportement a été reproduit.
+**Description :** Les écritures de la KRL par ``ssh-ca`` sont sérialisées entre générateurs — ``_updateKrl`` prend un ``flock(LOCK_EX)`` sur ``<sshCaKrlPath>.lock`` autour de tout le lire-modifier-écrire depuis la PR amont ``#13`` — mais elles ne sont **pas atomiques** : ``ssh-keygen -u`` réécrit le fichier en place. Deux chemins échappent en outre à ce verrou : les **lecteurs** (``/ssh/revoked`` et le téléchargement côté open-bastion, qui ne prennent aucun verrou) et le script cron ``sshca-rebuild-krl``, qui réécrit le fichier sans passer par le verrou du portail. Une KRL tronquée mais dont l'en-tête reste valide est servie telle quelle ; elle franchit le contrôle de plausibilité d'open-bastion (``head -c 6 | grep SSHKRL``), est déployée en ``RevokedKeys``, et **``sshd`` échoue alors fermé sur toutes les clés**. Le comportement a été reproduit.
 
 **Conséquence :** perte d'accès SSH sur l'ensemble des serveurs qui ont rafraîchi la KRL — c'est le mécanisme de révocation qui devient le vecteur d'indisponibilité. Recoupe R-S17 (verrouillage total).
 
@@ -158,7 +158,7 @@ R-P3 - Corruption de la KRL et indisponibilité de la flotte
 - Le contrôle de plausibilité côté client rejette une KRL vide ou sans magie — mais pas une KRL tronquée après l'en-tête
 - Le compte de service de secours et l'accès console hors-bande (CE12) restent le filet
 
-**Remédiation plugin (amont) :** écriture atomique (fichier temporaire dans le répertoire cible + ``rename()``), verrou partagé pris par les lecteurs, extension du verrou existant au cron ``sshca-rebuild-krl``, et refus de servir une KRL que ``ssh-keygen`` ne relit pas. ``#59`` est **corrigée en amont** par la PR ``#77``, non publiée à ce jour ; la mesure côté open-bastion ci-dessous reste donc la seule effective, et garde de toute façon sa valeur (elle couvre aussi une KRL corrompue en transit ou au stockage, hors du périmètre du correctif).
+**Remédiation plugin (amont) :** écriture atomique (fichier temporaire dans le répertoire cible + ``rename()``), verrou partagé pris par les lecteurs, extension du verrou existant au cron ``sshca-rebuild-krl``, et refus de servir une KRL que ``ssh-keygen`` ne relit pas. ``#59`` est **corrigée en amont** par la PR ``#77`` ; la mesure côté open-bastion ci-dessous reste donc la seule effective, et garde de toute façon sa valeur (elle couvre aussi une KRL corrompue en transit ou au stockage, hors du périmètre du correctif).
 
 **Remédiation configuration (côté open-bastion) :** durcir le contrôle de plausibilité avant déploiement — vérifier que ``ssh-keygen -Q -l -f`` accepte le fichier, et non seulement la présence de la magie, avant de remplacer ``RevokedKeys``.
 
@@ -196,7 +196,7 @@ R-P4 - Exposition de la clé privée de CA sur le portail
 - L'hôte du portail est censé être dédié et durci — c'est l'hypothèse de confiance H1 de :ref:`08, §1.3 <security-08-dossier-homologation-13-hypothèses-de-confiance>`
 - La CA seule ne suffit pas : ``/pam/authorize`` autorise séparément
 
-**Remédiation plugin (amont) :** nettoyage du répertoire temporaire en fin de signature, ou signature sans passage par le disque. ``#60`` est **corrigée en amont**, non publiée à ce jour. Elle ne réduit pas ce risque au-delà de la fenêtre d'exposition sur disque : la clé reste en clair dans la configuration LLNG, et c'est ce qui fixe l'impact 4.
+**Remédiation plugin (amont) :** nettoyage du répertoire temporaire en fin de signature, ou signature sans passage par le disque. ``#60`` est **corrigée en amont**. Elle ne réduit pas ce risque au-delà de la fenêtre d'exposition sur disque : la clé reste en clair dans la configuration LLNG, et c'est ce qui fixe l'impact 4.
 
 **Remédiation configuration :** restreindre et tracer l'accès au Manager LLNG et à l'hôte du portail (condition d'emploi CE13) ; à terme, HSM ou service de signature dédié.
 
@@ -237,7 +237,7 @@ R-P5 - Approbation d'enrôlement par un utilisateur non habilité
 
 Ne pas ancrer la fin (``^/device$``) : ``grant()`` compare à ``REQUEST_URI``, qui porte la query string. Condition d'emploi CE01.
 
-**Remédiation plugin (amont) :** documenter que ``1`` signifie « tout utilisateur authentifié » et proposer une règle dédiée. ``#74`` est **corrigée en amont** (documentation), non publiée à ce jour. C'est une clarification : elle ne substitue pas de contrôle à la ``locationRules``, qui reste la mesure.
+**Remédiation plugin (amont) :** documenter que ``1`` signifie « tout utilisateur authentifié » et proposer une règle dédiée. ``#74`` est **corrigée en amont** (documentation). C'est une clarification : elle ne substitue pas de contrôle à la ``locationRules``, qui reste la mesure.
 
 +-----------------+---------------------------------------------------------------+
 |                 | Score résiduel                                                |
@@ -266,11 +266,11 @@ R-P6 - Perte de l'identité machine (``_deviceId``)
 **Facteurs atténuants structurels :**
 
 - L'hôte reste authentifié : ce n'est pas un contournement d'authentification mais une perte d'attribution
-- ``ob-bastion-id`` permet de constater l'absence de device-id après enrôlement — mais l'endpoint dont il dépend (``/pam/bastion-token``) est supprimé par la PR amont ``#86``, **mergée**, et son remplaçant ``POST /pam/whoami`` l'est aussi (PR amont ``#94``) ; la migration côté open-bastion est faite dans `#248 <https://github.com/linagora/open-bastion/pull/248>`__, qui bascule ``ob-bastion-id`` sur le nouvel endpoint avec repli sur l'ancien tant que le portail n'a pas migré. Ce facteur atténuant survit donc à la mise à jour du portail, à condition de déployer cette version d'``ob-bastion-id`` **avant** de mettre le portail à jour (voir ``UPGRADE-NOTES.md``)
+- ``ob-bastion-id`` permet de constater l'absence de device-id après enrôlement  : il interroge ``POST /pam/whoami`` (`#248 <https://github.com/linagora/open-bastion/pull/248>`__).
 
 **Remédiation opérationnelle :** vérifier ``ob-bastion-id`` après chaque enrôlement et refuser un hôte sans device-id ; surveiller les jetons serveur dont le sujet est un compte humain.
 
-**Remédiation plugin (amont) :** échec fermé en cas d'échec de la session synthétique, et couverture de tests. Les deux sont **corrigées en amont, non publiées** : ``#72`` par la PR ``#80``, et ``#71`` par le commit ``2e5e4c4``, arrivé sur ``main`` via la PR ``#90`` — le plugin porte désormais ``t/38-Device-Organization.t`` (PR ``#80``) et ``t/39-Device-Organization-Identity.t``. La probabilité résiduelle reste à 2 pour la même raison que R-P3 et R-P7, et pour elle seule : **rien n'est publié**, et la vérification manuelle d'``ob-bastion-id`` après enrôlement (CE19) est le seul contrôle dont dispose un exploitant aujourd'hui.
+**Remédiation plugin (amont) :** échec fermé en cas d'échec de la session synthétique, et couverture de tests. Les deux sont **corrigées en amont** : ``#72`` par la PR ``#80``, et ``#71`` par le commit ``2e5e4c4``, arrivé sur ``main`` via la PR ``#90`` — le plugin porte désormais ``t/38-Device-Organization.t`` (PR ``#80``) et ``t/39-Device-Organization-Identity.t``. La probabilité résiduelle reste à 2 pour la même raison que R-P3 et R-P7 : le seul contrôle dont dispose un exploitant reste la vérification manuelle d'``ob-bastion-id`` après enrôlement (CE19).
 
 +-----------------+---------------------------------------------------------------------------+
 |                 | Score résiduel                                                            |
@@ -306,14 +306,14 @@ R-P7 - Concurrence sur le magasin de sessions partagé (défaut systémique)
 - La fenêtre est étroite (millisecondes) et non déclenchable à volonté par un attaquant sans accès au portail
 - Les effets observés jusqu'ici étaient des refus (fail-closed) plus souvent que des acceptations
 
-**Remédiation plugin (amont) :** verrouillage réel du magasin de sessions, ou mises à jour par champ avec comparaison-et-échange. Suivie dans ``linagora/lemonldap-ng-plugins#54``, ``#66``, ``#68`` et ``#69``. ``#69`` est **corrigée en amont** ; ``#54`` et ``#66`` (une clé de session par enregistrement au lieu d'un blob partagé) sont traitées par la PR amont ``#87``, ``#53`` et ``#68`` (consommation réellement atomique des jetons à usage unique) par la PR amont ``#88``, et la PR amont ``#95`` va plus loin en donnant à chaque voucher son propre enregistrement de session plutôt qu'une clé dans un blob réécrit en entier — les trois **mergées, non publiées**. Le motif de fond, lui, ne disparaît pas : les correctifs suppriment des courses identifiées, ils ne rendent pas le magasin atomique.
+**Remédiation plugin (amont) :** verrouillage réel du magasin de sessions, ou mises à jour par champ avec comparaison-et-échange. Suivie dans ``linagora/lemonldap-ng-plugins#54``, ``#66``, ``#68`` et ``#69``. ``#69`` est **corrigée en amont** ; ``#54`` et ``#66`` (une clé de session par enregistrement au lieu d'un blob partagé) sont traitées par la PR amont ``#87``, ``#53`` et ``#68`` (consommation réellement atomique des jetons à usage unique) par la PR amont ``#88``, et la PR amont ``#95`` va plus loin en donnant à chaque voucher son propre enregistrement de session plutôt qu'une clé dans un blob réécrit en entier — les trois **mergées**. Le motif de fond, lui, ne disparaît pas : les correctifs suppriment des courses identifiées, ils ne rendent pas le magasin atomique.
 
 **Remédiation architecturale :** traiter le motif comme tel — toute nouvelle écriture dans la session persistante doit être conçue comme idempotente et tolérante à l'écrasement, tant que le magasin ne fournit pas d'atomicité.
 
 +-----------------+----------------------------------------------------------------------------+
 |                 | Score résiduel                                                             |
 +=================+============================================================================+
-| **Probabilité** | 2 (correctifs amont mergés, non publiés ; le motif reste structurel)       |
+| **Probabilité** | 2 (correctifs amont partiels ; le motif reste structurel)                  |
 +-----------------+----------------------------------------------------------------------------+
 | **Impact**      | 3 (un écrasement peut annuler une révocation — fail-open sur une garantie) |
 +-----------------+----------------------------------------------------------------------------+
@@ -339,7 +339,7 @@ R-P8 - Déni de service authentifié sur ``ssh-ca``
 
 **Remédiation configuration :** limitation de débit au niveau du reverse proxy devant le portail ; surveillance de la taille de la KRL et du temps de signature.
 
-**Remédiation plugin (amont) :** borner ``/ssh/sign``. Suivie dans ``linagora/lemonldap-ng-plugins#63`` ; **corrigée en amont**, non publiée à ce jour, par la PR amont ``#90`` : ``sshCaSignMaxPerHour`` (20/h, **429**) et ``sshCaMaxCertsPerUser`` (20, **409**), comptés dans la session de l'utilisateur.
+**Remédiation plugin (amont) :** borner ``/ssh/sign``. Suivie dans ``linagora/lemonldap-ng-plugins#63`` ; **corrigée en amont** par la PR amont ``#90`` : ``sshCaSignMaxPerHour`` (20/h, **429**) et ``sshCaMaxCertsPerUser`` (20, **409**), comptés dans la session de l'utilisateur.
 
 La KRL, elle, n'est **délibérément pas plafonnée** en amont : refuser d'enregistrer une révocation parce que le fichier est devenu gros serait un fail-open silencieux — le certificat resterait utilisable. Borner les deux entrées borne la KRL sans jamais perdre une révocation. Il n'y a donc **aucune purge d'entrées expirées à attendre de l'amont**, et la limitation obtenue est celle du plugin, pas celle du reverse proxy que suppose CE17 : la remédiation configuration ci-dessus reste entièrement à la charge de l'exploitant (MT49).
 
@@ -390,7 +390,7 @@ Après remédiation
 
 **Ce que cette matrice dit et que les autres ne disaient pas :** **cinq** des huit risques du portail dépendent d'une **configuration** que le produit ne pose pas lui-même (R-P1, R-P2, R-P5, R-P8 et, pour partie, R-P4). Pour R-P8, la descente de (2,3) à (1,2) suppose la limitation de débit au reverse proxy et la surveillance de la taille de la KRL — CE17 et MT49, toutes deux ``À COMPLÉTER`` : sa zone verte est conditionnelle, exactement comme celle de R-P1 l'est via CE03. Deux restent en zone orange et sont portés à l'acceptation formelle en :ref:`08, §3.1 <security-08-dossier-homologation-31-zone-orange--acceptation-requise>` : R-P3 (corruption de la KRL) et R-P7 (concurrence sur le magasin de sessions).
 
-**État des correctifs amont au 6 septembre 2026.** L'analyse a été menée contre le code publié ; depuis, l'amont a bougé, et il a fini de bouger. Les **quinze** tickets référencés par ces fiches sont **tous fermés et mergés** dans ``linagora/lemonldap-ng-plugins``. L'inventaire est donné en entier, parce que c'est lui qui fonde l'acceptation formelle en :ref:`08, §3.1 <security-08-dossier-homologation-31-zone-orange--acceptation-requise>` et qu'un relecteur doit pouvoir le refaire :
+**État des correctifs amont au 6 septembre 2026.** Les **quinze** tickets référencés par ces fiches sont **tous fermés et mergés** dans ``linagora/lemonldap-ng-plugins``. L'inventaire est donné en entier, parce que c'est lui qui fonde l'acceptation formelle en :ref:`08, §3.1 <security-08-dossier-homologation-31-zone-orange--acceptation-requise>` et qu'un relecteur doit pouvoir le refaire :
 
 .. list-table::
    :header-rows: 1
@@ -464,11 +464,11 @@ Le tour d'audit complet couvre les PR ``#76`` à ``#95``.
 
    **Sur ``#71`` en particulier.** La PR ``#91`` porte bien ce correctif, mais sa branche de base est ``fix/sshca-rate-limit``, pas ``main`` : elle a été mergée dans cette branche intermédiaire, et c'est la PR ``#90`` qui a amené le commit sur ``main``. Elle n'a par ailleurs livré qu'un fichier de tests — ``t/38`` vient de la PR ``#80``.
 
-**Aucun n'est publié** — la dernière version étiquetée est ``v0.5.2``, ces correctifs sortiront en ``0.6.0`` — donc **aucun score de cette matrice ne change** : elle décrit ce qu'un exploitant peut déployer aujourd'hui. Trois conséquences pratiques :
+**Aucun score de cette matrice ne change** : elle décrit ce qu'un exploitant peut déployer aujourd'hui. Trois conséquences pratiques :
 
 - l'acceptation de R-P3 et R-P7 porte désormais sur un **délai de publication**, pas sur l'absence de correctif — ce qui est une décision différente, et plus facile à prendre ;
 - la mise à jour du portail qui apportera ces correctifs apporte aussi des **ruptures** : ``/pam/bastion-token`` disparaît (voir R-P6, traité par `#248 <https://github.com/linagora/open-bastion/pull/248>`__), un voucher non lié à une empreinte tombe de 12 h à 15 min, le scope PAM est désormais comparé à l'identique (un RP portant ``pam-prod`` perd ``/pam/*``), et ``/ssh/admin``, ``/ssh/certs`` et ``/ssh/revoke`` refusent tant que ``sshCaAdminRule`` n'est pas renseignée. Cette montée de version doit être planifiée, pas subie : la marche à suivre est dans ``UPGRADE-NOTES.md`` ;
-- deux correctifs amont **ouvrent des mesures que le produit ne prend pas encore de lui-même**. ``pamAccessAllowedRps`` (``#92``) ne mord que si l'exploitant le renseigne, ce qui suppose un ``client_id`` propre aux bastions (CE21) ; et la vérification de signature de requête (``#93``) ne peut être portée à ``required`` que si le client signe les six endpoints ``/pam/*`` — c'est désormais le cas côté produit (`#247 <https://github.com/linagora/open-bastion/issues/247>`__ fermé par la PR `#252 <https://github.com/linagora/open-bastion/pull/252>`__, à publier avec ``0.7.0`` ; cf. MT52), le basculement lui-même restant une décision de configuration du portail.
+- deux correctifs amont **ouvrent des mesures que le produit ne prend pas encore de lui-même**. ``pamAccessAllowedRps`` (``#92``) ne mord que si l'exploitant le renseigne, ce qui suppose un ``client_id`` propre aux bastions (CE21) ; et la vérification de signature de requête (``#93``) ne peut être portée à ``required`` que si le client signe les six endpoints ``/pam/*`` — c'est désormais le cas côté produit (`#247 <https://github.com/linagora/open-bastion/issues/247>`__ fermé par la PR `#252 <https://github.com/linagora/open-bastion/pull/252>`__ ; cf. MT52), le basculement lui-même restant une décision de configuration du portail.
 
 --------------
 

@@ -265,7 +265,7 @@ Ce sont les **conditions d'emploi** : sans elles, les scores résiduels de l'ate
 
 ..
 
-   **Comptes de service, 0.7.0 (#353).** MT20 portait sur ``sudo_allowed`` dans ``service-accounts.conf`` ; cette clé est désormais ignorée : Open Bastion n'accorde plus de ``sudo`` à un compte de service, ne crée plus le compte et ne gère plus ses groupes. La mesure s'applique aux règles ``sudoers`` que l'exploitant écrit lui-même, et en Mode E à toute modification manuelle de la pile PAM ``sudo`` (cf. R-S24). MT23 ne couvre pas les comptes de service : ``force_shell`` ne vaut que pour les comptes résolus par ``libnss_openbastion`` ; sur un hôte qui enregistre, l'exploitant crée le compte de service avec ``/usr/sbin/ob-login-shell`` comme shell, sans que rien ne l'impose.
+   **Comptes de service (#353).** MT20 porte sur les règles ``sudoers`` que l'exploitant écrit lui-même : Open Bastion n'accorde aucun ``sudo`` à un compte de service, ne crée pas le compte et ne gère pas ses groupes. En Mode E, la pile PAM ``sudo`` refuse tout compte local sans une modification manuelle (cf. R-S24). MT23 ne couvre pas les comptes de service : ``force_shell`` ne vaut que pour les comptes résolus par ``libnss_openbastion`` ; sur un hôte qui enregistre, l'exploitant crée le compte de service avec ``/usr/sbin/ob-login-shell`` comme shell, sans que rien ne l'impose.
 
 .. _security-07-plan-de-traitement-53bis-mesures-portant-sur-le-portail-llng-et-ses-plugins:
 
@@ -294,7 +294,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P0
      - Administrateur LLNG
      - ``À COMPLÉTER``
-     - **Ouvert — prérequis de publication ``0.7.0``**, condition d'emploi CE03 bloquante
+     - **Ouvert — bloquant pour la mise en service**, condition d'emploi CE03 bloquante
 
    * - **MT41**
      - Liaison d'audience sur les jetons ``/pam/*``
@@ -303,7 +303,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P1
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Corrigé amont, non publié** — ``#50``, PR ``#92`` ; n'agit que si ``pamAccessAllowedRps`` est renseigné
+     - **Corrigé en amont** — ``#50``, PR ``#92`` ; n'agit que si ``pamAccessAllowedRps`` est renseigné
 
    * - **MT42**
      - Contrôle d'autorisation intégré sur ``/ssh/admin|certs|revoke`` (refus par défaut)
@@ -312,7 +312,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P1
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Corrigé amont, non publié** — ``#58``
+     - **Corrigé en amont** — ``#58``
 
    * - **MT43**
      - Écriture atomique de la KRL, verrou étendu aux lecteurs et au cron de reconstruction
@@ -321,7 +321,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P0
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Corrigé amont, non publié** — ``#59``, PR ``#77`` ; le verrou entre générateurs existait déjà en ``v0.5.2``
+     - **Corrigé en amont** — ``#59``, PR ``#77``
 
    * - **MT44**
      - Contrôle de plausibilité de la KRL côté client (``ssh-keygen -Q -l -f`` avant déploiement)
@@ -339,7 +339,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P0
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Corrigé amont, non publié** — ``#60``
+     - **Corrigé en amont** — ``#60``
 
    * - **MT46**
      - Échec fermé sur échec de session synthétique + couverture de tests du plugin device-organization
@@ -348,7 +348,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P1
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Corrigé amont, non publié** — ``#72`` (échec fermé, PR ``#80``) et ``#71`` (tests, ``2e5e4c4`` via PR ``#90``)
+     - **Corrigé en amont** — ``#72`` (échec fermé, PR ``#80``) et ``#71`` (tests, ``2e5e4c4`` via PR ``#90``)
 
    * - **MT47**
      - Vérification systématique de ``ob-bastion-id`` après enrôlement
@@ -366,7 +366,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P1
      - Mainteneur plugins
      - ``À COMPLÉTER``
-     - **Partiellement corrigé amont, non publié** — les courses identifiées sont fermées (PR ``#87``, ``#88``, ``#95``, ``#69``), mais la mesure elle-même — verrou réel ou comparaison-et-échange — n'est pas livrée : le motif survit à ``0.6.0``
+     - **Partiellement corrigé en amont** — les courses identifiées sont fermées (PR ``#87``, ``#88``, ``#95``, ``#69``), mais la mesure elle-même — verrou réel ou comparaison-et-échange — n'est pas livrée : le motif n'est pas traité à la racine
 
    * - **MT49**
      - Limitation de débit sur ``/ssh/sign`` au niveau du reverse proxy, et surveillance de la taille de la KRL
@@ -384,16 +384,16 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P0
      - Administrateur LLNG
      - ``À COMPLÉTER``
-     - **Ouvert — prérequis de publication ``0.7.0``**, condition d'emploi CE16 bloquante ; la cible est ``0.6.0`` (``v0.5.2`` est la dernière publiée)
+     - **Ouvert — bloquant pour la mise en service**, condition d'emploi CE16 bloquante
 
    * - **MT51**
-     - Migrer ``ob-bastion-id`` de ``/pam/bastion-token`` (supprimé amont) vers ``POST /pam/whoami``
+     - Migrer ``ob-bastion-id`` vers ``POST /pam/whoami``
      - R-P6
      - Produit
      - P0
      - Équipe Open Bastion
      - ``À COMPLÉTER``
-     - **Livré, non publié** — PR `#248 <https://github.com/linagora/open-bastion/pull/248>`__, fusionnée dans ``main`` ; sera publiée avec ``0.7.0``
+     - **Livré** — PR `#248 <https://github.com/linagora/open-bastion/pull/248>`__, fusionnée dans ``main``
 
    * - **MT52**
      - Signer les six endpoints ``/pam/*`` côté client, pour rendre ``pamAccessRequestSigningMode = required`` déployable
@@ -402,7 +402,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P1
      - Équipe Open Bastion
      - ``À COMPLÉTER``
-     - **Livré, non publié** — `#247 <https://github.com/linagora/open-bastion/issues/247>`__ fermé par la PR `#252 <https://github.com/linagora/open-bastion/pull/252>`__, fusionnée dans ``main`` ; sera publiée avec ``0.7.0``. Le déploiement de ``required`` reste conditionné à la configuration du portail
+     - **Livré** — `#247 <https://github.com/linagora/open-bastion/issues/247>`__ fermé par la PR `#252 <https://github.com/linagora/open-bastion/pull/252>`__, fusionnée dans ``main``. Le déploiement de ``required`` reste conditionné à la configuration du portail
 
    * - **MT53**
      - Renseigner ``pamAccessAllowedRps`` et enrôler les bastions sous un ``client_id`` distinct du projet
@@ -411,11 +411,11 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P0
      - Administrateur LLNG
      - ``À COMPLÉTER``
-     - **Ouvert — prérequis de publication ``0.7.0``**, condition d'emploi CE21 bloquante ; une liste vide vaut « pas de changement », donc MT41 n'agit pas du tout tant qu'elle l'est
+     - **Ouvert — bloquant pour la mise en service**, condition d'emploi CE21 bloquante ; une liste vide vaut « pas de changement », donc MT41 n'agit pas du tout tant qu'elle l'est
 
 ..
 
-   **MT48 n'est pas une correction ponctuelle.** **Neuf** courses lecture-modification-écriture ont été identifiées sur des magasins qui n'offrent aucune atomicité : c'est un **motif**, pas neuf bogues. Les PR amont ``#87``, ``#88`` et ``#95`` ferment les courses recensées ; elles ne rendent pas le magasin atomique, et la mesure telle qu'elle est écrite ci-dessus n'est donc pas livrée par ``0.6.0``. Tant que le motif n'est pas traité à la racine, toute nouvelle écriture dans la session persistante doit être conçue idempotente et tolérante à l'écrasement.
+   **MT48 n'est pas une correction ponctuelle.** **Neuf** courses lecture-modification-écriture ont été identifiées sur des magasins qui n'offrent aucune atomicité : c'est un **motif**, pas neuf bogues. Les PR amont ``#87``, ``#88`` et ``#95`` ferment les courses recensées ; elles ne rendent pas le magasin atomique, et la mesure telle qu'elle est écrite ci-dessus n'est donc pas livrée. Tant que le motif n'est pas traité à la racine, toute nouvelle écriture dans la session persistante doit être conçue idempotente et tolérante à l'écrasement.
 
 .. _54-améliorations-planifiées-p2:
 
@@ -478,7 +478,7 @@ Le portail est **dans le périmètre** (:ref:`08, §1.1 <security-08-dossier-hom
      - P2
      - Équipe Open Bastion
      - ``À COMPLÉTER``
-     - **Livré, non publié** — ``#287``
+     - **Livré** — ``#287``
 
    * - **MT35**
      - Webhook de révocation LLNG → fermeture des sessions ouvertes

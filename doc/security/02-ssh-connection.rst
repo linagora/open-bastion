@@ -321,7 +321,7 @@ La KRL est le mécanisme de révocation immédiate des certificats. Elle est mai
 Binding fingerprint SSH sur ``/pam/authorize`` et ``/pam/verify`` (défense en profondeur)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Depuis le plugin PamAccess ≥ 0.1.16, le module PAM ``pam_openbastion`` transmet à LLNG l'empreinte SHA256 de la clef SSH utilisée pour la connexion, dans le corps des requêtes ``POST /pam/authorize`` (phase ``account``, à chaque connexion SSH) **et** ``POST /pam/verify`` (vérification d'un token PAM à usage unique pour sudo/ré-auth).
+Le module PAM ``pam_openbastion`` transmet à LLNG l'empreinte SHA256 de la clef SSH utilisée pour la connexion, dans le corps des requêtes ``POST /pam/authorize`` (phase ``account``, à chaque connexion SSH) **et** ``POST /pam/verify`` (vérification d'un token PAM à usage unique pour sudo/ré-auth).
 
 **Récupération de l'empreinte côté bastion.** OpenSSH moderne (≥ 9.x) ne propage pas ``SSH_USER_AUTH`` à l'environnement PAM pendant ``pam_acct_mgmt`` — ``ExposeAuthInfo yes`` ne suffit donc pas. Le bastion utilise un canal explicite :
 
@@ -391,7 +391,7 @@ Si l'une des conditions 2-4 n'est pas remplie :
      - **LLNG**
      - **Token volé à un utilisateur et rejoué depuis une autre clef SSH : l'empreinte ne correspond à aucun cert du ``sub`` du token**
 
-``ob-bastion-setup`` et ``ob-backend-setup`` déploient automatiquement ``ob-ssh-principals`` + le répertoire spool (mode ``0700``, propriétaire ``root`` depuis #249) + ``ob-fp.socket`` + un drop-in ``/etc/tmpfiles.d/`` pour recréation au boot. Côté LLNG, le champ ``fingerprint`` reste optionnel : un bastion à jour contre un portail antérieur à PamAccess 0.1.16 reste compatible (le portail ignore simplement le champ).
+``ob-bastion-setup`` et ``ob-backend-setup`` déploient automatiquement ``ob-ssh-principals`` + le répertoire spool (mode ``0700``, propriétaire ``root`` depuis #249) + ``ob-fp.socket`` + un drop-in ``/etc/tmpfiles.d/`` pour recréation au boot. Côté LLNG, le champ ``fingerprint`` reste optionnel : le portail ignore le champ si le plugin ne le connaît pas.
 
 --------------
 
@@ -433,7 +433,7 @@ R-S3 - Certificat SSH compromis
 
 - Révocation immédiate via LLNG ``/ssh/admin`` → KRL propagée en 30 min
 - Le serial permet d'identifier précisément le certificat compromis
-- **Binding fingerprint sur ``/pam/authorize`` (plugin PamAccess ≥ 0.1.16) :** à chaque connexion SSH, ``pam_openbastion`` envoie l'empreinte SHA256 de la clef utilisée, extraite de ``SSH_USER_AUTH``. LLNG refuse l'autorisation (donc l'ouverture de la session SSH, via la phase ``account`` de PAM) si l'empreinte n'est pas présente dans la session persistante de l'utilisateur (``_sshCerts``), ou si le certificat correspondant est révoqué ou expiré côté LLNG. Ce filet de défense en profondeur bloque la session même si un certificat révoqué a franchi ``sshd`` à cause d'une KRL obsolète ou manquante.
+- **Binding fingerprint sur ``/pam/authorize``  :** à chaque connexion SSH, ``pam_openbastion`` envoie l'empreinte SHA256 de la clef utilisée, extraite de ``SSH_USER_AUTH``. LLNG refuse l'autorisation (donc l'ouverture de la session SSH, via la phase ``account`` de PAM) si l'empreinte n'est pas présente dans la session persistante de l'utilisateur (``_sshCerts``), ou si le certificat correspondant est révoqué ou expiré côté LLNG. Ce filet de défense en profondeur bloque la session même si un certificat révoqué a franchi ``sshd`` à cause d'une KRL obsolète ou manquante.
 - **Binding fingerprint sur ``/pam/verify`` :** la même vérification est effectuée lors de toute utilisation d'un token PAM (sudo, ré-authentification), fermant l'escalade privilège dans la même logique.
 
 **Remédiation embarquée :**
@@ -846,9 +846,7 @@ R-S11 - Utilisation de clés SSH faibles ou obsolètes
 
 **Description :** Des utilisateurs peuvent générer des clés SSH utilisant des algorithmes cryptographiques faibles ou obsolètes (DSA, RSA-1024) et les faire signer par la CA LLNG.
 
-   **Correction d'une hypothèse de cette fiche.** Elle indiquait que « la politique de clés CA peut rejeter ces clés », le contrôle PAM n'étant qu'une défense en profondeur. C'était faux **dans la version publiée du plugin** (``v0.5.2`` et antérieures) : ``ssh-ca`` n'y applique aucune contrainte de type ni de taille, une clé RSA-1024 est signée sans objection. Le contrôle côté PAM n'y est donc pas une défense en profondeur, c'est **le seul contrôle**, et il doit être activé (``ssh_key_policy_enabled = true``), faute de quoi le risque reste à son niveau initial.
-
-   **L'amont a corrigé ce point** (``linagora/lemonldap-ng-plugins#61``, PR ``#78``) : ``sshCaMinKeyBits`` (2048 par défaut) et ``sshCaAllowedKeyTypes`` refusent RSA < 2048 bits et ``ssh-dss`` en 400, et acceptent au passage les clés FIDO2 ``sk-*`` jusque-là rejetées. Ce correctif est **mergé et non publié** : il sortira en ``0.6.0``. À partir de cette version, et **seulement** à partir d'elle, le contrôle PAM redevient ce que la fiche disait au départ — une défense en profondeur. Le score ci-dessous et la mesure restent donc calés sur la version déployable aujourd'hui. Voir :doc:`/security/09-portail-llng` pour le périmètre serveur.
+   **Le contrôle est côté PAM, pas côté CA.** ``ssh-ca`` n'applique aucune contrainte de type ni de taille : une clé RSA-1024 est signée sans objection. Le contrôle du module PAM n'est donc pas une défense en profondeur, c'est **le seul contrôle**, et il doit être activé (``ssh_key_policy_enabled = true``), faute de quoi le risque reste à son niveau initial. Voir :doc:`/security/09-portail-llng` pour le périmètre serveur.
 
 **Vecteurs d'attaque :**
 
@@ -1197,7 +1195,7 @@ R-S15 - Certificat 1 an compromis sans KRL à jour
 
 **Facteurs atténuants :**
 
-1. **Binding fingerprint sur ``/pam/authorize`` (plugin PamAccess ≥ 0.1.16) :** à la phase ``account`` de PAM (donc à l'ouverture de chaque connexion SSH), ``pam_openbastion`` transmet l'empreinte SHA256 de la clef SSH utilisée. LLNG refuse l'autorisation (et donc l'ouverture de la session) si :
+1. **Binding fingerprint sur ``/pam/authorize``  :** à la phase ``account`` de PAM (donc à l'ouverture de chaque connexion SSH), ``pam_openbastion`` transmet l'empreinte SHA256 de la clef SSH utilisée. LLNG refuse l'autorisation (et donc l'ouverture de la session) si :
 
    - l'empreinte n'apparaît pas dans la session persistante (``_sshCerts``) de l'utilisateur (clef inconnue de LLNG), **ou**
    - le certificat correspondant est marqué ``revoked_at`` (révocation côté LLNG), **ou**
@@ -1315,7 +1313,7 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 
    **Prérequis d'exploitation.** Le compte de secours et l'accès console ne sont fournis par aucun paquet : l'exploitant les met en place et les teste avant la mise en production. Seul ``PermitRootLogin no`` est posé par ``ob-bastion-setup``. Sans eux, les deux mesures ci-dessus n'existent pas et la cotation résiduelle de R-S17 ne tient pas.
 
-   **Compte de secours et élévation (#353).** Depuis la 0.7.0, Open Bastion ne crée plus un compte de service et ne gère plus son ``sudo`` : le compte doit exister dans ``/etc/passwd``, et son élévation, s'il en faut une, vient d'une règle ``sudoers`` ``NOPASSWD`` écrite par l'exploitant. Hors Mode E, cette règle suffit. **En Mode E, la pile ``sudo`` refuse tout compte local, comptes de service compris** : le compte de secours ouvre une session SSH pendant la panne, mais n'obtient pas ``root`` sans modification manuelle de ``/etc/pam.d/sudo``, qui renonce à la promesse du Mode E (toute élévation passe par le SSO) et relève de la décision de l'administrateur. Sans cette décision, ``root`` en Mode E vient de la console hors-bande.
+   **Compte de secours et élévation (#353).** Open Bastion ne crée pas le compte de service et ne gère pas son ``sudo`` : le compte doit exister dans ``/etc/passwd``, et son élévation, s'il en faut une, vient d'une règle ``sudoers`` ``NOPASSWD`` écrite par l'exploitant. Hors Mode E, cette règle suffit. **En Mode E, la pile ``sudo`` refuse tout compte local, comptes de service compris** : le compte de secours ouvre une session SSH pendant la panne, mais n'obtient pas ``root`` sans modification manuelle de ``/etc/pam.d/sudo``, qui renonce à la promesse du Mode E (toute élévation passe par le SSO) et relève de la décision de l'administrateur. Sans cette décision, ``root`` en Mode E vient de la console hors-bande.
 
    **Écarter la « clé SSH personnelle sur le bastion » comme filet.** Une réponse souvent proposée à ce risque est de laisser chaque administrateur déposer une clé SSH personnelle dans son ``~/.ssh`` sur le bastion, pour continuer à rebondir vers les backends pendant une panne du portail. **En Mode E, c'est impossible par construction** : les backends posent ``AuthorizedKeysFile none`` et n'acceptent qu'un certificat signé par la CA dont le key-id porte ``bastion=<id>;user=<u>`` — ``sshd`` refuse une clé nue avant même que PAM ne soit consulté, et ``ob-ssh`` ne peut pas aider puisque l'émission du certificat éphémère exige le portail.
 
@@ -1497,7 +1495,7 @@ R-S20 - Action différée hors session (at, cron, systemd-run timer)
 **Remédiation implémentée — Désactivation des planificateurs utilisateur (PR1 #112, opt-in via ``--enable-hardening``) :**
 
 - ``/etc/at.allow`` vide (root only) + ``systemctl mask atd`` : ``at(1)`` est désactivé pour les non-root et le démon ``atd`` ne tourne plus.
-- ``/etc/cron.allow`` root-only : ``crontab(1)`` refuse les non-root au moment de l'édition. ``cron.service`` n'est pas masqué : aucune tâche Open Bastion n'en dépend plus (le rafraîchissement de la KRL et la rotation d'audit sont des timers systemd depuis 0.7.0), mais d'autres tâches de l'hôte peuvent en dépendre. ``cron.allow`` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans ``/etc/cron.d/`` restent root-only par construction.
+- ``/etc/cron.allow`` root-only : ``crontab(1)`` refuse les non-root au moment de l'édition. ``cron.service`` n'est pas masqué : aucune tâche Open Bastion n'en dépend plus (le rafraîchissement de la KRL et la rotation d'audit sont des timers systemd), mais d'autres tâches de l'hôte peuvent en dépendre. ``cron.allow`` empêche les utilisateurs de soumettre leurs propres crontabs ; les fichiers déposés dans ``/etc/cron.d/`` restent root-only par construction.
 - Pre-flight bloquant : ``setup_hardening`` **refuse de s'exécuter** si un utilisateur non-root a ``Linger=yes``. L'administrateur doit faire ``loginctl disable-linger <user>`` avant. Cette protection ferme le canal ``systemd-run --user --on-active=...``.
 
 **Remédiation complémentaire — Trace primaire auditd (PR2 #113) :**
@@ -1716,7 +1714,7 @@ Après remédiation complète
 - **Conditions d'activation :** ces nouveaux risques (R-S19, R-S20, R-S21) ne sont mitigés à leur niveau résiduel **que si** le hardening (PR1) ET la trace auditd (PR2) sont activés via ``ob-bastion-setup --enable-hardening --enable-audit-trace``. En l'absence d'activation, ces risques restent en zone jaune (P=3, I=3 pour R-S19 ; P=2, I=3 pour R-S20 et R-S21). Voir :doc:`/hardening` et :doc:`/audit` (documentations techniques en anglais) pour les détails opérationnels.
 - R-S22 (certificat vouché réutilisé vers un autre backend) : **P=1, I=2** — ``target=`` non vérifié par ``ob-ssh-principals``, mais ``source-address`` impose le contrôle du bastion et l'allowlist par backend cloisonne les zones (piste : vérifier ``target=`` contre le FQDN local)
 - R-S23 (backend en mode hérité, ``allowed_bastions`` absent) : **P=1, I=3** — ``ob-backend-setup`` écrit toujours le fichier et ``ob-ssh-principals`` est fail-closed si illisible ; le risque résiduel ne concerne qu'un backend jamais configuré par le setup (piste : postinst écrivant un fichier vide par défaut)
-- R-S24 (sudo de compte de service hors token SSO) : **P=1, I=3** — depuis la 0.7.0 (#353), Open Bastion n'accorde plus aucun ``sudo`` à un compte de service : seule une règle ``sudoers`` de l'exploitant le fait, et en Mode E seulement après modification manuelle de la pile PAM ``sudo`` ; le score évalue ce cas, le risque n'existe pas sur un hôte sans une telle règle
+- R-S24 (sudo de compte de service hors token SSO) : **P=1, I=3** — Open Bastion n'accorde aucun ``sudo`` à un compte de service : seule une règle ``sudoers`` de l'exploitant le fait, et en Mode E seulement après modification manuelle de la pile PAM ``sudo`` ; le score évalue ce cas, le risque n'existe pas sur un hôte sans une telle règle
 - R-S25 (hop de compte de service via ProxyJump) : **P=1, I=2** — non enregistré par le ``ForceCommand`` (canal ``direct-tcpip``) ; à traiter par ``AllowTcpForwarding no`` ou par un accès direct aux cibles
 - Risques résiduels en zone jaune (PR1 et PR2 activées) : R-S4 et R-SA2 (P=1, I=4), R-SA1 (P=2, I=3), R-S6 (P=2, I=3), R-S8 (P=2, I=2)
 
@@ -1765,18 +1763,10 @@ Bastion et vouching par certificat éphémère
 
 - ☐ Plugin ``ssh-ca`` LLNG actif (``sshCaActivation=1``)
 
-- ☐ **``locationRules`` sur ``^/ssh/(admin|certs|revoke)(\?|/|$)`` déployée** sur le vhost du portail. Ce que ce contrôle recouvre dépend de la version du plugin, et les deux régimes
-  échouent en sens inverse :
-
-  - **≤ ``v0.5.2``** (versions publiées) : le plugin n'effectue **aucun** contrôle
-    d'autorisation sur ces routes ; la règle est le **seul** contrôle, et sans
-    elle tout utilisateur SSO authentifié liste tous les certificats émis et
-    **révoque ceux de n'importe qui** (panne SSH à l'échelle de l'organisation).
-  - **≥ ``0.6.0``** : ``sshCaAdminRule`` est le contrôle intégré, et il est
-    **fail-closed** — non défini, les trois routes répondent 403 y compris aux
-    utilisateurs que la ``locationRules`` admettrait. Vérifier alors **les
-    deux** : ``sshCaAdminRule`` renseigné (sinon personne n'administre, pas même
-    en incident), et la ``locationRules`` conservée en défense en profondeur.
+- ☐ **``locationRules`` sur ``^/ssh/(admin|certs|revoke)(\?|/|$)`` déployée** sur le vhost du portail : le plugin ne protège pas ces routes — la ``locationRules`` est le **seul**
+  contrôle, et sans elle tout utilisateur SSO authentifié liste tous les
+  certificats émis et **révoque ceux de n'importe qui** (panne SSH à l'échelle
+  de l'organisation).
 
   Attention à ne pas écrire ``^/ssh/revoke`` seul : cela capture aussi
   ``/ssh/revoked``, la KRL **publique** que chaque backend télécharge. Cela ne
@@ -1830,7 +1820,7 @@ Tests de validation
 Description
 ~~~~~~~~~~~
 
-La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.reference`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : tant que les plugins ne sont pas en ``0.6.0``, c'est le **seul** contrôle qui refuse une clé faible (voir la correction d'hypothèse de R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique à la clé que l'utilisateur présente à la connexion — le type
+La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.reference`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : c'est le **seul** contrôle qui refuse une clé faible (voir R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique à la clé que l'utilisateur présente à la connexion — le type
 et le blob relevés par ``ob-ssh-principals`` —, jamais à la clé de la CA
 elle-même, que le module ne voit pas.
 
@@ -1950,7 +1940,7 @@ Ce comportement est intentionnel : l'escalade de privilèges requiert toujours u
 Description
 ~~~~~~~~~~~
 
-Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comptes techniques qui s'authentifient uniquement par clé SSH, **sans passer par LLNG**. Depuis la 0.7.0 (#353), ce sont des **comptes Unix locaux créés par l'exploitant** (``useradd``) : le SSO ne les connaît pas, et le rôle d'Open Bastion s'arrête là où le SSO n'intervient pas.
+Les comptes de service (ansible, backup, monitoring, deploy, etc.) sont des comptes techniques qui s'authentifient uniquement par clé SSH, **sans passer par LLNG**. Ce sont des **comptes Unix locaux créés par l'exploitant** (``useradd``) : le SSO ne les connaît pas, et le rôle d'Open Bastion s'arrête là où le SSO n'intervient pas.
 
 Open Bastion fournit :
 
@@ -2002,7 +1992,7 @@ Configuration
    [backup]
    key_fingerprint = SHA256:xyz789...
 
-Seuls le nom de section et ``key_fingerprint`` sont lus. Les clés ``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed`` et ``sudo_nopasswd`` des versions antérieures sont ignorées avec un avertissement, sans refus : une mise à jour ne verrouille personne.
+Seuls le nom de section et ``key_fingerprint`` sont lus. Les clés ``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed`` et ``sudo_nopasswd`` sont ignorées avec un avertissement, sans refus : une mise à jour ne verrouille personne.
 
 Flux d'authentification
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -2065,7 +2055,7 @@ Sécurité
      - Non géré par Open Bastion (``PAM_IGNORE``) ; règle ``sudoers`` de l'exploitant
 
    * - **Shells / home autorisés**
-     - Ne s'appliquent plus aux comptes de service (``approved_shells``, ``approved_home_prefixes``)
+     - Ne s'appliquent pas aux comptes de service (``approved_shells``, ``approved_home_prefixes``)
 
    * - **Noms de compte**
      - Validation stricte (lowercase, max 32 chars)
@@ -2111,7 +2101,7 @@ R-SA2 - Compromission du fichier de configuration
 **Impact**      4
 =============== =====
 
-**Description :** Si un attaquant peut modifier ``/etc/open-bastion/service-accounts.conf`` et ``service-accounts.d/``, il peut exempter du SSO un compte local de son choix et lui donner une clé. Depuis la 0.7.0, le fichier n'accorde plus de ``sudo`` ni ne crée de compte : l'élévation passe par ``/etc/sudoers.d/`` et le compte par ``/etc/passwd``, qu'il faut alors aussi modifier. Ces écritures demandent root ; la gravité reste celle d'un accès privilégié persistant hors SSO.
+**Description :** Si un attaquant peut modifier ``/etc/open-bastion/service-accounts.conf`` et ``service-accounts.d/``, il peut exempter du SSO un compte local de son choix et lui donner une clé. Le fichier n'accorde aucun ``sudo`` et ne crée aucun compte : l'élévation passe par ``/etc/sudoers.d/`` et le compte par ``/etc/passwd``, qu'il faut alors aussi modifier. Ces écritures demandent root ; la gravité reste celle d'un accès privilégié persistant hors SSO.
 
 **Remédiation embarquée :**
 
@@ -2142,19 +2132,19 @@ R-S24 - Sudo de compte de service hors token SSO
 **Impact**      4
 =============== =====
 
-**Description :** Un compte de service n'a pas de token SSO : s'il élève ses privilèges, c'est **sans aucun appel LLNG**. Jusqu'à la 0.7.0, ce droit venait de ``service-accounts.conf`` (``sudo_allowed`` / ``sudo_nopasswd``) et ``pam_openbastion`` l'accordait localement, y compris en Mode E. **Depuis la 0.7.0 (#353), Open Bastion n'accorde plus aucun sudo à un compte de service** : ces clés sont ignorées, le module renvoie ``PAM_IGNORE`` dans les services ``sudo`` et ``sudo-i`` et ne touche plus au groupe ``open-bastion-sudo``. Le risque ne subsiste que là où l'exploitant écrit une règle ``sudoers`` ``NOPASSWD`` pour le compte — et, en Mode E, modifie aussi à la main la pile PAM ``sudo``, qui refuse sinon tout compte local. Une clé de service ainsi dotée reste un privilège local permanent qui échappe à la porte sudo gouvernée par le SSO ; en Mode E, cette modification renonce explicitement à la promesse que toute élévation passe par le SSO. Les scores ci-dessous évaluent ce cas ; sur un hôte sans une telle règle, le risque n'existe pas.
+**Description :** Un compte de service n'a pas de token SSO : s'il élève ses privilèges, c'est **sans aucun appel LLNG**. Open Bastion n'accorde aucun ``sudo`` à un compte de service : ces clés sont ignorées, le module renvoie ``PAM_IGNORE`` dans les services ``sudo`` et ``sudo-i`` et ne touche pas au groupe ``open-bastion-sudo``. Le risque ne subsiste que là où l'exploitant écrit une règle ``sudoers`` ``NOPASSWD`` pour le compte — et, en Mode E, modifie aussi à la main la pile PAM ``sudo``, qui refuse sinon tout compte local. Une clé de service ainsi dotée reste un privilège local permanent qui échappe à la porte sudo gouvernée par le SSO ; en Mode E, cette modification renonce explicitement à la promesse que toute élévation passe par le SSO. Les scores ci-dessous évaluent ce cas ; sur un hôte sans une telle règle, le risque n'existe pas.
 
 **Vecteurs d'attaque :**
 
 - Vol de la clé privée d'un compte de service disposant d'une règle ``sudoers``
 - Réutilisation d'une clé d'automatisation exposée dans un dépôt, un artefact CI ou une sauvegarde
 - Prestataire ou outil sorti du périmètre sans retrait de sa clé
-- Appartenance résiduelle à ``open-bastion-sudo`` héritée d'une version antérieure (laissée en place par la mise à jour, sans effet seule : la règle de ce groupe exige une authentification que le compte ne peut fournir)
+- Appartenance résiduelle à ``open-bastion-sudo`` (sans effet seule : la règle de ce groupe exige une authentification que le compte ne peut fournir)
 
 **Facteurs atténuants structurels :**
 
 - Le fichier et les clés sont locaux à chaque serveur : la portée d'une clé est bornée aux serveurs qui la déclarent
-- ``service-accounts.conf`` est root:root 0600, refusé s'il est un lien symbolique (``O_NOFOLLOW``) ; il n'accorde plus rien
+- ``service-accounts.conf`` est root:root 0600, refusé s'il est un lien symbolique (``O_NOFOLLOW``) ; il n'accorde rien
 - Aucun ``sudo`` par défaut : il faut une règle ``sudoers`` explicite, qui décide aussi *quelles* commandes
 - En Mode E, la pile ``sudo`` livrée refuse tout compte local ; l'élévation d'un compte de service exige une modification manuelle, visible à l'audit, et effacée par un nouveau passage du setup
 

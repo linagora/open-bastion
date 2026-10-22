@@ -299,18 +299,18 @@ Les scores résiduels de l'atelier 4 **supposent** ces conditions. Le produit ne
    * - **CE20**
      - ``ssh_key_policy_enabled = true`` sur les hôtes en cible de sécurité maximale
      - R-S11
-     - Le défaut du code est ``false`` (``src/config.c``) ; tant que les plugins ne sont pas en ``0.6.0``, ``ssh-ca`` n'applique aucune contrainte de type ni de taille et ce réglage est le seul contrôle qui refuse RSA < 2048 ou ``ssh-dss``
+     - Le défaut du code est ``false`` (``src/config.c``) ; ``ssh-ca`` n'applique aucune contrainte de type ni de taille et ce réglage est le seul contrôle qui refuse RSA < 2048 ou ``ssh-dss``
      - ``À COMPLÉTER``
 
    * - **CE21**
      - ``pamAccessAllowedRps`` renseigné, bastions enrôlés sous un ``client_id`` distinct — **bloquante**
      - R-P1
-     - Manager LLNG : la liste n'est pas vide. Une liste vide vaut « pas de changement » (compatibilité de montée de version), donc la liaison d'audience amont n'agit pas du tout tant qu'elle l'est
+     - Manager LLNG : la liste n'est pas vide. Une liste vide vaut « pas de changement », donc la liaison d'audience amont n'agit pas du tout tant qu'elle l'est
      - ``À COMPLÉTER``
 
-**Quatre de ces conditions sont bloquantes pour la publication de ``0.7.0``.** CE03, CE06, CE16 et CE21 traitent le même risque, R-P1 : tant que ``pamAccessServerGroups`` est vide, le ``server_group`` est lu dans le corps de la requête, et **tout hôte enrôlé du projet qui est compromis peut se déclarer bastion** et obtenir un voucher de rebond pour un utilisateur. C'est le comportement **par défaut** du produit tel qu'il est livré, et :doc:`/security/00-architecture` recommande précisément la configuration multi-groupes dans laquelle il se manifeste.
+**Quatre de ces conditions sont bloquantes.** CE03, CE06, CE16 et CE21 traitent le même risque, R-P1 : tant que ``pamAccessServerGroups`` est vide, le ``server_group`` est lu dans le corps de la requête, et **tout hôte enrôlé du projet qui est compromis peut se déclarer bastion** et obtenir un voucher de rebond pour un utilisateur. C'est le comportement **par défaut** du produit tel qu'il est livré, et :doc:`/security/00-architecture` recommande précisément la configuration multi-groupes dans laquelle il se manifeste.
 
-Deux positions étaient tenables : en faire un prérequis, ou l'accepter comme risque résiduel signé. La seconde a été écartée — un défaut livré qui contredit la configuration recommandée par l'architecture n'est pas un résiduel, c'est une condition de mise en service. ``0.7.0`` ne se déploie donc pas sans elles, et elles ne sont pas rattrapables après coup : un hôte compromis pendant la fenêtre a déjà obtenu ses vouchers.
+Deux positions étaient tenables : en faire un prérequis, ou l'accepter comme risque résiduel signé. La seconde a été écartée — un défaut livré qui contredit la configuration recommandée par l'architecture n'est pas un résiduel, c'est une condition de mise en service. Le produit ne se déploie donc pas sans elles, et elles ne sont pas rattrapables après coup : un hôte compromis pendant la fenêtre a déjà obtenu ses vouchers.
 
 Le produit ne peut ni les poser ni les vérifier. ``pamAccessServerGroups`` et ``pamAccessAllowedRps`` sont des réglages du Manager LLNG, et interroger le portail sur leur état supposerait une API qui publierait les bastions, les groupes de serveurs et les RP du projet — ce qu'un SSO n'a pas à offrir. La seule application possible est donc déclarative, et elle est en place : ``ob-bastion-setup``, ``ob-backend-setup``, ``ob-desktop-setup`` et ``ob-post-upgrade`` impriment la consigne à chaque exécution, et ``ob-builder`` écrit à côté de chaque artefact une ``PORTAL-CHECKLIST.md`` pré-remplie avec le ``client_id`` et le ``server_group`` de ce déploiement (``tests/test_ob_portal_prerequisites.sh``).
 
@@ -323,12 +323,12 @@ Le produit ne peut ni les poser ni les vérifier. ``pamAccessServerGroups`` et `
 
 Cinq risques sont en **zone orange** (score 6) après traitement et requièrent une acceptation formelle. Les sept risques en zone jaune sont listés pour information ; les 35 risques en zone verte relèvent de la surveillance ordinaire.
 
-Deux des cinq — R-P3 et R-P7 — dépendent d'un correctif **amont** : les accepter, c'est accepter un délai hors du contrôle direct du projet. Ce délai n'est plus indéterminé : au 6 septembre 2026, les **quinze** tickets amont référencés par les fiches du portail sont tous fermés et mergés (inventaire ticket par ticket en :ref:`09, état des correctifs amont <security-09-portail-llng-matrice-des-risques-du-portail>`). Aucun n'est **publié** : la dernière version étiquetée est ``v0.5.2`` et ils sortiront en ``0.6.0``. Le résiduel ne change donc pas.
+Deux des cinq — R-P3 et R-P7 — dépendent d'un correctif **amont** : les accepter, c'est accepter un délai hors du contrôle direct du projet. Ce délai n'est plus indéterminé : au 6 septembre 2026, les **quinze** tickets amont référencés par les fiches du portail sont tous fermés et mergés (inventaire ticket par ticket en :ref:`09, état des correctifs amont <security-09-portail-llng-matrice-des-risques-du-portail>`). Le résiduel ne change pas.
 
 Ce que devient l'acceptation n'est en revanche **pas le même pour les deux risques**, et le dossier ne doit pas les confondre :
 
-- **R-P3** — l'acceptation porte sur un **délai de publication seul**. La cause (écriture non atomique de la KRL) est traitée en amont par la PR ``#77`` ; à la publication de ``0.6.0``, avec CE18 côté client, le risque sort de la zone orange. C'est la version la plus faible de cette acceptation et la plus facile à assumer.
-- **R-P7** — l'acceptation porte sur **davantage qu'un délai**. Les PR ``#87``, ``#88`` et ``#95`` ferment les neuf courses recensées, mais la mesure MT48 telle qu'elle est écrite — verrouillage réel du magasin de sessions, ou mises à jour par champ avec comparaison-et-échange — n'est livrée par aucune d'elles, et la fiche R-P7 le dit explicitement : « les correctifs suppriment des courses identifiées, ils ne rendent pas le magasin atomique ». Le statut orange de R-P7 **survit donc à la publication de ``0.6.0``**. MT52, la part produit, est livrée depuis (``open-bastion#247``, fermé par la PR ``#252``, à publier avec ``0.7.0``) ; ce qui reste est un travail de conception **amont** sur le magasin de sessions, et c'est lui qui maintient le statut orange.
+- **R-P3** — l'acceptation porte sur un **correctif amont seul**. La cause (écriture non atomique de la KRL) est traitée en amont par la PR ``#77`` ; CE18 durcit le contrôle côté client sans supprimer la cause. C'est la version la plus faible de cette acceptation et la plus facile à assumer.
+- **R-P7** — l'acceptation porte sur **davantage qu'un délai**. Les PR ``#87``, ``#88`` et ``#95`` ferment les neuf courses recensées, mais la mesure MT48 telle qu'elle est écrite — verrouillage réel du magasin de sessions, ou mises à jour par champ avec comparaison-et-échange — n'est livrée par aucune d'elles, et la fiche R-P7 le dit explicitement : « les correctifs suppriment des courses identifiées, ils ne rendent pas le magasin atomique ». Le statut orange de R-P7 reste donc acquis. MT52, la part produit, est livrée depuis (``open-bastion#247``, fermé par la PR ``#252``) ; ce qui reste est un travail de conception **amont** sur le magasin de sessions, et c'est lui qui maintient le statut orange.
 
 L'autorité d'homologation signe donc, pour R-P7, l'acceptation d'un motif connu et non refermé — pas celle d'une simple attente de version.
 
@@ -376,7 +376,7 @@ L'autorité d'homologation signe donc, pour R-P7, l'acceptation d'un motif connu
    * - **R-P3**
      - Corruption de la KRL, indisponibilité flotte
      - P=2, I=3
-     - Le correctif est **amont** (écriture atomique de la KRL) : mergé, non publié ; CE18 durcit le contrôle côté client sans supprimer la cause
+     - Le correctif est **amont** (écriture atomique de la KRL) : CE18 durcit le contrôle côté client sans supprimer la cause
      - ``À COMPLÉTER``
      - ``À COMPLÉTER``
      - ``À COMPLÉTER``
@@ -384,7 +384,7 @@ L'autorité d'homologation signe donc, pour R-P7, l'acceptation d'un motif connu
    * - **R-P7**
      - Concurrence sur le magasin de sessions
      - P=2, I=3
-     - Défaut **systémique** amont (ni verrou ni comparaison-et-échange) : neuf courses identifiées, correctifs partiels mergés (``#87``, ``#88``, ``#95``), aucun publié ; le motif survit à ``0.6.0`` (voir le préambule du §3)
+     - Défaut **systémique** amont (ni verrou ni comparaison-et-échange) : neuf courses identifiées, correctifs partiels mergés (``#87``, ``#88``, ``#95``) ; le motif n'est pas traité à la racine (voir le préambule du §3)
      - ``À COMPLÉTER``
      - ``À COMPLÉTER``
      - ``À COMPLÉTER``

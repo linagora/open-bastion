@@ -159,7 +159,7 @@ Le plugin SSH CA de LLNG fournit une interface d'administration pour révoquer l
 
 ..
 
-   **Note** : L'accès à l'interface d'administration dépend de la version du plugin. Avant ``0.6.0``, le plugin n'effectue **aucun** contrôle d'autorisation sur ces routes : seule une ``locationRules`` sur ``^/ssh/(admin|certs|revoke)(\\?|/|$)`` les protège. À partir de ``0.6.0``, ``sshCaAdminRule`` les refuse par défaut (403) tant qu'il n'est pas renseigné, et la ``locationRules`` reste utile en défense en profondeur. Voir R-P2 en :doc:`/security/09-portail-llng` et la condition d'emploi CE02 en :doc:`/security/08-dossier-homologation`.
+   **Note** : le plugin ne contrôle pas l'accès à ces routes ; seule une ``locationRules`` les protège. Voir R-P2 en :doc:`/security/09-portail-llng` et la condition d'emploi CE02 en :doc:`/security/08-dossier-homologation`.
 
 **Option 2 : Révocation manuelle via KRL**
 
