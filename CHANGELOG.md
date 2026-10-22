@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
+  line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
+
 ## [0.7.0] _(2026-10-20)_
 
 Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before deploying: every host needs

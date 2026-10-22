@@ -6,7 +6,8 @@
 # License: AGPL-3.0
 #
 # Never (re-)enrols -- a new device id is in no backend allowlist -- and never
-# edits a file carrying a decision (conf, token, sshd_config, PAM).
+# edits a file carrying a decision (conf, token, sshd_config, PAM). The one sshd
+# edit is mechanical: %t %k on its own drop-in's AuthorizedPrincipalsCommand.
 
 set -euo pipefail
 
@@ -60,6 +61,10 @@ and audit rotation cron jobs of 0.6 with their systemd timers.
 Takes no configuration and asks no questions. It does not enrol, does not
 re-enrol, and does not modify openbastion.conf, the server token, sshd_config
 or any PAM stack -- so it is safe to run at any time, as often as you like.
+
+In an Open Bastion sshd drop-in written before 0.7.0, it adds %t %k to the
+AuthorizedPrincipalsCommand line (checked with sshd -t, then sshd is
+reloaded). Any other stale line stops it, with what to do.
 
 On a host that records sessions, it also makes /usr/sbin/ob-login-shell the
 login shell of SSO users (force_shell in nss_openbastion.conf) if it is not
@@ -126,17 +131,43 @@ detect_role() {
     esac
 }
 
-# Refuse, never edit sshd_config: the v1 helper under a line without %t %k
-# would lock out key-policy hosts and silence the postinst warning.
+APC_RE='^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]]'
+SSHD_FIX=()
+
+# A drop-in line exactly as a pre-0.7.0 setup wrote it, for that drop-in's
+# role, is fixed; any other stale line is refused, never guessed at.
+fixable_sshd_line() {
+    local f="$1" want
+    case "$f" in
+        *-open-bastion-backend.conf) want='%u[[:space:]]+%f[[:space:]]+%i' ;;
+        *-open-bastion-bastion.conf) want='%u[[:space:]]+%f' ;;
+        *) return 1 ;;
+    esac
+    [ "$(grep -cE "$APC_RE" "$f")" = 1 ] \
+        && grep -qE "${APC_RE}[[:space:]]*[^[:space:]]*/ob-ssh-principals[[:space:]]+${want}[[:space:]]*\$" "$f"
+}
+
 check_sshd_tokens() {
     local f found="" bad=""
     for f in "$SSHD_CONFIG_DIR"/*-open-bastion-*.conf; do
         [ -f "$f" ] || continue
-        grep -q '^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]]' "$f" || continue
+        grep -qE "$APC_RE" "$f" || continue
         found=yes
-        grep -E '^[[:space:]]*AuthorizedPrincipalsCommand[[:space:]].*%t([[:space:]]|$)' "$f" \
-            | grep -q '%k' || bad="$bad $f"
+        grep -E "${APC_RE}.*%t([[:space:]]|\$)" "$f" | grep -q '%k' && continue
+        if fixable_sshd_line "$f"; then
+            SSHD_FIX+=("$f")
+        else
+            bad="$bad $f"
+        fi
     done
+    # Without sshd_config.d the setup appended its block to sshd_config, which
+    # this command does not edit.
+    if [ -z "$found" ] \
+       && grep -qE "${APC_RE}.*ob-ssh-principals" "$SSHD_MAIN_CONFIG" 2>/dev/null; then
+        found=yes
+        grep -E "${APC_RE}.*%t([[:space:]]|\$)" "$SSHD_MAIN_CONFIG" | grep -q '%k' \
+            || bad="$bad $SSHD_MAIN_CONFIG"
+    fi
 
     if [ -z "$found" ]; then
         warn "No AuthorizedPrincipalsCommand found under $SSHD_CONFIG_DIR/."
@@ -145,7 +176,10 @@ check_sshd_tokens() {
         warn "binding will not work. Nothing here can fix that."
         return 0
     fi
-    [ -z "$bad" ] && { ok "sshd passes the key type and blob to the helper"; return 0; }
+    if [ -z "$bad" ]; then
+        [ "${#SSHD_FIX[@]}" -gt 0 ] || ok "sshd passes the key type and blob to the helper"
+        return 0
+    fi
 
     error "sshd still calls the principals helper without %t and %k:"
     for f in $bad; do error "    $f"; done
@@ -155,13 +189,87 @@ check_sshd_tokens() {
     error "ssh_key_policy_enabled = true the PAM module denies every SSH login"
     error "fail-closed rather than authorize a key it cannot identify."
     error ""
-    error "This command does not edit sshd_config. Re-run the setup script for"
+    error "This command only adds them to a line it recognises in an Open Bastion"
+    error "drop-in, and does not recognise this one. Re-run the setup script for"
     error "this host, which rewrites the line:"
     error "    ob-bastion-setup     (bastion)"
     error "    ob-backend-setup     (backend)"
     error "or add '%t %k' to the AuthorizedPrincipalsCommand line yourself and"
     error "reload sshd."
     return 1
+}
+
+reload_sshd() {
+    local svc
+    command -v systemctl >/dev/null 2>&1 || return 1
+    for svc in ssh sshd; do
+        systemctl is-active --quiet "$svc" 2>/dev/null || continue
+        systemctl reload "$svc" >/dev/null 2>&1 || return 1
+        info "reloaded $svc.service (existing sessions are kept)"
+        return 0
+    done
+    info "no active ssh/sshd service: sshd reads the new line when it starts"
+}
+
+# Before the v1 helper, and reloaded at once: the old helpers read only $1..$3
+# and ignore the extra tokens, while the v1 helper under the old line writes
+# no .key drop. Every intermediate state keeps logins working.
+fix_sshd_tokens() {
+    local f tmp out line stamp failed=""
+    local -a fixed=()
+    [ "${#SSHD_FIX[@]}" -gt 0 ] || return 0
+    if [ "$DRY_RUN" = "true" ]; then
+        for f in "${SSHD_FIX[@]}"; do
+            info "would add %t %k to the AuthorizedPrincipalsCommand line of $f and reload sshd"
+        done
+        return 0
+    fi
+    if ! command -v sshd >/dev/null 2>&1; then
+        error "sshd not found: cannot validate adding %t %k. Nothing was changed."
+        return 1
+    fi
+
+    stamp=$(date +%Y%m%d%H%M%S)
+    for f in "${SSHD_FIX[@]}"; do
+        tmp=""
+        if cp -p "$f" "$f.bak-$stamp" \
+           && tmp=$(mktemp "$f.XXXXXX") \
+           && sed -E "/${APC_RE}/ s/[[:space:]]*\$/ %t %k/" "$f" > "$tmp" \
+           && chown --reference="$f" "$tmp" && chmod --reference="$f" "$tmp" \
+           && mv -f "$tmp" "$f"; then
+            fixed+=("$f")
+            if command -v restorecon >/dev/null 2>&1; then
+                restorecon "$f" 2>/dev/null || true
+            fi
+        else
+            [ -n "$tmp" ] && rm -f "$tmp"
+            rm -f "$f.bak-$stamp"
+            error "Could not rewrite $f"
+            failed=yes
+            break
+        fi
+    done
+    if [ -z "$failed" ] && ! out=$(sshd -t 2>&1); then
+        error "sshd rejects its configuration once %t %k are added:"
+        while IFS= read -r line; do error "    $line"; done <<< "$out"
+        failed=yes
+    fi
+    if [ -n "$failed" ]; then
+        for f in "${fixed[@]}"; do
+            mv -f "$f.bak-$stamp" "$f" || error "Could not restore $f from $f.bak-$stamp"
+        done
+        error "The sshd files are back as they were. Nothing else was changed."
+        return 1
+    fi
+
+    for f in "${fixed[@]}"; do
+        act "added %t %k to the AuthorizedPrincipalsCommand line of $f (backup: $f.bak-$stamp)"
+    done
+    if ! reload_sshd; then
+        error "Could not reload sshd: it still runs the old line. Reload it"
+        error "(systemctl reload ssh), then run $PROG_NAME again."
+        return 1
+    fi
 }
 
 if [ ! -r "$CONFIG_FILE" ]; then
@@ -187,8 +295,9 @@ echo "Open Bastion post-upgrade repair — role: $ROLE"
 [ "$DRY_RUN" = "true" ] && info "dry run: nothing will be changed"
 echo
 
-# First: it is the one thing this command cannot repair.
+# First: a stale line it cannot fix must stop it before the v1 helper.
 check_sshd_tokens || exit 1
+fix_sshd_tokens || exit 1
 
 # Before the helper: the new one deposits only into the socket, so a failed
 # enable after the swap would lose the binding the old helper still provided.
@@ -213,7 +322,7 @@ else
     error "fingerprint_required = true, or against a portal with"
     error "pamAccessRequireFingerprint, those logins are refused instead."
     error ""
-    error "Nothing was changed. The host keeps the binding it had."
+    error "The helper was not replaced: the host keeps the binding it had."
     exit 1
 fi
 

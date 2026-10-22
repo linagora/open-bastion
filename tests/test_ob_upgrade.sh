@@ -106,8 +106,9 @@ chown -R nobody:nogroup /run/open-bastion/ssh-fp
 chmod 0700 /run/open-bastion/ssh-fp
 sha256sum /etc/open-bastion/openbastion.conf > /tmp/conf.sha
 # A recording bastion (#293): the ForceCommand in its drop-in (only that line:
-# the old AuthorizedPrincipalsCommand would make ob-post-upgrade stop), and the
-# NSS configuration v0.6.2 wrote, which hands SSO users bash.
+# fixing the old AuthorizedPrincipalsCommand needs sshd -t and a reload, and is
+# tested in test_ob_post_upgrade.sh), and the NSS configuration v0.6.2 wrote,
+# which hands SSO users bash.
 mkdir -p /etc/ssh/sshd_config.d
 printf 'ForceCommand /usr/sbin/ob-session-recorder\n' \
     > /etc/ssh/sshd_config.d/00-open-bastion-bastion.conf

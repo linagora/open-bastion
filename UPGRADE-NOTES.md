@@ -44,6 +44,12 @@ touch `openbastion.conf`, the server token, `sshd_config` or PAM stacks.
 On a bastion that records sessions it also changes the login shell of SSO users:
 see [A7](#a7-sso-users-log-in-through-ob-login-shell-on-a-recording-host).
 
+In the setup's sshd drop-in it adds `%t %k` to the `AuthorizedPrincipalsCommand`
+line (`%u %f` → `%u %f %t %k`, backend `%u %f %i` → `%u %f %i %t %k`), keeps a
+`.bak-<timestamp>` copy, checks the result with `sshd -t` and reloads sshd. A
+line of any other shape, or one in `sshd_config` itself, stops it: re-run the
+setup script, or add `%t %k` by hand and reload sshd.
+
 If it cannot enable `ob-fp.socket` it stops and says so: logins would have no
 fingerprint binding, and would be refused with `fingerprint_required = true` or
 a portal enforcing `pamAccessRequireFingerprint`.
