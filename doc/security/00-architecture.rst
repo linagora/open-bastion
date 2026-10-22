@@ -1,7 +1,7 @@
-Architecture de Sécurité
+Architecture de sécurité
 ========================
 
-Cible de Sécurité
+Cible de sécurité
 -----------------
 
 Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open Bastion (Mode E) :
@@ -60,7 +60,7 @@ Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open 
 
 D'autres architectures moins restrictives sont possibles (serveur isolé, sans CA, sans bastion), mais cette étude se concentre sur la configuration offrant le meilleur profil de risque.
 
-Flux d'Authentification
+Flux d'authentification
 -----------------------
 
 .. mermaid::
@@ -81,7 +81,7 @@ Flux d'Authentification
 3. Le token est consommé *(usage unique)* et ne peut pas être rejoué
 4. Le serveur retourne les attributs utilisateur et le statut d'autorisation
 
-Sécurité du Transport
+Sécurité du transport
 ---------------------
 
 Configuration TLS
@@ -120,7 +120,7 @@ terminateur TLS 1.3.
    # Exemple de configuration
    cert_pin = sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 
-Signature des Requêtes (Optionnel)
+Signature des requêtes (optionnel)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Lorsque ``request_signing_secret`` est configuré, les requêtes incluent :
@@ -143,12 +143,12 @@ Tous les appelants signent : le module PAM (``/pam/verify``, ``/pam/authorize``,
 
 Les appelants shell signent via ``ob-sign-request``, jamais via ``openssl dgst -sha256 -hmac "$secret"``. OpenSSL prend la clé HMAC sur la ligne de commande et n'offre aucune forme qui la lise depuis un fichier ou l'environnement ; ``/proc/<pid>/cmdline`` est lisible par tous, donc sur un bastion ce one-liner livrerait le secret de signature de toute la flotte à chaque utilisateur ayant un shell, toutes les quelques minutes, indéfiniment. ``ob-sign-request`` lit le secret dans le fichier de configuration réservé à root et prend le corps sur stdin — ce qui compte aussi, puisque ``ob-heartbeat`` signe un corps contenant le ``refresh_token`` de l'hôte.
 
-Réponses Signées (Optionnel)
+Réponses signées (optionnel)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Sans ``response_signing``, les réponses du portail ne reposent que sur TLS : qui termine ou usurpe TLS peut forger un ``authorized: true`` ou les attributs d'un utilisateur. Avec ``response_signing`` (``off``, ``prefer`` ou ``required``), les réponses de ``/pam/authorize``, ``/pam/verify``, ``/pam/heartbeat`` (module PAM) et ``/pam/userinfo`` (module NSS) sont des JWS vérifiées contre un JWKS local (``sso_jwks_file``, fichier de confiance appartenant à root), liées au nonce et au corps de la requête. Une réponse refusée est traitée comme une erreur de transport (règles du mode hors-ligne). Le JWKS doit être déployé à la main dans cette version ; la distribution automatique viendra plus tard. Voir la :doc:`référence de sécurité </references/security-reference>` (« Signed answers »).
 
-Authentification du Serveur
+Authentification du serveur
 ---------------------------
 
 Le module PAM s'authentifie auprès du serveur LLNG en utilisant :
@@ -171,7 +171,7 @@ Le module PAM s'authentifie auprès du serveur LLNG en utilisant :
 
 Le token serveur doit être stocké dans un fichier avec des permissions restreintes (0600) appartenant à root.
 
-Authentification Client OAuth2
+Authentification client OAuth2
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pour les opérations d'introspection et de rafraîchissement de tokens OAuth2, le module utilise **JWT Client Assertion** (RFC 7523) plutôt que l'authentification HTTP Basic. Cela offre une sécurité renforcée :
@@ -181,12 +181,12 @@ Pour les opérations d'introspection et de rafraîchissement de tokens OAuth2, l
 - Le JWT contient : ``iss``, ``sub``, ``aud``, ``exp``, ``iat``, et un ``jti`` unique (UUID v4)
 - La validité du JWT est de 5 minutes pour éviter les attaques par rejeu
 
-Rotation Automatique des Tokens
+Rotation automatique des tokens
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Lorsque ``token_rotate_refresh = true`` (défaut), le module fait automatiquement tourner le token de rafraîchissement après chaque rafraîchissement de token réussi. Cela limite la fenêtre d'opportunité si un token est compromis, car les tokens volés deviennent invalides après la prochaine utilisation légitime.
 
-Authentification Bastion vers Backend (vouching par certificat éphémère)
+Authentification bastion vers backend (vouching par certificat éphémère)
 ------------------------------------------------------------------------
 
 Dans les architectures bastion/backend, le mécanisme de vouching par certificat garantit cryptographiquement que les connexions SSH vers les backends proviennent d'un bastion autorisé ayant réellement authentifié l'utilisateur.
@@ -236,7 +236,7 @@ Flux détaillé
 2. Sur le bastion, ``ob-ssh [user@]backend`` : a. génère une paire de clés éphémère **ed25519** en tmpfs (clé privée ne quitte jamais le bastion) ; b. appelle ``ob-cert-request`` (non privilégié), qui se connecte au socket Unix ``/run/open-bastion/cert.sock`` servi par ``ob-cert-daemon`` (root, socket-activé). Le daemon dérive l'utilisateur via ``SO_PEERCRED`` (vérifié par le noyau, jamais depuis le corps de la requête) ; c. le daemon lit le **jeton serveur** (réservé à root, jamais transmis), envoie ``POST /pam/bastion-cert`` avec le voucher, la clé publique, l'utilisateur et l'hôte cible ; d. LLNG vérifie le voucher côté serveur, signe la clé publique avec la CA ``ssh-ca`` : principal = utilisateur, ``key-id = bastion=<bastion_id>;user=<user>;target=<hôte>``, validité ~120 s, option critique ``source-address`` épinglée à l'IP du bastion ; e. ``ssh -i <eph> -o CertificateFile=<cert> -o IdentitiesOnly=yes <user>@<backend>`` ; les fichiers temporaires sont effacés après connexion.
 3. Le backend sshd valide nativement : signature CA, fenêtre de validité, ``principal == utilisateur``, **``source-address``** (refus si la connexion ne vient pas de l'IP du bastion). **Avant PAM**, ``AuthorizedPrincipalsCommand`` exécute ``ob-ssh-principals`` (en tant que ``nobody``) qui lit le ``key-id`` (``%i``), vérifie que ``bastion=<id>`` figure dans ``/etc/open-bastion/allowed_bastions`` et que ``user=<u>`` correspond au login, et n'émet le principal que dans ce cas — un cert SSO direct (sans ``bastion=``) est donc **refusé avant PAM**. ``pam_openbastion`` (``acct_mgmt``) effectue ensuite l'autorisation applicative via ``/pam/authorize``.
 
-Propriétés de Sécurité du Voucher
+Propriétés de sécurité du voucher
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Validité** : ``min(now + pamAccessBastionVoucherTtl [défaut 43200 s = 12 h], expires_at du cert SSO)`` — la durée de vie du cert SSO est le vrai plafond.
@@ -255,7 +255,7 @@ La **seule** propriété de sécurité qui gouverne l'émission d'un certificat 
 - son existence prouve donc déjà que l'appelant était un point d'entrée légitime au moment de la connexion ;
 - en conséquence ``/pam/bastion-cert`` **ne re-vérifie aucun groupe** (ni revendiqué, ni dérivé d'une session) : il valide le voucher, point. Le groupe-bastion n'est pas une frontière de sécurité au minting du cert, c'est une politique appliquée en amont (à l'émission du voucher) et sur les cibles (``pamAccessSshRules[target_group]``).
 
-Bénéfices de Sécurité
+Bénéfices de sécurité
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -286,7 +286,7 @@ Bénéfices de Sécurité
      - N/A
      - Bloqué — ``allowed_bastions`` vérifié par ``ob-ssh-principals`` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert
 
-Configuration (Backend)
+Configuration (backend)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: bash
@@ -305,7 +305,7 @@ Configuration (Backend)
    AuthorizedPrincipalsCommandUser nobody
    # Supprimer : AcceptEnv LLNG_BASTION_JWT
 
-Champs du Certificat Éphémère
+Champs du certificat éphémère
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -361,14 +361,14 @@ Paramètres LLNG (``pam-access``)
      - 0
      - Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme
 
-Sécurité du Cache d'Autorisation
+Sécurité du cache d'autorisation
 --------------------------------
 
 Le **cache d'autorisation** (``auth_cache``) est le seul cache côté PAM du module. Il conserve le résultat d'un appel ``/pam/authorize`` réussi afin qu'un utilisateur déjà autorisé puisse encore se connecter lorsque le portail LLNG est injoignable. Il ne met jamais en cache d'identifiants, de tokens ou de matériel de mot de passe — uniquement un verdict d'autorisation et les attributs de compte associés.
 
 Tous les builds l'alimentent, avec ou sans les composants Desktop SSO. Jusqu'à la 0.6.x, seuls les builds ``-DINSTALL_DESKTOP=ON`` — dont les paquets ``.deb`` et ``.rpm`` — écrivaient les entrées : un build SSH seul lisait le cache sans jamais l'alimenter (#318).
 
-Chiffrement au Repos
+Chiffrement au repos
 ~~~~~~~~~~~~~~~~~~~~
 
 Les entrées du cache sont toujours chiffrées — il n'existe pas de mode en clair :
@@ -390,12 +390,12 @@ Les entrées du cache sont toujours chiffrées — il n'existe pas de mode en cl
 
 L'en-tête d'expiration en clair permet des vérifications rapides d'expiration et le nettoyage sans déchiffrer le payload. Il est authentifié par un HMAC-SHA256 sur l'horodatage, avec la même clé dérivée : un attaquant ne peut donc pas étendre la validité du cache en l'éditant. Un en-tête dont le HMAC échoue est ignoré et l'entrée passe par un déchiffrement authentifié complet.
 
-Dérivation de Clé Fail-Closed
+Dérivation de clé fail-closed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``auth_cache_init()`` renvoie ``NULL`` si la dérivation de clé échoue. Il n'y a pas de repli non chiffré : si le cache ne peut pas être chiffré, il n'est pas utilisé du tout et l'autorisation repasse par le chemin en ligne.
 
-Isolation du Cache
+Isolation du cache
 ~~~~~~~~~~~~~~~~~~
 
 - Les entrées sont indexées sur ``(user, server_group, host)``, un fichier par entrée
@@ -404,19 +404,19 @@ Isolation du Cache
 - Écriture dans un fichier temporaire puis renommage atomique
 - Lecture avec ``O_NOFOLLOW`` ; un lien symbolique à la place d'un fichier de cache est supprimé, pas suivi
 
-TTL et Invalidation
+TTL et invalidation
 ~~~~~~~~~~~~~~~~~~~
 
 Le TTL n'est pas un réglage local : il provient du serveur, dans le champ ``offline.ttl`` de la réponse ``/pam/authorize``, et l'entrée n'est écrite que si le serveur active explicitement le mode hors ligne pour cet utilisateur. Les entrées expirées sont supprimées à l'accès et par ``auth_cache_cleanup()``.
 
 Mettre ``auth_cache_enabled = false`` désactive complètement le cache ; créer le fichier ``auth_cache_force_online`` (``/etc/open-bastion/force_online`` par défaut) force toute autorisation en ligne sans changement de configuration.
 
-Protection contre la Force Brute
+Protection contre la force brute
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Comme un verdict en cache peut être rejoué hors ligne, les consultations du cache sont limitées en débit indépendamment du chemin en ligne (``cache_rate_limit_*``). Les succès comme les échecs comptent dans le verrouillage : un attaquant ne peut donc pas sonder quels comptes ont une entrée en cache sans en subir la pénalité.
 
-Limitation de Débit
+Limitation de débit
 -------------------
 
 Protection contre les attaques par force brute :
@@ -451,12 +451,12 @@ Protection contre les attaques par force brute :
 
 L'état de verrouillage est stocké par utilisateur dans ``rate_limit_state_dir``.
 
-Sécurité de la Création Automatique d'Utilisateurs
+Sécurité de la création automatique d'utilisateurs
 --------------------------------------------------
 
 Lorsque ``create_user_enabled = true``, les utilisateurs peuvent être créés automatiquement à la première connexion.
 
-Validation des Chemins
+Validation des chemins
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Tous les chemins sont validés avant utilisation :
@@ -488,7 +488,7 @@ Génération d'UID
 - **Gestion des collisions** : Si l'UID existe, l'opération échoue de façon sûre *(retourne 0)*
 - Pas de repli vers des UID aléatoires qui pourraient entraîner un comportement imprévisible
 
-Sécurité du Module NSS
+Sécurité du module NSS
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Le module NSS (``libnss_openbastion.so``) fournit la résolution des utilisateurs :
@@ -499,7 +499,7 @@ Le module NSS (``libnss_openbastion.so``) fournit la résolution des utilisateur
 - **Contrôle de la plage de GID** : Le GID primaire fourni par le serveur doit être dans la plage ``min_gid``/``max_gid`` configurée (par défaut ``[1000, 65533]``, la frontière Debian/RHEL entre groupes système et groupes utilisateur). Les GID 0 et ``nogroup`` sont refusés inconditionnellement : un portail compromis ou mal configuré ne peut pas attribuer aux utilisateurs SSO un groupe primaire équivalent à root (``root``, ``sudo``, ``wheel``, ``shadow``, ``docker``). Un GID hors politique retombe sur ``default_gid`` avec un avertissement syslog (repli plutôt qu'échec : un GID erroné ne doit pas provoquer un blocage NSS sur tout l'hôte)
 - **Sécurité par défaut** : Retourne les codes d'erreur appropriés en cas d'échec ; les chemins invalides se replient sur les valeurs par défaut
 
-Manipulation Directe de /etc/passwd et /etc/shadow
+Manipulation directe de /etc/passwd et /etc/shadow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Les comptes utilisateurs sont créés en écrivant directement dans ``/etc/passwd`` et ``/etc/shadow`` plutôt qu'en utilisant des outils externes comme ``useradd``. Ce choix de conception a été fait pour :
@@ -523,7 +523,7 @@ Les comptes utilisateurs sont créés en écrivant directement dans ``/etc/passw
 - Si l'écriture dans ``/etc/shadow`` échoue après le succès de ``/etc/passwd``, une annulation est tentée via ``userdel``
 - Protection TOCTOU : l'existence de l'utilisateur est revérifiée après acquisition des verrous
 
-Journalisation d'Audit
+Journalisation d'audit
 ----------------------
 
 Lorsque ``audit_enabled = true`` :
@@ -555,7 +555,7 @@ Les événements d'audit incluent :
 - Déclenchements de limitation de débit
 - Événements de création d'utilisateur
 
-Classification des Types d'Événements
+Classification des types d'événements
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Les événements d'audit utilisent des codes différenciés pour l'intégration SIEM :
@@ -593,7 +593,7 @@ Cette classification permet aux équipes de sécurité de distinguer :
 - Les échecs d'autorisation (l'utilisateur n'a pas la permission) → ``AUDIT_AUTHZ_DENIED``
 - Les incidents de sécurité (tentative d'attaque) → ``AUDIT_SECURITY_ERROR``
 
-Notifications Webhook
+Notifications webhook
 ---------------------
 
 Pour la surveillance de sécurité en temps réel :
@@ -614,17 +614,17 @@ Pour la surveillance de sécurité en temps réel :
    * - ``notify_secret``
      - Secret HMAC pour les signatures des webhooks
 
-Sécurité de la Configuration
+Sécurité de la configuration
 ----------------------------
 
-Gestion des Secrets
+Gestion des secrets
 ~~~~~~~~~~~~~~~~~~~
 
 Les secrets d'``openbastion.conf`` — ``client_secret``, ``notify_secret``, ``crowdsec_password`` — ne sont **pas** chiffrés au repos. Leur seule protection est la permission du fichier : le module refuse de lire ``openbastion.conf`` s'il n'est pas un fichier régulier appartenant à root et interdit au groupe comme aux autres (``0600``). La mesure complémentaire est de ne pas écrire le secret sur l'hôte (``client_secret_mode: prompt`` dans un bundle ``ob-builder``, ou valeur détenue par ``ansible-vault``).
 
 Le paramètre ``secrets_encrypted`` documenté ici jusqu'à la 0.6.2 n'avait aucun effet : il alimentait un module ``secret_store`` dépourvu d'appelant. Les deux ont été supprimés.
 
-Permissions des Fichiers
+Permissions des fichiers
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Permissions recommandées :
@@ -653,7 +653,7 @@ Permissions recommandées :
      - 0700
      - root
 
-Sécurité des Scripts
+Sécurité des scripts
 --------------------
 
 Les scripts shell (``ob-ssh``, ``ob-enroll``) mettent en œuvre des mesures de sécurité :
@@ -673,7 +673,7 @@ Les scripts utilisent ``jq`` pour la construction des payloads JSON plutôt que 
 
 Cela empêche les attaques par injection JSON où des entrées malveillantes pourraient sortir du contexte de chaîne.
 
-Validation des Fichiers de Configuration
+Validation des fichiers de configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Les scripts vérifient la sécurité des fichiers de configuration avant de les sourcer :
@@ -686,10 +686,10 @@ Les scripts vérifient la sécurité des fichiers de configuration avant de les 
 
 Cela empêche l'escalade de privilèges via une injection de configuration malveillante.
 
-Considérations de Sécurité Opérationnelle
+Considérations de sécurité opérationnelle
 -----------------------------------------
 
-Avertissement sur la Journalisation de Débogage
+Avertissement sur la journalisation de débogage
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **CRITIQUE : Ne jamais activer la journalisation de débogage en environnement de production.**
@@ -712,7 +712,7 @@ Lorsque ``log_level = debug``, le module peut journaliser des informations sensi
 - Si la journalisation de débogage est temporairement nécessaire, s'assurer que l'accès à syslog est restreint
 - Faire tourner et purger rapidement les journaux contenant des sorties de débogage
 
-Exigence de Stabilité du Machine-ID
+Exigence de stabilité du machine-id
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 La clé de chiffrement pour les tokens et secrets en cache est dérivée de ``/etc/machine-id``.
@@ -747,12 +747,12 @@ La clé de chiffrement pour les tokens et secrets en cache est dérivée de ``/e
    # 2. Relancer l'enrôlement
    ob-enroll --portal https://auth.example.com --client-id pam-access
 
-Sécurité des Comptes de Service
+Sécurité des comptes de service
 -------------------------------
 
 Les comptes de service (ansible, backup, deploy, etc.) sont des comptes Unix locaux, **créés par l'exploitant** (``useradd``), qui s'authentifient uniquement par clé SSH et sont exemptés du SSO. Open Bastion sert leur clé à sshd, autorise localement, sans appel au portail, les noms listés dans un fichier de configuration local, et enregistre leurs sessions sur un hôte qui enregistre. Il ne crée pas ces comptes, ne gère ni leurs groupes ni leur ``sudo``. Voir :doc:`/service-accounts`.
 
-Sécurité du Fichier de Configuration
+Sécurité du fichier de configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -776,7 +776,7 @@ Sécurité du Fichier de Configuration
 
 Les clés elles-mêmes sont dans ``/etc/open-bastion/service-accounts.d/<nom>.pub`` ; ``ob-service-account-keys`` ne sert qu'un fichier appartenant à root.
 
-Validation des Comptes
+Validation des comptes
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -794,7 +794,7 @@ Validation des Comptes
 
 Une entrée invalide est écartée au chargement. Les clés des versions antérieures (``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed``, ``sudo_nopasswd``) sont ignorées avec un avertissement : le shell, le home et les identifiants sont ceux du compte local, et le ``sudo`` relève de ``sudoers``.
 
-Exigence du Serveur SSH
+Exigence du serveur SSH
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 sshd doit accepter la clé : ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (écrit par ``--enable-service-keys`` ; seule voie en Mode E, qui pose ``AuthorizedKeysFile none``), ou un fichier ``authorized_keys`` dans le home du compte — que le compte peut alors modifier lui-même.
@@ -803,7 +803,7 @@ sshd doit accepter la clé : ``AuthorizedKeysCommand /usr/sbin/ob-service-accoun
 
 .. _security-00-architecture-flux-dauthentification-1:
 
-Flux d'Authentification
+Flux d'authentification
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -834,7 +834,7 @@ Flux d'Authentification
 
 .. _bénéfices-de-sécurité-1:
 
-Bénéfices de Sécurité
+Bénéfices de sécurité
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -884,7 +884,7 @@ Limitations
    * - Shell non imposé sur un hôte qui enregistre
      - Créer le compte avec ``/usr/sbin/ob-login-shell``
 
-Exemple de Configuration
+Exemple de configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: ini
@@ -892,7 +892,7 @@ Exemple de Configuration
    [ansible]
    key_fingerprint = SHA256:abc123def456
 
-Politique de Clés SSH
+Politique de clés SSH
 ---------------------
 
 Le module PAM peut imposer des restrictions sur les types de clés SSH autorisés et leurs tailles minimales. Cela empêche les connexions utilisant des algorithmes cryptographiques faibles ou obsolètes.
@@ -924,7 +924,7 @@ Configuration
      - 256
      - Taille minimale de clé ECDSA en bits
 
-Types de Clés Supportés
+Types de clés supportés
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -959,7 +959,7 @@ Types de Clés Supportés
      - DSA
      - **Obsolète** - Devrait être désactivé
 
-Considérations de Sécurité
+Considérations de sécurité
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Clés DSA** : Devraient être désactivées. DSA est considéré comme obsolète et a une taille de clé fixe de 1024 bits.
@@ -970,7 +970,7 @@ Considérations de Sécurité
 
 .. _exemple--configuration-haute-sécurité:
 
-Exemple : Configuration Haute Sécurité
+Exemple : configuration haute sécurité
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: ini
@@ -980,7 +980,7 @@ Exemple : Configuration Haute Sécurité
 
 Cette configuration n'autorise que les clés Ed25519 et les clés de sécurité matérielles FIDO2.
 
-Atténuation des Menaces
+Atténuation des menaces
 -----------------------
 
 .. list-table::

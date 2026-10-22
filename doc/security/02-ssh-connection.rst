@@ -1,9 +1,9 @@
-Analyse de Sécurité - Connexion SSH
+Analyse de sécurité - Connexion SSH
 ===================================
 
 .. _1-cible-de-sécurité:
 
-1. Cible de Sécurité
+1. Cible de sécurité
 --------------------
 
 Cette analyse porte sur la cible de sécurité maximale d'Open Bastion, qui combine :
@@ -397,7 +397,7 @@ Si l'une des conditions 2-4 n'est pas remplie :
 
 .. _security-02-ssh-connection-3-analyse-des-risques:
 
-3. Analyse des Risques
+3. Analyse des risques
 ----------------------
 
 Échelle de cotation
@@ -1665,7 +1665,7 @@ R-S23 - Backend en mode hérité : ``allowed_bastions`` absent (fail-open)
 
 .. _security-02-ssh-connection-4-matrice-des-risques:
 
-4. Matrice des Risques
+4. Matrice des risques
 ----------------------
 
 Avant remédiation
@@ -1728,7 +1728,7 @@ Après remédiation complète
 
 .. _5-checklist-de-déploiement:
 
-5. Checklist de Déploiement
+5. Checklist de déploiement
 ---------------------------
 
 CA SSH et certificats
@@ -1824,7 +1824,7 @@ Tests de validation
 
 .. _6-politique-de-clés-ssh:
 
-6. Politique de Clés SSH
+6. Politique de clés SSH
 ------------------------
 
 Description
@@ -1901,7 +1901,7 @@ Le module PAM extrait les informations via les variables d'environnement SSH (n�
 
 .. _security-02-ssh-connection-7-protection-du-cache-offline:
 
-7. Protection du Cache Offline
+7. Protection du cache offline
 ------------------------------
 
 Le cache offline est une mesure de résilience en cas d'indisponibilité LLNG. Sa sécurité est renforcée par le rate limiting pour éviter les attaques locales (voir R-S12).
@@ -1942,7 +1942,7 @@ Ce comportement est intentionnel : l'escalade de privilèges requiert toujours u
 
 .. _security-02-ssh-connection-8-comptes-de-service:
 
-8. Comptes de Service
+8. Comptes de service
 ---------------------
 
 .. _security-02-ssh-connection-description-1:

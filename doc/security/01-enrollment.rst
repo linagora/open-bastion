@@ -1,13 +1,13 @@
 .. _analyse-de-sécurité---phase-1--enrôlement-du-serveur:
 
-Analyse de Sécurité - Phase 1 : Enrôlement du Serveur
+Analyse de sécurité - Phase 1 : enrôlement du serveur
 =====================================================
 
    **Contexte** : Cette analyse s'inscrit dans la cible de sécurité maximale d'Open Bastion (Mode E) : bastion + certificats SSH signés par la CA LLNG + sudo via token temporaire LLNG + KRL obligatoire. L'enrôlement des serveurs est identique quelle que soit l'architecture choisie.
 
 .. _security-01-enrollment-1-description-du-flux:
 
-1. Description du Flux
+1. Description du flux
 ----------------------
 
 L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). Ce flux est conçu pour les appareils sans navigateur (serveurs, IoT, CLI) qui ne peuvent pas effectuer de redirection HTTP.
@@ -48,7 +48,7 @@ Prérequis (côté LLNG)
 
 .. _security-01-enrollment-phase-0--initialisation-par-ladministrateur:
 
-Phase 0 : Initialisation par l'administrateur
+Phase 0 : initialisation par l'administrateur
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Avant de pouvoir exécuter ``ob-enroll``, l'administrateur système doit configurer le serveur cible avec les informations de connexion à LLNG. Cette étape est réalisée une seule fois par serveur (ou par ``server_group``).
@@ -129,7 +129,7 @@ Dans ce cas, le secret est obtenu par l'opérateur via un canal sécurisé (gest
 
 .. _flux-détaillé-phase-1--device-authorization-grant-avec-pkce:
 
-Flux détaillé (Phase 1 : Device Authorization Grant avec PKCE)
+Flux détaillé (phase 1 : Device Authorization Grant avec PKCE)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. mermaid::
@@ -174,7 +174,7 @@ Flux détaillé (Phase 1 : Device Authorization Grant avec PKCE)
 
 .. _étape-1-3--initiation-du-flux-device-authorization-avec-pkce:
 
-Étape 1-3 : Initiation du flux Device Authorization avec PKCE
+Étape 1-3 : initiation du flux Device Authorization avec PKCE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 L'opérateur exécute ``sudo ob-enroll`` sur le serveur. Le script génère d'abord les paramètres PKCE :
@@ -215,7 +215,7 @@ Le portail répond avec :
 
 .. _étape-4-5--communication-du-user_code:
 
-Étape 4-5 : Communication du user_code
+Étape 4-5 : communication du user_code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Le script affiche à l'opérateur :
@@ -247,7 +247,7 @@ Le script affiche à l'opérateur :
 
 .. _étape-6-9--approbation-par-ladministrateur:
 
-Étape 6-9 : Approbation par l'administrateur
+Étape 6-9 : approbation par l'administrateur
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 L'administrateur LLNG :
@@ -259,7 +259,7 @@ L'administrateur LLNG :
 
 .. _étape-10-11--obtention-du-token-avec-validation-pkce:
 
-Étape 10-11 : Obtention du token avec validation PKCE
+Étape 10-11 : obtention du token avec validation PKCE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Pendant ce temps, le script poll toutes les 5 secondes avec :
@@ -303,7 +303,7 @@ Réponses possibles :
 
 .. _étape-12--stockage-du-token:
 
-Étape 12 : Stockage du token
+Étape 12 : stockage du token
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Le token est sauvegardé en JSON :
@@ -321,14 +321,14 @@ Fichier : ``/var/lib/open-bastion/token`` Permissions : ``0600`` (lecture/écrit
 
 .. _étape-13-14--vérification:
 
-Étape 13-14 : Vérification
+Étape 13-14 : vérification
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Le script teste le token avec un appel à ``/pam/authorize`` pour confirmer que l'enrôlement fonctionne.
 
 .. _phase-2--cycle-de-vie-du-token-post-enrôlement:
 
-Phase 2 : Cycle de vie du token (post-enrôlement)
+Phase 2 : cycle de vie du token (post-enrôlement)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Après l'enrôlement initial, le module PAM gère automatiquement le renouvellement des tokens pour maintenir l'authentification opérationnelle.
@@ -444,7 +444,7 @@ Diagramme du cycle de renouvellement
 
 .. _security-01-enrollment-2-analyse-des-risques:
 
-2. Analyse des Risques
+2. Analyse des risques
 ----------------------
 
 Échelle de cotation
@@ -1274,7 +1274,7 @@ Avec cette option activée, LLNG rejette les requêtes d'enrôlement sans ``code
 
 .. _security-01-enrollment-3-matrice-des-risques:
 
-3. Matrice des Risques
+3. Matrice des risques
 ----------------------
 
 Avant remédiation
@@ -1407,7 +1407,7 @@ Cette matrice ne s'applique **que si** un ``client_id`` distinct est déclaré p
 
 .. _4-synthèse-des-remédiations:
 
-4. Synthèse des Remédiations
+4. Synthèse des remédiations
 ----------------------------
 
 Configuration minimale sécurisée
@@ -1489,7 +1489,7 @@ Hardening système
 
 .. _5-stratégies-de-segmentation:
 
-5. Stratégies de Segmentation
+5. Stratégies de segmentation
 -----------------------------
 
 La segmentation permet de limiter le "blast radius" en cas de compromission. Deux niveaux de segmentation sont possibles : par ``server_group`` (même client OIDC) ou par client OIDC distinct.
@@ -1739,7 +1739,7 @@ Chaque environnement ou zone de sécurité dispose de son propre client OIDC ave
 
 .. _6-checklist-de-déploiement:
 
-6. Checklist de Déploiement
+6. Checklist de déploiement
 ---------------------------
 
 Avant l'enrôlement (client OIDC unique)

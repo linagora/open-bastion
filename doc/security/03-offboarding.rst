@@ -1,4 +1,4 @@
-Offboarding d'un Administrateur SSH
+Offboarding d'un administrateur SSH
 ===================================
 
 Ce document décrit la procédure de révocation des accès lorsqu'un administrateur SSH quitte l'entreprise ou change de service. Il s'applique à l'architecture Mode E (sécurité maximale).
@@ -32,7 +32,7 @@ Un administrateur SSH (appelé "A" dans ce document) dispose de :
 
 .. _principe--défense-en-profondeur:
 
-Principe : Défense en Profondeur
+Principe : défense en profondeur
 --------------------------------
 
 La sécurité repose sur plusieurs couches indépendantes. La compromission d'une couche ne suffit pas à obtenir un accès :
@@ -62,12 +62,12 @@ La sécurité repose sur plusieurs couches indépendantes. La compromission d'un
 
 --------------
 
-Procédure d'Offboarding
+Procédure d'offboarding
 -----------------------
 
 .. _phase-1--actions-immédiates-jour-j:
 
-Phase 1 : Actions Immédiates (Jour J)
+Phase 1 : actions immédiates (Jour J)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Ces actions bloquent immédiatement tout nouvel accès de A.
@@ -110,7 +110,7 @@ Ces actions bloquent immédiatement tout nouvel accès de A.
 
 .. _security-03-offboarding-12-invalidation-des-sessions-llng-actives:
 
-1.2 Invalidation des Sessions LLNG Actives
+1.2 Invalidation des sessions LLNG actives
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code:: bash
@@ -121,7 +121,7 @@ Ces actions bloquent immédiatement tout nouvel accès de A.
 
 .. _13-révocation-accès-réseauvpn:
 
-1.3 Révocation Accès Réseau/VPN
+1.3 Révocation accès réseau/VPN
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Retirer les droits VPN de A auprès de l'équipe réseau.
@@ -132,7 +132,7 @@ Retirer les droits VPN de A auprès de l'équipe réseau.
 
 .. _phase-2--révocation-des-certificats-ssh:
 
-Phase 2 : Révocation des Certificats SSH
+Phase 2 : révocation des certificats SSH
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 En Mode E, les certificats SSH ont une durée de vie d'un an. **L'attente de l'expiration naturelle n'est pas une option** : la révocation via KRL est obligatoire.
@@ -199,7 +199,7 @@ Pour une propagation immédiate :
 
 .. _phase-3--actions-planifiées-j7-à-j30:
 
-Phase 3 : Actions Planifiées (J+7 à J+30)
+Phase 3 : actions planifiées (J+7 à J+30)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Ces actions ne sont pas urgentes mais doivent être planifiées.
@@ -233,7 +233,7 @@ A connaissait le ``client_secret`` du client OIDC. Bien que la révocation LLNG 
 
 .. _32-rotation-périodique-recommandée:
 
-3.2 Rotation Périodique Recommandée
+3.2 Rotation périodique recommandée
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Indépendamment des offboardings, planifier une rotation régulière :
@@ -256,7 +256,7 @@ Indépendamment des offboardings, planifier une rotation régulière :
 
 --------------
 
-Tableau Récapitulatif
+Tableau récapitulatif
 ---------------------
 
 .. list-table::
@@ -295,10 +295,10 @@ Tableau Récapitulatif
 
 --------------
 
-Checklist Offboarding Administrateur SSH
+Checklist offboarding administrateur SSH
 ----------------------------------------
 
-Jour J (Immédiat)
+Jour J (immédiat)
 ~~~~~~~~~~~~~~~~~
 
 - ☐ Compte A désactivé dans l'annuaire LDAP/AD
@@ -324,7 +324,7 @@ J+7 à J+30
 
 --------------
 
-Cas Particuliers
+Cas particuliers
 ----------------
 
 A avait accès à plusieurs zones
@@ -361,7 +361,7 @@ S'assurer qu'un autre administrateur a les accès nécessaires AVANT de révoque
 
 --------------
 
-Comptes de Service
+Comptes de service
 ------------------
 
 Particularité
@@ -426,7 +426,7 @@ Si la personne partante avait connaissance d'une clé de service ou pouvait la r
 
 .. _phase-1--actions-immédiates-jour-j-1:
 
-Phase 1 : Actions Immédiates (Jour J)
+Phase 1 : actions immédiates (Jour J)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. **Identifier les comptes de service concernés** :
@@ -483,14 +483,14 @@ Phase 1 : Actions Immédiates (Jour J)
 
 .. _phase-2--vérification-j1:
 
-Phase 2 : Vérification (J+1)
+Phase 2 : vérification (J+1)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 - ☐ Tester que les comptes de service fonctionnent avec les nouvelles clés
 - ☐ Supprimer les anciennes clés de tous les systèmes de stockage (Vault, etc.)
 - ☐ Vérifier que l'ancienne clé ne permet plus l'accès (``ssh -i ancienne_clé compte@serveur`` doit échouer)
 
-Tableau récapitulatif - Comptes de Service
+Tableau récapitulatif - Comptes de service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. list-table::
@@ -517,7 +517,7 @@ Tableau récapitulatif - Comptes de Service
      - Immédiat
      - Si A avait accès à la clé
 
-Checklist Comptes de Service
+Checklist comptes de service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Jour J (si clés compromises)

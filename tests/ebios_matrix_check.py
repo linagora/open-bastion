@@ -136,7 +136,7 @@ def sheets(path):
 def matrix(path, heading_path):
     """Parse the risk matrix under the headings named by `heading_path`.
 
-    `heading_path` is read outside-in ("4. Matrice des Risques", then
+    `heading_path` is read outside-in ("4. Matrice des risques", then
     "Avant remediation"): the same sub-heading appears under several parents.
     Returns {risk_id: (P, I)} and the line the matrix starts on.
     """
@@ -204,13 +204,13 @@ def main():
                       f"not an absent study)")
 
     checks = [
-        ("01-enrollment avant", ENROLLMENT, ("3. Matrice des Risques", "Avant remédiation"),
+        ("01-enrollment avant", ENROLLMENT, ("3. Matrice des risques", "Avant remédiation"),
          {k: v["initial"] for k, v in enrol.items()}, "initial"),
-        ("01-enrollment après", ENROLLMENT, ("3. Matrice des Risques", "Après remédiation"),
+        ("01-enrollment après", ENROLLMENT, ("3. Matrice des risques", "Après remédiation"),
          {k: v["residual"] for k, v in enrol.items()}, "residual"),
-        ("02-ssh avant", SSH, ("4. Matrice des Risques", "Avant remédiation"),
+        ("02-ssh avant", SSH, ("4. Matrice des risques", "Avant remédiation"),
          {k: v["initial"] for k, v in ssh.items()}, "initial"),
-        ("02-ssh après", SSH, ("4. Matrice des Risques", "Après remédiation complète"),
+        ("02-ssh après", SSH, ("4. Matrice des risques", "Après remédiation complète"),
          {k: v["residual"] for k, v in ssh.items()}, "residual"),
         ("09-portail avant", PORTAL, ("Matrice des risques du portail", "Avant remédiation"),
          {k: v["initial"] for k, v in portal.items()}, "initial"),
@@ -237,7 +237,7 @@ def main():
     all_residual.update({k: v["residual"] for k, v in ssh.items()})
     all_residual.update({k: v["residual"] for k, v in portal.items()})
     try:
-        placed, _ = matrix(CONSOLIDATED, ("Matrice des Risques Résiduels (Mode E)",))
+        placed, _ = matrix(CONSOLIDATED, ("Matrice des risques résiduels (Mode E)",))
     except ValueError:
         placed = None
         errors.append("99-risk-reduce.rst: consolidated matrix heading not found")

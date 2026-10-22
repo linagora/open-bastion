@@ -1,9 +1,9 @@
-Pistes d'Amélioration - Mode E (Sécurité Maximale)
+Pistes d'amélioration - Mode E (sécurité maximale)
 ==================================================
 
    **Ce document porte l'argumentaire technique des mesures, pas le plan.** Le plan de traitement — une mesure par ligne, avec porteur, priorité, échéance et état — est en :doc:`/security/07-plan-de-traitement`, et les décisions (périmètre, conditions d'emploi, acceptation des résiduels) en :doc:`/security/08-dossier-homologation`. Les sections « Pistes » ci-dessous expliquent **pourquoi** une mesure réduit un risque et ce qu'elle coûte ; le plan dit **qui** la porte et **quand**.
 
-Matrice des Risques Résiduels (Mode E)
+Matrice des risques résiduels (Mode E)
 --------------------------------------
 
 +--------------------------+----------------------------------------------------------------------------------------------+-----------------------------+--------------+-------------------+
@@ -62,7 +62,7 @@ Voir :doc:`/security/03-offboarding` pour la procédure de révocation des accè
 
 --------------
 
-Pistes d'Amélioration - Enrôlement
+Pistes d'amélioration - Enrôlement
 ----------------------------------
 
 R5 *(P=1, I=4)* - Usurpation du serveur LLNG
@@ -99,7 +99,7 @@ Pistes pour réduire P :
 
 --------------
 
-Pistes d'Amélioration - SSH
+Pistes d'amélioration - SSH
 ---------------------------
 
 R-S4 *(P=1, I=4)* - Compromission de la CA SSH
@@ -145,7 +145,7 @@ Pistes pour réduire P à 1 :
 
 --------------
 
-Pistes d'Amélioration - Vouching par certificat (Bastion→Backend)
+Pistes d'amélioration - Vouching par certificat (bastion→backend)
 -----------------------------------------------------------------
 
    Le transport ``LLNG_BASTION_JWT`` via ``SendEnv``/``AcceptEnv`` (anciens R-S9 « replay JWT » et R-S10 « rotation JWKS ») a été **remplacé** par le vouching par certificat éphémère : un voucher ``(bastion_id, user)`` émis par ``/pam/authorize``, transporté localement via ``pam_putenv``, échangé par ``ob-ssh`` (via ``ob-cert-request``/``ob-cert-daemon`` socket-activé, pas de sudoers) contre un certificat ~120 s signé par la CA ``ssh-ca`` (``/pam/bastion-cert``), épinglé à l'IP du bastion par ``source-address``. Voir :doc:`/security/02-ssh-connection` et :doc:`/references/bastion-cert-vouching`.
@@ -188,7 +188,7 @@ R-S23 *(P=1, I=3)* - Backend en mode hérité fail-open
 
 --------------
 
-Pistes d'Amélioration - Cycle de vie des tokens (heartbeat)
+Pistes d'amélioration - Cycle de vie des tokens (heartbeat)
 -----------------------------------------------------------
 
 Supervision du rafraîchissement (suite au fix #121)
@@ -202,7 +202,7 @@ Le timer ``ob-heartbeat`` rafraîchit l'access_token (TTL 3600 s) toutes les 5 m
 
 --------------
 
-Pistes d'Amélioration - Spécifiques au Mode E
+Pistes d'amélioration - Spécifiques au Mode E
 ---------------------------------------------
 
 R-S15 *(P=1, I=1)* - KRL non à jour
@@ -290,7 +290,7 @@ Pistes pour réduire davantage :
 
 --------------
 
-Pistes d'Amélioration - Containment et Traçabilité
+Pistes d'amélioration - Containment et traçabilité
 --------------------------------------------------
 
 Cette section couvre les nouveaux risques R-S19, R-S20, R-S21 introduits par l'analyse approfondie de l'enregistreur de session. Voir :doc:`/security/02-ssh-connection` pour les fiches complètes.
@@ -327,7 +327,7 @@ Pistes pour réduire I à 1 :
 3. **eBPF-based tracing** (Falco, sysdig) : alternative ou complément à auditd qui couvre des événements moins accessibles via syscalls (par ex. opérations sur file descriptors mémoire, écritures ``pwrite`` sur sockets). Plus coûteux en CPU mais plus expressif.
 4. **Signature cryptographique du recording à la clôture** : ``gpg --detach-sign`` ou similaire avec clé privée hors du bastion (HSM ou serveur de signature distant), pour détecter toute altération a posteriori. Complète R-S18 plutôt que R-S21 stricto sensu, mais participe à la même propriété d'intégrité.
 
-Pistes d'Amélioration - Comptes de service
+Pistes d'amélioration - Comptes de service
 ------------------------------------------
 
 Les comptes de service (``service-accounts.conf``) sont des comptes locaux créés par l'exploitant, qui s'authentifient par **clé SSH directe**, en **local** sur chaque serveur, hors du modèle SSO/vouching. Ce sont des dérogations volontaires au contrôle centralisé : utiles pour l'automatisation (ansible, sauvegarde, CI/CD), mais ils ouvrent deux écarts à tracer.
