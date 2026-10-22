@@ -175,7 +175,7 @@ SS5 — Persistance d'un prestataire après la fin de sa mission
 
 **Ce qu'elle n'oppose pas :** une session déjà ouverte survit jusqu'à sa fermeture (R-S8), et une clé de **compte de service** n'est pas gouvernée par LLNG du tout — sa révocation est une modification de fichier sur chaque serveur.
 
-**Gravité : 3.** Fiches détaillées : R12, R-S8, R-S15, R-SA1 ; procédure en :doc:`/security/03-offboarding`.
+**Gravité : 3.** Fiches détaillées : R12, R-S8, R-S15, R-P7 ; procédure en :doc:`/security/03-offboarding`.
 
 .. _ss6--détournement-dune-clé-dautomatisation:
 
@@ -190,7 +190,7 @@ SS6 — Détournement d'une clé d'automatisation
 
 **Ce qu'elle n'oppose pas :** l'empreinte déclarée n'est pas comparée lors d'une connexion par clé nue : la clé fuitée suffit tant que son ``.pub`` est servi. Un ``sudo`` accordé par une règle ``sudoers`` de l'exploitant (et, en Mode E, par une modification manuelle de la pile) ne passe pas par LLNG : c'est un privilège local permanent, assumé et tracé sur l'hôte.
 
-**Gravité : 4.** Fiches détaillées : R-S24, R-S25, R-SA1, R-SA2.
+**Gravité : 4.** Fiches détaillées : R-S24, R-SA1, R-SA2.
 
 .. _security-06-atelier3-scenarios-strategiques-ss7--verrouillage-total-par-erreur-dexploitation:
 
@@ -264,7 +264,7 @@ SS7 — Verrouillage total par erreur d'exploitation
      - 3
      - Cache offline, compte de secours, console hors-bande
 
-Les mesures citées ici sont de haut niveau. Leur déclinaison technique, avec scores de vraisemblance et de gravité par chemin d'attaque, est l'objet des **39 fiches de l'atelier 4** (:doc:`enrôlement </security/01-enrollment>`, :doc:`connexion SSH </security/02-ssh-connection>`), et leur ordonnancement celui du :doc:`plan de traitement </security/07-plan-de-traitement>`.
+Les mesures citées ici sont de haut niveau. Leur déclinaison technique, avec scores de vraisemblance et de gravité par chemin d'attaque, est l'objet des **47 fiches de l'atelier 4** (:doc:`enrôlement </security/01-enrollment>`, :doc:`connexion SSH </security/02-ssh-connection>`, :doc:`portail LLNG </security/09-portail-llng>`), et leur ordonnancement celui du :doc:`plan de traitement </security/07-plan-de-traitement>`.
 
 --------------
 

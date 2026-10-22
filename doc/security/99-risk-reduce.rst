@@ -263,7 +263,7 @@ Pistes pour réduire encore I (couvrir root du bastion, déjà hors périmètre)
 R-S17 *(P=1, I=2)* - Verrouillage total (lockout)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Avant remédiation, ce risque est en **zone rouge** (P=2, I=4). La remédiation le ramène à P=1/I=2 via les mesures suivantes, dont les deux premières sont des prérequis d'exploitation, mis en place et testés par l'exploitant :
+Avant remédiation, ce risque est en **zone orange** (P=2, I=4, score 8). La remédiation le ramène à P=1/I=2 via les mesures suivantes, dont les deux premières sont des prérequis d'exploitation, mis en place et testés par l'exploitant :
 
 - Compte de service de secours avec clé stockée en coffre-fort — **préparé par l'exploitant** : compte local créé avec ``useradd``, déclaré dans ``service-accounts.conf``, sa clé publique dans ``service-accounts.d/``. Aucun paquet ne le fournit et Open Bastion ne le crée pas (#353). Son ``sudo`` est une règle ``sudoers`` de l'exploitant, et en Mode E la pile ``sudo`` refuse tout compte local : le compte de secours garantit l'accès SSH pendant la panne, ``root`` vient de la console, sauf décision de modifier la pile à la main (cf. R-S24)
 - Procédure de recouvrement console documentée et testée — **accès root par la console hors-bande à vérifier par l'exploitant** (getty sur ``ttyS0``, ``/etc/securetty`` si ``pam_securetty`` est actif) ; ``ob-bastion-setup`` pose ``PermitRootLogin no``, la console OVH reste le filet de sécurité

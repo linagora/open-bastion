@@ -286,7 +286,8 @@ Pendant ce temps, le script poll toutes les 5 secondes avec :
 
 - ``iss`` et ``sub`` : le ``client_id`` (pam-access)
 - ``aud`` : l'URL du token endpoint
-- ``exp`` : expiration (maintenant + 60 secondes)
+- ``exp`` : expiration (maintenant + 300 secondes, voir
+  ``src/jwt_utils.c``)
 - ``iat`` : timestamp de création
 - ``jti`` : UUID unique (protection anti-replay)
 
@@ -449,29 +450,11 @@ Diagramme du cycle de renouvellement
 Échelle de cotation
 ~~~~~~~~~~~~~~~~~~~
 
-.. list-table::
-   :header-rows: 1
-   :widths: 24 44 32
-
-   * - Score
-     - Probabilité
-     - Impact
-
-   * - 1
-     - Très improbable
-     - Négligeable
-
-   * - 2
-     - Peu probable
-     - Limité
-
-   * - 3
-     - Probable
-     - Important
-
-   * - 4
-     - Très probable
-     - Critique
+Les scores de cette section se lisent avec les échelles de
+vraisemblance et de gravité, et avec les zones de risque, définies une
+fois pour toute l'étude en :ref:`atelier 1, §1.4 à §1.5.1
+<security-04-atelier1-cadrage-socle-14-échelle-de-gravité>` (score =
+Vraisemblance × Gravité). Elles ne sont pas redéfinies ici.
 
 --------------
 
@@ -574,7 +557,7 @@ R1 - Interception du user_code pendant sa transmission
 
 **Remédiation embarquée :**
 
-- Expiration courte du code (5 minutes par défaut, ``expires_in``)
+- Expiration courte du code (``expires_in``, 10 minutes par défaut côté LLNG)
 - Format court et lisible (8 caractères) limitant les erreurs de transmission
 - Le code seul ne suffit pas : il faut que l'admin l'approuve activement
 
@@ -868,7 +851,9 @@ R6 - Expiration du device_code non gérée
 **Impact**      2
 =============== =====
 
-**Description :** Le ``device_code`` expire après 5 minutes (par défaut). Si l'administrateur tarde à approuver, l'enrôlement échoue.
+**Description :** Le ``device_code`` expire après 10 minutes
+(``oidcServiceDeviceAuthorizationExpiration``, défaut LLNG de 600 s). Si
+l'administrateur tarde à approuver, l'enrôlement échoue.
 
 **Vecteurs d'attaque :**
 

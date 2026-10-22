@@ -403,29 +403,11 @@ Si l'une des conditions 2-4 n'est pas remplie :
 Échelle de cotation
 ~~~~~~~~~~~~~~~~~~~
 
-.. list-table::
-   :header-rows: 1
-   :widths: 24 44 32
-
-   * - Score
-     - Probabilité
-     - Impact
-
-   * - 1
-     - Très improbable
-     - Négligeable
-
-   * - 2
-     - Peu probable
-     - Limité
-
-   * - 3
-     - Probable
-     - Important
-
-   * - 4
-     - Très probable
-     - Critique
+Les scores de cette section se lisent avec les échelles de
+vraisemblance et de gravité, et avec les zones de risque, définies une
+fois pour toute l'étude en :ref:`atelier 1, §1.4 à §1.5.1
+<security-04-atelier1-cadrage-socle-14-échelle-de-gravité>` (score =
+Vraisemblance × Gravité). Elles ne sont pas redéfinies ici.
 
 --------------
 
@@ -1848,7 +1830,9 @@ Tests de validation
 Description
 ~~~~~~~~~~~
 
-La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.reference`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : tant que les plugins ne sont pas en ``0.6.0``, c'est le **seul** contrôle qui refuse une clé faible (voir la correction d'hypothèse de R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique aux clés utilisées pour signer les certificats CA.
+La politique de clés SSH (``ssh_key_policy_enabled``) est **désactivée par défaut** — ``src/config.c`` la pose à ``false`` et ``config/openbastion.conf.reference`` la livre commentée : sans elle, tous les types et toutes les tailles de clés sont acceptés. Elle doit donc être activée explicitement en cible de sécurité maximale. Ce n'est pas un détail de configuration : tant que les plugins ne sont pas en ``0.6.0``, c'est le **seul** contrôle qui refuse une clé faible (voir la correction d'hypothèse de R-S11 ci-dessus), et le score résiduel de R-S11 la suppose active — d'où la condition d'emploi **CE20**. Elle s'applique à la clé que l'utilisateur présente à la connexion — le type
+et le blob relevés par ``ob-ssh-principals`` —, jamais à la clé de la CA
+elle-même, que le module ne voit pas.
 
 Configuration recommandée (haute sécurité)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
