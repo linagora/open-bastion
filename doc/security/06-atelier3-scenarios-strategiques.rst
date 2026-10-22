@@ -12,25 +12,72 @@ Atelier 3 — Écosystème et scénarios stratégiques
 
 Le niveau de menace d'une partie prenante combine sa **dépendance** (à quel point le système en dépend), sa **pénétration** (l'accès dont elle dispose), sa **maturité** cyber et sa **confiance**. Échelle : 1 (faible) à 4 (élevé) pour dépendance et pénétration ; 1 (faible) à 4 (élevée) pour maturité et confiance.
 
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Partie prenante                                         | Dépendance | Pénétration | Maturité | Confiance | Niveau de menace |
-+=========================================================+============+=============+==========+===========+==================+
-| **Portail LLNG** (et son exploitant)                    | 4          | 4           | 3        | 4         | **Élevé**        |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Annuaire LDAP/AD amont                                  | 4          | 3           | 3        | 4         | Moyen            |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Administrateurs internes                                | 3          | 4           | 3        | 3         | **Élevé**        |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Prestataires d'infogérance                              | 2          | 3           | 2        | 2         | **Élevé**        |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Automatisations (Ansible, CI/CD)                        | 3          | 3           | 2        | 3         | Moyen            |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Éditeur / chaîne d'approvisionnement (paquets ``.deb``) | 3          | 2           | 3        | 3         | Moyen            |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Hébergeur / fournisseur d'infrastructure                | 3          | 2           | 3        | 3         | Faible           |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
-| Postes de travail des administrateurs                   | 3          | 3           | 2        | 2         | **Élevé**        |
-+---------------------------------------------------------+------------+-------------+----------+-----------+------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 47 10 11 8 9 15
+
+   * - Partie prenante
+     - Dépendance
+     - Pénétration
+     - Maturité
+     - Confiance
+     - Niveau de menace
+
+   * - **Portail LLNG** (et son exploitant)
+     - 4
+     - 4
+     - 3
+     - 4
+     - **Élevé**
+
+   * - Annuaire LDAP/AD amont
+     - 4
+     - 3
+     - 3
+     - 4
+     - Moyen
+
+   * - Administrateurs internes
+     - 3
+     - 4
+     - 3
+     - 3
+     - **Élevé**
+
+   * - Prestataires d'infogérance
+     - 2
+     - 3
+     - 2
+     - 2
+     - **Élevé**
+
+   * - Automatisations (Ansible, CI/CD)
+     - 3
+     - 3
+     - 2
+     - 3
+     - Moyen
+
+   * - Éditeur / chaîne d'approvisionnement (paquets ``.deb``)
+     - 3
+     - 2
+     - 3
+     - 3
+     - Moyen
+
+   * - Hébergeur / fournisseur d'infrastructure
+     - 3
+     - 2
+     - 3
+     - 3
+     - Faible
+
+   * - Postes de travail des administrateurs
+     - 3
+     - 3
+     - 2
+     - 2
+     - **Élevé**
 
 Quatre parties prenantes ressortent en niveau élevé, et ce sont celles que les scénarios stratégiques suivent : le portail (autorité), les administrateurs (accès légitime), les prestataires (accès légitime borné, maturité plus faible) et leurs postes de travail (le maillon que le bastion ne contrôle pas).
 
@@ -165,23 +212,57 @@ SS7 — Verrouillage total par erreur d'exploitation
 3.3 Synthèse
 ------------
 
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| Scénario | Couple SR/OV | ER atteint | Gravité | Zone de traitement                                       |
-+==========+==============+============+=========+==========================================================+
-| **SS1**  | SR2 × OV1    | ER1        | 4       | Certificats courts + KRL + binding d'empreinte           |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS2**  | SR2 × OV1    | ER1/3/4    | 4       | Voucher borné, ``allowed_bastions``, ``source-address``  |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS3**  | SR2 × OV6    | ER7        | 3       | Approbation ``/device`` restreinte, PKCE, CrowdSec       |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS4**  | SR3 × OV3    | ER3        | 3       | Puits d'enregistrement root, confinement, auditd         |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS5**  | SR5 × OV2    | ER2        | 3       | Réautorisation en direct, KRL, procédure d'offboarding   |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS6**  | SR6 × OV1    | ER1        | 4       | Portée locale des clés, empreinte revérifiée, inventaire |
-+----------+--------------+------------+---------+----------------------------------------------------------+
-| **SS7**  | SR4 × OV5    | ER5        | 3       | Cache offline, compte de secours, console hors-bande     |
-+----------+--------------+------------+---------+----------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 14 12 9 56
+
+   * - Scénario
+     - Couple SR/OV
+     - ER atteint
+     - Gravité
+     - Zone de traitement
+
+   * - **SS1**
+     - SR2 × OV1
+     - ER1
+     - 4
+     - Certificats courts + KRL + binding d'empreinte
+
+   * - **SS2**
+     - SR2 × OV1
+     - ER1/3/4
+     - 4
+     - Voucher borné, ``allowed_bastions``, ``source-address``
+
+   * - **SS3**
+     - SR2 × OV6
+     - ER7
+     - 3
+     - Approbation ``/device`` restreinte, PKCE, CrowdSec
+
+   * - **SS4**
+     - SR3 × OV3
+     - ER3
+     - 3
+     - Puits d'enregistrement root, confinement, auditd
+
+   * - **SS5**
+     - SR5 × OV2
+     - ER2
+     - 3
+     - Réautorisation en direct, KRL, procédure d'offboarding
+
+   * - **SS6**
+     - SR6 × OV1
+     - ER1
+     - 4
+     - Portée locale des clés, empreinte revérifiée, inventaire
+
+   * - **SS7**
+     - SR4 × OV5
+     - ER5
+     - 3
+     - Cache offline, compte de secours, console hors-bande
 
 Les mesures citées ici sont de haut niveau. Leur déclinaison technique, avec scores de vraisemblance et de gravité par chemin d'attaque, est l'objet des **39 fiches de l'atelier 4** (:doc:`enrôlement </security/01-enrollment>`, :doc:`connexion SSH </security/02-ssh-connection>`), et leur ordonnancement celui du :doc:`plan de traitement </security/07-plan-de-traitement>`.
 

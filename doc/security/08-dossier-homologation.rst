@@ -10,52 +10,76 @@ Dossier d'homologation — périmètre, conditions d'emploi, acceptation
 Identification du dossier
 -------------------------
 
-+------------------------------+--------------------------------------------------------------------------------+
-| Champ                        | Valeur                                                                         |
-+==============================+================================================================================+
-| **Objet**                    | Open Bastion — accès SSH d'administration gouverné par LemonLDAP::NG           |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Version du dossier**       | 1.0 (première émission)                                                        |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Version du produit visée** | ``À COMPLÉTER`` (version d'Open Bastion et des quatre plugins LLNG homologuée) |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Méthode**                  | EBIOS Risk Manager (ANSSI, 2018), ateliers 1 à 5                               |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Rédacteur**                | Équipe Open Bastion                                                            |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Date d'émission**          | ``À COMPLÉTER``                                                                |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Autorité d'homologation**  | ``À COMPLÉTER`` (nom et fonction)                                              |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Date de décision**         | ``À COMPLÉTER``                                                                |
-+------------------------------+--------------------------------------------------------------------------------+
-| **Durée de validité**        | ``À COMPLÉTER`` (recommandation : 3 ans, ou toute évolution du périmètre)      |
-+------------------------------+--------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 27 73
+
+   * - Champ
+     - Valeur
+
+   * - **Objet**
+     - Open Bastion — accès SSH d'administration gouverné par LemonLDAP::NG
+
+   * - **Version du dossier**
+     - 1.0 (première émission)
+
+   * - **Version du produit visée**
+     - ``À COMPLÉTER`` (version d'Open Bastion et des quatre plugins LLNG homologuée)
+
+   * - **Méthode**
+     - EBIOS Risk Manager (ANSSI, 2018), ateliers 1 à 5
+
+   * - **Rédacteur**
+     - Équipe Open Bastion
+
+   * - **Date d'émission**
+     - ``À COMPLÉTER``
+
+   * - **Autorité d'homologation**
+     - ``À COMPLÉTER`` (nom et fonction)
+
+   * - **Date de décision**
+     - ``À COMPLÉTER``
+
+   * - **Durée de validité**
+     - ``À COMPLÉTER`` (recommandation : 3 ans, ou toute évolution du périmètre)
 
 Composition du dossier
 ~~~~~~~~~~~~~~~~~~~~~~
 
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| Pièce                                                                                                | Contenu                                                        |
-+======================================================================================================+================================================================+
-| :doc:`/security/00-architecture`                                                                     | Cible de sécurité, architecture, mécanismes                    |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/04-atelier1-cadrage-socle`                                                           | Périmètre, valeurs métier, biens supports, échelles, ER, socle |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/05-atelier2-sources-de-risque`                                                       | Sources de risque, objectifs visés, couples retenus            |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/06-atelier3-scenarios-strategiques`                                                  | Écosystème, scénarios stratégiques                             |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/01-enrollment`, :doc:`/security/02-ssh-connection`, :doc:`/security/09-portail-llng` | Scénarios opérationnels : 47 fiches de risque                  |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/07-plan-de-traitement`                                                               | Plan de traitement                                             |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/99-risk-reduce`                                                                      | Matrice résiduelle consolidée et argumentaire des mesures      |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| :doc:`/security/03-offboarding`                                                                      | Procédure opérationnelle de révocation                         |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
-| **Ce document**                                                                                      | Périmètre d'homologation, conditions d'emploi, acceptation     |
-+------------------------------------------------------------------------------------------------------+----------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 61 39
+
+   * - Pièce
+     - Contenu
+
+   * - :doc:`/security/00-architecture`
+     - Cible de sécurité, architecture, mécanismes
+
+   * - :doc:`/security/04-atelier1-cadrage-socle`
+     - Périmètre, valeurs métier, biens supports, échelles, ER, socle
+
+   * - :doc:`/security/05-atelier2-sources-de-risque`
+     - Sources de risque, objectifs visés, couples retenus
+
+   * - :doc:`/security/06-atelier3-scenarios-strategiques`
+     - Écosystème, scénarios stratégiques
+
+   * - :doc:`/security/01-enrollment`, :doc:`/security/02-ssh-connection`, :doc:`/security/09-portail-llng`
+     - Scénarios opérationnels : 47 fiches de risque
+
+   * - :doc:`/security/07-plan-de-traitement`
+     - Plan de traitement
+
+   * - :doc:`/security/99-risk-reduce`
+     - Matrice résiduelle consolidée et argumentaire des mesures
+
+   * - :doc:`/security/03-offboarding`
+     - Procédure opérationnelle de révocation
+
+   * - **Ce document**
+     - Périmètre d'homologation, conditions d'emploi, acceptation
 
 .. _1-périmètre-dhomologation:
 
@@ -80,23 +104,33 @@ Conséquence directe : les constats de sécurité portant sur les plugins font p
 1.2 Ce qui n'est pas homologué
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| Hors périmètre                                            | Attendu de l'exploitant                                               |
-+===========================================================+=======================================================================+
-| Système d'exploitation hôte et son durcissement           | Socle durci (CIS / ANSSI-BP-028), mises à jour de sécurité appliquées |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| ``sshd`` (OpenSSH amont)                                  | Version supportée, correctifs de sécurité appliqués                   |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| Réseau et sa segmentation                                 | Backends joignables uniquement depuis le bastion                      |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| Annuaire LDAP/AD derrière LLNG                            | Cycle de vie des comptes maîtrisé, désactivation effective au départ  |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| Socle LLNG cœur (portail, sessions, Manager) hors plugins | Version supportée, accès Manager restreint et tracé                   |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| Postes de travail des administrateurs                     | Durcissement et protection du matériel d'authentification             |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
-| **Les modes PAM A à D**                                   | Non couverts : l'étude porte sur la cible Mode E seule                |
-+-----------------------------------------------------------+-----------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Hors périmètre
+     - Attendu de l'exploitant
+
+   * - Système d'exploitation hôte et son durcissement
+     - Socle durci (CIS / ANSSI-BP-028), mises à jour de sécurité appliquées
+
+   * - ``sshd`` (OpenSSH amont)
+     - Version supportée, correctifs de sécurité appliqués
+
+   * - Réseau et sa segmentation
+     - Backends joignables uniquement depuis le bastion
+
+   * - Annuaire LDAP/AD derrière LLNG
+     - Cycle de vie des comptes maîtrisé, désactivation effective au départ
+
+   * - Socle LLNG cœur (portail, sessions, Manager) hors plugins
+     - Version supportée, accès Manager restreint et tracé
+
+   * - Postes de travail des administrateurs
+     - Durcissement et protection du matériel d'authentification
+
+   * - **Les modes PAM A à D**
+     - Non couverts : l'étude porte sur la cible Mode E seule
 
 .. _13-hypothèses-de-confiance:
 
@@ -107,17 +141,29 @@ Conséquence directe : les constats de sécurité portant sur les plugins font p
 
 Ces hypothèses ne sont pas des mesures : ce sont des postulats sans lesquels l'analyse ne tient pas. Elles sont énoncées pour être contestables.
 
-+--------+-------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+
-| Id     | Hypothèse                                                                                                   | Si elle tombe                                                            |
-+========+=============================================================================================================+==========================================================================+
-| **H1** | L'administrateur du portail LLNG (SR7) est digne de confiance ; son accès au Manager est restreint et tracé | Le modèle entier tombe : il peut signer un certificat pour n'importe qui |
-+--------+-------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+
-| **H2** | Root sur le bastion n'est pas dans le modèle de menace de la traçabilité                                    | Les enregistrements de session ne sont plus opposables                   |
-+--------+-------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+
-| **H3** | La chaîne de distribution APT et sa signature GPG ne sont pas compromises                                   | Un paquet malveillant s'installe avec les droits root                    |
-+--------+-------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+
-| **H4** | L'annuaire amont reflète fidèlement les habilitations en vigueur                                            | La révocation LLNG ne coupe plus l'accès en pratique                     |
-+--------+-------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 57 39
+
+   * - Id
+     - Hypothèse
+     - Si elle tombe
+
+   * - **H1**
+     - L'administrateur du portail LLNG (SR7) est digne de confiance ; son accès au Manager est restreint et tracé
+     - Le modèle entier tombe : il peut signer un certificat pour n'importe qui
+
+   * - **H2**
+     - Root sur le bastion n'est pas dans le modèle de menace de la traçabilité
+     - Les enregistrements de session ne sont plus opposables
+
+   * - **H3**
+     - La chaîne de distribution APT et sa signature GPG ne sont pas compromises
+     - Un paquet malveillant s'installe avec les droits root
+
+   * - **H4**
+     - L'annuaire amont reflète fidèlement les habilitations en vigueur
+     - La révocation LLNG ne coupe plus l'accès en pratique
 
 .. _security-08-dossier-homologation-2-conditions-demploi:
 
@@ -126,51 +172,141 @@ Ces hypothèses ne sont pas des mesures : ce sont des postulats sans lesquels l'
 
 Les scores résiduels de l'atelier 4 **supposent** ces conditions. Le produit ne les impose pas toutes : elles doivent être vérifiées sur la cible, et la preuve conservée dans le dossier.
 
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| Id       | Condition                                                                                          | Risques concernés | Vérification sur cible                                                                                                                                                                                                                   | Statut cible    |
-+==========+====================================================================================================+===================+==========================================================================================================================================================================================================================================+=================+
-| **CE01** | ``locationRules`` sur ``^/device`` restreignant l'approbation d'enrôlement                         | R0, R7, R-P5      | Manager LLNG → vhost portail → règle présente ; test négatif avec un compte non approbateur                                                                                                                                              | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE02** | ``locationRules`` sur ``^/ssh/(admin|certs|revoke)``                                               | R-S4, R-P2        | Idem ; vérifier que ``/ssh/revoked`` (KRL publique) reste accessible                                                                                                                                                                     | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE03** | ``pamAccessServerGroups`` renseigné — **bloquante** (voir ci-dessous)                              | R4, R7, R11, R-P1 | Manager LLNG : le mapping d'autorité ``client_id → server_group`` existe. Tant qu'il est vide, ``server_group`` est lu dans le corps de la requête                                                                                       | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE04** | ``RequirePKCE = 1`` sur le client OIDC d'enrôlement                                                | R13               | Manager LLNG → RP → option PKCE                                                                                                                                                                                                          | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE05** | CrowdSec **et un bouncer** effectivement déployés                                                  | R2, R-S12         | Le plugin n'émet qu'une alerte : sans bouncer, aucun blocage. Vérifier la chaîne de bout en bout                                                                                                                                         | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE06** | ``allowed_bastions`` renseigné sur chaque backend — **bloquante**                                  | R-S23, R-P1       | ``cat /etc/open-bastion/allowed_bastions`` non vide sur chaque backend ; alerte ``authpriv`` absente des logs                                                                                                                            | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE07** | Durcissement de confinement activé (``--enable-hardening``)                                        | R-S19, R-S20      | Sans lui, R-S19 revient à (P=3, I=3) et R-S20 à (P=2, I=3)                                                                                                                                                                               | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE08** | Trace auditd activée (``--enable-audit-trace``)                                                    | R-S21             | Sans elle, R-S21 revient à (P=2, I=3)                                                                                                                                                                                                    | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE09** | ``fingerprint_required = true`` sur les hôtes en mode certificat                                   | R-S3, R-S15       | Sans lui, la liaison d'empreinte disparaît silencieusement si le spool manque                                                                                                                                                            | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE10** | Enregistrement de session actif et fail-closed (défaut, non désactivé)                             | R-S18             | Absence de ``--disable-session-recorder`` ; ``ob-record.socket`` actif                                                                                                                                                                   | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE11** | KRL déployée et rafraîchie ≤ 30 min, avec alerte de fraîcheur                                      | R-S15             | ``RevokedKeys`` dans ``sshd_config`` ; âge du fichier surveillé                                                                                                                                                                          | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE12** | Compte de service de secours **et** accès console hors-bande, testés                               | R-S17, R-P3       | Test de recouvrement daté (MT22)                                                                                                                                                                                                         | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE13** | Clé privée de la CA SSH : accès au Manager LLNG restreint et tracé                                 | R5, R-S4, R-P4    | La clé est en clair dans la configuration LLNG : c'est l'accès au Manager qui la protège                                                                                                                                                 | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE14** | Journaux auditd et enregistrements exportés vers un collecteur distant                             | R-S18, R-S21      | Sans export, root du bastion peut effacer la trace après coup (voir H2)                                                                                                                                                                  | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE15** | ``client_secret_mode: prompt`` ou secret sous ``ansible-vault`` ; bundles non versionnés           | R0, R3            | Aucun ``ob_client_secret`` en clair dans un dépôt ou une sauvegarde                                                                                                                                                                      | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE16** | Version minimale des quatre plugins LLNG figée et déployée — **bloquante**                         | R-P1 à R-P8       | ``À COMPLÉTER`` : figer la version au moment de la décision, puis vérifier sur le portail                                                                                                                                                | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE17** | Limitation de débit sur ``/ssh/sign`` au niveau du reverse proxy du portail                        | R-P8              | Configuration du reverse proxy ; surveillance de la taille de la KRL et du temps de signature                                                                                                                                            | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE18** | Contrôle de plausibilité de la KRL avant déploiement (``ssh-keygen -Q -l -f``)                     | R-P3              | Une KRL tronquée après son en-tête passe le contrôle actuel et fait échouer ``sshd`` sur toutes les clés                                                                                                                                 | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE19** | ``ob-bastion-id`` vérifié après chaque enrôlement : un hôte sans device-id est refusé              | R-P6              | Sur échec de session synthétique, le plugin renvoie ``PE_OK`` et l'hôte obtient un jeton sans identité machine                                                                                                                           | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE20** | ``ssh_key_policy_enabled = true`` sur les hôtes en cible de sécurité maximale                      | R-S11             | Le défaut du code est ``false`` (``src/config.c``) ; tant que les plugins ne sont pas en ``0.6.0``, ``ssh-ca`` n'applique aucune contrainte de type ni de taille et ce réglage est le seul contrôle qui refuse RSA < 2048 ou ``ssh-dss`` | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
-| **CE21** | ``pamAccessAllowedRps`` renseigné, bastions enrôlés sous un ``client_id`` distinct — **bloquante** | R-P1              | Manager LLNG : la liste n'est pas vide. Une liste vide vaut « pas de changement » (compatibilité de montée de version), donc la liaison d'audience amont n'agit pas du tout tant qu'elle l'est                                           | ``À COMPLÉTER`` |
-+----------+----------------------------------------------------------------------------------------------------+-------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 26 8 62 8
+
+   * - Id
+     - Condition
+     - Risques concernés
+     - Vérification sur cible
+     - Statut cible
+
+   * - **CE01**
+     - ``locationRules`` sur ``^/device`` restreignant l'approbation d'enrôlement
+     - R0, R7, R-P5
+     - Manager LLNG → vhost portail → règle présente ; test négatif avec un compte non approbateur
+     - ``À COMPLÉTER``
+
+   * - **CE02**
+     - ``locationRules`` sur ``^/ssh/(admin|certs|revoke)``
+     - R-S4, R-P2
+     - Idem ; vérifier que ``/ssh/revoked`` (KRL publique) reste accessible
+     - ``À COMPLÉTER``
+
+   * - **CE03**
+     - ``pamAccessServerGroups`` renseigné — **bloquante** (voir ci-dessous)
+     - R4, R7, R11, R-P1
+     - Manager LLNG : le mapping d'autorité ``client_id → server_group`` existe. Tant qu'il est vide, ``server_group`` est lu dans le corps de la requête
+     - ``À COMPLÉTER``
+
+   * - **CE04**
+     - ``RequirePKCE = 1`` sur le client OIDC d'enrôlement
+     - R13
+     - Manager LLNG → RP → option PKCE
+     - ``À COMPLÉTER``
+
+   * - **CE05**
+     - CrowdSec **et un bouncer** effectivement déployés
+     - R2, R-S12
+     - Le plugin n'émet qu'une alerte : sans bouncer, aucun blocage. Vérifier la chaîne de bout en bout
+     - ``À COMPLÉTER``
+
+   * - **CE06**
+     - ``allowed_bastions`` renseigné sur chaque backend — **bloquante**
+     - R-S23, R-P1
+     - ``cat /etc/open-bastion/allowed_bastions`` non vide sur chaque backend ; alerte ``authpriv`` absente des logs
+     - ``À COMPLÉTER``
+
+   * - **CE07**
+     - Durcissement de confinement activé (``--enable-hardening``)
+     - R-S19, R-S20
+     - Sans lui, R-S19 revient à (P=3, I=3) et R-S20 à (P=2, I=3)
+     - ``À COMPLÉTER``
+
+   * - **CE08**
+     - Trace auditd activée (``--enable-audit-trace``)
+     - R-S21
+     - Sans elle, R-S21 revient à (P=2, I=3)
+     - ``À COMPLÉTER``
+
+   * - **CE09**
+     - ``fingerprint_required = true`` sur les hôtes en mode certificat
+     - R-S3, R-S15
+     - Sans lui, la liaison d'empreinte disparaît silencieusement si le spool manque
+     - ``À COMPLÉTER``
+
+   * - **CE10**
+     - Enregistrement de session actif et fail-closed (défaut, non désactivé)
+     - R-S18
+     - Absence de ``--disable-session-recorder`` ; ``ob-record.socket`` actif
+     - ``À COMPLÉTER``
+
+   * - **CE11**
+     - KRL déployée et rafraîchie ≤ 30 min, avec alerte de fraîcheur
+     - R-S15
+     - ``RevokedKeys`` dans ``sshd_config`` ; âge du fichier surveillé
+     - ``À COMPLÉTER``
+
+   * - **CE12**
+     - Compte de service de secours **et** accès console hors-bande, testés
+     - R-S17, R-P3
+     - Test de recouvrement daté (MT22)
+     - ``À COMPLÉTER``
+
+   * - **CE13**
+     - Clé privée de la CA SSH : accès au Manager LLNG restreint et tracé
+     - R5, R-S4, R-P4
+     - La clé est en clair dans la configuration LLNG : c'est l'accès au Manager qui la protège
+     - ``À COMPLÉTER``
+
+   * - **CE14**
+     - Journaux auditd et enregistrements exportés vers un collecteur distant
+     - R-S18, R-S21
+     - Sans export, root du bastion peut effacer la trace après coup (voir H2)
+     - ``À COMPLÉTER``
+
+   * - **CE15**
+     - ``client_secret_mode: prompt`` ou secret sous ``ansible-vault`` ; bundles non versionnés
+     - R0, R3
+     - Aucun ``ob_client_secret`` en clair dans un dépôt ou une sauvegarde
+     - ``À COMPLÉTER``
+
+   * - **CE16**
+     - Version minimale des quatre plugins LLNG figée et déployée — **bloquante**
+     - R-P1 à R-P8
+     - ``À COMPLÉTER`` : figer la version au moment de la décision, puis vérifier sur le portail
+     - ``À COMPLÉTER``
+
+   * - **CE17**
+     - Limitation de débit sur ``/ssh/sign`` au niveau du reverse proxy du portail
+     - R-P8
+     - Configuration du reverse proxy ; surveillance de la taille de la KRL et du temps de signature
+     - ``À COMPLÉTER``
+
+   * - **CE18**
+     - Contrôle de plausibilité de la KRL avant déploiement (``ssh-keygen -Q -l -f``)
+     - R-P3
+     - Une KRL tronquée après son en-tête passe le contrôle actuel et fait échouer ``sshd`` sur toutes les clés
+     - ``À COMPLÉTER``
+
+   * - **CE19**
+     - ``ob-bastion-id`` vérifié après chaque enrôlement : un hôte sans device-id est refusé
+     - R-P6
+     - Sur échec de session synthétique, le plugin renvoie ``PE_OK`` et l'hôte obtient un jeton sans identité machine
+     - ``À COMPLÉTER``
+
+   * - **CE20**
+     - ``ssh_key_policy_enabled = true`` sur les hôtes en cible de sécurité maximale
+     - R-S11
+     - Le défaut du code est ``false`` (``src/config.c``) ; tant que les plugins ne sont pas en ``0.6.0``, ``ssh-ca`` n'applique aucune contrainte de type ni de taille et ce réglage est le seul contrôle qui refuse RSA < 2048 ou ``ssh-dss``
+     - ``À COMPLÉTER``
+
+   * - **CE21**
+     - ``pamAccessAllowedRps`` renseigné, bastions enrôlés sous un ``client_id`` distinct — **bloquante**
+     - R-P1
+     - Manager LLNG : la liste n'est pas vide. Une liste vide vaut « pas de changement » (compatibilité de montée de version), donc la liaison d'audience amont n'agit pas du tout tant qu'elle l'est
+     - ``À COMPLÉTER``
 
 **Quatre de ces conditions sont bloquantes pour la publication de ``0.7.0``.** CE03, CE06, CE16 et CE21 traitent le même risque, R-P1 : tant que ``pamAccessServerGroups`` est vide, le ``server_group`` est lu dans le corps de la requête, et **tout hôte enrôlé du projet qui est compromis peut se déclarer bastion** et obtenir un voucher de rebond pour un utilisateur. C'est le comportement **par défaut** du produit tel qu'il est livré, et :doc:`/security/00-architecture` recommande précisément la configuration multi-groupes dans laquelle il se manifeste.
 
@@ -201,36 +337,98 @@ L'autorité d'homologation signe donc, pour R-P7, l'acceptation d'un motif connu
 3.1 Zone orange — acceptation requise
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
-| Risque    | Libellé                                       | Résiduel | Justification du maintien                                                                                                                                                                                                  | Décision        | Approbateur     | Date            |
-+===========+===============================================+==========+============================================================================================================================================================================================================================+=================+=================+=================+
-| **R1**    | Interception du ``user_code`` en transmission | P=2, I=3 | Le canal de transmission du ``user_code`` à l'opérateur est hors du produit ; l'approbation humaine sur ``/device`` reste requise (CE01)                                                                                   | ``À COMPLÉTER`` | ``À COMPLÉTER`` | ``À COMPLÉTER`` |
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
-| **R-S6**  | Compromission du bastion                      | P=2, I=3 | Réductible à I=2 par des ``client_id`` distincts par zone (MT30) — arbitrage entre isolation et nombre de RP à gérer                                                                                                       | ``À COMPLÉTER`` | ``À COMPLÉTER`` | ``À COMPLÉTER`` |
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
-| **R-SA1** | Vol de clé de compte de service               | P=2, I=3 | Une clé de service n'est pas gouvernée par LLNG : sa révocation est un geste d'exploitation sur chaque serveur (MT20)                                                                                                      | ``À COMPLÉTER`` | ``À COMPLÉTER`` | ``À COMPLÉTER`` |
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
-| **R-P3**  | Corruption de la KRL, indisponibilité flotte  | P=2, I=3 | Le correctif est **amont** (écriture atomique de la KRL) : mergé, non publié ; CE18 durcit le contrôle côté client sans supprimer la cause                                                                                 | ``À COMPLÉTER`` | ``À COMPLÉTER`` | ``À COMPLÉTER`` |
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
-| **R-P7**  | Concurrence sur le magasin de sessions        | P=2, I=3 | Défaut **systémique** amont (ni verrou ni comparaison-et-échange) : neuf courses identifiées, correctifs partiels mergés (``#87``, ``#88``, ``#95``), aucun publié ; le motif survit à ``0.6.0`` (voir le préambule du §3) | ``À COMPLÉTER`` | ``À COMPLÉTER`` | ``À COMPLÉTER`` |
-+-----------+-----------------------------------------------+----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------+-----------------+-----------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 14 8 65 8 8 8
+
+   * - Risque
+     - Libellé
+     - Résiduel
+     - Justification du maintien
+     - Décision
+     - Approbateur
+     - Date
+
+   * - **R1**
+     - Interception du ``user_code`` en transmission
+     - P=2, I=3
+     - Le canal de transmission du ``user_code`` à l'opérateur est hors du produit ; l'approbation humaine sur ``/device`` reste requise (CE01)
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+
+   * - **R-S6**
+     - Compromission du bastion
+     - P=2, I=3
+     - Réductible à I=2 par des ``client_id`` distincts par zone (MT30) — arbitrage entre isolation et nombre de RP à gérer
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+
+   * - **R-SA1**
+     - Vol de clé de compte de service
+     - P=2, I=3
+     - Une clé de service n'est pas gouvernée par LLNG : sa révocation est un geste d'exploitation sur chaque serveur (MT20)
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+
+   * - **R-P3**
+     - Corruption de la KRL, indisponibilité flotte
+     - P=2, I=3
+     - Le correctif est **amont** (écriture atomique de la KRL) : mergé, non publié ; CE18 durcit le contrôle côté client sans supprimer la cause
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+
+   * - **R-P7**
+     - Concurrence sur le magasin de sessions
+     - P=2, I=3
+     - Défaut **systémique** amont (ni verrou ni comparaison-et-échange) : neuf courses identifiées, correctifs partiels mergés (``#87``, ``#88``, ``#95``), aucun publié ; le motif survit à ``0.6.0`` (voir le préambule du §3)
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
+     - ``À COMPLÉTER``
 
 .. _security-08-dossier-homologation-32-zone-jaune--pour-information:
 
 3.2 Zone jaune — pour information
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-========= ================================================ ========
-Risque    Libellé                                          Résiduel
-========= ================================================ ========
-**R4**    Vol du fichier token après enrôlement            P=1, I=4
-**R5**    Usurpation du serveur LLNG                       P=1, I=4
-**R-S4**  Compromission de la CA SSH                       P=1, I=4
-**R-SA2** Compromission du fichier de comptes de service   P=1, I=4
-**R-S8**  Session persistante après révocation             P=2, I=2
-**R-P4**  Exposition de la clé privée de CA sur le portail P=1, I=4
-**R-P6**  Perte de l'identité machine (``_deviceId``)      P=2, I=2
-========= ================================================ ========
+.. list-table::
+   :header-rows: 1
+   :widths: 14 74 12
+
+   * - Risque
+     - Libellé
+     - Résiduel
+
+   * - **R4**
+     - Vol du fichier token après enrôlement
+     - P=1, I=4
+
+   * - **R5**
+     - Usurpation du serveur LLNG
+     - P=1, I=4
+
+   * - **R-S4**
+     - Compromission de la CA SSH
+     - P=1, I=4
+
+   * - **R-SA2**
+     - Compromission du fichier de comptes de service
+     - P=1, I=4
+
+   * - **R-S8**
+     - Session persistante après révocation
+     - P=2, I=2
+
+   * - **R-P4**
+     - Exposition de la clé privée de CA sur le portail
+     - P=1, I=4
+
+   * - **R-P6**
+     - Perte de l'identité machine (``_deviceId``)
+     - P=2, I=2
 
 R4, R5, R-S4, R-SA2 et R-P4 partagent une propriété : leur vraisemblance est très faible mais leur gravité maximale. Ce sont les points où le modèle concentre sa confiance — la CA, le portail, les credentials d'enrôlement, les comptes de service. Aucune mesure produit ne les ramène en gravité 3 ; ce sont les conditions d'emploi CE13, CE15 et l'hypothèse H1 qui les tiennent.
 

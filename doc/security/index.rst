@@ -10,25 +10,45 @@ Les documents sont en français ; les documentations techniques auxquelles ils r
 Plan de lecture
 ---------------
 
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| Atelier                         | Document                                                                                               | Contenu                                                                                                             |
-+=================================+========================================================================================================+=====================================================================================================================+
-| —                               | :doc:`/security/00-architecture`                                                                       | Cible de sécurité, architecture, mécanismes de défense                                                              |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| **1** — Cadrage et socle        | :doc:`/security/04-atelier1-cadrage-socle`                                                             | Périmètre, valeurs métier, biens supports, **échelles**, événements redoutés, socle                                 |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| **2** — Sources de risque       | :doc:`/security/05-atelier2-sources-de-risque`                                                         | Sources de risque, objectifs visés, couples SR/OV retenus                                                           |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| **3** — Scénarios stratégiques  | :doc:`/security/06-atelier3-scenarios-strategiques`                                                    | Écosystème, niveaux de menace, sept scénarios stratégiques                                                          |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| **4** — Scénarios opérationnels | :doc:`/security/01-enrollment` · :doc:`/security/02-ssh-connection` · :doc:`/security/09-portail-llng` | **47 fiches de risque** avec scores initiaux et résiduels, matrices — dont huit pour le portail LLNG et ses plugins |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| **5** — Traitement              | :doc:`/security/07-plan-de-traitement` · :doc:`/security/99-risk-reduce`                               | Plan de traitement daté et porté ; matrice résiduelle consolidée et argumentaire                                    |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| Décision                        | :doc:`/security/08-dossier-homologation`                                                               | Périmètre d'homologation, **conditions d'emploi**, acceptation des résiduels                                        |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
-| Opérationnel                    | :doc:`/security/03-offboarding`                                                                        | Procédure de révocation des accès administrateurs                                                                   |
-+---------------------------------+--------------------------------------------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 13 41 46
+
+   * - Atelier
+     - Document
+     - Contenu
+
+   * - —
+     - :doc:`/security/00-architecture`
+     - Cible de sécurité, architecture, mécanismes de défense
+
+   * - **1** — Cadrage et socle
+     - :doc:`/security/04-atelier1-cadrage-socle`
+     - Périmètre, valeurs métier, biens supports, **échelles**, événements redoutés, socle
+
+   * - **2** — Sources de risque
+     - :doc:`/security/05-atelier2-sources-de-risque`
+     - Sources de risque, objectifs visés, couples SR/OV retenus
+
+   * - **3** — Scénarios stratégiques
+     - :doc:`/security/06-atelier3-scenarios-strategiques`
+     - Écosystème, niveaux de menace, sept scénarios stratégiques
+
+   * - **4** — Scénarios opérationnels
+     - :doc:`/security/01-enrollment` · :doc:`/security/02-ssh-connection` · :doc:`/security/09-portail-llng`
+     - **47 fiches de risque** avec scores initiaux et résiduels, matrices — dont huit pour le portail LLNG et ses plugins
+
+   * - **5** — Traitement
+     - :doc:`/security/07-plan-de-traitement` · :doc:`/security/99-risk-reduce`
+     - Plan de traitement daté et porté ; matrice résiduelle consolidée et argumentaire
+
+   * - Décision
+     - :doc:`/security/08-dossier-homologation`
+     - Périmètre d'homologation, **conditions d'emploi**, acceptation des résiduels
+
+   * - Opérationnel
+     - :doc:`/security/03-offboarding`
+     - Procédure de révocation des accès administrateurs
 
 Deux lectures utiles selon le besoin
 ------------------------------------

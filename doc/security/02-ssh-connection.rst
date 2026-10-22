@@ -22,16 +22,30 @@ Cette analyse porte sur la cible de sécurité maximale d'Open Bastion, qui comb
 Acteurs
 ~~~~~~~
 
-================ ==============================================
-Acteur           Rôle
-================ ==============================================
-**Utilisateur**  Personne se connectant en SSH
-**Client SSH**   Machine de l'utilisateur (laptop, workstation)
-**Bastion**      Point d'entrée unique pour les connexions SSH
-**Backend**      Serveur accessible uniquement via le bastion
-**Portail LLNG** Serveur d'authentification/autorisation
-**SSH CA**       Autorité de certification pour les clés SSH
-================ ==============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Acteur
+     - Rôle
+
+   * - **Utilisateur**
+     - Personne se connectant en SSH
+
+   * - **Client SSH**
+     - Machine de l'utilisateur (laptop, workstation)
+
+   * - **Bastion**
+     - Point d'entrée unique pour les connexions SSH
+
+   * - **Backend**
+     - Serveur accessible uniquement via le bastion
+
+   * - **Portail LLNG**
+     - Serveur d'authentification/autorisation
+
+   * - **SSH CA**
+     - Autorité de certification pour les clés SSH
 
 --------------
 
@@ -349,19 +363,33 @@ Si l'une des conditions 2-4 n'est pas remplie :
 
 **Niveaux de défense apportés :**
 
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Contrôle                                    | Où ?     | Couvre                                                                                                                                                    |
-+=============================================+==========+===========================================================================================================================================================+
-| ``RevokedKeys`` (KRL locale)                | ``sshd`` | Authentification SSH avec certificat révoqué (mécanisme principal, toujours requis)                                                                       |
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Binding fingerprint ``/pam/authorize``**  | **LLNG** | **Ouverture de session SSH avec un certificat inconnu, révoqué ou expiré côté LLNG, même si ``sshd`` l'a accepté (KRL stale ou ``RevokedKeys`` oubliée)** |
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``/pam/authorize`` (autorisation classique) | LLNG     | Utilisateur désactivé ou sans droit sur le ``server_group``                                                                                               |
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Binding fingerprint ``/pam/verify``**     | **LLNG** | **sudo / ré-authentification par token : rejet si le cert de la session SSH est inconnu, révoqué ou expiré côté LLNG**                                    |
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Présence dans la session persistante**    | **LLNG** | **Token volé à un utilisateur et rejoué depuis une autre clef SSH : l'empreinte ne correspond à aucun cert du ``sub`` du token**                          |
-+---------------------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 21 8 74
+
+   * - Contrôle
+     - Où ?
+     - Couvre
+
+   * - ``RevokedKeys`` (KRL locale)
+     - ``sshd``
+     - Authentification SSH avec certificat révoqué (mécanisme principal, toujours requis)
+
+   * - **Binding fingerprint ``/pam/authorize``**
+     - **LLNG**
+     - **Ouverture de session SSH avec un certificat inconnu, révoqué ou expiré côté LLNG, même si ``sshd`` l'a accepté (KRL stale ou ``RevokedKeys`` oubliée)**
+
+   * - ``/pam/authorize`` (autorisation classique)
+     - LLNG
+     - Utilisateur désactivé ou sans droit sur le ``server_group``
+
+   * - **Binding fingerprint ``/pam/verify``**
+     - **LLNG**
+     - **sudo / ré-authentification par token : rejet si le cert de la session SSH est inconnu, révoqué ou expiré côté LLNG**
+
+   * - **Présence dans la session persistante**
+     - **LLNG**
+     - **Token volé à un utilisateur et rejoué depuis une autre clef SSH : l'empreinte ne correspond à aucun cert du ``sub`` du token**
 
 ``ob-bastion-setup`` et ``ob-backend-setup`` déploient automatiquement ``ob-ssh-principals`` + le répertoire spool (mode ``0700``, propriétaire ``root`` depuis #249) + ``ob-fp.socket`` + un drop-in ``/etc/tmpfiles.d/`` pour recréation au boot. Côté LLNG, le champ ``fingerprint`` reste optionnel : un bastion à jour contre un portail antérieur à PamAccess 0.1.16 reste compatible (le portail ignore simplement le champ).
 
@@ -375,14 +403,29 @@ Si l'une des conditions 2-4 n'est pas remplie :
 Échelle de cotation
 ~~~~~~~~~~~~~~~~~~~
 
-===== =============== ===========
-Score Probabilité     Impact
-===== =============== ===========
-1     Très improbable Négligeable
-2     Peu probable    Limité
-3     Probable        Important
-4     Très probable   Critique
-===== =============== ===========
+.. list-table::
+   :header-rows: 1
+   :widths: 24 44 32
+
+   * - Score
+     - Probabilité
+     - Impact
+
+   * - 1
+     - Très improbable
+     - Négligeable
+
+   * - 2
+     - Peu probable
+     - Limité
+
+   * - 3
+     - Probable
+     - Important
+
+   * - 4
+     - Très probable
+     - Critique
 
 --------------
 
@@ -862,16 +905,37 @@ La taille RSA est déduite du module de la clé (décodage du blob ``%k`` fourni
 
 **Types de clés supportés :**
 
-============== ======================= ===============================
-Type           Description             Recommandation
-============== ======================= ===============================
-``ed25519``    Curve25519              **Recommandé**
-``sk-ed25519`` Ed25519 + FIDO2         **Recommandé** (clé matérielle)
-``sk-ecdsa``   ECDSA + FIDO2           **Recommandé** (clé matérielle)
-``ecdsa``      ECDSA P-256/P-384/P-521 Acceptable
-``rsa``        RSA                     Acceptable si ≥2048 bits
-``dsa``        DSA                     **À désactiver**
-============== ======================= ===============================
+.. list-table::
+   :header-rows: 1
+   :widths: 21 34 46
+
+   * - Type
+     - Description
+     - Recommandation
+
+   * - ``ed25519``
+     - Curve25519
+     - **Recommandé**
+
+   * - ``sk-ed25519``
+     - Ed25519 + FIDO2
+     - **Recommandé** (clé matérielle)
+
+   * - ``sk-ecdsa``
+     - ECDSA + FIDO2
+     - **Recommandé** (clé matérielle)
+
+   * - ``ecdsa``
+     - ECDSA P-256/P-384/P-521
+     - Acceptable
+
+   * - ``rsa``
+     - RSA
+     - Acceptable si ≥2048 bits
+
+   * - ``dsa``
+     - DSA
+     - **À désactiver**
 
 **Prérequis SSH :**
 
@@ -929,19 +993,27 @@ Le module PAM applique un rate limiting aux lookups de cache :
 
 **Caractéristiques de protection :**
 
-+-----------------------------+-----------------------------------------------------------------+
-| Aspect                      | Mesure                                                          |
-+=============================+=================================================================+
-| **Comptage des tentatives** | TOUTES les tentatives (hits + misses) pour éviter l'énumération |
-+-----------------------------+-----------------------------------------------------------------+
-| **Rate limiting**           | Par utilisateur (attaque locale, pas par IP)                    |
-+-----------------------------+-----------------------------------------------------------------+
-| **Backoff exponentiel**     | 60s → 120s → 240s → ... → 3600s max                             |
-+-----------------------------+-----------------------------------------------------------------+
-| **Réinitialisation**        | Uniquement sur cache hit autorisé                               |
-+-----------------------------+-----------------------------------------------------------------+
-| **Persistance**             | État sur disque (survit aux redémarrages)                       |
-+-----------------------------+-----------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 31 69
+
+   * - Aspect
+     - Mesure
+
+   * - **Comptage des tentatives**
+     - TOUTES les tentatives (hits + misses) pour éviter l'énumération
+
+   * - **Rate limiting**
+     - Par utilisateur (attaque locale, pas par IP)
+
+   * - **Backoff exponentiel**
+     - 60s → 120s → 240s → ... → 3600s max
+
+   * - **Réinitialisation**
+     - Uniquement sur cache hit autorisé
+
+   * - **Persistance**
+     - État sur disque (survit aux redémarrages)
 
 =============== ========================================
 \               Score résiduel
@@ -975,21 +1047,30 @@ R-S13 - Manipulation des groupes Unix via synchronisation LLNG
 
 **Remédiation embarquée (IMPLÉMENTÉE) :**
 
-+--------------------------------+-----------------------------------------------------------------------------------+
-| Mesure de sécurité             | Description                                                                       |
-+================================+===================================================================================+
-| **Groupes gérés explicites**   | Seuls les groupes listés dans ``managed_groups`` peuvent être modifiés            |
-+--------------------------------+-----------------------------------------------------------------------------------+
-| **Liste blanche locale**       | ``allowed_managed_groups`` permet de restreindre davantage côté serveur           |
-+--------------------------------+-----------------------------------------------------------------------------------+
-| **Validation des noms**        | Les noms de groupes sont validés (alphanum, tiret, underscore uniquement)         |
-+--------------------------------+-----------------------------------------------------------------------------------+
-| **Utilisation outils système** | ``groupadd``/``gpasswd`` pour manipulation atomique de /etc/group et /etc/gshadow |
-+--------------------------------+-----------------------------------------------------------------------------------+
-| **Cache chiffré**              | Les groupes sont stockés en cache avec AES-256-GCM                                |
-+--------------------------------+-----------------------------------------------------------------------------------+
-| **Audit GROUP_SYNC**           | Toutes les modifications de groupes sont journalisées                             |
-+--------------------------------+-----------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Mesure de sécurité
+     - Description
+
+   * - **Groupes gérés explicites**
+     - Seuls les groupes listés dans ``managed_groups`` peuvent être modifiés
+
+   * - **Liste blanche locale**
+     - ``allowed_managed_groups`` permet de restreindre davantage côté serveur
+
+   * - **Validation des noms**
+     - Les noms de groupes sont validés (alphanum, tiret, underscore uniquement)
+
+   * - **Utilisation outils système**
+     - ``groupadd``/``gpasswd`` pour manipulation atomique de /etc/group et /etc/gshadow
+
+   * - **Cache chiffré**
+     - Les groupes sont stockés en cache avec AES-256-GCM
+
+   * - **Audit GROUP_SYNC**
+     - Toutes les modifications de groupes sont journalisées
 
 **Configuration LLNG (server-side) :**
 
@@ -1058,14 +1139,24 @@ Le module PAM permet de configurer une whitelist d'IPs/CIDRs qui bypass complèt
 
 Caractéristiques de la whitelist :
 
-======================== ==============================================
-Aspect                   Comportement
-======================== ==============================================
-**Formats supportés**    IPv4, IPv6, CIDR (ex: ``10.0.0.0/8``, ``::1``)
-**Vérification bouncer** IPs whitelistées ne sont pas vérifiées
-**Report watcher**       Échecs d'IPs whitelistées ne sont pas reportés
-**Limite**               Maximum 1000 entrées (protection DoS)
-======================== ==============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Aspect
+     - Comportement
+
+   * - **Formats supportés**
+     - IPv4, IPv6, CIDR (ex: ``10.0.0.0/8``, ``::1``)
+
+   * - **Vérification bouncer**
+     - IPs whitelistées ne sont pas vérifiées
+
+   * - **Report watcher**
+     - Échecs d'IPs whitelistées ne sont pas reportés
+
+   * - **Limite**
+     - Maximum 1000 entrées (protection DoS)
 
 **Remédiation configuration :**
 
@@ -1222,18 +1313,21 @@ R-S17 - Verrouillage total (lockout) en cas d'indisponibilité prolongée du SSO
 
 **Remédiation opérationnelle :**
 
-+----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Mesure                           | Description                                                                                                                                                                                                                    |
-+==================================+================================================================================================================================================================================================================================+
-| **Compte de service de secours** | Un compte local (par exemple ``secours``) préparé à l'avance par l'exploitant : créé avec ``useradd``, déclaré dans ``service-accounts.conf``, sa clé publique servie par l'AuthorizedKeysCommand                              |
-|                                  | (``service-accounts.d/secours.pub``) et sa clé privée en coffre-fort. Open Bastion ne le fournit pas et ne le crée pas. Son ``sudo``, s'il en faut un, est une règle ``sudoers`` de l'exploitant, refusée en Mode E tant que   |
-|                                  | la pile PAM n'est pas modifiée à la main (voir la note ci-dessous)                                                                                                                                                             |
-+----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Accès console hors-bande**     | ``ob-bastion-setup`` pose ``PermitRootLogin no`` : ``root`` n'entre pas par SSH. L'accès ``root`` par la console (KVM, IPMI, console OVH sur ``ttyS0``) est à vérifier par l'exploitant : getty sur la console série et, si    |
-|                                  | ``pam_securetty`` est actif dans la pile ``login``, ``ttyS0`` dans ``/etc/securetty``. Open Bastion ne le configure pas                                                                                                        |
-+----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| **Cache offline suffisant**      | Configurer ``pamAccessOfflineTtl`` (côté LLNG) à une valeur couvrant la durée maximale d'indisponibilité tolérée, et activer ``auth_cache = true`` sur les hôtes. Sans valeur renvoyée par le portail, le module applique 24 h |
-+----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 13 87
+
+   * - Mesure
+     - Description
+
+   * - **Compte de service de secours**
+     - Un compte local (par exemple ``secours``) préparé à l'avance par l'exploitant : créé avec ``useradd``, déclaré dans ``service-accounts.conf``, sa clé publique servie par l'AuthorizedKeysCommand (``service-accounts.d/secours.pub``) et sa clé privée en coffre-fort. Open Bastion ne le fournit pas et ne le crée pas. Son ``sudo``, s'il en faut un, est une règle ``sudoers`` de l'exploitant, refusée en Mode E tant que la pile PAM n'est pas modifiée à la main (voir la note ci-dessous)
+
+   * - **Accès console hors-bande**
+     - ``ob-bastion-setup`` pose ``PermitRootLogin no`` : ``root`` n'entre pas par SSH. L'accès ``root`` par la console (KVM, IPMI, console OVH sur ``ttyS0``) est à vérifier par l'exploitant : getty sur la console série et, si ``pam_securetty`` est actif dans la pile ``login``, ``ttyS0`` dans ``/etc/securetty``. Open Bastion ne le configure pas
+
+   * - **Cache offline suffisant**
+     - Configurer ``pamAccessOfflineTtl`` (côté LLNG) à une valeur couvrant la durée maximale d'indisponibilité tolérée, et activer ``auth_cache = true`` sur les hôtes. Sans valeur renvoyée par le portail, le module applique 24 h
 
 ..
 
@@ -1689,17 +1783,26 @@ Bastion et vouching par certificat éphémère
 
 - ☐ Plugin ``ssh-ca`` LLNG actif (``sshCaActivation=1``)
 
-- ☐ **``locationRules`` sur ``^/ssh/(admin|certs|revoke)(\?|/|$)`` déployée** sur le vhost du portail. Ce que ce contrôle recouvre dépend de la version du plugin, et les deux régimes échouent en sens inverse : - **≤ ``v0.5.2``** (versions publiées) : le plugin n'effectue **aucun** contrôle d'autorisation sur ces routes, la règle est le **seul** contrôle, et sans elle tout utilisateur SSO authentifié liste tous les certificats émis et **révoque ceux de n'importe qui** (panne SSH à l'échelle de l'organisation). - **≥ ``0.6.0``** : ``sshCaAdminRule`` est le contrôle intégré, et il est **fail-closed** — non défini, les trois routes répondent 403 y compris aux utilisateurs que la ``locationRules`` admettrait. Vérifier alors **les deux** : ``sshCaAdminRule`` renseigné (sinon personne n'administre, pas même en incident), et la ``locationRules`` conservée en défense en profondeur.
+- ☐ **``locationRules`` sur ``^/ssh/(admin|certs|revoke)(\?|/|$)`` déployée** sur le vhost du portail. Ce que ce contrôle recouvre dépend de la version du plugin, et les deux régimes
+  échouent en sens inverse :
 
-  ::
+  - **≤ ``v0.5.2``** (versions publiées) : le plugin n'effectue **aucun** contrôle
+    d'autorisation sur ces routes ; la règle est le **seul** contrôle, et sans
+    elle tout utilisateur SSO authentifié liste tous les certificats émis et
+    **révoque ceux de n'importe qui** (panne SSH à l'échelle de l'organisation).
+  - **≥ ``0.6.0``** : ``sshCaAdminRule`` est le contrôle intégré, et il est
+    **fail-closed** — non défini, les trois routes répondent 403 y compris aux
+    utilisateurs que la ``locationRules`` admettrait. Vérifier alors **les
+    deux** : ``sshCaAdminRule`` renseigné (sinon personne n'administre, pas même
+    en incident), et la ``locationRules`` conservée en défense en profondeur.
 
-     Attention à ne pas écrire `^/ssh/revoke` seul : cela capture aussi
-     `/ssh/revoked`, la KRL **publique** que chaque backend télécharge. Cela ne
-     casse pas la propagation des révocations — les backends la tirent en
-     `curl` anonyme, et une requête sans session n'atteint jamais `grant()` :
-     elle est servie par la route non authentifiée du plugin. Ce que cela casse,
-     c'est un téléchargement fait **avec** une session (un administrateur en
-     navigateur), qui reçoit un 403.
+  Attention à ne pas écrire ``^/ssh/revoke`` seul : cela capture aussi
+  ``/ssh/revoked``, la KRL **publique** que chaque backend télécharge. Cela ne
+  casse pas la propagation des révocations — les backends la tirent en ``curl``
+  anonyme, et une requête sans session n'atteint jamais ``grant()`` : elle est
+  servie par la route non authentifiée du plugin. Ce que cela casse, c'est un
+  téléchargement fait **avec** une session (un administrateur en navigateur),
+  qui reçoit un 403.
 
 - ☐ Socket Unix ``/run/open-bastion/cert.sock`` servi par ``ob-cert-daemon`` systemd socket-activated sur le bastion
 
@@ -1759,16 +1862,37 @@ Configuration recommandée (haute sécurité)
 Types de clés
 ~~~~~~~~~~~~~
 
-============== ======================= ===============================
-Type           Description             Recommandation
-============== ======================= ===============================
-``ed25519``    Curve25519              **Recommandé**
-``sk-ed25519`` Ed25519 + FIDO2         **Recommandé** (clé matérielle)
-``sk-ecdsa``   ECDSA + FIDO2           **Recommandé** (clé matérielle)
-``ecdsa``      ECDSA P-256/P-384/P-521 Acceptable
-``rsa``        RSA                     Acceptable si ≥2048 bits
-``dsa``        DSA                     **Interdit**
-============== ======================= ===============================
+.. list-table::
+   :header-rows: 1
+   :widths: 21 34 46
+
+   * - Type
+     - Description
+     - Recommandation
+
+   * - ``ed25519``
+     - Curve25519
+     - **Recommandé**
+
+   * - ``sk-ed25519``
+     - Ed25519 + FIDO2
+     - **Recommandé** (clé matérielle)
+
+   * - ``sk-ecdsa``
+     - ECDSA + FIDO2
+     - **Recommandé** (clé matérielle)
+
+   * - ``ecdsa``
+     - ECDSA P-256/P-384/P-521
+     - Acceptable
+
+   * - ``rsa``
+     - RSA
+     - Acceptable si ≥2048 bits
+
+   * - ``dsa``
+     - DSA
+     - **Interdit**
 
 Extraction des informations de certificat
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1928,27 +2052,39 @@ Flux d'authentification
 Sécurité
 ~~~~~~~~
 
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| Aspect                          | Mesure                                                                                        |
-+=================================+===============================================================================================+
-| **Fichier config**              | Propriétaire root, mode 0600, pas de symlink                                                  |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Clé**                         | ``service-accounts.d/<nom>.pub`` servie seulement si propriété de root                        |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Validation fingerprint**      | Comparée seulement si une empreinte parvient à PAM : jamais pour une clé nue                  |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **ExposeAuthInfo**              | Écrit par ``--enable-service-keys`` ; ne transmet pas l'empreinte à la phase ``account``      |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Compte local**                | Créé par l'exploitant ; sshd refuse un nom absent de ``/etc/passwd``                          |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Shell (hôte qui enregistre)** | ``/usr/sbin/ob-login-shell``, posé par l'exploitant, non imposé                               |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **sudo**                        | Non géré par Open Bastion (``PAM_IGNORE``) ; règle ``sudoers`` de l'exploitant                |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Shells / home autorisés**     | Ne s'appliquent plus aux comptes de service (``approved_shells``, ``approved_home_prefixes``) |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
-| **Noms de compte**              | Validation stricte (lowercase, max 32 chars)                                                  |
-+---------------------------------+-----------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Aspect
+     - Mesure
+
+   * - **Fichier config**
+     - Propriétaire root, mode 0600, pas de symlink
+
+   * - **Clé**
+     - ``service-accounts.d/<nom>.pub`` servie seulement si propriété de root
+
+   * - **Validation fingerprint**
+     - Comparée seulement si une empreinte parvient à PAM : jamais pour une clé nue
+
+   * - **ExposeAuthInfo**
+     - Écrit par ``--enable-service-keys`` ; ne transmet pas l'empreinte à la phase ``account``
+
+   * - **Compte local**
+     - Créé par l'exploitant ; sshd refuse un nom absent de ``/etc/passwd``
+
+   * - **Shell (hôte qui enregistre)**
+     - ``/usr/sbin/ob-login-shell``, posé par l'exploitant, non imposé
+
+   * - **sudo**
+     - Non géré par Open Bastion (``PAM_IGNORE``) ; règle ``sudoers`` de l'exploitant
+
+   * - **Shells / home autorisés**
+     - Ne s'appliquent plus aux comptes de service (``approved_shells``, ``approved_home_prefixes``)
+
+   * - **Noms de compte**
+     - Validation stricte (lowercase, max 32 chars)
 
 Risques spécifiques
 ~~~~~~~~~~~~~~~~~~~
@@ -2109,62 +2245,99 @@ Recommandations
 Mesures critiques (non négociables)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+----------------------------------------------------------------------+-------------------------------------------------------------+
-| Mesure                                                               | Justification                                               |
-+======================================================================+=============================================================+
-| ``AuthorizedKeysFile none``                                          | Élimine R-S1 et R-S2 ; certificat CA obligatoire            |
-+----------------------------------------------------------------------+-------------------------------------------------------------+
-| KRL rafraîchie toutes les 30 min (``ob-krl-refresh.timer``)          | Contrôle compensatoire pour les certificats 1 an            |
-+----------------------------------------------------------------------+-------------------------------------------------------------+
-| Cert éphémère + ``source-address`` + ``AuthorizedPrincipalsCommand`` | Réduit R-S5 à P=1 même si restrictions réseau insuffisantes |
-+----------------------------------------------------------------------+-------------------------------------------------------------+
-| PAM sudo avec token LLNG                                             | Bloque toute escalade sans réauthentification SSO           |
-+----------------------------------------------------------------------+-------------------------------------------------------------+
-| Restriction réseau backends                                          | Défense en profondeur contre le contournement bastion       |
-+----------------------------------------------------------------------+-------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 53 47
+
+   * - Mesure
+     - Justification
+
+   * - ``AuthorizedKeysFile none``
+     - Élimine R-S1 et R-S2 ; certificat CA obligatoire
+
+   * - KRL rafraîchie toutes les 30 min (``ob-krl-refresh.timer``)
+     - Contrôle compensatoire pour les certificats 1 an
+
+   * - Cert éphémère + ``source-address`` + ``AuthorizedPrincipalsCommand``
+     - Réduit R-S5 à P=1 même si restrictions réseau insuffisantes
+
+   * - PAM sudo avec token LLNG
+     - Bloque toute escalade sans réauthentification SSO
+
+   * - Restriction réseau backends
+     - Défense en profondeur contre le contournement bastion
 
 Mesures recommandées
 ~~~~~~~~~~~~~~~~~~~~
 
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| Mesure                                                    | Justification                                                          |
-+===========================================================+========================================================================+
-| CA sur HSM ou machine air-gap                             | Réduit l'impact catastrophique de R-S4                                 |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| LLNG en haute disponibilité                               | Réduit R-S7 à P=1                                                      |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| Monitoring KRL + alertes                                  | Détection rapide de R-S15                                              |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| ``AllowAgentForwarding no``                               | Réduit l'impact de R-S6 en cas de compromission bastion                |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| ``ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa`` | Élimine les clés faibles (R-S11)                                       |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| ``ob-ssh`` (pas ProxyJump natif)                          | Vouching par certificat éphémère + clé privée ne quitte pas le bastion |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| ``ClientAliveInterval 300``                               | Limite l'exposition des sessions actives après révocation              |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
-| 2FA sur LLNG pour les tokens sudo                         | Renforce la protection contre R-S16                                    |
-+-----------------------------------------------------------+------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Mesure
+     - Justification
+
+   * - CA sur HSM ou machine air-gap
+     - Réduit l'impact catastrophique de R-S4
+
+   * - LLNG en haute disponibilité
+     - Réduit R-S7 à P=1
+
+   * - Monitoring KRL + alertes
+     - Détection rapide de R-S15
+
+   * - ``AllowAgentForwarding no``
+     - Réduit l'impact de R-S6 en cas de compromission bastion
+
+   * - ``ssh_key_allowed_types = ed25519, sk-ed25519, sk-ecdsa``
+     - Élimine les clés faibles (R-S11)
+
+   * - ``ob-ssh`` (pas ProxyJump natif)
+     - Vouching par certificat éphémère + clé privée ne quitte pas le bastion
+
+   * - ``ClientAliveInterval 300``
+     - Limite l'exposition des sessions actives après révocation
+
+   * - 2FA sur LLNG pour les tokens sudo
+     - Renforce la protection contre R-S16
 
 .. _security-02-ssh-connection-points-de-surveillance-siem--monitoring:
 
 Points de surveillance (SIEM / monitoring)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Événement                                                                                                | Criticité | Action recommandée       |
-+==========================================================================================================+===========+==========================+
-| Connexion SSH sans certificat rejetée                                                                    | Medium    | Log + alerte récurrente  |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Connexion avec certificat révoqué (KRL)                                                                  | High      | Alerte immédiate         |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Connexion backend sans certificat éphémère bastion (rejet source-address ou AuthorizedPrincipalsCommand) | High      | Alerte immédiate         |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| KRL non mise à jour depuis > 1h                                                                          | High      | Alerte immédiate         |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Sudo refusé (token absent/invalide)                                                                      | Medium    | Log                      |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Même certificat depuis 2+ IPs différentes                                                                | High      | Alerte + investigation   |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
-| Modification ``service-accounts.conf``                                                                   | Critical  | Alerte immédiate + audit |
-+----------------------------------------------------------------------------------------------------------+-----------+--------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 74 8 18
+
+   * - Événement
+     - Criticité
+     - Action recommandée
+
+   * - Connexion SSH sans certificat rejetée
+     - Medium
+     - Log + alerte récurrente
+
+   * - Connexion avec certificat révoqué (KRL)
+     - High
+     - Alerte immédiate
+
+   * - Connexion backend sans certificat éphémère bastion (rejet source-address ou AuthorizedPrincipalsCommand)
+     - High
+     - Alerte immédiate
+
+   * - KRL non mise à jour depuis > 1h
+     - High
+     - Alerte immédiate
+
+   * - Sudo refusé (token absent/invalide)
+     - Medium
+     - Log
+
+   * - Même certificat depuis 2+ IPs différentes
+     - High
+     - Alerte + investigation
+
+   * - Modification ``service-accounts.conf``
+     - Critical
+     - Alerte immédiate + audit

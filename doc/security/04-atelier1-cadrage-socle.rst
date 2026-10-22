@@ -21,19 +21,27 @@ Open Bastion est un point de passage SSH d'entreprise : les administrateurs ouvr
 Périmètre technique retenu
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
-| Dans le périmètre                                                                                                                   | Hors périmètre                                               |
-+=====================================================================================================================================+==============================================================+
-| Module PAM ``pam_openbastion.so`` et module NSS ``libnss_openbastion``                                                              | Le système d'exploitation hôte et son durcissement de base   |
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
-| Démons et clients : ``ob-cert-daemon``, ``ob-record-sink``, ``ob-ssh``/``ob-scp``/``ob-sftp``                                       | ``sshd`` lui-même (OpenSSH amont)                            |
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
-| Scripts d'installation et d'enrôlement : ``ob-bastion-setup``, ``ob-backend-setup``, ``ob-enroll``                                  | Le réseau et sa segmentation                                 |
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
-| Le générateur de déploiements ``ob-builder`` et les artefacts qu'il produit                                                         | L'annuaire (LDAP/AD) derrière LLNG                           |
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
-| **Le portail LLNG et ses quatre plugins** : ``pam-access``, ``ssh-ca``, ``oidc-device-authorization``, ``oidc-device-organization`` | Le socle LLNG cœur (portail, sessions, Manager) hors plugins |
-+-------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 68 32
+
+   * - Dans le périmètre
+     - Hors périmètre
+
+   * - Module PAM ``pam_openbastion.so`` et module NSS ``libnss_openbastion``
+     - Le système d'exploitation hôte et son durcissement de base
+
+   * - Démons et clients : ``ob-cert-daemon``, ``ob-record-sink``, ``ob-ssh``/``ob-scp``/``ob-sftp``
+     - ``sshd`` lui-même (OpenSSH amont)
+
+   * - Scripts d'installation et d'enrôlement : ``ob-bastion-setup``, ``ob-backend-setup``, ``ob-enroll``
+     - Le réseau et sa segmentation
+
+   * - Le générateur de déploiements ``ob-builder`` et les artefacts qu'il produit
+     - L'annuaire (LDAP/AD) derrière LLNG
+
+   * - **Le portail LLNG et ses quatre plugins** : ``pam-access``, ``ssh-ca``, ``oidc-device-authorization``, ``oidc-device-organization``
+     - Le socle LLNG cœur (portail, sessions, Manager) hors plugins
 
 Le portail et sa chaîne de plugins sont **dans** le périmètre : c'est lui qui autorise chaque session et chaque ``sudo``, signe les certificats et détient la clé de CA. Une étude qui s'arrêterait au bord du serveur ne dirait rien de la moitié des décisions de sécurité. Cette inclusion est une décision d'homologation, tracée comme telle en :doc:`/security/08-dossier-homologation`.
 
@@ -49,46 +57,98 @@ L'étude porte sur la **cible maximale (Mode E)** décrite en :doc:`/security/00
 
 Les valeurs métier sont ce que l'organisation cherche à protéger, exprimé en termes de finalité et non de technique.
 
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
-| Id      | Valeur métier                            | Description                                                                                                       | Nature      |
-+=========+==========================================+===================================================================================================================+=============+
-| **VM1** | Accès administrateur au SI               | La capacité, pour les seules personnes habilitées, d'administrer les serveurs de production                       | Processus   |
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
-| **VM2** | Traçabilité des actions d'administration | La preuve de qui a fait quoi, quand, sur quel serveur — opposable en cas d'incident ou de contrôle                | Information |
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
-| **VM3** | Confidentialité des sessions             | Le contenu des sessions d'administration (secrets manipulés, configurations, données consultées)                  | Information |
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
-| **VM4** | Continuité de l'exploitation             | La capacité à intervenir sur les serveurs, y compris en situation dégradée (panne du SSO, incident réseau)        | Processus   |
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
-| **VM5** | Maîtrise du cycle de vie des accès       | L'attribution, la révision et surtout la **révocation** effective des accès, notamment au départ d'un intervenant | Processus   |
-+---------+------------------------------------------+-------------------------------------------------------------------------------------------------------------------+-------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 23 64 8
+
+   * - Id
+     - Valeur métier
+     - Description
+     - Nature
+
+   * - **VM1**
+     - Accès administrateur au SI
+     - La capacité, pour les seules personnes habilitées, d'administrer les serveurs de production
+     - Processus
+
+   * - **VM2**
+     - Traçabilité des actions d'administration
+     - La preuve de qui a fait quoi, quand, sur quel serveur — opposable en cas d'incident ou de contrôle
+     - Information
+
+   * - **VM3**
+     - Confidentialité des sessions
+     - Le contenu des sessions d'administration (secrets manipulés, configurations, données consultées)
+     - Information
+
+   * - **VM4**
+     - Continuité de l'exploitation
+     - La capacité à intervenir sur les serveurs, y compris en situation dégradée (panne du SSO, incident réseau)
+     - Processus
+
+   * - **VM5**
+     - Maîtrise du cycle de vie des accès
+     - L'attribution, la révision et surtout la **révocation** effective des accès, notamment au départ d'un intervenant
+     - Processus
 
 .. _security-04-atelier1-cadrage-socle-13-biens-supports:
 
 1.3 Biens supports
 ------------------
 
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| Id      | Bien support                                                      | Valeurs métier portées | Détenteur             |
-+=========+===================================================================+========================+=======================+
-| **BS1** | Clé privée de la CA SSH (détenue par le portail LLNG)             | VM1, VM3, VM5          | Administrateur LLNG   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS2** | Portail LLNG et ses plugins (``/pam/*``, ``/ssh/*``, ``/device``) | VM1, VM5               | Administrateur LLNG   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS3** | Bastion : ``sshd``, ``pam_openbastion``, enregistreur de session  | VM1, VM2, VM3          | Équipe Open Bastion   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS4** | Backends : ``sshd``, ``pam_openbastion``, ``sudo``                | VM1, VM3               | Équipe d'exploitation |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS5** | Enregistrements de session (``/var/lib/open-bastion/sessions``)   | VM2                    | Équipe Open Bastion   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS6** | Credentials d'enrôlement (``client_secret``, token serveur)       | VM1, VM5               | Équipe Open Bastion   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS7** | Caches locaux (autorisation offline, NSS)                         | VM1, VM4               | Équipe Open Bastion   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS8** | Comptes de service (``service-accounts.conf`` et leurs clés)      | VM1, VM4               | Équipe d'exploitation |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
-| **BS9** | KRL (liste de révocation des certificats)                         | VM5                    | Administrateur LLNG   |
-+---------+-------------------------------------------------------------------+------------------------+-----------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 54 20 19
+
+   * - Id
+     - Bien support
+     - Valeurs métier portées
+     - Détenteur
+
+   * - **BS1**
+     - Clé privée de la CA SSH (détenue par le portail LLNG)
+     - VM1, VM3, VM5
+     - Administrateur LLNG
+
+   * - **BS2**
+     - Portail LLNG et ses plugins (``/pam/*``, ``/ssh/*``, ``/device``)
+     - VM1, VM5
+     - Administrateur LLNG
+
+   * - **BS3**
+     - Bastion : ``sshd``, ``pam_openbastion``, enregistreur de session
+     - VM1, VM2, VM3
+     - Équipe Open Bastion
+
+   * - **BS4**
+     - Backends : ``sshd``, ``pam_openbastion``, ``sudo``
+     - VM1, VM3
+     - Équipe d'exploitation
+
+   * - **BS5**
+     - Enregistrements de session (``/var/lib/open-bastion/sessions``)
+     - VM2
+     - Équipe Open Bastion
+
+   * - **BS6**
+     - Credentials d'enrôlement (``client_secret``, token serveur)
+     - VM1, VM5
+     - Équipe Open Bastion
+
+   * - **BS7**
+     - Caches locaux (autorisation offline, NSS)
+     - VM1, VM4
+     - Équipe Open Bastion
+
+   * - **BS8**
+     - Comptes de service (``service-accounts.conf`` et leurs clés)
+     - VM1, VM4
+     - Équipe d'exploitation
+
+   * - **BS9**
+     - KRL (liste de révocation des certificats)
+     - VM5
+     - Administrateur LLNG
 
 .. _14-échelle-de-gravité:
 
@@ -99,17 +159,29 @@ Les valeurs métier sont ce que l'organisation cherche à protéger, exprimé en
 
 Cette échelle est celle qu'emploient — implicitement jusqu'ici — les colonnes « Impact » des matrices des ateliers 4 et 5. Elle est désormais explicite : une case de matrice se lit avec elle.
 
-+--------+-----------------+-------------------------------------------------------------------------------------------------------------------------+
-| Niveau | Libellé         | Critère                                                                                                                 |
-+========+=================+=========================================================================================================================+
-| **4**  | **Critique**    | Compromission de l'ensemble du parc administré, ou perte totale et irrécupérable de la traçabilité                      |
-+--------+-----------------+-------------------------------------------------------------------------------------------------------------------------+
-| **3**  | **Important**   | Compromission d'une zone (un ``server_group``, un projet), ou perte de traçabilité sur un périmètre identifié           |
-+--------+-----------------+-------------------------------------------------------------------------------------------------------------------------+
-| **2**  | **Limité**      | Compromission d'un serveur, ou dégradation temporaire de la traçabilité ou de la disponibilité, avec détection possible |
-+--------+-----------------+-------------------------------------------------------------------------------------------------------------------------+
-| **1**  | **Négligeable** | Gêne opérationnelle sans perte de sécurité, ou incident intégralement tracé et réversible                               |
-+--------+-----------------+-------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 12 83
+
+   * - Niveau
+     - Libellé
+     - Critère
+
+   * - **4**
+     - **Critique**
+     - Compromission de l'ensemble du parc administré, ou perte totale et irrécupérable de la traçabilité
+
+   * - **3**
+     - **Important**
+     - Compromission d'une zone (un ``server_group``, un projet), ou perte de traçabilité sur un périmètre identifié
+
+   * - **2**
+     - **Limité**
+     - Compromission d'un serveur, ou dégradation temporaire de la traçabilité ou de la disponibilité, avec détection possible
+
+   * - **1**
+     - **Négligeable**
+     - Gêne opérationnelle sans perte de sécurité, ou incident intégralement tracé et réversible
 
 .. _15-échelle-de-vraisemblance:
 
@@ -118,17 +190,29 @@ Cette échelle est celle qu'emploient — implicitement jusqu'ici — les colonn
 
 Employée par les colonnes « Probabilité » des matrices.
 
-+--------+---------------------+--------------------------------------------------------------------------------------------------------------+
-| Niveau | Libellé             | Critère                                                                                                      |
-+========+=====================+==============================================================================================================+
-| **4**  | **Très probable**   | Se produira dans la durée de vie du système sans mesure supplémentaire ; exploitable sans compétence notable |
-+--------+---------------------+--------------------------------------------------------------------------------------------------------------+
-| **3**  | **Probable**        | Plausible dans l'année ; exploitable par un attaquant motivé disposant d'un accès réseau                     |
-+--------+---------------------+--------------------------------------------------------------------------------------------------------------+
-| **2**  | **Peu probable**    | Suppose une conjonction de conditions (accès privilégié, erreur de configuration, position réseau)           |
-+--------+---------------------+--------------------------------------------------------------------------------------------------------------+
-| **1**  | **Très improbable** | Suppose la compromission préalable d'un bien support fortement protégé, ou un attaquant de niveau étatique   |
-+--------+---------------------+--------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 15 79
+
+   * - Niveau
+     - Libellé
+     - Critère
+
+   * - **4**
+     - **Très probable**
+     - Se produira dans la durée de vie du système sans mesure supplémentaire ; exploitable sans compétence notable
+
+   * - **3**
+     - **Probable**
+     - Plausible dans l'année ; exploitable par un attaquant motivé disposant d'un accès réseau
+
+   * - **2**
+     - **Peu probable**
+     - Suppose une conjonction de conditions (accès privilégié, erreur de configuration, position réseau)
+
+   * - **1**
+     - **Très improbable**
+     - Suppose la compromission préalable d'un bien support fortement protégé, ou un attaquant de niveau étatique
 
 .. _security-04-atelier1-cadrage-socle-151-zones-de-risque:
 
@@ -137,17 +221,29 @@ Employée par les colonnes « Probabilité » des matrices.
 
 Le **score** d'un risque est le produit Vraisemblance × Gravité. Cette définition unique s'applique à toutes les matrices de l'étude ; jusqu'ici, ``01-enrollment.md`` employait un zonage par seuils sur (P, I) et ``99-risk-reduce.md`` un zonage par score, avec des listes qui ne se recoupaient pas.
 
-+------------+-------+-----------------------------------------------------------------------+
-| Zone       | Score | Traitement attendu                                                    |
-+============+=======+=======================================================================+
-| **Verte**  | ≤ 3   | Risque acceptable en l'état ; surveillance ordinaire                  |
-+------------+-------+-----------------------------------------------------------------------+
-| **Jaune**  | 4 – 5 | Risque à surveiller ; mesure de traitement souhaitable, non bloquante |
-+------------+-------+-----------------------------------------------------------------------+
-| **Orange** | 6 – 8 | Risque à traiter ; mesure requise ou acceptation formelle motivée     |
-+------------+-------+-----------------------------------------------------------------------+
-| **Rouge**  | ≥ 9   | Risque inacceptable ; traitement obligatoire avant mise en production |
-+------------+-------+-----------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 13 9 78
+
+   * - Zone
+     - Score
+     - Traitement attendu
+
+   * - **Verte**
+     - ≤ 3
+     - Risque acceptable en l'état ; surveillance ordinaire
+
+   * - **Jaune**
+     - 4 – 5
+     - Risque à surveiller ; mesure de traitement souhaitable, non bloquante
+
+   * - **Orange**
+     - 6 – 8
+     - Risque à traiter ; mesure requise ou acceptation formelle motivée
+
+   * - **Rouge**
+     - ≥ 9
+     - Risque inacceptable ; traitement obligatoire avant mise en production
 
 L'acceptation formelle des risques en zone orange est portée par :doc:`/security/08-dossier-homologation`.
 
@@ -205,21 +301,37 @@ Les 47 fiches de l'atelier 4 sont rattachées, chacune à un et un seul événem
 
 Le socle est l'ensemble des référentiels applicables et l'état des écarts.
 
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| Référentiel                                                | Applicabilité                                               | État                                                                                               |
-+============================================================+=============================================================+====================================================================================================+
-| **Guide ANSSI « Recommandations pour l'admin sécurisée »** | Structurant : bastion, point de passage unique, traçabilité | Conforme sur l'architecture ; écarts tracés en atelier 5                                           |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| **ISO/IEC 27002:2022** § 8.2 (droits d'accès privilégiés)  | Directement applicable                                      | Conforme : attribution via LLNG, révision par les groupes, révocation immédiate côté portail       |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| **ISO/IEC 27002:2022** § 8.15 (journalisation)             | Directement applicable                                      | Conforme sous condition d'emploi : enregistrement fail-closed activé, auditd opt-in (PR2)          |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| **ISO/IEC 27002:2022** § 8.5 (authentification sécurisée)  | Directement applicable                                      | Conforme : certificats CA + réauthentification SSO pour ``sudo``                                   |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| **Politique de mots de passe de l'organisation**           | Sans objet sur la cible Mode E                              | Aucun mot de passe SSH n'est accepté (``AuthorizedKeysFile none``, PAM ``auth`` fail-closed)       |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
-| **Durcissement système (CIS, ANSSI-BP-028)**               | Applicable à l'hôte, hors périmètre de l'étude              | À la charge de l'exploitant ; ``--enable-hardening`` couvre le confinement de session (voir R-S19) |
-+------------------------------------------------------------+-------------------------------------------------------------+----------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 27 28 45
+
+   * - Référentiel
+     - Applicabilité
+     - État
+
+   * - **Guide ANSSI « Recommandations pour l'admin sécurisée »**
+     - Structurant : bastion, point de passage unique, traçabilité
+     - Conforme sur l'architecture ; écarts tracés en atelier 5
+
+   * - **ISO/IEC 27002:2022** § 8.2 (droits d'accès privilégiés)
+     - Directement applicable
+     - Conforme : attribution via LLNG, révision par les groupes, révocation immédiate côté portail
+
+   * - **ISO/IEC 27002:2022** § 8.15 (journalisation)
+     - Directement applicable
+     - Conforme sous condition d'emploi : enregistrement fail-closed activé, auditd opt-in (PR2)
+
+   * - **ISO/IEC 27002:2022** § 8.5 (authentification sécurisée)
+     - Directement applicable
+     - Conforme : certificats CA + réauthentification SSO pour ``sudo``
+
+   * - **Politique de mots de passe de l'organisation**
+     - Sans objet sur la cible Mode E
+     - Aucun mot de passe SSH n'est accepté (``AuthorizedKeysFile none``, PAM ``auth`` fail-closed)
+
+   * - **Durcissement système (CIS, ANSSI-BP-028)**
+     - Applicable à l'hôte, hors périmètre de l'étude
+     - À la charge de l'exploitant ; ``--enable-hardening`` couvre le confinement de session (voir R-S19)
 
 Les écarts au socle qui restent ouverts sont portés par le plan de traitement en :doc:`/security/07-plan-de-traitement`, et les hypothèses que le socle suppose vérifiées sont les **conditions d'emploi** de :doc:`/security/08-dossier-homologation`.
 

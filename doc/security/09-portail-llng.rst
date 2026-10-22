@@ -10,17 +10,29 @@ Atelier 4 (suite) — Risques du portail LLNG et de ses plugins
 Composants couverts
 -------------------
 
-+-------------------------------+-------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Plugin                        | Rôle                                                              | Routes                                                                                                                                                                                                  |
-+===============================+===================================================================+=========================================================================================================================================================================================================+
-| ``pam-access``                | Autorisation SSH et ``sudo``, vouchers de rebond, cache offline   | ``/pam/authorize``, ``/pam/verify``, ``/pam/bastion-cert``, ``/pam/heartbeat``, ``/pam/whoami`` (ajouté par la PR amont ``#94``), ``/pam/bastion-token`` (supprimé par la PR amont ``#86`` — voir R-P6) |
-+-------------------------------+-------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``ssh-ca``                    | Signature des certificats utilisateur, KRL, administration        | ``/ssh/sign``, ``/ssh/ca``, ``/ssh/revoked``, ``/ssh/admin``, ``/ssh/certs``, ``/ssh/revoke``                                                                                                           |
-+-------------------------------+-------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``oidc-device-authorization`` | Flux RFC 8628 d'enrôlement des machines                           | ``/device``, ``/oauth2/device``                                                                                                                                                                         |
-+-------------------------------+-------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``oidc-device-organization``  | Identité machine (``_deviceId``), rattachement à une organisation | —                                                                                                                                                                                                       |
-+-------------------------------+-------------------------------------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 22 67
+
+   * - Plugin
+     - Rôle
+     - Routes
+
+   * - ``pam-access``
+     - Autorisation SSH et ``sudo``, vouchers de rebond, cache offline
+     - ``/pam/authorize``, ``/pam/verify``, ``/pam/bastion-cert``, ``/pam/heartbeat``, ``/pam/whoami`` (ajouté par la PR amont ``#94``), ``/pam/bastion-token`` (supprimé par la PR amont ``#86`` — voir R-P6)
+
+   * - ``ssh-ca``
+     - Signature des certificats utilisateur, KRL, administration
+     - ``/ssh/sign``, ``/ssh/ca``, ``/ssh/revoked``, ``/ssh/admin``, ``/ssh/certs``, ``/ssh/revoke``
+
+   * - ``oidc-device-authorization``
+     - Flux RFC 8628 d'enrôlement des machines
+     - ``/device``, ``/oauth2/device``
+
+   * - ``oidc-device-organization``
+     - Identité machine (``_deviceId``), rattachement à une organisation
+     - —
 
 **Version minimale requise :** ``À COMPLÉTER`` — à figer dans :doc:`/security/08-dossier-homologation` au moment de la décision. Plusieurs mesures décrites ici dépendent de correctifs plugin dont l'état est suivi dans ``linagora/lemonldap-ng-plugins``.
 
@@ -380,25 +392,73 @@ Après remédiation
 
 **État des correctifs amont au 6 septembre 2026.** L'analyse a été menée contre le code publié ; depuis, l'amont a bougé, et il a fini de bouger. Les **quinze** tickets référencés par ces fiches sont **tous fermés et mergés** dans ``linagora/lemonldap-ng-plugins``. L'inventaire est donné en entier, parce que c'est lui qui fonde l'acceptation formelle en :ref:`08, §3.1 <security-08-dossier-homologation-31-zone-orange--acceptation-requise>` et qu'un relecteur doit pouvoir le refaire :
 
-============ ===== ============================================
-Ticket amont Fiche Fermé par
-============ ===== ============================================
-``#50``      R-P1  PR ``#92``
-``#53``      R-P7  PR ``#88``
-``#54``      R-P7  PR ``#87``
-``#55``      R-P1  PR ``#86``
-``#56``      R-P1  PR ``#86``
-``#58``      R-P2  PR ``#76``
-``#59``      R-P3  PR ``#77``
-``#60``      R-P4  PR ``#78``
-``#63``      R-P8  PR ``#90``
-``#66``      R-P7  PR ``#87``
-``#68``      R-P7  PR ``#88``
-``#69``      R-P7  PR ``#80``
-``#71``      R-P6  commit ``2e5e4c4``, arrivé via la PR ``#90``
-``#72``      R-P6  PR ``#80``
-``#74``      R-P5  PR ``#80``
-============ ===== ============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 19 12 69
+
+   * - Ticket amont
+     - Fiche
+     - Fermé par
+
+   * - ``#50``
+     - R-P1
+     - PR ``#92``
+
+   * - ``#53``
+     - R-P7
+     - PR ``#88``
+
+   * - ``#54``
+     - R-P7
+     - PR ``#87``
+
+   * - ``#55``
+     - R-P1
+     - PR ``#86``
+
+   * - ``#56``
+     - R-P1
+     - PR ``#86``
+
+   * - ``#58``
+     - R-P2
+     - PR ``#76``
+
+   * - ``#59``
+     - R-P3
+     - PR ``#77``
+
+   * - ``#60``
+     - R-P4
+     - PR ``#78``
+
+   * - ``#63``
+     - R-P8
+     - PR ``#90``
+
+   * - ``#66``
+     - R-P7
+     - PR ``#87``
+
+   * - ``#68``
+     - R-P7
+     - PR ``#88``
+
+   * - ``#69``
+     - R-P7
+     - PR ``#80``
+
+   * - ``#71``
+     - R-P6
+     - commit ``2e5e4c4``, arrivé via la PR ``#90``
+
+   * - ``#72``
+     - R-P6
+     - PR ``#80``
+
+   * - ``#74``
+     - R-P5
+     - PR ``#80``
 
 Le tour d'audit complet couvre les PR ``#76`` à ``#95``.
 

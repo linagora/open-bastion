@@ -6,21 +6,30 @@ Cible de Sécurité
 
 Cette étude de sécurité porte sur la **cible de sécurité maximale** d'Open Bastion (Mode E) :
 
-+--------------------------+----------------------------------------------------------------------------+
-| Composant                | Configuration                                                              |
-+==========================+============================================================================+
-| **Architecture réseau**  | Bastion + backends isolés                                                  |
-+--------------------------+----------------------------------------------------------------------------+
-| **Authentification SSH** | Certificats signés par la CA LLNG uniquement (``AuthorizedKeysFile none``) |
-+--------------------------+----------------------------------------------------------------------------+
-| **Autorisation SSH**     | Vérification LLNG ``/pam/authorize`` à chaque connexion                    |
-+--------------------------+----------------------------------------------------------------------------+
-| **Escalade sudo**        | Token temporaire LLNG uniquement (réauthentification SSO)                  |
-+--------------------------+----------------------------------------------------------------------------+
-| **Révocation**           | KRL obligatoire + désactivation compte LLNG                                |
-+--------------------------+----------------------------------------------------------------------------+
-| **Bastion → Backend**    | Certificat éphémère signé par la CA LLNG (vouching par cert)               |
-+--------------------------+----------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Composant
+     - Configuration
+
+   * - **Architecture réseau**
+     - Bastion + backends isolés
+
+   * - **Authentification SSH**
+     - Certificats signés par la CA LLNG uniquement (``AuthorizedKeysFile none``)
+
+   * - **Autorisation SSH**
+     - Vérification LLNG ``/pam/authorize`` à chaque connexion
+
+   * - **Escalade sudo**
+     - Token temporaire LLNG uniquement (réauthentification SSO)
+
+   * - **Révocation**
+     - KRL obligatoire + désactivation compte LLNG
+
+   * - **Bastion → Backend**
+     - Certificat éphémère signé par la CA LLNG (vouching par cert)
 
 .. mermaid::
 
@@ -84,15 +93,25 @@ Toutes les connexions au portail exigent TLS 1.3 : modules PAM et NSS,
 en dessous ; un portail limité à TLS 1.2 doit être placé derrière un
 terminateur TLS 1.3.
 
-+---------------------+--------------+-------------------------------------------------+
-| Paramètre           | Défaut       | Description                                     |
-+=====================+==============+=================================================+
-| ``verify_ssl``      | true         | Vérifier le certificat serveur                  |
-+---------------------+--------------+-------------------------------------------------+
-| ``ca_cert``         | système      | Chemin vers un certificat CA personnalisé       |
-+---------------------+--------------+-------------------------------------------------+
-| ``cert_pin``        | aucun        | Épinglage de certificat (format sha256//base64) |
-+---------------------+--------------+-------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 17 58
+
+   * - Paramètre
+     - Défaut
+     - Description
+
+   * - ``verify_ssl``
+     - true
+     - Vérifier le certificat serveur
+
+   * - ``ca_cert``
+     - système
+     - Chemin vers un certificat CA personnalisé
+
+   * - ``cert_pin``
+     - aucun
+     - Épinglage de certificat (format sha256/base64)
 
 **Épinglage de Certificat** : Lorsqu'il est configuré, le module PAM, le module NSS et ``ob-cert-daemon`` valident la clé publique du serveur par rapport à la valeur épinglée, empêchant les attaques MITM même en cas de compromission de CA. Les commandes (``ob-heartbeat``, ``ob-bastion-id``, ``ob-enroll``…) n'épinglent pas : elles s'appuient sur TLS et, avec ``response_signing``, sur les réponses signées. Un épinglage invalide est refusé, jamais ignoré. Avant la 0.7.0, rien n'appliquait ``cert_pin`` (#332).
 
@@ -134,15 +153,21 @@ Authentification du Serveur
 
 Le module PAM s'authentifie auprès du serveur LLNG en utilisant :
 
-+--------------------------+---------------------------------------------------------------------+
-| Paramètre                | Description                                                         |
-+==========================+=====================================================================+
-| ``server_token_file``    | Chemin vers le fichier contenant le token bearer du serveur         |
-+--------------------------+---------------------------------------------------------------------+
-| ``server_group``         | Nom du groupe serveur (défaut : "default")                          |
-+--------------------------+---------------------------------------------------------------------+
-| ``token_rotate_refresh`` | Rotation automatique des tokens de rafraîchissement (défaut : true) |
-+--------------------------+---------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 27 73
+
+   * - Paramètre
+     - Description
+
+   * - ``server_token_file``
+     - Chemin vers le fichier contenant le token bearer du serveur
+
+   * - ``server_group``
+     - Nom du groupe serveur (défaut : "default")
+
+   * - ``token_rotate_refresh``
+     - Rotation automatique des tokens de rafraîchissement (défaut : true)
 
 Le token serveur doit être stocké dans un fichier avec des permissions restreintes (0600) appartenant à root.
 
@@ -233,19 +258,33 @@ La **seule** propriété de sécurité qui gouverne l'émission d'un certificat 
 Bénéfices de Sécurité
 ~~~~~~~~~~~~~~~~~~~~~
 
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
-| Menace                          | Sans vouching cert                  | Avec vouching cert                                                                                                             |
-+=================================+=====================================+================================================================================================================================+
-| Accès direct au backend         | Possible si réseau accessible       | Bloqué — cert SSO direct refusé (key-id sans ``bastion=``), cert épinglé à l'IP du bastion                                     |
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
-| Contournement VPN vers backend  | Possible                            | Bloqué — ``source-address`` critique dans le cert, sshd refuse hors IP bastion                                                 |
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
-| Mauvaise configuration pare-feu | Expose les backends                 | Backends toujours protégés — enforcement sshd-natif                                                                            |
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
-| Rejeu d'un identifiant volé     | Clé/token compromis = accès backend | Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement                                                   |
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
-| Bastion non autorisé            | N/A                                 | Bloqué — ``allowed_bastions`` vérifié par ``ob-ssh-principals`` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert |
-+---------------------------------+-------------------------------------+--------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 17 19 65
+
+   * - Menace
+     - Sans vouching cert
+     - Avec vouching cert
+
+   * - Accès direct au backend
+     - Possible si réseau accessible
+     - Bloqué — cert SSO direct refusé (key-id sans ``bastion=``), cert épinglé à l'IP du bastion
+
+   * - Contournement VPN vers backend
+     - Possible
+     - Bloqué — ``source-address`` critique dans le cert, sshd refuse hors IP bastion
+
+   * - Mauvaise configuration pare-feu
+     - Expose les backends
+     - Backends toujours protégés — enforcement sshd-natif
+
+   * - Rejeu d'un identifiant volé
+     - Clé/token compromis = accès backend
+     - Voucher volé inutile sans le jeton server root ; cert valide 120 s seulement
+
+   * - Bastion non autorisé
+     - N/A
+     - Bloqué — ``allowed_bastions`` vérifié par ``ob-ssh-principals`` (AuthorizedPrincipalsCommand, avant PAM) via le key-id du cert
 
 Configuration (Backend)
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -269,36 +308,58 @@ Configuration (Backend)
 Champs du Certificat Éphémère
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+--------------------+--------------------------------------------------------------------+
-| Champ cert SSH     | Valeur                                                             |
-+====================+====================================================================+
-| ``principal``      | Nom d'utilisateur proxifié                                         |
-+--------------------+--------------------------------------------------------------------+
-| ``key-id``         | ``bastion=<bastion_id>;user=<user>;target=<target_host>``          |
-+--------------------+--------------------------------------------------------------------+
-| ``validity``       | ~120 s (``pamAccessBastionCertTtl``)                               |
-+--------------------+--------------------------------------------------------------------+
-| ``source-address`` | IP du bastion (option critique — sshd refuse si connexion hors IP) |
-+--------------------+--------------------------------------------------------------------+
-| ``extension``      | ``bastion-id@open-bastion = <bastion_id>`` (optionnel, audit)      |
-+--------------------+--------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 23 77
+
+   * - Champ cert SSH
+     - Valeur
+
+   * - ``principal``
+     - Nom d'utilisateur proxifié
+
+   * - ``key-id``
+     - ``bastion=<bastion_id>;user=<user>;target=<target_host>``
+
+   * - ``validity``
+     - ~120 s (``pamAccessBastionCertTtl``)
+
+   * - ``source-address``
+     - IP du bastion (option critique — sshd refuse si connexion hors IP)
+
+   * - ``extension``
+     - ``bastion-id@open-bastion = <bastion_id>`` (optionnel, audit)
 
 Paramètres LLNG (``pam-access``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Paramètre                      | Défaut  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-+================================+=========+===============================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================+
-| ``pamAccessBastionGroups``     | bastion | Groupes dont les serveurs sont des **points d'entrée** (bastions). Vérifié **uniquement à l'émission du voucher** (``/pam/authorize``), **jamais** à ``/pam/bastion-cert``                                                                                                                                                                                                                                                                                                                                                                    |
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``pamAccessBastionVoucherTtl`` | 43200   | Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``pamAccessBastionCertTtl``    | 120     | Validité du certificat éphémère en secondes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``pamAccessServerGroups``      | —       | (Optionnel) **mapping d'autorité ``client_id → server_group``** : quand il est non vide, ``/pam/authorize`` impose ce ``server_group`` au lieu de croire celui de la requête, et ``/pam/whoami`` ne renvoie que ce groupe-là. À **ne pas confondre** avec les *règles* d'accès par groupe (``pamAccessSshRules`` / ``pamAccessSudoRules``, ``server_group → règle``). Inadapté quand un ``client_id`` couvre un projet **multi-groupes** → laisser vide. ``/pam/bastion-cert`` n'utilise **aucun** groupe : il ne s'appuie que sur le voucher |
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| ``sshCaActivation``            | 0       | Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-+--------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 8 93
+
+   * - Paramètre
+     - Défaut
+     - Description
+
+   * - ``pamAccessBastionGroups``
+     - bastion
+     - Groupes dont les serveurs sont des **points d'entrée** (bastions). Vérifié **uniquement à l'émission du voucher** (``/pam/authorize``), **jamais** à ``/pam/bastion-cert``
+
+   * - ``pamAccessBastionVoucherTtl``
+     - 43200
+     - Plafond de validité du voucher en secondes (12 h) ; la durée du cert SSO prime
+
+   * - ``pamAccessBastionCertTtl``
+     - 120
+     - Validité du certificat éphémère en secondes
+
+   * - ``pamAccessServerGroups``
+     - —
+     - (Optionnel) **mapping d'autorité ``client_id → server_group``** : quand il est non vide, ``/pam/authorize`` impose ce ``server_group`` au lieu de croire celui de la requête, et ``/pam/whoami`` ne renvoie que ce groupe-là. À **ne pas confondre** avec les *règles* d'accès par groupe (``pamAccessSshRules`` / ``pamAccessSudoRules``, ``server_group → règle``). Inadapté quand un ``client_id`` couvre un projet **multi-groupes** → laisser vide. ``/pam/bastion-cert`` n'utilise **aucun** groupe : il ne s'appuie que sur le voucher
+
+   * - ``sshCaActivation``
+     - 0
+     - Doit être mis à **1** pour activer le plugin ssh-ca requis par ce mécanisme
 
 Sécurité du Cache d'Autorisation
 --------------------------------
@@ -360,19 +421,33 @@ Limitation de Débit
 
 Protection contre les attaques par force brute :
 
-+--------------------------------+--------+----------------------------------------+
-| Paramètre                      | Défaut | Description                            |
-+================================+========+========================================+
-| ``rate_limit_enabled``         | true   | Activer la limitation de débit         |
-+--------------------------------+--------+----------------------------------------+
-| ``rate_limit_max_attempts``    | 5      | Échecs avant verrouillage              |
-+--------------------------------+--------+----------------------------------------+
-| ``rate_limit_initial_lockout`` | 30s    | Durée initiale de verrouillage         |
-+--------------------------------+--------+----------------------------------------+
-| ``rate_limit_max_lockout``     | 3600s  | Durée maximale de verrouillage         |
-+--------------------------------+--------+----------------------------------------+
-| ``rate_limit_backoff_mult``    | 2.0    | Multiplicateur d'attente exponentielle |
-+--------------------------------+--------+----------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 10 50
+
+   * - Paramètre
+     - Défaut
+     - Description
+
+   * - ``rate_limit_enabled``
+     - true
+     - Activer la limitation de débit
+
+   * - ``rate_limit_max_attempts``
+     - 5
+     - Échecs avant verrouillage
+
+   * - ``rate_limit_initial_lockout``
+     - 30s
+     - Durée initiale de verrouillage
+
+   * - ``rate_limit_max_lockout``
+     - 3600s
+     - Durée maximale de verrouillage
+
+   * - ``rate_limit_backoff_mult``
+     - 2.0
+     - Multiplicateur d'attente exponentielle
 
 L'état de verrouillage est stocké par utilisateur dans ``rate_limit_state_dir``.
 
@@ -453,13 +528,25 @@ Journalisation d'Audit
 
 Lorsque ``audit_enabled = true`` :
 
-=================== ====== =========================================
-Paramètre           Défaut Description
-=================== ====== =========================================
-``audit_log_file``  aucun  Chemin du fichier de journal d'audit JSON
-``audit_to_syslog`` true   Émettre également vers syslog
-``audit_level``     1      0=critique, 1=événements auth, 2=tous
-=================== ====== =========================================
+.. list-table::
+   :header-rows: 1
+   :widths: 28 12 60
+
+   * - Paramètre
+     - Défaut
+     - Description
+
+   * - ``audit_log_file``
+     - aucun
+     - Chemin du fichier de journal d'audit JSON
+
+   * - ``audit_to_syslog``
+     - true
+     - Émettre également vers syslog
+
+   * - ``audit_level``
+     - 1
+     - 0=critique, 1=événements auth, 2=tous
 
 Les événements d'audit incluent :
 
@@ -473,23 +560,33 @@ Classification des Types d'Événements
 
 Les événements d'audit utilisent des codes différenciés pour l'intégration SIEM :
 
-+--------------------------+-------------------------------------------------------------------+
-| Type d'événement         | Description                                                       |
-+==========================+===================================================================+
-| ``AUDIT_AUTH_SUCCESS``   | Authentification réussie                                          |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_AUTH_FAILURE``   | Authentification échouée                                          |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_AUTHZ_DENIED``   | Autorisation refusée (utilisateur valide, sans permission)        |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_SECURITY_ERROR`` | Échec cryptographique/sécurité (signature invalide, JWT malformé) |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_RATE_LIMITED``   | Limitation de débit déclenchée                                    |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_USER_CREATED``   | Compte utilisateur local créé                                     |
-+--------------------------+-------------------------------------------------------------------+
-| ``AUDIT_SERVER_ERROR``   | Erreur de communication avec le backend                           |
-+--------------------------+-------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Type d'événement
+     - Description
+
+   * - ``AUDIT_AUTH_SUCCESS``
+     - Authentification réussie
+
+   * - ``AUDIT_AUTH_FAILURE``
+     - Authentification échouée
+
+   * - ``AUDIT_AUTHZ_DENIED``
+     - Autorisation refusée (utilisateur valide, sans permission)
+
+   * - ``AUDIT_SECURITY_ERROR``
+     - Échec cryptographique/sécurité (signature invalide, JWT malformé)
+
+   * - ``AUDIT_RATE_LIMITED``
+     - Limitation de débit déclenchée
+
+   * - ``AUDIT_USER_CREATED``
+     - Compte utilisateur local créé
+
+   * - ``AUDIT_SERVER_ERROR``
+     - Erreur de communication avec le backend
 
 Cette classification permet aux équipes de sécurité de distinguer :
 
@@ -501,13 +598,21 @@ Notifications Webhook
 
 Pour la surveillance de sécurité en temps réel :
 
-================== ============================================
-Paramètre          Description
-================== ============================================
-``notify_enabled`` Activer les webhooks
-``notify_url``     URL de l'endpoint webhook
-``notify_secret``  Secret HMAC pour les signatures des webhooks
-================== ============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 29 71
+
+   * - Paramètre
+     - Description
+
+   * - ``notify_enabled``
+     - Activer les webhooks
+
+   * - ``notify_url``
+     - URL de l'endpoint webhook
+
+   * - ``notify_secret``
+     - Secret HMAC pour les signatures des webhooks
 
 Sécurité de la Configuration
 ----------------------------
@@ -524,14 +629,29 @@ Permissions des Fichiers
 
 Permissions recommandées :
 
-====================================== =========== ============
-Fichier                                Permissions Propriétaire
-====================================== =========== ============
-``/etc/open-bastion/openbastion.conf`` 0600        root
-Fichier token serveur                  0600        root
-Répertoire cache                       0700        root
-Répertoire état limitation de débit    0700        root
-====================================== =========== ============
+.. list-table::
+   :header-rows: 1
+   :widths: 62 18 20
+
+   * - Fichier
+     - Permissions
+     - Propriétaire
+
+   * - ``/etc/open-bastion/openbastion.conf``
+     - 0600
+     - root
+
+   * - Fichier token serveur
+     - 0600
+     - root
+
+   * - Répertoire cache
+     - 0700
+     - root
+
+   * - Répertoire état limitation de débit
+     - 0700
+     - root
 
 Sécurité des Scripts
 --------------------
@@ -635,27 +755,42 @@ Les comptes de service (ansible, backup, deploy, etc.) sont des comptes Unix loc
 Sécurité du Fichier de Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-=========== ===========================================================
-Exigence    Description
-=========== ===========================================================
-Propriété   Doit appartenir à root (uid 0)
-Permissions Doit être 0600 (lecture/écriture propriétaire uniquement)
-Liens sym.  Le fichier ne doit pas être un lien symbolique (O_NOFOLLOW)
-Emplacement ``/etc/open-bastion/service-accounts.conf`` (configurable)
-=========== ===========================================================
+.. list-table::
+   :header-rows: 1
+   :widths: 16 84
+
+   * - Exigence
+     - Description
+
+   * - Propriété
+     - Doit appartenir à root (uid 0)
+
+   * - Permissions
+     - Doit être 0600 (lecture/écriture propriétaire uniquement)
+
+   * - Liens sym.
+     - Le fichier ne doit pas être un lien symbolique (O_NOFOLLOW)
+
+   * - Emplacement
+     - ``/etc/open-bastion/service-accounts.conf`` (configurable)
 
 Les clés elles-mêmes sont dans ``/etc/open-bastion/service-accounts.d/<nom>.pub`` ; ``ob-service-account-keys`` ne sert qu'un fichier appartenant à root.
 
 Validation des Comptes
 ~~~~~~~~~~~~~~~~~~~~~~
 
-+---------------------+--------------------------------------------------------------------------------------+
-| Champ               | Validation                                                                           |
-+=====================+======================================================================================+
-| ``name``            | Lettres minuscules, chiffres, underscore, tiret ; max 32 caractères                  |
-+---------------------+--------------------------------------------------------------------------------------+
-| ``key_fingerprint`` | Doit commencer par ``SHA256:`` ou ``MD5:``, uniquement des caractères base64 valides |
-+---------------------+--------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Champ
+     - Validation
+
+   * - ``name``
+     - Lettres minuscules, chiffres, underscore, tiret ; max 32 caractères
+
+   * - ``key_fingerprint``
+     - Doit commencer par ``SHA256:`` ou ``MD5:``, uniquement des caractères base64 valides
 
 Une entrée invalide est écartée au chargement. Les clés des versions antérieures (``uid``, ``gid``, ``shell``, ``home``, ``gecos``, ``sudo_allowed``, ``sudo_nopasswd``) sont ignorées avec un avertissement : le shell, le home et les identifiants sont ceux du compte local, et le ``sudo`` relève de ``sudoers``.
 
@@ -702,36 +837,52 @@ Flux d'Authentification
 Bénéfices de Sécurité
 ~~~~~~~~~~~~~~~~~~~~~
 
-+------------------------+----------------------------------------------------------------------+
-| Fonctionnalité         | Bénéfice                                                             |
-+========================+======================================================================+
-| Configuration locale   | Pas de dépendance réseau pour les comptes de service                 |
-+------------------------+----------------------------------------------------------------------+
-| Contrôle par serveur   | Chaque serveur liste explicitement les comptes de service autorisés  |
-+------------------------+----------------------------------------------------------------------+
-| Clés propriété de root | Le compte ne peut pas ajouter de clé (``AuthorizedKeysCommand``)     |
-+------------------------+----------------------------------------------------------------------+
-| Journalisation d'audit | Tous les accès de comptes de service sont journalisés                |
-+------------------------+----------------------------------------------------------------------+
-| Pas de sudo implicite  | Open Bastion n'en accorde aucun ; ``sudoers`` en est la seule source |
-+------------------------+----------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Fonctionnalité
+     - Bénéfice
+
+   * - Configuration locale
+     - Pas de dépendance réseau pour les comptes de service
+
+   * - Contrôle par serveur
+     - Chaque serveur liste explicitement les comptes de service autorisés
+
+   * - Clés propriété de root
+     - Le compte ne peut pas ajouter de clé (``AuthorizedKeysCommand``)
+
+   * - Journalisation d'audit
+     - Tous les accès de comptes de service sont journalisés
+
+   * - Pas de sudo implicite
+     - Open Bastion n'en accorde aucun ; ``sudoers`` en est la seule source
 
 Limitations
 ~~~~~~~~~~~
 
-+---------------------------------------------+------------------------------------------------------------------+
-| Limitation                                  | Atténuation                                                      |
-+=============================================+==================================================================+
-| Pas de gestion centralisée                  | Utiliser la gestion de configuration (Ansible, Puppet)           |
-+---------------------------------------------+------------------------------------------------------------------+
-| Pas de révocation par le portail            | Retirer le ``.pub`` et l'entrée sur chaque serveur ; ``userdel`` |
-+---------------------------------------------+------------------------------------------------------------------+
-| Rotation manuelle des clés                  | Mettre en œuvre des procédures de rotation des clés              |
-+---------------------------------------------+------------------------------------------------------------------+
-| Dépendance au fichier local                 | Surveiller l'intégrité des fichiers avec AIDE/Tripwire           |
-+---------------------------------------------+------------------------------------------------------------------+
-| Shell non imposé sur un hôte qui enregistre | Créer le compte avec ``/usr/sbin/ob-login-shell``                |
-+---------------------------------------------+------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 41 59
+
+   * - Limitation
+     - Atténuation
+
+   * - Pas de gestion centralisée
+     - Utiliser la gestion de configuration (Ansible, Puppet)
+
+   * - Pas de révocation par le portail
+     - Retirer le ``.pub`` et l'entrée sur chaque serveur ; ``userdel``
+
+   * - Rotation manuelle des clés
+     - Mettre en œuvre des procédures de rotation des clés
+
+   * - Dépendance au fichier local
+     - Surveiller l'intégrité des fichiers avec AIDE/Tripwire
+
+   * - Shell non imposé sur un hôte qui enregistre
+     - Créer le compte avec ``/usr/sbin/ob-login-shell``
 
 Exemple de Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -749,36 +900,64 @@ Le module PAM peut imposer des restrictions sur les types de clés SSH autorisé
 Configuration
 ~~~~~~~~~~~~~
 
-+----------------------------+--------+----------------------------------------------------+
-| Paramètre                  | Défaut | Description                                        |
-+============================+========+====================================================+
-| ``ssh_key_policy_enabled`` | false  | Activer les restrictions de type de clé SSH        |
-+----------------------------+--------+----------------------------------------------------+
-| ``ssh_key_allowed_types``  | tous   | Liste séparée par des virgules des types autorisés |
-+----------------------------+--------+----------------------------------------------------+
-| ``ssh_key_min_rsa_bits``   | 2048   | Taille minimale de clé RSA en bits                 |
-+----------------------------+--------+----------------------------------------------------+
-| ``ssh_key_min_ecdsa_bits`` | 256    | Taille minimale de clé ECDSA en bits               |
-+----------------------------+--------+----------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 32 9 59
+
+   * - Paramètre
+     - Défaut
+     - Description
+
+   * - ``ssh_key_policy_enabled``
+     - false
+     - Activer les restrictions de type de clé SSH
+
+   * - ``ssh_key_allowed_types``
+     - tous
+     - Liste séparée par des virgules des types autorisés
+
+   * - ``ssh_key_min_rsa_bits``
+     - 2048
+     - Taille minimale de clé RSA en bits
+
+   * - ``ssh_key_min_ecdsa_bits``
+     - 256
+     - Taille minimale de clé ECDSA en bits
 
 Types de Clés Supportés
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-+----------------+---------------------------+--------------------------------------------+
-| Type           | Algorithme                | Recommandation                             |
-+================+===========================+============================================+
-| ``ed25519``    | Ed25519                   | **Recommandé** - Moderne, rapide, sécurisé |
-+----------------+---------------------------+--------------------------------------------+
-| ``sk-ed25519`` | Ed25519 avec FIDO2        | **Recommandé** - Lié au matériel           |
-+----------------+---------------------------+--------------------------------------------+
-| ``sk-ecdsa``   | ECDSA avec FIDO2          | **Recommandé** - Lié au matériel           |
-+----------------+---------------------------+--------------------------------------------+
-| ``ecdsa``      | ECDSA (P-256/P-384/P-521) | Acceptable                                 |
-+----------------+---------------------------+--------------------------------------------+
-| ``rsa``        | RSA                       | Acceptable avec ≥3072 bits                 |
-+----------------+---------------------------+--------------------------------------------+
-| ``dsa``        | DSA                       | **Obsolète** - Devrait être désactivé      |
-+----------------+---------------------------+--------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 31 51
+
+   * - Type
+     - Algorithme
+     - Recommandation
+
+   * - ``ed25519``
+     - Ed25519
+     - **Recommandé** - Moderne, rapide, sécurisé
+
+   * - ``sk-ed25519``
+     - Ed25519 avec FIDO2
+     - **Recommandé** - Lié au matériel
+
+   * - ``sk-ecdsa``
+     - ECDSA avec FIDO2
+     - **Recommandé** - Lié au matériel
+
+   * - ``ecdsa``
+     - ECDSA (P-256/P-384/P-521)
+     - Acceptable
+
+   * - ``rsa``
+     - RSA
+     - Acceptable avec ≥3072 bits
+
+   * - ``dsa``
+     - DSA
+     - **Obsolète** - Devrait être désactivé
 
 Considérations de Sécurité
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -804,38 +983,57 @@ Cette configuration n'autorise que les clés Ed25519 et les clés de sécurité 
 Atténuation des Menaces
 -----------------------
 
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Menace                      | Atténuation                                                                                                                 |
-+=============================+=============================================================================================================================+
-| Rejeu de token              | Tokens à usage unique, invalidation du cache                                                                                |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Attaques MITM               | TLS 1.3, épinglage de certificat                                                                                            |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Force brute                 | Limitation de débit avec attente exponentielle                                                                              |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Falsification du cache      | Chiffrement authentifié AES-256-GCM                                                                                         |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Injection de chemin         | Validation stricte des chemins, listes approuvées                                                                           |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Débordement de tampon       | Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null                                        |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Collision d'UID             | Détection de collision à sécurité intégrée                                                                                  |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Falsification de requête    | Signature HMAC optionnelle avec nonces                                                                                      |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| DoS par épuisement mémoire  | Limites de taille de réponse (256 Ko), limites de groupes (256 max)                                                         |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Dépassement d'entier        | Validation des entrées dans l'encodage base64, calculs d'attente                                                            |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| JSON malformé               | Validation de type pour les champs de réponse critiques                                                                     |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Exposition du secret client | JWT Client Assertion (RFC 7523) - secret jamais transmis                                                                    |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Contournement du bastion    | Certificat éphémère lié à ``(bastion_id, user)`` via voucher serveur ; ``source-address`` épinglée à l'IP du bastion        |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Accès direct au backend     | Cert SSO direct refusé (key-id sans ``bastion=``) ; cert éphémère épinglé à l'IP du bastion via ``source-address`` critique |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Clés SSH faibles            | Application de la politique de clés SSH avec restrictions de type/taille                                                    |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
-| Force brute sur le cache    | Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle                                   |
-+-----------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 19 81
+
+   * - Menace
+     - Atténuation
+
+   * - Rejeu de token
+     - Tokens à usage unique, invalidation du cache
+
+   * - Attaques MITM
+     - TLS 1.3, épinglage de certificat
+
+   * - Force brute
+     - Limitation de débit avec attente exponentielle
+
+   * - Falsification du cache
+     - Chiffrement authentifié AES-256-GCM
+
+   * - Injection de chemin
+     - Validation stricte des chemins, listes approuvées
+
+   * - Débordement de tampon
+     - Opérations sur chaînes avec vérification des limites, snprintf avec terminaison null
+
+   * - Collision d'UID
+     - Détection de collision à sécurité intégrée
+
+   * - Falsification de requête
+     - Signature HMAC optionnelle avec nonces
+
+   * - DoS par épuisement mémoire
+     - Limites de taille de réponse (256 Ko), limites de groupes (256 max)
+
+   * - Dépassement d'entier
+     - Validation des entrées dans l'encodage base64, calculs d'attente
+
+   * - JSON malformé
+     - Validation de type pour les champs de réponse critiques
+
+   * - Exposition du secret client
+     - JWT Client Assertion (RFC 7523) - secret jamais transmis
+
+   * - Contournement du bastion
+     - Certificat éphémère lié à ``(bastion_id, user)`` via voucher serveur ; ``source-address`` épinglée à l'IP du bastion
+
+   * - Accès direct au backend
+     - Cert SSO direct refusé (key-id sans ``bastion=``) ; cert éphémère épinglé à l'IP du bastion via ``source-address`` critique
+
+   * - Clés SSH faibles
+     - Application de la politique de clés SSH avec restrictions de type/taille
+
+   * - Force brute sur le cache
+     - Limitation de débit pour les consultations de cache hors-ligne avec attente exponentielle

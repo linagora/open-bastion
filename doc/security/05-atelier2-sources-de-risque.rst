@@ -10,23 +10,57 @@ Atelier 2 — Sources de risque et objectifs visés
 2.1 Sources de risque identifiées
 ---------------------------------
 
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| Id      | Source de risque                            | Motivation                                       | Ressources                                               | Activité                     |
-+=========+=============================================+==================================================+==========================================================+==============================+
-| **SR1** | Attaquant externe opportuniste              | Gain financier (rançongiciel, revente d'accès)   | Faibles : outillage public, scans de masse               | Élevée, permanente           |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR2** | Attaquant externe ciblé (groupe organisé)   | Espionnage, sabotage, revente d'accès privilégié | Élevées : 0-day possible, temps long, ingénierie sociale | Moyenne, campagne dirigée    |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR3** | Administrateur légitime malveillant         | Contournement du contrôle, dissimulation d'actes | Très élevées : accès légitime, connaissance du SI        | Faible mais impact maximal   |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR4** | Administrateur légitime maladroit           | Aucune — erreur                                  | Accès légitime                                           | Élevée (l'erreur est banale) |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR5** | Prestataire ou intervenant externe          | Dépassement de mandat, persistance après mission | Accès légitime borné dans le temps                       | Moyenne                      |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR6** | Compte technique / automatisation détournée | Aucune propre : vecteur pour SR1/SR2             | Clé de longue durée, souvent sans MFA ni rotation        | Moyenne, silencieuse         |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
-| **SR7** | Administrateur du portail LLNG              | Contournement du contrôle depuis l'autorité      | Maximales : détient la CA, décide des autorisations      | Très faible, impact maximal  |
-+---------+---------------------------------------------+--------------------------------------------------+----------------------------------------------------------+------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 23 26 30 16
+
+   * - Id
+     - Source de risque
+     - Motivation
+     - Ressources
+     - Activité
+
+   * - **SR1**
+     - Attaquant externe opportuniste
+     - Gain financier (rançongiciel, revente d'accès)
+     - Faibles : outillage public, scans de masse
+     - Élevée, permanente
+
+   * - **SR2**
+     - Attaquant externe ciblé (groupe organisé)
+     - Espionnage, sabotage, revente d'accès privilégié
+     - Élevées : 0-day possible, temps long, ingénierie sociale
+     - Moyenne, campagne dirigée
+
+   * - **SR3**
+     - Administrateur légitime malveillant
+     - Contournement du contrôle, dissimulation d'actes
+     - Très élevées : accès légitime, connaissance du SI
+     - Faible mais impact maximal
+
+   * - **SR4**
+     - Administrateur légitime maladroit
+     - Aucune — erreur
+     - Accès légitime
+     - Élevée (l'erreur est banale)
+
+   * - **SR5**
+     - Prestataire ou intervenant externe
+     - Dépassement de mandat, persistance après mission
+     - Accès légitime borné dans le temps
+     - Moyenne
+
+   * - **SR6**
+     - Compte technique / automatisation détournée
+     - Aucune propre : vecteur pour SR1/SR2
+     - Clé de longue durée, souvent sans MFA ni rotation
+     - Moyenne, silencieuse
+
+   * - **SR7**
+     - Administrateur du portail LLNG
+     - Contournement du contrôle depuis l'autorité
+     - Maximales : détient la CA, décide des autorisations
+     - Très faible, impact maximal
 
 SR7 est dans l'étude parce que le portail est **dans le périmètre** (:ref:`atelier 1, §1.1 <security-04-atelier1-cadrage-socle-périmètre-technique-retenu>`) : qui administre LLNG peut signer un certificat pour n'importe qui et s'autoriser n'importe où. C'est un pouvoir concentré, que l'architecture ne cherche pas à contraindre — elle le trace.
 
@@ -35,21 +69,37 @@ SR7 est dans l'étude parce que le portail est **dans le périmètre** (:ref:`at
 2.2 Objectifs visés
 -------------------
 
-+---------+------------------------------------------------------------------+------------------------------+
-| Id      | Objectif visé                                                    | Événements redoutés associés |
-+=========+==================================================================+==============================+
-| **OV1** | Obtenir un accès administrateur durable au parc                  | ER1, ER6                     |
-+---------+------------------------------------------------------------------+------------------------------+
-| **OV2** | Conserver un accès après avoir perdu son habilitation            | ER2                          |
-+---------+------------------------------------------------------------------+------------------------------+
-| **OV3** | Agir sans laisser de trace exploitable                           | ER3                          |
-+---------+------------------------------------------------------------------+------------------------------+
-| **OV4** | Exfiltrer des secrets manipulés en session                       | ER4                          |
-+---------+------------------------------------------------------------------+------------------------------+
-| **OV5** | Empêcher l'exploitation (sabotage, extorsion)                    | ER5                          |
-+---------+------------------------------------------------------------------+------------------------------+
-| **OV6** | Introduire un serveur sous contrôle dans le périmètre administré | ER7                          |
-+---------+------------------------------------------------------------------+------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 9 63 29
+
+   * - Id
+     - Objectif visé
+     - Événements redoutés associés
+
+   * - **OV1**
+     - Obtenir un accès administrateur durable au parc
+     - ER1, ER6
+
+   * - **OV2**
+     - Conserver un accès après avoir perdu son habilitation
+     - ER2
+
+   * - **OV3**
+     - Agir sans laisser de trace exploitable
+     - ER3
+
+   * - **OV4**
+     - Exfiltrer des secrets manipulés en session
+     - ER4
+
+   * - **OV5**
+     - Empêcher l'exploitation (sabotage, extorsion)
+     - ER5
+
+   * - **OV6**
+     - Introduire un serveur sous contrôle dans le périmètre administré
+     - ER7
 
 .. _security-05-atelier2-sources-de-risque-23-couples-srov-et-pertinence:
 
@@ -58,44 +108,110 @@ SR7 est dans l'étude parce que le portail est **dans le périmètre** (:ref:`at
 
 Notation de la pertinence : **F** (forte, retenue pour la suite), **M** (moyenne, couverte mais non structurante), **f** (faible, hors étude).
 
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| SR ↓ / OV →                       | OV1 accès durable | OV2 survivre à la révocation | OV3 agir sans trace | OV4 exfiltrer | OV5 empêcher l'exploitation | OV6 enrôler un serveur |
-+===================================+===================+==============================+=====================+===============+=============================+========================+
-| **SR1** externe opportuniste      | **F**             | f                            | f                   | M             | M                           | f                      |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR2** externe ciblé             | **F**             | M                            | **F**               | **F**         | M                           | **F**                  |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR3** admin malveillant         | M                 | **F**                        | **F**               | **F**         | M                           | **F**                  |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR4** admin maladroit           | f                 | f                            | f                   | f             | **F**                       | M                      |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR5** prestataire               | M                 | **F**                        | M                   | M             | f                           | f                      |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR6** compte technique détourné | **F**             | **F**                        | **F**               | M             | f                           | f                      |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
-| **SR7** admin du portail LLNG     | **F**             | **F**                        | **F**               | **F**         | **F**                       | **F**                  |
-+-----------------------------------+-------------------+------------------------------+---------------------+---------------+-----------------------------+------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 11 17 12 9 17 14
+
+   * - SR ↓ / OV →
+     - OV1 accès durable
+     - OV2 survivre à la révocation
+     - OV3 agir sans trace
+     - OV4 exfiltrer
+     - OV5 empêcher l'exploitation
+     - OV6 enrôler un serveur
+
+   * - **SR1** externe opportuniste
+     - **F**
+     - f
+     - f
+     - M
+     - M
+     - f
+
+   * - **SR2** externe ciblé
+     - **F**
+     - M
+     - **F**
+     - **F**
+     - M
+     - **F**
+
+   * - **SR3** admin malveillant
+     - M
+     - **F**
+     - **F**
+     - **F**
+     - M
+     - **F**
+
+   * - **SR4** admin maladroit
+     - f
+     - f
+     - f
+     - f
+     - **F**
+     - M
+
+   * - **SR5** prestataire
+     - M
+     - **F**
+     - M
+     - M
+     - f
+     - f
+
+   * - **SR6** compte technique détourné
+     - **F**
+     - **F**
+     - **F**
+     - M
+     - f
+     - f
+
+   * - **SR7** admin du portail LLNG
+     - **F**
+     - **F**
+     - **F**
+     - **F**
+     - **F**
+     - **F**
 
 Couples retenus pour l'atelier 3
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Six couples structurent les scénarios stratégiques :
 
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| Couple        | Formulation                                                                                         | Traité par |
-+===============+=====================================================================================================+============+
-| **SR2 × OV1** | Un attaquant ciblé obtient un accès administrateur durable au parc                                  | SS1, SS2   |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| **SR2 × OV6** | Un attaquant ciblé fait enrôler un serveur sous son contrôle et récupère identités et autorisations | SS3        |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| **SR3 × OV3** | Un administrateur légitime agit sans laisser de trace exploitable                                   | SS4        |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| **SR5 × OV2** | Un prestataire conserve un accès après la fin de sa mission                                         | SS5        |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| **SR6 × OV1** | Une clé d'automatisation détournée donne un accès privilégié permanent, hors du contrôle SSO        | SS6        |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
-| **SR4 × OV5** | Une erreur d'exploitation rend le parc inaccessible (verrouillage total)                            | SS7        |
-+---------------+-----------------------------------------------------------------------------------------------------+------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 79 9
+
+   * - Couple
+     - Formulation
+     - Traité par
+
+   * - **SR2 × OV1**
+     - Un attaquant ciblé obtient un accès administrateur durable au parc
+     - SS1, SS2
+
+   * - **SR2 × OV6**
+     - Un attaquant ciblé fait enrôler un serveur sous son contrôle et récupère identités et autorisations
+     - SS3
+
+   * - **SR3 × OV3**
+     - Un administrateur légitime agit sans laisser de trace exploitable
+     - SS4
+
+   * - **SR5 × OV2**
+     - Un prestataire conserve un accès après la fin de sa mission
+     - SS5
+
+   * - **SR6 × OV1**
+     - Une clé d'automatisation détournée donne un accès privilégié permanent, hors du contrôle SSO
+     - SS6
+
+   * - **SR4 × OV5**
+     - Une erreur d'exploitation rend le parc inaccessible (verrouillage total)
+     - SS7
 
 Couples écartés, et pourquoi
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -8,19 +8,27 @@ Contexte
 
 Un administrateur SSH (appelé "A" dans ce document) dispose de :
 
-+-------------------+---------------------------------------------------------+
-| Accès             | Description                                             |
-+===================+=========================================================+
-| Compte LLNG       | Compte LDAP/AD avec appartenance aux groupes autorisés  |
-+-------------------+---------------------------------------------------------+
-| ``client_secret`` | Secret du client OIDC utilisé pour les enrôlements      |
-+-------------------+---------------------------------------------------------+
-| Certificat SSH    | Certificat signé par la CA LLNG (durée de vie : 1 an)   |
-+-------------------+---------------------------------------------------------+
-| Accès réseau      | VPN ou accès réseau interne vers le bastion             |
-+-------------------+---------------------------------------------------------+
-| Tokens machines   | Connaissance des ``refresh_token`` des serveurs enrôlés |
-+-------------------+---------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Accès
+     - Description
+
+   * - Compte LLNG
+     - Compte LDAP/AD avec appartenance aux groupes autorisés
+
+   * - ``client_secret``
+     - Secret du client OIDC utilisé pour les enrôlements
+
+   * - Certificat SSH
+     - Certificat signé par la CA LLNG (durée de vie : 1 an)
+
+   * - Accès réseau
+     - VPN ou accès réseau interne vers le bastion
+
+   * - Tokens machines
+     - Connaissance des ``refresh_token`` des serveurs enrôlés
 
 .. _principe--défense-en-profondeur:
 
@@ -230,32 +238,60 @@ A connaissait le ``client_secret`` du client OIDC. Bien que la révocation LLNG 
 
 Indépendamment des offboardings, planifier une rotation régulière :
 
-================= ===========================================
-Élément           Fréquence recommandée
-================= ===========================================
-``client_secret`` Tous les 6 mois
-Clé CA SSH        Tous les 2 ans (avec période de transition)
-Tokens machines   Rotation automatique via ``refresh_token``
-================= ===========================================
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Élément
+     - Fréquence recommandée
+
+   * - ``client_secret``
+     - Tous les 6 mois
+
+   * - Clé CA SSH
+     - Tous les 2 ans (avec période de transition)
+
+   * - Tokens machines
+     - Rotation automatique via ``refresh_token``
 
 --------------
 
 Tableau Récapitulatif
 ---------------------
 
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
-| Phase | Action                                  | Délai      | Effet                                                   |
-+=======+=========================================+============+=========================================================+
-| 1     | Désactiver compte LLNG                  | Immédiat   | Bloque ``/pam/authorize`` + nouveaux certificats + sudo |
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
-| 1     | Révoquer VPN                            | Immédiat   | Bloque accès bastion                                    |
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
-| 2     | Révoquer certificats via ``/ssh/admin`` | Immédiat   | Ajoute à la KRL                                         |
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
-| 2     | Propager KRL aux serveurs               | < 30 min   | Bloque certificats révoqués                             |
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
-| 3     | Rotation ``client_secret``              | < 30 jours | Limite exposition                                       |
-+-------+-----------------------------------------+------------+---------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 35 10 48
+
+   * - Phase
+     - Action
+     - Délai
+     - Effet
+
+   * - 1
+     - Désactiver compte LLNG
+     - Immédiat
+     - Bloque ``/pam/authorize`` + nouveaux certificats + sudo
+
+   * - 1
+     - Révoquer VPN
+     - Immédiat
+     - Bloque accès bastion
+
+   * - 2
+     - Révoquer certificats via ``/ssh/admin``
+     - Immédiat
+     - Ajoute à la KRL
+
+   * - 2
+     - Propager KRL aux serveurs
+     - < 30 min
+     - Bloque certificats révoqués
+
+   * - 3
+     - Rotation ``client_secret``
+     - < 30 jours
+     - Limite exposition
 
 --------------
 
@@ -457,14 +493,29 @@ Phase 2 : Vérification (J+1)
 Tableau récapitulatif - Comptes de Service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-======================= ======== =========================
-Action                  Délai    Condition
-======================= ======== =========================
-Rotation clé ansible    Immédiat Si A avait accès à la clé
-Rotation clé backup     Immédiat Si A avait accès à la clé
-Rotation clé deploy     Immédiat Si A avait accès à la clé
-Rotation clé monitoring Immédiat Si A avait accès à la clé
-======================= ======== =========================
+.. list-table::
+   :header-rows: 1
+   :widths: 41 14 45
+
+   * - Action
+     - Délai
+     - Condition
+
+   * - Rotation clé ansible
+     - Immédiat
+     - Si A avait accès à la clé
+
+   * - Rotation clé backup
+     - Immédiat
+     - Si A avait accès à la clé
+
+   * - Rotation clé deploy
+     - Immédiat
+     - Si A avait accès à la clé
+
+   * - Rotation clé monitoring
+     - Immédiat
+     - Si A avait accès à la clé
 
 Checklist Comptes de Service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

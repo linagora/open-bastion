@@ -15,17 +15,24 @@ L'enrôlement utilise le flux **OAuth2 Device Authorization Grant** (RFC 8628). 
 Acteurs
 ~~~~~~~
 
-+-------------------------+--------------------------------------------------------------------+
-| Acteur                  | Rôle                                                               |
-+=========================+====================================================================+
-| **Opérateur**           | Personne exécutant ``ob-enroll`` sur le serveur à enrôler          |
-+-------------------------+--------------------------------------------------------------------+
-| **Administrateur LLNG** | Personne habilitée à approuver les enrôlements sur le portail LLNG |
-+-------------------------+--------------------------------------------------------------------+
-| **Serveur cible**       | Machine à enrôler pour l'authentification PAM                      |
-+-------------------------+--------------------------------------------------------------------+
-| **Portail LLNG**        | Serveur LemonLDAP::NG fournissant les endpoints OAuth2             |
-+-------------------------+--------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 27 73
+
+   * - Acteur
+     - Rôle
+
+   * - **Opérateur**
+     - Personne exécutant ``ob-enroll`` sur le serveur à enrôler
+
+   * - **Administrateur LLNG**
+     - Personne habilitée à approuver les enrôlements sur le portail LLNG
+
+   * - **Serveur cible**
+     - Machine à enrôler pour l'authentification PAM
+
+   * - **Portail LLNG**
+     - Serveur LemonLDAP::NG fournissant les endpoints OAuth2
 
 Prérequis (côté LLNG)
 ~~~~~~~~~~~~~~~~~~~~~
@@ -48,17 +55,29 @@ Avant de pouvoir exécuter ``ob-enroll``, l'administrateur système doit configu
 
 **Informations à fournir :**
 
-+-------------------+--------------------------------+------------------------------+
-| Paramètre         | Description                    | Exemple                      |
-+===================+================================+==============================+
-| ``portal_url``    | URL du portail LLNG            | ``https://auth.example.com`` |
-+-------------------+--------------------------------+------------------------------+
-| ``client_id``     | Identifiant du client OIDC     | ``pam-access``               |
-+-------------------+--------------------------------+------------------------------+
-| ``client_secret`` | Secret partagé OIDC            | ``s3cr3t-p@ssw0rd``          |
-+-------------------+--------------------------------+------------------------------+
-| ``server_group``  | Groupe de serveurs (optionnel) | ``production``               |
-+-------------------+--------------------------------+------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 23 40 37
+
+   * - Paramètre
+     - Description
+     - Exemple
+
+   * - ``portal_url``
+     - URL du portail LLNG
+     - ``https://auth.example.com``
+
+   * - ``client_id``
+     - Identifiant du client OIDC
+     - ``pam-access``
+
+   * - ``client_secret``
+     - Secret partagé OIDC
+     - ``s3cr3t-p@ssw0rd``
+
+   * - ``server_group``
+     - Groupe de serveurs (optionnel)
+     - ``production``
 
 **Comment l'administrateur obtient ces informations :**
 
@@ -430,14 +449,29 @@ Diagramme du cycle de renouvellement
 Échelle de cotation
 ~~~~~~~~~~~~~~~~~~~
 
-===== =============== ===========
-Score Probabilité     Impact
-===== =============== ===========
-1     Très improbable Négligeable
-2     Peu probable    Limité
-3     Probable        Important
-4     Très probable   Critique
-===== =============== ===========
+.. list-table::
+   :header-rows: 1
+   :widths: 24 44 32
+
+   * - Score
+     - Probabilité
+     - Impact
+
+   * - 1
+     - Très improbable
+     - Négligeable
+
+   * - 2
+     - Peu probable
+     - Limité
+
+   * - 3
+     - Probable
+     - Important
+
+   * - 4
+     - Très probable
+     - Critique
 
 --------------
 
@@ -1296,21 +1330,37 @@ Configuration de référence : un ``client_id`` par projet, avec la segmentation
 
 **Remédiations appliquées :**
 
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| Remédiation                       | Risques impactés | Effet                                                                             |
-+===================================+==================+===================================================================================+
-| **PKCE obligatoire**              | R13              | I=4 → I=1 : Sans ``code_verifier``, l'interception du ``device_code`` est inutile |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| **``client_secret_jwt``**         | R3               | I=4 → I=3 : JWT à usage unique (anti-rejeu via ``jti``)                           |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| **Segmentation ``server_group``** | R4 R7 R11        | I=4 → I=3 : Blast radius limité au groupe                                         |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| **Clients OIDC distincts**        | R0 R4 R7 R11     | I supplémentaire −1 : Isolation complète par zone                                 |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| **CrowdSec**                      | R2               | P=3 → P=2 : Rate-limiting IP sur brute-force ``user_code``                        |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
-| **``RtActivity``**                | R12              | P=3 → P=1 : Révocation automatique des tokens inactifs                            |
-+-----------------------------------+------------------+-----------------------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 13 61
+
+   * - Remédiation
+     - Risques impactés
+     - Effet
+
+   * - **PKCE obligatoire**
+     - R13
+     - I=4 → I=1 : Sans ``code_verifier``, l'interception du ``device_code`` est inutile
+
+   * - **``client_secret_jwt``**
+     - R3
+     - I=4 → I=3 : JWT à usage unique (anti-rejeu via ``jti``)
+
+   * - **Segmentation ``server_group``**
+     - R4 R7 R11
+     - I=4 → I=3 : Blast radius limité au groupe
+
+   * - **Clients OIDC distincts**
+     - R0 R4 R7 R11
+     - I supplémentaire −1 : Isolation complète par zone
+
+   * - **CrowdSec**
+     - R2
+     - P=3 → P=2 : Rate-limiting IP sur brute-force ``user_code``
+
+   * - **``RtActivity``**
+     - R12
+     - P=3 → P=1 : Révocation automatique des tokens inactifs
 
 ..
 
@@ -1323,17 +1373,34 @@ Après remédiation, variante « clients OIDC distincts » (configuration condit
 
 Cette matrice ne s'applique **que si** un ``client_id`` distinct est déclaré par zone (voir section 5.2). Ce n'est pas la configuration par défaut, et elle n'est pas supposée acquise par la matrice précédente.
 
-+---------+-----------------------+------------------------+--------------------------------------------------------------------+
-| Risque  | Fiche (client unique) | Avec clients distincts | Amélioration                                                       |
-+=========+=======================+========================+====================================================================+
-| **R0**  | P=1, I=2              | **P=1, I=1**           | Le secret compromis ne peut initier d'enrôlements que dans sa zone |
-+---------+-----------------------+------------------------+--------------------------------------------------------------------+
-| **R4**  | P=1, I=4 (3 segmenté) | **P=1, I=2**           | Le token volé n'est valide que pour le scope de sa zone            |
-+---------+-----------------------+------------------------+--------------------------------------------------------------------+
-| **R7**  | P=1, I=3              | **P=1, I=2**           | Le serveur malveillant ne peut usurper que sa zone                 |
-+---------+-----------------------+------------------------+--------------------------------------------------------------------+
-| **R11** | P=1, I=3              | **P=1, I=2**           | Le refresh_token compromis est limité à sa zone                    |
-+---------+-----------------------+------------------------+--------------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 19 19 55
+
+   * - Risque
+     - Fiche (client unique)
+     - Avec clients distincts
+     - Amélioration
+
+   * - **R0**
+     - P=1, I=2
+     - **P=1, I=1**
+     - Le secret compromis ne peut initier d'enrôlements que dans sa zone
+
+   * - **R4**
+     - P=1, I=4 (3 segmenté)
+     - **P=1, I=2**
+     - Le token volé n'est valide que pour le scope de sa zone
+
+   * - **R7**
+     - P=1, I=3
+     - **P=1, I=2**
+     - Le serveur malveillant ne peut usurper que sa zone
+
+   * - **R11**
+     - P=1, I=3
+     - **P=1, I=2**
+     - Le refresh_token compromis est limité à sa zone
 
 +--------------------------+---------------------+------------------+--------------+-------------------+
 | Impact ↓ / Probabilité → | 1 - Très improbable | 2 - Peu probable | 3 - Probable | 4 - Très probable |
@@ -1512,14 +1579,34 @@ Chaque environnement ou zone de sécurité dispose de son propre client OIDC ave
 
 **Impact sur les risques :**
 
-====== ================= ===================== ======================
-Risque Sans segmentation Avec ``server_group`` Avec clients distincts
-====== ================= ===================== ======================
-R0     P=2, I=2          P=2, I=2              **P=2, I=1**
-R4     P=3, I=4          P=1, I=3              **P=1, I=2**
-R7     P=2, I=4          P=1, I=3              **P=1, I=2**
-R11    P=2, I=4          P=1, I=3              **P=1, I=2**
-====== ================= ===================== ======================
+.. list-table::
+   :header-rows: 1
+   :widths: 12 25 31 32
+
+   * - Risque
+     - Sans segmentation
+     - Avec ``server_group``
+     - Avec clients distincts
+
+   * - R0
+     - P=2, I=2
+     - P=2, I=2
+     - **P=2, I=1**
+
+   * - R4
+     - P=3, I=4
+     - P=1, I=3
+     - **P=1, I=2**
+
+   * - R7
+     - P=2, I=4
+     - P=1, I=3
+     - **P=1, I=2**
+
+   * - R11
+     - P=2, I=4
+     - P=1, I=3
+     - **P=1, I=2**
 
 **Explication :**
 
@@ -1581,21 +1668,37 @@ R11    P=2, I=4          P=1, I=3              **P=1, I=2**
 5.4 Matrice de décision
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-+--------------------------------------+-----------------------+------------------------+
-| Critère                              | ``server_group`` seul | Clients OIDC distincts |
-+======================================+=======================+========================+
-| Nombre de serveurs                   | < 20                  | > 20                   |
-+--------------------------------------+-----------------------+------------------------+
-| Environnements critiques séparés     | Non                   | **Oui**                |
-+--------------------------------------+-----------------------+------------------------+
-| Exigences de conformité (ISO, SOC2)  | Basique               | **Élevées**            |
-+--------------------------------------+-----------------------+------------------------+
-| Équipes distinctes par environnement | Non                   | **Oui**                |
-+--------------------------------------+-----------------------+------------------------+
-| Rotation fréquente des secrets       | Contraignante         | **Facile**             |
-+--------------------------------------+-----------------------+------------------------+
-| Complexité de configuration LLNG     | Simple                | Moyenne                |
-+--------------------------------------+-----------------------+------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 27 28
+
+   * - Critère
+     - ``server_group`` seul
+     - Clients OIDC distincts
+
+   * - Nombre de serveurs
+     - < 20
+     - > 20
+
+   * - Environnements critiques séparés
+     - Non
+     - **Oui**
+
+   * - Exigences de conformité (ISO, SOC2)
+     - Basique
+     - **Élevées**
+
+   * - Équipes distinctes par environnement
+     - Non
+     - **Oui**
+
+   * - Rotation fréquente des secrets
+     - Contraignante
+     - **Facile**
+
+   * - Complexité de configuration LLNG
+     - Simple
+     - Moyenne
 
 **Recommandation :**
 
@@ -1719,27 +1822,59 @@ Référence : `Issue LLNG #3030 <https://gitlab.ow2.org/lemonldap-ng/lemonldap-n
 Fonctionnalités de sécurité implémentées
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Recommandation                 | Référence | Statut           | Implémentation                                    |
-+================================+===========+==================+===================================================+
-| Authentification JWT du client | R8, R8+   | ✅ Implémenté    | ``client_secret_jwt`` (RFC 7523) avec HMAC-SHA256 |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Protection anti-rejeu JWT      | -         | ✅ Implémenté    | Claim ``jti`` (UUID unique) dans chaque JWT       |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Codes aléatoires               | R18, R24  | ✅ LLNG          | Génération côté serveur LLNG                      |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Désactivation code après usage | R30       | ✅ LLNG          | Géré par le serveur LLNG                          |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Limitation TTL access_token    | R33       | ✅ Configuration | Configurable côté LLNG                            |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Pas de token dans les logs     | R32       | ✅ Implémenté    | Aucun token dans les logs PAM                     |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| PKCE pour Device Flow          | Extension | ✅ Implémenté    | ``code_verifier`` / ``code_challenge`` (S256)     |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| PKCE obligatoire               | Extension | ✅ Configuration | ``oidcRPMetaDataOptionsRequirePKCE: 1`` côté LLNG |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
-| Stockage hashé des tokens      | R21, R25  | ✅ Configuration | ``Hashed session storage`` côté LLNG (2.19.0+)    |
-+--------------------------------+-----------+------------------+---------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 29 10 16 46
+
+   * - Recommandation
+     - Référence
+     - Statut
+     - Implémentation
+
+   * - Authentification JWT du client
+     - R8, R8+
+     - ✅ Implémenté    |
+     - ``client_secret_jwt`` (RFC 7523) avec HMAC-SHA256 |
+
+   * - Protection anti-rejeu JWT
+     - -
+     - ✅ Implémenté    |
+     - Claim ``jti`` (UUID unique) dans chaque JWT       |
+
+   * - Codes aléatoires
+     - R18, R24
+     - ✅ LLNG          |
+     - Génération côté serveur LLNG                      |
+
+   * - Désactivation code après usage
+     - R30
+     - ✅ LLNG          |
+     - Géré par le serveur LLNG                          |
+
+   * - Limitation TTL access_token
+     - R33
+     - ✅ Configuration |
+     - Configurable côté LLNG                            |
+
+   * - Pas de token dans les logs
+     - R32
+     - ✅ Implémenté    |
+     - Aucun token dans les logs PAM                     |
+
+   * - PKCE pour Device Flow
+     - Extension
+     - ✅ Implémenté    |
+     - ``code_verifier`` / ``code_challenge`` (S256)     |
+
+   * - PKCE obligatoire
+     - Extension
+     - ✅ Configuration |
+     - ``oidcRPMetaDataOptionsRequirePKCE: 1`` côté LLNG |
+
+   * - Stockage hashé des tokens
+     - R21, R25
+     - ✅ Configuration |
+     - ``Hashed session storage`` côté LLNG (2.19.0+)    |
 
 Configuration LLNG recommandée (côté serveur)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1800,15 +1935,25 @@ Recommandations non applicables au Device Flow
 
 Certaines recommandations ANSSI concernent le flux Authorization Code classique et ne s'appliquent pas au Device Authorization Grant (RFC 8628) :
 
-+------------------------+-----------+--------------------------------------------------+
-| Recommandation         | Référence | Raison                                           |
-+========================+===========+==================================================+
-| Envoi de ``state``     | R10, R12  | Le Device Flow n'utilise pas de redirection HTTP |
-+------------------------+-----------+--------------------------------------------------+
-| Envoi de ``nonce``     | R14, R16  | Pas d'``id_token`` dans le flux device code      |
-+------------------------+-----------+--------------------------------------------------+
-| Vérification ``state`` | R22       | Pas de ``state`` dans le Device Flow             |
-+------------------------+-----------+--------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 13 59
+
+   * - Recommandation
+     - Référence
+     - Raison
+
+   * - Envoi de ``state``
+     - R10, R12
+     - Le Device Flow n'utilise pas de redirection HTTP
+
+   * - Envoi de ``nonce``
+     - R14, R16
+     - Pas d'``id_token`` dans le flux device code
+
+   * - Vérification ``state``
+     - R22
+     - Pas de ``state`` dans le Device Flow
 
 PKCE pour Device Flow
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1839,26 +1984,50 @@ Bien que le RFC 8628 ne mentionne pas PKCE, le module PAM l'implémente comme ex
 Tableau de synthèse sécurité
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-+--------------+-------------------------+------------------------------------------------------------+
-| Couche       | Protection              | Mécanisme                                                  |
-+==============+=========================+============================================================+
-| Transport    | Confidentialité         | TLS 1.3 obligatoire                                        |
-+--------------+-------------------------+------------------------------------------------------------+
-| Transport    | Intégrité               | Certificate pinning (optionnel)                            |
-+--------------+-------------------------+------------------------------------------------------------+
-| Client       | Authentification        | ``client_secret_jwt`` (RFC 7523)                           |
-+--------------+-------------------------+------------------------------------------------------------+
-| Client       | Anti-rejeu              | JWT avec ``jti`` unique                                    |
-+--------------+-------------------------+------------------------------------------------------------+
-| Device Flow  | Anti-interception       | PKCE obligatoire (``oidcRPMetaDataOptionsRequirePKCE: 1``) |
-+--------------+-------------------------+------------------------------------------------------------+
-| Token        | Confidentialité         | PKCE (``code_verifier`` / ``code_challenge``)              |
-+--------------+-------------------------+------------------------------------------------------------+
-| Token        | Rotation                | Refresh token rotatif                                      |
-+--------------+-------------------------+------------------------------------------------------------+
-| Stockage     | Confidentialité         | Permissions 0600, ``Hashed session storage`` côté LLNG     |
-+--------------+-------------------------+------------------------------------------------------------+
-| Segmentation | Blast radius (niveau 1) | ``server_group`` par environnement                         |
-+--------------+-------------------------+------------------------------------------------------------+
-| Segmentation | Blast radius (niveau 2) | Clients OIDC distincts par zone (recommandé)               |
-+--------------+-------------------------+------------------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 25 61
+
+   * - Couche
+     - Protection
+     - Mécanisme
+
+   * - Transport
+     - Confidentialité
+     - TLS 1.3 obligatoire
+
+   * - Transport
+     - Intégrité
+     - Certificate pinning (optionnel)
+
+   * - Client
+     - Authentification
+     - ``client_secret_jwt`` (RFC 7523)
+
+   * - Client
+     - Anti-rejeu
+     - JWT avec ``jti`` unique
+
+   * - Device Flow
+     - Anti-interception
+     - PKCE obligatoire (``oidcRPMetaDataOptionsRequirePKCE: 1``)
+
+   * - Token
+     - Confidentialité
+     - PKCE (``code_verifier`` / ``code_challenge``)
+
+   * - Token
+     - Rotation
+     - Refresh token rotatif
+
+   * - Stockage
+     - Confidentialité
+     - Permissions 0600, ``Hashed session storage`` côté LLNG
+
+   * - Segmentation
+     - Blast radius (niveau 1)
+     - ``server_group`` par environnement
+
+   * - Segmentation
+     - Blast radius (niveau 2)
+     - Clients OIDC distincts par zone (recommandé)
