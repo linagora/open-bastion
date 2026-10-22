@@ -327,5 +327,5 @@
       ob-backend-setup) on this host, or the accounts cannot log in.
   when:
     - ob_service_accounts_enabled | default(false)
-    - not ((ob_setup_run.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))
-    - not ((ob_svc_keys_sshd.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))
+    - "not ((ob_setup_run.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))"
+    - "not ((ob_svc_keys_sshd.stdout | default('')) is search('^ob-service-keys-sshd: yes$', multiline=True))"

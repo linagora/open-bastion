@@ -159,6 +159,46 @@ test_backend_uses_the_bastion_fact() {
                   || test_fail "backend collector check failed" "$bad"
 }
 
+# A plain YAML scalar holding ": " is a mapping, not a string: ansible-core
+# >= 2.19 refuses it as a conditional at run time, which --syntax-check does
+# not see (#364).
+test_conditionals_are_strings() {
+    if ! python3 -c 'import yaml' 2>/dev/null; then
+        echo -e "${YELLOW}SKIP${NC} conditional types (PyYAML missing)"
+        return 0
+    fi
+    local bad
+    bad=$(python3 - "$TREE" <<'PY'
+import os, sys, yaml
+KEYS = ('when', 'changed_when', 'failed_when', 'until')
+bad = []
+def walk(node, path):
+    if isinstance(node, list):
+        for x in node:
+            walk(x, path)
+    elif isinstance(node, dict):
+        for k in KEYS:
+            if k in node:
+                v = node[k]
+                for c in (v if isinstance(v, list) else [v]):
+                    if not isinstance(c, (str, bool)):
+                        bad.append('%s:%s:%s' % (path, node.get('name', '?'), k))
+        for v in node.values():
+            walk(v, path)
+n = 0
+for root, _, files in os.walk(sys.argv[1]):
+    for f in files:
+        if f.endswith('.yml'):
+            p = os.path.join(root, f)
+            walk(yaml.safe_load(open(p)), os.path.relpath(p, sys.argv[1]))
+            n += 1
+print(' '.join(bad) if n else 'no-yaml-found')
+PY
+)
+    [ -z "$bad" ] && test_pass "every role: all when/changed_when/failed_when/until are strings" \
+                  || test_fail "a conditional is not a string (unquoted ': ')" "$bad"
+}
+
 # ── Functional checks (ansible-playbook on localhost) ──────────────────────
 
 have_ansible() {
@@ -364,6 +404,7 @@ else
     test_lock_detected_before_any_become
     test_sshd_check_runs_with_the_setup
     test_backend_uses_the_bastion_fact
+    test_conditionals_are_strings
     test_lock_detection_runs
     test_setup_wrapper_runs
     test_backend_collection_runs

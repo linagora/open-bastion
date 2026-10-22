@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- ob-builder: the generated Ansible roles failed on every host with service
+  accounts ("Conditional expressions must be strings"): two unquoted `when:`
+  entries holding `: ` were read as YAML mappings (#364).
+
 ### Changed
 
 - `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
