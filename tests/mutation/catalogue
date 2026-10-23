@@ -1079,3 +1079,57 @@ replace || if (0 && jwk_has_private_members(json_object_array_get_idx(keys, i)))
 suite   || tests/test_ob_verify_response.sh
 why     || A JWKS publishing the portal's private signing key must not become a
 why     || trust anchor, nor be rotated in by ob-heartbeat.
+
+id      || bastion-id-keeps-the-id
+file    || scripts/ob-bastion-id
+search  ||     keep_id "$id"
+replace ||     :
+suite   || tests/test_ob_bastion_id.sh
+why     || #377: a backend's Ansible play reads a maximum-security bastion's id
+why     || from the file a lookup keeps; nothing else gives it without root.
+
+id      || bastion-id-keeps-only-its-own-identity
+file    || scripts/ob-bastion-id
+search  || if [ "$ID_FILE_SET" != "true" ] && [ "$CONFIG_OR_TOKEN_SET" = "true" ]; then
+replace || if false; then
+suite   || tests/test_ob_bastion_id.sh
+why     || #377: a lookup with another configuration or token may name another
+why     || device; its id must not replace the bastion's own.
+
+id      || bastion-id-cached-refuses-garbage
+file    || scripts/ob-bastion-id
+search  || valid_id "$id" || die "$ID_FILE does not hold an id" 4
+replace || :
+suite   || tests/test_ob_bastion_id.sh
+why     || #377: whatever --cached prints lands in a backend's allowed_bastions.
+
+id      || heartbeat-keeps-bastion-id-once
+file    || scripts/ob-heartbeat
+search  || [ ! -e "$BASTION_ID_FILE" ] || return 0
+replace || :
+suite   || tests/test_ob_heartbeat.sh
+why     || #377: one /pam/whoami per enrolment, not one per heartbeat.
+
+id      || enroll-forgets-bastion-id
+file    || scripts/ob-enroll
+search  ||     rm -f "$BASTION_ID_FILE"
+replace ||     :
+suite   || tests/test_ob_enroll.sh
+why     || #377: a new enrolment assigns a new id; the old one would land in
+why     || the backends' allowlist and refuse the bastion's hops.
+
+id      || ansible-bastion-id-kept-without-become
+file    || admin-builder/templates/ansible/role/tasks/_bastion-id.yml.in
+search  ||   become: false\n  register: _ob_bastion_id_kept
+replace ||   register: _ob_bastion_id_kept
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: under maximum security a deployed bastion's sudo only takes SSO
+why     || tokens; a become there fails and the id is never read.
+
+id      || ansible-bastion-id-kept-used
+file    || admin-builder/templates/ansible/role/tasks/_bastion-id.yml.in
+search  || default(_ob_bastion_id_kept.stdout | default('') | trim, true)
+replace || default('', true)
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: the kept id is the only one a later run gets from a locked
+why     || bastion.

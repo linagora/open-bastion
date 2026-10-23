@@ -41,6 +41,8 @@ SUDOERS_FILE="/etc/sudoers.d/open-bastion"
 SUDOERS_LEGACY="/etc/sudoers.d/ob-bastion-cert-helper"
 SUDO_GROUP="open-bastion-sudo"
 DEFAULT_TOKEN="/var/lib/open-bastion/token"
+# The id ob-bastion-id keeps; it names a device that is about to go.
+BASTION_ID_FILE="/var/lib/open-bastion/bastion-id"
 SESSIONS_DIR="/var/lib/open-bastion/sessions"
 DEBCONF_BACKUP_DIR="/var/backups/open-bastion"
 SETUP_BACKUP_PARENT="/var/backup"
@@ -737,6 +739,11 @@ plan_token() {
     plan delete "$TOKEN_FILE_L (a live credential: NOT copied to the backup)"
 }
 
+plan_bastion_id() {
+    [ -e "$(P "$BASTION_ID_FILE")" ] || return 0
+    plan delete "$BASTION_ID_FILE (the bastion id ob-bastion-id kept)"
+}
+
 # Refused unless --force: an invoker who only gets in through Open Bastion.
 # create_user writes SSO users into /etc/passwd with a locked password, so
 # absence from /etc/passwd is not the only sign.
@@ -815,6 +822,7 @@ plan_timer_dropins
 plan_hardening
 plan_files
 plan_token
+plan_bastion_id
 
 echo
 echo "Open Bastion uninstall — role: $ROLE"
@@ -1266,6 +1274,12 @@ revoke_tokens() {
     [ "$REVOKE_FAIL" -eq 0 ]
 }
 
+do_bastion_id() {
+    [ -e "$(P "$BASTION_ID_FILE")" ] || return 0
+    rm -f "$(P "$BASTION_ID_FILE")"
+    act "deleted $BASTION_ID_FILE"
+}
+
 do_token() {
     local tok
     tok=$(P "$TOKEN_FILE_L")
@@ -1304,6 +1318,7 @@ do_hardening
 do_audit
 do_files
 do_token
+do_bastion_id
 
 # A stack still loading the module refuses every login once the package
 # is gone.

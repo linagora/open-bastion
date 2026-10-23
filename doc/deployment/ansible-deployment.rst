@@ -190,8 +190,12 @@ build decided (an empty value there means "any"). Re-enrolling a bastion
 assigns it a new id, so re-run the play after one: the collection picks the
 new value up.
 
-Under maximum security, only the run that deploys a bastion can read its id:
-see `Updating the fleet`_.
+A bastion that the same run did not configure (another ``ansible-playbook``
+run, or one that skipped it) is first asked, without ``sudo``, for the id it
+keeps in ``/var/lib/open-bastion/bastion-id``: ``ob-heartbeat`` writes it
+within five minutes of the enrolment, ``sudo ob-bastion-id`` right away.
+Only a bastion that keeps none is asked as root, which maximum security
+forbids once the bastion is deployed: see `Updating the fleet`_.
 
 Approving the enrolments
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -409,9 +413,11 @@ a host is the only one Ansible completes on it: the role does what needs
 root before the setup locks ``sudo``, and a later run finds the lock in
 ``/etc/pam.d/sudo`` (read without ``sudo``) and skips the host with a
 warning. Reconfigure such a host by hand from an SSO session allowed to
-``sudo``, or reinstall it. A backend deployed by a later run cannot read
-the ids of those bastions either: set ``ob_bastion_allowed_bastions`` in
-the inventory to what ``ob-bastion-id`` prints on each of them.
+``sudo``, or reinstall it. A backend deployed by a later run still reads
+the ids of those bastions, without ``sudo``, from the file they keep, as
+long as Ansible can connect to them; otherwise set
+``ob_bastion_allowed_bastions`` in the inventory to what ``ob-bastion-id``
+prints on each of them.
 
 A :doc:`service account </service-accounts>` keeps SSH access — create
 the local account on every target and give its key in

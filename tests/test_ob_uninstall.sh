@@ -199,6 +199,7 @@ mkroot_bastion() {
     echo "ssh-ed25519 AAAAsvc" | wr "$r/etc/open-bastion/service-accounts.d/svc.pub"
 
     printf '{"access_token":"%s","refresh_token":"%s"}\n' "$ACCESS" "$REFRESH" | wr "$r/var/lib/open-bastion/token"
+    echo "id-1" | wr "$r/var/lib/open-bastion/bastion-id"
     echo "recording" | wr "$r/var/lib/open-bastion/sessions/alice/20260301-rec.cast"
     echo "cached" | wr "$r/var/cache/open-bastion/auth/x"
     echo "alice" | wr "$r/var/cache/nss_llng/byname/alice"
@@ -360,7 +361,8 @@ test_full_run() {
              etc/open-bastion/nss_openbastion.conf etc/sudoers.d/open-bastion \
              etc/systemd/logind.conf.d/open-bastion.conf etc/security/limits.d/open-bastion.conf \
              etc/cron.allow etc/audit/rules.d/open-bastion.rules \
-             etc/systemd/system/ob-krl-refresh.timer.d var/lib/open-bastion/token; do
+             etc/systemd/system/ob-krl-refresh.timer.d var/lib/open-bastion/token \
+             var/lib/open-bastion/bastion-id; do
         [ -e "$FULL/$f" ] && bad="$bad kept:$f"
     done
     [ -f "$FULL/etc/sudoers.d/90-local" ] || bad="$bad removed:sudoers.d/90-local"

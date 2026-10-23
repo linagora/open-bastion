@@ -136,6 +136,12 @@ Files
    The portal's signature keys (``sso_jwks_file``): read to verify the
    answer, replaced on a verified key rotation.
 
+``/var/lib/open-bastion/bastion-id``
+   On a bastion (``node_role = bastion``), the id
+   :doc:`ob-bastion-id(1) <ob-bastion-id>` keeps. After a heartbeat that
+   went through, a bastion that has none runs ``ob-bastion-id`` once to
+   write it: backends' Ansible play reads it without ``sudo``.
+
 Exit status
 -----------
 
