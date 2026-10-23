@@ -128,8 +128,9 @@ test_roles_block_parsed() {
 
 test_roles_block_refused() {
     local bad="" rc case_ body
-    for case_ in unknown-role unknown-key misindented twice flow-map flow-list scalar; do
+    for case_ in unknown-role unknown-key misindented twice flow-map flow-list scalar indented-root; do
         case "$case_" in
+            indented-root) body=$'  roles:\n    backend:\n      client_id: x' ;;
             flow-map)     body='roles: {backend: {client_id: x}}' ;;
             flow-list)    body='roles: [backend]' ;;
             scalar)       body='roles: backend' ;;
@@ -143,7 +144,7 @@ test_roles_block_refused() {
         with_builder _parse_roles_block "$TEST_TMPDIR/bad.yml" >/dev/null 2>&1 || rc=$?
         [ "$rc" -ne 0 ] || bad="$bad $case_-accepted"
     done
-    [ -z "$bad" ] && test_pass "config: unknown role, unknown key, misindented line, a second roles: and flow forms are refused" \
+    [ -z "$bad" ] && test_pass "config: unknown role, unknown key, misindented line, a second roles:, flow forms and an indented root are refused" \
                   || test_fail "a malformed roles block is accepted" "$bad"
 }
 

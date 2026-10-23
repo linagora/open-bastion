@@ -939,6 +939,10 @@ _parse_roles_block() {
         line="${line%$'\r'}"
         [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
         if [ "$in_block" = 0 ]; then
+            # An indented root (valid YAML, read by yq) is not scanned: say so
+            # rather than leave every role on client_id.
+            [[ "$line" =~ ^[[:space:]]+roles[[:space:]]*: ]] \
+                && die "roles: in $f must start at the beginning of the line, as every top-level key"
             if [[ "$line" =~ ^roles[[:space:]]*: ]]; then
                 # The flow forms (`roles: {backend: {...}}`, `roles: [...]`)
                 # would otherwise be skipped, every role left on client_id.
@@ -1387,7 +1391,7 @@ role_client_id() {
     printf '%s' "${ROLE_CLIENT_ID[$1]:-$CLIENT_ID}"
 }
 role_embedded_secret() {
-    [ "$CLIENT_SECRET_MODE" = "embedded" ] || return 0
+    case "$CLIENT_SECRET_MODE" in embedded) ;; *) return 0 ;; esac
     printf '%s' "${ROLE_EMBEDDED_SECRET[$1]:-$EMBEDDED_CLIENT_SECRET}"
 }
 

@@ -1026,7 +1026,7 @@ why     || only fail at enrolment, on the target.
 
 id      || builder-secret-only-when-embedded
 file    || admin-builder/ob-builder
-search  || [ "$CLIENT_SECRET_MODE" = "embedded" ] || return 0
+search  || case "$CLIENT_SECRET_MODE" in embedded) ;; *) return 0 ;; esac
 replace || :
 suite   || tests/test_ob_builder_client_id_per_role.sh
 why     || #373 review: outside client_secret_mode=embedded the artefacts are
