@@ -29,3 +29,9 @@ ob_setup_cmd:
     {{ ob_svc_keys_sshd_sh }}
     echo "ob-service-keys-sshd: $served"
   - ob-setup
+
+# The role has a JWKS to deploy: the build's (files/), or the portal's,
+# fetched at play time (ob_sso_jwks_fetch).
+ob_sso_jwks_available: >-
+  {{ (ob_sso_jwks_fetch | default(false) | bool)
+     or (ob_sso_jwks_src | default('')) | length > 0 }}

@@ -39,6 +39,7 @@
            if ob_sso_jwks_deploy | default(false) | bool else [])
         + (['--sso-jwks-sha256', ob_sso_jwks_sha256]
            if ob_sso_jwks_deploy | default(false) | bool
+              and not (ob_sso_jwks_fetch | default(false) | bool)
               and (ob_sso_jwks_sha256 | default('')) | length > 0 else [])
       }}
   environment:

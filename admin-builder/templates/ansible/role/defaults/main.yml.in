@@ -47,18 +47,31 @@ ob_response_signing: "@@RESPONSE_SIGNING@@"
 # The trust anchor: the portal's JWKS for ob_sso_jwks_client_id, fetched by
 # ob-builder (role files/), deployed root:root 0644 at ob_sso_jwks_file.
 # Overriding ob_client_id means another relying party, so another JWKS: set
-# ob_sso_jwks_src (a file the copy module finds), ob_sso_jwks_sha256 (its
-# SHA-256, `jq -S -c . FILE | sha256sum`, or "" to skip the check) and
-# ob_sso_jwks_client_id with it, or set ob_response_signing to off.
+# ob_sso_jwks_fetch (below), or ob_sso_jwks_src (a file the copy module finds),
+# ob_sso_jwks_sha256 (its SHA-256, `jq -S -c . FILE | sha256sum`, or "" to skip
+# the check) and ob_sso_jwks_client_id with it, or set ob_response_signing to
+# off. ob_sso_jwks_src and ob_sso_jwks_client_id are unused under
+# ob_sso_jwks_fetch.
 ob_sso_jwks_src: "@@SSO_JWKS_SRC@@"
 ob_sso_jwks_sha256: "@@SSO_JWKS_SHA256@@"
 ob_sso_jwks_client_id: "@@SSO_JWKS_CLIENT_ID@@"
 ob_sso_jwks_file: /var/lib/open-bastion/jwks/sso-jwks.json
 # The JWKS is deployed once (#371): a host whose ob_sso_jwks_file the modules
 # load, enrolled as ob_client_id, keeps it, rotations by ob-heartbeat included.
-# true deploys ob_sso_jwks_src over it on every run, e.g. a host that missed a
-# rotation (security-reference.rst).
+# true deploys the role's JWKS (ob_sso_jwks_src, or the fetched one under
+# ob_sso_jwks_fetch) over it on every run, e.g. a host that missed a rotation
+# (security-reference.rst).
 ob_sso_jwks_force: false
+# true: instead of the build's JWKS, the controller fetches the one of the
+# host's ob_client_id from ob_sso_jwks_url when the JWKS is to be deployed
+# (no loadable one on the host, another client_id, ob_sso_jwks_force). For a
+# portal whose keys rotated since the build, or an ob_client_id overridden
+# per group. Same trust as the build's fetch (TLS: an http:// URL is refused
+# unless ob_verify_ssl is false); ob_sso_jwks_fetch_sha256 pins the expected
+# SHA-256 (`jq -S -c . | sha256sum`), empty = not pinned.
+ob_sso_jwks_fetch: false
+ob_sso_jwks_url: "{{ ob_portal_url }}/oauth2/jwks"
+ob_sso_jwks_fetch_sha256: ""
 
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.

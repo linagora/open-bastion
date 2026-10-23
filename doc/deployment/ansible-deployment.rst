@@ -119,7 +119,18 @@ still enrols as ``ob_client_id``. ``ob_sso_jwks_force: true`` deploys
 the role's JWKS anyway, for a host that missed a rotation: rebuild the
 tree first, so that it carries the portal's current keys (under
 ``required``, a host given a JWKS without the key the portal now signs
-with refuses every answer).
+with refuses every answer), or add ``ob_sso_jwks_fetch: true``.
+
+``ob_sso_jwks_fetch: true`` replaces the build-time JWKS with the one
+the controller fetches at play time from ``ob_sso_jwks_url`` (default
+``<ob_portal_url>/oauth2/jwks``) for each host's ``ob_client_id``, when
+a JWKS is to be deployed. It trusts the portal as the build does, over
+TLS from the admin side (an ``http://`` URL is refused unless
+``ob_verify_ssl`` is false), refuses a JWKS holding a private key, and
+``ob_sso_jwks_fetch_sha256`` pins the expected SHA-256 of its canonical
+form (``jq -S -c . | sha256sum``). Whatever its
+source, the file only replaces the host's once ``ob-verify-response
+check-jwks --anchor`` loads it.
 
 Non-interactively, the same build is ``ob-builder --config build.yml
 --output-ansible ./ansible-acme/``.
@@ -255,10 +266,11 @@ Notes:
   </references/man/ob-builder>`), here ``ob-client-bastion`` and
   ``ob-client-backend``: each role then carries the JWKS of its own relying
   party. A host whose ``ob_client_id`` differs from its role's needs its own:
-  set ``ob_sso_jwks_src``, ``ob_sso_jwks_sha256`` and
-  ``ob_sso_jwks_client_id`` for it, or ``ob_response_signing: off``. The play
-  stops on the first task otherwise, rather than deploy keys that do not sign
-  that client's answers.
+  set ``ob_sso_jwks_fetch: true`` (the controller then fetches the JWKS of
+  each host's ``ob_client_id`` at play time), or ``ob_sso_jwks_src``,
+  ``ob_sso_jwks_sha256`` and ``ob_sso_jwks_client_id`` for it, or
+  ``ob_response_signing: off``. The play stops on the first task otherwise,
+  rather than deploy keys that do not sign that client's answers.
 - With one relying party per role, give the secrets per group as above:
   ``--extra-vars ob_client_secret=...`` would hand the same secret to every
   playbook of ``site.yml``.
