@@ -1408,12 +1408,14 @@ planned_client_ids() {
 }
 
 # Where the JWKS of client_id $1 is fetched to. The build's client_id keeps
-# the historical name.
+# the historical name; another one is named after its SHA-256, so that no
+# character of a client_id (OAuth2 allows any) ever reaches the path, whatever
+# is_valid_client_id lets through.
 jwks_file_for() {
     if [ "$1" = "$CLIENT_ID" ]; then
         printf '%s/jwks.json' "$WORK_DIR"
     else
-        printf '%s/jwks-%s.json' "$WORK_DIR" "$1"
+        printf '%s/jwks-%s.json' "$WORK_DIR" "$(printf '%s' "$1" | sha256sum | cut -c1-32)"
     fi
 }
 
@@ -2066,8 +2068,8 @@ save_config() {
 #                        without a client_id, or when no usable JWKS could
 #                        be fetched and the mode is not required: the
 #                        artefacts then get response_signing = off)
-#   $WORK_DIR/jwks-<client_id>.json (the same, for a role enrolling with
-#                        another RP: see jwks_file_for)
+#   $WORK_DIR/jwks-<sha256 of client_id>.json (the same, for a role enrolling
+#                        with another RP: see jwks_file_for)
 # ─────────────────────────────────────────────────────────────────────────
 fetch_sso_assets() {
     WORK_DIR=$(mktemp_dir)

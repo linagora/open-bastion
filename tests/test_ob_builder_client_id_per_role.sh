@@ -195,6 +195,20 @@ test_artefacts_per_role() {
                   || test_fail "a role carries another role's relying party" "$bad"
 }
 
+# The fetch path of another RP's JWKS never holds the client_id itself: OAuth2
+# allows any character in one, `/` and `..` included.
+test_jwks_path_hashes_client_id() {
+    local got
+    got=$(with_builder eval 'WORK_DIR=/w; CLIENT_ID=pam-access
+        printf "%s|%s|%s" "$(jwks_file_for pam-access)" "$(jwks_file_for ob-backends)" "$(jwks_file_for "../../etc/x y")"')
+    if [[ "$got" =~ ^/w/jwks\.json\|/w/jwks-[0-9a-f]{32}\.json\|/w/jwks-[0-9a-f]{32}\.json$ ]] \
+       && [ "${got#*|}" != "${got##*|}" ]; then
+        test_pass "JWKS path: the build's client_id keeps jwks.json, another one is named after its SHA-256"
+    else
+        test_fail "a client_id reaches the JWKS path" "$got"
+    fi
+}
+
 test_same_rp_fetched_once() {
     local d="$TEST_TMPDIR/one"
     write_config prompt $'    client_id: pam-access'
@@ -255,6 +269,7 @@ test_roles_block_parsed
 test_roles_block_refused
 test_embedded_needs_role_secret
 test_artefacts_per_role
+test_jwks_path_hashes_client_id
 test_same_rp_fetched_once
 test_fetch_failure_per_rp
 test_role_secret_not_embedded_in_prompt_mode
