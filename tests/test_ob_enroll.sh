@@ -631,17 +631,30 @@ test_forget_bastion_id() {
     local d="$TEMP_DIR/forget"
     mkdir -p "$d"
     echo old-id > "$d/bastion-id"
+    # Another configuration and another token: another identity.
     (
         source_script_functions
         BASTION_ID_FILE="$d/bastion-id"
+        CONFIG_FILE="$TEMP_DIR/elsewhere/ob.conf"
         TOKEN_FILE="$TEMP_DIR/elsewhere/token"
         forget_bastion_id
     ) || return 1
     [ -f "$d/bastion-id" ] || return 1
+    # The default token place.
     (
         source_script_functions
         BASTION_ID_FILE="$d/bastion-id"
+        CONFIG_FILE="$TEMP_DIR/elsewhere/ob.conf"
         TOKEN_FILE="$d/token"
+        forget_bastion_id
+    ) || return 1
+    [ ! -e "$d/bastion-id" ] || return 1
+    # The host's configuration, whose server_token_file points elsewhere.
+    echo old-id > "$d/bastion-id"
+    (
+        source_script_functions
+        BASTION_ID_FILE="$d/bastion-id"
+        TOKEN_FILE="$TEMP_DIR/elsewhere/token"
         forget_bastion_id
     ) || return 1
     [ ! -e "$d/bastion-id" ] || return 1

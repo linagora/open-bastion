@@ -13,7 +13,8 @@ set -e
 VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
-CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+DEFAULT_CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+CONFIG_FILE="$DEFAULT_CONFIG_FILE"
 TOKEN_FILE="/var/lib/open-bastion/token"
 # The id ob-bastion-id keeps for this device (see forget_bastion_id).
 BASTION_ID_FILE="/var/lib/open-bastion/bastion-id"
@@ -683,8 +684,13 @@ show_summary() {
 # kept for the previous token would hand backends a stale value (#377). Drop
 # it; ob-heartbeat keeps the new one on a bastion within one interval.
 forget_bastion_id() {
-    # Only for the host's own token, which lives next to that file.
-    [ "$TOKEN_FILE" = "$(dirname "$BASTION_ID_FILE")/token" ] || return 0
+    # Only for the host's own token: the one at the default place, or the
+    # server_token_file of the host's configuration, wherever it points.
+    # Dropping it once too often costs one /pam/whoami.
+    if [ "$TOKEN_FILE" != "$(dirname "$BASTION_ID_FILE")/token" ] \
+       && [ "$CONFIG_FILE" != "$DEFAULT_CONFIG_FILE" ]; then
+        return 0
+    fi
     rm -f "$BASTION_ID_FILE"
 }
 

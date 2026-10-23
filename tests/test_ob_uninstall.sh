@@ -607,6 +607,8 @@ test_backup_contents() {
     grep -q ' openbastion ' "$b/etc/nsswitch.conf" || bad="$bad nss-backup-is-not-the-old-file"
     # A live credential is not copied around.
     [ -e "$b/var/lib/open-bastion/token" ] && bad="$bad TOKEN-BACKED-UP"
+    # The kept bastion id is no secret: backed up like any other file (#377).
+    [ "$(cat "$b/var/lib/open-bastion/bastion-id" 2>/dev/null)" = id-1 ] || bad="$bad missing:bastion-id"
     [ "$(stat -c %a "$b")" = "700" ] || bad="$bad mode:$(stat -c %a "$b")"
     grep -q "${b#"$FULL"}" "$WORK/full.out" || bad="$bad dir-not-printed"
     # Secrets are redacted in the backup; the setup's own copy is reported.

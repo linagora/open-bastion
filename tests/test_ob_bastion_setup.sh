@@ -516,6 +516,28 @@ test_pam_sudo_max_security_fail_closed() {
     assert_auth_stack_fail_closed "generated Mode E /etc/pam.d/sudo auth stack is fail-closed" "$out"
 }
 
+# ── #377: a provided token may be another device; its kept id goes ──
+test_provided_token_drops_kept_id() {
+    local d rc
+    d=$(mktemp -d)
+    echo old-id > "$d/bastion-id"
+    (
+        source_script "ob-bastion-setup"
+        step() { :; }; info() { :; }
+        OB_TOKEN="$d/token" OB_BASTION_ID="$d/bastion-id"
+        SERVER_TOKEN='{"access_token":"a","refresh_token":"r"}' DRY_RUN=false
+        enroll_server >/dev/null 2>&1
+    )
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ -s "$d/token" ] && [ ! -e "$d/bastion-id" ]; then
+        pass "a token given with --token-file drops the kept bastion id"
+    else
+        fail "a token given with --token-file drops the kept bastion id" \
+             "rc=$rc token=$([ -s "$d/token" ] && echo yes) id=$(cat "$d/bastion-id" 2>/dev/null)"
+    fi
+    rm -rf "$d"
+}
+
 # ── Run all tests ──
 echo "=== Testing ob-bastion-setup ==="
 run_test test_syntax
@@ -547,6 +569,7 @@ run_test test_sudoers_rule_is_valid
 
 run_test test_pam_sshd_fail_closed
 run_test test_pam_sudo_max_security_fail_closed
+run_test test_provided_token_drops_kept_id
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

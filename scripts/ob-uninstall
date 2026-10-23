@@ -741,7 +741,7 @@ plan_token() {
 
 plan_bastion_id() {
     [ -e "$(P "$BASTION_ID_FILE")" ] || return 0
-    plan delete "$BASTION_ID_FILE (the bastion id ob-bastion-id kept)"
+    plan remove "$BASTION_ID_FILE (the bastion id ob-bastion-id kept)"
 }
 
 # Refused unless --force: an invoker who only gets in through Open Bastion.
@@ -1275,9 +1275,7 @@ revoke_tokens() {
 }
 
 do_bastion_id() {
-    [ -e "$(P "$BASTION_ID_FILE")" ] || return 0
-    rm -f "$(P "$BASTION_ID_FILE")"
-    act "deleted $BASTION_ID_FILE"
+    remove_file "$BASTION_ID_FILE" "the bastion id ob-bastion-id kept"
 }
 
 do_token() {

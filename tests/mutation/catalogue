@@ -1133,3 +1133,11 @@ replace || default('', true)
 suite   || tests/test_ob_builder_ansible_maxsec.sh
 why     || #377: the kept id is the only one a later run gets from a locked
 why     || bastion.
+
+id      || setup-provided-token-drops-bastion-id
+file    || scripts/ob-bastion-setup
+search  ||         rm -f "$OB_BASTION_ID"
+replace ||         :
+suite   || tests/test_ob_bastion_setup.sh
+why     || #379 review: a token given with --token-file may be another device;
+why     || ob-heartbeat never replaces a kept id, so the stale one would stay.

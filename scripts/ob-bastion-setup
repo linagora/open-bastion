@@ -72,6 +72,8 @@ PAM_SSHD="/etc/pam.d/sshd"
 OB_CONFIG="/etc/open-bastion/openbastion.conf"
 OB_CONFIG_REFERENCE="/usr/share/open-bastion/openbastion.conf.reference"
 OB_TOKEN="/var/lib/open-bastion/token"
+# The id ob-bastion-id keeps for the device that token belongs to (#377).
+OB_BASTION_ID="/var/lib/open-bastion/bastion-id"
 SESSION_RECORDER="/usr/sbin/ob-session-recorder"
 SESSION_RECORDER_CONF="/etc/open-bastion/session-recorder.conf"
 SSH_PROXY_CONF="/etc/open-bastion/ssh-proxy.conf"
@@ -2408,6 +2410,9 @@ enroll_server() {
 
         echo "$SERVER_TOKEN" > "$OB_TOKEN"
         chmod 600 "$OB_TOKEN"
+        # Another token may be another device, with another id: ob-heartbeat
+        # keeps the right one again on a bastion (#377).
+        rm -f "$OB_BASTION_ID"
         info "Server token saved"
         ENROLL_RESULT="token-provided"
         return 0
