@@ -117,6 +117,60 @@ else
     fail "--json emits a bastion_id object" "$json"
 fi
 
+# #377: a lookup keeps the id where --id-file says, 0644, and --cached prints
+# it back with no portal, no configuration and no token -- what a backend's
+# Ansible play reads on a bastion whose sudo only takes SSO tokens.
+check() { # NAME CONDITION-RC DETAIL
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if [ "$2" -eq 0 ]; then pass "$1"; else fail "$1" "$3"; fi
+}
+start_mock() { # MODE PORT
+    printf 'portal_url = http://127.0.0.1:%s\nserver_group = bastion\nverify_ssl = false\n' \
+        "$2" > "$WORK/ob.conf"
+    chmod 600 "$WORK/ob.conf"
+    python3 "$MOCK" "$1" "$2" & mpid=$!
+    for _ in $(seq 1 50); do (echo > "/dev/tcp/127.0.0.1/$2") 2>/dev/null && break; sleep 0.1; done
+}
+stop_mock() { kill "$mpid" 2>/dev/null; wait "$mpid" 2>/dev/null; }
+
+kept="$WORK/kept/bastion-id"
+mkdir -p "$WORK/kept"
+port=$((port + 1))
+start_mock whoami "$port"
+OB_BASTION_ID_FILE="$WORK/kept/default" \
+    bash "$SCRIPT" --quiet -c "$WORK/ob.conf" -t "$WORK/token" >/dev/null 2>&1
+[ -z "$(ls "$WORK/kept")" ]; check "-c/-t without --id-file keeps nothing" $? "$(ls "$WORK/kept")"
+out=$(bash "$SCRIPT" --quiet -c "$WORK/ob.conf" -t "$WORK/token" --id-file "$kept" 2>&1)
+stop_mock
+[ "$out" = 9f86d081 ] && [ "$(cat "$kept" 2>/dev/null)" = 9f86d081 ] \
+    && [ "$(stat -c %a "$kept")" = 644 ]
+check "a lookup keeps the id, 0644" $? "out=$out kept=$(cat "$kept" 2>/dev/null) mode=$(stat -c %a "$kept" 2>/dev/null)"
+
+out=$(bash "$SCRIPT" --cached --id-file "$kept" -c /nonexistent 2>&1); rc=$?
+[ "$rc" -eq 0 ] && [ "$out" = 9f86d081 ]
+check "--cached prints the kept id without portal or configuration" $? "rc=$rc out=$out"
+out=$(bash "$SCRIPT" --cached --json --id-file "$kept" 2>&1)
+[ "$(echo "$out" | jq -r .bastion_id 2>/dev/null)" = 9f86d081 ]
+check "--cached --json" $? "$out"
+
+port=$((port + 1))
+start_mock catchall "$port"
+bash "$SCRIPT" --quiet -c "$WORK/ob.conf" -t "$WORK/token" --id-file "$kept" >/dev/null 2>&1
+stop_mock
+[ "$(cat "$kept")" = 9f86d081 ]
+check "a lookup with no identity leaves the kept id alone" $? "$(cat "$kept")"
+
+bash "$SCRIPT" --cached --verbose --id-file "$kept" >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ]; check "--cached refuses --verbose" $? "rc=$rc"
+bash "$SCRIPT" --cached --id-file "$WORK/kept/none" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 4 ]; check "--cached with no id kept exits 4" $? "rc=$rc"
+printf '<html>\n' > "$WORK/kept/bad"
+out=$(bash "$SCRIPT" --cached --id-file "$WORK/kept/bad" 2>/dev/null); rc=$?
+[ "$rc" -eq 4 ] && [ -z "$out" ]; check "--cached refuses a file that holds no id" $? "rc=$rc out=$out"
+printf 'id-1\nid-2\n' > "$WORK/kept/two"
+out=$(bash "$SCRIPT" --cached --id-file "$WORK/kept/two" 2>/dev/null); rc=$?
+[ "$rc" -eq 4 ] && [ -z "$out" ]; check "--cached refuses two lines" $? "rc=$rc out=$out"
+
 echo ""
 echo "Tests run: $TESTS_RUN, passed: $TESTS_PASSED, failed: $TESTS_FAILED"
 [ "$TESTS_FAILED" -eq 0 ]

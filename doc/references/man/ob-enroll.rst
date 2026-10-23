@@ -96,6 +96,11 @@ Files
 ``/var/lib/open-bastion/token``
    Server token file created by this script.
 
+``/var/lib/open-bastion/bastion-id``
+   The id :doc:`ob-bastion-id(1) <ob-bastion-id>` kept for the previous
+   enrolment. Removed when the token above is replaced, since the new
+   device gets a new id; ``ob-heartbeat`` writes the new one on a bastion.
+
 Security
 --------
 

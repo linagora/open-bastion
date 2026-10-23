@@ -467,6 +467,41 @@ test_get_sessions_cap() {
 
 # ── Run all tests ──
 echo "=== Testing ob-heartbeat ==="
+# ── #377: a bastion keeps its id for the backends' Ansible play ──
+test_keep_bastion_id() {
+    local d
+    d=$(mktemp -d)
+    (
+        source_script "ob-heartbeat"
+        CONFIG_FILE="$d/conf" TOKEN_FILE="$d/token" BASTION_ID_FILE="$d/bastion-id" DEBUG=""
+        # Stand-in: logs its arguments, writes the id where --id-file says.
+        ob-bastion-id() {
+            echo "$*" >> "$d/calls"
+            local f="" a
+            for a in "$@"; do [ "$f" = next ] && f="$a"; [ "$a" = --id-file ] && f=next; done
+            echo id-1 > "$f"
+        }
+        local ok=true
+        NODE_ROLE=backend; keep_bastion_id
+        [ ! -e "$d/calls" ] || { echo "backend asked"; ok=false; }
+        NODE_ROLE=bastion; keep_bastion_id
+        [ "$(cat "$d/calls" 2>/dev/null)" = "--quiet -c $d/conf -t $d/token --id-file $d/bastion-id" ] \
+            || { echo "calls: $(cat "$d/calls" 2>/dev/null)"; ok=false; }
+        [ "$(cat "$d/bastion-id" 2>/dev/null)" = id-1 ] || { echo "not kept"; ok=false; }
+        # Kept already: no second /pam/whoami on the next heartbeats.
+        keep_bastion_id
+        [ "$(wc -l < "$d/calls")" -eq 1 ] || { echo "asked again"; ok=false; }
+        $ok
+    )
+    local rc=$?
+    rm -rf "$d"
+    if [ $rc -eq 0 ]; then
+        pass "keep_bastion_id: a bastion with no kept id asks once, a backend never"
+    else
+        fail "keep_bastion_id: a bastion with no kept id asks once, a backend never"
+    fi
+}
+
 run_test test_syntax
 run_test test_version
 run_test test_help
@@ -489,6 +524,7 @@ run_test test_get_sessions_loginctl
 run_test test_get_sessions_loginctl_skips_nonuser
 run_test test_get_sessions_who_fallback
 run_test test_get_sessions_cap
+run_test test_keep_bastion_id
 
 echo ""
 echo "=== Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

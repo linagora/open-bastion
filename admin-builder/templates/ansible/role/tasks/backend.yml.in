@@ -17,8 +17,10 @@
 # The allowlist is the bastion_ids the portal assigned at enrolment, and the
 # only place they exist is on the bastions. With no build-time list, read them
 # there instead of asking the admin to copy them around: the bastion play of
-# the same run keeps each id as a host fact, and a bastion it did not reach is
-# probed with ob-bastion-id, which needs root there (the 0600 server token).
+# the same run keeps each id as a host fact. For a bastion it did not reach,
+# the id ob-bastion-id keeps there is read without root, and only a bastion
+# that keeps none is probed with ob-bastion-id as root (the 0600 server
+# token). See tasks/_bastion-id.yml.
 # An explicit ob_bastion_allowed_bastions wins, empty string included ("" =
 # accept any vouched bastion, as ob-backend-setup's --allow-any-bastion).
 #
@@ -59,12 +61,15 @@
       Could not collect the bastion ids from ob_bastion_group
       ('{{ ob_bastion_group }}'){% if (ob_bastion_missing_list | default([])) | length > 0 %}:
       {{ ob_bastion_missing_list | join(', ') }} did not answer ob-bastion-id
-      (not enrolled, unreachable, or no root){% endif %}. The group must exist,
-      hold every bastion of this deployment, and each of them must answer.{% if ob_max_security | bool %}
-      Under maximum security a bastion's sudo only takes SSO tokens once it is
-      deployed, so Ansible reads its id only in the run that deploys it
-      (site.yml): for a later run, set ob_bastion_allowed_bastions in the
-      inventory to the ids ob-bastion-id prints on the bastions.{% endif %}
+      (not enrolled, unreachable, or no id kept and no root){% endif %}. The
+      group must exist, hold every bastion of this deployment, and each of
+      them must answer. A bastion keeps its id in
+      /var/lib/open-bastion/bastion-id, read without sudo; ob-heartbeat
+      writes it within five minutes of the enrolment, and
+      "sudo ob-bastion-id" right away.{% if ob_max_security | bool %}
+      Under maximum security a deployed bastion's sudo only takes SSO
+      tokens, so only that file can give its id, and Ansible must still be
+      able to connect there (an SSO user, or a service account).{% endif %}
       Set ob_bastion_allowed_bastions explicitly to skip the collection; the
       empty string accepts any vouched bastion.
   when:
