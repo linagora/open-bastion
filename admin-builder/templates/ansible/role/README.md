@@ -62,17 +62,17 @@ Backend-only "accept only this bastion" variables:
 
 Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
 
-| Variable                   | Description                                                                                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_response_signing`      | `off`, `prefer` (default: unsigned answers still accepted) or `required` (only once the portal signs; a wrong JWKS then locks out)                    |
-| `ob_sso_jwks_src`          | JWKS file deployed by the role (`sso-jwks.json` in `files/`); empty = none, which requires `ob_response_signing: off`                                 |
-| `ob_sso_jwks_sha256`       | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                                                  |
-| `ob_sso_jwks_client_id`    | The client_id the JWKS belongs to; the play refuses a signing mode when it differs from `ob_client_id`                                                |
-| `ob_sso_jwks_file`         | Where it is deployed, root:root 0644 (default `/var/lib/open-bastion/jwks/sso-jwks.json`); ob-heartbeat rotates it only under `/var/lib/open-bastion` |
-| `ob_sso_jwks_force`        | `true` deploys `ob_sso_jwks_src` even over a JWKS the host already has (default `false`)                                                              |
-| `ob_sso_jwks_fetch`        | `true`: the controller fetches the JWKS of the host's `ob_client_id` when one is to be deployed, instead of using `ob_sso_jwks_src` (default `false`) |
-| `ob_sso_jwks_url`          | Where it is fetched from, `?client_id=` appended (default `<ob_portal_url>/oauth2/jwks`)                                                              |
-| `ob_sso_jwks_fetch_sha256` | Expected SHA-256 of the fetched JWKS in canonical form (`jq -S -c . \| sha256sum`); empty = not pinned                                                |
+| Variable                   | Description                                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ob_response_signing`      | `off`, `prefer` (default: unsigned answers still accepted) or `required` (only once the portal signs; a wrong JWKS then locks out)                     |
+| `ob_sso_jwks_src`          | JWKS file deployed by the role (`sso-jwks.json` in `files/`); empty = none, which requires `ob_response_signing: off` unless `ob_sso_jwks_fetch` is on |
+| `ob_sso_jwks_sha256`       | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                                                   |
+| `ob_sso_jwks_client_id`    | The client_id the JWKS belongs to; without `ob_sso_jwks_fetch`, the play refuses a signing mode when it differs from `ob_client_id`                    |
+| `ob_sso_jwks_file`         | Where it is deployed, root:root 0644 (default `/var/lib/open-bastion/jwks/sso-jwks.json`); ob-heartbeat rotates it only under `/var/lib/open-bastion`  |
+| `ob_sso_jwks_force`        | `true` deploys the role's JWKS (`ob_sso_jwks_src`, or the fetched one) even over a JWKS the host already has (default `false`)                         |
+| `ob_sso_jwks_fetch`        | `true`: the controller fetches the JWKS of the host's `ob_client_id` when one is to be deployed, instead of using `ob_sso_jwks_src` (default `false`)  |
+| `ob_sso_jwks_url`          | Where it is fetched from, `?client_id=` appended (default `<ob_portal_url>/oauth2/jwks`)                                                               |
+| `ob_sso_jwks_fetch_sha256` | Expected SHA-256 of the fetched JWKS in canonical form (`jq -S -c . \| sha256sum`); empty = not pinned                                                 |
 
 `ob_sso_jwks_src` is deployed once. A host whose `ob_sso_jwks_file` the modules
 load, and which still enrols as `ob_client_id`, keeps its JWKS on later runs:
@@ -85,7 +85,8 @@ at play time for the host's own `ob_client_id`, rather than the one `ob-builder`
 fetched at build time: no rebuild after a key rotation, and an `ob_client_id`
 overridden per group gets its own relying party's keys. The trust is the same
 as the build's fetch, TLS from the admin side; pin it with
-`ob_sso_jwks_fetch_sha256`. The modules' loader (`ob-verify-response check-jwks
+`ob_sso_jwks_fetch_sha256`; an `http://` URL is refused unless `ob_verify_ssl` is
+false, and a JWKS holding a private member (`d`) is refused. The modules' loader (`ob-verify-response check-jwks
 --anchor`) checks the file before it replaces the host's, whatever its source.
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):

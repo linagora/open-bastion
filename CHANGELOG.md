@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the JWKS of each host's `ob_client_id` from the controller at play time,
   instead of deploying the build-time one: no rebuild after a portal key
   rotation, and a per-group `ob_client_id` gets its own keys.
-  `ob_sso_jwks_fetch_sha256` pins it. The role now checks every JWKS with
+  `ob_sso_jwks_fetch_sha256` pins it; an `http://` URL or a private key is
+  refused. The role now checks every JWKS with
   `ob-verify-response check-jwks --anchor` before it replaces the host's
   (#371).
 

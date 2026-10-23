@@ -1047,3 +1047,27 @@ replace || :
 suite   || tests/test_ob_builder_client_id_per_role.sh
 why     || #373 review: outside client_secret_mode=embedded the artefacts are
 why     || not restricted (0755/0644, no .gitignore); a secret must not reach them.
+
+id      || ansible-jwks-fetch-no-private-key
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || | selectattr('d', 'defined') | list | length == 0
+replace || | list | length >= 0
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #375 review: check-jwks --anchor accepts a JWKS holding a private key
+why     || (`d`); the builder and the setup refuse one, the fetch must too.
+
+id      || ansible-jwks-fetch-https-only
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || (ob_sso_jwks_url | lower).startswith('https://') or not (ob_verify_ssl | default(true) | bool)
+replace || true
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #375 review: keys fetched over cleartext http would be trusted as the
+why     || anchor of every signed answer.
+
+id      || ansible-jwks-fetch-utf8-canonical
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}\n"
+replace || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #375 review: the canonical form is jq's, in UTF-8; an escaped one
+why     || changes the bytes the operator's `jq -S -c . | sha256sum` pins.

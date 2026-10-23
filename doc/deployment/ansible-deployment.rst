@@ -125,8 +125,10 @@ with refuses every answer), or add ``ob_sso_jwks_fetch: true``.
 the controller fetches at play time from ``ob_sso_jwks_url`` (default
 ``<ob_portal_url>/oauth2/jwks``) for each host's ``ob_client_id``, when
 a JWKS is to be deployed. It trusts the portal as the build does, over
-TLS from the admin side; ``ob_sso_jwks_fetch_sha256`` pins the expected
-SHA-256 of its canonical form (``jq -S -c . | sha256sum``). Whatever its
+TLS from the admin side (an ``http://`` URL is refused unless
+``ob_verify_ssl`` is false), refuses a JWKS holding a private key, and
+``ob_sso_jwks_fetch_sha256`` pins the expected SHA-256 of its canonical
+form (``jq -S -c . | sha256sum``). Whatever its
 source, the file only replaces the host's once ``ob-verify-response
 check-jwks --anchor`` loads it.
 

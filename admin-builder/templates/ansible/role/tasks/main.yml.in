@@ -215,6 +215,20 @@
 # controller now rather than by ob-builder at build time (#371). Same trust:
 # TLS from the admin side, which ob_sso_jwks_fetch_sha256 can pin. Only when
 # it is to be deployed: a kept JWKS follows the portal's rotations already.
+- name: Check the JWKS URL
+  ansible.builtin.assert:
+    that:
+      - (ob_sso_jwks_url | lower).startswith('https://') or not (ob_verify_ssl | default(true) | bool)
+    fail_msg: >-
+      ob_sso_jwks_url ({{ ob_sso_jwks_url }}) is not https://: the fetched keys
+      would be trusted on a cleartext answer. Use the portal's https:// URL, or
+      ob_verify_ssl: false on a test setup only.
+  delegate_to: localhost
+  become: false
+  when:
+    - ob_sso_jwks_fetch | default(false) | bool
+    - ob_sso_jwks_deploy | bool
+
 - name: Fetch the portal's JWKS for the host's client_id
   ansible.builtin.uri:
     url: "{{ ob_sso_jwks_url }}?client_id={{ ob_client_id | urlencode }}"
@@ -230,8 +244,10 @@
     - ob_sso_jwks_fetch | default(false) | bool
     - ob_sso_jwks_deploy | bool
 
-# The canonical form ob-builder and ob-*-setup fingerprint (`jq -S -c .`),
-# which ob-verify-response checks below before the file takes its place.
+# The canonical form ob-builder and ob-*-setup fingerprint (`jq -S -c .`,
+# UTF-8), which ob-verify-response checks below before the file takes its
+# place. That loader does not look for private members: refused here, as the
+# builder's and the setup's filters do.
 - name: Check the fetched JWKS
   ansible.builtin.assert:
     that:
@@ -240,14 +256,18 @@
       - _ob_jwks_fetched.json['keys'] is sequence
       - _ob_jwks_fetched.json['keys'] | length > 0
       - >-
+        _ob_jwks_fetched.json['keys'] | select('mapping')
+        | selectattr('d', 'defined') | list | length == 0
+      - >-
         (ob_sso_jwks_fetch_sha256 | default('')) | length == 0
         or (ob_sso_jwks_fetch_sha256 | lower) == (_ob_jwks_canonical | hash('sha256'))
     fail_msg: >-
       {{ ob_sso_jwks_url }}?client_id={{ ob_client_id }} did not return a JWKS
+      of public keys
       {{- ' matching ob_sso_jwks_fetch_sha256 (got ' ~ (_ob_jwks_canonical | hash('sha256')) ~ ')'
           if (ob_sso_jwks_fetch_sha256 | default('')) | length > 0 else '' }}.
   vars:
-    _ob_jwks_canonical: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+    _ob_jwks_canonical: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}\n"
   delegate_to: localhost
   become: false
   when:
@@ -256,7 +276,7 @@
 
 - name: Keep the fetched JWKS
   ansible.builtin.set_fact:
-    ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+    ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}\n"
   when:
     - ob_sso_jwks_fetch | default(false) | bool
     - ob_sso_jwks_deploy | bool
