@@ -230,7 +230,9 @@ sso_fetch_krl() {
 SSO_JWKS_FILTER='def b64len: if type == "string" then gsub("=+$"; "") | length else -1 end;
 type == "object"
   and (.keys | type == "array")
-  and ([.keys[] | objects | select(has("d"))] | length == 0)
+  and ([.keys[] | objects
+        | select(has("d") or has("p") or has("q") or has("dp") or has("dq")
+                 or has("qi") or has("oth"))] | length == 0)
   and ([.keys[] | objects
         | select((.kid | type) == "string" and (.kid | length) > 0)
         | select((has("use") | not) or .use == "sig")

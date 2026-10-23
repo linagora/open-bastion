@@ -176,7 +176,8 @@ Exit status
    Usage error.
 
 ``check-jwks``: ``0`` at least one usable key, ``1`` none (or the file
-cannot be read, or fails ``--anchor``), ``2`` usage error.
+cannot be read, fails ``--anchor``, or a key holds private key material),
+``2`` usage error.
 
 ``nonce``: ``0``, or ``1`` when no random nonce could be generated.
 

@@ -439,6 +439,12 @@ check "an empty key set is reported" "$(said "no usable signature key"; echo $?)
 portal_signed k1 k1 ".jwks = $JWKS_WEAK"; run_hb
 expect_kept "a key set with only unusable keys (RSA-1024) is not installed" ok
 
+# The portal's own signing key, published by mistake: anyone could then forge
+# its answers. Signed by the trusted key, for this client, and still refused.
+portal_signed k1 k1 ".jwks = ($JWKS_K2 | .keys[0] += {d: \"AQAB\"})"; run_hb
+expect_kept "a key set holding a private key (d) is not installed" ok
+check "a key set holding a private key is reported" "$(said "private key material"; echo $?)" "$OUT"
+
 portal_signed k1 k1 '.jwks = "garbage"'; run_hb
 expect_kept "a jwks claim that is not an object is ignored" ok
 

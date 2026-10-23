@@ -49,6 +49,8 @@ BAD_JWKS=(
     '{"keys":[]}'
     '{"keys":[{"kty":"oct","kid":"h","k":"c2VjcmV0"}]}'
     '{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k1","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","d":"nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"}]}'
+    # An RSA CRT member alone, next to a usable key: still private material.
+    '{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k1","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"},{"kty":"OKP","crv":"Ed25519","kid":"k2","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","qi":"AQAB"}]}'
     '{"keys":[{"kty":"RSA","kid":"e","n":"x","e":"AQAB","use":"enc"}]}'
     '{"keys":[{"kty":"EC","kid":"s","key_ops":["sign"]}]}'
     '{"keys":[{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]}'
