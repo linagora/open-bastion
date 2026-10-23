@@ -59,6 +59,15 @@ ob_sso_jwks_file: /var/lib/open-bastion/jwks/sso-jwks.json
 # true deploys ob_sso_jwks_src over it on every run, e.g. a host that missed a
 # rotation (security-reference.rst).
 ob_sso_jwks_force: false
+# true: instead of the build's JWKS, the controller fetches the one of the
+# host's ob_client_id from ob_sso_jwks_url when the JWKS is to be deployed
+# (no loadable one on the host, another client_id, ob_sso_jwks_force). For a
+# portal whose keys rotated since the build, or an ob_client_id overridden
+# per group. Same trust as the build's fetch (TLS); ob_sso_jwks_fetch_sha256
+# pins the expected SHA-256 (`jq -S -c . | sha256sum`), empty = not pinned.
+ob_sso_jwks_fetch: false
+ob_sso_jwks_url: "{{ ob_portal_url }}/oauth2/jwks"
+ob_sso_jwks_fetch_sha256: ""
 
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.

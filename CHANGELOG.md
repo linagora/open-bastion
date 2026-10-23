@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   several roles, the questionnaire. One JWKS is fetched per relying party, and
   each installer and Ansible role carries its own role's, so bastions and
   backends on two RPs no longer need `response_signing = off` (#371).
+- ob-builder: `ob_sso_jwks_fetch: true` makes the generated Ansible role fetch
+  the JWKS of each host's `ob_client_id` from the controller at play time,
+  instead of deploying the build-time one: no rebuild after a portal key
+  rotation, and a per-group `ob_client_id` gets its own keys.
+  `ob_sso_jwks_fetch_sha256` pins it. The role now checks every JWKS with
+  `ob-verify-response check-jwks --anchor` before it replaces the host's
+  (#371).
 
 ### Changed
 

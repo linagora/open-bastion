@@ -121,6 +121,10 @@ for r in ('bastion', 'backend', 'standalone'):
         bad.append(f'{r}(order)')
     if tasks[deploy].get('when') != 'ob_sso_jwks_deploy | bool':
         bad.append(f'{r}(deploy-when={tasks[deploy].get("when")})')
+    # Whatever its source, the modules' loader checks it before it lands.
+    if not str(tasks[deploy]['ansible.builtin.copy'].get('validate', '')).startswith(
+            '/usr/sbin/ob-verify-response check-jwks --anchor '):
+        bad.append(f'{r}(deploy-not-validated)')
     # openbastion.conf holds client_secret: the read must not print it.
     if tasks[names.index('Read the client_id the host enrols as')].get('no_log') is not True:
         bad.append(f'{r}(conf-read-logged)')
@@ -190,6 +194,7 @@ PY
 - hosts: localhost
   connection: local
   gather_facts: false
+  vars_files: [$BR/vars/main.yml]
   vars:
     ob_client_id: pam-access
   tasks:
@@ -200,6 +205,7 @@ PY
         ob_sso_jwks_src: "{{ fx.value.src | default('sso-jwks.json') }}"
         ob_sso_jwks_file: "{{ fx.value.jwks }}"
         ob_sso_jwks_force: "{{ fx.value.force | default(false) }}"
+        ob_sso_jwks_fetch: "{{ fx.value.fetch | default(false) }}"
         fixtures:
           kept:          { jwks: $d/jwks-ok,  conf: $d/conf-same }
           kept_spacing:  { jwks: $d/jwks-ok,  conf: $d/conf-same-spacing }
@@ -209,6 +215,8 @@ PY
           no_conf:       { jwks: $d/jwks-ok,  conf: $d/missing }
           forced:        { jwks: $d/jwks-ok,  conf: $d/conf-same, force: true }
           no_src:        { jwks: $d/missing,  conf: $d/missing, src: '' }
+          fetch_no_src:  { jwks: $d/missing,  conf: $d/missing, src: '', fetch: true }
+          fetch_kept:    { jwks: $d/jwks-ok,  conf: $d/conf-same, src: '', fetch: true }
     - ansible.builtin.copy:
         content: "{{ res | to_json }}"
         dest: $d/result.json
@@ -216,9 +224,132 @@ EOF
     printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n' > "$d/inv.yml"
     run_play "$d/play.yml" "$d/inv.yml" "$d/log" || { test_fail "decision play failed" "$(tail -20 "$d/log")"; return; }
     got=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(" ".join(f"{k}={str(r[k]).lower()}" for k in sorted(r)))' "$d/result.json")
-    [ "$got" = "bad_jwks=true forced=true kept=false kept_spacing=false no_conf=true no_jwks=true no_src=false other_rp=true" ] \
-        && test_pass "decision: a loadable JWKS of the same client_id is kept; missing, unloadable, other RP, no conf or forced redeploys" \
+    [ "$got" = "bad_jwks=true fetch_kept=false fetch_no_src=true forced=true kept=false kept_spacing=false no_conf=true no_jwks=true no_src=false other_rp=true" ] \
+        && test_pass "decision: a loadable JWKS of the same client_id is kept; missing, unloadable, other RP, no conf or forced redeploys; ob_sso_jwks_fetch counts as a JWKS" \
         || test_fail "the keep/deploy decision is wrong" "$got"
+}
+
+# ob_sso_jwks_fetch (#371): the controller fetches the JWKS of the host's
+# ob_client_id when it is to be deployed, writes it in canonical form, and the
+# modules' loader checks it before it replaces the host's. Against a local
+# portal stand-in; ob-verify-response is a stub refusing a kid "reject".
+test_fetch_runs() {
+    if ! have_ansible; then
+        echo -e "${YELLOW}SKIP${NC} play-time JWKS fetch run (ansible-playbook or PyYAML missing)"
+        return 0
+    fi
+    local d="$TEST_TMPDIR/fetch" got port pid rc sha canon
+    mkdir -p "$d/out"
+    cat > "$d/portal.py" <<'PY'
+import json, sys, urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+log = open(sys.argv[1], 'a', buffering=1)
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlsplit(self.path)
+        cid = urllib.parse.parse_qs(u.query).get('client_id', [''])[0]
+        log.write(cid + '\n')
+        if u.path != '/oauth2/jwks':
+            self.send_response(404); self.end_headers(); return
+        # Keys deliberately unsorted and indented: the role must canonicalise.
+        doc = {'a': 1} if cid == 'not-a-jwks' else \
+              {'keys': [{'x': '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo', 'kty': 'OKP',
+                         'kid': cid, 'crv': 'Ed25519'}]}
+        body = json.dumps(doc, indent=2).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+s = ThreadingHTTPServer(('127.0.0.1', 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()
+PY
+    : > "$d/requests"
+    python3 "$d/portal.py" "$d/requests" > "$d/port" 2>/dev/null &
+    pid=$!
+    for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$d/port" ] && break; sleep 0.2; done
+    port=$(cat "$d/port")
+    [ -n "$port" ] || { kill "$pid" 2>/dev/null; test_fail "portal stand-in did not start"; return; }
+    printf '#!/bin/sh\n# check-jwks --anchor --quiet FILE\n! grep -qs reject "$4"\n' > "$d/verify"
+    chmod +x "$d/verify"
+    # The fetch, check, keep and deploy tasks of the generated role, on the
+    # controller itself, without root.
+    python3 - "$BR/tasks/main.yml" "$d/fetch.yml" "$d/verify" <<'PY' || { kill "$pid"; test_fail "fetch tasks not found"; return; }
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = ("Fetch the portal's JWKS for the host's client_id", 'Check the fetched JWKS',
+         'Keep the fetched JWKS', "Deploy the portal's JWKS")
+keep = [t for t in tasks if t.get('name') in names]
+assert len(keep) == 4
+for t in keep:
+    t.pop('delegate_to', None); t.pop('become', None)
+cp = keep[3]['ansible.builtin.copy']
+cp.pop('owner'); cp.pop('group')
+assert cp['validate'].startswith('/usr/sbin/ob-verify-response ')
+cp['validate'] = cp['validate'].replace('/usr/sbin/ob-verify-response', sys.argv[3])
+yaml.safe_dump([{'block': keep,
+                 'rescue': [{'ansible.builtin.set_fact': {'failed_case': True}}]},
+                {'ansible.builtin.set_fact': {'res': "{{ res | default({}) | combine({fx.key: "
+                  "'failed' if failed_case | default(false) else "
+                  "(lookup('file', ob_sso_jwks_file, errors='ignore') | default('', true))}) }}"}},
+                {'ansible.builtin.set_fact': {'failed_case': False}}],
+               open(sys.argv[2], 'w'))
+PY
+    canon='{"keys":[{"crv":"Ed25519","kid":"ob-backends","kty":"OKP","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}]}'
+    sha=$(printf '%s\n' "$canon" | sha256sum | cut -d' ' -f1)
+    cat > "$d/play.yml" <<EOF
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ob_sso_jwks_fetch: true
+  tasks:
+    - ansible.builtin.include_tasks: $d/fetch.yml
+      loop: "{{ fixtures | dict2items }}"
+      loop_control: { loop_var: fx }
+      vars:
+        ob_client_id: "{{ fx.value.cid }}"
+        ob_sso_jwks_deploy: "{{ fx.value.deploy | default(true) }}"
+        ob_sso_jwks_fetch_sha256: "{{ fx.value.pin | default('') }}"
+        ob_sso_jwks_url: "{{ fx.value.url | default('http://127.0.0.1:$port/oauth2/jwks') }}"
+        ob_sso_jwks_file: "$d/out/{{ fx.key }}.json"
+        fixtures:
+          fetched:     { cid: ob-backends }
+          pinned:      { cid: ob-backends, pin: "$(tr a-f A-F <<<"$sha")" }
+          wrong_pin:   { cid: ob-backends, pin: "${sha%?}x" }
+          not_a_jwks:  { cid: not-a-jwks }
+          http_404:    { cid: ob-backends, url: "http://127.0.0.1:$port/nope" }
+          refused:     { cid: reject }
+          kept:        { cid: kept-host, deploy: false }
+    - ansible.builtin.copy:
+        content: "{{ res | to_json }}"
+        dest: $d/result.json
+EOF
+    printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n' > "$d/inv.yml"
+    rc=0
+    run_play "$d/play.yml" "$d/inv.yml" "$d/log" || rc=$?
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    [ "$rc" -eq 0 ] || { test_fail "fetch play failed" "$(tail -20 "$d/log")"; return; }
+    got=$(python3 - "$d/result.json" "$canon" "$d/requests" "$d/out" <<'PY'
+import json, os, sys
+r = json.load(open(sys.argv[1])); canon = sys.argv[2]
+want = {'fetched': canon, 'pinned': canon, 'wrong_pin': 'failed', 'not_a_jwks': 'failed',
+        'http_404': 'failed', 'refused': 'failed', 'kept': ''}
+bad = [f'{k}={r.get(k)!r}' for k in want if r.get(k) != want[k]]
+# The file holds the canonical form and its newline, as `jq -S -c .` writes it.
+p = os.path.join(sys.argv[4], 'fetched.json')
+if not os.path.exists(p) or open(p).read() != canon + '\n':
+    bad.append('not-canonical-on-disk')
+if os.path.exists(os.path.join(sys.argv[4], 'refused.json')):
+    bad.append('refused-written')
+if 'kept-host' in open(sys.argv[3]).read().split():
+    bad.append('kept-host-fetched')
+print(' '.join(bad))
+PY
+)
+    [ -z "$got" ] && test_pass "fetch: the JWKS of the host's client_id, canonical, pinned or not; a wrong pin, a non-JWKS, an HTTP error or a key the loader refuses deploys nothing; a kept JWKS is not fetched" \
+                  || test_fail "play-time JWKS fetch misbehaves" "$got"
 }
 
 if ! render_tree; then
@@ -227,6 +358,7 @@ else
     test_role_carries_the_jwks
     test_deploy_follows_the_decision
     test_decision_runs
+    test_fetch_runs
 fi
 
 echo ""

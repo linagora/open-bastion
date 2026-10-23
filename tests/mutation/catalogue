@@ -1024,6 +1024,22 @@ suite   || tests/test_ob_builder_client_id_per_role.sh
 why     || #371: a role on another RP would ship the top-level RP's secret and
 why     || only fail at enrolment, on the target.
 
+id      || ansible-jwks-validated-before-deploy
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || validate: /usr/sbin/ob-verify-response check-jwks --anchor --quiet %s
+replace || backup: false
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #371: a JWKS fetched at play time is trusted over TLS only; one the
+why     || modules cannot load must not replace the host's working anchor.
+
+id      || ansible-jwks-fetch-pin
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || or (ob_sso_jwks_fetch_sha256 | lower) == (_ob_jwks_canonical | hash('sha256'))
+replace || or true
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #371: ob_sso_jwks_fetch_sha256 is the operator's pin on a TLS-only
+why     || fetch; a mismatch must stop the deployment.
+
 id      || builder-secret-only-when-embedded
 file    || admin-builder/ob-builder
 search  || case "$CLIENT_SECRET_MODE" in embedded) ;; *) return 0 ;; esac

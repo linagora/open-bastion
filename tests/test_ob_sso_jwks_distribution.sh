@@ -359,7 +359,7 @@ test_ansible_role_jwks() {
     grep -qx 'ob_sso_jwks_file: /var/lib/open-bastion/jwks/sso-jwks.json' "$r/defaults/main.yml" || bad="$bad default-file"
     # The deploy task: root:root 0644, to the configured path, before the conf.
     awk '/name: Deploy the portal.s JWKS/,/^$/' "$r/tasks/main.yml" > "$WORK/task.txt"
-    grep -q 'src: "{{ ob_sso_jwks_src }}"' "$WORK/task.txt" || bad="$bad task-src"
+    grep -q 'src: "{{ omit if ob_sso_jwks_fetch | default(false) | bool else ob_sso_jwks_src }}"' "$WORK/task.txt" || bad="$bad task-src"
     grep -q 'dest: "{{ ob_sso_jwks_file }}"' "$WORK/task.txt" || bad="$bad task-dest"
     grep -q "owner: root" "$WORK/task.txt" && grep -q "group: root" "$WORK/task.txt" \
         && grep -q "mode: '0644'" "$WORK/task.txt" || bad="$bad task-perms"
@@ -407,7 +407,8 @@ render = {'name': 'render', 'ansible.builtin.template': {
 # The inventory declares ob_role since a tree only configures its own hosts.
 pb = [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False,
        'vars': {'ob_role': 'bastion'},
-       'vars_files': [d + '/roles/open-bastion-bastion/defaults/main.yml'], 'tasks': [check, render]}]
+       'vars_files': [d + '/roles/open-bastion-bastion/defaults/main.yml',
+                      d + '/roles/open-bastion-bastion/vars/main.yml'], 'tasks': [check, render]}]
 yaml.safe_dump(pb, open(d + '/check.yml', 'w'))
 PY
     out=$(ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" 2>&1) || bad="$bad default-failed"
@@ -415,6 +416,11 @@ PY
     grep -qx 'sso_jwks_file = /var/lib/open-bastion/jwks/sso-jwks.json' "$d/rendered.conf" 2>/dev/null || bad="$bad rendered-file"
     ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" -e ob_client_id=other >/dev/null 2>&1 \
         && bad="$bad other-client-accepted"
+    # ob_sso_jwks_fetch: the JWKS is fetched for that client_id itself (#371).
+    ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" -e "ob_client_id=other ob_sso_jwks_fetch=true" >/dev/null 2>&1 \
+        || bad="$bad other-client-fetch-refused"
+    ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" -e "ob_client_id= ob_sso_jwks_fetch=true" >/dev/null 2>&1 \
+        && bad="$bad fetch-without-client-accepted"
     ANSIBLE_NOCOLOR=1 ansible-playbook -i "$d/inv.yml" "$d/check.yml" -e "ob_client_id=other ob_response_signing=off" >/dev/null 2>&1 \
         || bad="$bad off-refused"
     grep -qx 'response_signing = off' "$d/rendered.conf" 2>/dev/null || bad="$bad rendered-off"

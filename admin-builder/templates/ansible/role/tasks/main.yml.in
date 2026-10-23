@@ -87,19 +87,24 @@
       Set ob_portal_url and ob_pam_mode (A-E) in the role's defaults.
 
 # Signed answers need the JWKS of the relying party the host enrols as: the
-# one in files/ belongs to ob_sso_jwks_client_id.
+# one in files/ belongs to ob_sso_jwks_client_id; one fetched at play time
+# (ob_sso_jwks_fetch) is ob_client_id's own.
 - name: Check the signed-answers settings
   ansible.builtin.assert:
     that:
       - ob_response_signing | default('off') in ['off', 'prefer', 'required']
-      - (ob_response_signing | default('off')) == 'off' or (ob_sso_jwks_src | default('')) | length > 0
-      - (ob_response_signing | default('off')) == 'off' or ob_client_id == (ob_sso_jwks_client_id | default(''))
+      - (ob_response_signing | default('off')) == 'off' or ob_sso_jwks_available | bool
+      - >-
+        (ob_response_signing | default('off')) == 'off' or (ob_sso_jwks_fetch | default(false) | bool)
+        or ob_client_id == (ob_sso_jwks_client_id | default(''))
+      - not (ob_sso_jwks_fetch | default(false) | bool) or (ob_client_id | default('')) | length > 0
     fail_msg: >-
       ob_response_signing is {{ ob_response_signing | default('off') }}, which
       needs the portal's JWKS for client_id {{ ob_client_id }}: the role carries
       {{ (ob_sso_jwks_src | default('')) | ternary('the one of client_id ' ~ (ob_sso_jwks_client_id | default('')), 'none') }}.
-      Set ob_sso_jwks_src, ob_sso_jwks_sha256 and ob_sso_jwks_client_id for
-      that client_id, or ob_response_signing to off.
+      Set ob_sso_jwks_fetch to true to fetch that client_id's at play time
+      (ob_client_id must then be set), or ob_sso_jwks_src, ob_sso_jwks_sha256
+      and ob_sso_jwks_client_id for it, or ob_response_signing to off.
 
 - name: Install prerequisites
   ansible.builtin.apt:
@@ -166,7 +171,7 @@
     owner: root
     group: root
     mode: '0755'
-  when: (ob_sso_jwks_src | default('')) | length > 0
+  when: ob_sso_jwks_available | bool
 
 # The build-time JWKS goes on a host only once (#371), like the installer's
 # without --force: a later run would put it back over the key set ob-heartbeat
@@ -181,7 +186,7 @@
   changed_when: false
   failed_when: false
   check_mode: false
-  when: (ob_sso_jwks_src | default('')) | length > 0
+  when: ob_sso_jwks_available | bool
 
 # The file also holds client_secret: keep it out of the play's output.
 - name: Read the client_id the host enrols as
@@ -191,12 +196,12 @@
   no_log: true
   failed_when: false
   check_mode: false
-  when: (ob_sso_jwks_src | default('')) | length > 0
+  when: ob_sso_jwks_available | bool
 
 - name: Decide whether to deploy the portal's JWKS
   ansible.builtin.set_fact:
     ob_sso_jwks_deploy: >-
-      {{ (ob_sso_jwks_src | default('')) | length > 0
+      {{ ob_sso_jwks_available | bool
          and ((ob_sso_jwks_force | default(false) | bool)
               or _ob_jwks_check.rc | default(1) != 0
               or _ob_client_ids != [ob_client_id]) }}
@@ -206,27 +211,79 @@
          | select('match', '\s*client_id\s*=')
          | map('regex_replace', '^\s*client_id\s*=\s*(.*?)\s*$', '\1') | list }}
 
+# ob_sso_jwks_fetch: the JWKS of the host's ob_client_id, fetched by the
+# controller now rather than by ob-builder at build time (#371). Same trust:
+# TLS from the admin side, which ob_sso_jwks_fetch_sha256 can pin. Only when
+# it is to be deployed: a kept JWKS follows the portal's rotations already.
+- name: Fetch the portal's JWKS for the host's client_id
+  ansible.builtin.uri:
+    url: "{{ ob_sso_jwks_url }}?client_id={{ ob_client_id | urlencode }}"
+    return_content: true
+    validate_certs: "{{ ob_verify_ssl | default(true) | bool }}"
+    headers:
+      Accept: application/json
+  register: _ob_jwks_fetched
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when:
+    - ob_sso_jwks_fetch | default(false) | bool
+    - ob_sso_jwks_deploy | bool
+
+# The canonical form ob-builder and ob-*-setup fingerprint (`jq -S -c .`),
+# which ob-verify-response checks below before the file takes its place.
+- name: Check the fetched JWKS
+  ansible.builtin.assert:
+    that:
+      - _ob_jwks_fetched.json is mapping
+      - _ob_jwks_fetched.json['keys'] is defined
+      - _ob_jwks_fetched.json['keys'] is sequence
+      - _ob_jwks_fetched.json['keys'] | length > 0
+      - >-
+        (ob_sso_jwks_fetch_sha256 | default('')) | length == 0
+        or (ob_sso_jwks_fetch_sha256 | lower) == (_ob_jwks_canonical | hash('sha256'))
+    fail_msg: >-
+      {{ ob_sso_jwks_url }}?client_id={{ ob_client_id }} did not return a JWKS
+      {{- ' matching ob_sso_jwks_fetch_sha256 (got ' ~ (_ob_jwks_canonical | hash('sha256')) ~ ')'
+          if (ob_sso_jwks_fetch_sha256 | default('')) | length > 0 else '' }}.
+  vars:
+    _ob_jwks_canonical: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+  delegate_to: localhost
+  become: false
+  when:
+    - ob_sso_jwks_fetch | default(false) | bool
+    - ob_sso_jwks_deploy | bool
+
+- name: Keep the fetched JWKS
+  ansible.builtin.set_fact:
+    ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+  when:
+    - ob_sso_jwks_fetch | default(false) | bool
+    - ob_sso_jwks_deploy | bool
+
 # A regular file, root:root, not writable by group or others, or the PAM and
-# NSS modules refuse to load it. Deployed before openbastion.conf, which names
-# it.
+# NSS modules refuse to load it: checked by the modules' own loader before it
+# replaces the host's. Deployed before openbastion.conf, which names it.
 - name: Deploy the portal's JWKS
   ansible.builtin.copy:
-    src: "{{ ob_sso_jwks_src }}"
+    src: "{{ omit if ob_sso_jwks_fetch | default(false) | bool else ob_sso_jwks_src }}"
+    content: "{{ ob_sso_jwks_content if ob_sso_jwks_fetch | default(false) | bool else omit }}"
     dest: "{{ ob_sso_jwks_file }}"
     owner: root
     group: root
     mode: '0644'
     follow: false
+    validate: /usr/sbin/ob-verify-response check-jwks --anchor --quiet %s
   when: ob_sso_jwks_deploy | bool
 
 - name: Keep the host's JWKS
   ansible.builtin.debug:
     msg: >-
       Keeping {{ ob_sso_jwks_file }}: it may hold keys ob-heartbeat rotated
-      since this role was built. Set ob_sso_jwks_force to true to deploy the
-      role's JWKS over it.
+      since it was deployed. Set ob_sso_jwks_force to true to deploy the
+      role's JWKS over it (with ob_sso_jwks_fetch, the portal's current one).
   when:
-    - (ob_sso_jwks_src | default('')) | length > 0
+    - ob_sso_jwks_available | bool
     - not (ob_sso_jwks_deploy | bool)
 
 # KRL (Key Revocation List) is mandatory in Mode E — certificate revocation
