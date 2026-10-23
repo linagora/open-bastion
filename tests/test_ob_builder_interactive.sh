@@ -566,6 +566,7 @@ test_questionnaire_full() {
             "embedded" "x" "y" "x" "x"   # secret mode, mismatch then match
             "" "grp"                # server_group policy, server_group
             "bastion" "backend" ""  # roles
+            "" ""                   # client_id of each role (#371): the default
             "b1"                    # allowed bastions (backend present)
             "" ""                   # hardening, audit trace
             "yes"                   # disable recorder (bastion present)
@@ -617,6 +618,7 @@ test_questionnaire_skips_auto_approve() {
             "prompt"                # secret mode (no secret questions)
             "" "grp"                # server_group policy, server_group
             "bastion" "backend" ""  # roles
+            "" ""                   # client_id of each role (#371): the default
             "b1"                    # allowed bastions (backend present)
             "" ""                   # hardening, audit trace
             "yes"                   # disable recorder (bastion present)
@@ -653,6 +655,29 @@ test_questionnaire_skips_cli_values() {
         test_pass "questionnaire: CLI output / repo options / --insecure are not re-asked"
     else
         test_fail "questionnaire asked for CLI-provided values" "$got"
+    fi
+}
+
+# Several roles: each is asked its client_id (#371). The default keeps the
+# role on the top-level RP; another one is kept, with the secret of that RP
+# under client_secret_mode=embedded. A role the config set is not asked.
+test_questionnaire_role_client_ids() {
+    local got
+    got=$(
+        set_baseline
+        CLIENT_SECRET_MODE="embedded"; EMBEDDED_CLIENT_SECRET="top"
+        TARGET_ROLES=(bastion standalone backend)
+        ROLE_CLIENT_ID=(["standalone"]=preset)
+        set_answers "" "bad id!" "ob-backends" "s-b" "s-b"
+        collect_role_client_ids_interactive >/dev/null 2>&1
+        printf '%s|' "${ROLE_CLIENT_ID[bastion]:-<none>}" "$(role_client_id standalone)" \
+            "$(role_client_id backend)" "$(role_embedded_secret backend)" "$(role_embedded_secret bastion)" \
+            "$(answers_left)"
+    )
+    if [ "$got" = "<none>|preset|ob-backends|s-b|top|0|" ]; then
+        test_pass "questionnaire: client_id asked per role, invalid one re-asked, secret of another RP asked"
+    else
+        test_fail "per-role client_id questions" "$got"
     fi
 }
 
@@ -917,6 +942,7 @@ test_site_playbook_deployment_order
 test_questionnaire_full
 test_questionnaire_skips_auto_approve
 test_questionnaire_skips_cli_values
+test_questionnaire_role_client_ids
 test_rendered_installer
 test_installer_runtime
 test_rendered_ansible

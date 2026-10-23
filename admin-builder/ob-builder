@@ -103,6 +103,11 @@ CLIENT_ID=""
 CLIENT_ID_POLICY=""
 CLIENT_SECRET_MODE=""
 EMBEDDED_CLIENT_SECRET=""
+# Per-role relying party (#371), from the config's `roles:` block or the
+# questionnaire: a role absent here enrols as CLIENT_ID, with
+# EMBEDDED_CLIENT_SECRET. Read through role_client_id / role_embedded_secret.
+declare -gA ROLE_CLIENT_ID=()
+declare -gA ROLE_EMBEDDED_SECRET=()
 SERVER_GROUP=""
 SERVER_GROUP_POLICY=""
 TARGET_ROLE=""
@@ -164,6 +169,8 @@ _OB_SA_SYSTEM_NAMES="root daemon bin sys sync games man lp mail news uucp proxy 
 PAM_MODE=""
 BUILD_DATE=""
 WORK_DIR=""  # Temp dir for fetched assets (CA, KRL, JWKS).
+# The JWKS of the role being rendered (see run_outputs_for_role).
+JWKS_FILE=""
 
 usage() {
     cat << EOF
@@ -209,7 +216,7 @@ REPO / SIGNING:
 SIGNED ANSWERS:
   --response-signing MODE    off | prefer | required (default: prefer). The
                              portal's JWKS (jwks_uri?client_id=<client_id>) is
-                             fetched for every role and deployed as
+                             fetched for the client_id of each role and deployed as
                              /var/lib/open-bastion/jwks/sso-jwks.json; the targets get
                              response_signing = MODE. Use 'required' only once
                              the portal signs its answers: before, it refuses
@@ -240,6 +247,20 @@ QUESTIONNAIRE (asked when no --config is given; CLI values are not re-asked):
  11. Auto-launch enroll/setup on the target? (yes | no | prompt), self-delete
  12. APT repository (URL, suite, component, keyring) and GPG signing key
  13. Save the answers as a YAML config for --config?
+
+RELYING PARTY PER ROLE (--config YAML):
+  Every role enrols as client_id unless a 'roles:' block gives it another
+  relying party; with client_secret_mode=embedded, the secret of that RP too
+  (required as soon as its client_id differs). The portal signs a host's
+  answers with the keys of its RP, so one JWKS is fetched per distinct
+  client_id, and each artefact carries its own role's. The questionnaire asks
+  for the client_id of each role when there are several. Example:
+    client_id: ob-bastions
+    target_role: "bastion,backend"
+    roles:
+      backend:
+        client_id: ob-backends
+        embedded_client_secret: "..."   # client_secret_mode=embedded only
 
 SERVICE ACCOUNTS (--config YAML):
   Declare SSH-key-only local accounts under a 'service_accounts:' list. They are
@@ -291,7 +312,8 @@ EXAMPLES:
   # A bastion and its backends in one run: target_role: "bastion,backend"
   # in build.yml. No portal conversation is repeated, so the two roles share
   # the CA fetched once.
-  # The JWKS of client_id is fetched for every role; see --response-signing.
+  # The JWKS of each role's client_id is fetched; see --response-signing and
+  # RELYING PARTY PER ROLE.
 
 EOF
 }
@@ -414,6 +436,8 @@ load_config() {
     # Parse them with a dedicated, yq-independent block scanner so behaviour is
     # identical whether or not yq is installed.
     _parse_service_accounts_block "$f"
+    # Same for the per-role relying parties.
+    _parse_roles_block "$f"
 
     _normalise_config_values
 
@@ -489,7 +513,7 @@ _load_config_yq() {
 # Awk parser: emits "KEY\tVALUE" lines for known keys, strips quotes.
 _load_config_awk() {
     local f="$1"
-    local line key val
+    local line key val in_roles=0
     while IFS= read -r line || [ -n "$line" ]; do
         # Strip CR (CRLF files) and leading/trailing whitespace.
         line="${line%$'\r'}"
@@ -497,6 +521,16 @@ _load_config_awk() {
         case "$line" in
             ''|\#*) continue ;;
         esac
+        # The `roles:` block is _parse_roles_block's: its client_id and
+        # embedded_client_secret must not override the top-level ones.
+        if [ "$in_roles" = 1 ]; then
+            [[ "$line" =~ ^[[:space:]] ]] && continue
+            in_roles=0
+        fi
+        if [[ "$line" =~ ^roles[[:space:]]*:[[:space:]]*(#.*)?$ ]]; then
+            in_roles=1
+            continue
+        fi
         # Match key: value
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.*)$ ]]; then
             key="${BASH_REMATCH[1]}"
@@ -885,6 +919,58 @@ _parse_service_accounts_block() {
     return 0
 }
 
+# The `roles:` block (#371): a client_id, and with client_secret_mode=embedded
+# its secret, for a role that enrols with another relying party than the
+# top-level client_id:
+#
+#   roles:
+#     backend:
+#       client_id: ob-backends
+#       embedded_client_secret: "..."
+#
+# Read by this scanner whether or not yq is installed, like service_accounts.
+# A line at the role names' indent opens a role, a deeper one sets a field of
+# it, a non-indented line ends the block. Anything else stops the build: a
+# misspelt key would silently leave the role on the top-level relying party.
+_parse_roles_block() {
+    local f="$1"
+    local in_block=0 line role="" role_indent="" indent key val
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+        if [ "$in_block" = 0 ]; then
+            [[ "$line" =~ ^roles[[:space:]]*:[[:space:]]*(#.*)?$ ]] && in_block=1
+            continue
+        fi
+        if [[ "$line" =~ ^[^[:space:]] ]]; then
+            [[ "$line" =~ ^roles[[:space:]]*: ]] && die "roles: appears twice in $f"
+            in_block=0
+            continue
+        fi
+        [[ "$line" =~ ^([[:space:]]+)([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*:[[:space:]]*(.*)$ ]] \
+            || die "roles: cannot read the line '$line' in $f"
+        indent="${BASH_REMATCH[1]}"
+        key="${BASH_REMATCH[2]}"
+        val=$(_sa_unquote "${BASH_REMATCH[3]}")
+        [ -n "$role_indent" ] || role_indent="$indent"
+        if [ "$indent" = "$role_indent" ]; then
+            is_valid_target_role "$key" \
+                || die "roles: unknown role '$key' in $f (bastion | standalone | backend)"
+            [ -z "$val" ] || die "roles.$key: expected a block of keys, got a value"
+            role="$key"
+            continue
+        fi
+        [ "${#indent}" -gt "${#role_indent}" ] && [ -n "$role" ] \
+            || die "roles: misindented line '$line' in $f"
+        case "$key" in
+            client_id)              ROLE_CLIENT_ID[$role]="$val" ;;
+            embedded_client_secret) ROLE_EMBEDDED_SECRET[$role]="$val" ;;
+            *) die "roles.$role: unknown key '$key' in $f (client_id | embedded_client_secret)" ;;
+        esac
+    done < "$f"
+    return 0
+}
+
 # Strip a YAML inline comment (" #…"), surrounding whitespace and matching quotes.
 _sa_unquote() {
     local v="$1"
@@ -1138,6 +1224,7 @@ EOF
     else
         collect_target_roles_interactive
     fi
+    collect_role_client_ids_interactive
 
     # q7b. (backend only) Allowed bastions allowlist
     # Forwarded as ob-backend-setup --allowed-bastions, which writes it to
@@ -1287,6 +1374,42 @@ _has_role() {
     return 1
 }
 
+# The client_id role $1 enrols as, and the secret embedded for it.
+role_client_id() {
+    printf '%s' "${ROLE_CLIENT_ID[$1]:-$CLIENT_ID}"
+}
+role_embedded_secret() {
+    printf '%s' "${ROLE_EMBEDDED_SECRET[$1]:-$EMBEDDED_CLIENT_SECRET}"
+}
+
+# The distinct client_ids of the planned roles, one per line, in role order.
+planned_client_ids() {
+    local r cid
+    local -A seen=()
+    for r in "${TARGET_ROLES[@]}"; do
+        cid=$(role_client_id "$r")
+        [ -n "${seen[$cid]+x}" ] && continue
+        seen[$cid]=1
+        printf '%s\n' "$cid"
+    done
+}
+
+# Where the JWKS of client_id $1 is fetched to. The build's client_id keeps
+# the historical name.
+jwks_file_for() {
+    if [ "$1" = "$CLIENT_ID" ]; then
+        printf '%s/jwks.json' "$WORK_DIR"
+    else
+        printf '%s/jwks-%s.json' "$WORK_DIR" "$1"
+    fi
+}
+
+# The JWKS of the role being rendered: JWKS_FILE, set by run_outputs_for_role,
+# else the build's client_id's.
+current_jwks_file() {
+    printf '%s' "${JWKS_FILE:-$(jwks_file_for "$CLIENT_ID")}"
+}
+
 # True when at least one role records sessions (bastion or standalone).
 _has_non_backend_role() {
     local r
@@ -1312,6 +1435,29 @@ collect_target_roles_interactive() {
             log_warn "Role '$r' already selected"
         else
             TARGET_ROLES+=("$r")
+        fi
+    done
+    return 0
+}
+
+# With several roles, each may enrol with its own relying party (#371): its
+# client_id, and with client_secret_mode=embedded the secret of that RP. A
+# role the config already set is not asked again.
+collect_role_client_ids_interactive() {
+    local r cid
+    [ "${#TARGET_ROLES[@]}" -gt 1 ] || return 0
+    explain "Each role may enrol with its own relying party: the portal then signs its answers with the keys of that RP, and the artefact of the role carries that RP's JWKS. Keep '$CLIENT_ID' for a role on the same RP."
+    for r in "${TARGET_ROLES[@]}"; do
+        [ -n "${ROLE_CLIENT_ID[$r]+x}" ] && continue
+        while :; do
+            cid=$(ask "OIDC client_id of the $r role" "$CLIENT_ID")
+            is_valid_client_id "$cid" && break
+            log_warn "Invalid client_id: $cid"
+        done
+        [ "$cid" = "$CLIENT_ID" ] && continue
+        ROLE_CLIENT_ID[$r]="$cid"
+        if [ "$CLIENT_SECRET_MODE" = "embedded" ] && [ -z "${ROLE_EMBEDDED_SECRET[$r]:-}" ]; then
+            ROLE_EMBEDDED_SECRET[$r]=$(ask_secret_confirm "OIDC client_secret of client_id $cid to embed")
         fi
     done
     return 0
@@ -1397,10 +1543,7 @@ validate_inputs() {
 
     : "${CLIENT_SECRET_MODE:=prompt}"
     case "$CLIENT_SECRET_MODE" in
-        none|prompt) ;;
-        embedded)
-            [ -n "$EMBEDDED_CLIENT_SECRET" ] || die "client_secret_mode=embedded requires embedded_client_secret to be set"
-            ;;
+        none|prompt|embedded) ;;
         *) die "Invalid client_secret_mode: $CLIENT_SECRET_MODE" ;;
     esac
 
@@ -1427,6 +1570,7 @@ validate_inputs() {
         _seen_role[$_role]=1
     done
     TARGET_ROLE="${TARGET_ROLES[0]}"
+    validate_role_relying_parties
 
     # apt_url / apt_suite / apt_component are concatenated into the
     # "deb [signed-by=...] URL SUITE COMPONENT" line and interpolated verbatim
@@ -1501,9 +1645,11 @@ validate_inputs() {
     # The JWKS is the one of the RP the targets enrol with: without a
     # client_id there is no RP to ask for, and the portal's global keys need
     # not be the ones it signs with.
-    if [ "$RESPONSE_SIGNING" = "required" ] && [ -z "$CLIENT_ID" ]; then
-        die "response_signing=required needs a client_id (the JWKS is fetched for that relying party)"
-    fi
+    for _role in "${TARGET_ROLES[@]}"; do
+        if [ "$RESPONSE_SIGNING" = "required" ] && [ -z "$(role_client_id "$_role")" ]; then
+            die "response_signing=required needs a client_id for the $_role role (the JWKS is fetched for that relying party)"
+        fi
+    done
 
     # The questionnaire checks the key when asked; a config or --sign-with
     # value used to fail only at signing, after the SSO fetch and with the
@@ -1537,6 +1683,35 @@ validate_inputs() {
     fi
     [ -f "$REPO_KEYRING" ] || die "Repo keyring not found: $REPO_KEYRING"
     # (Outputs: checked fail-fast in main() with --config, asked otherwise.)
+}
+
+# The client_id and embedded secret of every target role (#371). A role on
+# another relying party than the top-level client_id has its own secret: with
+# client_secret_mode=embedded, reusing the top-level one would only fail at
+# enrolment, on the target.
+validate_role_relying_parties() {
+    local r cid
+    for r in "${!ROLE_CLIENT_ID[@]}" "${!ROLE_EMBEDDED_SECRET[@]}"; do
+        _has_role "$r" || log_warn "roles.$r is ignored: $r is not a target role of this build"
+    done
+    for r in "${TARGET_ROLES[@]}"; do
+        cid=$(role_client_id "$r")
+        is_valid_client_id "$cid" || die "Invalid client_id for the $r role: $cid"
+        if [ "$CLIENT_ID_POLICY" = "fixed" ] && [ -z "$cid" ]; then
+            die "client_id_policy=fixed requires a non-empty client_id for the $r role"
+        fi
+        if [ "$CLIENT_SECRET_MODE" != "embedded" ]; then
+            [ -z "${ROLE_EMBEDDED_SECRET[$r]:-}" ] \
+                || log_warn "roles.$r.embedded_client_secret is ignored: client_secret_mode is $CLIENT_SECRET_MODE"
+            continue
+        fi
+        if [ "$cid" != "$CLIENT_ID" ] && [ -z "${ROLE_EMBEDDED_SECRET[$r]:-}" ]; then
+            die "The $r role enrols as client_id '$cid', not '$CLIENT_ID': client_secret_mode=embedded needs roles.$r.embedded_client_secret, the secret of that relying party"
+        fi
+        [ -n "$(role_embedded_secret "$r")" ] \
+            || die "client_secret_mode=embedded requires embedded_client_secret to be set (for the $r role)"
+    done
+    return 0
 }
 
 # --output-shell names a directory, ob-builder picks the file names in it. A
@@ -1606,7 +1781,7 @@ print_recap() {
   Allowed bastions:    $([ "$ALLOWED_BASTIONS_COLLECT" = 1 ] && echo "<collected from the bastions>" || echo "${ALLOWED_BASTIONS:-<any bastion of the project>}")
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
-  Signed answers:      response_signing = $RESPONSE_SIGNING  (JWKS of client_id ${CLIENT_ID:-<none>})
+  Signed answers:      response_signing = $RESPONSE_SIGNING  (JWKS of each role's client_id)
   APT repo:            $APT_URL  (suite=$APT_SUITE component=$APT_COMPONENT)
   Repo keyring:        $REPO_KEYRING
   Sign with:           ${SIGN_WITH:-<none>}
@@ -1614,6 +1789,10 @@ print_recap() {
   Dry-run:             $([ "$DRY_RUN" = 1 ] && echo yes || echo no)
   TLS verification:    $([ "$INSECURE" = 1 ] && echo "DISABLED (--insecure)" || echo enabled)
 EOF
+    for r in "${TARGET_ROLES[@]}"; do
+        [ "$(role_client_id "$r")" = "$CLIENT_ID" ] && continue
+        printf '  %-21s%s\n' "client_id ($r):" "$(role_client_id "$r")"
+    done
     for ((i=0; i<${#_PLAN_ROLES[@]}; i++)); do
         printf '  %-21sshell=%s\n' "Output (${_PLAN_ROLES[$i]}):" "${_PLAN_SHELL[$i]:-<none>}"
     done
@@ -1684,6 +1863,30 @@ _replay_command() {
     printf '%s' "$cmd"
 }
 
+# The `roles:` block of render_config_yaml: the roles on another relying party
+# than client_id, with their secret under the same rule as the top-level one.
+_render_roles_block() {
+    local r q any=0
+    for r in "${TARGET_ROLES[@]}"; do
+        [ "$(role_client_id "$r")" = "$CLIENT_ID" ] && continue
+        if [ "$any" = 0 ]; then
+            printf '# Roles enrolling with another relying party than client_id\n'
+            printf 'roles:\n'
+            any=1
+        fi
+        printf '  %s:\n' "$r"
+        _yaml_kv client_id "$(role_client_id "$r")" '    '
+        [ "$CLIENT_SECRET_MODE" = "embedded" ] || continue
+        if [ "$SAVE_CONFIG_SECRET" = 1 ] && q=$(_yaml_str "$(role_embedded_secret "$r")"); then
+            printf '    embedded_client_secret: %s\n' "$q"
+        else
+            printf '    # Not saved: add it back.\n'
+            printf '    # embedded_client_secret: ""\n'
+        fi
+    done
+    return 0
+}
+
 # The config YAML on stdout. Every key is written, defaults included, with the
 # accepted values as comments: that is what makes the file worth keeping.
 render_config_yaml() {
@@ -1724,6 +1927,7 @@ render_config_yaml() {
     printf '\n# bastion | standalone | backend; several, comma-separated, give one\n'
     printf '# artefact each, suffixed with the role\n'
     _yaml_kv target_role "$(IFS=,; printf '%s' "${TARGET_ROLES[*]}")"
+    _render_roles_block
     printf '# backend only: bastion ids allowed to reach it, comma-separated.\n'
     printf '# "" accepts any vouched bastion of the project; null asks the Ansible\n'
     printf '# role to collect the ids from the bastions themselves (ob_bastion_group)\n'
@@ -1827,6 +2031,15 @@ save_config() {
             log_warn "The client_secret could not be written to $path (control character, ' #', both"
             log_warn "  quote kinds, or not UTF-8): add embedded_client_secret by hand before replaying it."
         fi
+        local _r
+        for _r in "${!ROLE_EMBEDDED_SECRET[@]}"; do
+            _has_role "$_r" && [ "$(role_client_id "$_r")" != "$CLIENT_ID" ] || continue
+            if [ "$SAVE_CONFIG_SECRET" != 1 ]; then
+                log_warn "The client_secret of the $_r role was left out of $path: add roles.$_r.embedded_client_secret before replaying it."
+            elif ! _yaml_str "${ROLE_EMBEDDED_SECRET[$_r]}" >/dev/null; then
+                log_warn "The client_secret of the $_r role could not be written to $path: add roles.$_r.embedded_client_secret by hand."
+            fi
+        done
     fi
     return 0
 }
@@ -1836,10 +2049,12 @@ save_config() {
 # Files produced:
 #   $WORK_DIR/ca.pub
 #   $WORK_DIR/krl       (empty if not fetched)
-#   $WORK_DIR/jwks.json (the canonical JWKS of client_id's RP, every role;
-#                        absent without a client_id, or when no usable JWKS
-#                        could be fetched and the mode is not required: the
+#   $WORK_DIR/jwks.json (the canonical JWKS of client_id's RP; absent
+#                        without a client_id, or when no usable JWKS could
+#                        be fetched and the mode is not required: the
 #                        artefacts then get response_signing = off)
+#   $WORK_DIR/jwks-<client_id>.json (the same, for a role enrolling with
+#                        another RP: see jwks_file_for)
 # ─────────────────────────────────────────────────────────────────────────
 fetch_sso_assets() {
     WORK_DIR=$(mktemp_dir)
@@ -1861,31 +2076,44 @@ fetch_sso_assets() {
 
     # The trust anchor of signed answers (#339), for every role: bastions
     # and standalone hosts check the portal's answers as much as backends do.
-    if [ -z "$CLIENT_ID" ]; then
+    # One per relying party the roles enrol with (#371): the portal signs an
+    # answer with the keys it assigns to the caller's RP.
+    local cid
+    while IFS= read -r cid; do
+        fetch_role_jwks "$cid"
+    done < <(planned_client_ids)
+}
+
+# fetch_role_jwks CLIENT_ID: the JWKS of that RP to jwks_file_for CLIENT_ID.
+fetch_role_jwks() {
+    local cid="$1" out
+    out=$(jwks_file_for "$cid")
+    if [ -z "$cid" ]; then
         # validate_inputs already refused `required` here.
         log_warn "No client_id: the JWKS is not fetched (it is per relying party)."
         log_warn "The artefacts get response_signing = off; provision the JWKS on the"
         log_warn "targets with ob-*-setup --sso-jwks / --sso-jwks-sha256."
-    elif ! sso_fetch_jwks "$PORTAL_URL" "$WORK_DIR/jwks.json" "$CLIENT_ID"; then
-        rm -f -- "$WORK_DIR/jwks.json"
+    elif ! sso_fetch_jwks "$PORTAL_URL" "$out" "$cid"; then
+        rm -f -- "$out"
         # Same rule as the setup script: prefer degrades to off, required
         # stops. A portal with no usable signature key for this RP cannot
         # sign its answers anyway, and a bastion build never needed a JWKS
         # before #339: prefer must not turn that into a failed build.
         if [ "$RESPONSE_SIGNING" = "required" ]; then
-            die "No usable JWKS; response_signing = required needs it (--response-signing prefer|off builds without)."
+            die "No usable JWKS for client_id $cid; response_signing = required needs it (--response-signing prefer|off builds without)."
         fi
-        log_warn "No usable JWKS for client_id $CLIENT_ID: the artefacts carry none and get"
+        log_warn "No usable JWKS for client_id $cid: its artefacts carry none and get"
         log_warn "  response_signing = off instead of $RESPONSE_SIGNING. Check the RP's signing key"
         log_warn "  (oidcRPMetaDataOptionsSigningKey / oidcServiceSignatureKey, with a key id)."
     fi
+    return 0
 }
 
 # The response_signing the artefacts carry: off when there is no JWKS to check
 # the answers against. Writing prefer without one would only log a warning on
 # every PAM and NSS call; required would refuse them all.
 effective_response_signing() {
-    if [ -s "$WORK_DIR/jwks.json" ]; then
+    if [ -s "$(current_jwks_file)" ]; then
         printf '%s' "$RESPONSE_SIGNING"
     else
         printf 'off'
@@ -2109,12 +2337,13 @@ build_placeholder_map() {
     # Signed answers (#339): the canonical JWKS of client_id's RP, its SHA-256
     # (checked by the installer before it writes the file, and passed to the
     # setup run), the client_id it belongs to, and the mode.
-    local jwks_b64="" jwks_sha256="" jwks_client_id="" rsig
+    local jwks_b64="" jwks_sha256="" jwks_client_id="" rsig jwks
     rsig=$(effective_response_signing)
-    if [ -s "$WORK_DIR/jwks.json" ]; then
-        jwks_b64=$(base64_file "$WORK_DIR/jwks.json")
-        jwks_sha256=$(sso_jwks_sha256 "$WORK_DIR/jwks.json")
-        jwks_client_id="${SSO_JWKS_CLIENT_ID:-$CLIENT_ID}"
+    jwks=$(current_jwks_file)
+    if [ -s "$jwks" ]; then
+        jwks_b64=$(base64_file "$jwks")
+        jwks_sha256=$(sso_jwks_sha256 "$jwks")
+        jwks_client_id="$CLIENT_ID"
     fi
 
     apt_sources="deb [signed-by=/etc/apt/keyrings/open-bastion.gpg] ${APT_URL} ${APT_SUITE} ${APT_COMPONENT}"
@@ -2483,8 +2712,10 @@ render_ansible_role() {
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -s "$WORK_DIR/jwks.json" ]; then
-        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$WORK_DIR/jwks.json"
+    local jwks
+    jwks=$(current_jwks_file)
+    if [ -s "$jwks" ]; then
+        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$jwks"
     fi
 
     _tighten_if_embedded "$outpath/roles/open-bastion-${role}/defaults/main.yml" "0600"
@@ -2566,7 +2797,7 @@ ob_server_group_policy: $SERVER_GROUP_POLICY
 ob_auto_enroll_setup: $AUTO_ENROLL_SETUP
 ob_ca_fingerprint: ${SSO_CA_FINGERPRINT:-}
 ob_response_signing: $(effective_response_signing)
-ob_sso_jwks_sha256: "$([ -s "$WORK_DIR/jwks.json" ] && sso_jwks_sha256 "$WORK_DIR/jwks.json")"
+ob_sso_jwks_sha256: "$([ -s "$(current_jwks_file)" ] && sso_jwks_sha256 "$(current_jwks_file)")"
 ob_apt_url: $APT_URL
 ob_apt_suite: $APT_SUITE
 ob_apt_component: $APT_COMPONENT
@@ -2581,8 +2812,10 @@ EOF
         atomic_write_from "$files_dir/open-bastion-krl" "0644" "$WORK_DIR/krl"
     fi
     atomic_write_from "$files_dir/open-bastion.gpg" "0644" "$REPO_KEYRING"
-    if [ -s "$WORK_DIR/jwks.json" ]; then
-        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$WORK_DIR/jwks.json"
+    local jwks
+    jwks=$(current_jwks_file)
+    if [ -s "$jwks" ]; then
+        atomic_write_from "$files_dir/sso-jwks.json" "0644" "$jwks"
     fi
     _tighten_if_embedded "$defaults_dir/main.yml" "0600"
     _write_embedded_secret_gitignore "$outpath"
@@ -2623,6 +2856,15 @@ run_outputs_for_role() {
     local role="$1"
     local shell_out="$2"
     local ansible_out="$3"
+
+    # Every renderer reads CLIENT_ID, EMBEDDED_CLIENT_SECRET and JWKS_FILE:
+    # for the time of this role, they are its relying party's (#371).
+    # Computed before the `local`, which hides the build's values.
+    local _jwks _cid _secret
+    _jwks=$(jwks_file_for "$(role_client_id "$role")")
+    _cid=$(role_client_id "$role")
+    _secret=$(role_embedded_secret "$role")
+    local CLIENT_ID="$_cid" EMBEDDED_CLIENT_SECRET="$_secret" JWKS_FILE="$_jwks"
 
     [ -n "$shell_out" ]   && render_shell_installer "$shell_out" "$role"
     [ -n "$ansible_out" ] && render_ansible_role    "$ansible_out" "$role"
@@ -2702,12 +2944,16 @@ main() {
         fi
     done
     [ -n "$OUTPUT_ANSIBLE" ] && log_info "Ansible tree:      $OUTPUT_ANSIBLE"
-    if [ -s "${WORK_DIR:-/nonexistent}/jwks.json" ]; then
-        log_info "Portal JWKS (client_id ${SSO_JWKS_CLIENT_ID:-$CLIENT_ID}) SHA-256: $(sso_jwks_sha256 "$WORK_DIR/jwks.json")"
-        log_info "  Signed answers: response_signing = $(effective_response_signing)"
-    else
-        log_warn "No portal JWKS in the artefacts: signed answers stay off (response_signing = off)."
-    fi
+    local cid
+    while IFS= read -r cid; do
+        JWKS_FILE=$(jwks_file_for "$cid")
+        if [ -n "$cid" ] && [ -s "$JWKS_FILE" ]; then
+            log_info "Portal JWKS (client_id $cid) SHA-256: $(sso_jwks_sha256 "$JWKS_FILE")"
+            log_info "  Signed answers: response_signing = $(effective_response_signing)"
+        else
+            log_warn "No portal JWKS for client_id ${cid:-<none>} in the artefacts: signed answers stay off (response_signing = off)."
+        fi
+    done < <(planned_client_ids)
     return 0
 }
 

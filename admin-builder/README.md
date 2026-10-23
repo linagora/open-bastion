@@ -4,7 +4,7 @@
 
 ## How it Fits in the Project
 
-Administrators use `ob-builder` to answer a single questionnaire once, capturing deployment parameters (SSO URL, authentication scenario, target role, etc.). The builder fetches the SSH CA key and the portal's JWKS (for the `client_id` relying party, whatever the role) from the SSO server and generates two types of artifacts:
+Administrators use `ob-builder` to answer a single questionnaire once, capturing deployment parameters (SSO URL, authentication scenario, target role, etc.). The builder fetches the SSH CA key and the portal's JWKS (one per relying party the roles enrol with) from the SSO server and generates two types of artifacts:
 
 1. **Self-extracting shell installer** (`bootstrap-<slug>-<role>.sh`) — can be copied to target servers and executed; handles package installation, configuration, and enrollment
 2. **Ansible role tree** — for playbook-based deployments across fleets
@@ -92,6 +92,11 @@ client_id: backend-prod
 client_id_policy: fixed
 client_secret_mode: prompt # none | prompt | embedded
 # embedded_client_secret: ...  # required when client_secret_mode=embedded
+# A role on another relying party than client_id (see Several roles in one run):
+# roles:
+#   bastion:
+#     client_id: bastion-prod
+#     embedded_client_secret: ...  # its own secret, client_secret_mode=embedded only
 server_group: backend-prod-us-east
 server_group_policy: fixed
 target_role: backend # bastion | standalone | backend, or several: "bastion,backend"
@@ -271,6 +276,27 @@ The Ansible output is one tree holding a `playbook-<role>.yml` and a
 order over the inventory. Each playbook only configures the hosts whose
 `ob_role` matches its role; the others are skipped untouched.
 
+Each role enrols as `client_id`, unless a `roles:` block gives it another
+relying party (with `client_secret_mode: embedded`, its own secret too,
+required as soon as its `client_id` differs):
+
+```yaml
+client_id: ob-bastions
+target_role: "bastion,backend"
+roles:
+  backend:
+    client_id: ob-backends
+    # embedded_client_secret: ...   # client_secret_mode=embedded only
+```
+
+The portal signs a host's answers with the keys of its relying party, so the
+build fetches one JWKS per distinct `client_id`, and each installer and role
+carries the `client_id`, secret and JWKS of its own role. The questionnaire
+asks for the `client_id` of each role when there are several. At play time,
+give each role's hosts the secret of their own relying party (`ob_client_secret`
+in their group's vars): one `--extra-vars ob_client_secret=...` would hand the
+same secret to every playbook of `site.yml`.
+
 ## Signed portal answers
 
 The hosts can check that the portal's answers to `/pam/authorize`, `/pam/verify`, `/pam/heartbeat` and `/pam/userinfo` are signed by the portal (`response_signing` in `openbastion.conf(5)`), against a JWKS deployed at install time. `ob-builder` fetches that JWKS for every role from the discovery's `jwks_uri` (or `<portal>/oauth2/jwks`) with `?client_id=<client_id>`, refuses a document the hosts could not use, and keeps it in canonical form (`jq -S -c .`). The build summary and `PORTAL-CHECKLIST*.md` print its SHA-256; compare it, from a network you trust, with:
@@ -281,7 +307,7 @@ curl -s 'https://sso.example.com/oauth2/jwks?client_id=backend-prod' | jq -S -c 
 
 `response_signing` (YAML) or `--response-signing` chooses the mode the targets get: `prefer` by default, which still accepts the unsigned answers of a portal whose `pam-access` plugin does not sign yet and logs them; `required` once the plugin release that signs is deployed (see `UPGRADE-NOTES.md`: a host whose JWKS is wrong then refuses every SSO login); `off` to leave it out. Without a usable JWKS (fetch failure, or no signature key with a `kid` for that RP), `required` stops the build and `prefer` builds with `off`, with a warning.
 
-The JWKS belongs to the build's `client_id`. A target installed with another `--client-id` gets `response_signing = off` (with a warning); run `ob-*-setup --sso-jwks-sha256 <hex>` there later. In the Ansible role, overriding `ob_client_id` requires `ob_sso_jwks_src`, `ob_sso_jwks_sha256` and `ob_sso_jwks_client_id` for that client (or `ob_response_signing: off`), and the play says so.
+Each role gets the JWKS of its own `client_id`: the top-level one, or the one its `roles:` entry sets (one ob-builder run then fetches one JWKS per relying party, e.g. bastions and backends on two RPs). A target installed with another `--client-id` gets `response_signing = off` (with a warning); run `ob-*-setup --sso-jwks-sha256 <hex>` there later. In the Ansible role, overriding `ob_client_id` requires `ob_sso_jwks_src`, `ob_sso_jwks_sha256` and `ob_sso_jwks_client_id` for that client (or `ob_response_signing: off`), and the play says so.
 
 ## Security Notes
 

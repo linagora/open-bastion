@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ob-builder: a role can enrol with another relying party than `client_id`,
+  through a `roles:` block in the config (its `client_id`, and its
+  `embedded_client_secret` with `client_secret_mode: embedded`) or, with
+  several roles, the questionnaire. One JWKS is fetched per relying party, and
+  each installer and Ansible role carries its own role's, so bastions and
+  backends on two RPs no longer need `response_signing = off` (#371).
+
 ### Changed
 
 - `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
