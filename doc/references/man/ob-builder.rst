@@ -167,14 +167,43 @@ earlier releases are ignored with a warning. See the project's
 ``/usr/share/doc/open-bastion-doc/html/service-accounts.html`` in the
 HTML documentation.
 
+Relying party per role
+----------------------
+
+Every role enrols as ``client_id`` unless the configuration's ``roles:``
+block gives it another relying party, typically bastions and backends
+registered as two RPs in the portal:
+
+.. code:: yaml
+
+   client_id: ob-bastions
+   client_secret_mode: embedded
+   embedded_client_secret: "..."
+   target_role: "bastion,backend"
+   roles:
+     backend:
+       client_id: ob-backends
+       embedded_client_secret: "..."
+
+Under ``roles:``, a key per role (``bastion``, ``standalone``,
+``backend``) holds ``client_id`` and, with ``client_secret_mode:
+embedded``, ``embedded_client_secret``: the secret of that relying
+party, required as soon as its ``client_id`` differs from the top-level
+one. Any other key stops the build. Each artefact then carries its own
+role's ``client_id``, secret and JWKS; the policy (``client_id_policy``)
+applies to every role. With several roles, the questionnaire asks for
+the ``client_id`` of each, defaulting to the top-level one, and
+``--save-config`` writes the block back.
+
 Signed portal answers
 ---------------------
 
 For every role (bastion, standalone, backend), the builder
 fetches the portal's JWKS from the ``jwks_uri`` of the OIDC discovery,
 or ``<portal>/oauth2/jwks`` when none is advertised, with
-``?client_id=<client_id>``: the keys the portal signs that relying
-party's answers with. It refuses a document the hosts could not use (no
+``?client_id=<client_id>`` (the role's, see `Relying party per role`_):
+the keys the portal signs that relying party's answers with. A
+``client_id`` shared by several roles is fetched once. It refuses a document the hosts could not use (no
 RSA, EC or OKP signature key with a ``kid``, a private key, over 256
 KiB) and keeps it in canonical form (``jq -S -c .``), whose SHA-256 the
 build summary and ``PORTAL-CHECKLIST*.md`` print. Anyone can reproduce
@@ -200,7 +229,7 @@ rotated one. Rebuild the artefacts after a key rotation on the portal
 before forcing them on existing hosts: under ``required``, a host given
 a JWKS without the key the portal now signs with refuses every answer.
 
-The JWKS belongs to the ``client_id`` of the build. A target enrolled
+The JWKS belongs to the ``client_id`` of the role. A target enrolled
 under another ``client_id`` (policy ``modifiable``) gets
 ``response_signing = off`` from the installer, with a warning (its
 ``required`` is refused); the Ansible play stops until
@@ -208,10 +237,10 @@ under another ``client_id`` (policy ``modifiable``) gets
 are set for it, or ``ob_response_signing`` is ``off``. Without a
 ``client_id`` no JWKS is fetched and the artefacts get ``off``. When the
 fetch fails or the portal publishes no usable key (an RSA, EC or OKP
-signature key with a ``kid``) for the relying party, ``required`` stops
-the build; ``prefer`` builds artefacts with ``off`` and a warning, as
-the setup script does: the portal could not sign that client's answers
-anyway.
+signature key with a ``kid``) for a relying party, ``required`` stops
+the build; ``prefer`` builds the artefacts of that relying party's roles
+with ``off`` and a warning, as the setup script does: the portal could
+not sign that client's answers anyway.
 
 Files
 -----

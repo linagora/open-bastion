@@ -249,11 +249,19 @@ Notes:
   ``client_id`` to one server group (:ref:`Server groups
   <llng-configuration-server-groups>`) — hence the per-group values above,
   which override the role's baked-in ones.
-- The JWKS in ``files/`` is the one of the build's ``client_id``. A host
-  whose ``ob_client_id`` differs needs its own: set ``ob_sso_jwks_src``,
-  ``ob_sso_jwks_sha256`` and ``ob_sso_jwks_client_id`` for it, or
-  ``ob_response_signing: off``. The play stops on the first task otherwise,
-  rather than deploy keys that do not sign that client's answers.
+- The JWKS in each role's ``files/`` is the one of that role's ``client_id``
+  at build time. Build the tree with the ``client_id`` of each role (the
+  ``roles:`` block of the configuration, see :doc:`ob-builder(1)
+  </references/man/ob-builder>`), here ``ob-client-bastion`` and
+  ``ob-client-backend``: each role then carries the JWKS of its own relying
+  party. A host whose ``ob_client_id`` differs from its role's needs its own:
+  set ``ob_sso_jwks_src``, ``ob_sso_jwks_sha256`` and
+  ``ob_sso_jwks_client_id`` for it, or ``ob_response_signing: off``. The play
+  stops on the first task otherwise, rather than deploy keys that do not sign
+  that client's answers.
+- With one relying party per role, give the secrets per group as above:
+  ``--extra-vars ob_client_secret=...`` would hand the same secret to every
+  playbook of ``site.yml``.
 - Keep the client secret in ``ansible-vault``, not in clear text. The role
   never persists the LLNG approval cookie either: it is asked per run and kept
   in memory.
