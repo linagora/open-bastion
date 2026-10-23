@@ -1066,8 +1066,8 @@ why     || anchor of every signed answer.
 
 id      || ansible-jwks-fetch-utf8-canonical
 file    || admin-builder/templates/ansible/role/tasks/main.yml.in
-search  || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}\n"
-replace || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}\n"
+search  || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}
+replace || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':']) }}
 suite   || tests/test_ob_builder_ansible_jwks.sh
 why     || #375 review: the canonical form is jq's, in UTF-8; an escaped one
 why     || changes the bytes the operator's `jq -S -c . | sha256sum` pins.
