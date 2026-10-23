@@ -116,7 +116,10 @@ the portal.
 
 **8. server token**
    Its refresh token and its access token are revoked at the portal's
-   ``/oauth2/revoke`` endpoint, then the token file is deleted. A
+   ``/oauth2/revoke`` endpoint, then the token file is deleted, and with
+   it ``/var/lib/open-bastion/bastion-id``, the id
+   :doc:`ob-bastion-id(1) <ob-bastion-id>` kept for that device (backed
+   up: it is not a secret). A
    confidential client authenticates with a ``client_secret_jwt``
    assertion built by :doc:`ob-client-jwt(8) <ob-client-jwt>`; the client
    secret itself is never sent, and when that helper is missing the
