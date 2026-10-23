@@ -61,7 +61,8 @@ typedef struct ob_jws_keyset ob_jws_keyset_t;
  * Parse a JWKS document. Keys that cannot verify a signature here are
  * skipped: `use` other than "sig", `kty: oct`, an unsupported curve, a
  * malformed key, an RSA modulus under 2048 bits. Returns NULL, with a message
- * in err, when nothing usable is left.
+ * in err, when nothing usable is left, or when any key of the document holds
+ * private key material (`d`, or the RSA CRT members).
  */
 ob_jws_keyset_t *ob_jws_keyset_parse(const char *json, size_t len,
                                      char *err, size_t errlen);

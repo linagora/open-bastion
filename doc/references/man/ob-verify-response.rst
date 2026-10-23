@@ -55,7 +55,9 @@ Commands
    Parse a JWKS (``-`` reads standard input) and report the keys the
    verifier can use: RSA of 2048 bits or more, P-256/P-384/P-521, Ed25519,
    with ``use`` ``sig`` or none. ``oct`` keys and unsupported curves are
-   skipped. Prints::
+   skipped. A document where any key holds private key material (``d``,
+   or the RSA members ``p``, ``q``, ``dp``, ``dq``, ``qi``, ``oth``) is
+   refused as a whole: it would disclose the portal's signing key. Prints::
 
       keys=N
       key=<thumbprint> <kid>       (one line per usable key)
@@ -174,7 +176,8 @@ Exit status
    Usage error.
 
 ``check-jwks``: ``0`` at least one usable key, ``1`` none (or the file
-cannot be read, or fails ``--anchor``), ``2`` usage error.
+cannot be read, fails ``--anchor``, or a key holds private key material),
+``2`` usage error.
 
 ``nonce``: ``0``, or ``1`` when no random nonce could be generated.
 

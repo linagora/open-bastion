@@ -186,6 +186,58 @@ static void test_keyset(void)
     }
 }
 
+/*
+ * A JWKS holding private key material is refused as a whole, even next to
+ * usable public keys, and even beyond the OB_JWS_MAX_KEYS keys that are read:
+ * it discloses the portal's signing key.
+ */
+static void test_keyset_private(void)
+{
+    char err[256];
+    static const char *const members[] = { "d", "p", "q", "dp", "dq", "qi", "oth" };
+    printf("Private key material:\n");
+
+    for (size_t m = 0; m < sizeof(members) / sizeof(members[0]); m++) {
+        char extra[64], msg[160];
+        snprintf(extra, sizeof(extra), "\"%s\":\"AQAB\"", members[m]);
+        char *pub = tj_jwk(k_ed, "ed", NULL);
+        char *priv = tj_jwk(k_p256, "p256", extra);
+        size_t len = strlen(pub) + strlen(priv) + 32;
+        char *doc = malloc(len);
+        snprintf(doc, len, "{\"keys\":[%s,%s]}", pub, priv);
+        err[0] = '\0';
+        ob_jws_keyset_t *ks = ob_jws_keyset_parse(doc, strlen(doc), err, sizeof(err));
+        snprintf(msg, sizeof(msg), "a key with \"%s\" refuses the whole JWKS (%s)", members[m], err);
+        CHECK(ks == NULL && strstr(err, "private key material") != NULL, msg);
+        ob_jws_keyset_free(ks);
+        free(pub);
+        free(priv);
+        free(doc);
+    }
+
+    /* Past the keys the parser reads: still refused. */
+    enum { MANY = 70 };  /* more than OB_JWS_MAX_KEYS (64) in src/ob_jws.c */
+    size_t cap = (size_t)(MANY + 2) * 1024;
+    char *doc = malloc(cap), *pub = tj_jwk(k_ed, "ed", NULL);
+    size_t o = (size_t)snprintf(doc, cap, "{\"keys\":[");
+    for (int i = 0; i < MANY; i++) {
+        o += (size_t)snprintf(doc + o, cap - o, "%s,", pub);
+    }
+    snprintf(doc + o, cap - o, "{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"kid\":\"late\",\"x\":\"AA\",\"d\":\"AA\"}]}");
+    ob_jws_keyset_t *ks = ob_jws_keyset_parse(doc, strlen(doc), err, sizeof(err));
+    CHECK(ks == NULL, "a private key after the first OB_JWS_MAX_KEYS keys is still refused");
+    ob_jws_keyset_free(ks);
+    free(pub);
+    free(doc);
+
+    /* A symmetric oct key stays skipped, as before: not private material here. */
+    char *jwks = build_jwks();
+    ks = ob_jws_keyset_parse(jwks, strlen(jwks), err, sizeof(err));
+    CHECK(ks != NULL, "the reference JWKS (with a skipped kty:oct key) still loads");
+    ob_jws_keyset_free(ks);
+    free(jwks);
+}
+
 static void test_keyset_file(void)
 {
     char dir[] = "/tmp/ob_jws_XXXXXX";
@@ -576,6 +628,7 @@ int main(void)
         printf("no key set, giving up\n");
         return 1;
     }
+    test_keyset_private();
     test_keyset_file();
     test_valid();
     test_signature();
