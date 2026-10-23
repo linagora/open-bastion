@@ -168,10 +168,47 @@
     mode: '0755'
   when: (ob_sso_jwks_src | default('')) | length > 0
 
+# The build-time JWKS goes on a host only once (#371), like the installer's
+# without --force: a later run would put it back over the key set ob-heartbeat
+# rotated since, and once the portal drops the old key every SSO login fails
+# under required. Kept when the modules would load the host's file and the
+# host still enrols as ob_client_id (openbastion.conf, deployed below, still
+# names the previous one); ob_sso_jwks_force deploys it anyway.
+- name: Check the JWKS already on the host
+  ansible.builtin.command:
+    argv: ['/usr/sbin/ob-verify-response', 'check-jwks', '--anchor', '--quiet', "{{ ob_sso_jwks_file }}"]
+  register: _ob_jwks_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: (ob_sso_jwks_src | default('')) | length > 0
+
+# The file also holds client_secret: keep it out of the play's output.
+- name: Read the client_id the host enrols as
+  ansible.builtin.slurp:
+    src: /etc/open-bastion/openbastion.conf
+  register: _ob_conf_current
+  no_log: true
+  failed_when: false
+  check_mode: false
+  when: (ob_sso_jwks_src | default('')) | length > 0
+
+- name: Decide whether to deploy the portal's JWKS
+  ansible.builtin.set_fact:
+    ob_sso_jwks_deploy: >-
+      {{ (ob_sso_jwks_src | default('')) | length > 0
+         and ((ob_sso_jwks_force | default(false) | bool)
+              or _ob_jwks_check.rc | default(1) != 0
+              or _ob_client_ids != [ob_client_id]) }}
+  vars:
+    _ob_client_ids: >-
+      {{ ((_ob_conf_current.content | default('')) | b64decode).splitlines()
+         | select('match', '\s*client_id\s*=')
+         | map('regex_replace', '^\s*client_id\s*=\s*(.*?)\s*$', '\1') | list }}
+
 # A regular file, root:root, not writable by group or others, or the PAM and
 # NSS modules refuse to load it. Deployed before openbastion.conf, which names
-# it. Every run deploys this build-time JWKS again, over one ob-heartbeat may
-# have rotated since: rebuild the role after a key rotation on the portal.
+# it.
 - name: Deploy the portal's JWKS
   ansible.builtin.copy:
     src: "{{ ob_sso_jwks_src }}"
@@ -180,7 +217,17 @@
     group: root
     mode: '0644'
     follow: false
-  when: (ob_sso_jwks_src | default('')) | length > 0
+  when: ob_sso_jwks_deploy | bool
+
+- name: Keep the host's JWKS
+  ansible.builtin.debug:
+    msg: >-
+      Keeping {{ ob_sso_jwks_file }}: it may hold keys ob-heartbeat rotated
+      since this role was built. Set ob_sso_jwks_force to true to deploy the
+      role's JWKS over it.
+  when:
+    - (ob_sso_jwks_src | default('')) | length > 0
+    - not (ob_sso_jwks_deploy | bool)
 
 # KRL (Key Revocation List) is mandatory in Mode E — certificate revocation
 # requires an up-to-date KRL on every bastion and backend.

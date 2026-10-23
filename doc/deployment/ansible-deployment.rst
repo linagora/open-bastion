@@ -112,11 +112,14 @@ the SSH CA public key and the JWKS of the build's ``client_id``
 (``sso-jwks.json``). The role deploys the JWKS as
 ``/var/lib/open-bastion/jwks/sso-jwks.json`` (root:root 0644) and writes
 ``response_signing`` (``ob_response_signing``, ``prefer`` unless the
-build chose otherwise). Every run deploys that build-time JWKS again,
-over one :doc:`ob-heartbeat(8) </references/man/ob-heartbeat>` may have
-rotated since: after a key rotation on the portal, rebuild the tree
-before running it on existing hosts (under ``required``, a host given a
-JWKS without the key the portal now signs with refuses every answer).
+build chose otherwise). The JWKS is deployed once: a later run keeps
+the host's, which :doc:`ob-heartbeat(8) </references/man/ob-heartbeat>`
+may have rotated since, as long as the modules load it and the host
+still enrols as ``ob_client_id``. ``ob_sso_jwks_force: true`` deploys
+the role's JWKS anyway, for a host that missed a rotation: rebuild the
+tree first, so that it carries the portal's current keys (under
+``required``, a host given a JWKS without the key the portal now signs
+with refuses every answer).
 
 Non-interactively, the same build is ``ob-builder --config build.yml
 --output-ansible ./ansible-acme/``.

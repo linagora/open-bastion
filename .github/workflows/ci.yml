@@ -496,14 +496,16 @@ jobs:
           build-essential cmake pkg-config git jq curl python3 openssh-client \
           socat util-linux systemd rsync openssh-sftp-server \
           libcurl4-openssl-dev libjson-c-dev libpam0g-dev libssl-dev libkeyutils-dev \
-          python3-sphinx
+          python3-sphinx ansible-core python3-yaml
 
     # The suites the catalogue drives must be able to RUN here: one that skips
     # for a missing dependency is green before and after the mutation, and the
     # runner now refuses to conclude from that rather than calling it a
     # surviving mutant. socat is what tests/test_ob_fp_daemon.sh needs;
     # systemd (for systemd-socket-activate, not as init), rsync and
-    # openssh-sftp-server are what the session-recording suites need (#287).
+    # openssh-sftp-server are what the session-recording suites need (#287);
+    # ansible-core and python3-yaml are what the Ansible role's functional
+    # checks need (tests/test_ob_builder_ansible_jwks.sh, #371).
     - name: Build
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
