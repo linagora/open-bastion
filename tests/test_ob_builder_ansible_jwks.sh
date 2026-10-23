@@ -258,6 +258,8 @@ class H(BaseHTTPRequestHandler):
                          'kid': cid, 'crv': 'Ed25519'}]}
         if cid == 'with-private':
             doc['keys'][0]['d'] = 'nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A'
+        if cid == 'with-crt':
+            doc['keys'].append(dict(doc['keys'][0], kid='crt', qi='AQAB'))
         body = json.dumps(doc, indent=2, ensure_ascii=False).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -335,6 +337,7 @@ PY
           http_404:    { cid: ob-backends, url: "http://127.0.0.1:$port/nope" }
           refused:     { cid: reject }
           private:     { cid: with-private }
+          crt:         { cid: with-crt }
           non_ascii:   { cid: "clé", pin: "$sha_utf8" }
           cleartext:   { cid: ob-backends, verify: true }
           kept:        { cid: kept-host, deploy: false }
@@ -351,7 +354,8 @@ EOF
 import json, os, sys
 r = json.load(open(sys.argv[1])); canon = sys.argv[2]
 want = {'fetched': canon, 'pinned': canon, 'wrong_pin': 'failed', 'not_a_jwks': 'failed',
-        'http_404': 'failed', 'refused': 'failed', 'private': 'failed', 'cleartext': 'failed',
+        'http_404': 'failed', 'refused': 'failed', 'private': 'failed', 'crt': 'failed',
+        'cleartext': 'failed',
         'kept': ''}
 bad = [f'{k}={r.get(k)!r}' for k in want if r.get(k) != want[k]]
 # Written in UTF-8, as jq writes it, and matching a pin computed with jq.

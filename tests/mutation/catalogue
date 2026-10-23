@@ -1050,7 +1050,7 @@ why     || not restricted (0755/0644, no .gitignore); a secret must not reach th
 
 id      || ansible-jwks-fetch-no-private-key
 file    || admin-builder/templates/ansible/role/tasks/main.yml.in
-search  || | selectattr('d', 'defined') | list | length == 0
+search  || | select | list | length == 0
 replace || | list | length >= 0
 suite   || tests/test_ob_builder_ansible_jwks.sh
 why     || #375 review: check-jwks --anchor accepts a JWKS holding a private key

@@ -246,8 +246,8 @@
 
 # The canonical form ob-builder and ob-*-setup fingerprint (`jq -S -c .`,
 # UTF-8), which ob-verify-response checks below before the file takes its
-# place. That loader does not look for private members: refused here, as the
-# builder's and the setup's filters do.
+# place. Private members are refused here too, before anything is written,
+# as the builder's and the setup's filters refuse them.
 - name: Check the fetched JWKS
   ansible.builtin.assert:
     that:
@@ -257,7 +257,8 @@
       - _ob_jwks_fetched.json['keys'] | length > 0
       - >-
         _ob_jwks_fetched.json['keys'] | select('mapping')
-        | selectattr('d', 'defined') | list | length == 0
+        | map('dict2items') | map('map', attribute='key') | map('intersect', _ob_jwk_private)
+        | select | list | length == 0
       - >-
         (ob_sso_jwks_fetch_sha256 | default('')) | length == 0
         or (ob_sso_jwks_fetch_sha256 | lower) == (_ob_jwks_canonical | hash('sha256'))
@@ -268,6 +269,9 @@
           if (ob_sso_jwks_fetch_sha256 | default('')) | length > 0 else '' }}.
   vars:
     _ob_jwks_canonical: "{{ _ob_jwks_fetched.json | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false) }}\n"
+    # Private key material: `d` and the RSA CRT members, as the builder's and
+    # the setup's filters refuse.
+    _ob_jwk_private: [d, p, q, dp, dq, qi, oth]
   delegate_to: localhost
   become: false
   when:
