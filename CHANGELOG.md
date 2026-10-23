@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
+  line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
+
 ### Fixed
 
 - ob-builder: the generated Ansible roles failed on every host with service
   accounts ("Conditional expressions must be strings"): two unquoted `when:`
   entries holding `: ` were read as YAML mappings (#364).
-
-### Changed
-
-- `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
-  line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
 
 ## [0.7.0] _(2026-10-20)_
 
