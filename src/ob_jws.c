@@ -327,6 +327,26 @@ static bool jwk_is_for_signatures(struct json_object *jwk)
     return true;
 }
 
+/*
+ * A JWK carrying private key material: `d`, or the RSA CRT members that never
+ * come without it. A JWKS published with one discloses the portal's signing
+ * key, and anyone can then forge its answers; the builder's and the setup
+ * scripts' JWKS filters refuse such a document too.
+ */
+static bool jwk_has_private_members(struct json_object *jwk)
+{
+    static const char *const members[] = { "d", "p", "q", "dp", "dq", "qi", "oth" };
+    if (!json_object_is_type(jwk, json_type_object)) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(members) / sizeof(members[0]); i++) {
+        if (json_object_object_get_ex(jwk, members[i], NULL)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int add_key(ob_jws_keyset_t *ks, struct json_object *jwk)
 {
     if (!json_object_is_type(jwk, json_type_object) || !jwk_is_for_signatures(jwk)) {
@@ -384,6 +404,15 @@ ob_jws_keyset_t *ob_jws_keyset_parse(const char *json, size_t len,
     }
 
     size_t n = json_object_array_length(keys);
+    /* Every key, not only the OB_JWS_MAX_KEYS read below: the whole
+     * document is refused, as the scripts' filters refuse it. */
+    for (size_t i = 0; i < n; i++) {
+        if (jwk_has_private_members(json_object_array_get_idx(keys, i))) {
+            SET_ERR("the JWKS holds private key material (key %zu): refused", i);
+            json_object_put(doc);
+            return NULL;
+        }
+    }
     if (n > OB_JWS_MAX_KEYS) {
         n = OB_JWS_MAX_KEYS;
     }

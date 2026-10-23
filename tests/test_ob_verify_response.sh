@@ -195,6 +195,13 @@ if command -v openssl >/dev/null 2>&1; then
         "$keys vs $thumbs"
 fi
 
+# A published private key discloses the portal's signing key: the whole set is
+# refused, usable public keys included, as the builder's and setup's filters do
+# (ob-heartbeat's rotation goes through check-jwks too).
+out=$(jq -c '.keys[0] += {d: "AQAB"}' "$JWKS_FILE" | "$VR" check-jwks - 2>&1); rc=$?
+check "check-jwks refuses a set where a key holds a private member (d)" \
+    "$([ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'private key material'; echo $?)" "rc=$rc $out"
+
 for bad in '{"keys":[]}' "$JWKS_WEAK" '"garbage"' '{"keys":[{"kty":"oct","kid":"h","k":"c2VjcmV0"}]}'; do
     printf '%s' "$bad" | "$VR" check-jwks - >/dev/null 2>&1; rc=$?
     check "check-jwks refuses a set with no usable key: ${bad:0:40}" "$([ "$rc" = 1 ]; echo $?)" "rc=$rc"

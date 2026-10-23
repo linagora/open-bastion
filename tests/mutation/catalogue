@@ -1071,3 +1071,11 @@ replace || ob_sso_jwks_content: "{{ _ob_jwks_fetched.json | to_json(sort_keys=tr
 suite   || tests/test_ob_builder_ansible_jwks.sh
 why     || #375 review: the canonical form is jq's, in UTF-8; an escaped one
 why     || changes the bytes the operator's `jq -S -c . | sha256sum` pins.
+
+id      || jws-jwks-no-private-key
+file    || src/ob_jws.c
+search  || if (jwk_has_private_members(json_object_array_get_idx(keys, i))) {
+replace || if (0 && jwk_has_private_members(json_object_array_get_idx(keys, i))) {
+suite   || tests/test_ob_verify_response.sh
+why     || A JWKS publishing the portal's private signing key must not become a
+why     || trust anchor, nor be rotated in by ob-heartbeat.

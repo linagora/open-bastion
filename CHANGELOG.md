@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrols as `ob_client_id`; `ob_sso_jwks_force: true` restores the old
   behaviour (#371).
 
+### Security
+
+- The PAM and NSS modules and `ob-verify-response` refuse a JWKS where any key
+  holds private key material (`d`, or the RSA CRT members), as the
+  `ob-builder` and setup filters already did. Such a JWKS discloses the
+  portal's signing key; it was loaded before, and `ob-heartbeat` could rotate
+  it in.
+
 ## [0.7.0] _(2026-10-20)_
 
 Read [UPGRADE-NOTES.md](UPGRADE-NOTES.md) before deploying: every host needs
