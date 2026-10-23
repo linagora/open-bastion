@@ -37,6 +37,8 @@ debian/*.debhelper.log
 debian/*.substvars
 debian/*.postinst.debhelper
 debian/*.postrm.debhelper
+debian/*.preinst.debhelper
+debian/*.prerm.debhelper
 debian/debhelper-build-stamp
 debian/files
 obj-x86_64-linux-gnu/
