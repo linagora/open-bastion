@@ -282,8 +282,8 @@ installed. :option:`--sso-jwks` always replaces it, and
 :option:`--sso-jwks-sha256` does when the host's file does not match it.
 The ``ob-builder`` artefacts pass both with the JWKS fetched when they
 were built: running the self-extracting installer again with ``--force``,
-or the Ansible role again, puts that build-time JWKS back over a rotated
-one. If the portal's keys rotated since the build, and the old key no
+or the Ansible role with ``ob_sso_jwks_force: true``, puts that build-time
+JWKS back over a rotated one (a plain run of the role keeps the host's). If the portal's keys rotated since the build, and the old key no
 longer signs, a host under ``required`` then refuses every answer:
 rebuild the artefact first (it fetches the current JWKS), or re-run the
 setup alone, without these two options.

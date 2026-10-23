@@ -461,8 +461,8 @@ than the longest heartbeat gap (offline hosts included) so every host gets it
 in a signed heartbeat, then sign with it, and drop the old key later. A host
 that missed the whole window must be re-provisioned as in step 2. Re-running
 a setup without `--sso-jwks`/`--sso-jwks-sha256` keeps the host's (rotated)
-JWKS; the installer's `--force` and every Ansible play install the build-time
-one again. An RP whose signing algorithm is HMAC (`HS*`) cannot sign these
+JWKS, and so does an Ansible play since #371; the installer's `--force` and a
+play with `ob_sso_jwks_force: true` install the build-time one again. An RP whose signing algorithm is HMAC (`HS*`) cannot sign these
 answers: check the RP uses an asymmetric key before setting `prefer`.
 
 ---

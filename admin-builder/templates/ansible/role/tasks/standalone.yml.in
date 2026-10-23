@@ -36,9 +36,9 @@
         + (['--disable-session-recorder'] if ob_disable_session_recorder else [])
         + ['--response-signing', ob_response_signing | default('off')]
         + (['--sso-jwks', ob_sso_jwks_file]
-           if (ob_sso_jwks_src | default('')) | length > 0 else [])
+           if ob_sso_jwks_deploy | default(false) | bool else [])
         + (['--sso-jwks-sha256', ob_sso_jwks_sha256]
-           if (ob_sso_jwks_src | default('')) | length > 0
+           if ob_sso_jwks_deploy | default(false) | bool
               and (ob_sso_jwks_sha256 | default('')) | length > 0 else [])
       }}
   environment:

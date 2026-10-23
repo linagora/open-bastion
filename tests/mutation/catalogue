@@ -991,3 +991,19 @@ replace || if (!st) {
 suite   || tests/test_ob_portal_sign_pin.sh
 why     || #332: an openbastion.conf the module cannot read must stop the call,
 why     || not send it unsigned and unpinned.
+
+id      || ansible-jwks-keep-rotated
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || or _ob_jwks_check.rc | default(1) != 0
+replace || or true
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #371: every play put the build-time JWKS back over the one ob-heartbeat
+why     || rotated; once the portal drops its old key, required refuses all logins.
+
+id      || ansible-jwks-other-client-id
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  || or _ob_client_ids != [ob_client_id]) }}
+replace || ) }}
+suite   || tests/test_ob_builder_ansible_jwks.sh
+why     || #371: a host re-enrolled as another client_id must get that RP's JWKS,
+why     || not keep the previous RP's keys.

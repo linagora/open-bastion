@@ -54,6 +54,11 @@ ob_sso_jwks_src: "@@SSO_JWKS_SRC@@"
 ob_sso_jwks_sha256: "@@SSO_JWKS_SHA256@@"
 ob_sso_jwks_client_id: "@@SSO_JWKS_CLIENT_ID@@"
 ob_sso_jwks_file: /var/lib/open-bastion/jwks/sso-jwks.json
+# The JWKS is deployed once (#371): a host whose ob_sso_jwks_file the modules
+# load, enrolled as ob_client_id, keeps it, rotations by ob-heartbeat included.
+# true deploys ob_sso_jwks_src over it on every run, e.g. a host that missed a
+# rotation (security-reference.rst).
+ob_sso_jwks_force: false
 
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.

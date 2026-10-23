@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ob-builder: the generated Ansible roles failed on every host with service
   accounts ("Conditional expressions must be strings"): two unquoted `when:`
   entries holding `: ` were read as YAML mappings (#364).
+- ob-builder: every run of the generated Ansible role put the build-time JWKS
+  back over the one ob-heartbeat had rotated since, so that once the portal
+  dropped its old key, hosts under `response_signing = required` refused every
+  SSO login. The role now keeps a JWKS the host loads while the host still
+  enrols as `ob_client_id`; `ob_sso_jwks_force: true` restores the old
+  behaviour (#371).
 
 ## [0.7.0] _(2026-10-20)_
 

@@ -69,10 +69,13 @@ Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
 | `ob_sso_jwks_sha256`    | SHA-256 of that file, checked by the setup run (`jq -S -c . FILE \| sha256sum`); empty = not checked                                                  |
 | `ob_sso_jwks_client_id` | The client_id the JWKS belongs to; the play refuses a signing mode when it differs from `ob_client_id`                                                |
 | `ob_sso_jwks_file`      | Where it is deployed, root:root 0644 (default `/var/lib/open-bastion/jwks/sso-jwks.json`); ob-heartbeat rotates it only under `/var/lib/open-bastion` |
+| `ob_sso_jwks_force`     | `true` deploys `ob_sso_jwks_src` even over a JWKS the host already has (default `false`)                                                              |
 
-Every run deploys `ob_sso_jwks_src` again, over the JWKS ob-heartbeat may have
-rotated since on the host: after a key rotation on the portal, rebuild the role
-(ob-builder fetches the current JWKS) before running it on existing hosts.
+`ob_sso_jwks_src` is deployed once. A host whose `ob_sso_jwks_file` the modules
+load, and which still enrols as `ob_client_id`, keeps its JWKS on later runs:
+it may hold keys ob-heartbeat rotated since the role was built. To give it the
+role's JWKS anyway (a host that missed a rotation), set `ob_sso_jwks_force: true`
+after rebuilding the role, so that it carries the portal's current keys.
 
 Mode-specific variables (populated by ob-builder from the selected PAM mode):
 

@@ -192,12 +192,13 @@ to the setup.
 
 That JWKS is the one of the build. On the hosts,
 :doc:`ob-heartbeat(8) <ob-heartbeat>` follows the portal's key rotations
-afterwards; running the installer again with ``--force``, or the
-Ansible role again, puts the build-time JWKS back over a rotated one
-(re-running ``ob-*-setup`` by hand without ``--sso-jwks`` keeps the
-host's). Rebuild the artefacts after a key rotation on the portal before
-using them on existing hosts: under ``required``, a host given a JWKS
-without the key the portal now signs with refuses every answer.
+afterwards. Running the Ansible role again keeps a JWKS the host
+already loads, as long as the host still enrols as ``ob_client_id``;
+running the installer again with ``--force``, or the role with
+``ob_sso_jwks_force: true``, puts the build-time JWKS back over a
+rotated one. Rebuild the artefacts after a key rotation on the portal
+before forcing them on existing hosts: under ``required``, a host given
+a JWKS without the key the portal now signs with refuses every answer.
 
 The JWKS belongs to the ``client_id`` of the build. A target enrolled
 under another ``client_id`` (policy ``modifiable``) gets
