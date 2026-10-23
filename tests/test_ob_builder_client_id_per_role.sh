@@ -128,8 +128,11 @@ test_roles_block_parsed() {
 
 test_roles_block_refused() {
     local bad="" rc case_ body
-    for case_ in unknown-role unknown-key misindented twice; do
+    for case_ in unknown-role unknown-key misindented twice flow-map flow-list scalar; do
         case "$case_" in
+            flow-map)     body='roles: {backend: {client_id: x}}' ;;
+            flow-list)    body='roles: [backend]' ;;
+            scalar)       body='roles: backend' ;;
             unknown-role) body=$'roles:\n  frontend:\n    client_id: x' ;;
             unknown-key)  body=$'roles:\n  backend:\n    clientid: x' ;;
             misindented)  body=$'roles:\n    backend:\n  client_id: x' ;;
@@ -140,7 +143,7 @@ test_roles_block_refused() {
         with_builder _parse_roles_block "$TEST_TMPDIR/bad.yml" >/dev/null 2>&1 || rc=$?
         [ "$rc" -ne 0 ] || bad="$bad $case_-accepted"
     done
-    [ -z "$bad" ] && test_pass "config: unknown role, unknown key, misindented line and a second roles: are refused" \
+    [ -z "$bad" ] && test_pass "config: unknown role, unknown key, misindented line, a second roles: and flow forms are refused" \
                   || test_fail "a malformed roles block is accepted" "$bad"
 }
 
@@ -217,6 +220,19 @@ test_fetch_failure_per_rp() {
                   || test_fail "a JWKS failure leaks to the other relying party" "$bad"
 }
 
+# A role secret outside client_secret_mode=embedded is ignored, as the build
+# says: it must not reach artefacts that are not restricted as secret ones.
+test_role_secret_not_embedded_in_prompt_mode() {
+    local d="$TEST_TMPDIR/prompt" bad=""
+    write_config prompt
+    build prompt || { test_fail "prompt-mode build failed" "$(tail -5 "$d.log")"; return; }
+    grep -rq 'sec-backend' "$d" && bad="$bad role-secret-written"
+    grep -rq 'sec-bastion' "$d" && bad="$bad top-secret-written"
+    grep -q 'roles.backend.embedded_client_secret is ignored' "$d.log" || bad="$bad no-warning"
+    [ -z "$bad" ] && test_pass "prompt mode: no embedded secret, top-level or per role, reaches the artefacts" \
+                  || test_fail "a secret leaks into unrestricted artefacts" "$bad"
+}
+
 # ── --save-config ──────────────────────────────────────────────────────────
 
 test_save_config_round_trip() {
@@ -240,6 +256,7 @@ test_embedded_needs_role_secret
 test_artefacts_per_role
 test_same_rp_fetched_once
 test_fetch_failure_per_rp
+test_role_secret_not_embedded_in_prompt_mode
 test_save_config_round_trip
 
 echo ""

@@ -939,7 +939,13 @@ _parse_roles_block() {
         line="${line%$'\r'}"
         [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
         if [ "$in_block" = 0 ]; then
-            [[ "$line" =~ ^roles[[:space:]]*:[[:space:]]*(#.*)?$ ]] && in_block=1
+            if [[ "$line" =~ ^roles[[:space:]]*: ]]; then
+                # The flow forms (`roles: {backend: {...}}`, `roles: [...]`)
+                # would otherwise be skipped, every role left on client_id.
+                [[ "$line" =~ ^roles[[:space:]]*:[[:space:]]*(#.*)?$ ]] \
+                    || die "roles: in $f must be a block, one indented key per role (see --help)"
+                in_block=1
+            fi
             continue
         fi
         if [[ "$line" =~ ^[^[:space:]] ]]; then
@@ -1374,11 +1380,14 @@ _has_role() {
     return 1
 }
 
-# The client_id role $1 enrols as, and the secret embedded for it.
+# The client_id role $1 enrols as, and the secret embedded for it: none
+# unless client_secret_mode=embedded, whatever the config holds. The
+# artefacts are only restricted (0600/0700, .gitignore) in that mode.
 role_client_id() {
     printf '%s' "${ROLE_CLIENT_ID[$1]:-$CLIENT_ID}"
 }
 role_embedded_secret() {
+    [ "$CLIENT_SECRET_MODE" = "embedded" ] || return 0
     printf '%s' "${ROLE_EMBEDDED_SECRET[$1]:-$EMBEDDED_CLIENT_SECRET}"
 }
 

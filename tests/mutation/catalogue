@@ -1023,3 +1023,11 @@ replace || if false; then
 suite   || tests/test_ob_builder_client_id_per_role.sh
 why     || #371: a role on another RP would ship the top-level RP's secret and
 why     || only fail at enrolment, on the target.
+
+id      || builder-secret-only-when-embedded
+file    || admin-builder/ob-builder
+search  || [ "$CLIENT_SECRET_MODE" = "embedded" ] || return 0
+replace || :
+suite   || tests/test_ob_builder_client_id_per_role.sh
+why     || #373 review: outside client_secret_mode=embedded the artefacts are
+why     || not restricted (0755/0644, no .gitignore); a secret must not reach them.
