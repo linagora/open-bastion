@@ -121,6 +121,9 @@ for r in ('bastion', 'backend', 'standalone'):
         bad.append(f'{r}(order)')
     if tasks[deploy].get('when') != 'ob_sso_jwks_deploy | bool':
         bad.append(f'{r}(deploy-when={tasks[deploy].get("when")})')
+    # openbastion.conf holds client_secret: the read must not print it.
+    if tasks[names.index('Read the client_id the host enrols as')].get('no_log') is not True:
+        bad.append(f'{r}(conf-read-logged)')
     # The setup gets the JWKS options only when the role deployed it.
     setup = [t for t in yaml.safe_load(open(f'{tree}/roles/open-bastion-{r}/tasks/{r}.yml'))
              if 'ob-' in str(t.get('name', '')) and 'setup' in str(t.get('name', ''))
@@ -160,8 +163,9 @@ test_decision_runs() {
     fi
     local d="$TEST_TMPDIR/decide" got
     mkdir -p "$d"
-    # ob-verify-response check-jwks --anchor needs a root-owned file: stand in
-    # for it with a stub that loads a fixture only when it says "loadable".
+    # Stand in for ob-verify-response check-jwks --anchor (which may not be
+    # built where this runs) with a stub that loads a fixture only when it
+    # says "loadable".
     printf '#!/bin/sh\n# check-jwks --anchor --quiet FILE\ngrep -qs loadable "$4"\n' > "$d/verify"
     chmod +x "$d/verify"
     echo loadable > "$d/jwks-ok"

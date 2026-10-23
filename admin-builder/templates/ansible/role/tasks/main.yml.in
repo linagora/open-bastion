@@ -183,10 +183,12 @@
   check_mode: false
   when: (ob_sso_jwks_src | default('')) | length > 0
 
+# The file also holds client_secret: keep it out of the play's output.
 - name: Read the client_id the host enrols as
   ansible.builtin.slurp:
     src: /etc/open-bastion/openbastion.conf
   register: _ob_conf_current
+  no_log: true
   failed_when: false
   check_mode: false
   when: (ob_sso_jwks_src | default('')) | length > 0
