@@ -5,10 +5,29 @@
 # loop variable written in delegate_to itself (ansible/ansible#85849).
 #
 # The bastion play of the same run reads its id before its setup and keeps it
-# as ob_bastion_id: under maximum security that setup locks sudo to SSO tokens
-# (#361), and the probe below, which needs root on the bastion (the 0600
-# server token), could no longer become it. The probe is for the bastions that
-# play did not reach; it is not tried on one known to be locked.
+# as ob_bastion_id. For a bastion that play did not reach -- another
+# ansible-playbook run, or a later one that skipped it as locked -- the id
+# ob-bastion-id keeps in /var/lib/open-bastion/bastion-id (0644; ob-heartbeat
+# fills it) is read first, without become: under maximum security the
+# bastion's sudo only takes SSO tokens (#361), and asking the portal needs
+# root there (the 0600 server token). The probe as root is the fallback for a
+# bastion whose package predates that file; it is not tried on one known to be
+# locked (#377).
+
+- name: "Read the id {{ ob_bastion_host }} keeps"
+  ansible.builtin.command: ob-bastion-id --cached
+  delegate_to: "{{ ob_bastion_host }}"
+  become: false
+  register: _ob_bastion_id_kept
+  changed_when: false
+  check_mode: false
+  # No id kept yet, an older ob-bastion-id without --cached, or no connection:
+  # the probe below or the caller's assert takes over, as for the probe.
+  failed_when: false
+  ignore_errors: true
+  ignore_unreachable: true
+  when:
+    - (hostvars[ob_bastion_host].ob_bastion_id | default('')) | length == 0
 
 - name: "Read the id of {{ ob_bastion_host }}"
   ansible.builtin.command: ob-bastion-id
@@ -35,6 +54,7 @@
   ignore_unreachable: true
   when:
     - (hostvars[ob_bastion_host].ob_bastion_id | default('')) | length == 0
+    - (_ob_bastion_id_kept.stdout | default('') | trim) | length == 0
     - not (hostvars[ob_bastion_host].ob_sudo_locked | default(false) | bool)
 
 - name: "Keep the id of {{ ob_bastion_host }}"
@@ -48,4 +68,5 @@
   vars:
     _ob_this_id: >-
       {{ (hostvars[ob_bastion_host].ob_bastion_id
+          | default(_ob_bastion_id_kept.stdout | default('') | trim, true)
           | default(_ob_bastion_id.stdout | default(''), true)) | trim }}

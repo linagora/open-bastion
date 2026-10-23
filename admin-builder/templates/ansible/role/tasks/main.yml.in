@@ -62,8 +62,8 @@
       it, and the role skips it. To change its configuration, run
       ob-{{ ob_artefact_role }}-setup by hand from an SSO session allowed to
       sudo, or reinstall the host and run the play again.{% if ob_artefact_role == 'bastion' %}
-      Backends configured by a later run cannot read its id: set
-      ob_bastion_allowed_bastions in the inventory (ob-bastion-id prints it).{% endif %}
+      Backends still read its id, without sudo, from the file ob-bastion-id
+      keeps (/var/lib/open-bastion/bastion-id).{% endif %}
   when: ob_sudo_locked | bool
 
 - name: Skip the hosts whose sudo only takes SSO tokens

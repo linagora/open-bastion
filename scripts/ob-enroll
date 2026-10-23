@@ -13,8 +13,11 @@ set -e
 VERSION="0.2.3"
 PROG_NAME=$(basename "$0")
 
-CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+DEFAULT_CONFIG_FILE="/etc/open-bastion/openbastion.conf"
+CONFIG_FILE="$DEFAULT_CONFIG_FILE"
 TOKEN_FILE="/var/lib/open-bastion/token"
+# The id ob-bastion-id keeps for this device (see forget_bastion_id).
+BASTION_ID_FILE="/var/lib/open-bastion/bastion-id"
 # offline_access is required: without it LLNG issues no refresh token and the
 # token dies after ~1h. The RP must allow it (oidcRPMetaDataOptionsAllowOffline=1).
 SCOPE="pam:server offline_access"
@@ -677,6 +680,20 @@ show_summary() {
     echo ""
 }
 
+# A new enrolment is a new device, with a new bastion_id: the one ob-bastion-id
+# kept for the previous token would hand backends a stale value (#377). Drop
+# it; ob-heartbeat keeps the new one on a bastion within one interval.
+forget_bastion_id() {
+    # Only for the host's own token: the one at the default place, or the
+    # server_token_file of the host's configuration, wherever it points.
+    # Dropping it once too often costs one /pam/whoami.
+    if [ "$TOKEN_FILE" != "$(dirname "$BASTION_ID_FILE")/token" ] \
+       && [ "$CONFIG_FILE" != "$DEFAULT_CONFIG_FILE" ]; then
+        return 0
+    fi
+    rm -f "$BASTION_ID_FILE"
+}
+
 # The timer's ConditionPathExists (the token) was false at package install, so
 # it would only arm at next reboot and the access token would expire unrefreshed.
 arm_heartbeat_timer() {
@@ -720,6 +737,7 @@ main() {
     display_instructions
     poll_for_token
     save_token
+    forget_bastion_id
     update_config
     verify_enrollment
     arm_heartbeat_timer

@@ -199,6 +199,7 @@ mkroot_bastion() {
     echo "ssh-ed25519 AAAAsvc" | wr "$r/etc/open-bastion/service-accounts.d/svc.pub"
 
     printf '{"access_token":"%s","refresh_token":"%s"}\n' "$ACCESS" "$REFRESH" | wr "$r/var/lib/open-bastion/token"
+    echo "id-1" | wr "$r/var/lib/open-bastion/bastion-id"
     echo "recording" | wr "$r/var/lib/open-bastion/sessions/alice/20260301-rec.cast"
     echo "cached" | wr "$r/var/cache/open-bastion/auth/x"
     echo "alice" | wr "$r/var/cache/nss_llng/byname/alice"
@@ -360,7 +361,8 @@ test_full_run() {
              etc/open-bastion/nss_openbastion.conf etc/sudoers.d/open-bastion \
              etc/systemd/logind.conf.d/open-bastion.conf etc/security/limits.d/open-bastion.conf \
              etc/cron.allow etc/audit/rules.d/open-bastion.rules \
-             etc/systemd/system/ob-krl-refresh.timer.d var/lib/open-bastion/token; do
+             etc/systemd/system/ob-krl-refresh.timer.d var/lib/open-bastion/token \
+             var/lib/open-bastion/bastion-id; do
         [ -e "$FULL/$f" ] && bad="$bad kept:$f"
     done
     [ -f "$FULL/etc/sudoers.d/90-local" ] || bad="$bad removed:sudoers.d/90-local"
@@ -605,6 +607,8 @@ test_backup_contents() {
     grep -q ' openbastion ' "$b/etc/nsswitch.conf" || bad="$bad nss-backup-is-not-the-old-file"
     # A live credential is not copied around.
     [ -e "$b/var/lib/open-bastion/token" ] && bad="$bad TOKEN-BACKED-UP"
+    # The kept bastion id is no secret: backed up like any other file (#377).
+    [ "$(cat "$b/var/lib/open-bastion/bastion-id" 2>/dev/null)" = id-1 ] || bad="$bad missing:bastion-id"
     [ "$(stat -c %a "$b")" = "700" ] || bad="$bad mode:$(stat -c %a "$b")"
     grep -q "${b#"$FULL"}" "$WORK/full.out" || bad="$bad dir-not-printed"
     # Secrets are redacted in the backup; the setup's own copy is reported.

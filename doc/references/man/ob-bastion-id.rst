@@ -56,6 +56,18 @@ asked to provide that list; running this utility on each enrolled bastion
 is the canonical way to discover the right value (the alternative being
 the LLNG Manager).
 
+A lookup that succeeds keeps the id in ``/var/lib/open-bastion/bastion-id``
+(mode 0644) when it can write there, that is when run as root.
+``--cached`` prints it back without root and without asking the portal:
+that is how the Ansible role of a backend reads a bastion's id when
+``sudo`` there only takes SSO tokens (maximum security). The id is not a
+secret; every backend's ``allowed_bastions`` is world-readable too.
+:doc:`ob-heartbeat(8) <ob-heartbeat>` fills the file on a bastion that
+has none, and :doc:`ob-enroll(8) <ob-enroll>` removes it, since a new
+enrolment assigns a new id. A lookup with ``--config`` or ``--token``,
+which may name another identity, keeps nothing unless ``--id-file``
+says where.
+
 Options
 -------
 
@@ -88,6 +100,16 @@ Options
    Path to the server token file (default:
    ``/var/lib/open-bastion/token``).
 
+.. option:: -C, --cached
+
+   Print the id the last lookup kept, without asking the portal. Needs
+   neither root nor the configuration. Does not go with ``--verbose``.
+
+.. option:: -i, --id-file FILE
+
+   Where the id is kept and read by ``--cached`` (default:
+   ``/var/lib/open-bastion/bastion-id``).
+
 .. option:: -h, --help
 
    Show help.
@@ -114,11 +136,23 @@ Exit status
    The portal answered, but with no identity in it (also returned when a
    legacy JWT cannot be base64url-decoded).
 
+``4``
+   ``--cached``: no id kept yet, or the file does not hold one.
+
 Security
 --------
 
 Must be run as root in order to read ``/var/lib/open-bastion/token``
-(mode 0600).
+(mode 0600), except with ``--cached``.
+
+Files
+-----
+
+``/var/lib/open-bastion/token``
+   The server token sent to the portal.
+
+``/var/lib/open-bastion/bastion-id``
+   The id of the last successful lookup, read by ``--cached``.
 
 See also
 --------

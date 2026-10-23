@@ -154,8 +154,22 @@ test_backend_uses_the_bastion_fact() {
     # become is an error failed_when does not see.
     grep -qF 'ignore_unreachable: true' "$f" || bad="$bad no-ignore-unreachable"
     grep -qF 'ignore_errors: true' "$f" || bad="$bad no-ignore-errors"
-    grep -qF 'set ob_bastion_allowed_bastions in the' "$b" || bad="$bad assert-no-way-out"
-    [ -z "$bad" ] && test_pass "backend: bastion id from the bastion play, locked bastions not probed" \
+    grep -qF 'Set ob_bastion_allowed_bastions explicitly' "$b" || bad="$bad assert-no-way-out"
+    grep -qF '/var/lib/open-bastion/bastion-id' "$b" || bad="$bad assert-no-kept-file"
+    # #377: the id the bastion keeps is read without become, before the probe
+    # as root, and a kept id spares the probe.
+    python3 - "$f" <<'PY' || bad="$bad kept-id-read"
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = [t.get('name', '') for t in tasks]
+kept = [t for t in tasks if t.get('ansible.builtin.command') == 'ob-bastion-id --cached']
+probe = [t for t in tasks if t.get('ansible.builtin.command') == 'ob-bastion-id']
+assert len(kept) == 1 and len(probe) == 1
+assert kept[0].get('become') is False
+assert tasks.index(kept[0]) < tasks.index(probe[0])
+assert any('_ob_bastion_id_kept.stdout' in w for w in probe[0]['when'])
+PY
+    [ -z "$bad" ] && test_pass "backend: bastion id from the bastion play or the kept file, locked bastions not probed" \
                   || test_fail "backend collector check failed" "$bad"
 }
 
@@ -345,7 +359,16 @@ yaml.safe_dump(t, open(sys.argv[2], 'w'))
 PY
     # bastion-1: id read by its own play; bastion-2: locked by an earlier run;
     # bastion-3: no fact, unreachable -- the probe is tried and the backend
-    # still reaches the assert (#338).
+    # still reaches the assert (#338). The stand-in ob-bastion-id logs its
+    # arguments, and keeps an id only once "$d/kept" exists (#377).
+    mkdir -p "$d/bin"
+    cat > "$d/bin/ob-bastion-id" <<EOF
+#!/bin/sh
+echo "args:\$*" >> "$d/calls"
+[ "\$*" = --cached ] && [ -e "$d/kept" ] && { echo id-kept; exit 0; }
+exit 4
+EOF
+    chmod +x "$d/bin/ob-bastion-id"
     cat > "$d/inv.yml" <<'EOF'
 all:
   vars:
@@ -376,25 +399,48 @@ EOF
         content: "{{ {'ids': ob_bastion_id_list, 'missing': ob_bastion_missing_list, 'msg': assert_msg | default('')} | to_json }}"
         dest: $d/result.json
 EOF
-    run_play "$d/play.yml" "$d/inv.yml" "$d/log" || { test_fail "backend collection play failed" "$(tail -20 "$d/log")"; return; }
-    got=$(python3 - "$d/result.json" "$d/log" <<'PY'
+    PATH="$d/bin:$PATH" run_play "$d/play.yml" "$d/inv.yml" "$d/log" \
+        || { test_fail "backend collection play failed" "$(tail -20 "$d/log")"; return; }
+    got=$(python3 - "$d/result.json" "$d/calls" <<'PY'
 import json, sys
-r = json.load(open(sys.argv[1])); log = open(sys.argv[2]).read()
+r = json.load(open(sys.argv[1])); calls = open(sys.argv[2]).read().splitlines()
 bad = []
 if r['ids'] != ['id-1', '', '']:
     bad.append('ids=%s' % r['ids'])
 if r['missing'] != ['bastion-2', 'bastion-3']:
     bad.append('missing=%s' % r['missing'])
-if 'bastion-2, bastion-3' not in r['msg'] or 'set ob_bastion_allowed_bastions in the inventory' not in r['msg']:
+if 'bastion-2, bastion-3' not in r['msg'] or '/var/lib/open-bastion/bastion-id' not in r['msg']:
     bad.append('msg=' + r['msg'])
-# Neither bastion-1 nor bastion-2 is probed.
-if 'backend-1 -> bastion-1' in log or 'backend-1 -> bastion-2' in log:
-    bad.append('probed-a-known-bastion')
+# bastion-1 has its fact; bastion-2 is asked for its kept id only, never
+# probed as root (bastion-3 is unreachable and runs nothing).
+if calls != ['args:--cached']:
+    bad.append('calls=%s' % calls)
 print(' '.join(bad))
 PY
 )
     [ -z "$got" ] && test_pass "backend collection: bastion fact used, locked bastion not probed, both named with the way out" \
                   || test_fail "backend collection misbehaves" "$got"
+
+    # A later run (#377): the locked bastion now keeps its id, read without
+    # sudo; only the unreachable one is left.
+    : > "$d/calls"; touch "$d/kept"; rm -f "$d/result.json"
+    PATH="$d/bin:$PATH" run_play "$d/play.yml" "$d/inv.yml" "$d/log2" \
+        || { test_fail "backend collection play failed (kept id)" "$(tail -20 "$d/log2")"; return; }
+    got=$(python3 - "$d/result.json" "$d/calls" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1])); calls = open(sys.argv[2]).read().splitlines()
+bad = []
+if r['ids'] != ['id-1', 'id-kept', '']:
+    bad.append('ids=%s' % r['ids'])
+if r['missing'] != ['bastion-3']:
+    bad.append('missing=%s' % r['missing'])
+if calls != ['args:--cached']:
+    bad.append('calls=%s' % calls)
+print(' '.join(bad))
+PY
+)
+    [ -z "$got" ] && test_pass "backend collection: a locked bastion's kept id is read without sudo (#377)" \
+                  || test_fail "kept id not used" "$got"
 }
 
 if ! render_tree; then

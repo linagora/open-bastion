@@ -55,10 +55,10 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 
 Backend-only "accept only this bastion" variables:
 
-| Variable                      | Description                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address.                                            |
-| `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. A bastion configured in the same run (`site.yml`) hands its id over as a host fact; under maximum security a later run cannot read it (see below). |
+| Variable                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_bastion_allowed_bastions` | Comma/space-separated bastion_id (as printed by `ob-bastion-id` on the bastion) the backend accepts certs from. `""` = accept any vouched bastion. Undefined = the play collects the ids from the bastions itself (ob-builder's `allowed_bastions: null`). Enforced by ob-backend-setup via the cert key-id (`bastion=<id>`) + source-address.                                                                                                     |
+| `ob_bastion_group`            | Inventory group holding the bastion hosts, used for that collection (default `bastions`). Every host of the group must answer `ob-bastion-id`, or the play stops: a short list would deny hops, an empty one would accept any bastion. A bastion configured in the same run (`site.yml`) hands its id over as a host fact; any other is asked, without `become`, for the id it keeps in `/var/lib/open-bastion/bastion-id`, and only then as root. |
 
 Signed portal answers (#339; see `openbastion.conf(5)` and UPGRADE-NOTES.md):
 
@@ -107,9 +107,10 @@ The role does what needs root before that point or in the setup's own task,
 so the run that deploys a host completes. A later run reads
 `/etc/pam.d/sudo` without `become`, finds the lock and skips the host with a
 warning: reconfigure it by hand from an SSO session allowed to `sudo`, or
-reinstall it. For backends configured by a later run, set
-`ob_bastion_allowed_bastions` in the inventory: the locked bastions cannot be
-asked for their id.
+reinstall it. Backends configured by a later run still read the id of a
+locked bastion, without `become`, from `/var/lib/open-bastion/bastion-id`
+(written by `ob-heartbeat`), provided Ansible can still connect there. Set
+`ob_bastion_allowed_bastions` in the inventory when it cannot.
 
 ## Protecting the client secret with ansible-vault
 

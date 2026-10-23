@@ -15,6 +15,8 @@ PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/var/lib/open-bastion/token"
+# Where ob-bastion-id keeps a bastion's id (see keep_bastion_id).
+BASTION_ID_FILE="/var/lib/open-bastion/bastion-id"
 STATS_FILE="/var/lib/open-bastion/stats.json"
 TIMEOUT=10
 # How long a run waits for another one to finish, in seconds (see lock_run).
@@ -434,6 +436,7 @@ send_heartbeat() {
         if [ -n "$jwks_claim" ]; then
             rotate_jwks "$jwks_claim" || exit 1
         fi
+        keep_bastion_id
     elif [ "$http_code" = "401" ]; then
         log_error "Heartbeat rejected: invalid or expired refresh_token"
         exit 1
@@ -443,6 +446,23 @@ send_heartbeat() {
     else
         log_error "Heartbeat failed with HTTP $http_code: $response"
         exit 1
+    fi
+}
+
+# A backend's Ansible play reads a bastion's id from the file ob-bastion-id
+# keeps, without sudo (#377): under maximum security it could not become
+# root on the bastion to ask the portal. Fill it on a bastion that has none:
+# one /pam/whoami per enrolment, since ob-enroll drops it when the device and
+# its id change. Best effort: the heartbeat itself went through.
+keep_bastion_id() {
+    [ "$NODE_ROLE" = "bastion" ] || return 0
+    [ ! -e "$BASTION_ID_FILE" ] || return 0
+    command -v ob-bastion-id >/dev/null 2>&1 || return 0
+    if ob-bastion-id --quiet -c "$CONFIG_FILE" -t "$TOKEN_FILE" \
+        --id-file "$BASTION_ID_FILE" >/dev/null 2>&1; then
+        log_debug "Kept this bastion's id in $BASTION_ID_FILE"
+    else
+        log_warn "Could not keep this bastion's id in $BASTION_ID_FILE (ob-bastion-id failed)"
     fi
 }
 

@@ -9,6 +9,7 @@
 #   ob-bastion-id                    # prints bastion_id on stdout
 #   ob-bastion-id --verbose          # full portal response as JSON
 #   ob-bastion-id --json             # bastion_id wrapped in JSON (machine-readable)
+#   ob-bastion-id --cached           # the id kept by the last lookup, no root needed
 #
 # Copyright (C) 2026 Linagora
 # License: AGPL-3.0
@@ -20,6 +21,14 @@ PROG_NAME=$(basename "$0")
 
 CONFIG_FILE="/etc/open-bastion/openbastion.conf"
 TOKEN_FILE="/var/lib/open-bastion/token"
+# The id of the last successful lookup, 0644: the id is not a secret (every
+# backend's allowed_bastions is 0644 too), and a reader without root -- an
+# Ansible play on a bastion whose sudo only takes SSO tokens (#377) -- has no
+# other way to learn it. OB_BASTION_ID_FILE moves it for the tests.
+ID_FILE="${OB_BASTION_ID_FILE:-/var/lib/open-bastion/bastion-id}"
+ID_FILE_SET=false
+CONFIG_OR_TOKEN_SET=false
+CACHED=false
 PORTAL_URL=""
 SERVER_GROUP=""
 VERIFY_SSL=true
@@ -64,6 +73,9 @@ OPTIONS:
   -q, --quiet            Suppress informational logs (errors still go to stderr)
   -c, --config FILE      Path to openbastion.conf  (default: $CONFIG_FILE)
   -t, --token FILE       Path to server token file (default: $TOKEN_FILE)
+  -C, --cached           Print the id the last lookup kept in the id file,
+                         without asking the portal (needs no root)
+  -i, --id-file FILE     Where the id is kept (default: $ID_FILE)
   -h, --help             Show this help
   -V, --version          Print version
 
@@ -72,6 +84,11 @@ EXIT STATUS:
   1  configuration or token missing / unreadable
   2  the portal request failed or was refused
   3  the portal answered, but with no identity in it
+  4  --cached: no id kept yet (or the id file is malformed)
+
+A successful lookup keeps the id in the id file when it can write there (as
+root). It does not with --config or --token, which may name another identity,
+unless --id-file says where.
 EOF
     exit 0
 }
@@ -210,21 +227,64 @@ pam_post() {
     return 0
 }
 
+# The charset ob-backend-setup accepts in --allowed-bastions.
+valid_id() {
+    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+print_id() {
+    if [ "$JSON_OUT" = "true" ]; then
+        jq -nc --arg id "$1" '{bastion_id: $id}'
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+# Keep the id for --cached. Best effort: a reader that is not root cannot
+# write there, and the id was printed anyway. Replaced by a rename, so a
+# concurrent --cached never reads half a file.
+keep_id() {
+    local id="$1" dir tmp
+    if [ "$ID_FILE_SET" != "true" ] && [ "$CONFIG_OR_TOKEN_SET" = "true" ]; then
+        return 0
+    fi
+    valid_id "$id" || return 0
+    dir=$(dirname "$ID_FILE")
+    [ -d "$dir" ] && [ -w "$dir" ] || return 0
+    if [ -f "$ID_FILE" ] && [ "$(cat "$ID_FILE" 2>/dev/null)" = "$id" ]; then
+        return 0
+    fi
+    tmp=$(mktemp "$ID_FILE.XXXXXX" 2>/dev/null) || return 0
+    if printf '%s\n' "$id" > "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$ID_FILE"; then
+        log_info "Kept the id in $ID_FILE"
+    else
+        rm -f "$tmp"
+        log_warn "Could not keep the id in $ID_FILE"
+    fi
+}
+
+# --cached: the id file holds one line, the id. Anything else is not an id.
+emit_cached() {
+    local id
+    [ -r "$ID_FILE" ] || die "No id kept in $ID_FILE: run $PROG_NAME as root once (ob-heartbeat does it on a bastion)" 4
+    id=$(cat "$ID_FILE" 2>/dev/null) || die "Cannot read $ID_FILE" 4
+    valid_id "$id" || die "$ID_FILE does not hold an id" 4
+    print_id "$id"
+    exit 0
+}
+
 # Print the identity and exit 0; return non-zero if the document has none.
 emit_id() {
     local body="$1" filter="$2" id
     # Check the id before --verbose, or the portal's HTML page would be dumped.
     id=$(printf '%s' "$body" | jq -r "$filter" 2>/dev/null) || return 1
     [ -n "$id" ] || return 1
+    keep_id "$id"
     if [ "$VERBOSE" = "true" ]; then
         printf '%s\n' "$body" | jq .
         exit 0
     fi
-    if [ "$JSON_OUT" = "true" ]; then
-        jq -nc --arg id "$id" '{bastion_id: $id}'
-    else
-        printf '%s\n' "$id"
-    fi
+    print_id "$id"
     exit 0
 }
 
@@ -234,8 +294,13 @@ parse_args() {
             -v|--verbose)  VERBOSE=true; shift ;;
             -j|--json)     JSON_OUT=true; shift ;;
             -q|--quiet)    QUIET=true; shift ;;
-            -c|--config)   CONFIG_FILE="${2:?--config requires a path}"; shift 2 ;;
-            -t|--token)    TOKEN_FILE="${2:?--token requires a path}"; shift 2 ;;
+            -c|--config)   CONFIG_FILE="${2:?--config requires a path}"
+                           CONFIG_OR_TOKEN_SET=true; shift 2 ;;
+            -t|--token)    TOKEN_FILE="${2:?--token requires a path}"
+                           CONFIG_OR_TOKEN_SET=true; shift 2 ;;
+            -C|--cached)   CACHED=true; shift ;;
+            -i|--id-file)  ID_FILE="${2:?--id-file requires a path}"
+                           ID_FILE_SET=true; shift 2 ;;
             -h|--help)     usage ;;
             -V|--version)  echo "$PROG_NAME $VERSION"; exit 0 ;;
             *) die "Unknown option: $1 (use --help)" ;;
@@ -246,8 +311,12 @@ parse_args() {
 main() {
     parse_args "$@"
 
-    command -v curl >/dev/null || die "curl is required"
     command -v jq   >/dev/null || die "jq is required"
+    if [ "$CACHED" = "true" ]; then
+        [ "$VERBOSE" != "true" ] || die "--verbose needs the portal's answer: it does not go with --cached"
+        emit_cached
+    fi
+    command -v curl >/dev/null || die "curl is required"
 
     [ -r "$CONFIG_FILE" ] || die "Config file not readable: $CONFIG_FILE (run as root?)"
 

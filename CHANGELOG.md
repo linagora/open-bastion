@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SSO login. The role now keeps a JWKS the host loads while the host still
   enrols as `ob_client_id`; `ob_sso_jwks_force: true` restores the old
   behaviour (#371).
+- ob-builder: the generated backend role could not collect the id of a
+  maximum-security bastion deployed by another `ansible-playbook` run (the
+  per-role playbooks run one by one, or any later run): `ob-bastion-id` needs
+  root, and that bastion's `sudo` only takes SSO tokens. A bastion now keeps
+  its id in `/var/lib/open-bastion/bastion-id` (0644), which
+  `ob-bastion-id --cached` prints without root and the role reads without
+  `become`. `ob-bastion-id` writes it on each lookup as root, `ob-heartbeat`
+  on a bastion that has none; `ob-enroll` and `ob-bastion-setup --token-file`
+  remove it when the host's token changes, and `ob-uninstall` with the token
+  (#377).
 
 ### Security
 

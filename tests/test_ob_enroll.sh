@@ -625,6 +625,43 @@ test_save_token_no_offline_ok() {
     return 0
 }
 
+# #377: a new enrolment is a new device with a new id; the id ob-bastion-id
+# kept for the old one goes, and only for the host's own token.
+test_forget_bastion_id() {
+    local d="$TEMP_DIR/forget"
+    mkdir -p "$d"
+    echo old-id > "$d/bastion-id"
+    # Another configuration and another token: another identity.
+    (
+        source_script_functions
+        BASTION_ID_FILE="$d/bastion-id"
+        CONFIG_FILE="$TEMP_DIR/elsewhere/ob.conf"
+        TOKEN_FILE="$TEMP_DIR/elsewhere/token"
+        forget_bastion_id
+    ) || return 1
+    [ -f "$d/bastion-id" ] || return 1
+    # The default token place.
+    (
+        source_script_functions
+        BASTION_ID_FILE="$d/bastion-id"
+        CONFIG_FILE="$TEMP_DIR/elsewhere/ob.conf"
+        TOKEN_FILE="$d/token"
+        forget_bastion_id
+    ) || return 1
+    [ ! -e "$d/bastion-id" ] || return 1
+    # The host's configuration, whose server_token_file points elsewhere.
+    echo old-id > "$d/bastion-id"
+    (
+        source_script_functions
+        BASTION_ID_FILE="$d/bastion-id"
+        TOKEN_FILE="$TEMP_DIR/elsewhere/token"
+        forget_bastion_id
+    ) || return 1
+    [ ! -e "$d/bastion-id" ] || return 1
+    grep -qE '^    save_token$' "$SCRIPT_PATH" \
+        && grep -A1 -E '^    save_token$' "$SCRIPT_PATH" | grep -qE '^    forget_bastion_id$'
+}
+
 # -C must be read before the options are applied (issue #314). main prints the
 # portal and server group before the first network call; the loopback portal
 # then fails at once.
@@ -700,6 +737,7 @@ main() {
     run_test "save_token creates valid JSON via jq" test_save_token_json
     run_test "save_token fails + removes token when no refresh_token" test_save_token_no_refresh_fails
     run_test "save_token ok without refresh when offline not requested" test_save_token_no_offline_ok
+    run_test "a new enrolment drops the kept bastion id (#377)" test_forget_bastion_id
     run_test "Config file with 'portal' alias works" test_config_portal_alias
     run_test "Multiple values in config - last one wins" test_config_last_value_wins
     run_test "Empty config file doesn't break load_config" test_empty_config
