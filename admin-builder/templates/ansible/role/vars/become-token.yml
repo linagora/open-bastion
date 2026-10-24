@@ -1,0 +1,7 @@
+---
+# Loaded by tasks/main.yml on a host whose sudo only takes SSO tokens, when
+# ob_become_token_cmd is set (#377). A variable file is templated when the
+# variable is used, not when it is loaded: the command runs on the controller
+# at every task, and sudo gets a fresh token each time it asks for one -- the
+# tokens are single-use. set_fact would keep the first.
+ansible_become_password: "{{ lookup('ansible.builtin.pipe', ob_become_token_cmd) }}"
