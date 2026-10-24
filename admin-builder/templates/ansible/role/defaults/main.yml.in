@@ -86,16 +86,17 @@ ob_auto_setup: @@AUTO_SETUP_BOOL@@
 
 # ── Maximum security: sudo through the SSO on later runs (#377) ──────────────
 # Once deployed under maximum security, a host's sudo only takes SSO tokens,
-# and the role skips it on later runs. A command the controller runs to print
-# one -- "llng --llng-server sso.example.com pam_token", from a session of the
-# person running the play -- lets the role play such a host again: it runs at
-# every task, and sudo gets the token it prints, so each elevation goes
-# through the SSO under that person's name, as the scenario intends. Only a
-# host found locked uses it; the first run takes the deploy account's own
-# password (-K) as before. Run the command once by hand before the play, so
-# its session is in the cookie jar and it never waits for a login. The tokens
-# are single-use and short-lived; sudo's timestamp cache means most are never
-# asked for. Empty: locked hosts are skipped with a warning.
+# and the role skips it on later runs. Set this to a command the controller
+# runs to print one -- "llng --llng-server sso.example.com pam_token", from a
+# session of the person running the play -- and a host found locked is played
+# with the ob_sudo_sso become method (become_plugins/): each time sudo asks
+# for a password, the command runs and sudo gets the token it prints. One
+# token per task that becomes root, consumed by that elevation, on behalf of
+# that person, who must be ansible_user (the token is theirs; a service
+# account's sudo takes no token). Run the command once by hand first: it
+# opens the session in the cookie jar, and without one it waits for a login,
+# which the plugin cuts after 60 seconds. See README.md. Empty: locked hosts
+# are skipped with a warning.
 ob_become_token_cmd: ""
 
 # ── Optional opt-in features ──────────────────────────────────────────────────
