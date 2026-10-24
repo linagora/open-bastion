@@ -10,7 +10,11 @@
 #   - a host already locked is recognised without become, before facts are
 #     gathered, and skipped;
 #   - the backend's collector takes the bastion play's id, does not probe a
-#     locked bastion, and names it in its assert with the way out.
+#     locked bastion, and names it in its assert with the way out;
+#   - with ansible_become_token_cmd (#377), a locked host is played with the
+#     ob_sudo_sso become method: the command runs each time sudo asks for a
+#     password, and sudo gets the token it prints; the host is not enrolled
+#     again.
 #
 # The static checks read the generated tree. The functional ones run
 # ansible-playbook on localhost (connection local, no root) over the generated
@@ -114,7 +118,7 @@ test_lock_detected_before_any_become() {
         python3 - "$t" <<'PY' 2>/dev/null || bad="$bad ${r##*-}(become-before-skip)"
 import sys, yaml
 tasks = yaml.safe_load(open(sys.argv[1]))
-controller = {'ansible.builtin.meta', 'ansible.builtin.assert', 'ansible.builtin.set_fact', 'ansible.builtin.debug'}
+controller = {'ansible.builtin.meta', 'ansible.builtin.assert', 'ansible.builtin.set_fact', 'ansible.builtin.debug', 'ansible.builtin.include_vars'}
 for t in tasks:
     if t.get('name') == 'Skip the hosts whose sudo only takes SSO tokens':
         sys.exit(0)
@@ -171,6 +175,41 @@ assert any('_ob_bastion_id_kept.stdout' in w for w in probe[0]['when'])
 PY
     [ -z "$bad" ] && test_pass "backend: bastion id from the bastion play or the kept file, locked bastions not probed" \
                   || test_fail "backend collector check failed" "$bad"
+}
+
+# #377: a locked host is played when ansible_become_token_cmd is set. The switch
+# to the ob_sudo_sso become method happens only then, and only on a locked
+# host (the first run keeps the deploy account's own password), after the lock
+# is read and before the skip, which the option disarms along with its
+# warning. The plugin ships with every role, and a locked host, enrolled by
+# definition, is not enrolled again.
+test_become_token_option() {
+    local r t bad=""
+    for r in "$BR" "$KR" "$SR"; do
+        t="$r/tasks/main.yml"
+        grep -qE '^ansible_become_token_cmd: ""$' "$r/defaults/main.yml" || bad="$bad ${r##*-}(no-default)"
+        grep -qE "^    name = 'ob_sudo_sso'$" "$r/become_plugins/ob_sudo_sso.py" 2>/dev/null \
+            || bad="$bad ${r##*-}(no-plugin)"
+        grep -qE '^ob_become_via_sso: .*ansible_become_token_cmd' "$r/vars/main.yml" || bad="$bad ${r##*-}(no-helper)"
+        python3 - "$t" "$r/tasks/${r##*-}.yml" <<'PY' 2>/dev/null || bad="$bad ${r##*-}(tasks)"
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+by = {t.get('name'): t for t in tasks}
+names = [t.get('name') for t in tasks]
+sw = by["Take sudo's password from the SSO at every prompt"]
+assert sw['ansible.builtin.set_fact']['ansible_become_method'] == 'ob_sudo_sso'
+assert set(sw['when']) == {'ob_sudo_locked | bool', 'ob_become_via_sso | bool'}
+assert names.index('Check whether sudo only takes SSO tokens') < names.index(sw['name'])
+for n in ('Warn that the role leaves this host alone', 'Skip the hosts whose sudo only takes SSO tokens'):
+    assert names.index(sw['name']) < names.index(n)
+    assert set(by[n]['when']) == {'ob_sudo_locked | bool', 'not (ob_become_via_sso | bool)'}, n
+enrol = [t for t in yaml.safe_load(open(sys.argv[2])) if t.get('ansible.builtin.include_tasks') == '_enroll.yml']
+assert len(enrol) == 1
+assert 'not (ob_sudo_locked | default(false) | bool)' in enrol[0]['when']
+PY
+    done
+    [ -z "$bad" ] && test_pass "every role: ansible_become_token_cmd switches a locked host to ob_sudo_sso, disarms the skip, and skips the enrolment" \
+                  || test_fail "ansible_become_token_cmd is not wired as #377 says" "$bad"
 }
 
 # A plain YAML scalar holding ": " is a mapping, not a string: ansible-core
@@ -443,6 +482,118 @@ PY
                   || test_fail "kept id not used" "$got"
 }
 
+# The generated switch task, then tasks that become root through a stand-in
+# sudo that logs the password it is given, in a role whose become_plugins/
+# is the generated one (found by Ansible as in the shipped tree, without
+# ANSIBLE_BECOME_PLUGINS): before the switch sudo gets the deploy
+# account's password from the inventory; after it, one fresh token per task
+# that becomes root, minted at sudo's prompt only (none for a task without
+# become, none when sudo does not ask, as with a valid timestamp), whatever
+# the inventory's password, and whatever command a module of the host returns
+# as a fact (Ansible drops ansible_become_* keys from returned facts: that
+# is why the variable is named so); on an unlocked host, no switch and no
+# token.
+test_become_token_runs() {
+    if ! have_ansible; then
+        echo -e "${YELLOW}SKIP${NC} become token run (ansible-playbook or PyYAML missing)"
+        return 0
+    fi
+    local d="$TEST_TMPDIR/token" got
+    mkdir -p "$d/bin"
+    # Ansible's sudo: -H -S [-n] [-p PROMPT] -u root CMD... The prompt is only
+    # given with a password, which Ansible sends once it sees the prompt. A
+    # "$d/cached" file is a valid sudo timestamp: no prompt.
+    cat > "$d/bin/sudo" <<EOF
+#!/bin/bash
+prompt=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -p) prompt="\$2"; shift 2 ;;
+        -u) shift 2 ;;
+        -H|-S|-n) shift ;;
+        *) break ;;
+    esac
+done
+if [ -e "$d/cached" ]; then
+    echo cached >> "$d/passwords"
+elif [ -n "\$prompt" ]; then
+    printf '%s' "\$prompt" >&2
+    IFS= read -rs pw
+    echo "\$pw" >> "$d/passwords"
+else
+    echo none >> "$d/passwords"
+fi
+exec "\$@"
+EOF
+    cat > "$d/bin/mint" <<EOF
+#!/bin/sh
+n=\$(( \$(cat "$d/count" 2>/dev/null || echo 0) + 1 ))
+echo "\$n" > "$d/count"
+echo "token-\$n"
+EOF
+    chmod +x "$d/bin/sudo" "$d/bin/mint"
+    mkdir -p "$d/roles/token/tasks" "$d/roles/token/library"
+    cp -r "$BR/become_plugins" "$d/roles/token/"
+    # A module of a compromised host returning the command as a fact.
+    cat > "$d/roles/token/library/ob_test_fact.py" <<EOF
+#!/usr/bin/python3
+from ansible.module_utils.basic import AnsibleModule
+m = AnsibleModule(argument_spec={})
+m.exit_json(changed=False, ansible_facts={'ansible_become_token_cmd': '/bin/echo injected-token'})
+EOF
+    python3 - "$BR/tasks/main.yml" "$d/roles/token/tasks/main.yml" "$d" <<'PY' || { test_fail "switch task not found"; return; }
+import sys, yaml
+t = [t for t in yaml.safe_load(open(sys.argv[1])) if t.get('name') == "Take sudo's password from the SSO at every prompt"]
+assert len(t) == 1
+d = sys.argv[3]
+tasks = [
+    {'ansible.builtin.command': '/bin/true'},
+    t[0],
+    {'ansible.builtin.command': '/bin/true'},
+    {'ansible.builtin.command': '/bin/true'},
+    {'ob_test_fact': {}, 'become': False},
+    {'ansible.builtin.command': '/bin/true', 'become': False},
+    {'ansible.builtin.debug': {'msg': 'no root needed'}},
+    {'ansible.builtin.command': '/bin/true'},
+    {'ansible.builtin.file': {'path': d + '/cached', 'state': 'touch'}, 'become': False},
+    {'ansible.builtin.command': '/bin/true'},
+]
+yaml.safe_dump(tasks, open(sys.argv[2], 'w'))
+PY
+    cat > "$d/play.yml" <<EOF
+- hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+  vars_files: [$BR/vars/main.yml]
+  vars:
+    ansible_become_exe: $d/bin/sudo
+    ansible_become_token_cmd: $d/bin/mint
+    ob_sudo_locked: true
+  roles:
+    - token
+EOF
+    # ansible_become_pass is the alias an inventory often holds: the stock
+    # sudo takes it, the switched one must not.
+    printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n      ansible_become_pass: deploypw\n' > "$d/inv.yml"
+    run_play "$d/play.yml" "$d/inv.yml" "$d/log" \
+        || { test_fail "become token play failed" "$(tail -20 "$d/log")"; return; }
+    got="$(tr '\n' ' ' < "$d/passwords")minted=$(cat "$d/count" 2>/dev/null || echo 0)"
+    [ "$got" = "deploypw token-1 token-2 token-3 cached minted=3" ] \
+        && test_pass "become token: the inventory password before the switch, then one fresh token per sudo prompt and none otherwise, a host's fact ignored (#377)" \
+        || test_fail "sudo did not get one fresh token per prompt" "$got"
+
+    # Not locked: no switch, the deploy account's own password stays in use.
+    : > "$d/passwords"; rm -f "$d/count" "$d/cached"
+    sed -i 's/^    ob_sudo_locked: true$/    ob_sudo_locked: false/' "$d/play.yml"
+    run_play "$d/play.yml" "$d/inv.yml" "$d/log2" \
+        || { test_fail "become token play failed (unlocked)" "$(tail -20 "$d/log2")"; return; }
+    got=$(tr '\n' ' ' < "$d/passwords")
+    [ "$got" = "deploypw deploypw deploypw deploypw cached " ] && [ ! -e "$d/count" ] \
+        && test_pass "become token: an unlocked host keeps its own become password, no token minted" \
+        || test_fail "the switch happened on an unlocked host" "passwords: $got"
+}
+
 if ! render_tree; then
     test_fail "ob-builder could not render the max-security tree" "$(tail -5 "$TEST_TMPDIR/render.log")"
 else
@@ -450,10 +601,12 @@ else
     test_lock_detected_before_any_become
     test_sshd_check_runs_with_the_setup
     test_backend_uses_the_bastion_fact
+    test_become_token_option
     test_conditionals_are_strings
     test_lock_detection_runs
     test_setup_wrapper_runs
     test_backend_collection_runs
+    test_become_token_runs
 fi
 
 echo ""

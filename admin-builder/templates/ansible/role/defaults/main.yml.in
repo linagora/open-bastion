@@ -84,6 +84,25 @@ ob_auto_enroll: @@AUTO_ENROLL_BOOL@@  # true when AUTO_ENROLL_SETUP includes enr
 # When true, the role runs ob-bastion-setup / ob-backend-setup during the play.
 ob_auto_setup: @@AUTO_SETUP_BOOL@@
 
+# ── Maximum security: sudo through the SSO on later runs (#377) ──────────────
+# Once deployed under maximum security, a host's sudo only takes SSO tokens,
+# and the role skips it on later runs. Set this to a command the controller
+# runs to print one -- "llng --llng-server sso.example.com pam_token", from a
+# session of the person running the play -- and a host found locked is played
+# with the ob_sudo_sso become method (become_plugins/): each time sudo asks
+# for a password, the command runs and sudo gets the token it prints. One
+# token per sudo prompt, none when sudo does not ask (over SSH every sudo
+# run asks: at least one per task that becomes root, two for copy and
+# template), consumed by that elevation, on behalf of that person, who must
+# be ansible_user (the token is theirs; a service account's sudo takes no
+# token). Open the session once by hand first (llng ... whoami): the command
+# gets no input, so without a session it fails at once instead of asking; a
+# command that hangs is killed after 60 s (under connection: local the whole
+# prompt gets ansible_local_become_success_timeout, 10 s on ansible-core
+# 2.19+). It shows at -vvv, and its stderr is quoted when it fails: put no
+# secret in it. See README.md. Empty: locked hosts are skipped with a warning.
+ansible_become_token_cmd: ""
+
 # ── Optional opt-in features ──────────────────────────────────────────────────
 # Hardening and audit-trace are intrusive/system-wide and default to false
 # (see SECURITY.md). They apply to every role. Session recording is ON by

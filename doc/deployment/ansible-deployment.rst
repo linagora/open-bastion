@@ -408,14 +408,49 @@ applies after re-enrolling a bastion, which assigns it a new id.
 
 Under :doc:`maximum security </security-scenarios/max-security-scenario>`,
 the account of the first run can no longer connect: the hosts accept
-only SSO certificates, and ``sudo`` only SSO users. The run that deploys
-a host is the only one Ansible completes on it: the role does what needs
-root before the setup locks ``sudo``, and a later run finds the lock in
-``/etc/pam.d/sudo`` (read without ``sudo``) and skips the host with a
-warning. Reconfigure such a host by hand from an SSO session allowed to
-``sudo``, or reinstall it. A backend deployed by a later run still reads
-the ids of those bastions, without ``sudo``, from the file they keep, as
-long as Ansible can connect to them; otherwise set
+only SSO certificates, and ``sudo`` only SSO users. The role does what
+needs root before the setup locks ``sudo``, so the run that deploys a
+host completes; a later run finds the lock in ``/etc/pam.d/sudo`` (read
+without ``sudo``) and, by default, skips the host with a warning.
+Reconfigure such a host by hand from an SSO session allowed to ``sudo``,
+reinstall it, or let the play take ``sudo``'s password from the SSO:
+``ansible_become_token_cmd`` names a command the controller runs each time
+``sudo`` asks for a password, whose output is the token ``sudo`` gets.
+Each ``sudo`` prompt then consumes one single-use token of the person
+running the play (over SSH every ``sudo`` run asks: at least one per
+task that becomes root, two for ``copy`` and ``template``), so that
+every elevation goes through the SSO
+under their name, as the scenario intends. Connect as that person
+(``ansible_user`` is their SSO login, and SSH authenticates them with
+their SSO certificate as for an interactive session, the ``<key>-cert.pub``
+of :doc:`/using-open-bastion` next to ``ansible_ssh_private_key_file``:
+``sudo`` refuses a token minted for someone else, and a service account's
+``sudo`` takes none), open the SSO session once by hand, then run the
+play:
+
+.. code:: bash
+
+   llng --llng-server sso.example.com whoami   # opens the session
+   ansible-playbook -i inventory.yml site.yml \
+     -e 'ansible_become_token_cmd="llng --llng-server sso.example.com pam_token"'
+
+The variable is named ``ansible_become_...`` on purpose: the command runs
+on the controller, and Ansible drops every key of that form from the
+facts a host returns, so a compromised host cannot choose it.
+
+The command only runs when ``sudo`` asks, so the portal mints and logs
+one token per elevation and none for the tasks that need no root. It
+gets no input: without a session in the cookie jar it fails at once
+rather than asks for a login, and a command that hangs is killed after
+60 seconds (a host played with ``connection: local`` gives the whole
+prompt ``ansible_local_become_success_timeout``, 10 seconds on
+ansible-core 2.19 and later). It shows at ``-vvv`` and its stderr is
+quoted when it fails, so put no secret in it. The run that deploys a host
+still takes the deploy account's own password: only a host found locked
+switches, for the rest of the run, and such a host is not enrolled again
+(a new enrolment would give it a new id). A backend deployed by a later
+run still reads the ids of those bastions, without ``sudo``, from the file
+they keep, as long as Ansible can connect to them; otherwise set
 ``ob_bastion_allowed_bastions`` in the inventory to what ``ob-bastion-id``
 prints on each of them.
 
@@ -426,6 +461,8 @@ which the play needs (``become: true``). Open Bastion does not grant a
 service account ``sudo``; under maximum security it takes a ``NOPASSWD``
 ``sudoers`` rule **and** a hand edit of ``/etc/pam.d/sudo``, which gives
 up the scenario's promise that every elevation goes through the SSO (see
-:ref:`service-accounts-sudo`). If you take that decision, the role plays
-the host again, but its setup run rewrites the file and drops the edit:
-``sudo`` is locked again when the run ends, so re-apply the edit by hand.
+:ref:`service-accounts-sudo`); ``ansible_become_token_cmd`` above keeps that
+promise, by connecting as a person rather than as a service account. If
+you take that decision instead, the role plays the host again, but its
+setup run rewrites the file and drops the edit: ``sudo`` is locked again
+when the run ends, so re-apply the edit by hand.

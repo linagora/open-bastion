@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused. The role now checks every JWKS with
   `ob-verify-response check-jwks --anchor` before it replaces the host's
   (#371).
+- ob-builder: under maximum security, the generated Ansible role can play
+  a host again after the run that deployed it. `ansible_become_token_cmd` names a
+  command the controller runs each time `sudo` asks for a password,
+  typically `llng --llng-server sso.example.com pam_token`, and `sudo` gets
+  the token it prints (become method `ob_sudo_sso`, shipped with the role):
+  each elevation goes through the SSO under the name of the person running
+  the play, who must be `ansible_user`, as the scenario intends. Such a host
+  is not enrolled again. Without the option it is still skipped with a
+  warning (#377).
 
 ### Changed
 
