@@ -414,24 +414,29 @@ host completes; a later run finds the lock in ``/etc/pam.d/sudo`` (read
 without ``sudo``) and, by default, skips the host with a warning.
 Reconfigure such a host by hand from an SSO session allowed to ``sudo``,
 reinstall it, or let the play take ``sudo``'s password from the SSO:
-``ob_become_token_cmd`` names a command the controller runs at every
-task, whose output is the token ``sudo`` gets, so that each elevation
-goes through the SSO under the name of the person running the play, as
-the scenario intends. Connect as that person (an SSO user, with
-``ansible_user`` set to it) or as a :doc:`service account
-</service-accounts>`, open the SSO session once by hand, then run the
-play:
+``ob_become_token_cmd`` names a command the controller runs each time
+``sudo`` asks for a password, whose output is the token ``sudo`` gets.
+Each task that becomes root then consumes one single-use token of the
+person running the play, so that every elevation goes through the SSO
+under their name, as the scenario intends. Connect as that person
+(``ansible_user`` is their SSO login, and SSH authenticates them with
+their SSO certificate as for an interactive session: ``sudo`` refuses a
+token minted for someone else, and a service account's ``sudo`` takes
+none), open the SSO session once by hand, then run the play:
 
 .. code:: bash
 
-   llng --llng-server sso.example.com pam_token >/dev/null   # opens the session
+   llng --llng-server sso.example.com whoami   # opens the session
    ansible-playbook -i inventory.yml site.yml \
      -e 'ob_become_token_cmd="llng --llng-server sso.example.com pam_token"'
 
-The tokens are single-use and live ten minutes; the play mints one per
-task, and ``sudo``'s timestamp cache means most are never asked for. The
-run that deploys a host still takes the deploy account's own password:
-only a host found locked uses the command. A backend deployed by a later
+The command only runs when ``sudo`` asks, so the portal mints and logs
+one token per elevation and none for the tasks that need no root; a
+command that waits for a login instead (no session in the cookie jar) is
+cut after 60 seconds and fails the task. The run that deploys a host
+still takes the deploy account's own password: only a host found locked
+switches, for the rest of the run, and such a host is not enrolled again
+(a new enrolment would give it a new id). A backend deployed by a later
 run still reads the ids of those bastions, without ``sudo``, from the file
 they keep, as long as Ansible can connect to them; otherwise set
 ``ob_bastion_allowed_bastions`` in the inventory to what ``ob-bastion-id``
@@ -445,7 +450,7 @@ service account ``sudo``; under maximum security it takes a ``NOPASSWD``
 ``sudoers`` rule **and** a hand edit of ``/etc/pam.d/sudo``, which gives
 up the scenario's promise that every elevation goes through the SSO (see
 :ref:`service-accounts-sudo`); ``ob_become_token_cmd`` above keeps that
-promise, with the service account's SSH access and a person's tokens. If
+promise, by connecting as a person rather than as a service account. If
 you take that decision instead, the role plays the host again, but its
 setup run rewrites the file and drops the edit: ``sudo`` is locked again
 when the run ends, so re-apply the edit by hand.

@@ -19,7 +19,8 @@ ob_svc_keys_sshd_sh: |
 
 # Prefix of the setup task's argv: runs the setup given as arguments, then the
 # check above, in the same become. Under maximum security the setup locks sudo
-# to SSO tokens (#361): no later task of the role can become root to look.
+# to SSO tokens (#361): no later task of the role can become root to look,
+# unless ob_become_token_cmd gives sudo its tokens (#377).
 # The last line of stdout is the verdict, read by tasks/main.yml.
 ob_setup_cmd:
   - /bin/sh
@@ -36,6 +37,7 @@ ob_sso_jwks_available: >-
   {{ (ob_sso_jwks_fetch | default(false) | bool)
      or (ob_sso_jwks_src | default('')) | length > 0 }}
 
-# A locked host is played with SSO tokens as sudo's password (#377, see
-# defaults/main.yml and vars/become-token.yml).
-ob_become_via_sso: "{{ (ob_become_token_cmd | default('')) | length > 0 }}"
+# A locked host is played, with SSO tokens as sudo's password (#377, see
+# defaults/main.yml and become_plugins/ob_sudo_sso.py). default(_, true):
+# an empty "ob_become_token_cmd:" in the inventory is off, not an error.
+ob_become_via_sso: "{{ ((ob_become_token_cmd | default('', true)) | trim) | length > 0 }}"
