@@ -178,7 +178,9 @@ In practice:
   service account ``sudo`` takes a hand edit of this stack, which breaks
   the scenario's promise that every elevation goes through the SSO; see
   :ref:`service-accounts-sudo`. The Ansible role therefore deploys a host
-  once, and skips it on later runs; see :doc:`/deployment/ansible-deployment`.
+  once, and on later runs either skips it or, with ``ob_become_token_cmd``,
+  gives ``sudo`` a token of the person running the play at every task; see
+  :doc:`/deployment/ansible-deployment`.
 - The break-glass path for an SSO outage is out-of-band console access.
   A service account still logs in during an outage, but gets ``sudo``
   only with that hand edit.

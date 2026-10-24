@@ -10,7 +10,9 @@
 #   - a host already locked is recognised without become, before facts are
 #     gathered, and skipped;
 #   - the backend's collector takes the bastion play's id, does not probe a
-#     locked bastion, and names it in its assert with the way out.
+#     locked bastion, and names it in its assert with the way out;
+#   - with ob_become_token_cmd (#377), a locked host is played, and sudo's
+#     password is a fresh token from that command at every task.
 #
 # The static checks read the generated tree. The functional ones run
 # ansible-playbook on localhost (connection local, no root) over the generated
@@ -114,7 +116,7 @@ test_lock_detected_before_any_become() {
         python3 - "$t" <<'PY' 2>/dev/null || bad="$bad ${r##*-}(become-before-skip)"
 import sys, yaml
 tasks = yaml.safe_load(open(sys.argv[1]))
-controller = {'ansible.builtin.meta', 'ansible.builtin.assert', 'ansible.builtin.set_fact', 'ansible.builtin.debug'}
+controller = {'ansible.builtin.meta', 'ansible.builtin.assert', 'ansible.builtin.set_fact', 'ansible.builtin.debug', 'ansible.builtin.include_vars'}
 for t in tasks:
     if t.get('name') == 'Skip the hosts whose sudo only takes SSO tokens':
         sys.exit(0)
@@ -171,6 +173,36 @@ assert any('_ob_bastion_id_kept.stdout' in w for w in probe[0]['when'])
 PY
     [ -z "$bad" ] && test_pass "backend: bastion id from the bastion play or the kept file, locked bastions not probed" \
                   || test_fail "backend collector check failed" "$bad"
+}
+
+# #377: a locked host is played when ob_become_token_cmd is set. The token
+# file is loaded only then, and only on a locked host (the first run keeps the
+# deploy account's own password), after the lock is read and before the skip,
+# which the option disarms along with its warning.
+test_become_token_option() {
+    local r t bad=""
+    for r in "$BR" "$KR" "$SR"; do
+        t="$r/tasks/main.yml"
+        grep -qE '^ob_become_token_cmd: ""$' "$r/defaults/main.yml" || bad="$bad ${r##*-}(no-default)"
+        grep -qF "lookup('ansible.builtin.pipe', ob_become_token_cmd)" "$r/vars/become-token.yml" 2>/dev/null \
+            || bad="$bad ${r##*-}(no-token-file)"
+        grep -qE '^ob_become_via_sso: .*ob_become_token_cmd' "$r/vars/main.yml" || bad="$bad ${r##*-}(no-helper)"
+        python3 - "$t" <<'PY' 2>/dev/null || bad="$bad ${r##*-}(tasks)"
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+by = {t.get('name'): t for t in tasks}
+names = [t.get('name') for t in tasks]
+inc = by["Take sudo's password from the SSO at every task"]
+assert inc['ansible.builtin.include_vars'] == {'file': 'become-token.yml'}
+assert set(inc['when']) == {'ob_sudo_locked | bool', 'ob_become_via_sso | bool'}
+assert names.index('Check whether sudo only takes SSO tokens') < names.index(inc['name'])
+for n in ('Warn that the role leaves this host alone', 'Skip the hosts whose sudo only takes SSO tokens'):
+    assert names.index(inc['name']) < names.index(n)
+    assert set(by[n]['when']) == {'ob_sudo_locked | bool', 'not (ob_become_via_sso | bool)'}, n
+PY
+    done
+    [ -z "$bad" ] && test_pass "every role: ob_become_token_cmd loads the token file on a locked host and disarms the skip" \
+                  || test_fail "ob_become_token_cmd is not wired as #377 says" "$bad"
 }
 
 # A plain YAML scalar holding ": " is a mapping, not a string: ansible-core
@@ -443,6 +475,96 @@ PY
                   || test_fail "kept id not used" "$got"
 }
 
+# The generated include_vars task, then tasks that become root through a
+# stand-in sudo that logs the password it is given: each one must get a new
+# token from ob_become_token_cmd (single-use tokens), and a task played before
+# the include, or without become, must get none.
+test_become_token_runs() {
+    if ! have_ansible; then
+        echo -e "${YELLOW}SKIP${NC} become token run (ansible-playbook or PyYAML missing)"
+        return 0
+    fi
+    local d="$TEST_TMPDIR/token" got
+    mkdir -p "$d/bin"
+    # Ansible's sudo: -H -S [-n] [-p PROMPT] -u root CMD... The prompt is only
+    # given with a password, which Ansible sends once it sees the prompt.
+    cat > "$d/bin/sudo" <<EOF
+#!/bin/bash
+prompt=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in
+        -p) prompt="\$2"; shift 2 ;;
+        -u) shift 2 ;;
+        -H|-S|-n) shift ;;
+        *) break ;;
+    esac
+done
+if [ -n "\$prompt" ]; then
+    printf '%s' "\$prompt" >&2
+    IFS= read -rs pw
+    echo "\$pw" >> "$d/passwords"
+else
+    echo none >> "$d/passwords"
+fi
+exec "\$@"
+EOF
+    cat > "$d/bin/mint" <<EOF
+#!/bin/sh
+n=\$(( \$(cat "$d/count" 2>/dev/null || echo 0) + 1 ))
+echo "\$n" > "$d/count"
+echo "token-\$n"
+EOF
+    chmod +x "$d/bin/sudo" "$d/bin/mint"
+    python3 - "$BR/tasks/main.yml" "$BR/vars/become-token.yml" "$d/include.yml" <<'PY' || { test_fail "include_vars task not found"; return; }
+import sys, yaml
+t = [t for t in yaml.safe_load(open(sys.argv[1])) if t.get('name') == "Take sudo's password from the SSO at every task"]
+assert len(t) == 1
+t[0]['ansible.builtin.include_vars']['file'] = sys.argv[2]
+yaml.safe_dump(t, open(sys.argv[3], 'w'))
+PY
+    cat > "$d/play.yml" <<EOF
+- hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+  vars_files: [$BR/vars/main.yml]
+  vars:
+    ansible_become_exe: $d/bin/sudo
+    ob_become_token_cmd: $d/bin/mint
+    ob_sudo_locked: true
+  tasks:
+    - ansible.builtin.command: /bin/true
+    - ansible.builtin.include_tasks: $d/include.yml
+    - ansible.builtin.command: /bin/true
+    - ansible.builtin.command: /bin/true
+    - ansible.builtin.command: /bin/true
+      become: false
+    - ansible.builtin.command: /bin/true
+EOF
+    printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n' > "$d/inv.yml"
+    run_play "$d/play.yml" "$d/inv.yml" "$d/log" || { test_fail "become token play failed" "$(tail -20 "$d/log")"; return; }
+    got=$(tr '\n' ' ' < "$d/passwords")
+    # The tokens are minted on demand, so their numbers only need to grow.
+    if [[ "$got" =~ ^none\ token-([0-9]+)\ token-([0-9]+)\ token-([0-9]+)\ $ ]] \
+        && [ "${BASH_REMATCH[1]}" -lt "${BASH_REMATCH[2]}" ] && [ "${BASH_REMATCH[2]}" -lt "${BASH_REMATCH[3]}" ]; then
+        test_pass "become token: none before the include, a fresh token at every task that becomes root (#377)"
+    else
+        test_fail "sudo did not get a fresh token per task" "passwords: $got"
+    fi
+
+    # Not locked: the file is not loaded, and the deploy account's own
+    # password stays in use (none here).
+    : > "$d/passwords"; rm -f "$d/count"
+    sed -i 's/^    ob_sudo_locked: true$/    ob_sudo_locked: false/' "$d/play.yml"
+    run_play "$d/play.yml" "$d/inv.yml" "$d/log2" || { test_fail "become token play failed (unlocked)" "$(tail -20 "$d/log2")"; return; }
+    got=$(tr '\n' ' ' < "$d/passwords")
+    if [ "$got" = "none none none none " ] && [ ! -e "$d/count" ]; then
+        test_pass "become token: an unlocked host keeps its own become password, no token minted"
+    else
+        test_fail "the token file was loaded on an unlocked host" "passwords: $got"
+    fi
+}
+
 if ! render_tree; then
     test_fail "ob-builder could not render the max-security tree" "$(tail -5 "$TEST_TMPDIR/render.log")"
 else
@@ -450,10 +572,12 @@ else
     test_lock_detected_before_any_become
     test_sshd_check_runs_with_the_setup
     test_backend_uses_the_bastion_fact
+    test_become_token_option
     test_conditionals_are_strings
     test_lock_detection_runs
     test_setup_wrapper_runs
     test_backend_collection_runs
+    test_become_token_runs
 fi
 
 echo ""

@@ -408,14 +408,32 @@ applies after re-enrolling a bastion, which assigns it a new id.
 
 Under :doc:`maximum security </security-scenarios/max-security-scenario>`,
 the account of the first run can no longer connect: the hosts accept
-only SSO certificates, and ``sudo`` only SSO users. The run that deploys
-a host is the only one Ansible completes on it: the role does what needs
-root before the setup locks ``sudo``, and a later run finds the lock in
-``/etc/pam.d/sudo`` (read without ``sudo``) and skips the host with a
-warning. Reconfigure such a host by hand from an SSO session allowed to
-``sudo``, or reinstall it. A backend deployed by a later run still reads
-the ids of those bastions, without ``sudo``, from the file they keep, as
-long as Ansible can connect to them; otherwise set
+only SSO certificates, and ``sudo`` only SSO users. The role does what
+needs root before the setup locks ``sudo``, so the run that deploys a
+host completes; a later run finds the lock in ``/etc/pam.d/sudo`` (read
+without ``sudo``) and, by default, skips the host with a warning.
+Reconfigure such a host by hand from an SSO session allowed to ``sudo``,
+reinstall it, or let the play take ``sudo``'s password from the SSO:
+``ob_become_token_cmd`` names a command the controller runs at every
+task, whose output is the token ``sudo`` gets, so that each elevation
+goes through the SSO under the name of the person running the play, as
+the scenario intends. Connect as that person (an SSO user, with
+``ansible_user`` set to it) or as a :doc:`service account
+</service-accounts>`, open the SSO session once by hand, then run the
+play:
+
+.. code:: bash
+
+   llng --llng-server sso.example.com pam_token >/dev/null   # opens the session
+   ansible-playbook -i inventory.yml site.yml \
+     -e 'ob_become_token_cmd="llng --llng-server sso.example.com pam_token"'
+
+The tokens are single-use and live ten minutes; the play mints one per
+task, and ``sudo``'s timestamp cache means most are never asked for. The
+run that deploys a host still takes the deploy account's own password:
+only a host found locked uses the command. A backend deployed by a later
+run still reads the ids of those bastions, without ``sudo``, from the file
+they keep, as long as Ansible can connect to them; otherwise set
 ``ob_bastion_allowed_bastions`` in the inventory to what ``ob-bastion-id``
 prints on each of them.
 
@@ -426,6 +444,8 @@ which the play needs (``become: true``). Open Bastion does not grant a
 service account ``sudo``; under maximum security it takes a ``NOPASSWD``
 ``sudoers`` rule **and** a hand edit of ``/etc/pam.d/sudo``, which gives
 up the scenario's promise that every elevation goes through the SSO (see
-:ref:`service-accounts-sudo`). If you take that decision, the role plays
-the host again, but its setup run rewrites the file and drops the edit:
-``sudo`` is locked again when the run ends, so re-apply the edit by hand.
+:ref:`service-accounts-sudo`); ``ob_become_token_cmd`` above keeps that
+promise, with the service account's SSH access and a person's tokens. If
+you take that decision instead, the role plays the host again, but its
+setup run rewrites the file and drops the edit: ``sudo`` is locked again
+when the run ends, so re-apply the edit by hand.

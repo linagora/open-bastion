@@ -35,3 +35,7 @@ ob_setup_cmd:
 ob_sso_jwks_available: >-
   {{ (ob_sso_jwks_fetch | default(false) | bool)
      or (ob_sso_jwks_src | default('')) | length > 0 }}
+
+# A locked host is played with SSO tokens as sudo's password (#377, see
+# defaults/main.yml and vars/become-token.yml).
+ob_become_via_sso: "{{ (ob_become_token_cmd | default('')) | length > 0 }}"
