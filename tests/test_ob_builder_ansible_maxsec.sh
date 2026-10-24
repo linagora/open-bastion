@@ -489,7 +489,10 @@ PY
 # account's password from the inventory; after it, one fresh token per task
 # that becomes root, minted at sudo's prompt only (none for a task without
 # become, none when sudo does not ask, as with a valid timestamp), whatever
-# the inventory's password; on an unlocked host, no switch and no token.
+# the inventory's password, and whatever command a module of the host returns
+# as a fact (Ansible drops ansible_become_* keys from returned facts: that
+# is why the variable is named so); on an unlocked host, no switch and no
+# token.
 test_become_token_runs() {
     if ! have_ansible; then
         echo -e "${YELLOW}SKIP${NC} become token run (ansible-playbook or PyYAML missing)"
@@ -529,8 +532,15 @@ echo "\$n" > "$d/count"
 echo "token-\$n"
 EOF
     chmod +x "$d/bin/sudo" "$d/bin/mint"
-    mkdir -p "$d/roles/token/tasks"
+    mkdir -p "$d/roles/token/tasks" "$d/roles/token/library"
     cp -r "$BR/become_plugins" "$d/roles/token/"
+    # A module of a compromised host returning the command as a fact.
+    cat > "$d/roles/token/library/ob_test_fact.py" <<EOF
+#!/usr/bin/python3
+from ansible.module_utils.basic import AnsibleModule
+m = AnsibleModule(argument_spec={})
+m.exit_json(changed=False, ansible_facts={'ansible_become_token_cmd': '/bin/echo injected-token'})
+EOF
     python3 - "$BR/tasks/main.yml" "$d/roles/token/tasks/main.yml" "$d" <<'PY' || { test_fail "switch task not found"; return; }
 import sys, yaml
 t = [t for t in yaml.safe_load(open(sys.argv[1])) if t.get('name') == "Take sudo's password from the SSO at every prompt"]
@@ -541,6 +551,7 @@ tasks = [
     t[0],
     {'ansible.builtin.command': '/bin/true'},
     {'ansible.builtin.command': '/bin/true'},
+    {'ob_test_fact': {}, 'become': False},
     {'ansible.builtin.command': '/bin/true', 'become': False},
     {'ansible.builtin.debug': {'msg': 'no root needed'}},
     {'ansible.builtin.command': '/bin/true'},
@@ -569,7 +580,7 @@ EOF
         || { test_fail "become token play failed" "$(tail -20 "$d/log")"; return; }
     got="$(tr '\n' ' ' < "$d/passwords")minted=$(cat "$d/count" 2>/dev/null || echo 0)"
     [ "$got" = "deploypw token-1 token-2 token-3 cached minted=3" ] \
-        && test_pass "become token: the inventory password before the switch, then one fresh token per sudo prompt and none otherwise (#377)" \
+        && test_pass "become token: the inventory password before the switch, then one fresh token per sudo prompt and none otherwise, a host's fact ignored (#377)" \
         || test_fail "sudo did not get one fresh token per prompt" "$got"
 
     # Not locked: no switch, the deploy account's own password stays in use.
