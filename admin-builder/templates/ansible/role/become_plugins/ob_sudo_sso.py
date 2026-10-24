@@ -44,9 +44,11 @@ DOCUMENTATION = """
                   password prompt of sudo. Its standard output is the token.
                   Typically C(llng --llng-server sso.example.com pam_token).
                   It gets no standard input (a client without a session fails
-                  at once rather than waits for a login), is killed after
-                  60 seconds, and is named in error messages and at -vvv, so
-                  it must hold no secret.
+                  at once rather than waits for a login) and is killed after
+                  60 seconds (under connection:local the whole prompt gets
+                  ansible_local_become_success_timeout). It shows at -vvv
+                  and its stderr is quoted when it fails, so it must hold
+                  no secret.
             type: str
             required: true
             vars:
