@@ -12,7 +12,7 @@
   ansible.builtin.include_tasks: _enroll.yml
   when:
     - ob_auto_enroll | bool
-    # A locked host is enrolled: played again (ob_become_token_cmd), it must
+    # A locked host is enrolled: played again (ansible_become_token_cmd), it must
     # not enrol again, which would give it a new id (#377).
     - not (ob_sudo_locked | default(false) | bool)
   vars:

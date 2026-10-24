@@ -2710,7 +2710,7 @@ render_ansible_role() {
             mkdir -p -- "$(dirname -- "$dest")"
             atomic_write_from "$dest" "0644" "$f"
         fi
-    done < <(find "$src" -type f -print0)
+    done < <(find "$src" -type f ! -name '*.pyc' ! -path '*/__pycache__/*' -print0)
 
     # Drop in the binary assets that templates can't carry.
     local files_dir="$outpath/roles/open-bastion-${role}/files"
