@@ -34,7 +34,9 @@ The `files/` directory (not shipped here) must contain:
 
 ## Variables
 
-All variables are prefixed with `ob_`. Build-time defaults live in
+All variables are prefixed with `ob_`, but `ansible_become_token_cmd` (its
+`ansible_become_` name is what keeps a host from setting it through a
+returned fact). Build-time defaults live in
 `defaults/main.yml`; override them via host_vars, group_vars, or extra-vars.
 
 | Variable                   | Description                                                                                                                                                                                                                                                                                                                                                  |
@@ -112,10 +114,11 @@ run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
 - with `ansible_become_token_cmd` set, plays the host with the `ob_sudo_sso`
   become method (`become_plugins/`): each time `sudo` asks for a password,
   the command runs on the controller and `sudo` gets the token it prints. One
-  single-use token per `sudo` run: at least one per task that becomes root
-  (each task is a new SSH session, so `sudo`'s timestamp cache does not
-  apply; `copy` and `template` run `sudo` twice), consumed by that
-  elevation, so every one of them goes through the SSO under the name of the
+  single-use token per `sudo` prompt, none when `sudo` does not ask; over
+  SSH every `sudo` run asks (each task is a new session, so `sudo`'s
+  timestamp cache does not apply): at least one per task that becomes root,
+  two for `copy` and `template`. Each one is consumed by that elevation, so
+  every one of them goes through the SSO under the name of the
   person running the play, as the scenario intends. The host is not enrolled
   again: a locked host is enrolled, and a new enrolment would give it a new
   id;
@@ -134,8 +137,9 @@ jar: the command gets no input, so without a session it fails at once instead
 of asking, and a command that hangs is killed after 60 seconds (a host played
 with `connection: local` gives the whole prompt
 `ansible_local_become_success_timeout`, 10 s on ansible-core 2.19 and later:
-raise it when the portal is slow). The command is named in error messages
-and at `-vvv`: put no secret in it, the session lives in the cookie jar. Set
+raise it when the portal is slow). The command shows at `-vvv`, and its
+stderr is quoted when it fails: put no secret in it, the session lives in the
+cookie jar. Set
 it in `group_vars` or with `--extra-vars` (its `ansible_become_` name keeps a
 host from setting it through a returned fact); the switch, and the command,
 stay with the host for the rest of the `ansible-playbook` run (the other

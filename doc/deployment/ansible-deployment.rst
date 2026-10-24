@@ -416,9 +416,10 @@ Reconfigure such a host by hand from an SSO session allowed to ``sudo``,
 reinstall it, or let the play take ``sudo``'s password from the SSO:
 ``ansible_become_token_cmd`` names a command the controller runs each time
 ``sudo`` asks for a password, whose output is the token ``sudo`` gets.
-Each ``sudo`` run then consumes one single-use token of the person
-running the play (at least one per task that becomes root; ``copy`` and
-``template`` run two), so that every elevation goes through the SSO
+Each ``sudo`` prompt then consumes one single-use token of the person
+running the play (over SSH every ``sudo`` run asks: at least one per
+task that becomes root, two for ``copy`` and ``template``), so that
+every elevation goes through the SSO
 under their name, as the scenario intends. Connect as that person
 (``ansible_user`` is their SSO login, and SSH authenticates them with
 their SSO certificate as for an interactive session, the ``<key>-cert.pub``
@@ -441,8 +442,10 @@ The command only runs when ``sudo`` asks, so the portal mints and logs
 one token per elevation and none for the tasks that need no root. It
 gets no input: without a session in the cookie jar it fails at once
 rather than asks for a login, and a command that hangs is killed after
-60 seconds. It is named in error messages and at ``-vvv``, so put no
-secret in it. The run that deploys a host
+60 seconds (a host played with ``connection: local`` gives the whole
+prompt ``ansible_local_become_success_timeout``, 10 seconds on
+ansible-core 2.19 and later). It shows at ``-vvv`` and its stderr is
+quoted when it fails, so put no secret in it. The run that deploys a host
 still takes the deploy account's own password: only a host found locked
 switches, for the rest of the run, and such a host is not enrolled again
 (a new enrolment would give it a new id). A backend deployed by a later
