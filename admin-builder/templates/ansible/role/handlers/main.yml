@@ -3,7 +3,7 @@
 # (ob_auto_setup = false). When ob_auto_setup is true, ob-bastion-setup /
 # ob-backend-setup already restart sshd at the end of their run — and Mode E
 # locks sudo behind an LLNG token, so a become-based handler running afterwards
-# can no longer escalate ("Missing sudo password") unless ob_become_token_cmd
+# can no longer escalate ("Missing sudo password") unless ansible_become_token_cmd
 # gives sudo its tokens (#377). Skipping it then avoids a spurious failure on
 # an otherwise-successful deployment.
 - name: Restart sshd

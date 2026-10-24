@@ -91,13 +91,15 @@ ob_auto_setup: @@AUTO_SETUP_BOOL@@
 # session of the person running the play -- and a host found locked is played
 # with the ob_sudo_sso become method (become_plugins/): each time sudo asks
 # for a password, the command runs and sudo gets the token it prints. One
-# token per task that becomes root, consumed by that elevation, on behalf of
-# that person, who must be ansible_user (the token is theirs; a service
-# account's sudo takes no token). Run the command once by hand first: it
-# opens the session in the cookie jar, and without one it waits for a login,
-# which the plugin cuts after 60 seconds. See README.md. Empty: locked hosts
-# are skipped with a warning.
-ob_become_token_cmd: ""
+# token per sudo run (at least one per task that becomes root; copy and
+# template run two), consumed by that elevation, on behalf of that person,
+# who must be ansible_user (the token is theirs; a service
+# account's sudo takes no token). Open the session once by hand first
+# (llng ... whoami): the command gets no input, so without a session it fails
+# at once instead of asking; a command that hangs is killed after 60 s. It
+# is named in errors and at -vvv: put no secret in it. See README.md. Empty:
+# locked hosts are skipped with a warning.
+ansible_become_token_cmd: ""
 
 # ── Optional opt-in features ──────────────────────────────────────────────────
 # Hardening and audit-trace are intrusive/system-wide and default to false

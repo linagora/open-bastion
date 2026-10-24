@@ -53,7 +53,7 @@ All variables are prefixed with `ob_`. Build-time defaults live in
 | `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                                                                                                                                                       |
 | `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                                                                                                                                                              |
 | `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                                                                                                                                                             |
-| `ob_become_token_cmd`      | Maximum security only: a controller-side command printing an SSO token (`llng --llng-server sso.example.com pam_token`) of the person the play connects as. A host whose `sudo` is locked to SSO tokens is then played with the `ob_sudo_sso` become method: `sudo` gets a fresh token each time it asks. Empty (default): such hosts are skipped. See below |
+| `ansible_become_token_cmd` | Maximum security only: a controller-side command printing an SSO token (`llng --llng-server sso.example.com pam_token`) of the person the play connects as. A host whose `sudo` is locked to SSO tokens is then played with the `ob_sudo_sso` become method: `sudo` gets a fresh token each time it asks. Empty (default): such hosts are skipped. See below |
 
 Backend-only "accept only this bastion" variables:
 
@@ -109,11 +109,12 @@ with a password of its own. The role does what needs root before that point
 or in the setup's own task, so the run that deploys a host completes. A later
 run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
 
-- with `ob_become_token_cmd` set, plays the host with the `ob_sudo_sso`
+- with `ansible_become_token_cmd` set, plays the host with the `ob_sudo_sso`
   become method (`become_plugins/`): each time `sudo` asks for a password,
   the command runs on the controller and `sudo` gets the token it prints. One
-  single-use token per task that becomes root (each task is a new SSH
-  session, so `sudo`'s timestamp cache does not apply), consumed by that
+  single-use token per `sudo` run: at least one per task that becomes root
+  (each task is a new SSH session, so `sudo`'s timestamp cache does not
+  apply; `copy` and `template` run `sudo` twice), consumed by that
   elevation, so every one of them goes through the SSO under the name of the
   person running the play, as the scenario intends. The host is not enrolled
   again: a locked host is enrolled, and a new enrolment would give it a new
@@ -121,19 +122,26 @@ run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
 - otherwise skips it with a warning: reconfigure it by hand from an SSO
   session allowed to `sudo`, or reinstall it.
 
-`ob_become_token_cmd` is typically `llng --llng-server sso.example.com
+`ansible_become_token_cmd` is typically `llng --llng-server sso.example.com
 pam_token` (the `llng` client of simple-oidc-client), and `ansible_user` must
 be the SSO login of that session: `sudo` refuses a token minted for someone
 else, and a service account's `sudo` takes no token at all; SSH authenticates
-that person as for an interactive session, with their SSO certificate. Open
-the session once by hand before the play (`llng --llng-server
-sso.example.com whoami`), so that it is in the cookie jar; a command that
-waits for a login instead (no session) is cut after 60 seconds and fails the
-task. Set it in `group_vars` or with `--extra-vars`; the
-switch, and the command, stay with the host for the rest of the
-`ansible-playbook` run (the other trees of `site.yml` included). Only a host
-found locked uses it: the run that deploys a host still takes the deploy
-account's own password (`-K`, or none with `NOPASSWD`).
+that person as for an interactive session, with their SSO certificate next to
+`ansible_ssh_private_key_file` (`<key>-cert.pub`, see "Using Open Bastion" in
+the documentation). Open the session once by hand before the play
+(`llng --llng-server sso.example.com whoami`), so that it is in the cookie
+jar: the command gets no input, so without a session it fails at once instead
+of asking, and a command that hangs is killed after 60 seconds (a host played
+with `connection: local` gives the whole prompt
+`ansible_local_become_success_timeout`, 10 s on ansible-core 2.19 and later:
+raise it when the portal is slow). The command is named in error messages
+and at `-vvv`: put no secret in it, the session lives in the cookie jar. Set
+it in `group_vars` or with `--extra-vars` (its `ansible_become_` name keeps a
+host from setting it through a returned fact); the switch, and the command,
+stay with the host for the rest of the `ansible-playbook` run (the other
+trees of `site.yml` included). Only a host found locked uses it: the run that
+deploys a host still takes the deploy account's own password (`-K`, or none
+with `NOPASSWD`).
 
 Backends configured by a later run still read the id of a locked bastion,
 without `become`, from `/var/lib/open-bastion/bastion-id` (written by

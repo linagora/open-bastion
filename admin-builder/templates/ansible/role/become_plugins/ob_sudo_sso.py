@@ -4,14 +4,27 @@
 # tokens the portal mints (llng pam_token). This become plugin is the stock
 # sudo one, with one difference: it carries no password. When sudo asks for
 # one, the connection plugin tells it so (check_password_prompt) and only then
-# does it run ob_become_token_cmd on the controller, and hand sudo what the
-# command prints. So the portal mints exactly one token per prompt -- none
-# while sudo's timestamp cache is valid, one per task under sudo-fresh-otp --
-# instead of one per evaluation of ansible_become_password, which Ansible
-# templates several times per task, prompt or not.
+# does it run ansible_become_token_cmd on the controller, and hand sudo what
+# the command prints. So the portal mints exactly one token per sudo run, and
+# none for a task that needs no root, instead of one per evaluation of
+# ansible_become_password, which Ansible templates several times per task,
+# prompt or not.
+#
+# The command runs on the operator's workstation, so no managed host may
+# choose it. Its variable is named ansible_become_*: Ansible drops every key
+# of that form from the facts a module returns (ansible.vars.clean.clean_facts),
+# as it does for ansible_become_exe, where a plain name could be set by a
+# compromised host at fact precedence, above group_vars and role defaults.
 #
 # tasks/main.yml switches a host found locked to this method; the run that
 # deploys it keeps the deploy account's own password with the stock sudo.
+#
+# Assumed of the connection plugin: it calls check_password_prompt before it
+# reads get_option('become_pass'), as local and ssh do (ansible-core 2.15 to
+# 2.22). Before the prompt that option is a placeholder, never a password. A
+# host played with connection: local gives the whole prompt, mint included,
+# ansible_local_become_success_timeout (10 s on ansible-core >= 2.19): raise
+# it when the portal is slow.
 from __future__ import annotations
 
 DOCUMENTATION = """
@@ -22,7 +35,7 @@ DOCUMENTATION = """
           asks for a password, runs O(token_cmd) on the controller and sends
           what it prints, a single-use SSO token, so each elevation goes
           through the SSO under the name of the person running the play.
-          No token is minted while sudo's timestamp cache is valid.
+          No token is minted for a task that does not become root.
     author: Open Bastion
     options:
         token_cmd:
@@ -30,12 +43,14 @@ DOCUMENTATION = """
                 - Command run on the controller, through the shell, at each
                   password prompt of sudo. Its standard output is the token.
                   Typically C(llng --llng-server sso.example.com pam_token).
+                  It gets no standard input (a client without a session fails
+                  at once rather than waits for a login), is killed after
+                  60 seconds, and is named in error messages and at -vvv, so
+                  it must hold no secret.
             type: str
             required: true
             vars:
-              - name: ob_become_token_cmd
-            env:
-              - name: OB_BECOME_TOKEN_CMD
+              - name: ansible_become_token_cmd
         become_user:
             description: User you 'become' to execute the task
             default: root
@@ -108,6 +123,8 @@ DOCUMENTATION = """
                 key: chdir
 """
 
+import os
+import signal
 import subprocess
 
 from ansible.errors import AnsibleError
@@ -145,23 +162,37 @@ class BecomeModule(SudoBecomeModule):
             self._token = self._mint()
         return matched
 
+    _MINT_TIMEOUT = 60
+
     def _mint(self):
-        cmd = self.get_option('token_cmd')
+        cmd = (self.get_option('token_cmd') or '').strip()
         if not cmd:
-            raise AnsibleError('ob_sudo_sso: ob_become_token_cmd is not set')
+            raise AnsibleError('ob_sudo_sso: ansible_become_token_cmd is not set')
+        # No stdin: a command that would wait for a login (an llng client
+        # without a session in its cookie jar) fails at once instead. Its own
+        # session, so that the timeout kills what the shell started too. The
+        # errors name neither the command line nor the token.
         try:
-            # No stdin: a command that would wait for a login (an llng client
-            # without a session in its cookie jar) fails at once instead.
-            run = subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL,
+            p = subprocess.Popen(cmd, shell=True, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=60)
-        except (OSError, subprocess.SubprocessError) as e:
-            raise AnsibleError('ob_sudo_sso: ob_become_token_cmd failed: %s' % e)
-        if run.returncode != 0:
-            raise AnsibleError('ob_sudo_sso: ob_become_token_cmd exited %d: %s'
-                               % (run.returncode, to_text(run.stderr).strip()))
-        token = to_text(run.stdout).strip()
+                                 start_new_session=True)
+        except OSError as e:
+            raise AnsibleError('ob_sudo_sso: could not run ansible_become_token_cmd: %s' % e.strerror)
+        try:
+            out, err = p.communicate(timeout=self._MINT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.communicate()
+            raise AnsibleError('ob_sudo_sso: ansible_become_token_cmd gave no token within %d s'
+                               % self._MINT_TIMEOUT)
+        if p.returncode != 0:
+            raise AnsibleError('ob_sudo_sso: ansible_become_token_cmd exited %d: %s'
+                               % (p.returncode, to_text(err).strip()))
+        token = to_text(out).strip()
         if not token or '\n' in token:
-            raise AnsibleError('ob_sudo_sso: ob_become_token_cmd must print one token, got %d line(s)'
+            raise AnsibleError('ob_sudo_sso: ansible_become_token_cmd must print one token, got %d line(s)'
                                % len(token.splitlines()))
         return token
