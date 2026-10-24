@@ -20,7 +20,10 @@
 #   ansible_become: true         Escalate to root with sudo for the tasks.
 #                                Add --ask-become-pass (-K) on the CLI, or set
 #                                ansible_become_password (via ansible-vault), if
-#                                sudo needs a password.
+#                                sudo needs a password. Under maximum security
+#                                a deployed host's sudo only takes SSO tokens:
+#                                ob_become_token_cmd (role README) gives it one
+#                                at every task.
 #
 # Tip: if SSH fails with "Too many authentication failures", your agent is
 # offering too many keys. Force the chosen key only:

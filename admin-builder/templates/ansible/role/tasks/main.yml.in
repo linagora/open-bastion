@@ -30,10 +30,11 @@
 # Maximum security locks sudo to SSO tokens on every role (#361): once the
 # setup has run, the stack refuses every local account, and each task with
 # become would fail with "Missing sudo password". Read the stack without
-# become (it is 0644) and leave such a host alone. Locked means the stack the
-# setup writes: auth and account lines are pam_openbastion and pam_deny only.
-# A hand edit that lets an account through (service-accounts.rst) adds another
-# line, and the host is played as before.
+# become (it is 0644) and, unless ob_become_token_cmd gives sudo its tokens
+# (#377, below), leave such a host alone. Locked means the stack the setup
+# writes: auth and account lines are pam_openbastion and pam_deny only. A hand
+# edit that lets an account through (service-accounts.rst) adds another line,
+# and the host is played as before.
 - name: Read the sudo PAM stack
   ansible.builtin.slurp:
     src: /etc/pam.d/sudo
@@ -54,21 +55,49 @@
       {{ ((ob_pam_sudo.content | default('')) | b64decode).splitlines()
          | map('trim') | reject('match', '(#|$)') | list }}
 
+# Only a host found locked takes its sudo password from the SSO: the run that
+# deploys it keeps the deploy account's own (-K, NOPASSWD). include_vars, not
+# set_fact: a variable file is templated at each use, so the command runs at
+# every task and each sudo gets a fresh token, where set_fact would keep the
+# first one, which the first sudo consumes.
+- name: Take sudo's password from the SSO at every task
+  ansible.builtin.include_vars:
+    file: become-token.yml
+  when:
+    - ob_sudo_locked | bool
+    - ob_become_via_sso | bool
+
+- name: Say that sudo goes through the SSO
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} runs maximum security: its sudo only takes SSO
+      tokens. ob_become_token_cmd is set, so every task that becomes root
+      gets a fresh one from it, on behalf of the person running the play.
+  when:
+    - ob_sudo_locked | bool
+    - ob_become_via_sso | bool
+
 - name: Warn that the role leaves this host alone
   ansible.builtin.debug:
     msg: >-
       {{ inventory_hostname }} runs maximum security: its sudo only takes SSO
       tokens, so Ansible cannot become root there after the run that deployed
-      it, and the role skips it. To change its configuration, run
-      ob-{{ ob_artefact_role }}-setup by hand from an SSO session allowed to
-      sudo, or reinstall the host and run the play again.{% if ob_artefact_role == 'bastion' %}
+      it, and the role skips it. Set ob_become_token_cmd to a command that
+      prints an SSO token (llng pam_token) to play it with sudo's password
+      taken from the SSO, change its configuration by hand from an SSO
+      session allowed to sudo, or reinstall the host and run the play
+      again.{% if ob_artefact_role == 'bastion' %}
       Backends still read its id, without sudo, from the file ob-bastion-id
       keeps (/var/lib/open-bastion/bastion-id).{% endif %}
-  when: ob_sudo_locked | bool
+  when:
+    - ob_sudo_locked | bool
+    - not (ob_become_via_sso | bool)
 
 - name: Skip the hosts whose sudo only takes SSO tokens
   ansible.builtin.meta: end_host
-  when: ob_sudo_locked | bool
+  when:
+    - ob_sudo_locked | bool
+    - not (ob_become_via_sso | bool)
 
 # The guards above are controller-side or run without become, which is what
 # lets a host that is not ours end the play without a connection ever being

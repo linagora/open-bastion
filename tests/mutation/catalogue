@@ -1141,3 +1141,27 @@ replace ||         :
 suite   || tests/test_ob_bastion_setup.sh
 why     || #379 review: a token given with --token-file may be another device;
 why     || ob-heartbeat never replaces a kept id, so the stale one would stay.
+
+id      || ansible-become-token-per-task
+file    || admin-builder/templates/ansible/role/vars/become-token.yml
+search  || {{ lookup('ansible.builtin.pipe', ob_become_token_cmd) }}
+replace || {{ lookup('ansible.builtin.pipe', ob_become_token_cmd ~ ' | sed s/[0-9]*$/1/') }}
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: the SSO tokens are single-use, so sudo must get a fresh one at
+why     || every task; a password kept from the first task fails every later sudo.
+
+id      || ansible-become-token-locked-only
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  ||     file: become-token.yml\n  when:\n    - ob_sudo_locked | bool\n
+replace ||     file: become-token.yml\n  when:\n
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: only a host found locked takes sudo's password from the SSO; the
+why     || run that deploys it needs the deploy account's own password before the lock.
+
+id      || ansible-become-token-disarms-skip
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  ||   ansible.builtin.meta: end_host\n  when:\n    - ob_sudo_locked | bool\n    - not (ob_become_via_sso | bool)
+replace ||   ansible.builtin.meta: end_host\n  when:\n    - ob_sudo_locked | bool
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: with ob_become_token_cmd a locked host must be played, not skipped,
+why     || or the option does nothing and the operator falls back to a hand edit.

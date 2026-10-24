@@ -84,6 +84,20 @@ ob_auto_enroll: @@AUTO_ENROLL_BOOL@@  # true when AUTO_ENROLL_SETUP includes enr
 # When true, the role runs ob-bastion-setup / ob-backend-setup during the play.
 ob_auto_setup: @@AUTO_SETUP_BOOL@@
 
+# ── Maximum security: sudo through the SSO on later runs (#377) ──────────────
+# Once deployed under maximum security, a host's sudo only takes SSO tokens,
+# and the role skips it on later runs. A command the controller runs to print
+# one -- "llng --llng-server sso.example.com pam_token", from a session of the
+# person running the play -- lets the role play such a host again: it runs at
+# every task, and sudo gets the token it prints, so each elevation goes
+# through the SSO under that person's name, as the scenario intends. Only a
+# host found locked uses it; the first run takes the deploy account's own
+# password (-K) as before. Run the command once by hand before the play, so
+# its session is in the cookie jar and it never waits for a login. The tokens
+# are single-use and short-lived; sudo's timestamp cache means most are never
+# asked for. Empty: locked hosts are skipped with a warning.
+ob_become_token_cmd: ""
+
 # ── Optional opt-in features ──────────────────────────────────────────────────
 # Hardening and audit-trace are intrusive/system-wide and default to false
 # (see SECURITY.md). They apply to every role. Session recording is ON by
