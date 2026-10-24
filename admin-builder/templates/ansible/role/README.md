@@ -36,22 +36,23 @@ The `files/` directory (not shipped here) must contain:
 All variables are prefixed with `ob_`. Build-time defaults live in
 `defaults/main.yml`; override them via host_vars, group_vars, or extra-vars.
 
-| Variable                   | Description                                                                                                                                                                                                             |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_portal_url`            | LLNG portal URL (required)                                                                                                                                                                                              |
-| `ob_client_id`             | OIDC client_id for enrollment                                                                                                                                                                                           |
-| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false`                                                                                                          |
-| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                                                                                                                                                  |
-| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                                                                                                                                                  |
-| `ob_role`                  | `bastion`, `backend`, or `standalone` — declared by the inventory (host_vars/group_vars). A host whose `ob_role` is missing or differs from the tree's is **skipped**, so one tree can be played over a mixed inventory |
-| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                              |
-| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                     |
-| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                             |
-| `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                           |
-| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                 |
-| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                  |
-| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                         |
-| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                        |
+| Variable                   | Description                                                                                                                                                                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ob_portal_url`            | LLNG portal URL (required)                                                                                                                                                                                                                                             |
+| `ob_client_id`             | OIDC client_id for enrollment                                                                                                                                                                                                                                          |
+| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false`                                                                                                                                                         |
+| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                                                                                                                                                                                                 |
+| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                                                                                                                                                                                                 |
+| `ob_role`                  | `bastion`, `backend`, or `standalone` — declared by the inventory (host_vars/group_vars). A host whose `ob_role` is missing or differs from the tree's is **skipped**, so one tree can be played over a mixed inventory                                                |
+| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                                                                             |
+| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                                                                    |
+| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                                                                            |
+| `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                                                                          |
+| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                                                                |
+| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                                                                 |
+| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                                                                        |
+| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                                                                       |
+| `ob_become_token_cmd`      | Maximum security only: a controller-side command printing an SSO token (`llng --llng-server sso.example.com pam_token`). On a host whose `sudo` is locked to SSO tokens, it runs at every task and `sudo` gets its output; empty (default) skips such hosts. See below |
 
 Backend-only "accept only this bastion" variables:
 
@@ -99,17 +100,34 @@ Mode-specific variables (populated by ob-builder from the selected PAM mode):
 | `ob_cache_rate_limit_enabled`      | `true`           |
 | `ob_cache_rate_limit_max_attempts` | `3`              |
 
-## Maximum security: one run per host
+## Maximum security: later runs
 
 Under maximum security (Mode E) the setup run locks `sudo` to SSO tokens on
-every role: from then on the account Ansible connects with cannot become root.
-The role does what needs root before that point or in the setup's own task,
-so the run that deploys a host completes. A later run reads
-`/etc/pam.d/sudo` without `become`, finds the lock and skips the host with a
-warning: reconfigure it by hand from an SSO session allowed to `sudo`, or
-reinstall it. Backends configured by a later run still read the id of a
-locked bastion, without `become`, from `/var/lib/open-bastion/bastion-id`
-(written by `ob-heartbeat`), provided Ansible can still connect there. Set
+every role: from then on the account Ansible connects with cannot become root
+with a password of its own. The role does what needs root before that point
+or in the setup's own task, so the run that deploys a host completes. A later
+run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
+
+- with `ob_become_token_cmd` set, plays the host: the command runs on the
+  controller at every task and `sudo` gets the token it prints, so each
+  elevation goes through the SSO under the name of the person running the
+  play, as the scenario intends. Ansible must still be able to connect there,
+  as an SSO user or a service account;
+- otherwise skips it with a warning: reconfigure it by hand from an SSO
+  session allowed to `sudo`, or reinstall it.
+
+`ob_become_token_cmd` is typically `llng --llng-server sso.example.com
+pam_token` (the `llng` client of simple-oidc-client). Run it once by hand
+before the play, so that its session is in the cookie jar and the play never
+waits for a login; set it in the `group_vars` of the locked hosts or with
+`--extra-vars`. The tokens are single-use and live ten minutes; one is minted
+per task, and `sudo`'s timestamp cache means most are never asked for. Only a
+host found locked uses it: the run that deploys a host still takes the deploy
+account's own password (`-K`, or none with `NOPASSWD`).
+
+Backends configured by a later run still read the id of a locked bastion,
+without `become`, from `/var/lib/open-bastion/bastion-id` (written by
+`ob-heartbeat`), provided Ansible can still connect there. Set
 `ob_bastion_allowed_bastions` in the inventory when it cannot.
 
 ## Protecting the client secret with ansible-vault
