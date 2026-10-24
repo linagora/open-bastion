@@ -39,14 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrator guide links to it. `python3-myst-parser` is a new
   build-dependency of the Debian packages; the man pages still build without
   it (#388).
-
 - ob-builder: under maximum security, the generated Ansible role can play
   a host again after the run that deployed it. `ob_become_token_cmd` names a
-  command the controller runs at every task, typically
-  `llng --llng-server sso.example.com pam_token`, and `sudo` gets the token
-  it prints: each elevation goes through the SSO under the name of the
-  person running the play, as the scenario intends. Without it, such a host
-  is still skipped with a warning (#377).
+  command the controller runs each time `sudo` asks for a password,
+  typically `llng --llng-server sso.example.com pam_token`, and `sudo` gets
+  the token it prints (become method `ob_sudo_sso`, shipped with the role):
+  each elevation goes through the SSO under the name of the person running
+  the play, who must be `ansible_user`, as the scenario intends. Such a host
+  is not enrolled again. Without the option it is still skipped with a
+  warning (#377).
 
 ### Changed
 
