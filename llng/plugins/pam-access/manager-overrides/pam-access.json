@@ -1,0 +1,380 @@
+{
+  "attributes": {
+    "pamAccessActivation": {
+      "type": "bool",
+      "default": 0,
+      "documentation": "PAM access token generation activation"
+    },
+    "pamAccessTokenDuration": {
+      "type": "int",
+      "default": 600,
+      "documentation": "Default PAM access token validity (seconds)"
+    },
+    "pamAccessMaxDuration": {
+      "type": "int",
+      "default": 3600,
+      "documentation": "Maximum PAM access token validity (seconds)"
+    },
+    "pamAccessSshRules": {
+      "type": "keyTextContainer",
+      "default": {},
+      "documentation": "SSH authorization rules per server group"
+    },
+    "pamAccessSudoRules": {
+      "type": "keyTextContainer",
+      "default": {},
+      "documentation": "Sudo authorization rules per server group"
+    },
+    "pamAccessRp": {
+      "type": "text",
+      "default": "pam-access",
+      "documentation": "OIDC RP name for PAM tokens"
+    },
+    "pamAccessHeartbeatInterval": {
+      "type": "int",
+      "default": 300,
+      "documentation": "Expected heartbeat interval from PAM servers (seconds)"
+    },
+    "pamAccessInactiveThreshold": {
+      "type": "int",
+      "default": 900,
+      "documentation": "Maximum age of the calling server's last heartbeat accepted by /pam/authorize when pamAccessHeartbeatRequired is enabled (seconds, default 900)"
+    },
+    "pamAccessHeartbeatRequired": {
+      "type": "bool",
+      "default": 0,
+      "documentation": "Refuse /pam/authorize when the calling server has not sent a heartbeat within pamAccessInactiveThreshold seconds"
+    },
+    "pamAccessExportedVars": {
+      "type": "keyTextContainer",
+      "default": {},
+      "documentation": "Exported variables for PAM user provisioning"
+    },
+    "pamAccessOfflineEnabled": {
+      "type": "boolOrExpr",
+      "default": 0,
+      "documentation": "Enable offline mode for PAM authorization caching"
+    },
+    "pamAccessOfflineTtl": {
+      "type": "int",
+      "default": 86400,
+      "documentation": "Default offline authorization cache TTL (seconds)"
+    },
+    "pamAccessServerGroups": {
+      "type": "keyTextContainer",
+      "default": {},
+      "documentation": "Authoritative mapping of enrolled OIDC client_id to server group. When non-empty, /pam/authorize enforces the group from this map instead of trusting the request body."
+    },
+    "pamAccessBastionGroups": {
+      "type": "text",
+      "default": "bastion",
+      "documentation": "Comma-separated list of server groups whose hosts may be vouched for as bastions"
+    },
+    "pamAccessChoice": {
+      "type": "text",
+      "default": "",
+      "documentation": "Choice sub-module used by PamAccess server-to-server endpoints (must match an entry of authChoiceModules). Leave empty when Choice auth is not used."
+    },
+    "pamAccessBastionCertPinSourceAddress": {
+      "type": "bool",
+      "default": 0,
+      "documentation": "Pin the ephemeral certificate issued by /pam/bastion-cert to the bastion's IP (source-address critical option), so a leaked cert is only usable from the bastion that requested it. Recommended when there is no NAT/PAT between the bastion and the portal. Leave disabled when the address LLNG observes differs from the bastion's SSH egress address (reverse proxy, multi-homed bastion, NAT/PAT). Default 0 (disabled)."
+    },
+    "pamAccessRequireFingerprint": {
+      "type": "bool",
+      "default": 0,
+      "documentation": "Refuse /pam/verify and /pam/authorize when the caller supplies no SSH fingerprint, instead of falling back to the unbound behaviour"
+    },
+    "pamAccessBastionVoucherUnboundTtl": {
+      "type": "int",
+      "default": 900,
+      "documentation": "Maximum lifetime of a bastion voucher minted without an SSH fingerprint, i.e. one that nothing binds to the user's SSO certificate expiry (seconds)"
+    },
+    "pamAccessAllowedRps": {
+      "type": "text",
+      "default": "",
+      "documentation": "Comma-separated list of OIDC relying-party configuration keys allowed to call /pam/*. Empty (default) accepts any device-grant token carrying a pam scope, which is the historical behaviour. When set, it also forbids a caller from declaring a bastion server_group in the request body: bastion groups must then come from pamAccessServerGroups."
+    },
+    "pamAccessRequestSigningMode": {
+      "type": "select",
+      "select": [
+        {
+          "k": "off",
+          "v": "Off"
+        },
+        {
+          "k": "optional",
+          "v": "Optional (accept unsigned)"
+        },
+        {
+          "k": "required",
+          "v": "Required"
+        }
+      ],
+      "default": "off",
+      "documentation": "Verification of the X-Signature-256 / X-Timestamp / X-Nonce headers sent by the open-bastion PAM client. 'optional' accepts unsigned requests but still refuses a bad signature: use it while rolling the secret out, then switch to 'required'."
+    },
+    "pamAccessRequestSigningSecret": {
+      "type": "password",
+      "default": "",
+      "documentation": "Shared secret used to verify signed PAM requests. Must equal request_signing_secret in the open-bastion client configuration."
+    },
+    "pamAccessRequestSigningWindow": {
+      "type": "int",
+      "default": 300,
+      "documentation": "Accepted clock skew, in seconds, for X-Timestamp. Also the lifetime of the nonce replay cache entries."
+    },
+    "pamAccessResponseSigningAlg": {
+      "type": "select",
+      "select": [
+        {
+          "k": "",
+          "v": "Default (RP ID token algorithm, else RS256)"
+        },
+        {
+          "k": "RS256",
+          "v": "RS256"
+        },
+        {
+          "k": "RS384",
+          "v": "RS384"
+        },
+        {
+          "k": "RS512",
+          "v": "RS512"
+        },
+        {
+          "k": "PS256",
+          "v": "PS256"
+        },
+        {
+          "k": "PS384",
+          "v": "PS384"
+        },
+        {
+          "k": "PS512",
+          "v": "PS512"
+        },
+        {
+          "k": "ES256",
+          "v": "ES256"
+        },
+        {
+          "k": "ES256K",
+          "v": "ES256K"
+        },
+        {
+          "k": "ES384",
+          "v": "ES384"
+        },
+        {
+          "k": "ES512",
+          "v": "ES512"
+        },
+        {
+          "k": "EdDSA",
+          "v": "EdDSA"
+        }
+      ],
+      "default": "",
+      "documentation": "Algorithm of the signed answers of /pam/authorize, /pam/verify, /pam/userinfo, /pam/whoami and /pam/heartbeat, sent when a caller asks for them (Accept: application/ob-pam-response+jwt). Empty (default): the PAM relying party's ID token signature algorithm when it is asymmetric, else RS256. The key is the RP's signing key, else oidcServiceSignatureKey; it must match the algorithm's key type. Symmetric (HS*) and 'none' are never used."
+    }
+  },
+  "tree": [
+    {
+      "insert_into": "generalParameters/plugins",
+      "insert_after": "oidcOfflineTokens",
+      "nodes": [
+        {
+          "title": "pamAccess",
+          "help": "pamaccess.html",
+          "form": "simpleInputContainer",
+          "nodes": [
+            "pamAccessActivation",
+            "pamAccessTokenDuration",
+            "pamAccessMaxDuration",
+            {
+              "title": "pamAccessAuthzRules",
+              "form": "simpleInputContainer",
+              "nodes": [
+                "pamAccessSshRules",
+                "pamAccessSudoRules"
+              ]
+            },
+            "pamAccessRp",
+            "pamAccessHeartbeatInterval",
+            "pamAccessInactiveThreshold",
+            "pamAccessHeartbeatRequired",
+            "pamAccessExportedVars",
+            "pamAccessOfflineEnabled",
+            "pamAccessOfflineTtl",
+            "pamAccessRequestSigningMode",
+            "pamAccessRequestSigningSecret",
+            "pamAccessRequestSigningWindow",
+            "pamAccessResponseSigningAlg",
+            "pamAccessAllowedRps",
+            "pamAccessServerGroups",
+            "pamAccessBastionGroups",
+            "pamAccessRequireFingerprint",
+            "pamAccessBastionVoucherUnboundTtl",
+            "pamAccessChoice",
+            "pamAccessBastionCertPinSourceAddress"
+          ]
+        }
+      ]
+    }
+  ],
+  "lang": {
+    "pamAccess": {
+      "en": "PAM Access",
+      "fr": "Accès PAM",
+      "es": "Acceso PAM",
+      "it": "Accesso PAM"
+    },
+    "pamAccessActivation": {
+      "en": "Activation",
+      "fr": "Activation",
+      "es": "Activación",
+      "it": "Attivazione"
+    },
+    "pamAccessTokenDuration": {
+      "en": "Default token duration",
+      "fr": "Durée par défaut du token",
+      "es": "Duración predeterminada del token",
+      "it": "Durata predefinita del token"
+    },
+    "pamAccessMaxDuration": {
+      "en": "Maximum token duration",
+      "fr": "Durée maximale du token",
+      "es": "Duración máxima del token",
+      "it": "Durata massima del token"
+    },
+    "pamAccessAuthzRules": {
+      "en": "Authorization rules",
+      "fr": "Règles d'autorisation",
+      "es": "Reglas de autorización",
+      "it": "Regole di autorizzazione"
+    },
+    "pamAccessSshRules": {
+      "en": "SSH rules",
+      "fr": "Règles SSH",
+      "es": "Reglas SSH",
+      "it": "Regole SSH"
+    },
+    "pamAccessSudoRules": {
+      "en": "Sudo rules",
+      "fr": "Règles sudo",
+      "es": "Reglas sudo",
+      "it": "Regole sudo"
+    },
+    "pamAccessRp": {
+      "en": "OIDC Relying Party",
+      "fr": "Fournisseur de service OIDC",
+      "es": "Relying Party OIDC",
+      "it": "Relying Party OIDC"
+    },
+    "pamAccessHeartbeatInterval": {
+      "en": "Heartbeat interval",
+      "fr": "Intervalle de heartbeat",
+      "es": "Intervalo de heartbeat",
+      "it": "Intervallo di heartbeat"
+    },
+    "pamAccessInactiveThreshold": {
+      "en": "Inactive threshold",
+      "fr": "Seuil d'inactivité",
+      "es": "Umbral de inactividad",
+      "it": "Soglia di inattività"
+    },
+    "pamAccessHeartbeatRequired": {
+      "en": "Require heartbeat",
+      "fr": "Exiger le heartbeat",
+      "es": "Exigir heartbeat",
+      "it": "Richiedi l'heartbeat"
+    },
+    "pamAccessExportedVars": {
+      "en": "Exported variables",
+      "fr": "Variables exportées",
+      "es": "Variables exportadas",
+      "it": "Variabili esportate"
+    },
+    "pamAccessOfflineEnabled": {
+      "en": "Enable offline mode",
+      "fr": "Activer le mode hors ligne",
+      "es": "Activar el modo sin conexión",
+      "it": "Attiva la modalità offline"
+    },
+    "pamAccessOfflineTtl": {
+      "en": "Offline cache TTL",
+      "fr": "TTL du cache hors ligne",
+      "es": "TTL de la caché sin conexión",
+      "it": "TTL della cache offline"
+    },
+    "pamAccessServerGroups": {
+      "en": "Server groups (client_id → group)",
+      "fr": "Groupes de serveurs (client_id → groupe)",
+      "es": "Grupos de servidores (client_id → grupo)",
+      "it": "Gruppi di server (client_id → gruppo)"
+    },
+    "pamAccessBastionGroups": {
+      "en": "Bastion server groups",
+      "fr": "Groupes serveurs bastion",
+      "es": "Grupos de servidores bastión",
+      "it": "Gruppi di server bastion"
+    },
+    "pamAccessChoice": {
+      "en": "Choice sub-module for server-to-server endpoints",
+      "fr": "Sous-module Choice pour les endpoints serveur-à-serveur",
+      "es": "Submódulo Choice para los endpoints servidor a servidor",
+      "it": "Sottomodulo Choice per gli endpoint server-to-server"
+    },
+    "pamAccessBastionCertPinSourceAddress": {
+      "en": "Pin bastion certificate to source address",
+      "fr": "Lier le certificat bastion à l'adresse source",
+      "es": "Vincular el certificado del bastión a la dirección de origen",
+      "it": "Vincola il certificato del bastion all'indirizzo di origine"
+    },
+    "pamAccessRequireFingerprint": {
+      "en": "Require an SSH fingerprint",
+      "fr": "Exiger une empreinte SSH",
+      "es": "Exigir una huella SSH",
+      "it": "Richiedi un'impronta SSH"
+    },
+    "pamAccessBastionVoucherUnboundTtl": {
+      "en": "Unbound voucher TTL (s)",
+      "fr": "Durée d'un voucher non lié (s)",
+      "es": "TTL de un voucher no vinculado (s)",
+      "it": "TTL di un voucher non vincolato (s)"
+    },
+    "pamAccessAllowedRps": {
+      "en": "Allowed PAM relying parties",
+      "fr": "Clients OIDC autorisés pour PAM",
+      "es": "Clientes OIDC autorizados para PAM",
+      "it": "Client OIDC autorizzati per PAM"
+    },
+    "pamAccessRequestSigningMode": {
+      "en": "Request signature verification",
+      "fr": "Vérification de signature des requêtes",
+      "es": "Verificación de la firma de las solicitudes",
+      "it": "Verifica della firma delle richieste"
+    },
+    "pamAccessRequestSigningSecret": {
+      "en": "Request signing secret",
+      "fr": "Secret de signature des requêtes",
+      "es": "Secreto de firma de las solicitudes",
+      "it": "Segreto di firma delle richieste"
+    },
+    "pamAccessRequestSigningWindow": {
+      "en": "Signature time window (s)",
+      "fr": "Fenêtre temporelle de signature (s)",
+      "es": "Ventana temporal de la firma (s)",
+      "it": "Finestra temporale della firma (s)"
+    },
+    "pamAccessResponseSigningAlg": {
+      "en": "Response signature algorithm",
+      "fr": "Algorithme de signature des réponses",
+      "es": "Algoritmo de firma de las respuestas",
+      "de": "Algorithmus der Antwortsignatur",
+      "it": "Algoritmo di firma delle risposte"
+    }
+  }
+}

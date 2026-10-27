@@ -1,0 +1,196 @@
+#!/usr/bin/perl
+#=============================================================================
+# Rebuild the SSH CA KRL (Key Revocation List) from persistent sessions.
+#
+# Use case: multi-portal deployments (issue #9) where revocations are
+# propagated between nodes via the LLNG message broker. The broker is a
+# non-durable pub/sub, so a node that is down during a revocation will miss
+# the event and drift out of sync. This script re-reads the authoritative
+# source of truth (persistent sessions) and rewrites the local KRL.
+#
+# Intended to be run from cron on every portal node.
+#
+# This is part of LemonLDAP::NG SSH CA plugin, released under GPL-2+.
+#=============================================================================
+
+use strict;
+use Getopt::Long;
+use JSON qw(from_json);
+use File::Basename qw(dirname);
+use File::Path;
+use File::Temp;
+use Lemonldap::NG::Common::Apache::Session;
+use Lemonldap::NG::Portal;
+
+my %opts;
+
+sub usage {
+    print STDERR "Rebuild the SSH CA KRL from persistent sessions
+
+Usage:
+    $0 [options]
+
+Options:
+    -h, --help:     display this
+    -d, --debug:    enable debug logs
+    --loglevel=X:   fix logLevel (default: error)
+";
+}
+
+unless ( GetOptions( \%opts, 'h|help', 'd|debug', 'loglevel=s' ) ) {
+    usage;
+    exit 1;
+}
+
+if ( $opts{h} ) {
+    usage;
+    exit 0;
+}
+
+$opts{loglevel} ||= 'error';
+
+# Boot the portal so the SSH CA plugin loads (which converts the CA key from
+# PEM to the OpenSSH format we need). Then pull the plugin instance out for
+# its config and pre-computed sshPubKey.
+my $p = Lemonldap::NG::Portal->new;
+$p->init( { logLevel => $opts{d} ? 'debug' : $opts{loglevel} } );
+
+my $plugin = $p->_loadedPlugins->{'Lemonldap::NG::Portal::Plugins::SSHCA'};
+unless ($plugin) {
+    print STDERR
+      "SSH CA plugin not loaded — is sshCaActivation enabled in the config?\n";
+    exit 1;
+}
+
+exit( rebuild_krl($plugin) ? 0 : 1 );
+
+#=============================================================================
+# rebuild_krl($plugin)
+#
+# Scan every persistent session for revoked SSH certificates, collect their
+# serials, and rewrite the local KRL file via a single `ssh-keygen -k`
+# invocation (no -u: the existing KRL is replaced atomically).
+#=============================================================================
+sub rebuild_krl {
+    my ($plugin) = @_;
+    my $log = $plugin->logger;
+    my $conf = $plugin->conf;
+
+    my $krlPath = $conf->{sshCaKrlPath};
+    unless ($krlPath) {
+        $log->error('SSH CA: no KRL path configured, cannot rebuild');
+        return 0;
+    }
+
+    my $moduleOptions = {
+        backend => $conf->{persistentStorage} || $conf->{globalStorage},
+        %{
+                 $conf->{persistentStorageOptions}
+              || $conf->{globalStorageOptions}
+              || {}
+        },
+    };
+    unless ( $moduleOptions->{backend} ) {
+        $log->error('SSH CA: no persistent storage configured');
+        return 0;
+    }
+
+    my $res = eval {
+        Lemonldap::NG::Common::Apache::Session->searchOnExpr( $moduleOptions,
+            '_session_kind', 'Persistent',
+            qw(_session_kind _sshCerts) );
+    };
+    if ($@) {
+        $log->error("SSH CA: persistent session scan failed: $@");
+        return 0;
+    }
+
+    my %serials;
+    for my $sessionId ( keys %{ $res || {} } ) {
+        my $raw = $res->{$sessionId}->{_sshCerts} or next;
+        my $certs = eval { from_json($raw) };
+        next if $@ || ref($certs) ne 'ARRAY';
+        for my $c (@$certs) {
+            next unless $c->{revoked_at} && $c->{serial};
+            $serials{ $c->{serial} } = 1;
+        }
+    }
+
+    unless (%serials) {
+        $log->info('SSH CA: no revoked serials found, nothing to rebuild');
+
+        # Still make sure the local KRL is a file sshd can parse: a missing
+        # (or empty) one is a silent fail-open. No-op if a KRL is in place.
+        return $plugin->_ensureKrl($krlPath);
+    }
+
+    # Reject anything that is not a plain decimal serial before it reaches the
+    # ssh-keygen spec file: session data is authoritative but not necessarily
+    # well-formed, and one bad record must not be able to inject extra KRL
+    # directives for every node running this cron job.
+    my @bad = grep { !$plugin->_validSerial($_) } keys %serials;
+    if (@bad) {
+        $log->error( "SSH CA: ignoring "
+              . scalar(@bad)
+              . " malformed serial(s) found in persistent sessions" );
+        delete @serials{@bad};
+    }
+    unless (%serials) {
+        $log->error('SSH CA: no usable serial left, aborting rebuild');
+        return 0;
+    }
+
+    my $dir = dirname($krlPath);
+    File::Path::make_path($dir) if $dir ne '.' && !-d $dir;
+
+    my $tmpdir = File::Temp::tempdir( CLEANUP => 1 );
+
+    my $specFile = "$tmpdir/revoke_spec";
+    open my $fh, '>', $specFile or do {
+        $log->error("SSH CA: cannot write revoke spec: $!");
+        return 0;
+    };
+    print $fh "serial: $_\n" for sort { $a <=> $b } keys %serials;
+    close $fh;
+
+    # Delegate the write to the plugin so this cron job shares the portal's
+    # KRL lock and its atomic temp-file+rename install (issue #59). Writing
+    # `ssh-keygen -k -f $krlPath` directly here truncated the live KRL while
+    # sshd and /ssh/revoked were reading it.
+    unless ( $plugin->_writeKrl( $krlPath, spec => $specFile, update => 0 ) ) {
+        $log->error('SSH CA: KRL rebuild failed');
+        return 0;
+    }
+
+    $log->info(
+        "SSH CA: KRL rebuilt with " . scalar( keys %serials ) . " revoked serials" );
+    return 1;
+}
+
+__END__
+
+=head1 NAME
+
+sshca-rebuild-krl - Rebuild the SSH CA KRL from persistent sessions
+
+=head1 SYNOPSIS
+
+sshca-rebuild-krl [--debug] [--loglevel=LEVEL]
+
+=head1 DESCRIPTION
+
+Scans every persistent session for revoked SSH certificates and rewrites
+the local KRL file (C<sshCaKrlPath>) accordingly. Use this on every portal
+node, typically from cron every few minutes, to recover from drift caused
+by transient broker outages or a node joining the cluster after the fact.
+
+=head1 EXAMPLE
+
+  # /etc/cron.d/lemonldap-ng-sshca
+  */5 * * * * __APACHEUSER__ [ -x __BINDIR__/sshca-rebuild-krl ] && __BINDIR__/sshca-rebuild-krl
+
+=head1 SEE ALSO
+
+L<Lemonldap::NG::Portal::Plugins::SSHCA>
+
+=cut

@@ -1,0 +1,27 @@
+{
+  "name": "oidc-device-authorization",
+  "version": "0.6.0",
+  "summary": "OAuth 2.0 Device Authorization Grant (RFC 8628)",
+  "description": "Implements RFC 8628 Device Authorization Grant for LemonLDAP::NG. Provides device code endpoint, user verification page, and device code grant type on the token endpoint. Supports PKCE for additional security.",
+  "author": "Xavier Guimard <yadd@debian.org>",
+  "license": "GPL-2.0",
+  "llng_compat": ">=2.23.2",
+  "perl_requires": {
+    "JSON": "2.0",
+    "Crypt::URandom": "0",
+    "Digest::SHA": "0"
+  },
+  "customPlugins": "::Plugins::OIDCDeviceAuthorization",
+  "tags": [
+    "oidc",
+    "device",
+    "rfc8628"
+  ],
+  "homepage": "https://github.com/linagora/lemonldap-ng-plugins",
+  "autoload": [
+    {
+      "condition": "or::oidcRPMetaDataOptions/*/oidcRPMetaDataOptionsAllowDeviceAuthorization",
+      "module": "::Plugins::OIDCDeviceAuthorization"
+    }
+  ]
+}

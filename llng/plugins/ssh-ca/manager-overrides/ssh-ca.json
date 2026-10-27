@@ -1,0 +1,146 @@
+{
+  "attributes": {
+    "sshCaActivation": {
+      "type": "bool",
+      "default": 0,
+      "documentation": "SSH CA activation"
+    },
+    "sshCaAdminRule": {
+      "type": "boolOrExpr",
+      "default": 0,
+      "documentation": "Rule granting access to the SSH CA administration endpoints (/ssh/admin, /ssh/certs, /ssh/revoke). These endpoints list and revoke every user's certificates, so there is no permissive default: an empty rule (or 0) denies everyone."
+    },
+    "sshCaKeyRef": {
+      "type": "text",
+      "documentation": "SSH CA key reference (key ID from LLNG keys)"
+    },
+    "sshCaCertMaxValidity": {
+      "type": "int",
+      "default": 365,
+      "documentation": "SSH certificate max validity (days)"
+    },
+    "sshCaAllowedKeyTypes": {
+      "type": "text",
+      "default": "ed25519,ecdsa,sk-ed25519,sk-ecdsa,rsa",
+      "documentation": "Allowed SSH key families for signing (comma-separated: ed25519, sk-ed25519, ecdsa, sk-ecdsa, rsa, dss)"
+    },
+    "sshCaMinKeyBits": {
+      "type": "int",
+      "default": 2048,
+      "documentation": "Minimum SSH key size in bits (RSA/DSA only)"
+    },
+    "sshCaPrincipalSources": {
+      "type": "text",
+      "default": "$uid",
+      "documentation": "SSH certificate principal sources (Perl expression)"
+    },
+    "sshCaKrlPath": {
+      "type": "text",
+      "default": "/var/lib/lemonldap-ng/ssh/revoked_keys",
+      "documentation": "Path to SSH Key Revocation List file"
+    },
+    "sshCaSignMaxPerHour": {
+      "type": "int",
+      "default": 20,
+      "documentation": "Maximum /ssh/sign calls per user per hour. 0 disables the limit. Bounds KRL growth: each re-signature of the same key revokes the superseded serial."
+    },
+    "sshCaMaxCertsPerUser": {
+      "type": "int",
+      "default": 20,
+      "documentation": "Maximum active (non-revoked, non-expired) certificates per user. 0 disables the limit. Re-signing an existing key replaces its record and is not counted."
+    }
+  },
+  "tree": [
+    {
+      "insert_into": "generalParameters/plugins",
+      "insert_after": "oidcOfflineTokens",
+      "nodes": [
+        {
+          "title": "sshCa",
+          "help": "sshca.html",
+          "form": "simpleInputContainer",
+          "nodes": [
+            "sshCaActivation",
+            "sshCaAdminRule",
+            "sshCaKeyRef",
+            "sshCaCertMaxValidity",
+            "sshCaAllowedKeyTypes",
+            "sshCaMinKeyBits",
+            "sshCaSignMaxPerHour",
+            "sshCaMaxCertsPerUser",
+            "sshCaPrincipalSources",
+            "sshCaKrlPath"
+          ]
+        }
+      ]
+    }
+  ],
+  "lang": {
+    "sshCa": {
+      "en": "SSH CA",
+      "fr": "CA SSH",
+      "es": "CA SSH",
+      "it": "CA SSH"
+    },
+    "sshCaActivation": {
+      "en": "Activation",
+      "fr": "Activation",
+      "es": "Activación",
+      "it": "Attivazione"
+    },
+    "sshCaAdminRule": {
+      "en": "Administration rule",
+      "fr": "Règle d'administration",
+      "es": "Regla de administración",
+      "it": "Regola di amministrazione"
+    },
+    "sshCaKeyRef": {
+      "en": "CA key reference",
+      "fr": "Référence de la clé CA",
+      "es": "Referencia de la clave de la CA",
+      "it": "Riferimento della chiave della CA"
+    },
+    "sshCaCertMaxValidity": {
+      "en": "Maximum validity (days)",
+      "fr": "Validité maximale (jours)",
+      "es": "Validez máxima (días)",
+      "it": "Validità massima (giorni)"
+    },
+    "sshCaAllowedKeyTypes": {
+      "en": "Allowed key types",
+      "fr": "Types de clés autorisés",
+      "es": "Tipos de clave permitidos",
+      "it": "Tipi di chiave consentiti"
+    },
+    "sshCaMinKeyBits": {
+      "en": "Minimum key size (bits, RSA/DSA)",
+      "fr": "Taille de clé minimale (bits, RSA/DSA)",
+      "es": "Tamaño mínimo de clave (bits, RSA/DSA)",
+      "it": "Dimensione minima della chiave (bit, RSA/DSA)"
+    },
+    "sshCaPrincipalSources": {
+      "en": "Principal sources",
+      "fr": "Sources des principals",
+      "es": "Fuentes de los principals",
+      "it": "Fonti dei principal"
+    },
+    "sshCaKrlPath": {
+      "en": "KRL file path",
+      "fr": "Chemin du fichier KRL",
+      "es": "Ruta del archivo KRL",
+      "it": "Percorso del file KRL"
+    },
+    "sshCaSignMaxPerHour": {
+      "en": "Signatures per user per hour",
+      "fr": "Signatures par utilisateur et par heure",
+      "es": "Firmas por usuario y por hora",
+      "it": "Firme per utente all'ora"
+    },
+    "sshCaMaxCertsPerUser": {
+      "en": "Active certificates per user",
+      "fr": "Certificats actifs par utilisateur",
+      "es": "Certificados activos por usuario",
+      "it": "Certificati attivi per utente"
+    }
+  }
+}
