@@ -1,0 +1,39 @@
+linagora-lemonldap-ng-plugin-pam-access (0.6.0) unstable; urgency=high
+
+  Requires open-bastion 0.7.0 or later.
+
+  /pam/bastion-token has been removed (it signed a JWT even when the user
+  lookup had failed). Its probe mode was the only way for a server to read the
+  identity the portal assigned it at enrollment; that is now POST /pam/whoami,
+  returning the same bastion_id field with the same value.
+
+  An open-bastion older than 0.7.0 still calls the old endpoint and gets a
+  404. What this breaks, and what it does not:
+
+   * ob-bastion-id fails. Bringing a NEW bastion into service therefore fails,
+     because its bastion_id is what goes into the backends' allowed_bastions.
+     Worse, local-test/deploy-shell.sh and deploy-ansible.sh fall back to the
+     literal "ob-bastion" instead of failing, which yields a backend that
+     refuses every connection with nothing in the deployment log to say why.
+   * Bastions already in service keep working. Connections, sudo and hop
+     certificates do not go through this endpoint.
+
+  Also in this release, and NOT yet deployable: pamAccessRequestSigningMode
+  must stay at 'off' or 'optional'. The verifier gates all six /pam/*
+  endpoints, but the client signs only /pam/verify and /pam/authorize.
+  'required' would refuse /pam/heartbeat, which is how every enrolled host
+  renews its access token -- nothing fails when you flip the switch, then the
+  whole fleet stops at once, hours later, as those tokens expire.
+
+  New, and opt-in on the client side: signed answers (Accept:
+  application/ob-pam-response+jwt). Nothing changes until a host asks for
+  them. Once hosts REQUIRE them, an answer the portal cannot sign is a 500
+  for the whole fleet: keep the PAM relying party without
+  oidcRPMetaDataOptionsNoJwtHeader, and rotate the signing key only as the
+  README says -- append the new key, wait for every host to receive it
+  through the signed heartbeat, move it first, drop the old one later.
+
+  The rest of this release's upgrade notes are in UPGRADING.md upstream:
+  https://github.com/linagora/lemonldap-ng-plugins/blob/main/UPGRADING.md
+
+ -- Xavier Guimard <yadd@debian.org>  Tue, 20 Oct 2026 12:00:00 +0200

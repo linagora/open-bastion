@@ -1,0 +1,30 @@
+{
+  "name": "pam-access",
+  "version": "0.6.0",
+  "summary": "PAM access token generation and authorization for SSH/sudo",
+  "description": "Provides a portal interface for users to generate temporary PAM access tokens, and server-to-server endpoints for token verification and authorization checks. Supports SSH/sudo authorization rules per server group, heartbeat monitoring, offline mode, and OIDC Device Authorization Grant for server authentication.",
+  "author": "Xavier Guimard <yadd@debian.org>",
+  "license": "GPL-2.0",
+  "llng_compat": ">=2.23.2",
+  "perl_requires": {
+    "JSON": "2.0"
+  },
+  "customPlugins": "::Plugins::PamAccess",
+  "test_depends": [
+    "oidc-device-authorization",
+    "oidc-device-organization",
+    "ssh-ca"
+  ],
+  "tags": [
+    "pam",
+    "ssh",
+    "authorization"
+  ],
+  "homepage": "https://github.com/linagora/lemonldap-ng-plugins",
+  "autoload": [
+    {
+      "condition": "pamAccessActivation",
+      "module": "::Plugins::PamAccess"
+    }
+  ]
+}
