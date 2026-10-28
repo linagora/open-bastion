@@ -271,7 +271,7 @@ Pendant ce temps, le script poll toutes les 5 secondes avec :
 
 - ``iss`` et ``sub`` : le ``client_id`` (pam-access)
 - ``aud`` : l'URL du token endpoint
-- ``exp`` : expiration (maintenant + 60 secondes)
+- ``exp`` : expiration (maintenant + 300 secondes, soit 5 minutes)
 - ``iat`` : timestamp de création
 - ``jti`` : UUID unique (protection anti-replay)
 
