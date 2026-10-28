@@ -46,8 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the token it prints (become method `ob_sudo_sso`, shipped with the role):
   each elevation goes through the SSO under the name of the person running
   the play, who must be `ansible_user`, as the scenario intends. Such a host
-  is not enrolled again. Without the option it is still skipped with a
-  warning (#377).
+  is not enrolled again. The role's `openbastion.conf` now names the server
+  token file itself, so `sudo` keeps working on a locked host played again,
+  instead of losing it until the setup puts it back. Without the option it
+  is still skipped with a warning (#377).
 
 ### Changed
 
