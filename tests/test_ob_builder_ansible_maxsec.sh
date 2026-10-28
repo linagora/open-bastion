@@ -591,7 +591,12 @@ EOF
     # ansible_become_pass is the alias an inventory often holds: the stock
     # sudo takes it, the switched one must not.
     printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n      ansible_become_pass: deploypw\n' > "$d/inv.yml"
-    run_play "$d/play.yml" "$d/inv.yml" "$d/log" \
+    # The real play becomes root from the deploy account. Run as root (the CI's
+    # mutation job), the local connection's user is root too, and Ansible drops
+    # become when the remote user is the become user: the sudo above would never
+    # run, nor the plugin. Force it, so the plugin is exercised as it is from an
+    # ordinary account; as one, this changes nothing (root differs anyway).
+    ANSIBLE_BECOME_ALLOW_SAME_USER=1 run_play "$d/play.yml" "$d/inv.yml" "$d/log" \
         || { test_fail "become token play failed" "$(tail -20 "$d/log")"; return; }
     got="$(tr '\n' ' ' < "$d/passwords")minted=$(cat "$d/count" 2>/dev/null || echo 0)"
     [ "$got" = "deploypw token-1 token-2 token-3 cached minted=3" ] \
@@ -601,7 +606,7 @@ EOF
     # Not locked: no switch, the deploy account's own password stays in use.
     : > "$d/passwords"; rm -f "$d/count" "$d/cached"
     sed -i 's/^    ob_sudo_locked: true$/    ob_sudo_locked: false/' "$d/play.yml"
-    run_play "$d/play.yml" "$d/inv.yml" "$d/log2" \
+    ANSIBLE_BECOME_ALLOW_SAME_USER=1 run_play "$d/play.yml" "$d/inv.yml" "$d/log2" \
         || { test_fail "become token play failed (unlocked)" "$(tail -20 "$d/log2")"; return; }
     got=$(tr '\n' ' ' < "$d/passwords")
     [ "$got" = "deploypw deploypw deploypw deploypw cached " ] && [ ! -e "$d/count" ] \
