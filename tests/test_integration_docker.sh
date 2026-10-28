@@ -5,7 +5,8 @@
 # Tests the full PAM module with a real LLNG server including:
 # - Docker compose build and startup
 # - LLNG authentication via llng CLI
-# - Token introspection with JWT client assertion
+# - Token introspection of a user access token (device grant), with a JWT
+#   client assertion
 # - SSH connection with certificate authentication
 #
 # Usage:
@@ -558,50 +559,121 @@ test_ssh_connection_refused_after_revocation() {
     return 0
 }
 
+# Print a client_secret_jwt assertion (RFC 7523) for pam-access, addressed to
+# $1. ob-client-jwt, the helper ob-enroll signs its token requests with, runs
+# in the bastion; the secret goes over stdin, never on a command line.
+client_assertion_for() {
+    printf '%s' "$CLIENT_SECRET" \
+        | docker exec -i ob-cert-bastion ob-client-jwt --client-id "$CLIENT_ID" --audience "$1"
+}
+
+# Token introspection (RFC 7662), as pam_openbastion does it when a user's
+# password is an OAuth2 access token: the portal must answer "active": true
+# for a live user token, to a client authenticated with a JWT assertion.
+#
+# The token is dwho's, obtained the way ob-enroll gets one: a device
+# authorization grant on pam-access, approved here with the SSO session
+# test_llng_authentication opened, then exchanged with a client assertion.
+# It is tied to that SSO session, so the portal can introspect it.
+#
+# Two tokens that look closer to hand do not work, and must not be
+# "fixed" back in:
+# - the llng CLI's `access_token` is the authorization-code flow, which
+#   pam-access (a device-authorization client with no redirect URI) cannot
+#   complete;
+# - the bastion's server_token.json: once ob-heartbeat has run, its access
+#   token is minted by the portal's /pam/heartbeat with no SSO or offline
+#   session behind it, and /oauth2/introspect answers {"active":false} for
+#   it (it says "Count not find session tied to Access Token").
+#
+# Every step that does not produce what it should now fails the test.
 test_token_introspection() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing token introspection (with JWT client assertion)..."
 
-    # Get a valid user token first
-    # Use the llng client to get an access token
-    local access_token
-    access_token=$(llng --llng-url "$PORTAL_URL" \
-                        --login "$TEST_USER" \
-                        --password "$TEST_PASSWORD" \
-                        --client-id "$CLIENT_ID" \
-                        --client-secret "$CLIENT_SECRET" \
-                        access_token 2>&1) || true
-
-    if [[ -z "$access_token" ]] || [[ "$access_token" == *"error"* ]]; then
-        log_warn "Could not get access token for introspection test, skipping..."
-        pass "Token introspection skipped (no token available)"
-        return 0
+    if [[ ! -f "$COOKIE_FILE" ]] || ! grep -q "lemonldap" "$COOKIE_FILE"; then
+        fail "No SSO session in $COOKIE_FILE to approve the device grant with"
+        return 1
     fi
 
-    log_verbose "Access token: ${access_token:0:30}..."
-
-    # The actual introspection test would require the JWT assertion
-    # which is handled by the PAM module internally
-    # For now, verify the endpoint exists
-    local response
-    response=$(curl -sf -X POST "$PORTAL_URL/oauth2/introspect" \
-        -d "token=$access_token" \
+    # 1. Device authorization request (client_secret_post, as ob-enroll)
+    local device_resp device_code user_code
+    device_resp=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
         -d "client_id=$CLIENT_ID" \
-        -d "client_secret=$CLIENT_SECRET" 2>&1) || true
+        -d "client_secret=$CLIENT_SECRET" \
+        -d "scope=openid" 2>&1) || true
+    device_code=$(echo "$device_resp" | jq -r '.device_code // empty' 2>/dev/null) || true
+    user_code=$(echo "$device_resp" | jq -r '.user_code // empty' 2>/dev/null | tr -d '-') || true
+
+    if [[ -z "$device_code" ]] || [[ -z "$user_code" ]]; then
+        fail "Device authorization request failed" "$device_resp"
+        return 1
+    fi
+
+    # 2. Approval by dwho, through the portal's /device form
+    local form_token
+    form_token=$(curl -s -b "$COOKIE_FILE" "$PORTAL_URL/device?user_code=$user_code" \
+        | grep -oP 'name="token" value="\K[^"]+' | head -1) || true
+
+    if [[ -z "$form_token" ]]; then
+        fail "No form token on the portal's /device page for user code $user_code"
+        return 1
+    fi
+
+    curl -s -o /dev/null -b "$COOKIE_FILE" -X POST "$PORTAL_URL/device" \
+        -d "user_code=$user_code" \
+        -d "action=approve" \
+        -d "token=$form_token" || true
+
+    # 3. Device code exchange, authenticated with a client assertion
+    local token_endpoint="$PORTAL_URL/oauth2/token"
+    local assertion token_resp access_token="" error
+    for _ in 1 2 3 4 5; do
+        if ! assertion=$(client_assertion_for "$token_endpoint" 2>&1); then
+            fail "ob-client-jwt did not produce a client assertion" "$assertion"
+            return 1
+        fi
+        token_resp=$(curl -s -X POST "$token_endpoint" \
+            --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
+            --data-urlencode "device_code=$device_code" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+            --data-urlencode "client_assertion=$assertion" 2>&1) || true
+        access_token=$(echo "$token_resp" | jq -r '.access_token // empty' 2>/dev/null) || true
+        [[ -n "$access_token" ]] && break
+        error=$(echo "$token_resp" | jq -r '.error // empty' 2>/dev/null) || true
+        [[ "$error" == "authorization_pending" || "$error" == "slow_down" ]] || break
+        sleep 2
+    done
+
+    if [[ -z "$access_token" ]]; then
+        fail "Device code exchange returned no access token" "$token_resp"
+        return 1
+    fi
+
+    log_verbose "Access token: ${access_token:0:20}..."
+
+    # 4. Introspection, authenticated with a client assertion
+    local introspection_endpoint="$PORTAL_URL/oauth2/introspect"
+    if ! assertion=$(client_assertion_for "$introspection_endpoint" 2>&1); then
+        fail "ob-client-jwt did not produce a client assertion" "$assertion"
+        return 1
+    fi
+
+    local response
+    response=$(curl -s -X POST "$introspection_endpoint" \
+        --data-urlencode "token=$access_token" \
+        --data-urlencode "client_id=$CLIENT_ID" \
+        --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+        --data-urlencode "client_assertion=$assertion" 2>&1) || true
 
     log_verbose "Introspection response: $response"
 
-    if echo "$response" | jq -e '.active' >/dev/null 2>&1; then
-        local active
-        active=$(echo "$response" | jq -r '.active')
-        if [[ "$active" == "true" ]]; then
-            pass "Token introspection works (token active)"
-        else
-            pass "Token introspection works (token inactive/expired)"
-        fi
+    if echo "$response" | jq -e --arg user "$TEST_USER" '.active == true and .sub == $user' >/dev/null 2>&1; then
+        pass "Token introspection works (token active)"
         return 0
     else
-        fail "Token introspection failed" "$response"
+        fail "Introspection of $TEST_USER's access token did not answer active" "$response"
         return 1
     fi
 }

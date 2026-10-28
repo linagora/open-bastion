@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a bastion that has none; `ob-enroll` and `ob-bastion-setup --token-file`
   remove it when the host's token changes, and `ob-uninstall` with the token
   (#377).
+- Integration tests: the token introspection test of both Docker suites never
+  ran. It asked the llng CLI for a token through the authorization-code flow,
+  which the `pam-access` client, having no redirect URI, cannot complete, and
+  counted "skipped" as a pass. It now gets a token for `dwho` through a
+  device authorization grant, as `ob-enroll` does, introspects it with a
+  `client_secret_jwt` assertion, and fails unless the portal answers it
+  active. CI pins the llng CLI revision the tests are written against (#382).
 
 ### Security
 

@@ -543,8 +543,15 @@ jobs:
 
     - name: Install llng CLI
       run: |
-        # Install simple-oidc-client (llng CLI)
-        git clone --depth 1 https://github.com/linagora/simple-oidc-client.git /tmp/simple-oidc-client
+        # Install simple-oidc-client (llng CLI) at a fixed revision: it is a
+        # shell helper that prompts for the options it was not given, and its
+        # own changes alter what reaches stdout -- which is what the
+        # integration tests read. Bump REV deliberately, not by drift.
+        REV=1310bb9ec193b1b2931fc4725230991d2cd05d78
+        git init -q /tmp/simple-oidc-client
+        git -C /tmp/simple-oidc-client remote add origin https://github.com/linagora/simple-oidc-client.git
+        git -C /tmp/simple-oidc-client fetch -q --depth 1 origin "$REV"
+        git -C /tmp/simple-oidc-client checkout -q FETCH_HEAD
         sudo cp /tmp/simple-oidc-client/sh/llng /usr/local/bin/
         sudo cp /tmp/simple-oidc-client/sh/llng-lib.sh /usr/local/bin/
         sudo chmod +x /usr/local/bin/llng
@@ -608,7 +615,15 @@ jobs:
 
     - name: Install llng CLI
       run: |
-        git clone --depth 1 https://github.com/linagora/simple-oidc-client.git /tmp/simple-oidc-client
+        # Install simple-oidc-client (llng CLI) at a fixed revision: it is a
+        # shell helper that prompts for the options it was not given, and its
+        # own changes alter what reaches stdout -- which is what the
+        # integration tests read. Bump REV deliberately, not by drift.
+        REV=1310bb9ec193b1b2931fc4725230991d2cd05d78
+        git init -q /tmp/simple-oidc-client
+        git -C /tmp/simple-oidc-client remote add origin https://github.com/linagora/simple-oidc-client.git
+        git -C /tmp/simple-oidc-client fetch -q --depth 1 origin "$REV"
+        git -C /tmp/simple-oidc-client checkout -q FETCH_HEAD
         sudo cp /tmp/simple-oidc-client/sh/llng /usr/local/bin/
         sudo cp /tmp/simple-oidc-client/sh/llng-lib.sh /usr/local/bin/
         sudo chmod +x /usr/local/bin/llng
