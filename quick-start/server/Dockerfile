@@ -1,7 +1,8 @@
 # Open Bastion Quick Start - Single SSH server with token authentication
 #
-# Minimal Dockerfile that builds pam_openbastion + libnss_openbastion from source,
-# configures PAM/NSS and enrolls itself against LemonLDAP::NG at startup.
+# Minimal Dockerfile that builds pam_openbastion + libnss_openbastion from source
+# (and ob-client-jwt, which signs the enrolment requests), configures PAM/NSS
+# and enrolls itself against LemonLDAP::NG at startup.
 
 FROM debian:13-slim
 
@@ -40,6 +41,7 @@ RUN mkdir -p build && cd build && \
     mkdir -p "/usr/lib/${MULTIARCH}/security" "/lib/${MULTIARCH}" && \
     cp pam_openbastion.so "/usr/lib/${MULTIARCH}/security/" && \
     cp nss/libnss_openbastion.so.2 "/lib/${MULTIARCH}/" && \
+    install -m 0755 ob-client-jwt /usr/sbin/ && \
     ldconfig && \
     cd / && rm -rf /src/open-bastion/build
 

@@ -646,12 +646,19 @@ test_token_introspection() {
         return 1
     fi
 
-    # 1. Device authorization request (client_secret_post, as ob-enroll)
-    local device_resp device_code user_code
+    # 1. Device authorization request, authenticated with a client assertion
+    #    addressed to the token endpoint, as ob-enroll does (#384)
+    local token_endpoint="$PORTAL_URL/oauth2/token"
+    local assertion device_resp device_code user_code
+    if ! assertion=$(client_assertion_for "$token_endpoint" 2>&1); then
+        fail "ob-client-jwt did not produce a client assertion" "$assertion"
+        return 1
+    fi
     device_resp=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
-        -d "client_id=$CLIENT_ID" \
-        -d "client_secret=$CLIENT_SECRET" \
-        -d "scope=openid" 2>&1) || true
+        --data-urlencode "client_id=$CLIENT_ID" \
+        --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+        --data-urlencode "client_assertion=$assertion" \
+        --data-urlencode "scope=openid" 2>&1) || true
     device_code=$(echo "$device_resp" | jq -r '.device_code // empty' 2>/dev/null) || true
     user_code=$(echo "$device_resp" | jq -r '.user_code // empty' 2>/dev/null | tr -d '-') || true
 
@@ -676,8 +683,7 @@ test_token_introspection() {
         -d "token=$form_token" || true
 
     # 3. Device code exchange, authenticated with a client assertion
-    local token_endpoint="$PORTAL_URL/oauth2/token"
-    local assertion token_resp access_token="" error
+    local token_resp access_token="" error
     for _ in 1 2 3 4 5; do
         if ! assertion=$(client_assertion_for "$token_endpoint" 2>&1); then
             fail "ob-client-jwt did not produce a client assertion" "$assertion"
@@ -721,9 +727,31 @@ test_token_introspection() {
 
     if echo "$response" | jq -e --arg user "$TEST_USER" '.active == true and .sub == $user' >/dev/null 2>&1; then
         pass "Token introspection works (token active)"
-        return 0
     else
         fail "Introspection of $TEST_USER's access token did not answer active" "$response"
+        return 1
+    fi
+
+    # 5. The same request with the secret itself (client_secret_post) must be
+    #    refused: the portal enforces client_secret_jwt for pam-access
+    #    (oidcRPMetaDataOptionsAuthMethod, #384). LLNG answers a client
+    #    refused without an Authorization header with 400 invalid_client.
+    #    The token is live (step 4), so anything else means the secret was
+    #    accepted.
+    TESTS_RUN=$((TESTS_RUN + 1))
+    local code body
+    response=$(curl -s -w '\n%{http_code}' -X POST "$introspection_endpoint" \
+        --data-urlencode "token=$access_token" \
+        --data-urlencode "client_id=$CLIENT_ID" \
+        --data-urlencode "client_secret=$CLIENT_SECRET" 2>&1) || true
+    code=$(tail -n1 <<<"$response")
+    body=$(sed '$d' <<<"$response")
+    if [[ "$code" =~ ^40[01]$ ]] \
+        && jq -e '.error == "invalid_client"' >/dev/null 2>&1 <<<"$body"; then
+        pass "client_secret_post is refused on the pam-access client"
+        return 0
+    else
+        fail "client_secret_post is refused on the pam-access client" "HTTP $code: $body"
         return 1
     fi
 }

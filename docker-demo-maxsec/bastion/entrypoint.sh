@@ -218,9 +218,19 @@ fi
 
 # Step 3: Initiate Device Authorization Grant
 echo "Initiating Device Authorization Grant..."
+# The portal enforces client_secret_jwt for this client
+# (oidcRPMetaDataOptionsAuthMethod): requests carry an RFC 7523 assertion,
+# never the secret. ob-client-jwt (open-bastion package) reads the secret on stdin.
+client_assertion() {
+    printf '%s' "$CLIENT_SECRET" \
+        | ob-client-jwt --client-id "$CLIENT_ID" --audience "$PORTAL_URL/oauth2/token"
+}
+
+ASSERTION=$(client_assertion)
 DEVICE_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/device" \
     -d "client_id=$CLIENT_ID" \
-    -d "client_secret=$CLIENT_SECRET" \
+    -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+    -d "client_assertion=$ASSERTION" \
     -d "scope=pam pam:server")
 echo "  Device response: $DEVICE_RESP"
 
@@ -256,11 +266,13 @@ fi
 # Step 5: Poll for access token
 echo "Polling for access token..."
 for i in {1..30}; do
+    ASSERTION=$(client_assertion)
     TOKEN_RESP=$(curl -s -X POST "$PORTAL_URL/oauth2/token" \
         -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
         -d "device_code=$DEVICE_CODE" \
         -d "client_id=$CLIENT_ID" \
-        -d "client_secret=$CLIENT_SECRET")
+        -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+        -d "client_assertion=$ASSERTION")
 
     ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
 

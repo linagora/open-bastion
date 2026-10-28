@@ -662,6 +662,47 @@ test_forget_bastion_id() {
         && grep -A1 -E '^    save_token$' "$SCRIPT_PATH" | grep -qE '^    forget_bastion_id$'
 }
 
+# #384: a confidential client authenticates to /oauth2/device with a
+# client_secret_jwt assertion, as to /oauth2/token. The secret itself is
+# refused by a portal enforcing client_secret_jwt, and would be readable on
+# curl's command line. A public client sends no credentials.
+test_device_request_uses_assertion() {
+    local d="$TEMP_DIR/device"
+    mkdir -p "$d"
+    cat > "$d/ob-client-jwt" <<STUB
+#!/bin/sh
+cat > "$d/jwt-stdin"
+printf '%s\n' "\$*" > "$d/jwt-argv"
+echo stub.assertion.jwt
+STUB
+    chmod +x "$d/ob-client-jwt"
+    # The assignments are read by the sourced functions.
+    # shellcheck disable=SC2034
+    (
+        source_script_functions
+        OB_CLIENT_JWT="$d/ob-client-jwt"
+        curl() { printf '%s\n' "$@" > "$d/curl-argv"; printf '{"device_code":"dc","user_code":"UC"}\n200'; }
+        PORTAL_URL=https://sso.example.com CLIENT_ID=rp CLIENT_SECRET=s3cret SCOPE=pam:server
+        initiate_device_auth > /dev/null 2>&1
+    ) || return 1
+    grep -qx 'client_assertion=stub.assertion.jwt' "$d/curl-argv" || return 1
+    grep -qx 'client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer' "$d/curl-argv" || return 1
+    grep -qx 'client_id=rp' "$d/curl-argv" || return 1
+    if grep -q 's3cret\|client_secret' "$d/curl-argv"; then return 1; fi
+    [ "$(cat "$d/jwt-stdin")" = s3cret ] || return 1
+    grep -qx -- '--client-id rp --audience https://sso.example.com/oauth2/token' "$d/jwt-argv" || return 1
+    # shellcheck disable=SC2034
+    (
+        source_script_functions
+        OB_CLIENT_JWT="$d/ob-client-jwt"
+        curl() { printf '%s\n' "$@" > "$d/curl-argv"; printf '{"device_code":"dc","user_code":"UC"}\n200'; }
+        PORTAL_URL=https://sso.example.com CLIENT_ID=rp CLIENT_SECRET="" SCOPE=pam:server
+        initiate_device_auth > /dev/null 2>&1
+    ) || return 1
+    grep -qx 'client_id=rp' "$d/curl-argv" || return 1
+    if grep -q 'client_assertion\|client_secret' "$d/curl-argv"; then return 1; fi
+}
+
 # -C must be read before the options are applied (issue #314). main prints the
 # portal and server group before the first network call; the loopback portal
 # then fails at once.
@@ -738,6 +779,7 @@ main() {
     run_test "save_token fails + removes token when no refresh_token" test_save_token_no_refresh_fails
     run_test "save_token ok without refresh when offline not requested" test_save_token_no_offline_ok
     run_test "a new enrolment drops the kept bastion id (#377)" test_forget_bastion_id
+    run_test "/oauth2/device gets an assertion, never the secret (#384)" test_device_request_uses_assertion
     run_test "Config file with 'portal' alias works" test_config_portal_alias
     run_test "Multiple values in config - last one wins" test_config_last_value_wins
     run_test "Empty config file doesn't break load_config" test_empty_config

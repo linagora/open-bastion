@@ -81,6 +81,14 @@ replace || if ! jwt=$(echo x | openssl dgst -sha256 -hmac "$client_secret" \
 suite   || tests/test_ob_request_signing.sh
 why     || #256: the OIDC client secret must never reach a command line.
 
+id      || enroll-device-sends-assertion
+file    || scripts/ob-enroll
+search  || "${client_auth[@]}" \
+replace || ${CLIENT_SECRET:+-d "client_secret=${CLIENT_SECRET}"} \
+suite   || tests/test_ob_enroll.sh
+why     || #384: a portal enforcing client_secret_jwt refuses the bare secret on
+why     || /oauth2/device, and on curl's command line any local user reads it.
+
 id      || service-keys-foreign-command
 file    || scripts/ob-bastion-setup
 search  || if foreign=$(_ob_foreign_authorized_keys_command); then
