@@ -38,9 +38,12 @@ In the LLNG Manager, create a new OIDC Relying Party:
 4. Harden the client itself:
 
    - ``oidcRPMetaDataOptionsRequirePKCE`` = ``1``
-   - ``oidcRPMetaDataOptionsClientAuthenticationMethod`` =
-     ``client_secret_jwt``: the module already signs its requests this
-     way, and the secret stops travelling in a Basic header
+   - ``oidcRPMetaDataOptionsAuthMethod`` = ``client_secret_jwt``
+     (Manager: *Options → Security → Token endpoint authentication
+     method*; it applies to ``/oauth2/device``, ``/oauth2/introspect`` and
+     ``/oauth2/revoke`` too): the module, ``ob-enroll`` and
+     ``ob-uninstall`` already sign their requests this way, and the portal
+     then refuses the secret itself
    - ``oidcRPMetaDataOptionsRefreshTokenRotation`` = ``1``
    - ``oidcRPMetaDataOptionsRtActivity`` = ``2592000``: revoke the
      refresh token of a server that has not used it for 30 days. A

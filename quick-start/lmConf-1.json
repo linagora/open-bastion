@@ -84,7 +84,7 @@
       "oidcRPMetaDataOptionsDisplayName": "PAM Access",
       "oidcRPMetaDataOptionsClientID": "pam-access",
       "oidcRPMetaDataOptionsClientSecret": "pamsecret",
-      "oidcRPMetaDataOptionsClientAuthenticationMethod": "client_secret_jwt",
+      "oidcRPMetaDataOptionsAuthMethod": "client_secret_jwt",
       "oidcRPMetaDataOptionsAccessTokenExpiration": 86400,
       "oidcRPMetaDataOptionsRefreshToken": 1,
       "oidcRPMetaDataOptionsAllowDeviceAuthorization": 1,

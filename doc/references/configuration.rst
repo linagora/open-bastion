@@ -223,10 +223,21 @@ If you prefer manual enrollment:
 1. Initiate enrollment
 ^^^^^^^^^^^^^^^^^^^^^^
 
+A confidential client authenticates every request with a
+``client_secret_jwt`` assertion; the portal refuses the secret itself once
+``oidcRPMetaDataOptionsAuthMethod`` is ``client_secret_jwt``.
+``ob-client-jwt``\ (8) reads the secret on its standard input, so it never
+reaches a command line. An assertion is valid for five minutes: build a new one
+for each request.
+
 .. code:: bash
 
+   ASSERTION=$(ob-client-jwt --client-id pam-access \
+     --audience https://auth.example.com/oauth2/token < /path/to/client_secret)
    curl -X POST https://auth.example.com/oauth2/device \
      -d "client_id=pam-access" \
+     -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+     -d "client_assertion=$ASSERTION" \
      -d "scope=pam:server"
 
 Response:
@@ -254,11 +265,14 @@ An administrator visits ``https://auth.example.com/device``, logs in, and enters
 
 .. code:: bash
 
+   ASSERTION=$(ob-client-jwt --client-id pam-access \
+     --audience https://auth.example.com/oauth2/token < /path/to/client_secret)
    curl -X POST https://auth.example.com/oauth2/token \
      -d "grant_type=urn:ietf:params:oauth:grant-type:device_code" \
      -d "device_code=<device_code_from_step_1>" \
      -d "client_id=pam-access" \
-     -d "client_secret=your-secret"
+     -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+     -d "client_assertion=$ASSERTION"
 
 .. _configuration-4-save-the-token:
 

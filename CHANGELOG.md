@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device authorization grant, as `ob-enroll` does, introspects it with a
   `client_secret_jwt` assertion, and fails unless the portal answers it
   active. CI pins the llng CLI revision the tests are written against (#382).
+- The configuration key that makes the portal enforce `client_secret_jwt` is
+  `oidcRPMetaDataOptionsAuthMethod`: the demos and the documentation named one
+  LemonLDAP::NG does not read, so `client_secret_jwt` was not enforced.
+  `ob-enroll` now authenticates to `/oauth2/device` with a client assertion, as
+  it already did to `/oauth2/token` (#384).
 
 ### Security
 

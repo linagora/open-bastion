@@ -123,7 +123,7 @@ Flux détaillé (Phase 1 : Device Authorization Grant avec PKCE)
 
        Op->>Srv: 1. sudo ob-enroll
        Note over Srv: 1b. Génère PKCE:<br/>code_verifier=random<br/>code_challenge=SHA256(verifier)
-       Srv->>LLNG: 2. POST /oauth2/device<br/>client_id, scope, code_challenge
+       Srv->>LLNG: 2. POST /oauth2/device<br/>client_id, client_assertion, scope, code_challenge
        LLNG-->>Srv: 3. device_code, user_code,<br/>verification_uri
        Srv-->>Op: 4. Affiche user_code<br/>et verification_uri
 
@@ -166,7 +166,9 @@ L'opérateur exécute ``sudo ob-enroll`` sur le serveur. Le script génère d'ab
    code_verifier=$(head -c 32 /dev/urandom | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
    code_challenge=$(echo -n "$code_verifier" | openssl dgst -sha256 -binary | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
 
-Puis envoie une requête au portail avec le ``code_challenge`` :
+Puis envoie une requête au portail avec le ``code_challenge``, authentifiée
+comme celles du polling par une assertion ``client_secret_jwt`` (client
+confidentiel ; un client public n'envoie que ``client_id``) :
 
 .. code:: text
 
@@ -175,6 +177,8 @@ Puis envoie une requête au portail avec le ``code_challenge`` :
    Content-Type: application/x-www-form-urlencoded
 
    client_id=pam-access
+   &client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+   &client_assertion=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....<SIGNATURE>
    &scope=pam:server
    &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
    &code_challenge_method=S256
@@ -672,8 +676,8 @@ Le JWT (``client_assertion``) est signé avec le ``client_secret`` mais celui-ci
 .. code:: ini
 
    # Configuration LLNG (Manager) pour activer client_secret_jwt
-   # OIDC → Relying Parties → pam-access → Options → Client authentication method
-   oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+   # OIDC → Relying Parties → pam-access → Options → Security → Token endpoint authentication method
+   oidcRPMetaDataOptionsAuthMethod: client_secret_jwt
 
 - Stocker ``client_secret`` dans le fichier de config plutôt que le passer en CLI
 - Protéger le fichier de config (``chmod 600``)
@@ -1542,7 +1546,7 @@ R11    P=2, I=4          P=1, I=3              **P=1, I=2**
      pam-prod:
        oidcRPMetaDataOptionsClientID: pam-prod
        oidcRPMetaDataOptionsClientSecret: <PROD_SECRET>
-       oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+       oidcRPMetaDataOptionsAuthMethod: client_secret_jwt
        oidcRPMetaDataOptionsRequirePKCE: 1
        # Scope limité à la production
        oidcRPMetaDataOptionsScopeRules:
@@ -1552,7 +1556,7 @@ R11    P=2, I=4          P=1, I=3              **P=1, I=2**
      pam-staging:
        oidcRPMetaDataOptionsClientID: pam-staging
        oidcRPMetaDataOptionsClientSecret: <STAGING_SECRET>
-       oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+       oidcRPMetaDataOptionsAuthMethod: client_secret_jwt
        oidcRPMetaDataOptionsRequirePKCE: 1
        oidcRPMetaDataOptionsScopeRules:
          pam:staging: 1
@@ -1561,7 +1565,7 @@ R11    P=2, I=4          P=1, I=3              **P=1, I=2**
      pam-dev:
        oidcRPMetaDataOptionsClientID: pam-dev
        oidcRPMetaDataOptionsClientSecret: <DEV_SECRET>
-       oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+       oidcRPMetaDataOptionsAuthMethod: client_secret_jwt
        oidcRPMetaDataOptionsRequirePKCE: 1
        oidcRPMetaDataOptionsScopeRules:
          pam:dev: 1
@@ -1751,7 +1755,7 @@ Pour maximiser la sécurité du client OIDC ``pam-access``, appliquer ces param�
    # OIDC → Relying Parties → pam-access → Options
 
    # Authentification client par JWT (recommandation R8+)
-   oidcRPMetaDataOptionsClientAuthenticationMethod: client_secret_jwt
+   oidcRPMetaDataOptionsAuthMethod: client_secret_jwt
 
    # Exiger PKCE pour le Device Flow (FORTEMENT RECOMMANDÉ)
    oidcRPMetaDataOptionsRequirePKCE: 1

@@ -199,9 +199,13 @@ curl -s -H 'Host: auth.example.com' http://127.0.0.1:8090/.well-known/openid-con
 
 echo ""
 echo "-- Device flow smoke test --"
+# No credentials: the secret must not go on a command line, and a portal
+# enforcing client_secret_jwt refuses it anyway. A confidential client that is
+# registered and reaches the device plugin gets "Client authentication
+# required"; an unknown client gets a bare invalid_client.
 curl -s \
   -H 'Host: auth.example.com' \
-  -d 'client_id=pam-access&client_secret=pamsecret&scope=pam:server offline_access' \
+  -d 'client_id=pam-access&scope=pam:server offline_access' \
   http://127.0.0.1:8090/oauth2/device | jq .
 
 echo ""

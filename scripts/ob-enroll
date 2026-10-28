@@ -160,23 +160,26 @@ generate_pkce() {
     CODE_CHALLENGE_METHOD="S256"
 }
 
-# client_secret_jwt assertion (RFC 7523).
+# client_secret_jwt assertion (RFC 7523), for both /oauth2/device and
+# /oauth2/token: a portal enforcing client_secret_jwt refuses the bare secret on
+# either (#384). aud is the token endpoint for both, as RFC 7523 section 3
+# allows; LLNG only checks that an aud is present.
 generate_client_jwt() {
     local client_id="$1"
     local client_secret="$2"
-    local token_endpoint="$3"
+    local audience="$3"
 
     # No openssl fallback: `openssl dgst -hmac` takes the key on argv, readable
     # by any local user via /proc. See doc/security/01-enrollment.rst.
     if [ -z "$OB_CLIENT_JWT" ]; then
-        log_error "ob-client-jwt not found: cannot authenticate to the token endpoint"
+        log_error "ob-client-jwt not found: cannot authenticate to the portal"
         log_error "It ships with open-bastion; set OB_CLIENT_JWT to its path if it is elsewhere."
         return 1
     fi
 
     local jwt
     if ! jwt=$(printf '%s' "$client_secret" \
-        | "$OB_CLIENT_JWT" --client-id "$client_id" --audience "$token_endpoint"); then
+        | "$OB_CLIENT_JWT" --client-id "$client_id" --audience "$audience"); then
         return 1
     fi
     printf '%s\n' "$jwt"
@@ -340,11 +343,25 @@ initiate_device_auth() {
     local response
     local http_code
 
+    # A confidential client authenticates as it does to /oauth2/token: the
+    # secret itself would be refused by a portal enforcing client_secret_jwt,
+    # and would sit on curl's command line. A public client sends nothing.
+    local -a client_auth=()
+    if [ -n "$CLIENT_SECRET" ]; then
+        local client_jwt
+        if ! client_jwt=$(generate_client_jwt "$CLIENT_ID" "$CLIENT_SECRET" "${PORTAL_URL}/oauth2/token"); then
+            log_error "Cannot build the client assertion; aborting enrolment"
+            exit 1
+        fi
+        client_auth=(-d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                     -d "client_assertion=${client_jwt}")
+    fi
+
     build_curl_opts
     response=$(curl "${CURL_OPTS[@]}" -w "\n%{http_code}" \
         -X POST "${PORTAL_URL}/oauth2/device" \
         -d "client_id=${CLIENT_ID}" \
-        ${CLIENT_SECRET:+-d "client_secret=${CLIENT_SECRET}"} \
+        "${client_auth[@]}" \
         -d "scope=${SCOPE}" \
         -d "code_challenge=${CODE_CHALLENGE}" \
         -d "code_challenge_method=${CODE_CHALLENGE_METHOD}" 2>&1) || {
@@ -362,6 +379,7 @@ initiate_device_auth() {
         log_error "Response: $response"
         log_info "Common causes:"
         log_info "  - client_id '${CLIENT_ID}' is not registered on the LLNG portal"
+        log_info "  - invalid_client: wrong client_secret, or none for a confidential client"
         log_info "  - scope '${SCOPE}' is not allowed for this client"
         log_info "  - Device Authorization Grant is not enabled (oidcRPMetaDataOptionsGrantTypes)"
         log_info "  - PKCE method 'S256' is not allowed for this client"

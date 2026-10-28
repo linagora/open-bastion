@@ -141,8 +141,10 @@ ensure_sso(){
         sleep 5
         bash "$SSO_DIR/configure.sh" >"$WORK/sso.log" 2>&1 || die "configure.sh failed — see $WORK/sso.log"
     fi
+    # Without credentials (see sso/configure.sh): pam-access is registered and
+    # the device plugin answers when it asks the client to authenticate.
     check "SSO device endpoint answers" bash -c \
-      "curl -fsS -H 'Host: auth.example.com' -d 'client_id=pam-access&client_secret=pamsecret&scope=pam:server offline_access' http://$GW_IP/oauth2/device | jq -e .device_code >/dev/null"
+      "curl -sS -H 'Host: auth.example.com' -d 'client_id=pam-access&scope=pam:server offline_access' http://$GW_IP/oauth2/device | jq -e '.error_description == \"Client authentication required\"' >/dev/null"
 }
 
 # ── 3. recreate VMs + bootstrap ──────────────────────────────────────────────
