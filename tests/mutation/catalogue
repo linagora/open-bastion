@@ -1182,3 +1182,11 @@ replace || (#377).\n  vars:\n    ob_role: bastion
 suite   || tests/test_ob_builder_ansible_maxsec.sh
 why     || #377: a locked bastion played again must keep its enrolment; a new one
 why     || gives it a new id, and every backend holding the old one refuses its hops.
+
+id      || ansible-conf-names-server-token
+file    || admin-builder/templates/ansible/role/templates/openbastion.conf.j2
+search  || path, so it is not a variable.\nserver_token_file = /var/lib/open-bastion/token\n
+replace || path, so it is not a variable.\n
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #377: a locked host played again is not enrolled, so only the role's conf
+why     || keeps server_token_file in place before the next sudo checks its token.

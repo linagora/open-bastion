@@ -13,6 +13,11 @@ client_secret = {{ ob_client_secret }}
 
 # ── Server identity ───────────────────────────────────────────────────────────
 server_group = {{ ob_server_group }}
+# The token ob-enroll writes. Named here, not left to the setups that also
+# write it: a locked host played again is not enrolled, and its next sudo
+# needs the token before the setup runs (#377). The setups always write this
+# path, so it is not a variable.
+server_token_file = /var/lib/open-bastion/token
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
 verify_ssl = {{ 'true' if (ob_verify_ssl | default(true) | bool) else 'false' }}

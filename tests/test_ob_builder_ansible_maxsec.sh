@@ -212,6 +212,21 @@ PY
                   || test_fail "ansible_become_token_cmd is not wired as #377 says" "$bad"
 }
 
+# #377: the role deploys openbastion.conf on every run, and under maximum
+# security pam_openbastion needs the server token to check each sudo's token.
+# A locked host played again is not enrolled, so neither ob-enroll nor the
+# setup, which comes later, puts server_token_file back before the next become:
+# the conf the role deploys must name it itself.
+test_conf_names_the_server_token() {
+    local r bad=""
+    for r in "$BR" "$KR" "$SR"; do
+        grep -qx 'server_token_file = /var/lib/open-bastion/token' "$r/templates/openbastion.conf.j2" \
+            || bad="$bad ${r##*-}"
+    done
+    [ -z "$bad" ] && test_pass "every role: the deployed openbastion.conf names the server token file" \
+                  || test_fail "the role's openbastion.conf drops server_token_file (#377)" "$bad"
+}
+
 # A plain YAML scalar holding ": " is a mapping, not a string: ansible-core
 # >= 2.19 refuses it as a conditional at run time, which --syntax-check does
 # not see (#364).
@@ -602,6 +617,7 @@ else
     test_sshd_check_runs_with_the_setup
     test_backend_uses_the_bastion_fact
     test_become_token_option
+    test_conf_names_the_server_token
     test_conditionals_are_strings
     test_lock_detection_runs
     test_setup_wrapper_runs
