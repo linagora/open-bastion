@@ -132,13 +132,20 @@ static inline int path_validator_check_home(const char *home, const char *approv
         }
 
         /*
-         * The prefix alone, with or without a trailing slash, names the base
-         * directory itself and is never a home. Must stay in sync with
-         * config_validate_home() in src/config.c, which serves the PAM module.
+         * Skip empty entries, including one the strip above reduced to
+         * nothing ("/"): it would match any absolute path.
          */
-        if (strncmp(home, p, prefix_len) == 0 &&
-            home[prefix_len] == '/' && home[prefix_len + 1] != '\0') {
-            return 0;  /* Valid */
+        if (prefix_len > 0) {
+            /*
+             * The prefix alone, with or without a trailing slash, names the
+             * base directory itself and is never a home. Must stay in sync
+             * with config_validate_home() in src/config.c, which serves the
+             * PAM module.
+             */
+            if (strncmp(home, p, prefix_len) == 0 &&
+                home[prefix_len] == '/' && home[prefix_len + 1] != '\0') {
+                return 0;  /* Valid */
+            }
         }
 
         /* Move to next entry */
