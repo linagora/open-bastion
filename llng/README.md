@@ -9,6 +9,14 @@ packages them for the LLNG store.
 Note they are GPL-2+, not AGPL-3.0 as the rest of Open Bastion: see
 [COPYING](./COPYING) in this directory.
 
+## Installation with Debian packages
+
+The plugins are installed on the portal from Linagora's LLNG store, or from
+its Debian packages: see [the installation
+page](../doc/deployment/install.rst) of the documentation, section
+"Mandatory LLNG plugins". The HTML documentation renders the README of each
+plugin as its reference page.
+
 ## Two editable copies, until the submodule lands
 
 `lemonldap-ng-plugins` still carries its own `plugins/<plugin>` copy of this

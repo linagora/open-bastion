@@ -125,5 +125,5 @@ device code is known — carry `user_code_hash`, the index, instead.
 ## See Also
 
 - [RFC 8628 - OAuth 2.0 Device Authorization Grant](https://www.rfc-editor.org/rfc/rfc8628)
-- [oidc-device-organization plugin](../oidc-device-organization): tokens that
+- [oidc-device-organization plugin](../oidc-device-organization/README.md): tokens that
   identify the enrolled device rather than the approving admin

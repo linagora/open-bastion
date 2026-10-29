@@ -3,7 +3,7 @@ LLNG plugins parameters
 
 Optional parameters for the Open Bastion LLNG plugins, inserted into ``lemonldap-ng.ini``, section ``[portal]`` (or set via the Manager). This is a reference companion to :doc:`LemonLDAP::NG Configuration </deployment/llng-configuration>` — none of these are required to get started.
 
-   **Indicative only.** Names and defaults below are provided for convenience and may lag behind the plugins. The **authoritative** reference is each plugin's own ``README.md`` under ``llng/plugins/`` in this repository — defer to it in case of any doubt or discrepancy.
+   **Indicative only.** Names and defaults below are provided for convenience and may lag behind the plugins. The **authoritative** reference is each plugin's own documentation — :doc:`pam-access </llng/plugins/pam-access/README>`, :doc:`ssh-ca </llng/plugins/ssh-ca/README>`, :doc:`oidc-device-authorization </llng/plugins/oidc-device-authorization/README>` and :doc:`oidc-device-organization </llng/plugins/oidc-device-organization/README>` — defer to it in case of any doubt or discrepancy.
 
 General parameters
 ------------------

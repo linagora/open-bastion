@@ -96,6 +96,7 @@ formal analysis of the maximum security target.
 
    references/configuration
    references/llng-plugins-parameters
+   LLNG plugins <llng/README>
    references/security-reference
    references/maximum-security
    references/reference-paths

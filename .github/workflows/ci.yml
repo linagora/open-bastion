@@ -480,15 +480,17 @@ jobs:
           libjson-c-dev \
           libpam0g-dev \
           libsodium-dev \
+          python3-myst-parser \
           python3-sphinx \
           python3-sphinx-rtd-theme
 
     # doc/ is a Sphinx project now. A .md file dropped back in there would not
     # be in any toctree, would not be built, and would not be packaged -- it
-    # would just quietly not be documentation any more.
+    # would just quietly not be documentation any more. doc/llng/ is the one
+    # Markdown corner: the pages that render the LLNG plugins' READMEs.
     - name: The documentation tree is reST
       run: |
-        stray=$(find doc -name '*.md' -print)
+        stray=$(find doc -name '*.md' -not -path 'doc/llng/*' -print)
         if [ -n "$stray" ]; then
           echo "::error::Markdown left under doc/: $stray"
           exit 1
