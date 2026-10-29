@@ -300,6 +300,88 @@ jobs:
         path: build/*.deb
         retention-days: 7
 
+  # The release ships a CycloneDX SBOM per .deb (#277); this job keeps
+  # docker-sbom/generate-sbom.sh from rotting between tags, and leaves the
+  # maintainers a vulnerability report of the package on every push. The SBOM
+  # has to be valid CycloneDX, but the report is for reading, not gating: grype
+  # runs without --fail-on, so a CVE published upstream tomorrow does not turn
+  # CI red. No `container:` here: the script drives the runner's docker daemon.
+  sbom:
+    name: SBOM and vulnerability report
+    runs-on: ubuntu-latest
+    needs: package-deb
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Download Debian package
+      uses: actions/download-artifact@v7
+      with:
+        name: debian-package
+        path: packages
+
+    - name: Install syft
+      uses: anchore/sbom-action/download-syft@v0
+      with:
+        syft-version: v1.55.0
+
+    # cpack emits two packages here; the SBOM is the main one's. Run from the
+    # repository root, which the script insists on.
+    - name: Generate the SBOM
+      run: |
+        deb=$(find packages -name 'open-bastion_*_amd64.deb' | head -1)
+        mkdir -p sbom
+        ./docker-sbom/generate-sbom.sh --base-image debian:trixie-slim "$deb" sbom/
+        ls -l sbom/
+
+    - name: The SBOM is valid CycloneDX
+      run: |
+        for sbom in sbom/*.json; do
+          docker run --rm -v "$PWD/$sbom:/src/cyclonedx.json:ro" \
+            cyclonedx/cyclonedx-cli validate \
+            --input-file /src/cyclonedx.json --fail-on-errors
+        done
+
+    - name: Upload the SBOM
+      uses: actions/upload-artifact@v7
+      with:
+        name: sbom
+        path: sbom/*.json
+        retention-days: 7
+        if-no-files-found: error
+
+    - name: Install grype
+      id: grype
+      uses: anchore/scan-action/download-grype@v7
+      with:
+        grype-version: v0.121.0
+
+    # Informational only, see above. continue-on-error also keeps an outage of
+    # grype's vulnerability database from blocking a merge: the steps above
+    # are the ones that guard the script.
+    - name: Vulnerability report
+      continue-on-error: true
+      env:
+        GRYPE: ${{ steps.grype.outputs.cmd }}
+      run: |
+        mkdir -p vulnerabilities
+        for sbom in sbom/*.json; do
+          report="vulnerabilities/$(basename "$sbom" .json)-grype.txt"
+          "$GRYPE" "sbom:$sbom" -o table --file "$report"
+          cat "$report"
+        done
+
+    - name: Upload the vulnerability report
+      uses: actions/upload-artifact@v7
+      with:
+        name: vulnerabilities
+        path: vulnerabilities/
+        retention-days: 7
+        if-no-files-found: warn
+
   build-rpm:
     name: Build RPM (Rocky Linux ${{ matrix.version }})
     runs-on: ubuntu-latest

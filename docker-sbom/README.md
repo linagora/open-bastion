@@ -16,6 +16,22 @@ The Docker image `debian:trixie-slim` is used to collect dependencies
 recursively; Use the `--base-image` command line parameter to specify
 a different image.
 
+## Where the SBOMs are produced
+
+Each release carries, next to its packages, one SBOM per `.deb` and per
+distribution: the `bookworm`, `trixie` and `noble` packages are installed
+on `debian:bookworm-slim`, `debian:trixie-slim` and `ubuntu:noble`
+(`.github/workflows/release.yml`, job `sbom`). `open-bastion-desktop`
+has none: it depends on `lightdm-webkit2-greeter`, which none of those
+archives carries, so it cannot be installed on them. Neither has
+`open-bastion-dbgsym`: it depends on `open-bastion` alone, whose SBOM
+covers it.
+
+CI builds the SBOM of the main package on `debian:trixie-slim` on every
+push, validates it with `cyclonedx-cli` and runs grype on it; both the
+SBOM and grype's report are kept as artifacts (`sbom`,
+`vulnerabilities`). The report never fails the build.
+
 ## Methodology
 
 Note that Syft doesn't support generation of SBOM for a single DEB
