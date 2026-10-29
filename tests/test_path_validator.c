@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "path_validator.h"
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -148,6 +149,69 @@ static int test_home_special_chars(void)
     return 1;
 }
 
+/*
+ * The approved prefix names the base directory, never a home: user creation
+ * would then chown that base directory to the user it was asked to create.
+ */
+static int test_home_is_not_a_base_directory(void)
+{
+    if (config_validate_home("/home", NULL) != -1) return 0;
+    if (config_validate_home("/home/", NULL) != -1) return 0;
+    if (config_validate_home("/var/home", NULL) != -1) return 0;
+    if (config_validate_home("/var/home/", NULL) != -1) return 0;
+    if (path_validator_check_home("/home", NULL) != -1) return 0;
+    if (path_validator_check_home("/home/", NULL) != -1) return 0;
+    if (path_validator_check_home("/var/home", NULL) != -1) return 0;
+    if (path_validator_check_home("/var/home/", NULL) != -1) return 0;
+
+    /* A real home under the base directory still passes */
+    if (config_validate_home("/home/dwho", NULL) != 0) return 0;
+    if (path_validator_check_home("/home/dwho", NULL) != 0) return 0;
+
+    return 1;
+}
+
+/* A list entry written with a trailing slash must not change the answer */
+static int test_home_prefix_with_trailing_slash(void)
+{
+    if (config_validate_home("/home", "/home/") != -1) return 0;
+    if (config_validate_home("/home/", "/home/") != -1) return 0;
+    if (config_validate_home("/home/dwho", "/home/") != 0) return 0;
+
+    if (path_validator_check_home("/home", "/home/") != -1) return 0;
+    if (path_validator_check_home("/home/", "/home/") != -1) return 0;
+    if (path_validator_check_home("/home/dwho", "/home/") != 0) return 0;
+
+    return 1;
+}
+
+/* The PAM and NSS modules must agree, whatever the list looks like */
+static int test_pam_and_nss_validators_agree(void)
+{
+    static const char *const homes[] = {
+        "/home", "/home/", "/home/dwho", "/home/dwho/", "/var/home",
+        "/var/home/", "/var/home/dwho", "/home/dwho/sub", "/homefoo",
+        "/homefoo/dwho", "/root", "/tmp/user", NULL,
+    };
+    static const char *const lists[] = {
+        NULL, "/home", "/home/", "/home:/var/home", "/home/:/var/home/",
+        "/", "/homefoo", "/home/dwho", NULL,
+    };
+
+    for (int l = 0; lists[l]; l++) {
+        for (int h = 0; homes[h]; h++) {
+            int pam = config_validate_home(homes[h], lists[l]);
+            int nss = path_validator_check_home(homes[h], lists[l]);
+            if (pam != nss) {
+                printf("\n    disagrees on '%s' with list '%s' (pam=%d nss=%d) ",
+                       homes[h], lists[l], pam, nss);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 /* Test custom approved home prefixes */
 static int test_custom_home_prefixes(void)
 {
@@ -219,6 +283,9 @@ int main(void)
     TEST(home_relative_path);
     TEST(home_hidden_path);
     TEST(home_special_chars);
+    TEST(home_is_not_a_base_directory);
+    TEST(home_prefix_with_trailing_slash);
+    TEST(pam_and_nss_validators_agree);
     TEST(custom_home_prefixes);
 
     printf("\nEdge cases:\n");

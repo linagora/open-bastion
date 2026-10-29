@@ -405,8 +405,14 @@ All paths are validated before use:
 
 **Home Directory Validation** (``approved_home_prefixes``):
 
-- Must start with approved prefix *(default: /home, /var/home)*
+- Must start with approved prefix *(default: /home, /var/home)*, followed by
+  ``/`` and at least one more component; a trailing ``/`` on a list entry is
+  ignored (``/home/`` and ``/home`` are the same prefix)
+- The prefix itself, with or without a trailing slash, is refused: it names
+  the base directory, and user creation would then own the parent of every
+  other user's home
 - Same safety checks as shell
+- The PAM and NSS modules apply the same rules and always agree
 
 **Skeleton Directory Validation**:
 

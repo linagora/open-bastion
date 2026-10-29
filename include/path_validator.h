@@ -126,13 +126,19 @@ static inline int path_validator_check_home(const char *home, const char *approv
         const char *colon = strchr(p, ':');
         size_t prefix_len = colon ? (size_t)(colon - p) : strlen(p);
 
-        /* Check if home starts with this prefix */
-        if (strncmp(home, p, prefix_len) == 0) {
-            /* Home must be followed by / or end (prefix itself is not valid) */
-            char next = home[prefix_len];
-            if (next == '/') {
-                return 0;  /* Valid */
-            }
+        /* A trailing '/' on a list entry ("/home/:") is read as "/home" */
+        while (prefix_len > 0 && p[prefix_len - 1] == '/') {
+            prefix_len--;
+        }
+
+        /*
+         * The prefix alone, with or without a trailing slash, names the base
+         * directory itself and is never a home. Must stay in sync with
+         * config_validate_home() in src/config.c, which serves the PAM module.
+         */
+        if (strncmp(home, p, prefix_len) == 0 &&
+            home[prefix_len] == '/' && home[prefix_len + 1] != '\0') {
+            return 0;  /* Valid */
         }
 
         /* Move to next entry */

@@ -86,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ob-builder` and setup filters already did. Such a JWKS discloses the
   portal's signing key; it was loaded before, and `ob-heartbeat` could rotate
   it in.
+- A portal answering `"home":"/home"` or `"home":"/home/"` passed the home
+  validation of both the PAM and the NSS module. With `create_user` enabled,
+  the user's first login then made them the owner of the base directory
+  (`/home` or `/var/home`), which holds every other user's home. A home equal
+  to an approved prefix, with or without a trailing slash, is now refused by
+  both modules, which fall back to `create_user_home_base/<user>`.
 
 ## [0.7.0] _(2026-10-20)_
 
