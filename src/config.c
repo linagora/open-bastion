@@ -1318,14 +1318,21 @@ int config_validate_home(const char *home, const char *approved_prefixes)
         const char *colon = strchr(current, ':');
         size_t prefix_len = colon ? (size_t)(colon - current) : strlen(current);
 
+        /* A trailing '/' on a list entry ("/home/:") is read as "/home" */
+        while (prefix_len > 0 && current[prefix_len - 1] == '/') {
+            prefix_len--;
+        }
+
         /* Skip empty tokens (e.g., "::" or leading/trailing ":") */
         if (prefix_len > 0) {
-            /* Home must start with prefix and be followed by / or end */
-            if (strncmp(home, current, prefix_len) == 0) {
-                char next = home[prefix_len];
-                if (next == '/' || next == '\0') {
-                    return 0;  /* Found */
-                }
+            /*
+             * The prefix alone, with or without a trailing slash, names the
+             * base directory itself and is never a home: user creation would
+             * then hand the parent of every other user's home to its owner.
+             */
+            if (strncmp(home, current, prefix_len) == 0 &&
+                home[prefix_len] == '/' && home[prefix_len + 1] != '\0') {
+                return 0;  /* Found */
             }
         }
 
