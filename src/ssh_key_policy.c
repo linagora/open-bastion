@@ -422,6 +422,10 @@ bool ssh_key_policy_check_key(const ssh_key_policy_t *policy,
  *   ssh-ed25519 / sk-ed25519 : string pk                -> 256
  *   ecdsa-sha2-*             : string curve, string Q   -> from curve
  *
+ * Every field the type fixes is checked against an expected value (curve name,
+ * point length, key sizes), so a blob whose material contradicts its own type
+ * name is refused rather than reported with a size taken from that name.
+ *
  * The same decode is implemented in Perl in the LLNG ssh-ca plugin
  * (_parseSshPubKey / _mpintBits); keep the two in sync.
  * ------------------------------------------------------------------------ */
@@ -508,6 +512,58 @@ static bool blob_get_string(ssh_blob_reader_t *r,
     if (out_len) *out_len = n;
     r->off += n;
     return true;
+}
+
+/*
+ * Curve name and public point size an algorithm name implies. OpenSSH
+ * (sshkey_ecdsa_nid_from_name, SSH_ERR_EC_CURVE_MISMATCH) refuses a key whose
+ * curve field disagrees with its type; a size read from the name of such a blob
+ * would describe material the key does not hold.
+ */
+static const char *ecdsa_curve_name_for(ssh_key_type_t type)
+{
+    switch (type) {
+    case SSH_KEY_TYPE_ECDSA_256:
+    case SSH_KEY_TYPE_SK_ECDSA:
+        return "nistp256";
+    case SSH_KEY_TYPE_ECDSA_384:
+        return "nistp384";
+    case SSH_KEY_TYPE_ECDSA_521:
+        return "nistp521";
+    default:
+        return NULL;
+    }
+}
+
+static size_t ecdsa_point_len_for(ssh_key_type_t type)
+{
+    switch (type) {
+    case SSH_KEY_TYPE_ECDSA_256:
+    case SSH_KEY_TYPE_SK_ECDSA:
+        return 1 + 2 * 32;
+    case SSH_KEY_TYPE_ECDSA_384:
+        return 1 + 2 * 48;
+    case SSH_KEY_TYPE_ECDSA_521:
+        return 1 + 2 * 66;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * Whether an ECDSA curve field and public point are the ones the type names:
+ * the same curve, and an uncompressed point (0x04 || X || Y) of its size.
+ */
+static bool ecdsa_material_matches(ssh_key_type_t type,
+                                   const unsigned char *curve, size_t curve_len,
+                                   const unsigned char *point, size_t point_len)
+{
+    const char *expected = ecdsa_curve_name_for(type);
+    if (!expected) return false;
+    if (curve_len != strlen(expected)
+        || memcmp(curve, expected, curve_len) != 0) return false;
+    if (point_len != ecdsa_point_len_for(type)) return false;
+    return point[0] == 0x04;
 }
 
 /* Bit length of an SSH mpint (leading zero bytes stripped). */
@@ -599,11 +655,16 @@ bool ssh_key_blob_info(const char *blob_b64,
     case SSH_KEY_TYPE_ECDSA_521:
     case SSH_KEY_TYPE_SK_ECDSA:
         /* string curve name, string Q */
-        if (!blob_get_string(&r, &field, &field_len)) goto out;
-        if (field_len == 0 || field_len > 32) goto out;
-        if (!blob_get_string(&r, NULL, NULL)) goto out;
-        bits = ssh_key_type_bits(type);
-        if (bits <= 0) goto out;
+        {
+            const unsigned char *curve = NULL;
+            size_t curve_len = 0;
+            if (!blob_get_string(&r, &curve, &curve_len)) goto out;
+            if (!blob_get_string(&r, &field, &field_len)) goto out;
+            if (!ecdsa_material_matches(type, curve, curve_len, field, field_len))
+                goto out;
+            bits = ssh_key_type_bits(type);
+            if (bits <= 0) goto out;
+        }
         break;
 
     default:

@@ -119,6 +119,11 @@ logged. Consequences:
 - ``ssh_key_min_rsa_bits`` is enforced from the RSA modulus decoded out
   of the key blob. An RSA key whose size cannot be measured is
   rejected.
+- An ECDSA key or certificate whose curve field names another curve than
+  its type, or whose public point is not the uncompressed point of that
+  curve, is rejected, as sshd itself rejects it. The size of an ECDSA key
+  comes from its type name, so such a blob would be graded against
+  material it does not hold.
 - With the policy disabled (the default), none of this runs and
   behaviour is unchanged.
 
