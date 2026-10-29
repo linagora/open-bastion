@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
+  made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
+  PAM child and in `sudo`, so every SSO login and every elevation on that host
+  failed until the file was corrected. A member that is not a JSON string is
+  now read as absent, and the same check guards the portal's token,
+  introspection and CrowdSec answers (#391).
 - ob-builder: the generated Ansible roles failed on every host with service
   accounts ("Conditional expressions must be strings"): two unquoted `when:`
   entries holding `: ` were read as YAML mappings (#364).
