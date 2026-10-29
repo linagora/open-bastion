@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files are now suffixed with their distribution's codename
   (`open-bastion_0.7.0_amd64-bookworm.deb`), as all three were uploaded under
   the same name (#277).
+- The HTML documentation now carries the documentation of the four LLNG
+  plugins (`pam-access`, `ssh-ca`, `oidc-device-authorization`,
+  `oidc-device-organization`): a new "LLNG plugins" reference renders the
+  `README.md` of each from `llng/plugins/`, through myst-parser, and the
+  administrator guide links to it. `python3-myst-parser` is a new
+  build-dependency of the Debian packages; the man pages still build without
+  it (#388).
 
 ### Changed
 

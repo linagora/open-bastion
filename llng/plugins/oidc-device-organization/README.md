@@ -1,6 +1,6 @@
 # OIDC Device Organization - Organization Device Ownership
 
-Extension to the [oidc-device-authorization](../oidc-device-authorization)
+Extension to the [oidc-device-authorization](../oidc-device-authorization/README.md)
 plugin that adds organization-level device ownership for RFC 8628 Device
 Authorization Grant.
 
@@ -93,5 +93,5 @@ end to end.
 
 ## See Also
 
-- [oidc-device-authorization plugin](../oidc-device-authorization) (required)
+- [oidc-device-authorization plugin](../oidc-device-authorization/README.md) (required)
 - [RFC 8628 - OAuth 2.0 Device Authorization Grant](https://www.rfc-editor.org/rfc/rfc8628)

@@ -60,6 +60,27 @@ def _installed(module):
 _mermaid = _installed("sphinxcontrib.mermaid")
 extensions = ["sphinxcontrib.mermaid"] if _mermaid else []
 
+# The four LLNG plugins document themselves in Markdown, in the README of
+# each under llng/plugins/. The pages under llng/ here include those files as
+# they are, through myst-parser, so the README stays the one copy to
+# maintain. python3-myst-parser is a build-dependency of the Debian packages,
+# whose -doc package is the HTML build; the man pages need none of this and
+# EPEL 9 has no myst-parser, so a build without it leaves the plugin pages
+# out, and with them the references to them, instead of failing.
+_myst = _installed("myst_parser")
+if _myst:
+    extensions.append("myst_parser")
+    # The READMEs link to one another's sections by GitHub's heading slugs;
+    # give every heading down to ### the same id here.
+    myst_heading_anchors = 3
+else:
+    # Without a Markdown parser the .md files are not documents at all: the
+    # toctree entry and the :doc: references to them resolve to nothing,
+    # which is what these two warnings say. The CI build, with -W, has
+    # myst-parser, so a reference broken for any other reason still fails
+    # there.
+    suppress_warnings = ["toc.not_readable", "ref.doc"]
+
 # Shared with the repository README, which needs it at the root; Sphinx
 # resolves html_logo relative to this directory and copies it into the build.
 html_logo = "../linagora.png"

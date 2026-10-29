@@ -48,6 +48,7 @@ jobs:
             pkgconf \
             devscripts \
             fakeroot \
+            python3-myst-parser \
             python3-sphinx \
             python3-sphinx-rtd-theme
 

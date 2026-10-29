@@ -89,7 +89,8 @@ Plugin parameters
 The optional parameters for these plugins are listed in a separate
 reference page, see :doc:`LLNG Plugins Parameters
 </references/llng-plugins-parameters>`. The defaults are fine for a standard
-setup.
+setup. The complete documentation of each plugin — endpoints, every
+parameter and its default — is under :doc:`LLNG plugins </llng/README>`.
 
 .. _llng-configuration-restrict-device-and-the-ssh-ca-admin-routes-required:
 
