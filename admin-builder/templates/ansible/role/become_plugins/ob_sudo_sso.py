@@ -186,6 +186,8 @@ class BecomeModule(SudoBecomeModule):
             try:
                 os.killpg(p.pid, signal.SIGKILL)
             except OSError:
+                # The command ended by itself meanwhile, and reaped what it
+                # started: nothing is left to kill.
                 pass
             p.communicate()
             raise AnsibleError('ob_sudo_sso: ansible_become_token_cmd gave no token within %d s'
