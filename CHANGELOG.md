@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused. The role now checks every JWKS with
   `ob-verify-response check-jwks --anchor` before it replaces the host's
   (#371).
+- Each release now ships a CycloneDX SBOM per `.deb` and per distribution
+  (bookworm, trixie, noble), next to the packages, to feed a vulnerability
+  scanner such as grype. It lists what the package pulls in once installed,
+  and is produced by `docker-sbom/generate-sbom.sh`. `open-bastion-desktop`
+  has none, its greeter `lightdm-webkit2-greeter` being in none of those
+  archives, and neither has the debug symbols package (#277).
 
 ### Changed
 

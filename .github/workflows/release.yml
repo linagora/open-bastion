@@ -231,6 +231,79 @@ jobs:
           path: packages/*.rpm
           retention-days: 7
 
+  # One CycloneDX SBOM per .deb and per distribution, for a vulnerability
+  # scanner such as grype (#277). docker-sbom/generate-sbom.sh installs the
+  # package in a slim image of its distribution and runs syft on it: a build
+  # SBOM of what the package pulls in, not a source one. No `container:` here:
+  # the script drives the runner's docker daemon.
+  sbom:
+    name: SBOM (${{ matrix.codename }})
+    runs-on: ubuntu-latest
+    needs: build-deb
+    permissions:
+      contents: read
+
+    strategy:
+      matrix:
+        include:
+          - codename: bookworm
+            base-image: debian:bookworm-slim
+          - codename: trixie
+            base-image: debian:trixie-slim
+          - codename: noble
+            base-image: ubuntu:noble
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download packages
+        uses: actions/download-artifact@v7
+        with:
+          name: deb-${{ matrix.codename }}
+          path: packages
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+        with:
+          syft-version: v1.55.0
+
+      - name: Generate the SBOMs
+        env:
+          IMAGE: ${{ matrix.base-image }}
+        run: |
+          mkdir -p sbom
+          for deb in packages/*.deb; do
+            # The script installs one .deb on its own, resolving the rest from
+            # the image's archive. Two of ours cannot be installed that way:
+            # say so rather than fail the release, or leave them out without
+            # a word.
+            case "${deb##*/}" in
+              # lightdm-webkit2-greeter is in no Debian or Ubuntu archive (and
+              # open-bastion itself, which it needs too, is in none of these).
+              open-bastion-desktop_*)
+                echo "::notice::No SBOM for ${deb##*/}: its dependency lightdm-webkit2-greeter is in no archive of $IMAGE"
+                continue ;;
+              # Debug symbols (bookworm and trixie; noble's is a .ddeb): it
+              # depends on exactly this open-bastion and on nothing else, so
+              # open-bastion's SBOM already covers it.
+              open-bastion-dbgsym_*)
+                echo "::notice::No SBOM for ${deb##*/}: debug symbols of open-bastion, whose SBOM covers them"
+                continue ;;
+            esac
+            # Run from the repository root, which the script insists on.
+            ./docker-sbom/generate-sbom.sh --base-image "$IMAGE" "$deb" sbom/
+          done
+          ls -l sbom/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ matrix.codename }}
+          path: sbom/*.json
+          retention-days: 7
+          if-no-files-found: error
+
   create-repo:
     name: Create Repositories
     runs-on: ubuntu-latest
@@ -529,7 +602,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-deb, build-rpm]
+    needs: [build-deb, build-rpm, sbom]
     permissions:
       contents: write
 
@@ -537,11 +610,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Download all package artifacts
+      - name: Download all package and SBOM artifacts
         uses: actions/download-artifact@v7
         with:
           path: artifacts
-          pattern: '{deb,rpm}-*'
+          pattern: '{deb,rpm,sbom}-*'
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -560,10 +633,12 @@ jobs:
             echo "Release $VERSION" > RELEASE_NOTES.md
           fi
 
-      - name: Collect package files
+      # The SBOMs are named after their .deb and base image, so each
+      # distribution's ships next to the packages.
+      - name: Collect package and SBOM files
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \) \
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.json' \) \
             -exec cp {} release-assets/ \;
           ls -l release-assets/
 
