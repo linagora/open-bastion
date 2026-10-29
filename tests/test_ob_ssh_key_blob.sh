@@ -41,10 +41,14 @@ if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
     echo "SKIP: no C compiler"
     exit 0
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "SKIP: no python3 to build the blobs"
+    exit 0
+fi
 CC_BIN=$(command -v cc || command -v gcc)
 
-# Under build/ when there is one: the harness workspace may confine /tmp to a
-# single command, and this scratch directory has to outlive the first one.
+# Beside the build tree when there is one: a tmpfs or a tmp cleaner part-way
+# through the run is one failure mode a security suite should not inherit.
 SCRATCH_BASE="$ROOT_DIR/build"
 [ -d "$SCRATCH_BASE" ] || SCRATCH_BASE="${TMPDIR:-/tmp}"
 SCRATCH=$(mktemp -d "$SCRATCH_BASE/ob-ssh-key-blob.XXXXXX") \
