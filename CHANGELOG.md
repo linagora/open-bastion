@@ -78,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LemonLDAP::NG does not read, so `client_secret_jwt` was not enforced.
   `ob-enroll` now authenticates to `/oauth2/device` with a client assertion, as
   it already did to `/oauth2/token` (#384).
+- `crowdsec_whitelist` accepted a malformed CIDR prefix (`10.0.0.1/`,
+  `::1/-0`, `10.0.0.0/4294967296`) as `/0`, so one bad entry whitelisted every
+  IPv4 or IPv6 client and CrowdSec no longer refused banned addresses at the
+  PAM level. A prefix must now be one to three digits, at most 32 or 128;
+  anything else is skipped with an "invalid entry" warning (#390).
 
 ### Security
 

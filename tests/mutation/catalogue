@@ -1149,3 +1149,12 @@ replace ||         :
 suite   || tests/test_ob_bastion_setup.sh
 why     || #379 review: a token given with --token-file may be another device;
 why     || ob-heartbeat never replaces a kept id, so the stale one would stay.
+
+id      || crowdsec-whitelist-cidr-prefix-digits
+file    || src/crowdsec.c
+search  ||            if (slash[i + 1] < '0' || slash[i + 1] > '9' || i == 3) {
+replace ||            if (0) {
+suite   || tests/test_crowdsec
+why     || #390: a prefix that is not one to three digits ("/", "/-0",
+why     || "/4294967296") becomes /0 and whitelists the whole address family,
+why     || so the bouncer check is skipped for every client.

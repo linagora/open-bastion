@@ -530,6 +530,67 @@ static int test_whitelist_invalid_entries(void)
     return 1;
 }
 
+/* #390: a prefix that is not 1-3 digits must not become a network */
+static int test_whitelist_rejects_bad_prefix(void)
+{
+    const char *bad[] = {
+        "10.0.0.1/", "10.0.0.1/-0", "::1/-0", "10.0.0.0/+8", "10.0.0.0/ 8",
+        "10.0.0.0/4294967296", "::1/2147483648",
+        "::1/18446744073709551624", "::1/1000", "10.0.0.0/",
+        "::1/", "10.0.0.0/8/8", "10.0.0.0/ 0", "10.0.0.1//"
+    };
+
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        crowdsec_whitelist_entry_t *entries = NULL;
+        int count = -1;
+
+        if (crowdsec_parse_whitelist(bad[i], &entries, &count) != 0 || count != 0) {
+            printf("'%s' accepted as %d entries ", bad[i], count);
+            crowdsec_free_whitelist(entries);
+            return 0;
+        }
+        crowdsec_free_whitelist(entries);
+    }
+
+    /* Leading zeros are decimal, and an explicit /0 stays the stated intent */
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+    if (crowdsec_parse_whitelist("0.0.0.0/0", &entries, &count) != 0 || count != 1 ||
+        entries[0].prefix_len != 0) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+    crowdsec_free_whitelist(entries);
+
+    if (crowdsec_parse_whitelist("10.0.0.0/08", &entries, &count) != 0 || count != 1 ||
+        entries[0].prefix_len != 8) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+    crowdsec_free_whitelist(entries);
+
+    return 1;
+}
+
+/* #390: a bad prefix next to a good entry drops only the bad entry */
+static int test_whitelist_bad_prefix_mixed(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    if (crowdsec_parse_whitelist("10.0.0.1/, 192.168.1.0/24, ::1/2147483648, 10.0.0.2//, ::1",
+                                 &entries, &count) != 0) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+    if (count != 2 || entries[0].prefix_len != 24 || entries[1].prefix_len != 128) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+    crowdsec_free_whitelist(entries);
+    return 1;
+}
+
 int main(void)
 {
     printf("CrowdSec Integration Tests\n");
@@ -564,6 +625,8 @@ int main(void)
     TEST(whitelist_parse_mixed);
     TEST(whitelist_match);
     TEST(whitelist_invalid_entries);
+    TEST(whitelist_rejects_bad_prefix);
+    TEST(whitelist_bad_prefix_mixed);
 
     printf("\n==========================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);
