@@ -28,7 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scanner such as grype. It lists what the package pulls in once installed,
   and is produced by `docker-sbom/generate-sbom.sh`. `open-bastion-desktop`
   has none, its greeter `lightdm-webkit2-greeter` being in none of those
-  archives, and neither has the debug symbols package (#277).
+  archives, and neither has the debug symbols package. The release's `.deb`
+  files are now suffixed with their distribution's codename
+  (`open-bastion_0.7.0_amd64-bookworm.deb`), as all three were uploaded under
+  the same name (#277).
 
 ### Changed
 

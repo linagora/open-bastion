@@ -633,12 +633,25 @@ jobs:
             echo "Release $VERSION" > RELEASE_NOTES.md
           fi
 
-      # The SBOMs are named after their .deb and base image, so each
-      # distribution's ships next to the packages.
+      # The three distributions build packages with the same filename, and a
+      # release asset name must be unique: copied as they are, the last one
+      # would overwrite the other two. So each .deb gets its distribution's
+      # codename (open-bastion_0.7.0_amd64-bookworm.deb). The RPMs already
+      # carry theirs (.el9/.el10), and the SBOMs are named after their .deb
+      # and base image, so both keep their names.
       - name: Collect package and SBOM files
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.json' \) \
+          for dir in artifacts/deb-*/; do
+            codename=$(basename "$dir")
+            codename=${codename#deb-}
+            for deb in "$dir"*.deb; do
+              [ -f "$deb" ] || continue
+              name=$(basename "$deb" .deb)
+              cp "$deb" "release-assets/${name}-${codename}.deb"
+            done
+          done
+          find artifacts -type f \( -name '*.rpm' -o -name '*.json' \) \
             -exec cp {} release-assets/ \;
           ls -l release-assets/
 
