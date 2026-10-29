@@ -714,12 +714,29 @@ static int parse_whitelist_entry(const char *str, crowdsec_whitelist_entry_t *en
 
     if (slash) {
         *slash = '\0';
-        char *endptr;
-        long prefix = strtol(slash + 1, &endptr, 10);
-        if (*endptr != '\0' || prefix < 0) {
-            return -1;  /* Invalid prefix */
+
+        /*
+         * At most three decimal digits, and nothing else: strtol accepts a
+         * sign and leading spaces, never required a digit at all, and let the
+         * value overflow before the cast -- so "10.0.0.1/" became a /0 and
+         * whitelisted the whole address family, and "::1/2147483648" stored
+         * INT_MIN, which ip_matches_entry() passed to memcmp() as a size.
+         * The upper bound is checked once the family is known.
+         */
+        const char *p = slash + 1;
+        int prefix = 0;
+        int digits = 0;
+
+        for (; *p; p++, digits++) {
+            if (digits >= 3 || *p < '0' || *p > '9') {
+                return -1;  /* Invalid prefix */
+            }
+            prefix = prefix * 10 + (*p - '0');
         }
-        prefix_len = (int)prefix;
+
+        if (digits == 0) return -1;  /* No prefix after the slash */
+
+        prefix_len = prefix;
     }
 
     /* Try to parse as IPv4 */
@@ -788,6 +805,12 @@ static int ip_matches_entry(const char *ip, const crowdsec_whitelist_entry_t *en
     /* Compare addresses with prefix mask */
     int addr_bytes_count = (family == AF_INET) ? 4 : 16;
     int prefix_len = entry->prefix_len;
+
+    /* A prefix outside its family's width would size memcmp() with a value
+     * larger than the buffers, or, if negative, converted to size_t (#390). */
+    if (prefix_len < 0 || prefix_len > addr_bytes_count * 8) {
+        return 0;
+    }
 
     /* Compare full bytes */
     int full_bytes = prefix_len / 8;

@@ -530,6 +530,53 @@ static int test_whitelist_invalid_entries(void)
     return 1;
 }
 
+/*
+ * A prefix that names no network, or overflows, must be skipped rather than
+ * read as 0 or as a negative length (#390).
+ */
+static int test_whitelist_rejects_bad_prefix(void)
+{
+    static const char *bad[] = {
+        "10.0.0.1/", "10.0.0.1/-0", "::1/-0", "10.0.0.0/+8",
+        "10.0.0.0/4294967296", "::1/2147483648",
+        "::1/18446744073709551624", "10.0.0.0/ 8", " 49.46.50.46/ ",
+        "0.0.0.0/", "10.0.0.0/8x", "10.0.0.0/33", "::1/129",
+    };
+
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        crowdsec_whitelist_entry_t *entries = NULL;
+        int count = -1;
+
+        int result = crowdsec_parse_whitelist(bad[i], &entries, &count);
+        if (result != 0 || count != 0 || entries != NULL) {
+            printf("'%s' accepted (count=%d) ", bad[i], count);
+            crowdsec_free_whitelist(entries);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/* An explicit /0 is the administrator's stated intent and stays accepted */
+static int test_whitelist_zero_prefix_kept(void)
+{
+    crowdsec_whitelist_entry_t *entries = NULL;
+    int count = 0;
+
+    int result = crowdsec_parse_whitelist("0.0.0.0/0,::/0", &entries, &count);
+    if (result != 0 || count != 2 || !entries) {
+        crowdsec_free_whitelist(entries);
+        return 0;
+    }
+
+    int ok = (entries[0].family == AF_INET && entries[0].prefix_len == 0)
+             && (entries[1].family == AF_INET6 && entries[1].prefix_len == 0);
+
+    crowdsec_free_whitelist(entries);
+    return ok;
+}
+
 int main(void)
 {
     printf("CrowdSec Integration Tests\n");
@@ -564,6 +611,8 @@ int main(void)
     TEST(whitelist_parse_mixed);
     TEST(whitelist_match);
     TEST(whitelist_invalid_entries);
+    TEST(whitelist_rejects_bad_prefix);
+    TEST(whitelist_zero_prefix_kept);
 
     printf("\n==========================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);

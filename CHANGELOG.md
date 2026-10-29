@@ -81,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The CrowdSec whitelist accepted what it should have refused: a prefix that
+  names no network (`10.0.0.1/`, `0.0.0.0/`), carries a sign or a space
+  (`10.0.0.0/+8`, `10.0.0.0/ 8`) or overflows (`::1/2147483648`) was stored as
+  a `/0` or as a negative length. One malformed entry then whitelisted a whole
+  address family, so banned clients were no longer refused at the PAM level
+  and no "invalid entry" warning fired. A prefix must now be one to three
+  digits within the family's width; an explicit `/0` is still honoured (#390).
 - The PAM and NSS modules and `ob-verify-response` refuse a JWKS where any key
   holds private key material (`d`, or the RSA CRT members), as the
   `ob-builder` and setup filters already did. Such a JWKS discloses the
