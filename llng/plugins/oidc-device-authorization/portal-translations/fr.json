@@ -1,0 +1,18 @@
+{
+  "application": "Application",
+  "authorize": "Autoriser",
+  "clientId": "ID Client",
+  "codeAlreadyUsed": "Ce code a déjà été utilisé",
+  "deny": "Refuser",
+  "deviceApproved": "Appareil approuvé",
+  "deviceApprovedMsg": "L'appareil a été autorisé. Vous pouvez fermer cette fenêtre.",
+  "deviceAuthorization": "Autorisation d'appareil",
+  "deviceAuthorizationMsg": "Entrez le code affiché sur votre appareil pour l'autoriser.",
+  "deviceDenied": "Appareil refusé",
+  "deviceDeniedMsg": "L'autorisation de l'appareil a été refusée. Vous pouvez fermer cette fenêtre.",
+  "deviceTooManyAttempts": "Trop de codes invalides, réessayez plus tard",
+  "invalidUserCode": "Code invalide ou expiré",
+  "requestedScope": "Scope demandé",
+  "userCode": "Code de l'appareil",
+  "userCodeHelp": "Entrez le code à 8 caractères affiché sur votre appareil"
+}

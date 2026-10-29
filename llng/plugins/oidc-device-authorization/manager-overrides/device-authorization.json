@@ -1,0 +1,115 @@
+{
+  "attributes": {
+    "oidcServiceDeviceAuthorizationExpiration": {
+      "type": "int",
+      "default": 600,
+      "test": "^(?:[6-9][0-9]|[1-9][0-9]{2}|[12][0-9]{3}|3[0-5][0-9]{2}|3600)$",
+      "msgFail": "Device code TTL must be between 60 and 3600 seconds",
+      "documentation": "OpenID Connect Device Authorization code TTL (RFC 8628), between 60 and 3600 seconds"
+    },
+    "oidcServiceDeviceAuthorizationPollingInterval": {
+      "type": "int",
+      "default": 5,
+      "test": "^(?:[1-9]|[1-5][0-9]|60)$",
+      "msgFail": "Polling interval must be between 1 and 60 seconds",
+      "documentation": "OpenID Connect Device Authorization polling interval (RFC 8628), between 1 and 60 seconds"
+    },
+    "oidcServiceDeviceAuthorizationUserCodeLength": {
+      "type": "int",
+      "default": 8,
+      "test": "^(?:8|9|1[0-9]|20)$",
+      "msgFail": "User code length must be between 8 and 20 characters",
+      "documentation": "OpenID Connect Device Authorization user code length (RFC 8628). Minimum 8: over the 20-character alphabet that is ~34 bits of entropy, above the 20 bits RFC 8628 section 6.1 asks for"
+    },
+    "oidcServiceDeviceAuthorizationMaxFailures": {
+      "type": "int",
+      "default": 5,
+      "test": "^(?:[0-9]|[1-9][0-9]|100)$",
+      "msgFail": "Maximum invalid user codes must be between 0 and 100",
+      "documentation": "Number of invalid user codes a single SSO session may submit before device verification is locked for that session (0 disables the lockout)"
+    },
+    "oidcServiceDeviceAuthorizationLockoutDelay": {
+      "type": "int",
+      "default": 300,
+      "test": "^(?:[3-9][0-9]|[1-9][0-9]{2}|[12][0-9]{3}|3[0-5][0-9]{2}|3600)$",
+      "msgFail": "Lockout delay must be between 30 and 3600 seconds",
+      "documentation": "How long device verification stays locked for a session that submitted too many invalid user codes, in seconds"
+    },
+    "oidcRPMetaDataOptionsAllowDeviceAuthorization": {
+      "type": "boolOrExpr",
+      "default": 0,
+      "documentation": "Enable Device Authorization Grant (RFC 8628). 1 lets ANY authenticated user approve an enrollment for this RP; use a rule (e.g. $groups =~ /\\bdeviceadmins\\b/) to restrict who may approve"
+    }
+  },
+  "tree": {
+    "insert_into": "oidcServiceMetaData",
+    "insert_after": "oidcServiceMetaDataTimeouts",
+    "nodes": [
+      {
+        "title": "oidcServiceMetaDataDeviceAuthorization",
+        "help": "oidcdeviceauthorization.html",
+        "form": "simpleInputContainer",
+        "nodes": [
+          "oidcServiceDeviceAuthorizationExpiration",
+          "oidcServiceDeviceAuthorizationPollingInterval",
+          "oidcServiceDeviceAuthorizationUserCodeLength",
+          "oidcServiceDeviceAuthorizationMaxFailures",
+          "oidcServiceDeviceAuthorizationLockoutDelay"
+        ]
+      }
+    ]
+  },
+  "ctrees": {
+    "oidcRPMetaDataNode": {
+      "insert_into": "oidcRPMetaDataOptions/security",
+      "insert_after": "oidcRPMetaDataOptionsAllowClientCredentialsGrant",
+      "nodes": [
+        "oidcRPMetaDataOptionsAllowDeviceAuthorization"
+      ]
+    }
+  },
+  "lang": {
+    "oidcServiceMetaDataDeviceAuthorization": {
+      "en": "Device Authorization (RFC 8628)",
+      "fr": "Autorisation d'appareil (RFC 8628)",
+      "es": "Autorización de dispositivo (RFC 8628)",
+      "it": "Autorizzazione del dispositivo (RFC 8628)"
+    },
+    "oidcServiceDeviceAuthorizationExpiration": {
+      "en": "Device code expiration",
+      "fr": "Expiration du code appareil",
+      "es": "Caducidad del código de dispositivo",
+      "it": "Scadenza del codice dispositivo"
+    },
+    "oidcServiceDeviceAuthorizationPollingInterval": {
+      "en": "Polling interval",
+      "fr": "Intervalle de polling",
+      "es": "Intervalo de sondeo",
+      "it": "Intervallo di polling"
+    },
+    "oidcServiceDeviceAuthorizationUserCodeLength": {
+      "en": "User code length",
+      "fr": "Longueur du code utilisateur",
+      "es": "Longitud del código de usuario",
+      "it": "Lunghezza del codice utente"
+    },
+    "oidcServiceDeviceAuthorizationMaxFailures": {
+      "en": "Invalid codes before lockout",
+      "fr": "Codes invalides avant blocage",
+      "es": "Códigos no válidos antes del bloqueo",
+      "it": "Codici non validi prima del blocco"
+    },
+    "oidcServiceDeviceAuthorizationLockoutDelay": {
+      "en": "Lockout duration (s)",
+      "fr": "Durée du blocage (s)",
+      "es": "Duración del bloqueo (s)",
+      "it": "Durata del blocco (s)"
+    },
+    "oidcRPMetaDataOptionsAllowDeviceAuthorization": {
+      "en": "Allow Device Authorization Grant (RFC 8628)",
+      "fr": "Autoriser le Device Authorization Grant (RFC 8628)",
+      "es": "Permitir Device Authorization Grant (RFC 8628)",
+      "it": "Consenti il Device Authorization Grant (RFC 8628)"
+    }
+  }
+}

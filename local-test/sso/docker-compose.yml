@@ -15,8 +15,11 @@
 #   services:
 #     sso:
 #       volumes:
-#         - /path/to/lemonldap-ng-plugins/plugins/pam-access/lib/.../PamAccess.pm:/usr/share/perl5/.../PamAccess.pm:ro
-#         - /path/to/lemonldap-ng-plugins/plugins/ssh-ca/lib/.../SSHCA.pm:/usr/share/perl5/.../SSHCA.pm:ro
+#         - ../../llng/plugins/pam-access/lib/.../PamAccess.pm:/usr/share/perl5/.../PamAccess.pm:ro
+#         - ../../llng/plugins/ssh-ca/lib/.../SSHCA.pm:/usr/share/perl5/.../SSHCA.pm:ro
+#
+# Paths are relative to this file, so they point at the vendored tree in this
+# repository; substitute your lemonldap-ng-plugins checkout if you work there.
 #
 services:
   sso:
