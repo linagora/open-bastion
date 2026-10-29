@@ -639,6 +639,149 @@ TEST(blob_info_rejects_garbage)
     ASSERT(algo[0] == '\0');
 }
 
+/* P-384 and P-521 plain keys, and an sk-ecdsa key built from the P-256
+ * material above (ssh-keygen -t ecdsa). */
+static const char BLOB_ECDSA_384[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBICFCaQx6tiHJCZI"
+    "wGY2ar1TtaQqjxFmAL0qXq9KLooUmmtT7DlfL/kM3SQU/ufjp5uxMXggEfvBeulIy1iY"
+    "LogeAVfa77Z/nvaKHoD5tn+VJpnD1UkSQ9qVqISUYEyybA==";
+
+/* ssh-keygen -s ... -h: a host certificate over a P-256 key */
+static const char BLOB_ECDSA_256_CERT[] =
+    "AAAAKGVjZHNhLXNoYTItbmlzdHAyNTYtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgIXTI"
+    "RHQhpLAb7ZdIxJ4yUxHqibnB6Y5JP7+YB7bs3XwAAAAIbmlzdHAyNTYAAABBBD7grCRd"
+    "qHWaqqMkCuo+/iX1B5vUnKfFteXB8djt7G/Q5FCYND1S38vKaH1LVMcFZhLvK43asy8s"
+    "PUKXWxUWQzUAAAAAAAAAAAAAAAIAAAABdAAAAAUAAAABdQAAAAAAAAAA//////////8A"
+    "AAAAAAAAAAAAAAAAAABoAAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYA"
+    "AABBBD+4oFKUmp7ShP35WCzL4wE/gIKW8Hw6HLBzGgEed0o7HI4ADeRFlgwnDOrmkguV"
+    "B5nwg2/HQ0KF4abQAlPHuXgAAABkAAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAABJAAAA"
+    "IBwu88hR+kFrq+01nwu783DGctF5/Hkh2a4ZL+oePdE1AAAAIQDLrFQb20jGgH7sbj33"
+    "GOIGkoDv0fjMy05o4ow5jlFYOQ==";
+
+static const char BLOB_SK_ECDSA[] =
+    "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYA"
+    "AABBBNdik4NzxlsdXc5+WCKB5JFjXlz6YhyNb3lijXHynBjD8vzLX3R9w9otpO1FWRCS"
+    "11vOnyFarCJRrdf88F2v+MMAAAAEc3NoOg==";
+
+/* The same keys with one field altered: the curve name disagrees with the
+ * algorithm name, the point is one byte short or long, or the point is the
+ * compressed (0x02/0x03) form OpenSSH does not accept for SSH keys. ssh-keygen
+ * refuses every one of them as "not a public key file". */
+static const char BLOB_ECDSA_256_WRONG_CURVE[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAzODQAAABBBNdik4NzxlsdXc5+"
+    "WCKB5JFjXlz6YhyNb3lijXHynBjD8vzLX3R9w9otpO1FWRCS11vOnyFarCJRrdf88F2v"
+    "+MM=";
+
+static const char BLOB_ECDSA_384_WRONG_CURVE[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHA1MjEAAABhBICFCaQx6tiHJCZI"
+    "wGY2ar1TtaQqjxFmAL0qXq9KLooUmmtT7DlfL/kM3SQU/ufjp5uxMXggEfvBeulIy1iY"
+    "LogeAVfa77Z/nvaKHoD5tn+VJpnD1UkSQ9qVqISUYEyybA==";
+
+static const char BLOB_ECDSA_521_WRONG_CURVE[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHAyNTYAAACFBAGJxwFndWmLqXGV"
+    "aY6nKdRCLbPjEJdMOJAhxPyWAElPXBXZlt2Lg/JIgpUpJu4R03VMTadRLKox9XIfkNgT"
+    "5tO+tAEkYQREPPWa1kquJamBmI78T7l3EB9NxIUYR0+i9XJOLe1bi1hZLMYgtOlw9Vge"
+    "/AwNNnsWaHuJjr41DujV2JcerA==";
+
+/* The real P-256 certificate above, its curve field changed to nistp384 */
+static const char BLOB_ECDSA_256_CERT_WRONG_CURVE[] =
+    "AAAAKGVjZHNhLXNoYTItbmlzdHAyNTYtY2VydC12MDFAb3BlbnNzaC5jb20AAAAgTk5O"
+    "Tk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk4AAAAIbmlzdHAzODQAAABBBD7grCRd"
+    "qHWaqqMkCuo+/iX1B5vUnKfFteXB8djt7G/Q5FCYND1S38vKaH1LVMcFZhLvK43asy8s"
+    "PUKXWxUWQzU=";
+
+static const char BLOB_SK_ECDSA_WRONG_CURVE[] =
+    "AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAzODQA"
+    "AABBBNdik4NzxlsdXc5+WCKB5JFjXlz6YhyNb3lijXHynBjD8vzLX3R9w9otpO1FWRCS"
+    "11vOnyFarCJRrdf88F2v+MMAAAAEc3NoOg==";
+
+static const char BLOB_ECDSA_256_SHORT_POINT[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABABNdik4NzxlsdXc5+"
+    "WCKB5JFjXlz6YhyNb3lijXHynBjD8vzLX3R9w9otpO1FWRCS11vOnyFarCJRrdf88F2v"
+    "+A==";
+
+static const char BLOB_ECDSA_256_LONG_POINT[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABCBNdik4NzxlsdXc5+"
+    "WCKB5JFjXlz6YhyNb3lijXHynBjD8vzLX3R9w9otpO1FWRCS11vOnyFarCJRrdf88F2v"
+    "+MMA";
+
+static const char BLOB_ECDSA_384_SHORT_POINT[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABgBICFCaQx6tiHJCZI"
+    "wGY2ar1TtaQqjxFmAL0qXq9KLooUmmtT7DlfL/kM3SQU/ufjp5uxMXggEfvBeulIy1iY"
+    "LogeAVfa77Z/nvaKHoD5tn+VJpnD1UkSQ9qVqISUYEyy";
+
+static const char BLOB_ECDSA_521_LONG_POINT[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACGBAGJxwFndWmLqXGV"
+    "aY6nKdRCLbPjEJdMOJAhxPyWAElPXBXZlt2Lg/JIgpUpJu4R03VMTadRLKox9XIfkNgT"
+    "5tO+tAEkYQREPPWa1kquJamBmI78T7l3EB9NxIUYR0+i9XJOLe1bi1hZLMYgtOlw9Vge"
+    "/AwNNnsWaHuJjr41DujV2JcerAA=";
+
+static const char BLOB_ECDSA_256_COMPRESSED[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAAAhA9dik4NzxlsdXc5+"
+    "WCKB5JFjXlz6YhyNb3lijXHynBjD";
+
+static const char BLOB_ECDSA_384_COMPRESSED[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAAAhAoCFCaQx6tiHJCZI"
+    "wGY2ar1TtaQqjxFmAL0qXq9KLooU";
+
+static const char BLOB_ECDSA_521_COMPRESSED[] =
+    "AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAAAhAgGJxwFndWmLqXGV"
+    "aY6nKdRCLbPjEJdMOJAhxPyWAElP";
+
+static bool blob_refused(const char *blob)
+{
+    char algo[128];
+    ssh_key_type_t type;
+    int bits;
+    return !ssh_key_blob_info(blob, algo, sizeof(algo), &type, &bits);
+}
+
+TEST(blob_info_ecdsa_all_curves)
+{
+    char algo[128];
+    ssh_key_type_t type;
+    int bits;
+
+    ASSERT(ssh_key_blob_info(BLOB_ECDSA_384, algo, sizeof(algo), &type, &bits));
+    ASSERT_STR_EQ(algo, "ecdsa-sha2-nistp384");
+    ASSERT(type == SSH_KEY_TYPE_ECDSA_384);
+    ASSERT(bits == 384);
+
+    ASSERT(ssh_key_blob_info(BLOB_ECDSA_256_CERT, algo, sizeof(algo), &type, &bits));
+    ASSERT_STR_EQ(algo, "ecdsa-sha2-nistp256-cert-v01@openssh.com");
+    ASSERT(type == SSH_KEY_TYPE_ECDSA_256);
+    ASSERT(bits == 256);
+
+    ASSERT(ssh_key_blob_info(BLOB_SK_ECDSA, algo, sizeof(algo), &type, &bits));
+    ASSERT_STR_EQ(algo, "sk-ecdsa-sha2-nistp256@openssh.com");
+    ASSERT(type == SSH_KEY_TYPE_SK_ECDSA);
+    ASSERT(bits == 256);
+}
+
+/* The curve name the blob carries must be the one its algorithm name implies:
+ * the reported size comes from the name, so a mismatch would grade the key
+ * against material it does not hold (issue #401). */
+TEST(blob_info_ecdsa_curve_mismatch_refused)
+{
+    ASSERT(blob_refused(BLOB_ECDSA_256_WRONG_CURVE));
+    ASSERT(blob_refused(BLOB_ECDSA_384_WRONG_CURVE));
+    ASSERT(blob_refused(BLOB_ECDSA_521_WRONG_CURVE));
+    ASSERT(blob_refused(BLOB_ECDSA_256_CERT_WRONG_CURVE));
+    ASSERT(blob_refused(BLOB_SK_ECDSA_WRONG_CURVE));
+}
+
+/* The point must be the uncompressed encoding of the curve's size. */
+TEST(blob_info_ecdsa_point_shape_refused)
+{
+    ASSERT(blob_refused(BLOB_ECDSA_256_SHORT_POINT));
+    ASSERT(blob_refused(BLOB_ECDSA_256_LONG_POINT));
+    ASSERT(blob_refused(BLOB_ECDSA_384_SHORT_POINT));
+    ASSERT(blob_refused(BLOB_ECDSA_521_LONG_POINT));
+    ASSERT(blob_refused(BLOB_ECDSA_256_COMPRESSED));
+    ASSERT(blob_refused(BLOB_ECDSA_384_COMPRESSED));
+    ASSERT(blob_refused(BLOB_ECDSA_521_COMPRESSED));
+}
+
 /* An oversized blob is refused rather than allocated. */
 TEST(blob_info_rejects_oversized)
 {
@@ -861,6 +1004,9 @@ int main(void)
     RUN_TEST(blob_info_rsa_1024);
     RUN_TEST(blob_info_ed25519);
     RUN_TEST(blob_info_ecdsa);
+    RUN_TEST(blob_info_ecdsa_all_curves);
+    RUN_TEST(blob_info_ecdsa_curve_mismatch_refused);
+    RUN_TEST(blob_info_ecdsa_point_shape_refused);
     RUN_TEST(blob_info_certificate);
     RUN_TEST(blob_info_rejects_garbage);
     RUN_TEST(blob_info_rejects_oversized);
