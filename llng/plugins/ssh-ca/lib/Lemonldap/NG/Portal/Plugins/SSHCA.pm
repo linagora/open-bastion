@@ -80,6 +80,17 @@ my %SSHCA_FIXED_KEY_TYPES = (
     'sk-ecdsa-sha2-nistp256@openssh.com' => [ 'sk-ecdsa', 256 ],
 );
 
+# ECDSA types: the curve name the blob must carry, then the size of its
+# uncompressed point (0x04 || X || Y). OpenSSH (sshkey_ecdsa_nid_from_name)
+# refuses a key whose curve field disagrees with its type, so sizing one from
+# its type name would grade material the key does not hold.
+my %SSHCA_ECDSA_CURVES = (
+    'ecdsa-sha2-nistp256'                => [ 'nistp256', 1 + 2 * 32 ],
+    'ecdsa-sha2-nistp384'                => [ 'nistp384', 1 + 2 * 48 ],
+    'ecdsa-sha2-nistp521'                => [ 'nistp521', 1 + 2 * 66 ],
+    'sk-ecdsa-sha2-nistp256@openssh.com' => [ 'nistp256', 1 + 2 * 32 ],
+);
+
 has key => (
     is      => 'rw',
     lazy    => 1,
@@ -1914,10 +1925,12 @@ sub _mpintBits {
 # which is the RFC 4253 wire format: a sequence of fields, each a uint32
 # big-endian length followed by that many bytes. The first field is the key
 # type; the rest depend on it (`ssh-rsa` => e, n ; `ssh-dss` => p, q, g, y ;
-# `ssh-ed25519` => 32-byte point ; `sk-*` => point/curve then application).
+# `ssh-ed25519` => 32-byte point ; `sk-*` => point/curve then application ;
+# `ecdsa-sha2-*` => curve name, point).
 #
 # Returns undef if the blob is malformed, if the type is one we don't know
-# how to size, or if the announced prefix disagrees with the blob.
+# how to size, if the announced prefix disagrees with the blob, or if the
+# key material contradicts the type name.
 # Otherwise a hashref { type, family, bits, sized }, where `family` is the
 # token used in sshCaAllowedKeyTypes and `sized` says whether `bits` is a
 # variable modulus size (RSA/DSA) that sshCaMinKeyBits may be compared to.
@@ -1955,6 +1968,17 @@ sub _parseSshPubKey {
     # corrupt or an attempt to have the policy check read one type while
     # ssh-keygen reads another.
     return undef unless $type eq $prefix;
+
+    # ecdsa-sha2-*: type, curve name, point. Same reason as above: a curve
+    # that disagrees with the type name means the reported size is not the
+    # size of the key.
+    if ( my $curve = $SSHCA_ECDSA_CURVES{$type} ) {
+        return undef unless @fields >= 3;
+        return undef unless $fields[1] eq $curve->[0];
+        return undef
+          unless length( $fields[2] ) == $curve->[1]
+          && substr( $fields[2], 0, 1 ) eq "\x04";
+    }
 
     if ( my $fixed = $SSHCA_FIXED_KEY_TYPES{$type} ) {
         return {
