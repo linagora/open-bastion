@@ -1158,3 +1158,21 @@ suite   || tests/test_ob_crowdsec.sh
 why     || #390: a prefix that is not one to three digits ("/", "/-0",
 why     || "/4294967296") becomes /0 and whitelists the whole address family,
 why     || so the bouncer check is skipped for every client.
+id      || ssh-key-blob-ecdsa-curve
+file    || src/ssh_key_policy.c
+search  ||     if (curve_len != strlen(expected)\n        || memcmp(curve, expected, curve_len) != 0) return false;
+replace ||     if (0) return (void)curve, (void)curve_len, false;
+suite   || tests/test_ob_ssh_key_blob.sh
+why     || #401: the size of an ECDSA key comes from its type name, so a blob
+why     || whose curve field names another curve was accepted and graded as
+why     || material it does not hold. sshd refuses such a key; so must the
+why     || decoder that ranks it against ssh_key_min_ecdsa_bits.
+
+id      || ssh-key-blob-ecdsa-point
+file    || src/ssh_key_policy.c
+search  ||     if (point_len != ecdsa_point_len_for(type)) return false;\n    return point[0] == 0x04;
+replace ||     return (ecdsa_point_len_for(type), (void)point, (void)point_len, 1);
+suite   || tests/test_ob_ssh_key_blob.sh
+why     || #401: same decoder, the other half of the same check: a point of
+why     || the wrong size or a compressed point is not the key the type name
+why     || describes.
