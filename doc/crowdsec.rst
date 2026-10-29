@@ -138,6 +138,11 @@ The value must be a comma-separated list of IPs/CIDRs:
 - Single IPv6 addresses: ``::1``
 - IPv6 CIDR networks: ``2001:db8::/32``
 
+A prefix is one to three decimal digits, with no sign and no surrounding
+blank, and is at most 32 for IPv4 and 128 for IPv6. An explicit ``/0``
+whitelists the whole address family. Any other entry is skipped with an
+"invalid entry" warning in the journal, and the other entries are kept.
+
 Example:
 
 .. code:: ini

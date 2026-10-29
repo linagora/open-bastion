@@ -714,12 +714,21 @@ static int parse_whitelist_entry(const char *str, crowdsec_whitelist_entry_t *en
 
     if (slash) {
         *slash = '\0';
-        char *endptr;
-        long prefix = strtol(slash + 1, &endptr, 10);
-        if (*endptr != '\0' || prefix < 0) {
+        /* One to three digits, nothing else: strtol() would take a sign or
+         * leading blanks, stop before the end of the text, and on overflow
+         * give a prefix that compares below 32, i.e. a wider network. */
+        int prefix = 0;
+        size_t i = 0;
+        for (; slash[i + 1] != '\0'; i++) {
+            if (slash[i + 1] < '0' || slash[i + 1] > '9' || i == 3) {
+                return -1;  /* Invalid prefix */
+            }
+            prefix = prefix * 10 + (slash[i + 1] - '0');
+        }
+        if (i == 0) {
             return -1;  /* Invalid prefix */
         }
-        prefix_len = (int)prefix;
+        prefix_len = prefix;
     }
 
     /* Try to parse as IPv4 */
