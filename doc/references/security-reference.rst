@@ -412,7 +412,9 @@ All paths are validated before use:
   the base directory, and user creation would then own the parent of every
   other user's home
 - Same safety checks as shell
-- The PAM and NSS modules apply the same rules and always agree
+- The PAM and NSS modules apply the same rules to the same list. The NSS
+  module always uses the default list (``/home``, ``/var/home``): it does not
+  read ``approved_home_prefixes``
 
 **Skeleton Directory Validation**:
 

@@ -193,18 +193,20 @@ static int test_pam_and_nss_validators_agree(void)
         "/var/home/", "/var/home/dwho", "/home/dwho/sub", "/homefoo",
         "/homefoo/dwho", "/root", "/tmp/user", NULL,
     };
+    /* NULL stands for the default list and is a case like any other */
     static const char *const lists[] = {
         NULL, "/home", "/home/", "/home:/var/home", "/home/:/var/home/",
-        "/", "/homefoo", "/home/dwho", NULL,
+        "/", "//", "/homefoo", "/home/dwho", "", NULL,
     };
+    const size_t list_count = sizeof(lists) / sizeof(*lists) - 1;
 
-    for (int l = 0; lists[l]; l++) {
+    for (size_t l = 0; l < list_count; l++) {
         for (int h = 0; homes[h]; h++) {
             int pam = config_validate_home(homes[h], lists[l]);
             int nss = path_validator_check_home(homes[h], lists[l]);
             if (pam != nss) {
                 printf("\n    disagrees on '%s' with list '%s' (pam=%d nss=%d) ",
-                       homes[h], lists[l], pam, nss);
+                       homes[h], lists[l] ? lists[l] : "default", pam, nss);
                 return 0;
             }
         }
