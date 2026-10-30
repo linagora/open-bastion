@@ -6,7 +6,9 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "path_validator.h"
@@ -265,6 +267,56 @@ static int test_path_length_limit(void)
     return 1;
 }
 
+/*
+ * A home that already exists may only be reused when it already belongs to the
+ * account. Adopting somebody else's directory (root-owned ones included) would
+ * hand its whole tree to the new user, so the check must say "foreign" for any
+ * owner other than the target uid, and for anything that is not a real
+ * directory.
+ */
+static int test_foreign_home(void)
+{
+    char dir[] = "/tmp/ob-foreign-home-XXXXXX";
+    char link[sizeof(dir) + 8];
+    char file[sizeof(dir) + 8];
+    FILE *f;
+    int ok = 1;
+
+    if (!mkdtemp(dir)) return 0;
+
+    /* Absent: nothing to take over. */
+    if (path_validator_is_foreign_home("/tmp/ob-absent-home-xyzzy", getuid()) != 0) ok = 0;
+
+    /* Ours: reusable as-is. */
+    if (path_validator_is_foreign_home(dir, getuid()) != 0) ok = 0;
+
+    /* Another owner: never reusable. Skipped as root, where every file is ours. */
+    if (getuid() != 0 && path_validator_is_foreign_home(dir, 0) != 1) ok = 0;
+
+    /* A symlink is never adopted, even when it points at a directory. */
+    snprintf(link, sizeof(link), "%s/link", dir);
+    if (symlink(dir, link) != 0) {
+        ok = 0;
+    } else if (path_validator_is_foreign_home(link, getuid()) != 1) {
+        ok = 0;
+    }
+    unlink(link);
+
+    /* Neither is a regular file. */
+    snprintf(file, sizeof(file), "%s/file", dir);
+    f = fopen(file, "w");
+    if (!f) {
+        ok = 0;
+    } else {
+        fclose(f);
+        if (path_validator_is_foreign_home(file, getuid()) != 1) ok = 0;
+        unlink(file);
+    }
+
+    rmdir(dir);
+    return ok;
+}
+
 int main(void)
 {
     printf("Path Validator Tests\n");
@@ -289,6 +341,7 @@ int main(void)
     TEST(home_prefix_with_trailing_slash);
     TEST(pam_and_nss_validators_agree);
     TEST(custom_home_prefixes);
+    TEST(foreign_home);
 
     printf("\nEdge cases:\n");
     TEST(null_empty_inputs);

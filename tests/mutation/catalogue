@@ -1158,3 +1158,12 @@ suite   || tests/test_ob_crowdsec.sh
 why     || #390: a prefix that is not one to three digits ("/", "/-0",
 why     || "/4294967296") becomes /0 and whitelists the whole address family,
 why     || so the bouncer check is skipped for every client.
+
+id      || foreign-home-not-adopted
+file    || include/path_validator.h
+search  ||     return !S_ISDIR(st.st_mode) || st.st_uid != uid;
+replace ||     return (void)st, (void)uid, 0;
+suite   || tests/test_ob_path_validator.sh
+why     || #403: a pre-existing directory owned by somebody else (root
+why     || included) would otherwise become the new user's home, recursively.
+why     || A symlink or a regular file there is never a home either.
