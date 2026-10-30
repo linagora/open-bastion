@@ -91,6 +91,12 @@ int main(void)
         r = read_one("AAAAAAAA\n", 9, small, sizeof(small));
         CHECK(r == -1, "line longer than buffer rejected (overflow)");
     }
+    /* The validators stop at the first NUL; the line must not be accepted as
+     * the shorter string that precedes it. */
+    r = read_one("back\0\0garbage\n", 14, buf, sizeof(buf));
+    CHECK(r == -1, "embedded NUL rejected, not read as a shorter value");
+    r = read_one("host\0evil\n", 10, buf, sizeof(buf));
+    CHECK(r == -1, "NUL in a value rejected");
 
     printf("\n%d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
