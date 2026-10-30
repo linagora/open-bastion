@@ -154,6 +154,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a `groups` or `managed_groups` entry holding a NUL byte is skipped
   instead of being shortened to its prefix (#398, #399, #400). The same
   string-only copy also covers the authorization and offline caches.
+- `create_user` no longer takes over a home directory that already exists and
+  belongs to somebody else. It used to `chown` such a directory to the new
+  user, recursively, so any pre-existing root-owned directory under an approved
+  prefix (`/home/shared`, for instance) became theirs. The user is now given
+  `create_user_home_base/<user>` instead, and creation is refused when that is
+  the same path. A home the module creates itself is still handed over, and a
+  pre-existing home already owned by the user is left untouched (#403).
 
 ## [0.7.0] _(2026-10-20)_
 
