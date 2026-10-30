@@ -940,6 +940,32 @@ static void parse_config_file_line(char *line, pam_openbastion_config_t *config,
     }
 }
 
+/*
+ * Read a configuration stream. A physical line that does not fit in the
+ * buffer is not split into pseudo-lines: fgets() would hand its tail to
+ * parse_config_file_line(), which could then set a key from the middle of a
+ * long value (and ob_sign_load_settings() refuses the same file). Discard the
+ * rest of the line and fail the load instead.
+ */
+static int config_load_stream(FILE *f, pam_openbastion_config_t *config,
+                              const char *filename)
+{
+    char line[1024];
+
+    while (fgets(line, sizeof(line), f)) {
+        if (!strchr(line, '\n') && !feof(f)) {
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n') {
+                /* discard the rest of the physical line */
+            }
+            return -1;
+        }
+        parse_config_file_line(line, config, filename);
+    }
+
+    return 0;
+}
+
 int config_load(const char *filename, pam_openbastion_config_t *config)
 {
     /*
@@ -974,14 +1000,10 @@ int config_load(const char *filename, pam_openbastion_config_t *config)
         return -1;
     }
 
-    char line[1024];
-
-    while (fgets(line, sizeof(line), f)) {
-        parse_config_file_line(line, config, filename);
-    }
+    int rc = config_load_stream(f, config, filename);
 
     fclose(f);
-    return 0;
+    return rc;
 }
 
 int config_parse_args(int argc, const char **argv, pam_openbastion_config_t *config)
