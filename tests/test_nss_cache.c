@@ -606,6 +606,41 @@ static int test_oversized_home_refuses_write(void)
  * write, or a poisoning attempt) means one HTTPS round trip to LLNG per
  * lookup of that user, for as long as the file exists.
  */
+/* A record the reader always refuses must not be written: an empty user name
+ * parses as `corrupt`, so the entry is unlinked and every lookup of that uid
+ * pays a portal round trip, forever. */
+static int test_build_refuses_empty_name(void)
+{
+    struct passwd pw = { .pw_name = "", .pw_passwd = "x", .pw_uid = 20001,
+                         .pw_gid = 20001, .pw_gecos = "", .pw_dir = "/home/dwho",
+                         .pw_shell = "/bin/bash" };
+    char line[CACHE_LINE_MAX + 1];
+
+    return build_cache_line(line, sizeof(line), &pw, time(NULL)) == -1;
+}
+
+/* A negative timestamp underflowed "now - timestamp" (UB), and a far-future
+ * one made the record look fresh for centuries. Both are corrupt. */
+static int test_extreme_timestamps_are_refused(void)
+{
+    static const char *const stamps[] = {
+        "-9223372036854775808", "9223372036854775807", "-1", NULL,
+    };
+    struct passwd out;
+    char buf[2048];
+
+    for (size_t i = 0; stamps[i]; i++) {
+        char rec[256];
+        reset_cache_dirs();
+        snprintf(rec, sizeof(rec),
+                 "dwho:20001:20001:D Who:/home/dwho:/bin/bash:%s\n", stamps[i]);
+        if (write_raw_entry(test_cache_byname(), "dwho", rec) != 0) return 0;
+        if (file_cache_load_by_name("dwho", &out, buf, sizeof(buf), NULL) == 0) return 0;
+    }
+
+    return 1;
+}
+
 static int test_unparsable_entry_is_unlinked(void)
 {
     struct passwd out = {0};
@@ -1051,6 +1086,8 @@ int main(void)
     RUN(test_oversized_home_refuses_write);
     RUN(test_unparsable_entry_is_unlinked);
     RUN(test_file_promotion_keeps_record_age);
+    RUN(test_build_refuses_empty_name);
+    RUN(test_extreme_timestamps_are_refused);
 
     printf("\n  Cache trust checks (anti cache-poisoning):\n");
     RUN(test_load_rejects_writable_file);

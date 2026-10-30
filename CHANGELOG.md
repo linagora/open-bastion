@@ -161,6 +161,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `create_user_home_base/<user>` instead, and creation is refused when that is
   the same path. A home the module creates itself is still handed over, and a
   pre-existing home already owned by the user is left untouched (#403).
+- The NSS module refuses a looked-up name outside `[a-z_][a-z0-9_-]*` before
+  calling the portal, and checks the `default_home_base/<name>` fallback it
+  builds, so `pw_dir` can no longer carry bytes its own validator rejects
+  (#397).
+- The PAM and NSS path validators now apply the same 1024-byte limit (a long
+  home or shell was refused by PAM and accepted by NSS), and the NSS module
+  no longer truncates an accepted home at 255 bytes (#394).
+- The NSS on-disk cache refuses a record with an empty user name at write
+  time, instead of writing one its reader always treats as corrupt (#395),
+  and treats a negative or far-future timestamp as corrupt rather than
+  overflowing the age computation or serving the record for centuries
+  (#396).
 
 ## [0.7.0] _(2026-10-20)_
 
