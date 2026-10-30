@@ -55,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
   line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
+- The files `ob-bastion-setup` generates (`openbastion.conf`, the PAM stacks,
+  the sshd drop-ins, `nss_openbastion.conf`, `ssh-proxy.conf`, the session
+  recorder configuration, the sudoers rule) no longer carry the date of the run
+  that wrote them. A rerun that changes nothing now leaves them identical
+  instead of rewriting all of them, so a replay no longer alters a host's
+  configuration. Ansible recaps still count the setup task as changed, since it
+  runs on every play to apply a package upgrade.
+- ob-builder: under maximum security, a locked host played again keeps the
+  `openbastion.conf` its setup wrote. The role deploys its staging
+  configuration only to the run that also runs the setup; a play that stopped
+  in between (dropped connection, Ctrl-C, a token that ran out) used to leave
+  the host with a configuration under which certificate logins failed, and
+  nothing left on it could become root to repair it (#377).
 
 ### Fixed
 
