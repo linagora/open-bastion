@@ -951,13 +951,20 @@ static int config_load_stream(FILE *f, pam_openbastion_config_t *config,
                               const char *filename)
 {
     char line[1024];
+    unsigned long lineno = 0;
 
     while (fgets(line, sizeof(line), f)) {
+        lineno++;
         if (!strchr(line, '\n') && !feof(f)) {
             int c;
             while ((c = fgetc(f)) != EOF && c != '\n') {
                 /* discard the rest of the physical line */
             }
+            syslog(LOG_ERR,
+                   "open-bastion: line %lu of %s is longer than %zu bytes, "
+                   "refusing the file",
+                   lineno, filename ? filename : "openbastion.conf",
+                   sizeof(line) - 1);
             return -1;
         }
         parse_config_file_line(line, config, filename);
@@ -1003,6 +1010,12 @@ int config_load(const char *filename, pam_openbastion_config_t *config)
     int rc = config_load_stream(f, config, filename);
 
     fclose(f);
+    if (rc != 0) {
+        /* Never leave half of the file applied: callers treat a failed load as
+         * "defaults". */
+        config_free(config);
+        config_init(config);
+    }
     return rc;
 }
 
