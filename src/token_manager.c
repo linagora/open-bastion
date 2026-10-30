@@ -135,12 +135,11 @@ void token_info_free(token_info_t *info)
     explicit_bzero(info, sizeof(*info));
 }
 
-/* Copy a JSON member only when it holds a string.
+/* Copy a JSON member only when it is a JSON string.
  *
- * json_object_get_string() returns NULL for a JSON null -- and for nothing
- * else, the other types being rendered. strdup(NULL) then crashes the caller,
- * which is what a token file carrying "access_token": null did in the sshd
- * PAM child (#391). A member of the wrong type is treated as absent. */
+ * json_object_get_string() returns NULL for a JSON null, and if
+ * callers strdup() its result, a "access_token": null member result
+ * in a crash. */
 static char *json_dup_string(struct json_object *root, const char *key)
 {
     struct json_object *obj;
