@@ -307,12 +307,14 @@ static int watcher_login(crowdsec_context_t *ctx)
     }
 
     struct json_object *token_obj, *expire_obj;
-    if (json_object_object_get_ex(resp, "token", &token_obj)) {
+    if (json_object_object_get_ex(resp, "token", &token_obj)
+        && json_object_is_type(token_obj, json_type_string)) {
         secure_free_str(ctx->token);
         ctx->token = strdup(json_object_get_string(token_obj));
     }
 
-    if (json_object_object_get_ex(resp, "expire", &expire_obj)) {
+    if (json_object_object_get_ex(resp, "expire", &expire_obj)
+        && json_object_is_type(expire_obj, json_type_string)) {
         /* Parse ISO 8601 timestamp */
         const char *expire_str = json_object_get_string(expire_obj);
         struct tm tm = {0};

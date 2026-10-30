@@ -135,6 +135,21 @@ void token_info_free(token_info_t *info)
     explicit_bzero(info, sizeof(*info));
 }
 
+/* Copy a JSON member only when it is a JSON string.
+ *
+ * json_object_get_string() returns NULL for a JSON null, and if
+ * callers strdup() its result, a "access_token": null member result
+ * in a crash. */
+static char *json_dup_string(struct json_object *root, const char *key)
+{
+    struct json_object *obj;
+
+    if (!json_object_object_get_ex(root, key, &obj)) return NULL;
+    if (!json_object_is_type(obj, json_type_string)) return NULL;
+
+    return strdup(json_object_get_string(obj));
+}
+
 /* Parse token response JSON */
 static int parse_token_response(const char *json_str, token_info_t *info)
 {
@@ -143,21 +158,10 @@ static int parse_token_response(const char *json_str, token_info_t *info)
 
     struct json_object *obj;
 
-    if (json_object_object_get_ex(root, "access_token", &obj)) {
-        info->access_token = strdup(json_object_get_string(obj));
-    }
-
-    if (json_object_object_get_ex(root, "refresh_token", &obj)) {
-        info->refresh_token = strdup(json_object_get_string(obj));
-    }
-
-    if (json_object_object_get_ex(root, "token_type", &obj)) {
-        info->token_type = strdup(json_object_get_string(obj));
-    }
-
-    if (json_object_object_get_ex(root, "scope", &obj)) {
-        info->scope = strdup(json_object_get_string(obj));
-    }
+    info->access_token = json_dup_string(root, "access_token");
+    info->refresh_token = json_dup_string(root, "refresh_token");
+    info->token_type = json_dup_string(root, "token_type");
+    info->scope = json_dup_string(root, "scope");
 
     if (json_object_object_get_ex(root, "expires_in", &obj)) {
         info->expires_in = json_object_get_int(obj);
@@ -182,15 +186,10 @@ static int parse_introspection_response(const char *json_str, token_info_t *info
         info->active = json_object_get_boolean(obj);
     }
 
-    if (json_object_object_get_ex(root, "username", &obj)) {
-        info->user = strdup(json_object_get_string(obj));
-    } else if (json_object_object_get_ex(root, "sub", &obj)) {
-        info->user = strdup(json_object_get_string(obj));
-    }
+    info->user = json_dup_string(root, "username");
+    if (!info->user) info->user = json_dup_string(root, "sub");
 
-    if (json_object_object_get_ex(root, "scope", &obj)) {
-        info->scope = strdup(json_object_get_string(obj));
-    }
+    info->scope = json_dup_string(root, "scope");
 
     if (json_object_object_get_ex(root, "exp", &obj)) {
         info->server_exp = (time_t)json_object_get_int64(obj);
@@ -200,13 +199,8 @@ static int parse_introspection_response(const char *json_str, token_info_t *info
     }
 
     /* Check for client_ip in token claims if bound */
-    if (json_object_object_get_ex(root, "client_ip", &obj)) {
-        info->client_ip = strdup(json_object_get_string(obj));
-    }
-
-    if (json_object_object_get_ex(root, "fingerprint", &obj)) {
-        info->fingerprint = strdup(json_object_get_string(obj));
-    }
+    info->client_ip = json_dup_string(root, "client_ip");
+    info->fingerprint = json_dup_string(root, "fingerprint");
 
     json_object_put(root);
     return 0;
@@ -599,13 +593,8 @@ int token_manager_load_file(const char *filepath, token_info_t *info)
 
         struct json_object *obj;
 
-        if (json_object_object_get_ex(root, "access_token", &obj)) {
-            info->access_token = strdup(json_object_get_string(obj));
-        }
-
-        if (json_object_object_get_ex(root, "refresh_token", &obj)) {
-            info->refresh_token = strdup(json_object_get_string(obj));
-        }
+        info->access_token = json_dup_string(root, "access_token");
+        info->refresh_token = json_dup_string(root, "refresh_token");
 
         if (json_object_object_get_ex(root, "expires_at", &obj)) {
             info->expires_at = (time_t)json_object_get_int64(obj);

@@ -107,6 +107,83 @@ static int test_load_nonexistent(void)
     return (ret == -1);
 }
 
+/* Write raw content to a file under the test directory */
+static int write_raw(const char *name, const char *content)
+{
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", test_dir, name);
+
+    int fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+
+    size_t len = strlen(content);
+    ssize_t written = write(fd, content, len);
+    close(fd);
+
+    return (written == (ssize_t)len) ? 0 : -1;
+}
+
+/* A JSON null for access_token must not reach strdup() (#391) */
+static int test_load_null_access_token(void)
+{
+    const char *name = "token_null_access.json";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", test_dir, name);
+
+    if (write_raw(name, "{\"access_token\":null}") != 0) return 0;
+
+    token_info_t info = {0};
+    int ret = token_manager_load_file(filepath, &info);
+
+    int ok = (ret == -1) && (info.access_token == NULL) && (info.refresh_token == NULL);
+
+    token_info_free(&info);
+    unlink(filepath);
+
+    return ok;
+}
+
+/* A JSON null for refresh_token alone is ignored, the access token loads */
+static int test_load_null_refresh_token(void)
+{
+    const char *name = "token_null_refresh.json";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", test_dir, name);
+
+    if (write_raw(name, "{\"access_token\":\"t\",\"refresh_token\":null}") != 0) return 0;
+
+    token_info_t info = {0};
+    int ret = token_manager_load_file(filepath, &info);
+
+    int ok = (ret == 0) && info.access_token && (strcmp(info.access_token, "t") == 0)
+             && (info.refresh_token == NULL);
+
+    token_info_free(&info);
+    unlink(filepath);
+
+    return ok;
+}
+
+/* A member of any other type is treated as absent, not dereferenced */
+static int test_load_nonstring_members(void)
+{
+    const char *name = "token_nonstring.json";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", test_dir, name);
+
+    if (write_raw(name, "{\"access_token\":42,\"refresh_token\":{},\"expires_at\":null}") != 0) return 0;
+
+    token_info_t info = {0};
+    int ret = token_manager_load_file(filepath, &info);
+
+    int ok = (ret == -1) && (info.access_token == NULL) && (info.refresh_token == NULL);
+
+    token_info_free(&info);
+    unlink(filepath);
+
+    return ok;
+}
+
 /* Test save/load roundtrip with all fields */
 static int test_save_load_roundtrip(void)
 {
@@ -308,6 +385,9 @@ int main(void)
 
     TEST(save_and_load);
     TEST(load_nonexistent);
+    TEST(load_null_access_token);
+    TEST(load_null_refresh_token);
+    TEST(load_nonstring_members);
     TEST(save_load_roundtrip);
     TEST(load_rejects_symlink);
     TEST(save_rejects_symlink_dir);
