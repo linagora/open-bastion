@@ -3,12 +3,18 @@
 # (ob_auto_setup = false). When ob_auto_setup is true, ob-bastion-setup /
 # ob-backend-setup already restart sshd at the end of their run — and Mode E
 # locks sudo behind an LLNG token, so a become-based handler running afterwards
-# can no longer escalate ("Missing sudo password"). Skipping it then avoids a
-# spurious failure on an otherwise-successful deployment.
+# can no longer escalate ("Missing sudo password") unless ansible_become_token_cmd
+# gives sudo its tokens (#377). Skipping it then avoids a spurious failure on
+# an otherwise-successful deployment. Under maximum security the role deploys
+# openbastion.conf only to the run that also runs the setup, and that setup
+# restarts sshd itself (tasks/main.yml.in): the handler has nothing to do there,
+# and sshd must not read the file before the setup has rewritten it.
 - name: Restart sshd
   ansible.builtin.service:
     name: "{{ 'sshd' if ansible_facts['os_family'] == 'RedHat' else 'ssh' }}"
     state: restarted
   # | bool so an --extra-vars override (ob_auto_setup=false → string "false",
   # which is truthy in Jinja) is interpreted correctly, not silently truthy.
-  when: not (ob_auto_setup | default(true) | bool)
+  when: >-
+    not (ob_auto_setup | default(true) | bool)
+    and not (ob_max_security | default(false) | bool)

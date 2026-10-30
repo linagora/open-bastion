@@ -39,11 +39,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrator guide links to it. `python3-myst-parser` is a new
   build-dependency of the Debian packages; the man pages still build without
   it (#388).
+- ob-builder: under maximum security, the generated Ansible role can play
+  a host again after the run that deployed it. `ansible_become_token_cmd` names a
+  command the controller runs each time `sudo` asks for a password,
+  typically `llng --llng-server sso.example.com pam_token`, and `sudo` gets
+  the token it prints (become method `ob_sudo_sso`, shipped with the role):
+  each elevation goes through the SSO under the name of the person running
+  the play, who must be `ansible_user`, as the scenario intends. Such a host
+  is not enrolled again. The role's `openbastion.conf` now names the server
+  token file itself, so `sudo` keeps working on a locked host played again,
+  instead of losing it until the setup puts it back. Without the option it
+  is still skipped with a warning (#377).
 
 ### Changed
 
 - `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
   line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
+- The files `ob-bastion-setup` generates (`openbastion.conf`, the PAM stacks,
+  the sshd drop-ins, `nss_openbastion.conf`, `ssh-proxy.conf`, the session
+  recorder configuration, the sudoers rule) no longer carry the date of the run
+  that wrote them. A rerun that changes nothing now leaves them identical
+  instead of rewriting all of them, so a replay no longer alters a host's
+  configuration. Ansible recaps still count the setup task as changed, since it
+  runs on every play to apply a package upgrade.
+- ob-builder: under maximum security, a locked host played again keeps the
+  `openbastion.conf` its setup wrote. The role deploys its staging
+  configuration only to the run that also runs the setup; a play that stopped
+  in between (dropped connection, Ctrl-C, a token that ran out) used to leave
+  the host with a configuration under which certificate logins failed, and
+  nothing left on it could become root to repair it (#377).
 
 ### Fixed
 

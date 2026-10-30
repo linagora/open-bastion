@@ -16,6 +16,7 @@ the build, and each of them only touches the hosts that declare that role.
     ├── defaults/main.yml          # Build-time defaults (baked in by ob-builder)
     ├── handlers/main.yml          # Restart sshd on config change
     ├── vars/main.yml              # Internal: setup wrapper, sshd service-keys check
+    ├── become_plugins/ob_sudo_sso.py  # sudo with an SSO token at each prompt (max security)
     ├── tasks/
     │   ├── main.yml               # Role guard, prerequisites, APT, CA key, config
     │   └── <role>.yml             # ob-enroll + ob-*-setup
@@ -33,25 +34,28 @@ The `files/` directory (not shipped here) must contain:
 
 ## Variables
 
-All variables are prefixed with `ob_`. Build-time defaults live in
+All variables are prefixed with `ob_`, but `ansible_become_token_cmd` (its
+`ansible_become_` name is what keeps a host from setting it through a
+returned fact). Build-time defaults live in
 `defaults/main.yml`; override them via host_vars, group_vars, or extra-vars.
 
-| Variable                   | Description                                                                                                                                                                                                             |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ob_portal_url`            | LLNG portal URL (required)                                                                                                                                                                                              |
-| `ob_client_id`             | OIDC client_id for enrollment                                                                                                                                                                                           |
-| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false`                                                                                                          |
-| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                                                                                                                                                  |
-| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                                                                                                                                                  |
-| `ob_role`                  | `bastion`, `backend`, or `standalone` — declared by the inventory (host_vars/group_vars). A host whose `ob_role` is missing or differs from the tree's is **skipped**, so one tree can be played over a mixed inventory |
-| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                              |
-| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                     |
-| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                             |
-| `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                           |
-| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                 |
-| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                  |
-| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                         |
-| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                        |
+| Variable                   | Description                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ob_portal_url`            | LLNG portal URL (required)                                                                                                                                                                                                                                                                                                                                   |
+| `ob_client_id`             | OIDC client_id for enrollment                                                                                                                                                                                                                                                                                                                                |
+| `ob_verify_ssl`            | Verify the portal TLS cert; `false` (from ob-builder `--insecure`) passes `-k` and writes `verify_ssl = false`                                                                                                                                                                                                                                               |
+| `ob_client_secret`         | OIDC client secret — use ansible-vault                                                                                                                                                                                                                                                                                                                       |
+| `ob_server_group`          | Server group name (set per-host for fleet deployments)                                                                                                                                                                                                                                                                                                       |
+| `ob_role`                  | `bastion`, `backend`, or `standalone` — declared by the inventory (host_vars/group_vars). A host whose `ob_role` is missing or differs from the tree's is **skipped**, so one tree can be played over a mixed inventory                                                                                                                                      |
+| `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                                                                                                                                                                   |
+| `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                                                                                                                                                          |
+| `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                                                                                                                                                                  |
+| `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                                                                                                                                                                |
+| `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                                                                                                                                                      |
+| `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                                                                                                                                                       |
+| `ob_ansible_auto_approve`  | Enable LLNG-cookie-based device-code auto-approval (build-time)                                                                                                                                                                                                                                                                                              |
+| `ob_llng_cookie`           | LLNG session cookie used to auto-approve — asked at every play run via vars_prompt, never stored                                                                                                                                                                                                                                                             |
+| `ansible_become_token_cmd` | Maximum security only: a controller-side command printing an SSO token (`llng --llng-server sso.example.com pam_token`) of the person the play connects as. A host whose `sudo` is locked to SSO tokens is then played with the `ob_sudo_sso` become method: `sudo` gets a fresh token each time it asks. Empty (default): such hosts are skipped. See below |
 
 Backend-only "accept only this bastion" variables:
 
@@ -99,17 +103,62 @@ Mode-specific variables (populated by ob-builder from the selected PAM mode):
 | `ob_cache_rate_limit_enabled`      | `true`           |
 | `ob_cache_rate_limit_max_attempts` | `3`              |
 
-## Maximum security: one run per host
+## Maximum security: later runs
 
 Under maximum security (Mode E) the setup run locks `sudo` to SSO tokens on
-every role: from then on the account Ansible connects with cannot become root.
-The role does what needs root before that point or in the setup's own task,
-so the run that deploys a host completes. A later run reads
-`/etc/pam.d/sudo` without `become`, finds the lock and skips the host with a
-warning: reconfigure it by hand from an SSO session allowed to `sudo`, or
-reinstall it. Backends configured by a later run still read the id of a
-locked bastion, without `become`, from `/var/lib/open-bastion/bastion-id`
-(written by `ob-heartbeat`), provided Ansible can still connect there. Set
+every role: from then on the account Ansible connects with cannot become root
+with a password of its own. The role does what needs root before that point
+or in the setup's own task, so the run that deploys a host completes. A later
+run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
+
+- with `ansible_become_token_cmd` set, plays the host with the `ob_sudo_sso`
+  become method (`become_plugins/`): each time `sudo` asks for a password,
+  the command runs on the controller and `sudo` gets the token it prints. One
+  single-use token per `sudo` prompt, none when `sudo` does not ask; over
+  SSH every `sudo` run asks (each task is a new session, so `sudo`'s
+  timestamp cache does not apply): at least one per task that becomes root,
+  two for `copy` and `template`. Each one is consumed by that elevation, so
+  every one of them goes through the SSO under the name of the
+  person running the play, as the scenario intends. The host is not enrolled
+  again: a locked host is enrolled, and a new enrolment would give it a new
+  id;
+- otherwise skips it with a warning: reconfigure it by hand from an SSO
+  session allowed to `sudo`, or reinstall it.
+
+The play leaves the configuration of a locked host alone until its setup runs.
+The `openbastion.conf` the role deploys is a staging one — no `node_role`, no
+`authorize_only`, so certificate logins stop working under it — and only the
+setup of the same run turns it into the host's configuration. A locked host is
+therefore never handed it: the play may stop after any step (a dropped
+connection, Ctrl-C, a token that runs out), and nothing there can become root
+any more to run the setup and repair it. A locked host keeps what the setup
+wrote, which a replay does not change.
+
+`ansible_become_token_cmd` is typically `llng --llng-server sso.example.com
+pam_token` (the `llng` client of simple-oidc-client), and `ansible_user` must
+be the SSO login of that session: `sudo` refuses a token minted for someone
+else, and a service account's `sudo` takes no token at all; SSH authenticates
+that person as for an interactive session, with their SSO certificate next to
+`ansible_ssh_private_key_file` (`<key>-cert.pub`, see "Using Open Bastion" in
+the documentation). Open the session once by hand before the play
+(`llng --llng-server sso.example.com whoami`), so that it is in the cookie
+jar: the command gets no input, so without a session it fails at once instead
+of asking, and a command that hangs is killed after 60 seconds (a host played
+with `connection: local` gives the whole prompt
+`ansible_local_become_success_timeout`, 10 s on ansible-core 2.19 and later:
+raise it when the portal is slow). The command shows at `-vvv`, and its
+stderr is quoted when it fails: put no secret in it, the session lives in the
+cookie jar. Set
+it in `group_vars` or with `--extra-vars` (its `ansible_become_` name keeps a
+host from setting it through a returned fact); the switch, and the command,
+stay with the host for the rest of the `ansible-playbook` run (the other
+trees of `site.yml` included). Only a host found locked uses it: the run that
+deploys a host still takes the deploy account's own password (`-K`, or none
+with `NOPASSWD`).
+
+Backends configured by a later run still read the id of a locked bastion,
+without `become`, from `/var/lib/open-bastion/bastion-id` (written by
+`ob-heartbeat`), provided Ansible can still connect there. Set
 `ob_bastion_allowed_bastions` in the inventory when it cannot.
 
 ## Protecting the client secret with ansible-vault
