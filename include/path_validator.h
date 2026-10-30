@@ -14,6 +14,8 @@
 
 #include <string.h>
 #include <ctype.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 /* Default approved shells */
 #define PATH_VALIDATOR_DEFAULT_SHELLS \
@@ -157,6 +159,28 @@ static inline int path_validator_check_home(const char *home, const char *approv
     }
 
     return -1;  /* Not found */
+}
+
+/*
+ * A home directory that already exists may only be used as-is when it already
+ * belongs to the account being created. Taking over a directory owned by
+ * somebody else -- root included -- would hand its whole tree to the new user,
+ * so the caller must refuse or fall back instead.
+ *
+ * Returns 1 when the path exists and is not a directory owned by `uid`
+ * (a file, a symlink, or another owner's directory), 0 when it is absent or
+ * already the user's. The caller still has to re-check ownership after
+ * creating the directory: this decision and the mkdir are not atomic.
+ */
+static inline int path_validator_is_foreign_home(const char *path, uid_t uid)
+{
+    struct stat st;
+
+    if (lstat(path, &st) != 0) {
+        return 0;  /* Absent, or not ours to judge: mkdir will tell */
+    }
+
+    return !S_ISDIR(st.st_mode) || st.st_uid != uid;
 }
 
 #endif /* PATH_VALIDATOR_H */
