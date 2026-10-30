@@ -675,6 +675,40 @@ static void test_group_with_nul_is_skipped(void)
     PASS();
 }
 
+/*
+ * A single string field holding a NUL must be dropped too: storing
+ * "D\0Admin" as the gecos "D" invents a value the portal never sent.
+ */
+static void test_field_with_nul_is_dropped(void)
+{
+    TEST("verify response: a field with an embedded NUL is dropped");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response(
+        "{\"valid\":true,\"user\":\"dwho\","
+        "\"attrs\":{\"gecos\":\"D\\u0000Admin\","
+        "\"shell\":\"/bin/bash\"}}",
+        &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL(err);
+        return;
+    }
+    if (r.gecos != NULL) {
+        ob_response_free(&r);
+        FAIL("the NUL-bearing gecos was kept");
+        return;
+    }
+    if (r.shell == NULL || strcmp(r.shell, "/bin/bash") != 0) {
+        ob_response_free(&r);
+        FAIL("an ordinary field must still be parsed");
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
 static void test_authorize_without_offline(void)
 {
     TEST("authorize response: no offline object leaves the cache off");
@@ -750,6 +784,7 @@ int main(void)
     test_verify_non_string_user();
     test_authorize_sudo_requires_boolean();
     test_group_with_nul_is_skipped();
+    test_field_with_nul_is_dropped();
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Introspection tests (JWT client assertion) */
