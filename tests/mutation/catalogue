@@ -1142,6 +1142,15 @@ suite   || tests/test_ob_builder_ansible_maxsec.sh
 why     || #377: the kept id is the only one a later run gets from a locked
 why     || bastion.
 
+id      || ansible-krl-kept-on-later-runs
+file    || admin-builder/templates/ansible/role/tasks/main.yml.in
+search  ||     - _ob_krl_check.rc | default(1) != 0 or (ob_krl_force | default(false) | bool)
+replace ||     - true
+suite   || tests/test_ob_builder_ansible_maxsec.sh
+why     || #380 review: the KRL shipped with the role was fetched at build time;
+why     || deploying it over the one ob-krl-refresh keeps current re-accepts
+why     || certificates revoked since, until the next refresh.
+
 id      || setup-provided-token-drops-bastion-id
 file    || scripts/ob-bastion-setup
 search  ||         rm -f "$OB_BASTION_ID"
