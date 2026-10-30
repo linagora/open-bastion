@@ -858,7 +858,7 @@ Le module PAM applique une politique de restriction des types **et des tailles**
 
    Après une simple mise à jour du paquet, **rejouer le script de setup** de l'hôte avant (ou en même temps que) l'activation de la politique. Le postinst détecte la combinaison « politique activée + helper pré-v1 » et l'affiche.
 
-La taille RSA est déduite du module de la clé (décodage du blob ``%k`` fourni par sshd), pas du nom d'algorithme : ``ssh_key_min_rsa_bits`` est donc réellement appliqué. Une clé RSA dont la taille ne peut pas être mesurée est refusée.
+La taille RSA est déduite du module de la clé (décodage du blob ``%k`` fourni par sshd), pas du nom d'algorithme : ``ssh_key_min_rsa_bits`` est donc réellement appliqué. Une clé RSA dont la taille ne peut pas être mesurée est refusée. De même, une clé ou un certificat ECDSA dont le champ *courbe* ne nomme pas la courbe de son type, ou dont le point public n'est pas le point décompressé de cette courbe, est refusé — comme sshd le refuse. La taille d'une clé ECDSA venant de son nom de type, un tel blob serait autrement évalué sur du matériel qu'il ne contient pas.
 
 **Types de clés supportés :**
 

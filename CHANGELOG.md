@@ -103,6 +103,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`/home` or `/var/home`), which holds every other user's home. A home equal
   to an approved prefix, with or without a trailing slash, is now refused by
   both modules, which fall back to `create_user_home_base/<user>`.
+- The SSH key policy took the size of an ECDSA key or certificate from its type
+  name without checking the curve the blob carries, so a blob naming
+  `nistp521` under `ecdsa-sha2-nistp384` was accepted and graded as a P-384
+  key. The PAM module and the LLNG `ssh-ca` plugin now refuse an ECDSA blob
+  whose curve, or whose public point, does not match its type (#401).
 
 ## [0.7.0] _(2026-10-20)_
 

@@ -147,6 +147,31 @@ my $mislabelled;
     $mislabelled = "ssh-rsa $b64 liar";
 }
 
+# ECDSA keys whose curve field contradicts their type name (#401): the
+# size comes from the name, so OpenSSH and the policy both refuse them.
+my ( $curve_mismatch, $sk_ecdsa_curve_mismatch, $short_point );
+{
+    my @f = _fields($ecdsa);
+    my $t = 'ecdsa-sha2-nistp256';
+    $curve_mismatch =
+        "$t "
+      . encode_base64( _s($t) . _s('nistp384') . _s( $f[2] ), '' )
+      . " wrong-curve";
+
+    my $skt = 'sk-ecdsa-sha2-nistp256@openssh.com';
+    $sk_ecdsa_curve_mismatch =
+        "$skt "
+      . encode_base64( _s($skt) . _s('nistp384') . _s( $f[2] ) . _s('ssh:'), '' )
+      . " wrong-curve";
+
+    # Right curve, one byte missing from the point.
+    $short_point =
+        "$t "
+      . encode_base64( _s($t) . _s('nistp256') . _s( substr( $f[2], 0, -1 ) ),
+        '' )
+      . " short-point";
+}
+
 my $tmpdir  = tempdir( CLEANUP => 1 );
 my $krlPath = "$tmpdir/krl";
 
@@ -279,6 +304,21 @@ expectReject( $res, 400 );
 like( error_of($res), qr/Unsupported or malformed/,
     'Prefix/blob mismatch rejected' );
 count(1);
+
+# Same for a blob that contradicts itself (#401)
+for my $case (
+    [ 'curve', $curve_mismatch ], [ 'sk-curve', $sk_ecdsa_curve_mismatch ],
+    [ 'point', $short_point ]
+  )
+{
+    my ( $label, $key ) = @$case;
+    ok( $res = sign_req( { public_key => $key, label => "mismatch-$label" } ),
+        "sign key with a $label that contradicts its type" );
+    expectReject( $res, 400 );
+    like( error_of($res), qr/Unsupported or malformed/,
+        "ECDSA $label mismatch rejected" );
+    count(1);
+}
 
 # ============================================
 # PART 2: validity_days validation
