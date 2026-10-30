@@ -929,7 +929,8 @@ int ob_parse_verify_response(const char *body, ob_response_t *response,
         json_object_put(json);
         return -1;
     }
-    const char *user_str = json_object_get_string(val);
+    const char *user_str = json_object_is_type(val, json_type_string)
+                           ? json_object_get_string(val) : NULL;
     if (!user_str) {
         snprintf(err, errlen, "Invalid 'user' field type in response");
         json_object_put(json);
@@ -1109,7 +1110,8 @@ int ob_introspect_token(ob_client_t *client,
     struct json_object *val;
 
     if (json_object_object_get_ex(json, "active", &val)) {
-        response->active = json_object_get_boolean(val);
+        response->active = json_object_is_type(val, json_type_boolean) &&
+                           json_object_get_boolean(val);
     }
 
     if (json_object_object_get_ex(json, "sub", &val)) {
@@ -1361,7 +1363,8 @@ int ob_parse_authorize_response(const char *body, ob_response_t *response,
         json_object_put(json);
         return -1;
     }
-    const char *authz_user_str = json_object_get_string(val);
+    const char *authz_user_str = json_object_is_type(val, json_type_string)
+                                 ? json_object_get_string(val) : NULL;
     if (!authz_user_str) {
         snprintf(err, errlen,
                  "Invalid 'user' field type in response");
@@ -1397,10 +1400,14 @@ int ob_parse_authorize_response(const char *body, ob_response_t *response,
         if (json_object_is_type(perms_obj, json_type_object)) {
             response->has_permissions = true;
             if (json_object_object_get_ex(perms_obj, "sudo_allowed", &val)) {
-                response->permissions.sudo_allowed = json_object_get_boolean(val);
+                response->permissions.sudo_allowed =
+                    json_object_is_type(val, json_type_boolean) &&
+                    json_object_get_boolean(val);
             }
             if (json_object_object_get_ex(perms_obj, "sudo_nopasswd", &val)) {
-                response->permissions.sudo_nopasswd = json_object_get_boolean(val);
+                response->permissions.sudo_nopasswd =
+                    json_object_is_type(val, json_type_boolean) &&
+                    json_object_get_boolean(val);
             }
         }
     }
@@ -1425,7 +1432,9 @@ int ob_parse_authorize_response(const char *body, ob_response_t *response,
         if (json_object_is_type(offline_obj, json_type_object)) {
             response->has_offline = true;
             if (json_object_object_get_ex(offline_obj, "enabled", &val)) {
-                response->offline.enabled = json_object_get_boolean(val);
+                response->offline.enabled =
+                    json_object_is_type(val, json_type_boolean) &&
+                    json_object_get_boolean(val);
             }
             if (json_object_object_get_ex(offline_obj, "ttl", &val)) {
                 response->offline.ttl = json_object_get_int(val);
