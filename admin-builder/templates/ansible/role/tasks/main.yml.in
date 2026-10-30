@@ -345,6 +345,34 @@
 
 # KRL (Key Revocation List) is mandatory in Mode E — certificate revocation
 # requires an up-to-date KRL on every bastion and backend.
+#
+# The list is state, not configuration: ob-krl-refresh.timer replaces it with
+# the portal's current one. files/open-bastion-krl was fetched when the role was
+# built, so deploying it over a list the host already has would put back one
+# that predates the revocations made since, and sshd would accept those
+# certificates until the next refresh. Deploy it only where the host has none
+# that parses (ssh-keygen -Q -l, as ob-krl-refresh checks one), or with
+# ob_krl_force.
+- name: Check the KRL already on the host
+  ansible.builtin.command:
+    argv: [ssh-keygen, -Q, -l, -f, /etc/ssh/revoked_keys]
+  register: _ob_krl_check
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ob_max_security
+
+- name: Keep the host's KRL
+  ansible.builtin.debug:
+    msg: >-
+      Keeping /etc/ssh/revoked_keys: ob-krl-refresh.timer keeps it current.
+      Set ob_krl_force to true to deploy the role's KRL over it.
+  when:
+    - ob_max_security
+    - _ob_krl_check.rc == 0
+    - not (ob_krl_force | default(false) | bool)
+
 - name: Deploy KRL
   ansible.builtin.copy:
     src: open-bastion-krl
@@ -352,7 +380,9 @@
     owner: root
     group: root
     mode: '0644'
-  when: ob_max_security
+  when:
+    - ob_max_security
+    - _ob_krl_check.rc | default(1) != 0 or (ob_krl_force | default(false) | bool)
 
 # Appended to openbastion.conf by the template; absent before the package is
 # installed (check mode on a new host), in which case the conf goes without it.

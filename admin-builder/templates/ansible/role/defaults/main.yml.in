@@ -73,6 +73,14 @@ ob_sso_jwks_fetch: false
 ob_sso_jwks_url: "{{ ob_portal_url }}/oauth2/jwks"
 ob_sso_jwks_fetch_sha256: ""
 
+# ── Mode E: key revocation list ──────────────────────────────────────────────
+# /etc/ssh/revoked_keys is state, not configuration: ob-krl-refresh.timer
+# replaces it with the portal's current list every 30 minutes. The role deploys
+# the list fetched at build time (files/open-bastion-krl) only where the host
+# has none that parses, so a later run does not put back a list that predates
+# the revocations made since. true deploys the build-time list on every run.
+ob_krl_force: false
+
 # ── Enrollment / setup automation ────────────────────────────────────────────
 # When true, the role runs ob-enroll during the play.
 # Note: ob-enroll uses Device Authorization Grant. By default the admin must

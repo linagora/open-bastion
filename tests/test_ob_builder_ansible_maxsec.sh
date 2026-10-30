@@ -649,6 +649,72 @@ EOF
         || test_fail "the switch happened on an unlocked host" "passwords: $got"
 }
 
+# The role's KRL tasks, with the fixed paths made variables so a test can
+# point them at a scratch directory.
+render_krl_tasks() { # OUT
+    python3 - "$BR/tasks/main.yml" "$1" <<'PY'
+import sys, yaml
+tasks = yaml.safe_load(open(sys.argv[1]))
+names = ('Check the KRL already on the host', "Keep the host's KRL", 'Deploy KRL')
+keep = [t for t in tasks if t.get('name') in names]
+assert len(keep) == 3
+keep[0]['ansible.builtin.command']['argv'][-1] = '{{ krl_dest }}'
+keep[2]['ansible.builtin.copy']['src'] = '{{ krl_src }}'
+keep[2]['ansible.builtin.copy']['dest'] = '{{ krl_dest }}'
+# The play runs without become: the ownership is not what this tests.
+del keep[2]['ansible.builtin.copy']['owner']
+del keep[2]['ansible.builtin.copy']['group']
+yaml.safe_dump(keep, open(sys.argv[2], 'w'))
+PY
+}
+
+# ob-krl-refresh keeps /etc/ssh/revoked_keys current; the list shipped with the
+# role was fetched at build time, so deploying it again would re-accept the
+# certificates revoked since, until the next refresh.
+test_krl_kept_on_later_runs() {
+    if ! have_ansible || ! command -v ssh-keygen >/dev/null 2>&1; then
+        echo -e "${YELLOW}SKIP${NC} KRL keep run (ansible-playbook, PyYAML or ssh-keygen missing)"
+        return 0
+    fi
+    local d="$TEST_TMPDIR/krl" bad="" scenario dest src expect force
+    mkdir -p "$d"
+    render_krl_tasks "$d/krl.yml" || { test_fail "KRL tasks not found"; return; }
+    # Two valid, different lists: the host's current one and the role's build.
+    ssh-keygen -q -t ed25519 -N '' -C host -f "$d/host" >/dev/null
+    ssh-keygen -q -k -f "$d/host.krl" "$d/host.pub" 2>/dev/null
+    ssh-keygen -q -t ed25519 -N '' -C build -f "$d/build" >/dev/null
+    ssh-keygen -q -k -f "$d/build.krl" "$d/build.pub" 2>/dev/null
+    printf 'all:\n  hosts:\n    localhost:\n      ansible_python_interpreter: "{{ ansible_playbook_python }}"\n' > "$d/inv.yml"
+    for scenario in valid missing invalid force; do
+        dest="$d/revoked_keys"
+        src="$d/build.krl"
+        force=false
+        case "$scenario" in
+            valid)   cp "$d/host.krl" "$dest"; expect="$d/host.krl" ;;
+            missing) rm -f "$dest"; expect="$src" ;;
+            invalid) printf 'not a KRL\n' > "$dest"; expect="$src" ;;
+            force)   cp "$d/host.krl" "$dest"; force=true; expect="$src" ;;
+        esac
+        cat > "$d/play.yml" <<EOF
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ob_max_security: true
+    krl_dest: $dest
+    krl_src: $src
+    ob_krl_force: $force
+  tasks:
+    - ansible.builtin.include_tasks: $d/krl.yml
+EOF
+        run_play "$d/play.yml" "$d/inv.yml" "$d/log-$scenario" \
+            || { bad="$bad $scenario(run)"; continue; }
+        cmp -s "$dest" "$expect" || bad="$bad $scenario(wrong-list)"
+    done
+    [ -z "$bad" ] && test_pass "KRL: a valid host list is kept, a missing or unparsable one gets the role's, ob_krl_force deploys it" \
+                  || test_fail "the role overwrites a KRL ob-krl-refresh keeps current" "$bad"
+}
+
 if ! render_tree; then
     test_fail "ob-builder could not render the max-security tree" "$(tail -5 "$TEST_TMPDIR/render.log")"
 else
@@ -664,6 +730,7 @@ else
     test_setup_wrapper_runs
     test_backend_collection_runs
     test_become_token_runs
+    test_krl_kept_on_later_runs
 fi
 
 echo ""

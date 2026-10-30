@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ob-builder: a later run of a maximum-security role put the KRL fetched at
+  build time back over `/etc/ssh/revoked_keys`, which `ob-krl-refresh` keeps
+  current, so certificates revoked since the build were accepted again until
+  the next refresh. The role now deploys its KRL only where the host has none
+  that parses; `ob_krl_force: true` restores the old behaviour (#380).
 - ob-builder: the generated Ansible roles failed on every host with service
   accounts ("Conditional expressions must be strings"): two unquoted `when:`
   entries holding `: ` were read as YAML mappings (#364).

@@ -460,6 +460,13 @@ they keep, as long as Ansible can connect to them; otherwise set
 ``ob_bastion_allowed_bastions`` in the inventory to what ``ob-bastion-id``
 prints on each of them.
 
+A later run also leaves the host's KRL alone. The ``open-bastion-krl`` copy
+shipped with the role was fetched when the role was built, while
+``ob-krl-refresh`` keeps ``/etc/ssh/revoked_keys`` current from the portal: a
+replay that deployed the build's copy would accept certificates revoked since,
+until the next refresh. The role only deploys it where the host has no list
+that parses; ``ob_krl_force: true`` deploys it anyway.
+
 A :doc:`service account </service-accounts>` keeps SSH access — create
 the local account on every target and give its key in
 ``service_accounts:`` before you apply the scenario — but not ``sudo``,
