@@ -173,6 +173,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and treats a negative or far-future timestamp as corrupt rather than
   overflowing the age computation or serving the record for centuries
   (#396).
+- `openbastion.conf` refuses a physical line longer than 1023 bytes instead of
+  parsing its tail as a new `key = value` line, which could set a key from the
+  middle of a long value while `ob_sign` refused the same file (#393).
+- `ob-cert-daemon` refuses a request line containing a NUL byte instead of
+  accepting the shorter string that precedes it (#392).
 
 ## [0.7.0] _(2026-10-20)_
 
