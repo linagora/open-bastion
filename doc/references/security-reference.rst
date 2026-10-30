@@ -412,9 +412,12 @@ All paths are validated before use:
   the base directory, and user creation would then own the parent of every
   other user's home
 - Same safety checks as shell
-- The PAM and NSS modules apply the same rules to the same list. The NSS
-  module always uses the default list (``/home``, ``/var/home``): it does not
-  read ``approved_home_prefixes``
+- The PAM and NSS modules apply the same rules. Each reads its own file: the
+  PAM module ``approved_home_prefixes`` and ``approved_shells`` from
+  ``openbastion.conf``, the NSS module the same two keys from
+  ``nss_openbastion.conf``. Unset, both fall back to the same built-in lists.
+- Set both keys in both files. A list present in only one of them makes
+  ``getpwnam()`` and the login session disagree on the home or the shell
 
 **Skeleton Directory Validation**:
 

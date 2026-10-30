@@ -47,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The NSS module now reads `approved_shells` and `approved_home_prefixes`
+  from `nss_openbastion.conf`, and accepts `home_base` there as the alias of
+  `default_home_base` instead of ignoring it. With a list set in
+  `openbastion.conf` only, the PAM module accepted the portal's home while
+  `getpwnam()` answered `default_home_base/<user>`, so the session and the
+  resolved account disagreed on `$HOME` (#404). `ob-bastion-setup` keeps both
+  keys when it rewrites the file.
+- `ob-bastion-setup` rewrote `nss_openbastion.conf` in place, truncating it
+  before reading it back, so `sso_issuer` never survived a rerun. It now
+  renders to a temporary file and moves it into place.
 - ob-builder: the generated Ansible roles failed on every host with service
   accounts ("Conditional expressions must be strings"): two unquoted `when:`
   entries holding `: ` were read as YAML mappings (#364).
