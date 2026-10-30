@@ -174,6 +174,8 @@ typedef struct {
     char *default_shell;
     char *force_shell;            /* login shell of EVERY user resolved here */
     char *default_home_base;
+    char *approved_shells;        /* portals' shells may use, NULL: built-in list */
+    char *approved_home_prefixes; /* where a home may live, NULL: built-in list */
     uid_t min_uid;
     uid_t max_uid;
     gid_t min_gid;                /* policy range for a server-supplied gid */
@@ -372,17 +374,18 @@ static int safe_parse_int(const char *str, int *result, int min_val, int max_val
 }
 
 /*
- * Wrappers for shared path validation functions from path_validator.h
- * These use the default approved lists.
+ * Wrappers for shared path validation functions from path_validator.h.
+ * They take the lists from nss_openbastion.conf, or the built-in defaults
+ * when the keys are absent, so PAM and NSS can be given the same lists.
  */
 static inline int validate_shell(const char *shell)
 {
-    return path_validator_check_shell(shell, NULL);
+    return path_validator_check_shell(shell, g_config.approved_shells);
 }
 
 static inline int validate_home(const char *home)
 {
-    return path_validator_check_home(home, NULL);
+    return path_validator_check_home(home, g_config.approved_home_prefixes);
 }
 
 /*
@@ -726,9 +729,18 @@ static int load_config(nss_llng_config_t *config)
             free(config->force_shell);
             config->force_shell = strdup(value);
         }
-        else if (strcmp(key, "default_home_base") == 0) {
+        else if (strcmp(key, "default_home_base") == 0 || strcmp(key, "home_base") == 0) {
+            /* `home_base` is the alias the setup script writes. */
             free(config->default_home_base);
             config->default_home_base = strdup(value);
+        }
+        else if (strcmp(key, "approved_shells") == 0) {
+            free(config->approved_shells);
+            config->approved_shells = strdup(value);
+        }
+        else if (strcmp(key, "approved_home_prefixes") == 0) {
+            free(config->approved_home_prefixes);
+            config->approved_home_prefixes = strdup(value);
         }
         else if (strcmp(key, "min_uid") == 0) {
             uid_t min_uid;

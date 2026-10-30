@@ -115,6 +115,10 @@ configure_nss_in_work() {
     mkdir -p "$WORK/etc"
     printf 'passwd:         files systemd\ngroup:          files systemd\n' > "$WORK/etc/nsswitch.conf"
     printf '/bin/sh\n/bin/bash\n' > "$WORK/etc/shells"
+    if [ -n "${OB_SEED_NSS_CONF:-}" ]; then
+        printf '%s\n' "$OB_SEED_NSS_CONF" > "$WORK/etc/nss_openbastion.conf"
+        chmod 644 "$WORK/etc/nss_openbastion.conf"
+    fi
     (
         load_setup_as ob-bastion-setup || exit 99
         parse_args -p https://x.example.com -g g "$@" >/dev/null 2>&1 || exit 98
@@ -363,7 +367,32 @@ test_packages_ship_and_unregister() {
 
 run_test test_force_shell_by_role
 run_test test_dropin_pins_user_environment
+# ── 3b. A rerun keeps the approved lists and the issuer it found ────────────
+test_rerun_keeps_manual_keys() {
+    local bad="" fake="$WORK/ob-login-shell"
+    printf '#!/bin/sh\n' > "$fake"
+    chmod 755 "$fake"
+    OB_SEED_NSS_CONF='portal_url = https://old.example.com
+sso_issuer = https://sso.example.com
+approved_shells = /bin/bash:/usr/local/bin/zsh
+approved_home_prefixes = /srv/home:/data/users'
+    export OB_SEED_NSS_CONF
+    configure_nss_in_work "$fake" || bad="$bad rc:$(tail -3 "$WORK/out")"
+    unset OB_SEED_NSS_CONF
+    local conf="$WORK/etc/nss_openbastion.conf"
+    grep -qx 'sso_issuer = https://sso.example.com' "$conf" 2>/dev/null || bad="$bad issuer"
+    grep -qx 'approved_shells = /bin/bash:/usr/local/bin/zsh' "$conf" 2>/dev/null || bad="$bad shells"
+    grep -qx 'approved_home_prefixes = /srv/home:/data/users' "$conf" 2>/dev/null || bad="$bad homes"
+    grep -qx 'portal_url = https://x.example.com' "$conf" 2>/dev/null || bad="$bad new-portal"
+    if [ -z "$bad" ]; then
+        pass "a rerun replaces the generated settings and keeps the hand-added lists (#404)"
+    else
+        fail "a rerun keeps approved_shells, approved_home_prefixes and sso_issuer" "$bad"
+    fi
+}
+
 run_test test_setup_writes_and_registers
+run_test test_rerun_keeps_manual_keys
 run_test test_setup_refuses_missing_launcher
 run_test test_setup_without_recorder_keeps_bash
 run_test test_lib_force_launcher
