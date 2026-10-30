@@ -227,6 +227,41 @@ test_conf_names_the_server_token() {
                   || test_fail "the role's openbastion.conf drops server_token_file (#377)" "$bad"
 }
 
+# The role's openbastion.conf is a staging document (no node_role, no
+# authorize_only, log_level warn); only the setup of the same run makes it the
+# host's configuration. On a locked host the play can stop after the deploy —
+# dropped connection, Ctrl-C, a token that runs out — and nothing there can
+# become root any more to run the setup: the host would keep a conf under which
+# certificate logins stop working. So a locked host is never handed that file.
+test_locked_host_keeps_its_conf() {
+    local r bad=""
+    for r in "$BR" "$KR" "$SR"; do
+        python3 - "$r" <<'PY' 2>/dev/null || bad="$bad ${r##*-}"
+import sys, yaml
+role = sys.argv[1]
+tasks = yaml.safe_load(open(role + '/tasks/main.yml'))
+deploy = [t for t in tasks if t.get('name') == 'Deploy openbastion.conf']
+assert len(deploy) == 1, 'exactly one Deploy openbastion.conf'
+# Deployed to the runs that run the setup, never to a locked host.
+assert deploy[0]['when'] == 'not (ob_sudo_locked | default(false) | bool)', deploy[0]['when']
+# And no other task writes the file behind that condition.
+for t in tasks:
+    if t is deploy[0]:
+        continue
+    dest = (t.get('ansible.builtin.template') or t.get('ansible.builtin.copy') or {}).get('dest', '')
+    assert 'openbastion.conf' not in str(dest), (t.get('name'), dest)
+# sshd must not read the staging file either: under maximum security the
+# handler stays out of the way, the setup restarts sshd with its own conf.
+handlers = yaml.safe_load(open(role + '/handlers/main.yml'))
+restart = [h for h in handlers if h.get('name') == 'Restart sshd']
+assert len(restart) == 1
+assert 'ob_max_security' in restart[0]['when'], restart[0]['when']
+PY
+    done
+    [ -z "$bad" ] && test_pass "every role: a locked host keeps the openbastion.conf the setup wrote" \
+                  || test_fail "a locked host is handed the staging openbastion.conf (#380)" "$bad"
+}
+
 # A plain YAML scalar holding ": " is a mapping, not a string: ansible-core
 # >= 2.19 refuses it as a conditional at run time, which --syntax-check does
 # not see (#364).
@@ -623,6 +658,7 @@ else
     test_backend_uses_the_bastion_fact
     test_become_token_option
     test_conf_names_the_server_token
+    test_locked_host_keeps_its_conf
     test_conditionals_are_strings
     test_lock_detection_runs
     test_setup_wrapper_runs
