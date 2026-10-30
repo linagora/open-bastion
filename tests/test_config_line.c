@@ -295,6 +295,59 @@ static void test_unknown_keys(void)
           "max_reported_sessions         -> accepted (ob-heartbeat key)");
 }
 
+/*
+ * A line that does not fit must not be split: fgets() would hand its tail to
+ * the parser, which could then set a key from the middle of a long value, while
+ * ob_sign_load_settings() refuses the same file.
+ */
+static void test_overlong_line_is_not_split(void)
+{
+    pam_openbastion_config_t config;
+    char line[2048];
+    int off = snprintf(line, sizeof(line), "client_secret = ");
+    FILE *f;
+    int rc;
+
+    config_init(&config);
+
+    memset(line + off, 'A', 1100);
+    off += 1100;
+    snprintf(line + off, sizeof(line) - (size_t)off,
+             "cert_pin = sha256//tail\n");
+
+    f = tmpfile();
+    if (!f) {
+        CHECK(0, "tmpfile() for the over-long line test");
+        config_free(&config);
+        return;
+    }
+    fwrite(line, 1, strlen(line), f);
+    rewind(f);
+
+    rc = config_load_stream(f, &config, "test.conf");
+    fclose(f);
+
+    CHECK(rc == -1, "an over-long line fails the load");
+    CHECK(config.cert_pin == NULL, "its tail never becomes a setting");
+    config_free(&config);
+
+    /* Control: an ordinary stream still loads. */
+    config_init(&config);
+    f = tmpfile();
+    if (!f) {
+        CHECK(0, "tmpfile() for the control");
+        config_free(&config);
+        return;
+    }
+    fputs("server_group = prod\ncert_pin = sha256//abc\n", f);
+    rewind(f);
+    rc = config_load_stream(f, &config, "test.conf");
+    fclose(f);
+    CHECK(rc == 0 && config.cert_pin && strcmp(config.cert_pin, "sha256//abc") == 0,
+          "an ordinary stream still loads");
+    config_free(&config);
+}
+
 int main(void)
 {
     printf("Running openbastion.conf line-syntax tests...\n\n");
@@ -331,6 +384,9 @@ int main(void)
     printf("\nUnknown keys are reported instead of silently ignored (#229):\n");
     test_unknown_keys();
     test_desktop_sso_keys();
+
+    printf("\nAn over-long line is refused, not split (#393):\n");
+    test_overlong_line_is_not_split();
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

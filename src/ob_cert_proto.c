@@ -77,6 +77,11 @@ ssize_t ob_read_line(int fd, char *buf, size_t cap)
         }
         if (n == 0)
             break; /* EOF */
+        /* A NUL would end every validator's view of the line at that byte
+         * while the daemon still holds the whole buffer: refuse the line
+         * rather than validate a prefix of it. */
+        if (c == '\0')
+            return -1;
         if (c == '\n') {
             if (i > 0 && buf[i - 1] == '\r') /* tolerate CRLF clients */
                 i--;
