@@ -99,7 +99,7 @@ static void write_file(const char *path, const char *content, mode_t mode)
 
 /*
  * config_load(), and when the file cannot be root's (an unprivileged run),
- * the very loop config_load() runs after that check.
+ * the very stream reader config_load() uses after that check.
  */
 static int load_conf(const char *path, pam_openbastion_config_t *config)
 {
@@ -107,13 +107,10 @@ static int load_conf(const char *path, pam_openbastion_config_t *config)
     if (rc != -2) return rc;
 
     FILE *f = fopen(path, "r");
-    char line[1024];
     if (!f) return -1;
-    while (fgets(line, sizeof(line), f)) {
-        parse_config_file_line(line, config, path);
-    }
+    rc = config_load_stream(f, config, path);
     fclose(f);
-    return 0;
+    return rc;
 }
 
 /*
