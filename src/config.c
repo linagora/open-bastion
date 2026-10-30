@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include "ob_jws.h"
+#include "path_validator.h"
 #include "str_utils.h"
 
 /*
@@ -1220,127 +1221,20 @@ void config_client_settings(const pam_openbastion_config_t *config,
 }
 
 /*
- * Maximum path length to prevent DoS via very long paths.
- * Linux PATH_MAX is 4096, but we use a smaller limit for security.
+ * Both validators delegate to include/path_validator.h so the PAM module and
+ * the NSS module apply the same rules to the same path, and so there is only
+ * one implementation to keep right.
  */
-#define MAX_SAFE_PATH_LENGTH 1024
-
-/*
- * Check if a path contains dangerous patterns
- * Returns 1 if dangerous, 0 if safe
- */
-static int path_contains_dangerous_patterns(const char *path)
-{
-    if (!path) return 1;
-
-    /* Limit path length to prevent DoS - use strnlen to avoid scanning entire string */
-    if (strnlen(path, MAX_SAFE_PATH_LENGTH + 1) > MAX_SAFE_PATH_LENGTH) return 1;
-
-    /* Must be absolute path */
-    if (path[0] != '/') return 1;
-
-    /* Check for path traversal attempts */
-    if (strstr(path, "..") != NULL) return 1;
-
-    /* Check for multiple consecutive slashes (could indicate obfuscation) */
-    if (strstr(path, "//") != NULL) return 1;
-
-    /* Check for dangerous characters */
-    for (const char *p = path; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        /* Allow: alphanumeric, /, -, _, . */
-        if (!isalnum(c) && c != '/' && c != '-' && c != '_' && c != '.') {
-            return 1;
-        }
-    }
-
-    /* Check for hidden paths (starting with dot after slash) */
-    if (strstr(path, "/.") != NULL) return 1;
-
-    return 0;
-}
-
 int config_validate_shell(const char *shell, const char *approved_shells)
 {
-    if (!shell || !*shell) return -1;
-
-    /* Check for dangerous patterns first */
-    if (path_contains_dangerous_patterns(shell)) return -1;
-
-    /* Use default if no approved list provided */
-    const char *list = approved_shells ? approved_shells : DEFAULT_APPROVED_SHELLS;
-
-    /*
-     * Parse colon-separated list without strdup/strtok to avoid
-     * allocation overhead in the hot path (called on every auth).
-     */
-    size_t shell_len = strlen(shell);
-    const char *current = list;
-
-    while (current && *current) {
-        /* Find the end of current token (next ':' or end of string) */
-        const char *colon = strchr(current, ':');
-        size_t token_len = colon ? (size_t)(colon - current) : strlen(current);
-
-        /* Skip empty tokens (e.g., "::" or leading/trailing ":") */
-        if (token_len > 0) {
-            /* Compare shell with this token */
-            if (token_len == shell_len && strncmp(shell, current, token_len) == 0) {
-                return 0;  /* Found */
-            }
-        }
-
-        /* Move to next token */
-        current = colon ? colon + 1 : NULL;
-    }
-
-    return -1;  /* Not found */
+    return path_validator_check_shell(
+        shell, approved_shells ? approved_shells : DEFAULT_APPROVED_SHELLS);
 }
 
 int config_validate_home(const char *home, const char *approved_prefixes)
 {
-    if (!home || !*home) return -1;
-
-    /* Check for dangerous patterns first */
-    if (path_contains_dangerous_patterns(home)) return -1;
-
-    /* Use default if no approved list provided */
-    const char *list = approved_prefixes ? approved_prefixes : DEFAULT_APPROVED_HOME_PREFIXES;
-
-    /*
-     * Parse colon-separated list without strdup/strtok to avoid
-     * allocation overhead in the hot path (called on every auth).
-     */
-    const char *current = list;
-
-    while (current && *current) {
-        /* Find the end of current token (next ':' or end of string) */
-        const char *colon = strchr(current, ':');
-        size_t prefix_len = colon ? (size_t)(colon - current) : strlen(current);
-
-        /* A trailing '/' on a list entry ("/home/:") is read as "/home" */
-        while (prefix_len > 0 && current[prefix_len - 1] == '/') {
-            prefix_len--;
-        }
-
-        /* Skip empty tokens (e.g., "::" or leading/trailing ":") */
-        if (prefix_len > 0) {
-            /*
-             * The prefix alone, with or without a trailing slash, names the
-             * base directory itself and is never a home: user creation would
-             * then hand the parent of every other user's home to its owner.
-             */
-            if (strncmp(home, current, prefix_len) == 0 &&
-                home[prefix_len] == '/' && home[prefix_len + 1] != '\0') {
-                return 0;  /* Found */
-            }
-        }
-
-        /* Move to next token */
-        current = colon ? colon + 1 : NULL;
-    }
-
-    return -1;  /* Not found */
+    return path_validator_check_home(
+        home, approved_prefixes ? approved_prefixes : DEFAULT_APPROVED_HOME_PREFIXES);
 }
 
 int config_validate_skel(const char *skel_path)
