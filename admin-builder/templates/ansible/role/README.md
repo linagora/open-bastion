@@ -50,6 +50,7 @@ returned fact). Build-time defaults live in
 | `ob_artefact_role`         | The role this tree configures (baked in); do not change it                                                                                                                                                                                                                                                                                                   |
 | `ob_pam_mode`              | PAM mode A–E (see doc/security-scenarios/index.rst)                                                                                                                                                                                                                                                                                                          |
 | `ob_max_security`          | `true` for Mode E (KRL, cert-only SSH, sudo via LLNG token)                                                                                                                                                                                                                                                                                                  |
+| `ob_krl_force`             | Maximum security only: `true` deploys the role's build-time KRL even over the list the host has, which `ob-krl-refresh.timer` keeps current (default `false`)                                                                                                                                                                                                |
 | `ob_auto_enroll`           | Run ob-enroll during the play                                                                                                                                                                                                                                                                                                                                |
 | `ob_auto_setup`            | Run ob-bastion-setup / ob-backend-setup during the play                                                                                                                                                                                                                                                                                                      |
 | `ob_apt_sources_list_line` | APT sources.list entry for the Open Bastion repository                                                                                                                                                                                                                                                                                                       |
@@ -133,6 +134,12 @@ therefore never handed it: the play may stop after any step (a dropped
 connection, Ctrl-C, a token that runs out), and nothing there can become root
 any more to run the setup and repair it. A locked host keeps what the setup
 wrote, which a replay does not change.
+
+The same holds for `/etc/ssh/revoked_keys`: `ob-krl-refresh.timer` replaces it
+with the portal's current list, and the KRL shipped in `files/` was fetched
+when the role was built. A replay therefore keeps the host's list when it
+parses, instead of putting back one that would accept certificates revoked
+since; `ob_krl_force: true` deploys the build-time list over it.
 
 `ansible_become_token_cmd` is typically `llng --llng-server sso.example.com
 pam_token` (the `llng` client of simple-oidc-client), and `ansible_user` must
