@@ -25,9 +25,8 @@
 #define PATH_VALIDATOR_DEFAULT_HOME_PREFIXES "/home:/var/home"
 
 /*
- * Longest path either validator accepts. Must stay equal to
- * MAX_SAFE_PATH_LENGTH in src/config.c, which serves the PAM module: a path
- * over the limit was refused by PAM and accepted by NSS.
+ * Longest path either validator accepts. Linux PATH_MAX is 4096; this smaller
+ * limit bounds the work an attacker can force on every authentication.
  */
 #define PATH_VALIDATOR_MAX_PATH_LENGTH 1024
 
