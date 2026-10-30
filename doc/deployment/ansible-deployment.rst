@@ -382,6 +382,12 @@ Updating the fleet
 
 Re-running ``site.yml`` is idempotent: bump the package in your repo and run
 again to upgrade, or change a host's ``ob_*`` vars and re-apply to reconfigure.
+The files the setup generates are rewritten to the same bytes when nothing
+changed, so a replay does not alter a host's configuration; the recap still
+counts the setup task as changed, since it runs on every play (it is what
+applies an upgraded package) and cannot tell in advance whether it will write
+anything. Compare configurations before and after when you need to know
+whether a replay did something.
 
 Adding a host is one new inventory entry plus a run narrowed to it — each role
 tree only configures the hosts whose ``ob_role`` is its own, and the others are
