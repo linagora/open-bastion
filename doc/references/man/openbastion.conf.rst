@@ -605,6 +605,13 @@ scripts and by ``ob-builder``, and are recognised so they are not reported
 as typos. The module that reads them is the NSS module, from its own file,
 ``/etc/open-bastion/nss_openbastion.conf``.
 
+The NSS module also reads ``approved_shells`` and ``approved_home_prefixes``
+from that file (``home_base`` is accepted there as an alias of
+``default_home_base``). Keep both list keys identical to the ones here: the
+PAM module and the NSS module validate the portal's answer separately, and a
+list set in only one of the two files makes ``getpwnam()`` and the login
+session disagree on the home or the shell.
+
 PAM module arguments
 --------------------
 

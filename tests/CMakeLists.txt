@@ -68,6 +68,28 @@ target_link_libraries(test_nss_config
 )
 add_test(NAME test_nss_config COMMAND test_nss_config)
 
+# Same include-the-source pattern, with the configuration path redirected to a
+# file the suite writes and the trusted uid set to the one running it, so the
+# real loader checks ownership and permissions (#404).
+add_executable(test_nss_home_prefixes test_nss_home_prefixes.c ../src/str_utils.c ../src/ob_jws.c ../src/ob_sign.c)
+target_compile_definitions(test_nss_home_prefixes PRIVATE
+    _GNU_SOURCE
+    OB_TEST_NSS_CONF="${CMAKE_CURRENT_BINARY_DIR}/nss-home-prefixes.conf"
+)
+target_include_directories(test_nss_home_prefixes PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_nss_home_prefixes
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_nss_home_prefixes COMMAND test_nss_home_prefixes)
+
 add_executable(test_path_validator test_path_validator.c ../src/config.c ../src/str_utils.c)
 target_include_directories(test_path_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_path_validator COMMAND test_path_validator)
