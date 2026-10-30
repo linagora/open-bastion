@@ -44,6 +44,7 @@
 #include "service_account.h"
 #include "ssh_key_policy.h"
 #include "sshd_anchor.h"
+#include "path_validator.h"
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 #include "offline_cache.h"
 #endif /* ENABLE_DESKTOP_SSO */
@@ -4225,6 +4226,31 @@ static int create_unix_user(pam_handle_t *pamh,
         }
     }
 
+    /*
+     * Never adopt a directory that already belongs to somebody else: giving it
+     * to the new user, recursively, would turn a pre-existing root-owned
+     * directory under an approved prefix into a privilege escalation. Fall back
+     * to the configured base when it names a different path, and refuse rather
+     * than record a home the module will not own.
+     */
+    if (path_validator_is_foreign_home(home_dir, uid)) {
+        char fallback[512];
+        bool have_fallback = config->create_user_home_base &&
+            snprintf(fallback, sizeof(fallback), "%s/%s",
+                     config->create_user_home_base, user) < (int)sizeof(fallback) &&
+            strcmp(fallback, home_dir) != 0;
+
+        if (!have_fallback || path_validator_is_foreign_home(fallback, uid)) {
+            OB_LOG_ERR(pamh, "Home directory %s exists and is not owned by %s, refusing to create the user",
+                       home_dir, user);
+            return -1;
+        }
+
+        OB_LOG_WARN(pamh, "Home directory %s exists and is not owned by %s, using %s instead",
+                    home_dir, user, fallback);
+        snprintf(home_dir, sizeof(home_dir), "%s", fallback);
+    }
+
     /* Determine and validate shell */
     user_shell = NULL;
     if (shell && *shell && config_validate_shell(shell, config->approved_shells) == 0) {
@@ -4346,12 +4372,21 @@ static int create_unix_user(pam_handle_t *pamh,
      * Security: Use fchown on the directory fd to avoid TOCTOU race conditions.
      * This prevents an attacker from replacing the directory between mkdir and chown.
      */
-    bool home_dir_safe = false;  /* Track if we verified the directory is safe */
+    bool home_created = false;  /* The mkdir below made the directory */
+    bool home_exists = false;
+    bool home_dir_safe = false; /* Verified, and owned by the user */
 
-    if (mkdir(home_dir, 0700) != 0 && errno != EEXIST) {
+    if (mkdir(home_dir, 0700) == 0) {
+        home_created = true;
+        home_exists = true;
+    } else if (errno == EEXIST) {
+        home_exists = true;
+    } else {
         OB_LOG_WARN(pamh, "Cannot create home directory %s: %s", home_dir, strerror(errno));
         /* Continue anyway - user is created */
-    } else {
+    }
+
+    if (home_exists) {
         /* Open directory to get fd for secure ownership change */
         int home_fd = open(home_dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
         if (home_fd < 0) {
@@ -4359,28 +4394,36 @@ static int create_unix_user(pam_handle_t *pamh,
                           home_dir, strerror(errno));
             /* Security: don't proceed with skel/chown if we can't verify the directory */
         } else {
-            /* Verify we own the directory or it's newly created */
             struct stat st;
             if (fstat(home_fd, &st) == 0) {
-                /* Only change ownership if it's root-owned (just created) or already correct */
-                if (st.st_uid == 0 || (st.st_uid == (uid_t)uid && st.st_gid == (gid_t)gid)) {
-                    /* Security: use fchown on the fd - immune to symlink attacks */
-                    if (fchown(home_fd, uid, gid) == 0) {
-                        home_dir_safe = true;  /* Directory verified and ownership set */
+                if (home_created) {
+                    /* We made it, so root owns it: hand it to the user. */
+                    if (st.st_uid != 0) {
+                        OB_LOG_WARN(pamh, "New home directory %s is owned by uid %lu, not root; leaving it alone",
+                                      home_dir, (unsigned long)st.st_uid);
+                    } else if (fchown(home_fd, uid, gid) == 0) {
+                        home_dir_safe = true;
                     } else {
                         OB_LOG_WARN(pamh, "Cannot set ownership of home directory: %s",
                                       strerror(errno));
                     }
+                } else if (st.st_uid == (uid_t)uid) {
+                    /*
+                     * Pre-existing and already the user's: the ownership is
+                     * already right, and nothing here may rewrite it. Its
+                     * content is the user's, so no skel copy either.
+                     */
+                    home_dir_safe = true;
                 } else {
-                    OB_LOG_WARN(pamh, "Home directory %s owned by unexpected user %d, skipping chown",
-                                  home_dir, st.st_uid);
+                    OB_LOG_WARN(pamh, "Home directory %s owned by uid %lu, not %lu; leaving it alone",
+                                  home_dir, (unsigned long)st.st_uid, (unsigned long)uid);
                 }
             }
             close(home_fd);
         }
 
-        /* Only proceed with skel copy and recursive chown if directory is verified safe */
-        if (home_dir_safe) {
+        /* Only a directory this call created gets the skel and the recursive chown. */
+        if (home_dir_safe && home_created) {
             /* Copy skeleton files if configured and validated */
             if (config->create_user_skel && access(config->create_user_skel, R_OK) == 0) {
                 /* Validate skel path for security */
