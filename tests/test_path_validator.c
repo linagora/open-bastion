@@ -214,6 +214,22 @@ static int test_pam_and_nss_validators_agree(void)
     return 1;
 }
 
+/*
+ * Both modules must apply the same length limit: the PAM validator used to
+ * refuse a path over MAX_SAFE_PATH_LENGTH while the NSS one accepted it, so an
+ * account could be resolved with a home the other module rejects.
+ */
+static int test_long_paths_agree(void)
+{
+    char path[1200] = "/home/";
+    memset(path + 6, 'a', sizeof(path) - 7);
+    path[sizeof(path) - 1] = '\0';
+
+    if (path_validator_check_home(path, NULL) != config_validate_home(path, NULL)) return 0;
+    if (path_validator_check_shell(path, NULL) != config_validate_shell(path, NULL)) return 0;
+    return 1;
+}
+
 /* Test custom approved home prefixes */
 static int test_custom_home_prefixes(void)
 {
@@ -288,6 +304,7 @@ int main(void)
     TEST(home_is_not_a_base_directory);
     TEST(home_prefix_with_trailing_slash);
     TEST(pam_and_nss_validators_agree);
+    TEST(long_paths_agree);
     TEST(custom_home_prefixes);
 
     printf("\nEdge cases:\n");

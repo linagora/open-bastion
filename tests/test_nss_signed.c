@@ -561,6 +561,33 @@ static void test_request_signing(void)
     mt_stop();
 }
 
+/*
+ * A name outside the grammar can never be an account, and building a fallback
+ * home from it unchecked put any byte in pw_dir (#397).
+ */
+static void test_invalid_name_never_yields_a_home(void)
+{
+    struct passwd pw;
+    char buf[4096];
+
+    printf("a name outside the grammar:\n");
+    configure(conf_lines("off", NULL, 0));
+
+    mp_answer_t a = plain_answer("{\"found\":true,\"uid\":20001,\"gid\":20001,"
+                                 "\"home\":\"/home/a\\\"b\",\"shell\":\"/bin/bash\"}");
+    mp_set(&a);
+    check("is refused before any home is built",
+          lookup("a\"b", &pw, buf, sizeof(buf)) == NSS_STATUS_NOTFOUND);
+
+    a = plain_answer("{\"found\":true,\"uid\":20001,\"gid\":20001,"
+                     "\"home\":\"/home/dwho\",\"shell\":\"/bin/bash\"}");
+    mp_set(&a);
+    enum nss_status st = lookup("dwho", &pw, buf, sizeof(buf));
+    check("a valid name still resolves", st == NSS_STATUS_SUCCESS);
+    check("with a home its own validator accepts",
+          st != NSS_STATUS_SUCCESS || path_validator_check_home(pw.pw_dir, NULL) == 0);
+}
+
 int main(void)
 {
     char cmd[256];
@@ -587,6 +614,8 @@ int main(void)
     test_prefer_off();
     printf("\n");
     test_request_signing();
+    printf("\n");
+    test_invalid_name_never_yields_a_home();
 
     mp_stop();
     if (g_cache.entries) {
