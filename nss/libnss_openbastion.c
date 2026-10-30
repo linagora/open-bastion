@@ -2104,6 +2104,12 @@ static int portal_call_settings(char **secret, char **pin)
 static int query_llng_userinfo(const char *username, struct passwd *pw,
                                 char *buffer, size_t buflen)
 {
+    /* The entry point refuses such a name already; keep the guarantee here
+     * too, since the fallback home below is built from it. */
+    if (valid_cache_name(username) != 0) {
+        return 1;
+    }
+
     if (!g_config.portal_url) {
         return -1;
     }
