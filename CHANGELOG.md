@@ -103,6 +103,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`/home` or `/var/home`), which holds every other user's home. A home equal
   to an approved prefix, with or without a trailing slash, is now refused by
   both modules, which fall back to `create_user_home_base/<user>`.
+- Portal answers are read with their JSON types instead of json-c's
+  serialisation: a non-string `user` (number, boolean, object or array) is
+  refused, `sudo_allowed`, `sudo_nopasswd` and `offline.enabled` are granted
+  only by the boolean `true` (a string such as `"false"` used to grant sudo),
+  and a `groups` or `managed_groups` entry holding a NUL byte is skipped
+  instead of being shortened to its prefix (#398, #399, #400). The same
+  string-only copy also covers the authorization and offline caches.
 
 ## [0.7.0] _(2026-10-20)_
 

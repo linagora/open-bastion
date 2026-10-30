@@ -47,16 +47,31 @@ bool str_parse_bool(const char *value);
 
 /*
  * Safely extract a string from a json-c object and duplicate it.
- * Returns NULL if the object is NULL or the string is NULL.
- * Caller must free the returned string.
+ * Returns NULL if the object is NULL, is not a JSON string, or holds an
+ * embedded NUL. Caller must free the returned string.
  *
  * Note: Requires json-c to be included before using this function.
  */
 #ifdef JSON_C_VERSION
 static inline char *str_json_strdup(struct json_object *obj)
 {
+    /* json_object_get_string() only returns NULL for a JSON null: it
+     * serialises numbers, booleans, objects and arrays instead. A caller
+     * expecting a string must never receive "0.5" or "true" as one. */
+    if (!obj || !json_object_is_type(obj, json_type_string)) {
+        return NULL;
+    }
+
     const char *str = json_object_get_string(obj);
-    return str ? strdup(str) : NULL;
+    if (!str) {
+        return NULL;
+    }
+    /* json-c keeps an embedded NUL; strdup() would store only the part before
+     * it, a value the portal never sent. */
+    if (strlen(str) != (size_t)json_object_get_string_len(obj)) {
+        return NULL;
+    }
+    return strdup(str);
 }
 
 /*
@@ -92,10 +107,13 @@ static inline char **str_json_parse_string_array(struct json_object *arr,
     size_t valid_count = 0;
     for (size_t i = 0; i < count; i++) {
         struct json_object *elem = json_object_array_get_idx(arr, i);
-        /* Only accept string elements, skip non-strings */
+        /* Only accept string elements, skip non-strings. A string holding a
+         * NUL byte is refused too: strdup() would silently shorten it, so
+         * "admins\0-readonly" would become the group "admins". */
         if (elem && json_object_is_type(elem, json_type_string)) {
+            int len = json_object_get_string_len(elem);
             const char *str = json_object_get_string(elem);
-            if (str) {
+            if (str && len >= 0 && strlen(str) == (size_t)len) {
                 result[valid_count] = strdup(str);
                 if (result[valid_count]) {
                     valid_count++;

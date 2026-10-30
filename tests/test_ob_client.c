@@ -548,6 +548,167 @@ static void test_authorize_offline_settings(void)
     PASS();
 }
 
+/*
+ * A granted answer must name the user with a JSON string. json-c serialises
+ * any other type, so a number, a boolean, an object or an array used to
+ * become the user name ("0.5", "true", ...).
+ */
+static void test_authorize_non_string_user(void)
+{
+    TEST("authorize response: a non-string 'user' is refused");
+
+    static const char *const bodies[] = {
+        "{\"authorized\":true,\"user\":true}",
+        "{\"authorized\":true,\"user\":0.5}",
+        "{\"authorized\":true,\"user\":{\"a\":1}}",
+        "{\"authorized\":true,\"user\":[\"dwho\"]}",
+    };
+
+    for (size_t i = 0; i < sizeof(bodies) / sizeof(*bodies); i++) {
+        ob_response_t r;
+        char err[256] = {0};
+        int rc = ob_parse_authorize_response(bodies[i], &r, err, sizeof(err));
+        ob_response_free(&r);
+        if (rc != -1) {
+            FAIL("a non-string user was accepted");
+            return;
+        }
+    }
+    PASS();
+}
+
+static void test_verify_non_string_user(void)
+{
+    TEST("verify response: a non-string 'user' is refused");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response("{\"valid\":true,\"user\":true}",
+                                      &r, err, sizeof(err));
+    ob_response_free(&r);
+
+    if (rc == -1) {
+        PASS();
+    } else {
+        FAIL("a non-string user was accepted");
+    }
+}
+
+/*
+ * Only the JSON boolean true may grant sudo. json_object_get_boolean() maps
+ * every non-empty string ("false", "0", "no"), non-zero number, object and
+ * array to true.
+ */
+static void test_authorize_sudo_requires_boolean(void)
+{
+    TEST("authorize response: sudo is granted only by a JSON true");
+
+    static const char *const bodies[] = {
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"permissions\":{\"sudo_allowed\":\"false\",\"sudo_nopasswd\":\"no\"}}",
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"permissions\":{\"sudo_allowed\":\"0\",\"sudo_nopasswd\":\"\"}}",
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"permissions\":{\"sudo_allowed\":1,\"sudo_nopasswd\":{}}}",
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"permissions\":{\"sudo_allowed\":[],\"sudo_nopasswd\":null}}",
+    };
+
+    for (size_t i = 0; i < sizeof(bodies) / sizeof(*bodies); i++) {
+        ob_response_t r;
+        char err[256] = {0};
+        int rc = ob_parse_authorize_response(bodies[i], &r, err, sizeof(err));
+        if (rc != 0 || r.permissions.sudo_allowed || r.permissions.sudo_nopasswd) {
+            ob_response_free(&r);
+            FAIL("a value that is not true granted sudo");
+            return;
+        }
+        ob_response_free(&r);
+    }
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_authorize_response(
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"permissions\":{\"sudo_allowed\":true,\"sudo_nopasswd\":false}}",
+        &r, err, sizeof(err));
+    if (rc != 0 || !r.permissions.sudo_allowed || r.permissions.sudo_nopasswd) {
+        ob_response_free(&r);
+        FAIL("a JSON true no longer grants sudo");
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+/*
+ * A string element holding a NUL byte must not be shortened into another
+ * group name: "admins\0-readonly" is not "admins".
+ */
+static void test_group_with_nul_is_skipped(void)
+{
+    TEST("authorize response: a group with an embedded NUL is skipped");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_authorize_response(
+        "{\"authorized\":true,\"user\":\"dwho\","
+        "\"groups\":[\"admins\\u0000-readonly\",\"dev\"],"
+        "\"managed_groups\":[\"ops\\u0000x\"]}",
+        &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL(err);
+        return;
+    }
+    if (r.groups_count != 1 || strcmp(r.groups[0], "dev") != 0) {
+        ob_response_free(&r);
+        FAIL("the truncated group name was kept");
+        return;
+    }
+    if (r.managed_groups_count != 0) {
+        ob_response_free(&r);
+        FAIL("managed_groups kept a truncated name");
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
+/*
+ * A single string field holding a NUL must be dropped too: storing
+ * "D\0Admin" as the gecos "D" invents a value the portal never sent.
+ */
+static void test_field_with_nul_is_dropped(void)
+{
+    TEST("verify response: a field with an embedded NUL is dropped");
+
+    ob_response_t r;
+    char err[256] = {0};
+    int rc = ob_parse_verify_response(
+        "{\"valid\":true,\"user\":\"dwho\","
+        "\"attrs\":{\"gecos\":\"D\\u0000Admin\","
+        "\"shell\":\"/bin/bash\"}}",
+        &r, err, sizeof(err));
+
+    if (rc != 0) {
+        FAIL(err);
+        return;
+    }
+    if (r.gecos != NULL) {
+        ob_response_free(&r);
+        FAIL("the NUL-bearing gecos was kept");
+        return;
+    }
+    if (r.shell == NULL || strcmp(r.shell, "/bin/bash") != 0) {
+        ob_response_free(&r);
+        FAIL("an ordinary field must still be parsed");
+        return;
+    }
+    ob_response_free(&r);
+    PASS();
+}
+
 static void test_authorize_without_offline(void)
 {
     TEST("authorize response: no offline object leaves the cache off");
@@ -617,6 +778,13 @@ int main(void)
     test_authorize_offline_settings();
     test_authorize_without_offline();
     test_authorize_missing_authorized();
+
+    /* JSON type confusion in granted answers (#398, #399, #400) */
+    test_authorize_non_string_user();
+    test_verify_non_string_user();
+    test_authorize_sudo_requires_boolean();
+    test_group_with_nul_is_skipped();
+    test_field_with_nul_is_dropped();
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Introspection tests (JWT client assertion) */
