@@ -73,6 +73,10 @@
  */
 #define CACHE_LINE_MAX 900
 
+/* How far in the future a cache record's timestamp may be: a clock that moved
+ * backwards between the write and the read, and nothing more. */
+#define CACHE_TIMESTAMP_SKEW 60
+
 /* Overridable so tests/test_nss_cache.c (which includes this file) can point
  * the file cache at a temporary directory instead of the real system path. */
 #ifndef CACHE_DIR
@@ -1240,6 +1244,12 @@ static int build_cache_line(char *out, size_t outlen, const struct passwd *pw,
     const char *home  = pw->pw_dir   ? pw->pw_dir   : "";
     const char *shell = pw->pw_shell ? pw->pw_shell : "";
 
+    if (!name || !*name) {
+        syslog(LOG_WARNING,
+               "libnss_openbastion: refusing to cache uid %u: empty user name",
+               (unsigned)pw->pw_uid);
+        return -1;
+    }
     if (field_breaks_format(name) || field_breaks_format(home) ||
         field_breaks_format(shell)) {
         syslog(LOG_WARNING,
@@ -1522,7 +1532,17 @@ static int file_cache_parse_into(char *line, int dirfd, const char *leaf,
     if (errno != 0 || endptr == timestamp_str || *endptr != '\0') {
         goto corrupt;  /* Invalid timestamp */
     }
-    if (time(NULL) - timestamp > g_config.cache_ttl) {
+    /*
+     * Bound the timestamp before subtracting: a stored LONG_MIN overflowed
+     * "now - timestamp" (undefined behaviour), and a far-future one made the
+     * record look fresh for centuries. Only this host writes the cache, so a
+     * small allowance for clock adjustments is enough.
+     */
+    long now = (long)time(NULL);
+    if (timestamp < 0 || timestamp > now + CACHE_TIMESTAMP_SKEW) {
+        goto corrupt;
+    }
+    if (now - timestamp > g_config.cache_ttl) {
         /* Expired - remove file relative to the verified dir. */
         unlinkat(dirfd, leaf, 0);
         return -1;
@@ -2376,7 +2396,8 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     pw->pw_gecos = p;
     const char *gecos_raw = "";
     if (json_object_object_get_ex(json, "gecos", &val)) {
-        const char *tmp = json_object_get_string(val);
+        const char *tmp = json_object_is_type(val, json_type_string)
+                          ? json_object_get_string(val) : NULL;
         if (tmp) gecos_raw = tmp;
     }
     /* Sanitize GECOS: remove colons and newlines which could corrupt passwd format */
@@ -2395,18 +2416,30 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
 
     /* Home directory - validate server-provided path */
     pw->pw_dir = p;
-    char home_buf[256];
+    char home_buf[PATH_VALIDATOR_MAX_PATH_LENGTH + 1];
+    int home_ok = 0;
+    int home_len = 0;
+
     if (json_object_object_get_ex(json, "home", &val)) {
-        const char *home = json_object_get_string(val);
+        const char *home = json_object_is_type(val, json_type_string)
+                           ? json_object_get_string(val) : NULL;
         /* Only use server-provided home if it passes validation */
         if (home && *home && validate_home(home) == 0) {
-            snprintf(home_buf, sizeof(home_buf), "%s", home);
-        } else {
-            /* Fall back to default if invalid or missing */
-            snprintf(home_buf, sizeof(home_buf), "%s/%s", g_config.default_home_base, username);
+            home_len = snprintf(home_buf, sizeof(home_buf), "%s", home);
+            home_ok = home_len > 0 && (size_t)home_len < sizeof(home_buf);
         }
-    } else {
-        snprintf(home_buf, sizeof(home_buf), "%s/%s", g_config.default_home_base, username);
+    }
+    if (!home_ok) {
+        /* Fall back to default if invalid or missing. The result must still be
+         * a path the module's own validator would accept: building it from the
+         * looked-up name unchecked let any byte reach pw_dir. */
+        home_len = snprintf(home_buf, sizeof(home_buf), "%s/%s",
+                            g_config.default_home_base, username);
+        if (home_len <= 0 || (size_t)home_len >= sizeof(home_buf) ||
+            path_validator_is_dangerous(home_buf)) {
+            json_object_put(json);
+            return -1;
+        }
     }
     if (safe_strcpy(&p, &remaining, home_buf) != 0) {
         json_object_put(json);
@@ -2454,6 +2487,16 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
     if (!name || !result || !buffer) {
         *errnop = EINVAL;
         return NSS_STATUS_UNAVAIL;
+    }
+
+    /*
+     * A name outside the grammar can never be an account: the PAM module
+     * refuses to create it. Refuse it before the portal round trip, and before
+     * any code builds a home or a cache key from it.
+     */
+    if (valid_cache_name(name) != 0) {
+        *errnop = ENOENT;
+        return NSS_STATUS_NOTFOUND;
     }
 
     /* Recursion guard: if we're already in a lookup, don't recurse */

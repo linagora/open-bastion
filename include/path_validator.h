@@ -25,6 +25,13 @@
 #define PATH_VALIDATOR_DEFAULT_HOME_PREFIXES "/home:/var/home"
 
 /*
+ * Longest path either validator accepts. Must stay equal to
+ * MAX_SAFE_PATH_LENGTH in src/config.c, which serves the PAM module: a path
+ * over the limit was refused by PAM and accepted by NSS.
+ */
+#define PATH_VALIDATOR_MAX_PATH_LENGTH 1024
+
+/*
  * Check if a path contains dangerous patterns.
  * Returns 1 if dangerous, 0 if safe.
  *
@@ -41,6 +48,12 @@ static inline int path_validator_is_dangerous(const char *path)
 
     /* Must be absolute path */
     if (path[0] != '/') return 1;
+
+    /* Refuse an overlong path, as the PAM module does */
+    if (strnlen(path, PATH_VALIDATOR_MAX_PATH_LENGTH + 1) >
+        PATH_VALIDATOR_MAX_PATH_LENGTH) {
+        return 1;
+    }
 
     /* Check for path traversal attempts */
     if (strstr(path, "..") != NULL) return 1;
