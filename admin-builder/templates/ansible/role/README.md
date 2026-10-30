@@ -125,6 +125,15 @@ run reads `/etc/pam.d/sudo` without `become`, finds the lock, and:
 - otherwise skips it with a warning: reconfigure it by hand from an SSO
   session allowed to `sudo`, or reinstall it.
 
+The play leaves the configuration of a locked host alone until its setup runs.
+The `openbastion.conf` the role deploys is a staging one — no `node_role`, no
+`authorize_only`, so certificate logins stop working under it — and only the
+setup of the same run turns it into the host's configuration. A locked host is
+therefore never handed it: the play may stop after any step (a dropped
+connection, Ctrl-C, a token that runs out), and nothing there can become root
+any more to run the setup and repair it. A locked host keeps what the setup
+wrote, which a replay does not change.
+
 `ansible_become_token_cmd` is typically `llng --llng-server sso.example.com
 pam_token` (the `llng` client of simple-oidc-client), and `ansible_user` must
 be the SSO login of that session: `sudo` refuses a token minted for someone

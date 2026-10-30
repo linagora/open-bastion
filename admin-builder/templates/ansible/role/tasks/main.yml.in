@@ -362,6 +362,13 @@
   register: ob_conf_reference
   failed_when: false
 
+# This document is a staging one: no node_role, no authorize_only (a
+# certificate login needs it), the role's log_level. Only the setup that follows
+# in the same run turns it into the host's configuration, and under maximum
+# security nothing on the host can become root once that setup has locked sudo.
+# A locked host therefore keeps the file the setup wrote: deploying this one over
+# it and stopping (dropped connection, Ctrl-C, a token that runs out) would leave
+# the host unable to log anyone in, until someone reaches it from an SSO session.
 - name: Deploy openbastion.conf
   ansible.builtin.template:
     src: openbastion.conf.j2
@@ -369,6 +376,7 @@
     owner: root
     group: root
     mode: '0600'
+  when: not (ob_sudo_locked | default(false) | bool)
   notify: Restart sshd
 
 # Service accounts (SSH-key-only local accounts). Deployed only when enabled at
