@@ -1447,6 +1447,11 @@ static pam_openbastion_data_t *init_module_data(pam_handle_t *pamh,
                          "or the path of a public key, several separated by ';'");
         goto error;
     }
+    if (validate_result == -9) {
+        OB_LOG_ERR(pamh, "Configuration error: create_user_home_base cannot be '/' "
+                         "(a created home needs a parent directory to be staged in)");
+        goto error;
+    }
     if (validate_result != 0) {
         OB_LOG_ERR(pamh, "Invalid configuration");
         goto error;

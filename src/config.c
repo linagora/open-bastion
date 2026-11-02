@@ -1197,6 +1197,15 @@ int config_validate(const pam_openbastion_config_t *config)
         return -8;
     }
 
+    /*
+     * A created home is staged in a sibling directory and moved into place.
+     * The root has no sibling, so "/" cannot host that staging directory.
+     */
+    if (config->create_user_enabled && config->create_user_home_base &&
+        strcmp(config->create_user_home_base, "/") == 0) {
+        return -9;
+    }
+
     if (!config->portal_url || strlen(config->portal_url) == 0) {
         return -1;  /* portal_url is required */
     }
