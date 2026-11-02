@@ -45,6 +45,7 @@
 #include "ssh_key_policy.h"
 #include "sshd_anchor.h"
 #include "path_validator.h"
+#include "home_dir.h"
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 #include "offline_cache.h"
 #endif /* ENABLE_DESKTOP_SSO */
@@ -4162,6 +4163,97 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     return PAM_SUCCESS;
 }
 
+/* Drop a staged home that will not be moved into place. */
+static void discard_new_home(const char *path)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/bin/rm", "rm", "-rf", path, NULL);
+        _exit(127);
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+    }
+}
+
+/*
+ * Build a complete home in a private sibling directory of `home_dir`: copy the
+ * skeleton, hand the whole tree to uid:gid, and leave it in `tmp_home` for the
+ * caller to rename() into place. Returns 0 when the tree is ready.
+ *
+ * Nothing is written at the final path here, so an incomplete or root-owned
+ * home is never visible under the account's name.
+ */
+static int prepare_new_home(pam_handle_t *pamh,
+                            const pam_openbastion_config_t *config,
+                            const char *user,
+                            const char *home_dir,
+                            uid_t uid, gid_t gid,
+                            char *tmp_home, size_t tmp_home_size)
+{
+    char owner_str[64];
+    pid_t pid;
+    int status;
+
+    if (home_dir_temp_template(home_dir, tmp_home, tmp_home_size) != 0) {
+        OB_LOG_WARN(pamh, "Cannot derive a staging directory for home %s", home_dir);
+        return -1;
+    }
+
+    if (!mkdtemp(tmp_home)) {
+        OB_LOG_WARN(pamh, "Cannot create a staging directory for home %s: %s",
+                    home_dir, strerror(errno));
+        return -1;
+    }
+
+    if (config->create_user_skel && access(config->create_user_skel, R_OK) == 0) {
+        if (config_validate_skel(config->create_user_skel) == 0) {
+            pid = fork();
+            if (pid == 0) {
+                /* Child: copy skel contents (-P preserves symlinks, doesn't follow them) */
+                execl("/bin/cp", "cp", "-rTP", config->create_user_skel, tmp_home, NULL);
+                _exit(127);
+            } else if (pid > 0) {
+                if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
+                    WEXITSTATUS(status) != 0) {
+                    OB_LOG_WARN(pamh, "Cannot copy skeleton %s into the home of %s",
+                                config->create_user_skel, user);
+                    discard_new_home(tmp_home);
+                    return -1;
+                }
+            } else {
+                OB_LOG_WARN(pamh, "Cannot fork to copy the skeleton of %s", user);
+                discard_new_home(tmp_home);
+                return -1;
+            }
+        } else {
+            OB_LOG_WARN(pamh, "Skel path validation failed for %s, skipping",
+                        config->create_user_skel);
+        }
+    }
+
+    snprintf(owner_str, sizeof(owner_str), "%lu:%lu", (unsigned long)uid, (unsigned long)gid);
+    pid = fork();
+    if (pid == 0) {
+        execl("/bin/chown", "chown", "-Rh", owner_str, tmp_home, NULL);
+        _exit(127);
+    } else if (pid > 0) {
+        if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0) {
+            OB_LOG_WARN(pamh, "Cannot hand the home of %s to %lu:%lu",
+                        user, (unsigned long)uid, (unsigned long)gid);
+            discard_new_home(tmp_home);
+            return -1;
+        }
+    } else {
+        OB_LOG_WARN(pamh, "Cannot fork to set the ownership of the home of %s", user);
+        discard_new_home(tmp_home);
+        return -1;
+    }
+
+    return 0;
+}
+
 /*
  * Create Unix user account by writing directly to /etc/passwd and /etc/shadow
  * This bypasses NSS checks that would otherwise fail because libnss_openbastion
@@ -4368,97 +4460,31 @@ static int create_unix_user(pam_handle_t *pamh,
     ret = 0;
 
     /*
-     * Create home directory with secure permissions (0700).
-     * Security: Use fchown on the directory fd to avoid TOCTOU race conditions.
-     * This prevents an attacker from replacing the directory between mkdir and chown.
+     * A home that already exists and belongs to the account is reused as-is:
+     * its content is the user's, so it gets neither a skeleton copy nor a
+     * chown. Anything else is built in a private sibling directory and moved
+     * into place with one rename(), so the final path never holds a
+     * root-owned or half-populated tree.
      */
-    bool home_created = false;  /* The mkdir below made the directory */
-    bool home_exists = false;
-    bool home_dir_safe = false; /* Verified, and owned by the user */
+    struct stat home_st;
+    if (lstat(home_dir, &home_st) == 0) {
+        if (!S_ISDIR(home_st.st_mode) || home_st.st_uid != (uid_t)uid) {
+            OB_LOG_WARN(pamh, "Home directory %s is not owned by %s, leaving it alone",
+                        home_dir, user);
+        }
+    } else if (errno == ENOENT) {
+        char tmp_home[PATH_MAX];
 
-    if (mkdir(home_dir, 0700) == 0) {
-        home_created = true;
-        home_exists = true;
-    } else if (errno == EEXIST) {
-        home_exists = true;
+        if (prepare_new_home(pamh, config, user, home_dir, uid, gid,
+                             tmp_home, sizeof(tmp_home)) == 0) {
+            if (home_dir_commit(tmp_home, home_dir) != 0) {
+                OB_LOG_WARN(pamh, "Cannot move the home of %s into place at %s: %s",
+                            user, home_dir, strerror(errno));
+                discard_new_home(tmp_home);
+            }
+        }
     } else {
-        OB_LOG_WARN(pamh, "Cannot create home directory %s: %s", home_dir, strerror(errno));
-        /* Continue anyway - user is created */
-    }
-
-    if (home_exists) {
-        /* Open directory to get fd for secure ownership change */
-        int home_fd = open(home_dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-        if (home_fd < 0) {
-            OB_LOG_WARN(pamh, "Cannot open home directory %s for chown: %s",
-                          home_dir, strerror(errno));
-            /* Security: don't proceed with skel/chown if we can't verify the directory */
-        } else {
-            struct stat st;
-            if (fstat(home_fd, &st) == 0) {
-                if (home_created) {
-                    /* We made it, so root owns it: hand it to the user. */
-                    if (st.st_uid != 0) {
-                        OB_LOG_WARN(pamh, "New home directory %s is owned by uid %lu, not root; leaving it alone",
-                                      home_dir, (unsigned long)st.st_uid);
-                    } else if (fchown(home_fd, uid, gid) == 0) {
-                        home_dir_safe = true;
-                    } else {
-                        OB_LOG_WARN(pamh, "Cannot set ownership of home directory: %s",
-                                      strerror(errno));
-                    }
-                } else if (st.st_uid == (uid_t)uid) {
-                    /*
-                     * Pre-existing and already the user's: the ownership is
-                     * already right, and nothing here may rewrite it. Its
-                     * content is the user's, so no skel copy either.
-                     */
-                    home_dir_safe = true;
-                } else {
-                    OB_LOG_WARN(pamh, "Home directory %s owned by uid %lu, not %lu; leaving it alone",
-                                  home_dir, (unsigned long)st.st_uid, (unsigned long)uid);
-                }
-            }
-            close(home_fd);
-        }
-
-        /* Only a directory this call created gets the skel and the recursive chown. */
-        if (home_dir_safe && home_created) {
-            /* Copy skeleton files if configured and validated */
-            if (config->create_user_skel && access(config->create_user_skel, R_OK) == 0) {
-                /* Validate skel path for security */
-                if (config_validate_skel(config->create_user_skel) == 0) {
-                    pid_t pid = fork();
-                    if (pid == 0) {
-                        /* Child: copy skel contents (-P preserves symlinks, doesn't follow them) */
-                        execl("/bin/cp", "cp", "-rTP", config->create_user_skel, home_dir, NULL);
-                        _exit(127);
-                    } else if (pid > 0) {
-                        int status;
-                        waitpid(pid, &status, 0);
-                    }
-                } else {
-                    OB_LOG_WARN(pamh, "Skel path validation failed for %s, skipping",
-                                  config->create_user_skel);
-                }
-            }
-
-            /*
-             * Set ownership of contents recursively.
-             * Note: We still need chown -R for the contents copied from skel.
-             * The directory itself is already owned by the user (fchown above).
-             */
-            char owner_str[64];
-            snprintf(owner_str, sizeof(owner_str), "%lu:%lu", (unsigned long)uid, (unsigned long)gid);
-            pid_t pid = fork();
-            if (pid == 0) {
-                execl("/bin/chown", "chown", "-Rh", owner_str, home_dir, NULL);
-                _exit(127);
-            } else if (pid > 0) {
-                int status;
-                waitpid(pid, &status, 0);
-            }
-        }
+        OB_LOG_WARN(pamh, "Cannot inspect home directory %s: %s", home_dir, strerror(errno));
     }
 
     OB_LOG_INFO(pamh, "Successfully created Unix user: %s", user);

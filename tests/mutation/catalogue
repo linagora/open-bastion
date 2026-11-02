@@ -1253,3 +1253,12 @@ suite   || tests/test_ob_path_validator.sh
 why     || #403: a pre-existing directory owned by somebody else (root
 why     || included) would otherwise become the new user's home, recursively.
 why     || A symlink or a regular file there is never a home either.
+
+id      || home-dir-renamed-into-place
+file    || include/home_dir.h
+search  ||     return rename(tmp, home);
+replace ||     return (void)tmp, (void)home, 0;
+suite   || tests/test_ob_home_dir.sh
+why     || #414: a staged home that is never renamed leaves the account without
+why     || its home, and a final path that appeared meanwhile is reported as
+why     || ours instead of being refused.

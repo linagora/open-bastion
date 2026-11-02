@@ -94,6 +94,10 @@ add_executable(test_path_validator test_path_validator.c ../src/config.c ../src/
 target_include_directories(test_path_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_path_validator COMMAND test_path_validator)
 
+add_executable(test_home_dir test_home_dir.c)
+target_include_directories(test_home_dir PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME test_home_dir COMMAND test_home_dir)
+
 add_executable(test_username_validator test_username_validator.c)
 target_include_directories(test_username_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_username_validator COMMAND test_username_validator)
