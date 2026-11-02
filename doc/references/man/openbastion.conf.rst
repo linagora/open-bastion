@@ -334,8 +334,8 @@ User creation
 .. option:: create_user_home_base
 
    Parent directory of a created account's home. The home is assembled in a
-   hidden sibling directory and moved into place once complete. Default:
-   ``/home``. Alias: ``home_base``.
+   hidden sibling directory and moved into place once complete. A trailing
+   slash is ignored. Default: ``/home``. Alias: ``home_base``.
 
 .. option:: create_user_skel
 

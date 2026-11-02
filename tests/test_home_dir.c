@@ -86,9 +86,21 @@ static int test_temp_template(void)
     if (home_dir_temp_template("/var/home/alice", out, sizeof(out)) != 0) return 0;
     if (strcmp(out, "/var/home/.ob-home.XXXXXX") != 0) return 0;
 
+    /* A trailing slash is ignored: the home is not its own staging parent. */
+    if (home_dir_temp_template("/home/alice/", out, sizeof(out)) != 0) return 0;
+    if (strcmp(out, "/home/.ob-home.XXXXXX") != 0) return 0;
+
+    /* A base ending in '/' yields "//"; the template stays a clean sibling. */
+    if (home_dir_temp_template("/home//alice", out, sizeof(out)) != 0) return 0;
+    if (strcmp(out, "/home/.ob-home.XXXXXX") != 0) return 0;
+    if (home_dir_temp_template("/home///alice/", out, sizeof(out)) != 0) return 0;
+    if (strcmp(out, "/home/.ob-home.XXXXXX") != 0) return 0;
+
     /* No parent to stage in. */
     if (home_dir_temp_template("/alice", out, sizeof(out)) == 0) return 0;
+    if (home_dir_temp_template("//alice", out, sizeof(out)) == 0) return 0;
     if (home_dir_temp_template("alice", out, sizeof(out)) == 0) return 0;
+    if (home_dir_temp_template("alice/bob", out, sizeof(out)) == 0) return 0;
     if (home_dir_temp_template("", out, sizeof(out)) == 0) return 0;
     if (home_dir_temp_template(NULL, out, sizeof(out)) == 0) return 0;
 
