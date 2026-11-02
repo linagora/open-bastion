@@ -159,8 +159,7 @@ static int test_validate_http_allowed_insecure(void)
     return (ret == 0);  /* Should succeed when verify_ssl=false */
 }
 
-/* A root home base has no parent to stage the new home in. */
-static int test_validate_rejects_root_home_base(void)
+static int validate_home_base(const char *base)
 {
     pam_openbastion_config_t config;
     config_init(&config);
@@ -170,12 +169,20 @@ static int test_validate_rejects_root_home_base(void)
     config.client_secret = strdup("test-secret");
     config.create_user_enabled = true;
     free(config.create_user_home_base);
-    config.create_user_home_base = strdup("/");
+    config.create_user_home_base = strdup(base);
 
     int ret = config_validate(&config);
 
     config_free(&config);
-    return (ret == -9);
+    return ret;
+}
+
+/* The home base must be absolute and below the root, so it has a parent. */
+static int test_validate_rejects_bad_home_base(void)
+{
+    return validate_home_base("/") == -9 &&
+           validate_home_base("home") == -9 &&
+           validate_home_base("/var/home") == 0;
 }
 
 /* Test create_user defaults */
@@ -769,7 +776,7 @@ int main(void)
     TEST(validate_http_allowed_insecure);
     TEST(validate_verify_ssl_false_allows_http);
     TEST(validate_verify_ssl_true_rejects_http);
-    TEST(validate_rejects_root_home_base);
+    TEST(validate_rejects_bad_home_base);
     TEST(bad_bool_is_fatal);
     TEST(good_bool_values_accepted);
     TEST(bad_bool_other_key_is_fatal);

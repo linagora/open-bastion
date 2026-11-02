@@ -31,12 +31,6 @@ static int tests_passed = 0;
     } \
 } while(0)
 
-static int make_base(char *dir, size_t size)
-{
-    snprintf(dir, size, "/tmp/ob-home-dir-XXXXXX");
-    return mkdtemp(dir) != NULL;
-}
-
 static void remove_base(const char *dir)
 {
     char cmd[PATH_MAX + 16];
