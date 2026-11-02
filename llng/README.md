@@ -17,16 +17,22 @@ page](../doc/deployment/install.rst) of the documentation, section
 "Mandatory LLNG plugins". The HTML documentation renders the README of each
 plugin as its reference page.
 
-## Two editable copies, until the submodule lands
+## Pinning the submodule
 
-`lemonldap-ng-plugins` still carries its own `plugins/<plugin>` copy of this
-code, and no submodule points here yet. The one that will
-(linagora/lemonldap-ng-plugins#106) embeds the **whole** Open Bastion
-repository, as `open-bastion`, and is pinned to a sha of this repository.
+`lemonldap-ng-plugins` embeds this repository as the `open-bastion` submodule
+and builds the four plugins from it. Its pin must be a **tag**, never a branch
+or a bare sha: this repository's history is rewritten by rebases, and a commit
+that no tag carries becomes unreachable as soon as its branch is rebased away —
+the submodule then fails to fetch in every fresh clone.
 
-Until it lands, neither copy is authoritative on its own: a change merged in
-one repository has to be merged in the other in the same breath. When #106
-merges, its pin must move to the sha of the merge, or it dangles.
+The tags are named `plugins-vX.Y.Z`, where `X.Y.Z` is the highest of the four
+`plugin.json` versions at the tagged commit, and the `plugins-v*` pattern is
+protected so that a tag cannot be moved or deleted.
+
+We do not apply the lockstep rule of the packaging repository, where
+every plugin touched by a release is bumped to that release's
+version. Here only the plugin that changed is bumped. A release that
+touches none of the four needs no new tag.
 
 ## Working on them
 
