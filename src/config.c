@@ -1199,10 +1199,13 @@ int config_validate(const pam_openbastion_config_t *config)
 
     /*
      * A created home is staged in a sibling directory and moved into place.
-     * The root has no sibling, so "/" cannot host that staging directory.
+     * The base must therefore be an absolute path below the root: a relative
+     * one would resolve against the caller's directory, and "/" has no
+     * sibling to host the staging directory.
      */
     if (config->create_user_enabled && config->create_user_home_base &&
-        strcmp(config->create_user_home_base, "/") == 0) {
+        (config->create_user_home_base[0] != '/' ||
+         strcmp(config->create_user_home_base, "/") == 0)) {
         return -9;
     }
 
