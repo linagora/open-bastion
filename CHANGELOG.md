@@ -183,7 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complete and owned by the account. It no longer appears under its final name
   root-owned and half-populated while the skeleton is copied and `chown`ed. A
   non-empty directory that appears at the home path meanwhile is refused
-  rather than adopted (#414).
+  rather than adopted. A `create_user_home_base` of `/` is refused, since the
+  home cannot be staged beside a parent the root does not have (#414).
 
 ## [0.7.0] _(2026-10-20)_
 
