@@ -690,6 +690,17 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     }
     else if (strcmp(key, "create_user_home_base") == 0 || strcmp(key, "home_base") == 0) {
         SET_STRING_FIELD(config->create_user_home_base, value, key);
+        /*
+         * A base ending in '/' would make "<base>//<user>" the home recorded
+         * in passwd. Trailing slashes add no meaning to a directory prefix, so
+         * drop them here rather than carry a double slash into every home.
+         */
+        if (config->create_user_home_base) {
+            size_t len = strlen(config->create_user_home_base);
+            while (len > 1 && config->create_user_home_base[len - 1] == '/') {
+                config->create_user_home_base[--len] = '\0';
+            }
+        }
     }
     else if (strcmp(key, "create_user_skel") == 0 || strcmp(key, "skel") == 0) {
         SET_STRING_FIELD(config->create_user_skel, value, key);

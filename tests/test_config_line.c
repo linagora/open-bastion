@@ -138,6 +138,21 @@ static void assert_quoted_value_then_comment(pam_openbastion_config_t *c)
           "server_group = \"prod\" # note    -> ends at the closing quote");
 }
 
+/* ---- create_user_home_base must not leak a trailing slash into homes ---- */
+
+static void assert_home_base_trailing_slash_normalized(pam_openbastion_config_t *c)
+{
+    CHECK(c->create_user_home_base &&
+          strcmp(c->create_user_home_base, "/var/home") == 0,
+          "create_user_home_base = /var/home/ -> trailing slash dropped");
+}
+
+static void assert_home_base_root_kept(pam_openbastion_config_t *c)
+{
+    CHECK(c->create_user_home_base && strcmp(c->create_user_home_base, "/") == 0,
+          "create_user_home_base = /           -> root kept as-is");
+}
+
 /* ---- no regression on the ordinary cases ---- */
 
 static void assert_plain_value(pam_openbastion_config_t *c)
@@ -372,6 +387,10 @@ int main(void)
     printf("\nInline comments are stripped from ordinary keys:\n");
     with_config("server_group = prod # site A", assert_non_secret_stripped);
     with_config("server_group = \"prod\" # note", assert_quoted_value_then_comment);
+
+    printf("\ncreate_user_home_base is normalised:\n");
+    with_config("create_user_home_base = /var/home/", assert_home_base_trailing_slash_normalized);
+    with_config("create_user_home_base = /", assert_home_base_root_kept);
 
     printf("\nNo regression on ordinary lines:\n");
     with_config("server_group = production", assert_plain_value);
