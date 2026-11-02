@@ -178,6 +178,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   middle of a long value while `ob_sign` refused the same file (#393).
 - `ob-cert-daemon` refuses a request line containing a NUL byte instead of
   accepting the shorter string that precedes it (#392).
+- A home directory created by `create_user` is now assembled in a private
+  sibling directory and moved into place with one `rename()` once it is
+  complete and owned by the account. It no longer appears under its final name
+  root-owned and half-populated while the skeleton is copied and `chown`ed. A
+  non-empty directory that appears at the home path meanwhile is refused
+  rather than adopted (#414).
 
 ## [0.7.0] _(2026-10-20)_
 
