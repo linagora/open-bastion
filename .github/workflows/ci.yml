@@ -43,6 +43,7 @@ jobs:
           libjson-c-dev \
           libpam0g-dev \
           libsodium-dev \
+          libxml2-utils \
           curl \
           jq \
           socat \
@@ -58,23 +59,8 @@ jobs:
     - name: Build
       run: cmake --build build --parallel
 
-    - name: Run tests
-      run: |
-        cd build
-        ctest --output-on-failure
-
-    # ctest writes the failing test's own stdout to LastTest.log. Keep it:
-    # re-running a failed job replaces the workflow log, and with it the only
-    # record of which sub-test failed and on which assertion (#244).
-    - name: Upload ctest logs on failure
-      if: failure() || cancelled()
-      uses: actions/upload-artifact@v7
-      with:
-        name: ctest-logs-${{ matrix.os }}-${{ github.run_attempt }}
-        path: build/Testing/Temporary/
-        retention-days: 7
-        if-no-files-found: warn
-
+    # These read the build, not the test results: keep them ahead of the suite
+    # so a failing test does not hide them.
     - name: Check PAM module symbols
       run: |
         echo "Checking exported PAM symbols..."
@@ -88,15 +74,33 @@ jobs:
           bash -n "$script"
         done
 
-    # The mutation suite replays the guarding suites for every catalogue entry;
-    # it runs once, strict and as root, in the mutation job below.
-    - name: Run script unit tests
+    # One runner for both halves, so a failing C test does not hide the shell
+    # suites that never got to run. It writes JUnit reports naming the commit
+    # and the time of the run, which is what a certification file points at.
+    - name: Run tests
       run: |
-        for test in tests/test_ob_*.sh; do
-          case "$test" in tests/test_ob_mutation.sh) continue ;; esac
-          echo "Running: $test"
-          bash "$test"
-        done
+        tests/run-tests-junit.sh --build-dir build
+
+    - name: Upload JUnit test reports
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: junit-${{ matrix.os }}-${{ github.run_attempt }}
+        path: build/test-results/*.xml
+        retention-days: 90
+        if-no-files-found: warn
+
+    # ctest writes the failing test's own stdout to LastTest.log. Keep it:
+    # re-running a failed job replaces the workflow log, and with it the only
+    # record of which sub-test failed and on which assertion (#244).
+    - name: Upload ctest logs on failure
+      if: failure() || cancelled()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ctest-logs-${{ matrix.os }}-${{ github.run_attempt }}
+        path: build/Testing/Temporary/
+        retention-days: 7
+        if-no-files-found: warn
 
     # This suite reads the tree and nothing else -- no docker, no portal, no
     # build -- so it has no legitimate reason to skip, and its whole subject is
@@ -137,7 +141,7 @@ jobs:
             exit 1 ;;
         esac
 
-    # The loop above treats a SKIP as success, which is right for suites that
+    # The test runner treats a SKIP as success, which is right for suites that
     # need docker or a portal. It is wrong for the fingerprint sink: that suite
     # is the only thing guarding the trust root moved in #249, and if it skipped
     # -- no socat, no build -- CI would stay green while testing nothing.

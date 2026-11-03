@@ -15,8 +15,8 @@
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SINK="$SCRIPT_DIR/build/ob-record-sink"
-CONNECT="$SCRIPT_DIR/build/ob-record-connect"
+SINK="${OB_BUILD_DIR:-$SCRIPT_DIR/build}/ob-record-sink"
+CONNECT="${OB_BUILD_DIR:-$SCRIPT_DIR/build}/ob-record-connect"
 
 if [ ! -x "$SINK" ] || [ ! -x "$CONNECT" ]; then
     echo "SKIP: build/ob-record-sink or build/ob-record-connect missing (cmake --build build)"

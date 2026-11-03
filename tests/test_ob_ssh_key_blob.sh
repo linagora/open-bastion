@@ -49,7 +49,7 @@ CC_BIN=$(command -v cc || command -v gcc)
 
 # Beside the build tree when there is one: a tmpfs or a tmp cleaner part-way
 # through the run is one failure mode a security suite should not inherit.
-SCRATCH_BASE="$ROOT_DIR/build"
+SCRATCH_BASE="${OB_BUILD_DIR:-$ROOT_DIR/build}"
 [ -d "$SCRATCH_BASE" ] || SCRATCH_BASE="${TMPDIR:-/tmp}"
 SCRATCH=$(mktemp -d "$SCRATCH_BASE/ob-ssh-key-blob.XXXXXX") \
     || { echo "  FAIL: cannot create a scratch directory"; exit 1; }

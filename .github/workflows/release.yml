@@ -232,6 +232,60 @@ jobs:
           path: packages/*.rpm
           retention-days: 7
 
+  # The test reports are certification evidence: a release asset states which
+  # commit was tested and when, so an auditor can reference it instead of a
+  # branch that keeps moving. The job gates the release: a failing test suite
+  # publishes nothing.
+  test:
+    name: Test suite (JUnit evidence)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          # git describe names the tag the evidence belongs to.
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libcurl4-openssl-dev \
+            libjson-c-dev \
+            libpam0g-dev \
+            libsodium-dev \
+            libxml2-utils \
+            curl \
+            jq \
+            socat \
+            rsync \
+            openssh-client \
+            openssh-sftp-server \
+            python3-sphinx \
+            ansible-core
+
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DUSE_LIBSODIUM=ON -DINSTALL_DESKTOP=ON
+          cmake --build build --parallel
+
+      - name: Run tests
+        run: tests/run-tests-junit.sh --build-dir build
+
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-test-results
+          path: build/test-results/*.xml
+          retention-days: 90
+          if-no-files-found: warn
+
   # One CycloneDX SBOM per .deb and per distribution, for a vulnerability
   # scanner such as grype (#277). docker-sbom/generate-sbom.sh installs the
   # package in a slim image of its distribution and runs syft on it: a build
@@ -308,7 +362,7 @@ jobs:
   create-repo:
     name: Create Repositories
     runs-on: ubuntu-latest
-    needs: [build-deb, build-rpm]
+    needs: [build-deb, build-rpm, test]
     permissions:
       contents: read
 
@@ -603,7 +657,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-deb, build-rpm, sbom]
+    needs: [build-deb, build-rpm, sbom, test]
     permissions:
       contents: write
 
@@ -616,6 +670,12 @@ jobs:
         with:
           path: artifacts
           pattern: '{deb,rpm,sbom}-*'
+
+      - name: Download the JUnit test reports
+        uses: actions/download-artifact@v7
+        with:
+          name: junit-test-results
+          path: artifacts/test-results
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -654,6 +714,11 @@ jobs:
           done
           find artifacts -type f \( -name '*.rpm' -o -name '*.json' \) \
             -exec cp {} release-assets/ \;
+          # The JUnit reports, one per test layer (C and shell suites), prefixed
+          # with the tag so they stay distinguishable once downloaded.
+          for xml in artifacts/test-results/*.xml; do
+            cp "$xml" "release-assets/open-bastion-${GITHUB_REF_NAME}-${xml##*/}"
+          done
           ls -l release-assets/
 
       - name: Create GitHub Release
