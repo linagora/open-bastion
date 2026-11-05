@@ -376,12 +376,15 @@ sub authorize {
     return $body_bail if $body_bail;
 
     my $user              = $self->_stringField( $body, 'user' );
-    my $host              = $body->{host}    || '';
-    my $service           = $body->{service} || 'ssh';
-    my $body_server_group = $body->{server_group};
+    my $host              = $self->_stringField( $body, 'host' )    || '';
+    my $service           = $self->_stringField( $body, 'service' ) || 'ssh';
+    my $body_server_group = $self->_stringField( $body, 'server_group' );
 
     unless ($user) {
         return $self->_badRequest( $req, 'Missing user parameter' );
+    }
+    unless ( $self->_isPrintableAscii($user) ) {
+        return $self->_badRequest( $req, 'Invalid user parameter' );
     }
 
     # Resolve the authoritative server_group for this enrolled client.
@@ -822,6 +825,15 @@ sub _stringField {
     my $value = $body->{$name};
     return undef if !defined $value || ref $value;
     return $value;
+}
+
+# HELPER: true when $value is a non-empty printable-ASCII string. LLNG
+# hashes a session id and a login as bytes before using them as store keys,
+# so a wider character makes Digest::SHA die; no real credential or login
+# holds one.
+sub _isPrintableAscii {
+    my ( $self, $value ) = @_;
+    return defined $value && $value =~ /\A[\x21-\x7e]+\z/;
 }
 
 # ---------------------------------------------------------------------------
@@ -1642,6 +1654,9 @@ sub verifyToken {
     unless ($user_token) {
         return $self->_badRequest( $req, 'token parameter required' );
     }
+    unless ( $self->_isPrintableAscii($user_token) ) {
+        return $self->_badRequest( $req, 'Invalid token parameter' );
+    }
 
     # Get server info for audit
     my $server_id = $serverSession->data->{client_id} || 'unknown';
@@ -1968,6 +1983,9 @@ sub heartbeat {
     unless ($refresh_token_id) {
         return $self->_badRequest( $req, 'refresh_token required' );
     }
+    unless ( $self->_isPrintableAscii($refresh_token_id) ) {
+        return $self->_badRequest( $req, 'Invalid refresh_token parameter' );
+    }
 
     # 3. Validate refresh token exists
     my $rtSession = $self->oidc->getRefreshToken($refresh_token_id);
@@ -2005,7 +2023,7 @@ sub heartbeat {
     #    forward by OfflineSessionExpiration on every beat is what makes a
     #    live server's credential effectively never expire, while a server
     #    that stops beating ages out after that window (the grace period).
-    my $hostname = $body->{hostname} || 'unknown';
+    my $hostname = $self->_stringField( $body, 'hostname' ) || 'unknown';
     my $offlineExp =
       $self->oidc->rpOptions->{$rp}
       ->{oidcRPMetaDataOptionsOfflineSessionExpiration}
@@ -2015,9 +2033,10 @@ sub heartbeat {
     my $updates = {
         _pamServer      => 1,
         _pamHostname    => $hostname,
-        _pamServerGroup => $body->{server_group} || 'default',
-        _pamVersion     => $body->{version}      || '',
-        _pamNodeRole    => $body->{node_role}    || '',
+        _pamServerGroup => $self->_stringField( $body, 'server_group' )
+          || 'default',
+        _pamVersion     => $self->_stringField( $body, 'version' )   || '',
+        _pamNodeRole    => $self->_stringField( $body, 'node_role' ) || '',
         _pamLastSeen    => $now,
         _pamStatus      => 'active',
         _utime          => $now + $offlineExp - $self->conf->{timeout},
@@ -2141,6 +2160,9 @@ sub userinfo {
     my $user = $self->_stringField( $body, 'user' );
     unless ($user) {
         return $self->_badRequest( $req, 'user parameter required' );
+    }
+    unless ( $self->_isPrintableAscii($user) ) {
+        return $self->_badRequest( $req, 'Invalid user parameter' );
     }
 
     # 3. Lookup user in backend
@@ -2957,10 +2979,11 @@ sub bastionCert {
     return $body_bail if $body_bail;
 
     my $user         = $self->_stringField( $body, 'user' );
-    my $target_host  = $body->{target_host}  || '';
-    my $target_group = $body->{target_group} || 'default';
-    my $public_key   = $body->{public_key};
-    my $voucher      = $body->{voucher};
+    my $target_host  = $self->_stringField( $body, 'target_host' ) || '';
+    my $target_group = $self->_stringField( $body, 'target_group' )
+      || 'default';
+    my $public_key = $self->_stringField( $body, 'public_key' );
+    my $voucher    = $self->_stringField( $body, 'voucher' );
 
     return $self->_badRequest( $req, 'Missing user parameter' ) unless $user;
 
@@ -2968,9 +2991,9 @@ sub bastionCert {
     # ssh-keygen -n would split into multiple principals, characters that
     # cannot appear in a login, and anything that would poison the key-id
     # encoding. The persistent-session lookup below hashes the login as
-    # bytes, so a character above U+00FF would also die there.
+    # bytes, so a wider character would also die there.
     return $self->_badRequest( $req, 'Invalid user parameter' )
-      if $user =~ m{[\s,/;]} || $user =~ /[^\x21-\x7e]/;
+      unless $self->_isPrintableAscii($user) && $user !~ m{[,/;]};
 
     return $self->_badRequest( $req, 'Missing public_key parameter' )
       unless $public_key;

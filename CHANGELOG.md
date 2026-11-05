@@ -74,11 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - pam-access: a malformed request to `/pam/authorize`, `/pam/verify`,
   `/pam/userinfo`, `/pam/bastion-cert` or `/pam/heartbeat` answered 500
   instead of 400, which let an unauthenticated client fill the portal error
-  log. A body that is not a JSON object, and a `refresh_token`, `token` or
-  `user` that is an array, an object or a boolean, are now refused with a
-  400; so is a login holding a character above U+00FF on
-  `/pam/bastion-cert`, which died in the persistent-session lookup (#438,
-  #440, #441).
+  log. A body that is not a JSON object, a `refresh_token`, `token` or `user`
+  that is not a string, and a credential or login holding a character outside
+  printable ASCII — a session key the store hashes as bytes — are now refused
+  with a 400. The other string fields are read as strings too, so a reference
+  can no longer be stored in the heartbeat session or read as an
+  authorization refusal (#438, #440, #441).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host
