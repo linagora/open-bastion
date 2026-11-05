@@ -144,6 +144,20 @@ SKIP: {
     count(1);
 }
 
+# A section type OpenSSH does not define makes ssh-keygen refuse the whole
+# file, so serving it would fail closed on every host that installs it. The
+# framing walk alone accepted type 0 with a zero length (#437). The extension
+# type (255) stays out on purpose: ssh-keygen never writes one, and hosts
+# older than 9.4 refuse the whole KRL.
+my $unknownSection = substr( $empty, 0, 44 ) . "\0" . pack( 'N', 0 );
+my $extensionSection = substr( $empty, 0, 44 ) . "\xff" . pack( 'N', 0 );
+ok( $plugin->_krlIsValid($empty), 'a header-only KRL is valid' );
+ok( !$plugin->_krlIsValid($unknownSection),
+    'a section of an unknown type is refused' );
+ok( !$plugin->_krlIsValid($extensionSection),
+    'an extension section (255) is refused' );
+count(3);
+
 # =============================================================================
 # PART 2: serial validation (issue #65)
 # =============================================================================
@@ -158,7 +172,10 @@ ok( !$plugin->_validSerial('123456789012345678901'), 'over-long rejected' );
 ok( !$plugin->_validSerial("12\nid: root"),  'newline injection rejected' );
 ok( !$plugin->_validSerial("12\nkey: ssh-ed25519 AAAA"),
     'key directive injection rejected' );
-count(9);
+# A JSON boolean stringifies to "1" and slipped past the pattern (#435).
+ok( !$plugin->_validSerial(JSON::true),  'JSON true serial rejected' );
+ok( !$plugin->_validSerial(JSON::false), 'JSON false serial rejected' );
+count(11);
 
 # The injection payload must never reach the ssh-keygen spec file.
 my $before = slurp($krlPath);
@@ -175,6 +192,10 @@ ok( $action, 'sshCaRevoke broker action registered' );
 $action->( 'Lemonldap::NG::Handler::Main', { serial => "7\nid: everyone" },
     undef );
 is( slurp($krlPath), $before, 'KRL untouched by a poisoned broker event' );
+
+# A JSON boolean stringifies to "1" and would have added serial 1 (#435).
+$action->( 'Lemonldap::NG::Handler::Main', { serial => JSON::true }, undef );
+is( slurp($krlPath), $before, 'KRL untouched by a boolean serial' );
 count(2);
 
 # ... while a well-formed broker event still works.

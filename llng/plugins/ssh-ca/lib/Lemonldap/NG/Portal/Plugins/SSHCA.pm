@@ -1294,6 +1294,12 @@ sub sshMyCertRevoke {
     my ( $body, $bail ) = $self->_jsonBodyOrReject( $req, 'SSH myrevoke' );
     return $bail if $bail;
     my $serial = $body->{serial};
+
+    # A JSON boolean stringifies to "1" and could match a certificate serial,
+    # as the broker path did (#435). Refuse references like /ssh/revoke does.
+    if ( ref $serial ) {
+        return $self->p->sendError( $req, 'serial must be a string', 400 );
+    }
     unless ( defined $serial && $serial ne '' ) {
         return $self->p->sendError( $req, 'serial required', 400 );
     }
@@ -1542,6 +1548,13 @@ sub sshCertsList {
 
     my $total = scalar @certs;
 
+    # splice() takes its offset as a signed integer: an offset parsed as a
+    # float larger than 2^63 arrives negative and either dies on an empty list
+    # ("Modification of non-creatable array value") or silently returns the
+    # end of a non-empty one. Past the end, every offset means an empty page
+    # (#432).
+    $offset = $total if $offset > $total;
+
     # Apply pagination
     if ( $offset > 0 || $limit < $total ) {
         @certs = splice( @certs, $offset, $limit );
@@ -1576,6 +1589,15 @@ sub sshCertRevoke {
     unless ( $sessionId && $serial ) {
         return $self->p->sendError( $req, 'session_id and serial required',
             400 );
+    }
+
+    # A JSON array or object is true, so the presence check above lets it
+    # through and Session->new dies on its id type constraint (#433). The
+    # routes only ever hand out plain strings, so anything else is a client
+    # error.
+    if ( ref $sessionId || ref $serial ) {
+        return $self->p->sendError(
+            $req, 'session_id and serial must be strings', 400 );
     }
 
     # The reason is stored in the session, echoed in logger->info and in the
@@ -2140,8 +2162,22 @@ sub _checkKeyPolicy {
 
     my ( $self, $serial ) = @_;
     return 0 unless defined $serial;
+
+    # A JSON boolean stringifies to "1" and would otherwise match the pattern.
+    return 0 if ref $serial;
     return $serial =~ /\A[0-9]{1,20}\z/ ? 1 : 0;
 }
+
+# Section types this plugin can publish. OpenSSH also defines
+# KRL_SECTION_EXTENSION (255), parsed since 9.4, but `ssh-keygen` never writes
+# one and older hosts (bookworm ships 9.2) refuse the whole KRL, which would
+# fail closed on every key. A type outside this set means the blob is not a
+# KRL this plugin can serve: ssh-keygen refuses it, and a host installing it
+# would then fail closed. The framing walk alone accepted type 0 with a zero
+# length.
+my %SSHCA_KRL_SECTION_TYPES = map { $_ => 1 } ( 1 .. 5 );
+#   1 certificates, 2 explicit key, 3 SHA1 fingerprint,
+#   4 signature,    5 SHA256 fingerprint
 
 # HELPER: Check that a blob is a structurally complete OpenSSH KRL.
 #
@@ -2186,6 +2222,8 @@ sub _krlIsValid {
     # sections
     while ( $pos < $len ) {
         return 0 if $len - $pos < 5;    # u8 type + u32 length
+        my $sectionType = ord( substr( $data, $pos, 1 ) );
+        return 0 unless $SSHCA_KRL_SECTION_TYPES{$sectionType};
         $pos += 1;
         my $l = unpack( 'N', substr( $data, $pos, 4 ) );
         $pos += 4;

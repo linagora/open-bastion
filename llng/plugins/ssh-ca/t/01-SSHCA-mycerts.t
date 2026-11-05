@@ -345,6 +345,15 @@ sub myrevoke_req {
     );
 }
 
+# A reference is not a serial: JSON true stringifies to "1" and could match a
+# certificate serial, as the broker path did (#435).
+for my $bad ( JSON::true, [], {} ) {
+    ok( $res = myrevoke_req( { serial => $bad } ),
+        'POST /ssh/myrevoke with a non-string serial' );
+    is( $res->[0], 400, 'non-string serial is refused' );
+}
+count(1);
+
 ok( $res = myrevoke_req( { serial => $target->{serial} } ),
     'POST /ssh/myrevoke' );
 $payload = expectJSON($res);

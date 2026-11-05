@@ -94,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NOTFOUND` — an authoritative "no such user" — for an account that exists.
   The requirement is now the entry's own length instead of a padded estimate,
   and a short buffer is reported as `ERANGE` on every path (#430).
+- ssh-ca: `/ssh/certs` with an offset past the end no longer dies in
+  `splice`, `/ssh/revoke` refuses a `session_id` or `serial` that is a JSON
+  array or object instead of dying on the session id type constraint, a
+  broker revocation whose `serial` is a JSON boolean no longer revokes
+  serial 1, and a KRL carrying a section type OpenSSH does not define is
+  refused instead of served to hosts that would then fail closed on every
+  key (#432, #433, #435, #437).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host
