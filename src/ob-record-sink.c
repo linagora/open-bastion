@@ -68,6 +68,7 @@
 #include <json-c/json.h>
 
 #include "ob_cert_proto.h" /* ob_read_line, ob_valid_username */
+#include "str_utils.h"     /* str_json_has_embedded_nul */
 
 #define OB_RECORD_SINK_VERSION "0.2.0"
 /* Wire protocol version: the header's "v". See feed_frames() for v2. */
@@ -122,7 +123,9 @@ static int valid_session_id(const char *s)
 /* Read a string field from the parsed header, bounded by max. Returns a malloc'd
  * copy (caller frees) or NULL when absent/too long/contains control chars other
  * than what json already decoded; control chars are tolerated (json-c re-escapes
- * on output) but length is enforced. */
+ * on output) but length is enforced. A value holding a NUL is refused: the
+ * record would otherwise state a session id, a tty or a command that is the
+ * part before the NUL, not what the recorder sent. */
 static char *hdr_str(struct json_object *h, const char *key, size_t max)
 {
     struct json_object *v;
@@ -131,7 +134,7 @@ static char *hdr_str(struct json_object *h, const char *key, size_t max)
     if (!json_object_is_type(v, json_type_string))
         return NULL;
     const char *s = json_object_get_string(v);
-    if (!s || strlen(s) > max)
+    if (!s || str_json_has_embedded_nul(v) || strlen(s) > max)
         return NULL;
     return strdup(s);
 }
