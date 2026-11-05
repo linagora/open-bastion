@@ -22,6 +22,7 @@
  */
 
 #include <fcntl.h>
+#include <glob.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -219,14 +220,28 @@ int main(void)
         CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
               "read_instance_id() refuses an empty file");
 
-        /*
-         * A directory opens, so the FILE pointer is valid and fgets() is what
-         * fails: each failure path must close the file exactly once.
-         */
+        /* A directory opens, so the FILE pointer is valid and fgets() is what
+         * fails. It must be closed once on that path too. */
         unlink(idpath);
         if (mkdir(idpath, 0700) != 0) { perror("mkdir"); return 2; }
         CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
               "read_instance_id() refuses a directory");
+
+        /*
+         * The same directory also makes rename() fail (EISDIR): the only way
+         * into the recovery path an unprivileged suite can reach. It must
+         * report the failure and leave no temporary file behind.
+         */
+        CHECK(load_or_generate_instance_id(dir, buf, sizeof(buf)) == -1,
+              "load_or_generate_instance_id() fails when the ID is not renamed");
+        {
+            char pattern[300];
+            glob_t g;
+            snprintf(pattern, sizeof(pattern), "%s/.instance_id.tmp.*", dir);
+            CHECK(glob(pattern, 0, NULL, &g) == GLOB_NOMATCH,
+                  "a failed rename leaves no temporary file behind");
+            globfree(&g);
+        }
         rmdir(idpath);
 
         /* The fallback chain must leave a usable ID behind, and reuse it. */

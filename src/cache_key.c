@@ -25,46 +25,10 @@
 #define INSTANCE_ID_SIZE 33
 
 /*
- * Read machine-id from /etc/machine-id
- * buf: Output buffer (at least 64 bytes)
- * buf_size: Size of output buffer
- * Returns 0 on success, -1 on failure
+ * Read the first line of `path` into buf, without its trailing newline.
+ * Returns 0 on success, -1 when the file cannot be opened or read.
  */
-static int read_machine_id(char *buf, size_t buf_size)
-{
-    FILE *f = fopen(MACHINE_ID_FILE, "r");
-    if (!f) {
-        return -1;
-    }
-
-    if (!fgets(buf, buf_size, f)) {
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-
-    /* Remove trailing newline */
-    size_t len = strlen(buf);
-    if (len > 0 && buf[len - 1] == '\n') {
-        buf[len - 1] = '\0';
-    }
-
-    /* Reject empty machine-id */
-    if (strlen(buf) == 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
-/*
- * Read an instance ID from `path`.
- * buf: Output buffer (at least INSTANCE_ID_SIZE bytes)
- * buf_size: Size of output buffer
- * Returns 0 on success, -1 when the file is missing, unreadable or holds
- * something shorter than an instance ID.
- */
-static int read_instance_id(const char *path, char *buf, size_t buf_size)
+static int read_first_line(const char *path, char *buf, size_t buf_size)
 {
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -81,6 +45,38 @@ static int read_instance_id(const char *path, char *buf, size_t buf_size)
     size_t len = strlen(buf);
     if (len > 0 && buf[len - 1] == '\n') {
         buf[len - 1] = '\0';
+    }
+
+    return 0;
+}
+
+/*
+ * Read machine-id from /etc/machine-id
+ * buf: Output buffer (at least 64 bytes)
+ * buf_size: Size of output buffer
+ * Returns 0 on success, -1 on failure
+ */
+static int read_machine_id(char *buf, size_t buf_size)
+{
+    if (read_first_line(MACHINE_ID_FILE, buf, buf_size) != 0) {
+        return -1;
+    }
+
+    /* Reject empty machine-id */
+    return strlen(buf) == 0 ? -1 : 0;
+}
+
+/*
+ * Read an instance ID from `path`.
+ * buf: Output buffer (at least INSTANCE_ID_SIZE bytes)
+ * buf_size: Size of output buffer
+ * Returns 0 on success, -1 when the file is missing, unreadable or holds
+ * something shorter than an instance ID.
+ */
+static int read_instance_id(const char *path, char *buf, size_t buf_size)
+{
+    if (read_first_line(path, buf, buf_size) != 0) {
+        return -1;
     }
 
     return strlen(buf) >= 32 ? 0 : -1;
