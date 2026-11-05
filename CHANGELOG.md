@@ -71,6 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- pam-access: a malformed request to `/pam/authorize`, `/pam/verify`,
+  `/pam/userinfo`, `/pam/bastion-cert` or `/pam/heartbeat` answered 500
+  instead of 400, which let an unauthenticated client fill the portal error
+  log. A body that is not a JSON object, a `refresh_token`, `token` or `user`
+  that is not a string, and a credential or login holding a character outside
+  printable ASCII — a session key the store hashes as bytes — are now refused
+  with a 400. The other string fields are read as strings too, so a reference
+  can no longer be stored in the heartbeat session or read as an
+  authorization refusal (#438, #440, #441).
 - ssh-ca, pam-access: `/ssh/sign` answered 500 for a truncated or off-curve
   public key, and `/pam/bastion-cert` never applied the SSH key policy, so a
   malformed or weak key reached the signing fork and also answered 500. Both
