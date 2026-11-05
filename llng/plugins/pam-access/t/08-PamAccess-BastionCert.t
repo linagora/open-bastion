@@ -57,6 +57,19 @@ my $eph_pubkey;
     chomp $eph_pubkey;
 }
 
+# A 1024-bit RSA key, below the default sshCaMinKeyBits floor (#439).
+my $weak_rsa_pubkey;
+{
+    my $tmpdir = tempdir( CLEANUP => 1 );
+    system(
+        "ssh-keygen -t rsa -b 1024 -f $tmpdir/weak -N '' -q -C weak-rsa") == 0
+      or plan skip_all => "ssh-keygen RSA key generation failed";
+    open my $fh, '<', "$tmpdir/weak.pub" or die;
+    $weak_rsa_pubkey = <$fh>;
+    close $fh;
+    chomp $weak_rsa_pubkey;
+}
+
 my $krl = tempdir( CLEANUP => 1 ) . "/revoked_keys";
 
 # --- OP with pam-access + ssh-ca (cert vouching) -----------------------------
@@ -250,6 +263,30 @@ $res = bastion_post(
     }
 );
 is( $res->[0], 400, 'bastion-cert with malformed public_key -> 400' );
+
+# A truncated key and a weak key are client errors, not signing failures:
+# they must answer 400 here, before the CA fork runs (#436, #439).
+$res = bastion_post(
+    '/pam/bastion-cert',
+    {
+        user        => 'french',
+        target_host => 'b',
+        public_key  => 'ssh-ed25519 AAAAC3Nz',
+        voucher     => $voucher
+    }
+);
+is( $res->[0], 400, 'bastion-cert with a truncated public_key -> 400' );
+
+$res = bastion_post(
+    '/pam/bastion-cert',
+    {
+        user        => 'french',
+        target_host => 'b',
+        public_key  => $weak_rsa_pubkey,
+        voucher     => $voucher
+    }
+);
+is( $res->[0], 400, 'bastion-cert with a 1024-bit RSA key -> 400' );
 
 # ============================================================================
 # SECURITY: voucher binding

@@ -1945,21 +1945,27 @@ sub _parseSshPubKey {
     return undef unless length $blob;
 
     my @fields;
-    my $pos = 0;
-    my $len = length $blob;
+    my $pos        = 0;
+    my $len        = length $blob;
+    my $truncated  = 0;
     while ( $pos + 4 <= $len ) {
         my $flen = unpack( 'N', substr( $blob, $pos, 4 ) );
         $pos += 4;
 
         # Truncated or simply not a wire-format key: stop, don't guess.
-        last if $flen > $len - $pos;
+        if ( $flen > $len - $pos ) { $truncated = 1; last; }
         push @fields, substr( $blob, $pos, $flen );
         $pos += $flen;
 
         # No key type we handle needs more than this (DSA has 5).
         last if @fields >= 5;
     }
-    return undef unless @fields;
+    return undef if $truncated || !@fields;
+
+    # Trailing bytes after the last field: ssh-keygen reads the key type and
+    # its fields and refuses the rest, so a blob that parses here but carries
+    # extra data would only die later in the signing fork (#434).
+    return undef unless $pos == $len;
 
     my $type = $fields[0];
     return undef unless length $type;
@@ -1969,18 +1975,35 @@ sub _parseSshPubKey {
     # ssh-keygen reads another.
     return undef unless $type eq $prefix;
 
-    # ecdsa-sha2-*: type, curve name, point. Same reason as above: a curve
-    # that disagrees with the type name means the reported size is not the
-    # size of the key.
+    # ecdsa-sha2-*: type, curve name, point. A curve that disagrees with the
+    # type name means the reported size is not the size of the key. A point
+    # of the right size can still be off its curve; _checkKeyPolicy asks
+    # ssh-keygen about that (#434).
     if ( my $curve = $SSHCA_ECDSA_CURVES{$type} ) {
-        return undef unless @fields >= 3;
+        my $is_sk = $type =~ /\Ask-/ ? 1 : 0;
+        return undef unless @fields == ( $is_sk ? 4 : 3 );
         return undef unless $fields[1] eq $curve->[0];
         return undef
           unless length( $fields[2] ) == $curve->[1]
           && substr( $fields[2], 0, 1 ) eq "\x04";
+        return undef if $is_sk && !length $fields[3];
+        return {
+            type   => $type,
+            family => $SSHCA_FIXED_KEY_TYPES{$type}[0],
+            bits   => $SSHCA_FIXED_KEY_TYPES{$type}[1],
+            sized  => 0,
+        };
     }
 
+    # Fixed-size families carry an exact number of fields. ed25519 and its sk-
+    # variant hold a 32-byte point; a wrong length is a malformed key, not a
+    # weak one, and must be refused here rather than in ssh-keygen (#434).
     if ( my $fixed = $SSHCA_FIXED_KEY_TYPES{$type} ) {
+        my $is_sk    = $type =~ /\Ask-/ ? 1 : 0;
+        my $expected = $is_sk ? 3 : 2;    # sk-* add an application string
+        return undef unless @fields == $expected;
+        return undef unless length( $fields[1] ) == 32;
+        return undef if $is_sk && !length $fields[2];
         return {
             type   => $type,
             family => $fixed->[0],
@@ -1992,7 +2015,7 @@ sub _parseSshPubKey {
     if ( $type eq 'ssh-rsa' ) {
 
         # ssh-rsa: type, e, n — the modulus is the size that matters.
-        return undef unless @fields >= 3;
+        return undef unless @fields == 3;
         return {
             type   => $type,
             family => 'rsa',
@@ -2004,7 +2027,7 @@ sub _parseSshPubKey {
     if ( $type eq 'ssh-dss' ) {
 
         # ssh-dss: type, p, q, g, y — p carries the key size.
-        return undef unless @fields >= 2;
+        return undef unless @fields == 5;
         return {
             type   => $type,
             family => 'dss',
@@ -2014,6 +2037,50 @@ sub _parseSshPubKey {
     }
 
     return undef;
+}
+
+# HELPER: Ask OpenSSH whether a key line really parses as a public key.
+#
+# _parseSshPubKey checks the framing, the field count and the fixed sizes,
+# but it cannot verify that an ECDSA point lies on its curve: a point of the
+# right size can be off the curve, and the signing fork then dies after the
+# policy said yes (#434). OpenSSH's own reader rejects it.
+#
+# sk-* families are skipped: `ssh-keygen -l` refuses their public half
+# without the security key, while `ssh-keygen -s` (the signing path) accepts
+# it. Their framing and sizes are already checked by _parseSshPubKey.
+#
+# Returns 1 when the key is accepted OR when ssh-keygen cannot be run at all
+# (an environment failure must not turn a valid key into a 400; the signing
+# fork reports the real problem).
+sub _sshKeygenAcceptsKey {
+    my ( $self, $sshPubKey, $type ) = @_;
+    return 1 if $type =~ /\Ask-/;
+
+    my $pid = open my $pipe, '|-';
+    unless ( defined $pid ) {
+        $self->logger->error("SSH CA: Cannot fork ssh-keygen: $!");
+        return 1;
+    }
+    if ( $pid == 0 ) {
+        open STDOUT, '>', '/dev/null';
+        open STDERR, '>', '/dev/null';
+        exec 'ssh-keygen', '-l', '-f', '-';
+        exit 1;
+    }
+
+    # ssh-keygen reads its input up to EOF and prints one fingerprint line,
+    # which we discard: the exit status is the verdict.
+    local $SIG{PIPE} = 'IGNORE';
+    print $pipe $sshPubKey;
+    print $pipe "\n" unless $sshPubKey =~ /\n$/;
+    close $pipe;
+
+    my $exitCode = $? >> 8;
+    $self->logger->info(
+        "SSH CA: ssh-keygen refused a structurally invalid $type key "
+          . "(exit $exitCode)") if $exitCode;
+    return $exitCode == 0;
 }
 
 # HELPER: Apply the configured key policy to a user-supplied public key.
@@ -2053,6 +2120,13 @@ sub _checkKeyPolicy {
                   "SSH key is too small ($info->{bits} bits, minimum $min)",
             };
         }
+    }
+
+    # Last structural check, once the type and size have passed: the key must
+    # still parse as a key for OpenSSH. This is what catches an ECDSA point
+    # off its curve, which no amount of field-counting detects (#434).
+    unless ( $self->_sshKeygenAcceptsKey( $sshPubKey, $info->{type} ) ) {
+        return { ok => 0, error => 'Unsupported or malformed SSH public key' };
     }
 
     return { ok => 1, info => $info };
