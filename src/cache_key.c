@@ -58,6 +58,35 @@ static int read_machine_id(char *buf, size_t buf_size)
 }
 
 /*
+ * Read an instance ID from `path`.
+ * buf: Output buffer (at least INSTANCE_ID_SIZE bytes)
+ * buf_size: Size of output buffer
+ * Returns 0 on success, -1 when the file is missing, unreadable or holds
+ * something shorter than an instance ID.
+ */
+static int read_instance_id(const char *path, char *buf, size_t buf_size)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        return -1;
+    }
+
+    if (!fgets(buf, buf_size, f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    /* Remove trailing newline */
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[len - 1] = '\0';
+    }
+
+    return strlen(buf) >= 32 ? 0 : -1;
+}
+
+/*
  * Load or generate a persistent instance ID.
  * Used as fallback when /etc/machine-id is not available.
  *
@@ -79,23 +108,10 @@ static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t
     }
 
     /* Try to load existing instance ID */
-    FILE *f = fopen(id_path, "r");
-    if (f) {
-        if (fgets(buf, buf_size, f)) {
-            fclose(f);
-            /* Remove trailing newline */
-            size_t len = strlen(buf);
-            if (len > 0 && buf[len - 1] == '\n') {
-                buf[len - 1] = '\0';
-            }
-            if (strlen(buf) >= 32) {
-                return 0;  /* Successfully loaded existing ID */
-            }
-        } else {
-            fclose(f);
-        }
-        /* File corrupted or too short - regenerate */
+    if (read_instance_id(id_path, buf, buf_size) == 0) {
+        return 0;  /* Successfully loaded existing ID */
     }
+    /* File missing, corrupted or too short - regenerate */
 
     /* Generate new random instance ID (16 bytes = 32 hex chars) */
     unsigned char random_bytes[16];
@@ -127,7 +143,7 @@ static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t
         }
     }
 
-    f = fdopen(fd, "w");
+    FILE *f = fdopen(fd, "w");
     if (!f) {
         close(fd);
         unlink(temp_path);
@@ -149,19 +165,7 @@ static int load_or_generate_instance_id(const char *cache_dir, char *buf, size_t
     if (rename(temp_path, id_path) != 0) {
         unlink(temp_path);
         /* Another process may have created the file - try loading it */
-        f = fopen(id_path, "r");
-        if (f && fgets(buf, buf_size, f)) {
-            fclose(f);
-            size_t len = strlen(buf);
-            if (len > 0 && buf[len - 1] == '\n') {
-                buf[len - 1] = '\0';
-            }
-            if (strlen(buf) >= 32) {
-                return 0;
-            }
-        }
-        if (f) fclose(f);
-        return -1;
+        return read_instance_id(id_path, buf, buf_size);
     }
 
     return 0;

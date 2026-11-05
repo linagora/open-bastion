@@ -158,6 +158,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IPv4 or IPv6 client and CrowdSec no longer refused banned addresses at the
   PAM level. A prefix must now be one to three digits, at most 32 or 128;
   anything else is skipped with an "invalid entry" warning (#390).
+- On a host with no `/etc/machine-id` (a container, a chroot), the cache
+  instance ID fallback closed the same file twice when another process had
+  just created `.instance_id`, which can crash the PAM module during a login
+  (#445).
 
 ### Security
 
