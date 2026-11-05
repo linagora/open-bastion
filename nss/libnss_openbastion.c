@@ -2659,22 +2659,26 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
     /* Query LLNG server. On a transient failure (-1) the likeliest cause is a
      * token that rotated between the reload above and the call (or a brief
      * server hiccup): force a reload and retry once. Never negative-cache a
-     * transient failure. */
+     * transient failure. Retry only on -1, never on the buffer case: a buffer
+     * the caller chose too small costs neither a token reload nor a second
+     * round trip, and a -2 must not be swallowed by the retry. */
     int qr = query_llng_userinfo(name, result, buffer, buflen);
-    if (qr == NSS_BUFFER_TOO_SMALL) {
-        /* The caller's buffer cannot hold the entry: that is the NSS
-         * ERANGE/TRYAGAIN contract, and it retries with a larger buffer. Not
-         * transient, so no token reload and no second round trip, and nothing
-         * is cached -- the entry was never built. */
-        g_in_nss_lookup = 0;
-        *errnop = ERANGE;
-        return NSS_STATUS_TRYAGAIN;
-    }
-    if (qr < 0) {
+    if (qr == -1) {
         pthread_mutex_lock(&g_init_lock);
         load_server_token(&g_config);
         pthread_mutex_unlock(&g_init_lock);
         qr = query_llng_userinfo(name, result, buffer, buflen);
+    }
+
+    /* Tested AFTER the retry, so the second query's answer is tested too: a
+     * 401 answered by a buffer too small for the entry must still be the NSS
+     * ERANGE/TRYAGAIN contract, not the transient UNAVAIL below. The caller
+     * has to ask again with more room, and nothing is cached -- the entry was
+     * never built. */
+    if (qr == NSS_BUFFER_TOO_SMALL) {
+        g_in_nss_lookup = 0;
+        *errnop = ERANGE;
+        return NSS_STATUS_TRYAGAIN;
     }
 
     if (qr == 0) {

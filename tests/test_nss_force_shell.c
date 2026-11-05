@@ -226,8 +226,13 @@ static pid_t g_portal_pid;
  * `one_shot` makes the child answer a single request and exit, closing the
  * listening socket: a lookup that queries the portal twice finds nothing on
  * the second attempt, which is what lets a test pin the number of round trips.
+ *
+ * `first_401` makes the child answer its first request with 401 Unauthorized
+ * and every later one with the entry: that is the token-rotation sequence a
+ * lookup sees when the token it holds just expired, and it is what puts the
+ * module's reload-and-retry path under test.
  */
-static int start_portal_ex(const char *json, int one_shot)
+static int start_portal_ex(const char *json, int one_shot, int first_401)
 {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     struct sockaddr_in a;
@@ -249,6 +254,7 @@ static int start_portal_ex(const char *json, int one_shot)
         exit(1);
     }
     if (g_portal_pid == 0) {
+        int seen = 0;
         for (;;) {
             int c = accept(s, NULL, NULL);
             char req[8192], resp[1024];
@@ -272,10 +278,21 @@ static int start_portal_ex(const char *json, int one_shot)
                 if (hdr_end && (long)(got - (size_t)(hdr_end + 4 - req)) >= clen)
                     break;
             }
-            int n = snprintf(resp, sizeof(resp),
+            int n;
+            if (first_401 && seen == 0) {
+                static const char unauthorized[] = "{\"error\":\"unauthorized\"}";
+                n = snprintf(resp, sizeof(resp),
+                             "HTTP/1.1 401 Unauthorized\r\n"
+                             "Content-Type: application/json\r\n"
+                             "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                             strlen(unauthorized), unauthorized);
+            } else {
+                n = snprintf(resp, sizeof(resp),
                              "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                              "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
                              strlen(json), json);
+            }
+            seen++;
             if (write(c, resp, (size_t)n) < 0) {
                 /* the client went away; nothing to do */
             }
@@ -290,7 +307,7 @@ static int start_portal_ex(const char *json, int one_shot)
 
 static int start_portal(const char *json)
 {
-    return start_portal_ex(json, 0);
+    return start_portal_ex(json, 0, 0);
 }
 
 static void stop_portal(void)
@@ -480,7 +497,7 @@ static void test_serving_paths(void)
     size_t need = strlen("dwho") + strlen("x") + strlen("D Who")
                   + strlen("/home/dwho") + strlen("/bin/zsh") + 5;
     char *tight_portal = malloc(need - 1);
-    port = start_portal_ex(answer, 1);
+    port = start_portal_ex(answer, 1, 0);
     snprintf(url, sizeof(url), "http://127.0.0.1:%d", port);
     free(g_config.portal_url);
     g_config.portal_url = strdup(url);
@@ -505,6 +522,41 @@ static void test_serving_paths(void)
     check_str("  its shell", pw.pw_shell, "/bin/zsh");
     check_str("  its home", pw.pw_dir, "/home/dwho");
     free(exact);
+    stop_portal();
+
+    /*
+     * #430 review: a 401 sends the module round a token reload and a second
+     * query. When the SECOND query is the one that finds the buffer too small,
+     * the answer must still be ERANGE/TRYAGAIN -- the buffer case is not
+     * transient and must not fall through to the UNAVAIL/EAGAIN branch. The
+     * portal answers the first request with 401 and the second with the entry,
+     * so the short-buffer case proves the buffer test runs after the retry,
+     * and the exactly-sized case proves the retry really reaches the portal.
+     */
+    printf("A 401, then a buffer too small for the entry (#430):\n");
+    cache_reset();
+    port = start_portal_ex(answer, 0, 1);
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", port);
+    free(g_config.portal_url);
+    g_config.portal_url = strdup(url);
+    qerr = 0;
+    check_int("401 then short buffer: status",
+              _nss_openbastion_getpwnam_r("dwho", &pw, tight_portal, need - 1, &qerr),
+              NSS_STATUS_TRYAGAIN);
+    check_int("401 then short buffer: errno", qerr, ERANGE);
+    stop_portal();
+
+    cache_reset();
+    port = start_portal_ex(answer, 0, 1);
+    snprintf(url, sizeof(url), "http://127.0.0.1:%d", port);
+    free(g_config.portal_url);
+    g_config.portal_url = strdup(url);
+    char *after_401 = malloc(need);
+    check_int("401 then exactly-sized buffer: status",
+              _nss_openbastion_getpwnam_r("dwho", &pw, after_401, need, &qerr),
+              NSS_STATUS_SUCCESS);
+    check_str("  its shell", pw.pw_shell, "/bin/zsh");
+    free(after_401);
     free(tight_portal);
     stop_portal();
 
