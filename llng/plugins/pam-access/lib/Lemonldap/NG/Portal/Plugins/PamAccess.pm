@@ -371,13 +371,11 @@ sub authorize {
     return $hb_bail if $hb_bail;
 
     # 4. Parse JSON request body
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error("PAM authorize: Invalid JSON body: $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
+    my ( $body, $body_bail ) =
+      $self->_jsonBodyOrReject( $req, 'PAM authorize' );
+    return $body_bail if $body_bail;
 
-    my $user              = $body->{user};
+    my $user              = $self->_stringField( $body, 'user' );
     my $host              = $body->{host}    || '';
     my $service           = $body->{service} || 'ssh';
     my $body_server_group = $body->{server_group};
@@ -797,6 +795,33 @@ sub _badRequest {
     $message ||= 'Bad Request';
 
     return $self->_respond( $req, { error => $message }, code => 400 );
+}
+
+# HELPER: decode a request body and refuse anything that is not a JSON
+# object. from_json() also returns lists, numbers, strings and booleans, and
+# the handlers index the result as a hashref.
+sub _jsonBodyOrReject {
+    my ( $self, $req, $label ) = @_;
+
+    my $body = eval { from_json( $req->content ) };
+    if ($@) {
+        $self->logger->error("$label: Invalid JSON body: $@");
+        return ( undef, $self->_badRequest( $req, 'Invalid JSON' ) );
+    }
+    return ( $body, undef ) if ref $body eq 'HASH';
+
+    $self->logger->error("$label: JSON body is not an object");
+    return ( undef, $self->_badRequest( $req, 'Invalid JSON' ) );
+}
+
+# HELPER: read a body member that must be a plain string. from_json()
+# returns references for arrays, objects and booleans, and these values are
+# handed to helpers that take a session id or a byte string.
+sub _stringField {
+    my ( $self, $body, $name ) = @_;
+    my $value = $body->{$name};
+    return undef if !defined $value || ref $value;
+    return $value;
 }
 
 # ---------------------------------------------------------------------------
@@ -1610,13 +1635,10 @@ sub verifyToken {
     return $bail if $bail;
 
     # 2. Parse JSON request body
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error("PAM verify: Invalid JSON body: $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
+    my ( $body, $body_bail ) = $self->_jsonBodyOrReject( $req, 'PAM verify' );
+    return $body_bail if $body_bail;
 
-    my $user_token = $body->{token};
+    my $user_token = $self->_stringField( $body, 'token' );
     unless ($user_token) {
         return $self->_badRequest( $req, 'token parameter required' );
     }
@@ -1937,14 +1959,12 @@ sub heartbeat {
     my ( $self, $req ) = @_;
 
     # 1. Parse JSON request body
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error("PAM heartbeat: Invalid JSON body: $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
+    my ( $body, $body_bail ) =
+      $self->_jsonBodyOrReject( $req, 'PAM heartbeat' );
+    return $body_bail if $body_bail;
 
     # 2. Extract refresh_token from body
-    my $refresh_token_id = $body->{refresh_token};
+    my $refresh_token_id = $self->_stringField( $body, 'refresh_token' );
     unless ($refresh_token_id) {
         return $self->_badRequest( $req, 'refresh_token required' );
     }
@@ -2114,14 +2134,11 @@ sub userinfo {
         "PAM userinfo request from enrolled server: $server_id");
 
     # 2. Parse JSON request body
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error(
-            "PAM userinfo: Invalid JSON body from '$server_id': $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
+    my ( $body, $body_bail ) =
+      $self->_jsonBodyOrReject( $req, "PAM userinfo from '$server_id'" );
+    return $body_bail if $body_bail;
 
-    my $user = $body->{user};
+    my $user = $self->_stringField( $body, 'user' );
     unless ($user) {
         return $self->_badRequest( $req, 'user parameter required' );
     }
@@ -2935,13 +2952,11 @@ sub bastionCert {
     # "default" and rejected every legitimate hop.
 
     # 5. Parse + validate request body.
-    my $body = eval { from_json( $req->content ) };
-    if ($@) {
-        $self->logger->error("PAM bastion-cert: Invalid JSON body: $@");
-        return $self->_badRequest( $req, 'Invalid JSON' );
-    }
+    my ( $body, $body_bail ) =
+      $self->_jsonBodyOrReject( $req, 'PAM bastion-cert' );
+    return $body_bail if $body_bail;
 
-    my $user         = $body->{user};
+    my $user         = $self->_stringField( $body, 'user' );
     my $target_host  = $body->{target_host}  || '';
     my $target_group = $body->{target_group} || 'default';
     my $public_key   = $body->{public_key};
@@ -2949,11 +2964,13 @@ sub bastionCert {
 
     return $self->_badRequest( $req, 'Missing user parameter' ) unless $user;
 
-    # The principal we sign equals the unix login; reject separators that
-    # ssh-keygen -n would split into multiple principals or that would poison
-    # the key-id encoding.
+    # The principal we sign equals the unix login. Reject separators that
+    # ssh-keygen -n would split into multiple principals, characters that
+    # cannot appear in a login, and anything that would poison the key-id
+    # encoding. The persistent-session lookup below hashes the login as
+    # bytes, so a character above U+00FF would also die there.
     return $self->_badRequest( $req, 'Invalid user parameter' )
-      if $user =~ m{[\s,/;]};
+      if $user =~ m{[\s,/;]} || $user =~ /[^\x21-\x7e]/;
 
     return $self->_badRequest( $req, 'Missing public_key parameter' )
       unless $public_key;

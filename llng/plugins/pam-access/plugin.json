@@ -1,6 +1,6 @@
 {
   "name": "pam-access",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "summary": "PAM access token generation and authorization for SSH/sudo",
   "description": "Provides a portal interface for users to generate temporary PAM access tokens, and server-to-server endpoints for token verification and authorization checks. Supports SSH/sudo authorization rules per server group, heartbeat monitoring, offline mode, and OIDC Device Authorization Grant for server authentication.",
   "author": "Xavier Guimard <yadd@debian.org>",
