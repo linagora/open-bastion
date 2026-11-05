@@ -80,6 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a 400. The other string fields are read as strings too, so a reference
   can no longer be stored in the heartbeat session or read as an
   authorization refusal (#438, #440, #441).
+- ssh-ca, pam-access: `/ssh/sign` answered 500 for a truncated or off-curve
+  public key, and `/pam/bastion-cert` never applied the SSH key policy, so a
+  malformed or weak key reached the signing fork and also answered 500. Both
+  endpoints now refuse a structurally invalid key with a 400, and
+  `/pam/bastion-cert` enforces `sshCaAllowedKeyTypes` and `sshCaMinKeyBits`
+  as `/ssh/sign` does (#434, #436, #439).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host

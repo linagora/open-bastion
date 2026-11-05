@@ -172,6 +172,49 @@ my ( $curve_mismatch, $sk_ecdsa_curve_mismatch, $short_point );
       . " short-point";
 }
 
+# Malformed blobs that a lenient field walker would accept (#434): an
+# ed25519 point of the wrong length, a trailing field after a valid key, and
+# an ECDSA point of the right size that is not on its curve — plain or sk-.
+# Each one makes ssh-keygen refuse the key, so the policy must answer 400
+# before the signing fork does.
+my ( $short_ed, $long_ed, $extra_ed, $off_curve, $sk_off_curve );
+{
+    my @f = _fields($ed25519);
+    my $t = 'ssh-ed25519';
+    $short_ed =
+      "$t " . encode_base64( _s($t) . _s( substr( $f[1], 0, -1 ) ), '' )
+      . " short-ed";
+    $long_ed =
+      "$t " . encode_base64( _s($t) . _s( $f[1] . 'x' ), '' ) . " long-ed";
+    $extra_ed =
+      "$t " . encode_base64( _s($t) . _s( $f[1] ) . _s('junk'), '' )
+      . " extra-ed";
+
+    my @e = _fields($ecdsa);
+    my $et = 'ecdsa-sha2-nistp256';
+    my $pt = $e[2];
+
+    # Flip one byte of a real point: the size and the 0x04 prefix still hold,
+    # so only a curve membership check can tell.
+    substr( $pt, 10, 1 ) = chr( ord( substr( $pt, 10, 1 ) ) ^ 0xff );
+    $off_curve =
+        "$et "
+      . encode_base64( _s($et) . _s('nistp256') . _s($pt), '' )
+      . " off-curve";
+
+    # Same point, in the sk-ecdsa framing: the type, curve and application
+    # fields still parse, so only OpenSSH can reject the point.
+    my @se = _fields($sk_ecdsa);
+    my $skt = 'sk-ecdsa-sha2-nistp256@openssh.com';
+    my $spt = $se[2];
+    substr( $spt, 10, 1 ) = chr( ord( substr( $spt, 10, 1 ) ) ^ 0xff );
+    $sk_off_curve =
+        "$skt "
+      . encode_base64( _s($skt) . _s( $se[1] ) . _s($spt) . _s( $se[3] ),
+        '' )
+      . " fido-off-curve";
+}
+
 my $tmpdir  = tempdir( CLEANUP => 1 );
 my $krlPath = "$tmpdir/krl";
 
@@ -195,6 +238,12 @@ sub new_portal {
                 sshCaKrlPath          => $krlPath,
                 sshCaCertMaxValidity  => 30,
                 sshCaPrincipalSources => '$uid',
+
+                # This suite signs dozens of keys (allowed, refused, malformed)
+                # and is not the place that tests the per-user quota: the
+                # 20/hour default would turn later cases into 429s. The quota
+                # itself is covered by t/04-SSHCA-limits.t.
+                sshCaSignMaxPerHour => 1000,
 
                 # /ssh/certs and /ssh/revoke default-deny since the
                 # sshCaAdminRule of PR #76 (issue #58): the admin parts of this
@@ -317,6 +366,38 @@ for my $case (
     expectReject( $res, 400 );
     like( error_of($res), qr/Unsupported or malformed/,
         "ECDSA $label mismatch rejected" );
+    count(1);
+}
+
+# Malformed blobs that only a strict parser or OpenSSH's own reader catches
+# (#434): the policy must answer 400, not let the signing fork return a 500.
+for my $case (
+    [ 'short-ed',     $short_ed ],    [ 'long-ed', $long_ed ],
+    [ 'extra-ed',     $extra_ed ],    [ 'off-curve', $off_curve ],
+    [ 'sk-off-curve', $sk_off_curve ]
+  )
+{
+    my ( $label, $key ) = @$case;
+    ok( $res = sign_req( { public_key => $key, label => "malformed-$label" } ),
+        "sign malformed $label" );
+    expectReject( $res, 400 );
+    like( error_of($res), qr/Unsupported or malformed/,
+        "malformed $label rejected with 400" );
+    count(1);
+}
+
+# A portal without ssh-keygen is an environment failure, not a malformed key:
+# the policy probe must not turn it into a 400, and the signing fork reports
+# the missing binary as a 500 (#436).
+{
+    local $ENV{PATH} = '/nonexistent';
+    ok(
+        $res = sign_req(
+            { public_key => $ed25519, label => 'no-ssh-keygen' }
+        ),
+        'sign with ssh-keygen missing from PATH'
+    );
+    is( $res->[0], 500, 'missing ssh-keygen answers 500, not 400' );
     count(1);
 }
 

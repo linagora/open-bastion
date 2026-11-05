@@ -3057,6 +3057,20 @@ sub bastionCert {
         );
     }
 
+    # Apply the same key policy as /ssh/sign before anything is signed. The
+    # textual check above only proves the line looks like a key; the policy
+    # parses the blob, enforces the allowed types and the size floor, and
+    # asks OpenSSH to read it. A truncated key or a 1024-bit RSA key used to
+    # reach the signing fork and answer 500 "Failed to sign certificate"
+    # where a malformed or weak key is a client error (#436, #439).
+    my $policy = $sshca->_checkKeyPolicy($public_key);
+    unless ( $policy->{ok} ) {
+        $self->logger->warn(
+                "PAM bastion-cert: rejected key for user '$user': "
+              . $policy->{error} );
+        return $self->_badRequest( $req, $policy->{error} );
+    }
+
     # 8. Encode bastion identity in the key-id for the backend to allowlist.
     #    Sanitize each part so the `k=v;` encoding stays unambiguous.
     my $clean = sub { my $v = shift // ''; $v =~ s/[^A-Za-z0-9._-]/_/g; $v };

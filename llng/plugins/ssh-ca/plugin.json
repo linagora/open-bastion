@@ -1,6 +1,6 @@
 {
   "name": "ssh-ca",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "summary": "SSH Certificate Authority for LemonLDAP::NG",
   "description": "Provides SSH certificate signing functionality. Users can sign their SSH public keys through a portal interface to obtain short-lived certificates. Includes admin interface for certificate management and revocation, KRL support, and configurable principal sources.",
   "author": "Xavier Guimard <yadd@debian.org>",
