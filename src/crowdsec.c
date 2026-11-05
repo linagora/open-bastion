@@ -21,6 +21,7 @@
 #include <openssl/sha.h>
 
 #include "crowdsec.h"
+#include "str_utils.h"
 
 /* Module version for scenario_version field */
 #define CROWDSEC_MODULE_VERSION "0.1.1"
@@ -308,7 +309,8 @@ static int watcher_login(crowdsec_context_t *ctx)
 
     struct json_object *token_obj, *expire_obj;
     if (json_object_object_get_ex(resp, "token", &token_obj)
-        && json_object_is_type(token_obj, json_type_string)) {
+        && json_object_is_type(token_obj, json_type_string)
+        && !str_json_has_embedded_nul(token_obj)) {
         secure_free_str(ctx->token);
         ctx->token = strdup(json_object_get_string(token_obj));
     }

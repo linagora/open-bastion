@@ -30,6 +30,7 @@
 #include <openssl/rsa.h>
 
 #include "ob_jws.h"
+#include "str_utils.h"
 
 #define OB_JWS_MAX_JWKS   (256 * 1024)
 #define OB_JWS_MAX_KEYS   64
@@ -167,10 +168,24 @@ static const char *get_string(struct json_object *obj, const char *key)
 {
     struct json_object *val;
     if (!json_object_object_get_ex(obj, key, &val)
-        || !json_object_is_type(val, json_type_string)) {
+        || !json_object_is_type(val, json_type_string)
+        || str_json_has_embedded_nul(val)) {
         return NULL;
     }
     return json_object_get_string(val);
+}
+
+/*
+ * True when VAL is a JSON string equal to WANT and holding no embedded NUL.
+ * Every caller compares these values with strcmp(), which would otherwise
+ * match the part before the NUL: "openbastion\0x" is not the audience
+ * "openbastion", and "sig\0x" is not the key use "sig".
+ */
+static bool json_string_equals(struct json_object *val, const char *want)
+{
+    return json_object_is_type(val, json_type_string)
+        && !str_json_has_embedded_nul(val)
+        && strcmp(json_object_get_string(val), want) == 0;
 }
 
 static unsigned char *get_b64url(struct json_object *obj, const char *key,
@@ -305,8 +320,7 @@ static bool jwk_is_for_signatures(struct json_object *jwk)
 {
     struct json_object *val;
     if (json_object_object_get_ex(jwk, "use", &val)) {
-        if (!json_object_is_type(val, json_type_string)
-            || strcmp(json_object_get_string(val), "sig") != 0) {
+        if (!json_string_equals(val, "sig")) {
             return false;
         }
     }
@@ -317,8 +331,7 @@ static bool jwk_is_for_signatures(struct json_object *jwk)
         size_t n = json_object_array_length(val);
         for (size_t i = 0; i < n; i++) {
             struct json_object *op = json_object_array_get_idx(val, i);
-            if (op && json_object_is_type(op, json_type_string)
-                && strcmp(json_object_get_string(op), "verify") == 0) {
+            if (op && json_string_equals(op, "verify")) {
                 return true;
             }
         }
@@ -643,14 +656,13 @@ static bool same_secret_string(const char *a, const char *b)
 static bool audience_matches(struct json_object *aud, const char *want)
 {
     if (json_object_is_type(aud, json_type_string)) {
-        return strcmp(json_object_get_string(aud), want) == 0;
+        return json_string_equals(aud, want);
     }
     if (json_object_is_type(aud, json_type_array)) {
         size_t n = json_object_array_length(aud);
         for (size_t i = 0; i < n; i++) {
             struct json_object *a = json_object_array_get_idx(aud, i);
-            if (a && json_object_is_type(a, json_type_string)
-                && strcmp(json_object_get_string(a), want) == 0) {
+            if (a && json_string_equals(a, want)) {
                 return true;
             }
         }
