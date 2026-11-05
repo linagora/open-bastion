@@ -174,10 +174,10 @@ my ( $curve_mismatch, $sk_ecdsa_curve_mismatch, $short_point );
 
 # Malformed blobs that a lenient field walker would accept (#434): an
 # ed25519 point of the wrong length, a trailing field after a valid key, and
-# an ECDSA point of the right size that is not on its curve. Each one makes
-# ssh-keygen refuse the key, so the policy must answer 400 before the
-# signing fork does.
-my ( $short_ed, $long_ed, $extra_ed, $off_curve );
+# an ECDSA point of the right size that is not on its curve — plain or sk-.
+# Each one makes ssh-keygen refuse the key, so the policy must answer 400
+# before the signing fork does.
+my ( $short_ed, $long_ed, $extra_ed, $off_curve, $sk_off_curve );
 {
     my @f = _fields($ed25519);
     my $t = 'ssh-ed25519';
@@ -201,6 +201,18 @@ my ( $short_ed, $long_ed, $extra_ed, $off_curve );
         "$et "
       . encode_base64( _s($et) . _s('nistp256') . _s($pt), '' )
       . " off-curve";
+
+    # Same point, in the sk-ecdsa framing: the type, curve and application
+    # fields still parse, so only OpenSSH can reject the point.
+    my @se = _fields($sk_ecdsa);
+    my $skt = 'sk-ecdsa-sha2-nistp256@openssh.com';
+    my $spt = $se[2];
+    substr( $spt, 10, 1 ) = chr( ord( substr( $spt, 10, 1 ) ) ^ 0xff );
+    $sk_off_curve =
+        "$skt "
+      . encode_base64( _s($skt) . _s( $se[1] ) . _s($spt) . _s( $se[3] ),
+        '' )
+      . " fido-off-curve";
 }
 
 my $tmpdir  = tempdir( CLEANUP => 1 );
@@ -360,8 +372,9 @@ for my $case (
 # Malformed blobs that only a strict parser or OpenSSH's own reader catches
 # (#434): the policy must answer 400, not let the signing fork return a 500.
 for my $case (
-    [ 'short-ed', $short_ed ], [ 'long-ed',  $long_ed ],
-    [ 'extra-ed', $extra_ed ], [ 'off-curve', $off_curve ]
+    [ 'short-ed',     $short_ed ],    [ 'long-ed', $long_ed ],
+    [ 'extra-ed',     $extra_ed ],    [ 'off-curve', $off_curve ],
+    [ 'sk-off-curve', $sk_off_curve ]
   )
 {
     my ( $label, $key ) = @$case;
@@ -370,6 +383,21 @@ for my $case (
     expectReject( $res, 400 );
     like( error_of($res), qr/Unsupported or malformed/,
         "malformed $label rejected with 400" );
+    count(1);
+}
+
+# A portal without ssh-keygen is an environment failure, not a malformed key:
+# the policy probe must not turn it into a 400, and the signing fork reports
+# the missing binary as a 500 (#436).
+{
+    local $ENV{PATH} = '/nonexistent';
+    ok(
+        $res = sign_req(
+            { public_key => $ed25519, label => 'no-ssh-keygen' }
+        ),
+        'sign with ssh-keygen missing from PATH'
+    );
+    is( $res->[0], 500, 'missing ssh-keygen answers 500, not 400' );
     count(1);
 }
 

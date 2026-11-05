@@ -20,6 +20,7 @@ package Lemonldap::NG::Portal::Plugins::SSHCA;
 
 use strict;
 use Mouse;
+use POSIX ();
 use JSON qw(from_json to_json);
 use Time::HiRes qw(gettimeofday);
 use Digest::SHA qw(sha256);
@@ -988,10 +989,11 @@ sub _signSshKey {
     }
     elsif ( $pid == 0 ) {
 
-        # Child process
+        # Child process. _exit rather than exit: exec failed, so this is an
+        # environment failure, and the portal worker's END blocks and
+        # destructors must not run in the forked child.
         open STDERR, '>&', \*STDOUT;
-        exec @cmd;
-        exit 1;
+        exec @cmd or POSIX::_exit(127);
     }
     else {
         # Parent process
@@ -2044,18 +2046,14 @@ sub _parseSshPubKey {
 # _parseSshPubKey checks the framing, the field count and the fixed sizes,
 # but it cannot verify that an ECDSA point lies on its curve: a point of the
 # right size can be off the curve, and the signing fork then dies after the
-# policy said yes (#434). OpenSSH's own reader rejects it.
-#
-# sk-* families are skipped: `ssh-keygen -l` refuses their public half
-# without the security key, while `ssh-keygen -s` (the signing path) accepts
-# it. Their framing and sizes are already checked by _parseSshPubKey.
+# policy said yes (#434). OpenSSH's own reader rejects it, sk-* families
+# included: `ssh-keygen -l` reads their public half without the device.
 #
 # Returns 1 when the key is accepted OR when ssh-keygen cannot be run at all
 # (an environment failure must not turn a valid key into a 400; the signing
 # fork reports the real problem).
 sub _sshKeygenAcceptsKey {
     my ( $self, $sshPubKey, $type ) = @_;
-    return 1 if $type =~ /\Ask-/;
 
     my $pid = open my $pipe, '|-';
     unless ( defined $pid ) {
@@ -2065,8 +2063,10 @@ sub _sshKeygenAcceptsKey {
     if ( $pid == 0 ) {
         open STDOUT, '>', '/dev/null';
         open STDERR, '>', '/dev/null';
-        exec 'ssh-keygen', '-l', '-f', '-';
-        exit 1;
+        # exec failed: this is an environment failure, not a key ssh-keygen
+        # refused. _exit skips the portal worker's END blocks and destructors
+        # in this child.
+        exec 'ssh-keygen', '-l', '-f', '-' or POSIX::_exit(127);
     }
 
     # ssh-keygen reads its input up to EOF and prints one fingerprint line,
@@ -2076,7 +2076,12 @@ sub _sshKeygenAcceptsKey {
     print $pipe "\n" unless $sshPubKey =~ /\n$/;
     close $pipe;
 
+    # A signal, or our own 127, means there is no verdict: let the signing
+    # fork turn that into a 500 instead of blaming the caller's key.
+    return 1 if $? & 127;
     my $exitCode = $? >> 8;
+    return 1 if $exitCode == 127;
+
     $self->logger->info(
         "SSH CA: ssh-keygen refused a structurally invalid $type key "
           . "(exit $exitCode)") if $exitCode;
@@ -2347,8 +2352,9 @@ sub _writeKrl {
     }
     elsif ( $pid == 0 ) {
         open STDERR, '>&', \*STDOUT;
-        exec @cmd;
-        exit 1;
+
+        # exec failed: do not run the portal worker's END blocks in this child.
+        exec @cmd or POSIX::_exit(127);
     }
     else {
         local $/;
