@@ -489,6 +489,14 @@ static void test_claims(void)
     json_object_object_add(c, "aud", json_tokener_parse("\"" CLIENT "\\u0000x\""));
     refused(k_rsa, "RS256", "rsa", c, "(aud)",
             "an aud extending the client with a NUL is refused");
+
+    /* 'verify' plus a NUL is not the endpoint 'verify' either: get_string()
+     * carries the iss, endpoint, req_sha256 and req_nonce bindings. */
+    c = claims();
+    json_object_object_add(c, "endpoint",
+                           json_tokener_parse("\"verify\\u0000x\""));
+    refused(k_rsa, "RS256", "rsa", c, "endpoint",
+            "an endpoint extending 'verify' with a NUL is refused");
     c = claims(); json_object_object_add(c, "endpoint", json_object_new_string("userinfo"));
     refused(k_rsa, "RS256", "rsa", c, "endpoint", "an answer for another endpoint is refused");
     c = claims(); json_object_object_add(c, "exp", json_object_new_int64(g_now - 61));

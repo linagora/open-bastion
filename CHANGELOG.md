@@ -122,6 +122,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credential, and a `client_ip`, `fingerprint`, `aud`, `use` or `key_ops`
   value could satisfy the `strcmp()` binding, audience or key-use check it
   does not match (#431).
+- ob-client: a JSON string holding an embedded NUL was read as the part before
+  it wherever an answer from the portal, the CrowdSec API or the token file
+  becomes a C string. A granting answer naming `alice\0x` authorised the
+  account `alice` — the PAM module compares `user` with `strcmp()` — and the
+  audit log recorded the shorter name; a truncated `access_token`, `client_ip`
+  or `fingerprint` was used or stored as the credential or binding it only
+  prefix-matches; an `aud`, `use` or `key_ops` value satisfied the check it
+  does not match. Such a field is now refused when its decoded length differs
+  from its C-string length — the rule the module already applied to the group
+  and attribute fields — in both parsers, the authentication and offline
+  caches, the heartbeat and recorder fields, the token manager, the CrowdSec
+  and certificate-daemon tokens, and the JWS claims (#431).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host

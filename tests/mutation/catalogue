@@ -1272,3 +1272,20 @@ suite   || tests/test_ob_home_dir.sh
 why     || #414: a staged home that is never renamed leaves the account without
 why     || its home, and a final path that appeared meanwhile is reported as
 why     || ours instead of being refused.
+
+id      || ob-client-verify-user-embedded-nul
+file    || src/ob_client.c
+search  ||     response->user = safe_json_strdup(val);\n    if (!response->user) {\n        snprintf(err, errlen, "Invalid 'user' field in response");
+replace ||     response->user = strdup(json_object_get_string(val));\n    if (!response->user) {\n        snprintf(err, errlen, "Invalid 'user' field in response");
+suite   || tests/test_ob_client.sh
+why     || #431: json-c keeps the decoded length, so strdup() stores "alice"
+why     || for an answer naming "alice\0x" -- the name the PAM module then
+why     || compares with strcmp() and authenticates.
+
+id      || ob-client-authorize-user-embedded-nul
+file    || src/ob_client.c
+search  ||     response->user = safe_json_strdup(val);\n    if (!response->user) {\n        snprintf(err, errlen,\n                 "Invalid 'user' field in response");
+replace ||     response->user = strdup(json_object_get_string(val));\n    if (!response->user) {\n        snprintf(err, errlen,\n                 "Invalid 'user' field in response");
+suite   || tests/test_ob_client.sh
+why     || #431: the authorize parser's own copy of the same rule; the verify
+why     || entry above does not reach it.
