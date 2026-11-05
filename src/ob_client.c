@@ -507,7 +507,15 @@ int ob_client_refresh_via_heartbeat(ob_client_t *client,
         json_object_put(json);
         return refuse_anonymous_grant(client, call.path);
     }
-    *new_access_token = strdup(json_object_get_string(val));
+    /* Same rule as the userinfo fields: a token the portal sent with an
+     * embedded NUL is a truncation of one, not the token it issued. */
+    *new_access_token = safe_json_strdup(val);
+    if (!*new_access_token) {
+        snprintf(client->error, sizeof(client->error),
+                 "Invalid access_token in heartbeat response");
+        json_object_put(json);
+        return -1;
+    }
 
     if (expires_in && json_object_object_get_ex(json, "expires_in", &val)) {
         *expires_in = json_object_get_int(val);
@@ -929,16 +937,17 @@ int ob_parse_verify_response(const char *body, ob_response_t *response,
         json_object_put(json);
         return -1;
     }
-    const char *user_str = json_object_is_type(val, json_type_string)
-                           ? json_object_get_string(val) : NULL;
-    if (!user_str) {
-        snprintf(err, errlen, "Invalid 'user' field type in response");
-        json_object_put(json);
-        return -1;
-    }
-    response->user = strdup(user_str);
+    /*
+     * safe_json_strdup() is this module's rule for a single JSON string: NULL
+     * for a non-string, and for one holding an embedded NUL -- json-c decodes
+     * \u0000 and keeps the decoded length, so strdup() would store only the
+     * part before it, a name the portal never vouched for. The PAM module
+     * compares response.user with strcmp(), which would then accept the
+     * shorter account name.
+     */
+    response->user = safe_json_strdup(val);
     if (!response->user) {
-        snprintf(err, errlen, "Out of memory copying 'user' field");
+        snprintf(err, errlen, "Invalid 'user' field in response");
         json_object_put(json);
         return -1;
     }
@@ -1363,18 +1372,12 @@ int ob_parse_authorize_response(const char *body, ob_response_t *response,
         json_object_put(json);
         return -1;
     }
-    const char *authz_user_str = json_object_is_type(val, json_type_string)
-                                 ? json_object_get_string(val) : NULL;
-    if (!authz_user_str) {
-        snprintf(err, errlen,
-                 "Invalid 'user' field type in response");
-        json_object_put(json);
-        return -1;
-    }
-    response->user = strdup(authz_user_str);
+    /* Same rule as the verify parser: a 'user' the portal sent with an
+     * embedded NUL is not a name, it is a truncation of one. */
+    response->user = safe_json_strdup(val);
     if (!response->user) {
         snprintf(err, errlen,
-                 "Out of memory copying 'user' field");
+                 "Invalid 'user' field in response");
         json_object_put(json);
         return -1;
     }

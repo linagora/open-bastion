@@ -108,6 +108,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serial 1, and a KRL carrying a section type OpenSSH does not define is
   refused instead of served to hosts that would then fail closed on every
   key (#432, #433, #435, #437).
+- ob-client: a granting answer whose `user` string held an embedded NUL was
+  accepted with the name truncated at it, so an answer naming `alice\0x`
+  authorised the account `alice` and the audit log recorded the shorter name.
+  Both parsers now apply the rule the module already used for the group and
+  attribute fields — a JSON string whose decoded length differs from its
+  C-string length is refused. The same rule now guards the user name in the
+  authentication and offline caches, the heartbeat `access_token`, and the
+  session header fields the recorder copies into a record (#431).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host
