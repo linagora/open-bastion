@@ -86,6 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   endpoints now refuse a structurally invalid key with a 400, and
   `/pam/bastion-cert` enforces `sshCaAllowedKeyTypes` and `sshCaMinKeyBits`
   as `/ssh/sign` does (#434, #436, #439).
+- nss: a caller whose buffer was too small for the entry — any program that
+  resolves a name with fewer bytes than the entry needs — was told
+  `NSS_STATUS_UNAVAIL`/`EAGAIN` instead of `TRYAGAIN`/`ERANGE`, so it never
+  grew its buffer, and each such lookup cost two HTTPS round trips to the
+  portal and a token reload. On the on-disk cache path `getpwuid_r` answered
+  `NOTFOUND` — an authoritative "no such user" — for an account that exists.
+  The requirement is now the entry's own length instead of a padded estimate,
+  and a short buffer is reported as `ERANGE` on every path (#430).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host

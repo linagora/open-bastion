@@ -754,8 +754,8 @@ why     || #293: the one place every serving path asks.
 
 id      || nss-force-shell-file-cache
 file    || nss/libnss_openbastion.c
-search  || if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return -1;
-replace || if (safe_strcpy(&p, &remaining, shell_str) != 0) return -1;
+search  || if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return NSS_BUFFER_TOO_SMALL;
+replace || if (safe_strcpy(&p, &remaining, shell_str) != 0) return NSS_BUFFER_TOO_SMALL;
 suite   || tests/test_ob_nss_force_shell.sh
 why     || #293: a record cached before the upgrade still says bash, and is
 why     || served for up to cache_ttl.
@@ -774,6 +774,16 @@ search  || if (cached && cached->valid) {\n        /* Copy from cache with safe 
 replace || if (cached && cached->valid) {\n        /* Copy from cache with safe bounds checking */\n        const char *shell = (cached->pw.pw_shell);
 suite   || tests/test_ob_nss_force_shell.sh
 why     || #293: getpwuid is what the session's own processes ask.
+
+id      || nss-retry-only-on-transient
+file    || nss/libnss_openbastion.c
+search  || if (qr == -1) {
+replace || if (qr < 0) {
+suite   || tests/test_ob_nss_force_shell.sh
+why     || #430: retrying on the buffer case (-2) reloads the token and makes a
+why     || second round trip for a buffer the caller chose too small, and the
+why     || retry swallows the -2 -- the caller is sent UNAVAIL/EAGAIN again
+why     || instead of growing its buffer.
 
 id      || setup-renders-force-shell
 file    || scripts/ob-bastion-setup

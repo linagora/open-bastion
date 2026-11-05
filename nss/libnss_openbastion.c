@@ -1489,13 +1489,24 @@ static void file_cache_save_by_name(const struct passwd *pw)
 }
 
 /*
+ * Returned by the two functions that fill a caller's buffer -- the file-cache
+ * loader and the LLNG userinfo query -- when that buffer cannot hold the
+ * entry. Distinct from -1, which means "transient/unavailable" and costs a
+ * token reload and a second portal round trip: a buffer the caller chose too
+ * small is the NSS ERANGE/TRYAGAIN case, and the caller grows it and asks
+ * again.
+ */
+#define NSS_BUFFER_TOO_SMALL (-2)
+
+/*
  * Shared body for the file loaders: given an already-read line and the
  * verified filepath (relative leaf is `leaf`, opened via dirfd), parse it,
  * enforce TTL (unlinking expired entries via unlinkat), and populate `pw`
  * into the caller buffer. On success, `*out_created` (when non-NULL) receives
  * the timestamp the record was WRITTEN at, not the time it was read, so a
  * caller promoting the record into a shorter-lived cache can preserve its age.
- * Returns 0 on success, -1 otherwise.
+ * Returns 0 on success, -1 when there is no usable record here, and
+ * NSS_BUFFER_TOO_SMALL when the caller's buffer cannot hold the one found.
  *
  * A record that cannot be parsed is unlinked, exactly like an expired one. It
  * is not a transient miss: it can never become readable, so leaving it in
@@ -1579,27 +1590,28 @@ static int file_cache_parse_into(char *line, int dirfd, const char *leaf,
         goto corrupt;
     }
 
-    /* Copy data to buffer with safe bounds checking */
+    /* Copy data to buffer with safe bounds checking. A short buffer is
+     * reported as such: it is not a missing record. */
     char *p = buffer;
     size_t remaining = buflen;
 
     pw->pw_name = p;
-    if (safe_strcpy(&p, &remaining, username_str) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, username_str) != 0) return NSS_BUFFER_TOO_SMALL;
 
     pw->pw_passwd = p;
-    if (safe_strcpy(&p, &remaining, "x") != 0) return -1;
+    if (safe_strcpy(&p, &remaining, "x") != 0) return NSS_BUFFER_TOO_SMALL;
 
     pw->pw_uid = file_uid;
     pw->pw_gid = file_gid;
 
     pw->pw_gecos = p;
-    if (safe_strcpy(&p, &remaining, gecos_str) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, gecos_str) != 0) return NSS_BUFFER_TOO_SMALL;
 
     pw->pw_dir = p;
-    if (safe_strcpy(&p, &remaining, home_str) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, home_str) != 0) return NSS_BUFFER_TOO_SMALL;
 
     pw->pw_shell = p;
-    if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return -1;
+    if (safe_strcpy(&p, &remaining, login_shell(shell_str)) != 0) return NSS_BUFFER_TOO_SMALL;
 
     if (out_created) *out_created = (time_t)timestamp;
     return 0;
@@ -2307,9 +2319,11 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     /* Return convention: 0 = found, 1 = authoritatively not found (HTTP 200
      * with found=false), -1 = transient/unavailable (network error, 401/403
      * from a stale token, 5xx, unparseable, an answer that is not signed as
-     * response_signing requires). Only an authoritative not-found may be
+     * response_signing requires), NSS_BUFFER_TOO_SMALL = the caller's buffer
+     * cannot hold the entry. Only an authoritative not-found may be
      * negatively cached; -1 must NOT poison the cache and lets the caller
-     * reload the token and retry. */
+     * reload the token and retry; the buffer case costs neither a reload nor
+     * a round trip, the caller only has to ask again with more room. */
     struct json_object *json = NULL;
     int anonymous = 0;
     if (res == CURLE_OK && response.data) {
@@ -2355,25 +2369,86 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
     char *p = buffer;
     size_t remaining = buflen;
 
-    /* Verify minimum buffer size (rough estimate) */
-    size_t min_needed = strlen(username) + 64 + 256 + 256 + 128;
-    if (buflen < min_needed) {
+    /*
+     * The GECOS, the home and the shell are selected BEFORE anything is
+     * written: the caller's buffer holds the five strings back to back, each
+     * with its NUL, so only the selected values give the length it must have.
+     * The old fixed estimate (strlen(username) + 704) refused buffers that
+     * would have held the entry.
+     */
+
+    /* GECOS - sanitize to remove dangerous characters */
+    const char *gecos_raw = "";
+    if (json_object_object_get_ex(json, "gecos", &val)) {
+        const char *tmp = json_object_is_type(val, json_type_string)
+                          ? json_object_get_string(val) : NULL;
+        if (tmp) gecos_raw = tmp;
+    }
+    /* Sanitize GECOS: remove colons and newlines which could corrupt passwd format */
+    char gecos_safe[256];
+    size_t gi = 0;
+    for (const char *gc = gecos_raw; *gc && gi < sizeof(gecos_safe) - 1; gc++) {
+        if (*gc != ':' && *gc != '\n' && *gc != '\r') {
+            gecos_safe[gi++] = *gc;
+        }
+    }
+    gecos_safe[gi] = '\0';
+
+    /* Home directory - validate server-provided path */
+    char home_buf[PATH_VALIDATOR_MAX_PATH_LENGTH + 1];
+    int home_ok = 0;
+    int home_len = 0;
+
+    if (json_object_object_get_ex(json, "home", &val)) {
+        const char *home = json_object_is_type(val, json_type_string)
+                           ? json_object_get_string(val) : NULL;
+        /* Only use server-provided home if it passes validation */
+        if (home && *home && validate_home(home) == 0) {
+            home_len = snprintf(home_buf, sizeof(home_buf), "%s", home);
+            home_ok = home_len > 0 && (size_t)home_len < sizeof(home_buf);
+        }
+    }
+    if (!home_ok) {
+        /* Fall back to default if invalid or missing. The result must still be
+         * a path the module's own validator would accept: building it from the
+         * looked-up name unchecked let any byte reach pw_dir. */
+        home_len = snprintf(home_buf, sizeof(home_buf), "%s/%s",
+                            g_config.default_home_base, username);
+        if (home_len <= 0 || (size_t)home_len >= sizeof(home_buf) ||
+            path_validator_is_dangerous(home_buf)) {
+            json_object_put(json);
+            return -1;
+        }
+    }
+
+    /* Shell - validate server-provided path */
+    const char *shell = select_login_shell(json);
+
+    /*
+     * A buffer that cannot hold the entry is the NSS ERANGE/TRYAGAIN case:
+     * the caller grows its buffer and asks again. It is not a transient
+     * failure, so it must not be reported as one -- that would cost a token
+     * reload and a second portal round trip for a buffer the caller chose.
+     */
+    size_t needed = strlen(username) + strlen("x") + strlen(gecos_safe)
+                    + strlen(home_buf) + strlen(shell) + 5;
+    if (buflen < needed) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
     /* Username */
     pw->pw_name = p;
     if (safe_strcpy(&p, &remaining, username) != 0) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
     /* Password (disabled) */
     pw->pw_passwd = p;
     if (safe_strcpy(&p, &remaining, "x") != 0) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
     /* UID - only use if it's actually an integer, not a string like "username" */
@@ -2410,65 +2485,25 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
      * dangerous groups are refused. See select_primary_gid(). */
     pw->pw_gid = select_primary_gid(json, username);
 
-    /* GECOS - sanitize to remove dangerous characters */
+    /* GECOS */
     pw->pw_gecos = p;
-    const char *gecos_raw = "";
-    if (json_object_object_get_ex(json, "gecos", &val)) {
-        const char *tmp = json_object_is_type(val, json_type_string)
-                          ? json_object_get_string(val) : NULL;
-        if (tmp) gecos_raw = tmp;
-    }
-    /* Sanitize GECOS: remove colons and newlines which could corrupt passwd format */
-    char gecos_safe[256];
-    size_t gi = 0;
-    for (const char *gc = gecos_raw; *gc && gi < sizeof(gecos_safe) - 1; gc++) {
-        if (*gc != ':' && *gc != '\n' && *gc != '\r') {
-            gecos_safe[gi++] = *gc;
-        }
-    }
-    gecos_safe[gi] = '\0';
     if (safe_strcpy(&p, &remaining, gecos_safe) != 0) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
-    /* Home directory - validate server-provided path */
+    /* Home directory */
     pw->pw_dir = p;
-    char home_buf[PATH_VALIDATOR_MAX_PATH_LENGTH + 1];
-    int home_ok = 0;
-    int home_len = 0;
-
-    if (json_object_object_get_ex(json, "home", &val)) {
-        const char *home = json_object_is_type(val, json_type_string)
-                           ? json_object_get_string(val) : NULL;
-        /* Only use server-provided home if it passes validation */
-        if (home && *home && validate_home(home) == 0) {
-            home_len = snprintf(home_buf, sizeof(home_buf), "%s", home);
-            home_ok = home_len > 0 && (size_t)home_len < sizeof(home_buf);
-        }
-    }
-    if (!home_ok) {
-        /* Fall back to default if invalid or missing. The result must still be
-         * a path the module's own validator would accept: building it from the
-         * looked-up name unchecked let any byte reach pw_dir. */
-        home_len = snprintf(home_buf, sizeof(home_buf), "%s/%s",
-                            g_config.default_home_base, username);
-        if (home_len <= 0 || (size_t)home_len >= sizeof(home_buf) ||
-            path_validator_is_dangerous(home_buf)) {
-            json_object_put(json);
-            return -1;
-        }
-    }
     if (safe_strcpy(&p, &remaining, home_buf) != 0) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
-    /* Shell - validate server-provided path */
+    /* Shell */
     pw->pw_shell = p;
-    if (safe_strcpy(&p, &remaining, select_login_shell(json)) != 0) {
+    if (safe_strcpy(&p, &remaining, shell) != 0) {
         json_object_put(json);
-        return -1;
+        return NSS_BUFFER_TOO_SMALL;
     }
 
     json_object_put(json);
@@ -2548,7 +2583,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
         const char *shell = login_shell(cached->pw.pw_shell);
         size_t needed = strlen(cached->pw.pw_name) + strlen(cached->pw.pw_passwd) +
                        strlen(cached->pw.pw_gecos) + strlen(cached->pw.pw_dir) +
-                       strlen(shell) + 16;
+                       strlen(shell) + 5;  /* one NUL per field */
 
         if (buflen < needed) {
             pthread_mutex_unlock(&g_cache.lock);
@@ -2601,7 +2636,15 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
      * this module is asked (#353).
      */
     time_t file_created = 0;
-    if (file_cache_load_by_name(name, result, buffer, buflen, &file_created) == 0) {
+    int fr = file_cache_load_by_name(name, result, buffer, buflen, &file_created);
+    if (fr == NSS_BUFFER_TOO_SMALL) {
+        /* The record is on disk and the caller's buffer is not big enough for
+         * it: that is ERANGE, not something a portal round trip can answer. */
+        g_in_nss_lookup = 0;
+        *errnop = ERANGE;
+        return NSS_STATUS_TRYAGAIN;
+    }
+    if (fr == 0) {
         /* Promote with the record's ORIGINAL age, not time(NULL): the memory
          * copy must expire when the on-disk record would have. */
         cache_add_at(name, result, 1, file_created);
@@ -2616,13 +2659,26 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
     /* Query LLNG server. On a transient failure (-1) the likeliest cause is a
      * token that rotated between the reload above and the call (or a brief
      * server hiccup): force a reload and retry once. Never negative-cache a
-     * transient failure. */
+     * transient failure. Retry only on -1, never on the buffer case: a buffer
+     * the caller chose too small costs neither a token reload nor a second
+     * round trip, and a -2 must not be swallowed by the retry. */
     int qr = query_llng_userinfo(name, result, buffer, buflen);
-    if (qr < 0) {
+    if (qr == -1) {
         pthread_mutex_lock(&g_init_lock);
         load_server_token(&g_config);
         pthread_mutex_unlock(&g_init_lock);
         qr = query_llng_userinfo(name, result, buffer, buflen);
+    }
+
+    /* Tested AFTER the retry, so the second query's answer is tested too: a
+     * 401 answered by a buffer too small for the entry must still be the NSS
+     * ERANGE/TRYAGAIN contract, not the transient UNAVAIL below. The caller
+     * has to ask again with more room, and nothing is cached -- the entry was
+     * never built. */
+    if (qr == NSS_BUFFER_TOO_SMALL) {
+        g_in_nss_lookup = 0;
+        *errnop = ERANGE;
+        return NSS_STATUS_TRYAGAIN;
     }
 
     if (qr == 0) {
@@ -2696,7 +2752,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwuid_r(uid_t uid,
         const char *shell = login_shell(cached->pw.pw_shell);
         size_t needed = strlen(cached->pw.pw_name) + strlen(cached->pw.pw_passwd) +
                        strlen(cached->pw.pw_gecos) + strlen(cached->pw.pw_dir) +
-                       strlen(shell) + 16;
+                       strlen(shell) + 5;  /* one NUL per field */
 
         if (buflen < needed) {
             pthread_mutex_unlock(&g_cache.lock);
@@ -2740,7 +2796,16 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwuid_r(uid_t uid,
 
     /* Try file-based cache (shared across processes) */
     time_t file_created = 0;
-    if (file_cache_load_by_uid(uid, result, buffer, buflen, &file_created) == 0) {
+    int fur = file_cache_load_by_uid(uid, result, buffer, buflen, &file_created);
+    if (fur == NSS_BUFFER_TOO_SMALL) {
+        /* The record is on disk and the caller's buffer is not big enough for
+         * it. NOTFOUND would be an authoritative "no such user" for an
+         * account that exists. */
+        g_in_nss_lookup = 0;
+        *errnop = ERANGE;
+        return NSS_STATUS_TRYAGAIN;
+    }
+    if (fur == 0) {
         /* Also add to memory cache for future lookups in this process, with
          * the record's original age so it does not outlive the on-disk TTL. */
         cache_add_at(result->pw_name, result, 1, file_created);
