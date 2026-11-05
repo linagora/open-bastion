@@ -509,6 +509,27 @@ is( scalar @{ $payload->{certificates} }, 1, 'limit=1 returns one row' );
 is( $payload->{offset}, 1, 'offset echoed back' );
 count(2);
 
+# A very large offset used to reach splice() as a signed integer and die
+# ("Modification of non-creatable array value") on an empty list, or return
+# the end of a non-empty one. Past the end is an empty page.
+for my $o ( '9' x 30, '18446744073709551615', '9223372036854775808' ) {
+    for my $q ( "offset=$o", "user=nobody-here&offset=$o" ) {
+        ok(
+            $res = $portal->_get(
+                '/ssh/certs',
+                cookie => "lemonldap=$id",
+                accept => 'application/json',
+                query  => $q,
+            ),
+            "GET /ssh/certs?$q"
+        );
+        $payload = expectJSON($res);
+        is( scalar @{ $payload->{certificates} },
+            0, "$q: past the end, an empty page" );
+        count(1);
+    }
+}
+
 # ============================================
 # PART 4: revocation reason filtering
 # ============================================
@@ -538,6 +559,23 @@ sub revoke_req {
         length => length($raw),
     );
 }
+
+# A JSON array or object is true and used to slip past the presence check,
+# then Session->new died on its id type constraint (#433). The routes only
+# hand out plain strings, so anything else is a client error.
+for my $bad ( [], {}, ['x'], JSON::true ) {
+    ok( $res = revoke_req( { session_id => $bad, serial => '12' } ),
+        'POST /ssh/revoke with a non-string session_id' );
+    is( $res->[0], 400, '  -> 400' );
+    count(1);
+}
+ok(
+    $res = revoke_req(
+        { session_id => $victim->{session_id}, serial => [] } ),
+    'POST /ssh/revoke with a non-string serial'
+);
+is( $res->[0], 400, '  -> 400' );
+count(1);
 
 for my $bad (
     "compromised\nSSH_CERT_REVOKED fake log line",
