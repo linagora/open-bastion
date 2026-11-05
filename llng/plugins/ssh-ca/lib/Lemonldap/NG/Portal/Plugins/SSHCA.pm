@@ -1294,6 +1294,12 @@ sub sshMyCertRevoke {
     my ( $body, $bail ) = $self->_jsonBodyOrReject( $req, 'SSH myrevoke' );
     return $bail if $bail;
     my $serial = $body->{serial};
+
+    # A JSON boolean stringifies to "1" and could match a certificate serial,
+    # as the broker path did (#435). Refuse references like /ssh/revoke does.
+    if ( ref $serial ) {
+        return $self->p->sendError( $req, 'serial must be a string', 400 );
+    }
     unless ( defined $serial && $serial ne '' ) {
         return $self->p->sendError( $req, 'serial required', 400 );
     }
@@ -2162,10 +2168,13 @@ sub _checkKeyPolicy {
     return $serial =~ /\A[0-9]{1,20}\z/ ? 1 : 0;
 }
 
-# Section types OpenSSH defines in PROTOCOL.krl (krl.c). A type outside this
-# set means the blob is not a KRL this OpenSSH understands: ssh-keygen refuses
-# it, and a host installing it would then fail closed on every key. The
-# framing walk alone accepted type 0 with a zero length.
+# Section types this plugin can publish. OpenSSH also defines
+# KRL_SECTION_EXTENSION (255), parsed since 9.4, but `ssh-keygen` never writes
+# one and older hosts (bookworm ships 9.2) refuse the whole KRL, which would
+# fail closed on every key. A type outside this set means the blob is not a
+# KRL this plugin can serve: ssh-keygen refuses it, and a host installing it
+# would then fail closed. The framing walk alone accepted type 0 with a zero
+# length.
 my %SSHCA_KRL_SECTION_TYPES = map { $_ => 1 } ( 1 .. 5 );
 #   1 certificates, 2 explicit key, 3 SHA1 fingerprint,
 #   4 signature,    5 SHA256 fingerprint

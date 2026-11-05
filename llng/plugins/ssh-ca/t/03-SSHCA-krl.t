@@ -146,12 +146,17 @@ SKIP: {
 
 # A section type OpenSSH does not define makes ssh-keygen refuse the whole
 # file, so serving it would fail closed on every host that installs it. The
-# framing walk alone accepted type 0 with a zero length (#437).
+# framing walk alone accepted type 0 with a zero length (#437). The extension
+# type (255) stays out on purpose: ssh-keygen never writes one, and hosts
+# older than 9.4 refuse the whole KRL.
 my $unknownSection = substr( $empty, 0, 44 ) . "\0" . pack( 'N', 0 );
+my $extensionSection = substr( $empty, 0, 44 ) . "\xff" . pack( 'N', 0 );
 ok( $plugin->_krlIsValid($empty), 'a header-only KRL is valid' );
 ok( !$plugin->_krlIsValid($unknownSection),
     'a section of an unknown type is refused' );
-count(2);
+ok( !$plugin->_krlIsValid($extensionSection),
+    'an extension section (255) is refused' );
+count(3);
 
 # =============================================================================
 # PART 2: serial validation (issue #65)
