@@ -1208,10 +1208,14 @@ static int offline_cache_verify_locked(offline_cache_t *cache,
     const char *hash_b64 = NULL;
     const char *salt_b64 = NULL;
 
-    if (json_object_object_get_ex(json, "password_hash", &val)) {
+    if (json_object_object_get_ex(json, "password_hash", &val) &&
+        json_object_is_type(val, json_type_string) &&
+        !str_json_has_embedded_nul(val)) {
         hash_b64 = json_object_get_string(val);
     }
-    if (json_object_object_get_ex(json, "salt", &val)) {
+    if (json_object_object_get_ex(json, "salt", &val) &&
+        json_object_is_type(val, json_type_string) &&
+        !str_json_has_embedded_nul(val)) {
         salt_b64 = json_object_get_string(val);
     }
 

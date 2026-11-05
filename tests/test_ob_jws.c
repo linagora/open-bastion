@@ -483,6 +483,12 @@ static void test_claims(void)
     refused(k_rsa, "RS256", "rsa", c, "(aud)", "an answer for another client (aud) is refused");
     c = claims(); json_object_object_add(c, "aud", json_tokener_parse("[\"other\"]"));
     refused(k_rsa, "RS256", "rsa", c, "(aud)", "an aud array without the client is refused");
+    /* "openbastion\0x" is not the audience "openbastion": strcmp() stops at
+     * the NUL and would match. */
+    c = claims();
+    json_object_object_add(c, "aud", json_tokener_parse("\"" CLIENT "\\u0000x\""));
+    refused(k_rsa, "RS256", "rsa", c, "(aud)",
+            "an aud extending the client with a NUL is refused");
     c = claims(); json_object_object_add(c, "endpoint", json_object_new_string("userinfo"));
     refused(k_rsa, "RS256", "rsa", c, "endpoint", "an answer for another endpoint is refused");
     c = claims(); json_object_object_add(c, "exp", json_object_new_int64(g_now - 61));

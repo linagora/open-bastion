@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C-string length is refused. The same rule now guards the user name in the
   authentication and offline caches, the heartbeat `access_token`, and the
   session header fields the recorder copies into a record (#431).
+- The JSON answers read from the portal, the CrowdSec API and the token file
+  no longer accept a string field holding an embedded NUL: such a value was
+  read as the part before it, so a truncated `access_token` was sent as a
+  credential, and a `client_ip`, `fingerprint`, `aud`, `use` or `key_ops`
+  value could satisfy the `strcmp()` binding, audience or key-use check it
+  does not match (#431).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host
