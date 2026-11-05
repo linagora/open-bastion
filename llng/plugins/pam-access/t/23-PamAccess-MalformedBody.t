@@ -75,8 +75,7 @@ sub post {
 sub check_400 {
     my ( $op, $endpoint, $body, $bearer, $label ) = @_;
 
-    my $res = eval { post( $op, $endpoint, $body, $bearer ) };
-    is( $@, '', "$label: does not die" );
+    my $res = post( $op, $endpoint, $body, $bearer );
     is( $res && $res->[0], 400, "$label: 400" );
 }
 
@@ -152,7 +151,8 @@ unlike( $auth_res->[2]->[0], qr/pwned/,
 
 my $case = 0;
 for my $user ( "\x{263a}", "\x{100}", "a\x00b", "a\tb" ) {
-    my $body = encode_json( { user => $user } );
+    my $body = encode_json(
+        { user => $user, public_key => 'ssh-ed25519 AAAA', voucher => 'x' } );
     check_400( $op, 'bastion-cert', $body, $token,
         'bastion-cert with a non-login user (' . ++$case . ')' );
 }
@@ -189,10 +189,18 @@ $wide = encode_json( { token => "\x{263a}" } );
 check_400( $op_hashed, 'verify', $wide, $htoken,
     'verify with a wide-character token under hashedSessionStore' );
 
-for my $endpoint (qw(authorize userinfo bastion-cert)) {
+for my $endpoint (qw(authorize userinfo)) {
     $wide = encode_json( { user => "\x{263a}" } );
     check_400( $op_hashed, $endpoint, $wide, $htoken,
         "$endpoint with a wide-character user under hashedSessionStore" );
 }
+
+# Give bastion-cert a key and a voucher so the request really reaches the
+# login check: without them the handler's 400 "Missing public_key parameter"
+# would make the case pass whatever the login check does.
+$wide = encode_json(
+    { user => "\x{263a}", public_key => 'ssh-ed25519 AAAA', voucher => 'x' } );
+check_400( $op_hashed, 'bastion-cert', $wide, $htoken,
+    'bastion-cert with a wide-character user under hashedSessionStore' );
 
 done_testing();
