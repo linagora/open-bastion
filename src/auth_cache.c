@@ -492,8 +492,12 @@ bool auth_cache_lookup(auth_cache_t *cache,
 
     /* Verify user matches */
     if (json_object_object_get_ex(json, "user", &val)) {
-        const char *cached_user = json_object_get_string(val);
-        if (!cached_user || strcmp(cached_user, user) != 0) {
+        const char *cached_user = json_object_is_type(val, json_type_string)
+                                  ? json_object_get_string(val) : NULL;
+        /* A cached name holding a NUL is not the name it looks like: it would
+         * be compared, and match, as the part before it. */
+        if (!cached_user || str_json_has_embedded_nul(val) ||
+            strcmp(cached_user, user) != 0) {
             json_object_put(json);
             unlink(path);
             return false;

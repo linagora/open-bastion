@@ -479,6 +479,18 @@ static void test_shared_nonce(void)
           "heartbeat: one X-Nonce for the HMAC and the signed answer");
     free(tok);
     ob_client_destroy(c);
+
+    /* A token holding a NUL is not the token the portal issued: storing the
+     * part before it would send a truncated credential (#431). */
+    c = new_client("prefer", g_jwks, NULL);
+    a = plain_answer("{\"access_token\":\"fresh\\u0000truncated\","
+                     "\"expires_in\":3600}", 200);
+    mp_set(&a);
+    rc = do_heartbeat(c, &tok, &http);
+    CHECK(rc == -1 && tok == NULL,
+          "heartbeat: an access_token holding a NUL is refused");
+    free(tok);
+    ob_client_destroy(c);
 }
 
 /* ── 5. /pam/authorize ───────────────────────────────────────────────────── */

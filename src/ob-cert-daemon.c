@@ -274,7 +274,9 @@ static char *read_server_token(const char *path)
         struct json_object *at;
         if (root && json_object_object_get_ex(root, "access_token", &at)) {
             const char *s = json_object_get_string(at);
-            if (s && *s)
+            /* A token holding a NUL is a truncation of the one the portal
+             * issued, not that token. */
+            if (s && *s && !str_json_has_embedded_nul(at))
                 tok = strdup(s);
         }
         if (root)

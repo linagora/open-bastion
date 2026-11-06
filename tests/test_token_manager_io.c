@@ -143,6 +143,28 @@ static int test_load_null_access_token(void)
     return ok;
 }
 
+/* A token holding an embedded NUL is not the token the file names: json-c
+ * keeps the decoded length, so storing it would send the part before the NUL
+ * as the credential (#431) */
+static int test_load_embedded_nul_access_token(void)
+{
+    const char *name = "token_nul_access.json";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s/%s", test_dir, name);
+
+    if (write_raw(name, "{\"access_token\":\"abc\\u0000x\"}") != 0) return 0;
+
+    token_info_t info = {0};
+    int ret = token_manager_load_file(filepath, &info);
+
+    int ok = (ret == -1) && (info.access_token == NULL) && (info.refresh_token == NULL);
+
+    token_info_free(&info);
+    unlink(filepath);
+
+    return ok;
+}
+
 /* A JSON null for refresh_token alone is ignored, the access token loads */
 static int test_load_null_refresh_token(void)
 {
@@ -386,6 +408,7 @@ int main(void)
     TEST(save_and_load);
     TEST(load_nonexistent);
     TEST(load_null_access_token);
+    TEST(load_embedded_nul_access_token);
     TEST(load_null_refresh_token);
     TEST(load_nonstring_members);
     TEST(save_load_roundtrip);

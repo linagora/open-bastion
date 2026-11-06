@@ -709,6 +709,38 @@ static void test_field_with_nul_is_dropped(void)
     PASS();
 }
 
+/*
+ * The name a granting answer vouches for is an identity: the PAM module
+ * compares response.user with strcmp() against the account it is
+ * authenticating. "alice\0x" is not the account "alice", so a NUL-bearing
+ * user must be refused rather than stored as the part before the NUL.
+ */
+static void test_user_with_nul_is_refused(void)
+{
+    TEST("a granting answer whose 'user' holds a NUL is refused");
+
+    ob_response_t r;
+    char err[256] = {0};
+
+    int authz = ob_parse_authorize_response(
+        "{\"authorized\":true,\"user\":\"alice\\u0000x\",\"groups\":[\"admins\"]}",
+        &r, err, sizeof(err));
+    ob_response_free(&r);
+    if (authz != -1) {
+        FAIL("the authorize parser kept the name truncated at the NUL");
+        return;
+    }
+
+    int verify = ob_parse_verify_response(
+        "{\"valid\":true,\"user\":\"alice\\u0000x\"}", &r, err, sizeof(err));
+    ob_response_free(&r);
+    if (verify != -1) {
+        FAIL("the verify parser kept the name truncated at the NUL");
+        return;
+    }
+    PASS();
+}
+
 static void test_authorize_without_offline(void)
 {
     TEST("authorize response: no offline object leaves the cache off");
@@ -785,6 +817,7 @@ int main(void)
     test_authorize_sudo_requires_boolean();
     test_group_with_nul_is_skipped();
     test_field_with_nul_is_dropped();
+    test_user_with_nul_is_refused();
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Introspection tests (JWT client assertion) */

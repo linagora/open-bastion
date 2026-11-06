@@ -1085,8 +1085,12 @@ static int read_cache_entry(offline_cache_t *cache, const char *user,
     /* Verify user matches */
     struct json_object *val;
     if (json_object_object_get_ex(*json_out, "user", &val)) {
-        const char *cached_user = json_object_get_string(val);
-        if (!cached_user || strcmp(cached_user, user) != 0) {
+        const char *cached_user = json_object_is_type(val, json_type_string)
+                                  ? json_object_get_string(val) : NULL;
+        /* A cached name holding a NUL is not the name it looks like: it would
+         * be compared, and match, as the part before it. */
+        if (!cached_user || str_json_has_embedded_nul(val) ||
+            strcmp(cached_user, user) != 0) {
             json_object_put(*json_out);
             *json_out = NULL;
             unlink(path);
@@ -1204,10 +1208,14 @@ static int offline_cache_verify_locked(offline_cache_t *cache,
     const char *hash_b64 = NULL;
     const char *salt_b64 = NULL;
 
-    if (json_object_object_get_ex(json, "password_hash", &val)) {
+    if (json_object_object_get_ex(json, "password_hash", &val) &&
+        json_object_is_type(val, json_type_string) &&
+        !str_json_has_embedded_nul(val)) {
         hash_b64 = json_object_get_string(val);
     }
-    if (json_object_object_get_ex(json, "salt", &val)) {
+    if (json_object_object_get_ex(json, "salt", &val) &&
+        json_object_is_type(val, json_type_string) &&
+        !str_json_has_embedded_nul(val)) {
         salt_b64 = json_object_get_string(val);
     }
 

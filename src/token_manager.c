@@ -20,6 +20,7 @@
 
 #include "token_manager.h"
 #include "jwt_utils.h"
+#include "str_utils.h"
 
 /* Maximum response size to prevent DoS via memory exhaustion (256KB) */
 #define MAX_RESPONSE_SIZE (256 * 1024)
@@ -139,13 +140,17 @@ void token_info_free(token_info_t *info)
  *
  * json_object_get_string() returns NULL for a JSON null, and if
  * callers strdup() its result, a "access_token": null member result
- * in a crash. */
+ * in a crash. A string holding an embedded NUL is refused too: it is a
+ * truncation of the value the sender wrote, and these fields (tokens, the
+ * user name, the bound client IP and fingerprint) are compared with strcmp(),
+ * which would match the part before the NUL. */
 static char *json_dup_string(struct json_object *root, const char *key)
 {
     struct json_object *obj;
 
     if (!json_object_object_get_ex(root, key, &obj)) return NULL;
     if (!json_object_is_type(obj, json_type_string)) return NULL;
+    if (str_json_has_embedded_nul(obj)) return NULL;
 
     return strdup(json_object_get_string(obj));
 }
