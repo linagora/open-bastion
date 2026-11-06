@@ -32,8 +32,8 @@ source_script() {
 # into a copy of it, just before its final `main "$@"`: a knob only a modified
 # program can turn, never the recorded user.
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-E2E_SINK="$ROOT_DIR/build/ob-record-sink"
-E2E_CONNECT="$ROOT_DIR/build/ob-record-connect"
+E2E_SINK="${OB_BUILD_DIR:-$ROOT_DIR/build}/ob-record-sink"
+E2E_CONNECT="${OB_BUILD_DIR:-$ROOT_DIR/build}/ob-record-connect"
 E2E_WORK=""
 E2E_SA_PID=""
 

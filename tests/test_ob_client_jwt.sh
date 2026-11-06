@@ -42,7 +42,7 @@ run_test() {
 }
 
 HELPER=""
-for c in "$ROOT_DIR/build/ob-client-jwt" "$(command -v ob-client-jwt 2>/dev/null)"; do
+for c in "${OB_BUILD_DIR:-$ROOT_DIR/build}/ob-client-jwt" "$(command -v ob-client-jwt 2>/dev/null)"; do
     [ -n "$c" ] && [ -x "$c" ] && { HELPER="$c"; break; }
 done
 [ -n "$HELPER" ] || { echo "SKIP: ob-client-jwt not built (cmake --build build)"; exit 0; }

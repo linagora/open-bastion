@@ -10,6 +10,15 @@ cmake -S . -B build && cmake --build build && ctest --test-dir build
 for t in tests/test_ob_*.sh; do bash "$t"; done
 ```
 
+`tests/run-tests-junit.sh` runs both halves and writes JUnit reports,
+`build/test-results/ctest.xml` and `build/test-results/shell-tests.xml`,
+each naming the commit under test and the time of the run. CI uploads
+them on every run, and a release attaches them to the GitHub release as
+certification evidence; the release reports come from the ubuntu-24.04
+job, not from one run per package distribution. Pass ctest arguments
+after `--`, for a local subset:
+`tests/run-tests-junit.sh -- -R test_config`.
+
 The man pages build by default, with the `man` target when `sphinx-build`
 (`python3-sphinx`) is installed; without Sphinx they are skipped, and
 asking for them explicitly with `-DBUILD_MAN=ON` makes their absence

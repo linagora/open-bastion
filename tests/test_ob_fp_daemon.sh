@@ -46,10 +46,10 @@ run_test() { TESTS_RUN=$((TESTS_RUN + 1)); "$@"; }
 
 # The relaxed test build (see tests/CMakeLists.txt), not the shipped binary:
 # its spool and socket paths live in the build tree.
-DAEMON="$ROOT_DIR/build/tests/ob-fp-daemon-testbuild"
+DAEMON="${OB_BUILD_DIR:-$ROOT_DIR/build}/tests/ob-fp-daemon-testbuild"
 [ -x "$DAEMON" ] || DAEMON=""
 SUBMIT=""
-for c in "$ROOT_DIR/build/ob-fp-submit" "$(command -v ob-fp-submit 2>/dev/null)"; do
+for c in "${OB_BUILD_DIR:-$ROOT_DIR/build}/ob-fp-submit" "$(command -v ob-fp-submit 2>/dev/null)"; do
     [ -n "$c" ] && [ -x "$c" ] && { SUBMIT="$c"; break; }
 done
 

@@ -21,6 +21,7 @@ TESTS_FAILED=0
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CI="$ROOT_DIR/.github/workflows/ci.yml"
+RUNNER="$ROOT_DIR/tests/run-tests-junit.sh"
 
 pass() { TESTS_PASSED=$((TESTS_PASSED + 1)); echo "  PASS: $1"; }
 fail() { TESTS_FAILED=$((TESTS_FAILED + 1)); echo "  FAIL: $1${2:+ - $2}"; }
@@ -37,19 +38,46 @@ run_test() {
 
 echo "=== every test is reachable from CI ==="
 
-# The glob the build job loops over. Read it from the workflow rather than
-# hard-coding it, so narrowing the loop shows up here instead of silently
-# orphaning half the suite.
+# The glob the build job loops over. The loop lives in the JUnit runner now,
+# which CI invokes; read it there rather than hard-coding it, so narrowing the
+# loop shows up here instead of silently orphaning half the suite.
 loop_glob() {
-    sed -n 's|.*for test in tests/\(test[A-Za-z_*]*\.sh\); do.*|\1|p' "$CI" | head -1
+    local file out
+    for file in "$CI" "$RUNNER"; do
+        [ -f "$file" ] || continue
+        out=$(sed -n 's|.*for test in .*tests/\(test[A-Za-z_*]*\.sh\); do.*|\1|p' "$file" | head -1)
+        [ -n "$out" ] && { printf '%s\n' "$out"; return; }
+    done
 }
 
 # Files the loop skips (`case "$test" in tests/a.sh|tests/b.sh) continue`).
 # They match the glob but the loop does not run them, so another job must.
 loop_skips() {
-    # shellcheck disable=SC2016  # $test is literal text in ci.yml
-    sed -n 's|.*case "\$test" in \(.*\)) continue.*|\1|p' "$CI" \
-        | tr '|' '\n' | sed 's|^ *tests/||; s| *$||'
+    local file
+    for file in "$CI" "$RUNNER"; do
+        [ -f "$file" ] || continue
+        # shellcheck disable=SC2016  # $test is literal text in the shell sources
+        sed -n 's|.*case "\$test" in \(.*\)) continue.*|\1|p' "$file"
+    done | tr '|' '\n' | sed 's|^ *tests/||; s| *$||'
+}
+
+# The loop itself is not enough: it only covers the suite if CI runs the
+# runner that carries it.
+test_runner_is_invoked() {
+    local lines
+    # Anchored at the start of a command line, so a mention in a comment does
+    # not count as running it. --no-shell would leave every shell suite unrun,
+    # which is exactly what this file exists to prevent.
+    lines=$(grep -E '^[[:space:]]*tests/run-tests-junit\.sh([[:space:]]|$)' "$CI")
+    if [ -z "$lines" ]; then
+        fail "CI runs the JUnit test runner" \
+             "no command line invoking tests/run-tests-junit.sh in ci.yml"
+    elif printf '%s\n' "$lines" | grep -q -- '--no-shell'; then
+        fail "CI runs the full JUnit test runner" \
+             "the invocation passes --no-shell"
+    else
+        pass "CI runs the full JUnit test runner"
+    fi
 }
 
 test_no_orphan_shell_tests() {
@@ -57,8 +85,8 @@ test_no_orphan_shell_tests() {
     glob=$(loop_glob)
     skips=$(loop_skips)
     if [ -z "$glob" ]; then
-        fail "the workflow still loops over a tests/ glob" \
-             "could not find 'for test in tests/...' in ci.yml"
+        fail "the test runner loops over a tests/ glob" \
+             "could not find 'for test in tests/...' in ci.yml or the runner"
         return
     fi
     for f in "$ROOT_DIR"/tests/test_*.sh; do
@@ -127,6 +155,7 @@ test_ctest_without_desktop() {
     fi
 }
 
+run_test test_runner_is_invoked
 run_test test_no_orphan_shell_tests
 run_test test_no_orphan_c_tests
 run_test test_ctest_without_desktop
