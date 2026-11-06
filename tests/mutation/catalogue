@@ -260,6 +260,16 @@ why     || #268: fail-closed on any group or other bit. The security reference
 why     || (doc/references/security-reference.rst) documented a
 why     || `dd` recipe with no chmod, which under umask 022 yields 0644.
 
+id      || cache-key-rename-recovery
+file    || src/cache_key.c
+search  || return read_instance_id(id_path, buf, buf_size);
+replace || return 0;
+suite   || tests/test_ob_cache_key.sh
+why     || #445: when the rename() of a freshly generated instance ID fails,
+why     || reporting success would hand the caller an ID that is not on disk.
+why     || The next call generates another one, and every cache entry encrypted
+why     || under the first becomes undecryptable.
+
 id      || setup-node-role-drives-stack
 file    || scripts/ob-bastion-setup
 search  || is_backend() { [ "$NODE_ROLE" = "backend" ]; }

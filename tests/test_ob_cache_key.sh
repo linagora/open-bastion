@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs the key-file refusal tests (tests/test_cache_key.c).
+# Runs the key-file and instance-ID tests (tests/test_cache_key.c).
 #
 # The assertions live in C, next to the other unit tests, and ctest runs them
 # directly. This wrapper exists because tests/mutation/catalogue names its
@@ -20,7 +20,7 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${OB_BUILD_DIR:-$ROOT_DIR/build}/tests/test_cache_key"
 
-echo "=== offline cache key file: what is refused (#268) ==="
+echo "=== offline cache key file: what is refused (#268), cache instance ID (#445) ==="
 
 if [ ! -x "$BIN" ]; then
     echo "  FAIL: $BIN is not built; configure and build the tree first"
