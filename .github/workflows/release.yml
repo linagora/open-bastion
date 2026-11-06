@@ -700,7 +700,7 @@ jobs:
       # codename (open-bastion_0.7.0_amd64-bookworm.deb). The RPMs already
       # carry theirs (.el9/.el10), and the SBOMs are named after their .deb
       # and base image, so both keep their names.
-      - name: Collect package and SBOM files
+      - name: Collect release assets
         run: |
           mkdir -p release-assets
           for dir in artifacts/deb-*/; do
@@ -720,6 +720,11 @@ jobs:
             cp "$xml" "release-assets/open-bastion-${GITHUB_REF_NAME}-${xml##*/}"
           done
           ls -l release-assets/
+
+      - name: Write the release manifest
+        run: |
+          scripts/write-release-manifest \
+            --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" release-assets
 
       - name: Create GitHub Release
         env:

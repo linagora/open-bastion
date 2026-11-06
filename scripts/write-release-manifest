@@ -1,0 +1,94 @@
+#!/bin/bash
+# write-release-manifest -- write SHA256SUMS and MANIFEST.txt for a release.
+#
+# Usage: scripts/write-release-manifest [--tag TAG] [--commit COMMIT] DIR
+#
+# Every regular file directly under DIR is a published release asset. The two
+# index files are left out of the list so a rerun does not hash the previous
+# run's output.
+
+set -euo pipefail
+
+usage() {
+    echo "usage: $0 [--tag TAG] [--commit COMMIT] DIR" >&2
+}
+
+TAG=""
+COMMIT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tag)
+            [ $# -ge 2 ] || { usage; exit 2; }
+            TAG=$2
+            shift 2
+            ;;
+        --commit)
+            [ $# -ge 2 ] || { usage; exit 2; }
+            COMMIT=$2
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "$0: unknown option: $1" >&2
+            usage
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+[ $# -eq 1 ] || { usage; exit 2; }
+DIR=$1
+[ -d "$DIR" ] || { echo "$0: $DIR: not a directory" >&2; exit 1; }
+
+cd "$DIR"
+
+files=()
+while IFS= read -r -d '' file; do
+    files+=("${file#./}")
+done < <(
+    find . -maxdepth 1 -type f ! -name '.*' \
+        ! -name MANIFEST.txt ! -name SHA256SUMS -print0 \
+        | LC_ALL=C sort -z
+)
+
+# An empty SHA256SUMS would pin nothing, which is worse than a failed release.
+if [ "${#files[@]}" -eq 0 ]; then
+    echo "$0: $DIR: no release asset to list" >&2
+    exit 1
+fi
+
+: > SHA256SUMS
+{
+    printf 'Open Bastion %s\n' "${TAG:-release}"
+    if [ -n "$COMMIT" ]; then
+        printf 'Commit: %s\n' "$COMMIT"
+    fi
+    printf 'Generated: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '\n'
+    printf 'Every file attached to the release is listed below. SHA256SUMS holds\n'
+    printf 'the same hashes in `sha256sum -c` format; run it from the directory\n'
+    printf 'holding the downloaded assets to verify them.\n'
+    printf '\n'
+    printf '%-64s  %12s  %s\n' SHA256 BYTES FILE
+} > MANIFEST.txt
+
+for file in "${files[@]}"; do
+    hash=$(sha256sum -- "$file")
+    hash=${hash%% *}
+    size=$(stat -c %s -- "$file")
+    printf '%s  %s\n' "$hash" "$file" >> SHA256SUMS
+    printf '%-64s  %12s  %s\n' "$hash" "$size" "$file" >> MANIFEST.txt
+done
+
+sha256sum -c --quiet SHA256SUMS
+printf 'Wrote MANIFEST.txt and SHA256SUMS for %d asset(s)\n' "${#files[@]}"

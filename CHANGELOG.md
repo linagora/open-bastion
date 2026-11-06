@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/run-tests-junit.sh` writes `ctest.xml` for the C tests and
   `shell-tests.xml` for the `tests/test_ob_*.sh` suites, both naming the
   commit and carrying the time of the run. CI uploads them on every run, and
-  each release attaches them to the GitHub release next to the packages
-  (#428).
+  each release attaches them to the GitHub release next to the packages,
+  with `MANIFEST.txt` and `SHA256SUMS` pinning the complete set of published
+  artifacts (#428).
 - ob-builder: a role can enrol with another relying party than `client_id`,
   through a `roles:` block in the config (its `client_id`, and its
   `embedded_client_secret` with `client_secret_mode: embedded`) or, with
