@@ -155,6 +155,26 @@ target_link_libraries(test_ob_client_signed
 )
 add_test(NAME test_ob_client_signed COMMAND test_ob_client_signed)
 
+# Which /pam/authorize failures may fall back to the offline cache: the same
+# mock portal, driven per HTTP status and per signature outcome.
+add_executable(test_ob_client_status test_ob_client_status.c
+    ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c
+    ../src/str_utils.c)
+target_compile_definitions(test_ob_client_status PRIVATE _GNU_SOURCE)
+target_include_directories(test_ob_client_status PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+)
+target_link_libraries(test_ob_client_status
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    pthread
+)
+add_test(NAME test_ob_client_status COMMAND test_ob_client_status)
+
 # Not a test: the portal's signing side for tests/test_ob_verify_response.sh
 # (keys, JWKs, signed answers), through jws_test_util.h like the C tests.
 add_executable(jws-sign-fixture jws_sign_fixture.c)
@@ -309,6 +329,43 @@ add_test(NAME test_sshd_anchor COMMAND test_sshd_anchor)
 add_executable(test_ssh_key_policy test_ssh_key_policy.c ../src/ssh_key_policy.c)
 target_include_directories(test_ssh_key_policy PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_ssh_key_policy COMMAND test_ssh_key_policy)
+
+# Includes pam_openbastion.c to install its module data on a real PAM handle,
+# then drives pam_sm_acct_mgmt() against the mock portal. The other module
+# sources are linked as usual; offline_cache.c joins them when Desktop SSO is
+# built in, as ENABLE_DESKTOP_SSO is defined globally.
+set(PAM_ACCT_CACHE_SOURCES
+    ../src/ob_client.c ../src/ob_jws.c ../src/ob_sign.c ../src/config.c
+    ../src/audit_log.c ../src/rate_limiter.c ../src/token_manager.c
+    ../src/jwt_utils.c ../src/notify.c ../src/auth_cache.c ../src/cache_key.c
+    ../src/crowdsec.c ../src/service_account.c ../src/ssh_key_policy.c
+    ../src/sshd_anchor.c ../src/str_utils.c)
+if(INSTALL_DESKTOP)
+    list(APPEND PAM_ACCT_CACHE_SOURCES ../src/offline_cache.c)
+endif()
+add_executable(test_pam_acct_cache test_pam_acct_cache.c ${PAM_ACCT_CACHE_SOURCES})
+target_compile_definitions(test_pam_acct_cache PRIVATE _GNU_SOURCE)
+target_include_directories(test_pam_acct_cache PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${PAM_INCLUDE_DIR}
+    ${CURL_INCLUDE_DIRS}
+    ${JSON_C_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIRS}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_INCLUDE_DIRS}>
+)
+target_link_libraries(test_pam_acct_cache
+    ${PAM_LIBRARY}
+    ${CURL_LIBRARIES}
+    ${JSON_C_LIBRARIES}
+    ${OPENSSL_LIBRARIES}
+    $<$<BOOL:${USE_LIBSODIUM}>:${SODIUM_LIBRARIES}>
+    pthread
+)
+# A PAM application cannot call pam_set_data(), so the test wraps the module's
+# pam_get_data() lookup to hand it the module data it built.
+target_link_options(test_pam_acct_cache PRIVATE -Wl,--wrap=pam_get_data)
+add_test(NAME test_pam_acct_cache COMMAND test_pam_acct_cache)
+set_tests_properties(test_pam_acct_cache PROPERTIES SKIP_RETURN_CODE 77)
 
 # Integration tests require a running Open Bastion instance; run manually.
 

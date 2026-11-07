@@ -127,13 +127,13 @@ Mode            Behaviour
                 JWKS file refuses the answer.
 =============== =======================================================================
 
-A refused answer is handled as a transport error, like a network failure: the host does not act on its content (an unverified ``401`` does not trigger a token refresh), and the usual offline rules apply, so a user already in the authorization cache can still log in while ``offline`` mode allows it. Nothing that fails verification can create or extend a cache entry. ``prefer`` protects against nothing by itself, since an attacker can strip the signature: it is a way to check that the JWKS and the portal agree before moving to ``required``.
+A refused answer is a refusal, not a network failure: the host does not act on its content and does not fall back to the authorization cache, so a user whose cached grant an attacker tries to revive that way is denied. An unverified ``401`` does not trigger a token refresh either. Only a transport failure, or a ``502``/``503``/``504`` from an intermediary, lets the PAM module consult the offline cache. Nothing that fails verification can create or extend a cache entry. ``prefer`` protects against nothing by itself, since an attacker can strip the signature: it is a way to check that the JWKS and the portal agree before moving to ``required``.
 
 **NSS module.** ``libnss_openbastion`` applies the same rules to ``/pam/userinfo``. It reads ``response_signing``, ``sso_jwks_file``, ``sso_issuer`` and ``client_id`` from ``nss_openbastion.conf`` (not ``openbastion.conf``), and loads the JWKS on each query. An invalid ``response_signing`` value is logged and treated as ``required`` rather than ``off``; with ``required`` and no ``client_id`` in the file, lookups are refused. A refused lookup returns a transport failure and is never negatively cached.
 
 .. warning::
 
-   Under ``required``, a wrong, stale or unreadable JWKS refuses every portal answer: SSO logins fail on that host (only users in the offline cache still get in). Test with ``prefer`` and read the syslog first.
+   Under ``required``, a wrong, stale or unreadable JWKS refuses every portal answer: SSO logins fail on that host, and the offline cache is not consulted because the failure is not a transport one. Test with ``prefer`` and read the syslog first.
 
 Server authentication
 ---------------------
