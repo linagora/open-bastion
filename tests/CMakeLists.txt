@@ -334,6 +334,12 @@ add_test(NAME test_ssh_key_policy COMMAND test_ssh_key_policy)
 # then drives pam_sm_acct_mgmt() against the mock portal. The other module
 # sources are linked as usual; offline_cache.c joins them when Desktop SSO is
 # built in, as ENABLE_DESKTOP_SSO is defined globally.
+#
+# The mutation job builds the tree once per C mutant. This target recompiles
+# the whole PAM module for each of them, against no catalogue entry, so that
+# job disables it.
+option(BUILD_PAM_ACCT_TEST "Build the PAM account-phase offline-cache test" ON)
+if(BUILD_PAM_ACCT_TEST)
 set(PAM_ACCT_CACHE_SOURCES
     ../src/ob_client.c ../src/ob_jws.c ../src/ob_sign.c ../src/config.c
     ../src/audit_log.c ../src/rate_limiter.c ../src/token_manager.c
@@ -366,6 +372,7 @@ target_link_libraries(test_pam_acct_cache
 target_link_options(test_pam_acct_cache PRIVATE -Wl,--wrap=pam_get_data)
 add_test(NAME test_pam_acct_cache COMMAND test_pam_acct_cache)
 set_tests_properties(test_pam_acct_cache PROPERTIES SKIP_RETURN_CODE 77)
+endif() # BUILD_PAM_ACCT_TEST
 
 # Integration tests require a running Open Bastion instance; run manually.
 
