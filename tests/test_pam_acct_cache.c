@@ -124,7 +124,7 @@ static pam_openbastion_data_t *module_data(pam_handle_t *pamh, unsigned port)
     if (!data) return NULL;
 
     config_init(&data->config);
-    data->config.server_group = strdup("default");
+    free(data->config.auth_cache_dir);
     data->config.auth_cache_dir = strdup(g_cache_dir);
     data->client = client_at(port);
     data->auth_cache = auth_cache_init(g_cache_dir);

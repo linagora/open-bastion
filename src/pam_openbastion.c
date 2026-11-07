@@ -3962,7 +3962,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
 
                     /* Populate response from cache */
                     response.authorized = cache_entry.authorized;
-                    response.user = cache_entry.user ? strdup(cache_entry.user) : NULL;
+                    response.user = cache_entry.user;
                     cache_entry.user = NULL;  /* Ownership transferred */
 
                     response.has_permissions = true;
