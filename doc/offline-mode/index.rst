@@ -213,14 +213,16 @@ intermediary. A TLS trust failure — a certificate that does not verify, an
 issuer or a public key that does not match ``cert_pin``, an invalid OCSP
 status — is a refusal: the host reached a peer, but that peer did not prove
 it is the portal, so the cache does not answer for it. A local TLS
-misconfiguration, such as an unreadable ``ca_cert``, a missing client
-certificate or an unusable cipher, is a refusal too: it must be fixed, not
-masked by the cache. Any other answer is a verdict, and a verdict never
-becomes a cache hit. A ``400``, a ``403``, a ``401`` that survives a token
-refresh, or an answer whose signature cannot be verified refuses the login
-on the spot. A ``200`` that denies the user, or that no longer carries
-``offline.enabled``, also deletes the entry, so an outage cannot restore an
-authorization the portal has withdrawn.
+misconfiguration reported outside the handshake, such as an unreadable
+``ca_cert``, is a refusal too: it must be fixed, not masked by the cache. A
+handshake that fails for any reason, a portal that only speaks TLS 1.2
+included, is still treated as an outage and may use the cache, because curl
+cannot tell it apart from a connection cut. Any other answer is a verdict,
+and a verdict never becomes a cache hit. A ``400``, a ``403``, a ``401`` that
+survives a token refresh, or an answer whose signature cannot be verified
+refuses the login on the spot. A ``200`` that denies the user, or that no
+longer carries ``offline.enabled``, also deletes the entry, so an outage
+cannot restore an authorization the portal has withdrawn.
 
 .. list-table::
    :header-rows: 1

@@ -754,6 +754,12 @@ static int refuse_anonymous_grant(ob_client_t *client, const char *path)
  * does not verify, a failed issuer check, an unreadable ca_cert, a client
  * certificate or cipher problem, a malformed or oversized answer, and any
  * code this client cannot interpret.
+ *
+ * CURLE_SSL_CONNECT_ERROR is the ambiguous case: curl reports a failed
+ * handshake as this code, which here can also mean a local mismatch such as
+ * the forced TLS 1.3 against a TLS 1.2-only portal. It cannot be told apart
+ * from a cut connection, so it stays a cache-eligible outage. Only a local TLS
+ * problem reported outside the handshake is guaranteed to be a refusal.
  */
 bool ob_curl_error_allows_offline_cache(int curl_code)
 {
