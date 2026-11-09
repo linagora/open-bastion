@@ -51,8 +51,8 @@ why     || chooses who authenticates.
 
 id      || service-keys-name-validation
 file    || scripts/ob-service-account-keys
-search  || *[!a-z0-9_-]*) exit 0 ;;
-replace || *[!a-z0-9_-]*) : ;;
+search  || [[ "$USER" =~ ^[abcdefghijklmnopqrstuvwxyz_][abcdefghijklmnopqrstuvwxyz0123456789_.-]{0,31}$ ]] || exit 0
+replace || :
 suite   || tests/test_ob_service_account_keys.sh
 needs   || root
 why     || The username reaches the filesystem; without this a crafted name
@@ -65,6 +65,15 @@ replace || __never_matches__)\n            #
 suite   || tests/test_ob_session_monitor.sh
 why     || #257: a portal refusing OUR credentials must not read as "the user
 why     || was revoked" and terminate their sessions.
+
+id      || session-monitor-marker-names
+file    || scripts/ob-session-monitor
+search  || is_user_marker() {\n    [[
+replace || is_user_marker() {\n    true || [[
+suite   || tests/test_ob_session_monitor.sh
+why     || Only a file named after a user is a session marker; any other file
+why     || in the directory would be checked against the portal, and removed,
+why     || as if it were one.
 
 id      || session-monitor-jq-errexit
 file    || scripts/ob-session-monitor

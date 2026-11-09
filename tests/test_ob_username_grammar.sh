@@ -47,7 +47,8 @@ matches_re() { [[ "$1" =~ $RE ]]; }
 test_scripts_use_the_grammar() {
     local f bad=""
     for f in scripts/ob-session-recorder scripts/ob-service-account-keys \
-             scripts/ob-bastion-setup admin-builder/lib/validators.sh; do
+             scripts/ob-bastion-setup scripts/ob-session-monitor \
+             admin-builder/lib/validators.sh; do
         grep -qF -- "=~ $RE ]]" "$ROOT_DIR/$f" || bad="$bad $f"
     done
     if [ -z "$bad" ]; then
@@ -58,17 +59,25 @@ test_scripts_use_the_grammar() {
 }
 
 test_no_other_grammar() {
-    local hits
-    # The grammar without the dot, or without the length bound.
-    hits=$(grep -rnE -- '\[a-z_\]\[a-z0-9_-\]|\[a-z0-9_\.-\]\*\$|!a-z0-9_-\]' \
-        "$ROOT_DIR/scripts" "$ROOT_DIR/admin-builder" "$ROOT_DIR/src" \
-        "$ROOT_DIR/nss" "$ROOT_DIR/doc" 2>/dev/null)
+    local hits roots=()
+    local d
+    for d in scripts admin-builder src nss include tests config doc; do
+        roots+=("$ROOT_DIR/$d")
+    done
+    # The grammar without the dot or without the length bound; a C loop or a
+    # shell pattern that refuses every dotted name; the old wording.
+    hits=$(grep -rnIE --exclude="$(basename "$0")" --exclude-dir=_build -- \
+        '\[a-z_\]\[a-z0-9_-\]|\[a-z0-9_\.-\]\*\$|!a-z0-9_-\]'\
+'|== '"'"'/'"'"' \|\| \*p == '"'"'\.'"'"'|\*\.\* *\) *continue'\
+'|underscores, and hyphens|underscore, tiret' \
+        "${roots[@]}" 2>/dev/null)
     # A shell expression written with a range: the locale can widen it.
-    hits+=$(grep -rnE -- '=~ \^?\[a-z_\]' "$ROOT_DIR/scripts" "$ROOT_DIR/admin-builder" 2>/dev/null)
+    hits+=$(grep -rnIE --exclude="$(basename "$0")" --exclude-dir=_build -- \
+        '=~ \^?\[a-z_\]' "${roots[@]}" 2>/dev/null)
     if [ -z "$hits" ]; then
-        pass "no other user-name grammar is left in scripts, sources or docs"
+        pass "no other user-name grammar is left in scripts, sources, tests, config or docs"
     else
-        fail "no other user-name grammar is left in scripts, sources or docs" "$hits"
+        fail "no other user-name grammar is left in scripts, sources, tests, config or docs" "$hits"
     fi
 }
 

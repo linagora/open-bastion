@@ -402,9 +402,10 @@ letters, digits, underscores, dots or hyphens. ``john.doe`` is valid;
 character keeps ``.`` and ``..`` out and ``/`` is never accepted, so a valid
 name is always a single path component.
 
-The PAM module (account creation, group membership, invalidation of the NSS
-cache), the NSS module, service accounts, ``ob-cert-daemon``,
-``ob-record-sink``, ``ob-session-recorder``, ``ob-service-account-keys`` and
+The PAM module (account creation, group membership, offline session markers,
+invalidation of the NSS cache), the NSS module, service accounts,
+``ob-cert-daemon``, ``ob-record-sink``, ``ob-session-recorder``,
+``ob-session-monitor``, ``ob-service-account-keys``, ``ob-bastion-setup`` and
 ``ob-builder`` apply it. A name outside the grammar is refused: the NSS module
 does not resolve it and its login fails.
 

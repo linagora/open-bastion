@@ -284,6 +284,31 @@ static int test_name_roundtrip_dotted(void)
     return 1;
 }
 
+/*
+ * A name outside the grammar is never a cache key. Upper case is the case no
+ * other check catches: the leaf is a plain file name, and here the file exists
+ * and holds a well-formed record for that very name.
+ */
+static int test_name_outside_grammar_refused(void)
+{
+    reset_cache_dirs();
+    char rec[256];
+    snprintf(rec, sizeof(rec), "Mallory:12347:100:x:/home/Mallory:/bin/bash:%ld\n",
+             (long)time(NULL));
+    if (write_raw_entry(test_cache_byname(), "Mallory", rec) != 0) return 0;
+
+    struct passwd out = {0};
+    char buf[1024];
+    if (file_cache_load_by_name("Mallory", &out, buf, sizeof(buf), NULL) == 0) return 0;
+
+    reset_cache_dirs();
+    struct passwd in = make_user("Mallory", 12347, "");
+    file_cache_save_by_name(&in);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/Mallory", test_cache_byname());
+    return access(path, F_OK) != 0;
+}
+
 /* Round-trip through the real save/load: every passwd field survives. */
 static int test_name_roundtrip(void)
 {
@@ -1036,6 +1061,7 @@ int main(void)
 
     printf("\n  Name-keyed file cache (real implementation):\n");
     RUN(test_name_roundtrip_dotted);
+    RUN(test_name_outside_grammar_refused);
     RUN(test_name_roundtrip);
     RUN(test_name_roundtrip_empty_gecos);
     RUN(test_uid_roundtrip_and_key_check);

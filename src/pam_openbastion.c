@@ -69,7 +69,9 @@
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /* Offline session marker directory (for ob-session-monitor) */
+#ifndef OFFLINE_SESSION_MARKER_DIR
 #define OFFLINE_SESSION_MARKER_DIR "/run/open-bastion/offline_sessions"
+#endif
 #endif /* ENABLE_DESKTOP_SSO */
 
 /* Internal data structure */
@@ -178,12 +180,9 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
         }
     }
 
-    /* Validate username (no path traversal) */
-    for (const char *p = user; *p; p++) {
-        if (*p == '/' || *p == '.') {
-            OB_LOG_WARN(pamh, "Invalid username for offline marker: %s", user);
-            return;
-        }
+    if (!ob_valid_username(user)) {
+        OB_LOG_WARN(pamh, "Invalid username for offline marker: %s", user);
+        return;
     }
 
     char marker_path[PATH_MAX];
@@ -218,11 +217,8 @@ static void create_offline_session_marker(pam_handle_t *pamh, const char *user)
  */
 static void remove_offline_session_marker(pam_handle_t *pamh, const char *user)
 {
-    /* Validate username (no path traversal) */
-    for (const char *p = user; *p; p++) {
-        if (*p == '/' || *p == '.') {
-            return;
-        }
+    if (!ob_valid_username(user)) {
+        return;
     }
 
     char marker_path[PATH_MAX];
@@ -243,11 +239,8 @@ static void remove_offline_session_marker(pam_handle_t *pamh, const char *user)
  */
 static int has_offline_session_marker(const char *user)
 {
-    /* Validate username */
-    for (const char *p = user; *p; p++) {
-        if (*p == '/' || *p == '.') {
-            return 0;
-        }
+    if (!ob_valid_username(user)) {
+        return 0;
     }
 
     char marker_path[PATH_MAX];

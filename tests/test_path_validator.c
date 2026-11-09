@@ -120,6 +120,16 @@ static int test_home_path_traversal(void)
     if (config_validate_home("/home/../etc/passwd", NULL) == 0) return 0;
     if (config_validate_home("/home/user/..", NULL) == 0) return 0;
     if (config_validate_home("/home/user/../../root", NULL) == 0) return 0;
+    if (config_validate_home("/home/.", NULL) == 0) return 0;
+    return 1;
+}
+
+/* Dots inside a component are part of a user name, not a traversal */
+static int test_home_dotted_user_name(void)
+{
+    if (config_validate_home("/home/john.doe", NULL) != 0) return 0;
+    if (config_validate_home("/home/a..b", NULL) != 0) return 0;
+    if (config_validate_home("/home/a.", NULL) != 0) return 0;
     return 1;
 }
 
@@ -350,6 +360,7 @@ int main(void)
     TEST(valid_home);
     TEST(invalid_home);
     TEST(home_path_traversal);
+    TEST(home_dotted_user_name);
     TEST(home_relative_path);
     TEST(home_hidden_path);
     TEST(home_special_chars);
