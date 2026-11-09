@@ -15,19 +15,6 @@
 #include <string.h>
 #include <unistd.h>
 
-int ob_valid_username(const char *s)
-{
-    if (!s || !*s || strlen(s) > 32)
-        return 0;
-    if (!(islower((unsigned char)s[0]) || s[0] == '_'))
-        return 0;
-    for (const char *p = s + 1; *p; p++)
-        if (!(islower((unsigned char)*p) || isdigit((unsigned char)*p) ||
-              *p == '.' || *p == '_' || *p == '-'))
-            return 0;
-    return 1;
-}
-
 int ob_valid_host(const char *s)
 {
     if (!s || !*s || strlen(s) > 255)

@@ -46,6 +46,7 @@
 #include "sshd_anchor.h"
 #include "path_validator.h"
 #include "home_dir.h"
+#include "str_utils.h"
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 #include "offline_cache.h"
 #endif /* ENABLE_DESKTOP_SSO */
@@ -129,7 +130,6 @@ static const char *canonical_service(const char *service)
 /* Forward declarations */
 static void cleanup_data(pam_handle_t *pamh, void *data, int error_status);
 static void invalidate_user_cache(const char *username, uid_t uid, int have_uid);
-static int validate_username(const char *user);
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
 /*
@@ -627,7 +627,7 @@ static int user_in_group_locally(const char *username, const char *groupname)
  */
 static int add_user_to_group(pam_handle_t *pamh, const char *username, const char *groupname)
 {
-    if (!validate_username(username) || !validate_groupname(groupname)) {
+    if (!ob_valid_username(username) || !validate_groupname(groupname)) {
         return -1;
     }
 
@@ -678,7 +678,7 @@ static int add_user_to_group(pam_handle_t *pamh, const char *username, const cha
  */
 static int remove_user_from_group(pam_handle_t *pamh, const char *username, const char *groupname)
 {
-    if (!validate_username(username) || !validate_groupname(groupname)) {
+    if (!ob_valid_username(username) || !validate_groupname(groupname)) {
         return -1;
     }
 
@@ -1043,7 +1043,7 @@ static int sync_user_groups(pam_handle_t *pamh,
  * NSS side uses. The `byname` subdirectory is reached with openat() from the
  * verified parent fd, again O_NOFOLLOW and re-verified, so no component of the
  * path (not just the final one) can be swapped for a symlink between the check
- * and the unlink. The username is validated (same rules as validate_username)
+ * and the unlink. The username is validated with ob_valid_username()
  * before being used as a path component, and every leaf is built with a
  * bounds-checked snprintf. Everything is a harmless no-op when the cache files
  * or directories are absent, so this introduces no hard dependency on the NSS
@@ -1154,10 +1154,10 @@ static void invalidate_module_file_cache(const char *username, uid_t uid,
     }
 
     /* Remove the per-name entry, if a valid username is in scope. */
-    if (username && validate_username(username)) {
+    if (username && ob_valid_username(username)) {
         int bynamefd = open_verified_cache_dir(dirfd, OB_NSS_CACHE_BYNAME);
         if (bynamefd >= 0) {
-            /* validate_username() caps the length well below NAME_MAX, but
+            /* ob_valid_username() caps the length well below NAME_MAX, but
              * stay bounds-checked regardless. */
             n = snprintf(leaf, sizeof(leaf), "%s", username);
             if (n > 0 && (size_t)n < sizeof(leaf)) {
@@ -1186,37 +1186,6 @@ static void invalidate_user_cache(const char *username, uid_t uid, int have_uid)
      * with no module file cache on disk yet (nothing resolved since boot), and
      * that host still needs its group entry cleared. */
     invalidate_nscd_if_present();
-}
-
-/*
- * Validate username for safe use in /etc/passwd
- * Returns 1 if valid, 0 if invalid
- */
-static int validate_username(const char *user)
-{
-    if (!user || !*user) return 0;
-
-    size_t len = strlen(user);
-    /* POSIX username max is typically 32, be conservative */
-    if (len > 32 || len == 0) return 0;
-
-    /* First character must be lowercase letter or underscore */
-    if (!islower((unsigned char)user[0]) && user[0] != '_') return 0;
-
-    for (size_t i = 0; i < len; i++) {
-        char c = user[i];
-        /* Allow lowercase, digits, underscore, hyphen */
-        if (!islower((unsigned char)c) && !isdigit((unsigned char)c) &&
-            c != '_' && c != '-') {
-            return 0;
-        }
-        /* Reject dangerous characters for /etc/passwd */
-        if (c == ':' || c == '\n' || c == '\r' || c == '\0' || c == '/') {
-            return 0;
-        }
-    }
-
-    return 1;
 }
 
 /*
@@ -4331,7 +4300,7 @@ static int create_unix_user(pam_handle_t *pamh,
     int ret = -1;
 
     /* Validate username before any file operations */
-    if (!validate_username(user)) {
+    if (!ob_valid_username(user)) {
         OB_LOG_ERR(pamh, "Invalid username for user creation: %s", user);
         return -1;
     }

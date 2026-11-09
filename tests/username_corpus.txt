@@ -1,0 +1,44 @@
+# User-name corpus shared by test_username_validator (the C validator) and
+# test_ob_username_grammar.sh (the regular expression of the shell scripts).
+# One case per line: "valid <name>" or "invalid <name>". The name is the rest
+# of the line, so it may contain spaces.
+valid alice
+valid bob_123
+valid user-name
+valid _service
+valid a
+valid user123
+valid www-data
+valid _apt
+valid nobody
+valid systemd-network
+valid john.doe
+valid jean.dupont-martin
+valid a.b.c
+valid a..b
+valid x.
+valid _a.b
+valid abcdefghijklmnopqrstuvwxyz123456
+valid prenom.nom-tres.long.jusqua.32ch
+invalid abcdefghijklmnopqrstuvwxyz1234567
+invalid prenom.nom-tres.long.jusqua.32chx
+invalid .
+invalid ..
+invalid .hidden
+invalid ../etc
+invalid -bob
+invalid 1alice
+invalid Alice
+invalid aliceB
+invalid alice:bob
+invalid alice/bob
+invalid a b
+invalid alice;id
+invalid bob|cat
+invalid user`whoami`
+invalid test$(id)
+invalid u&ser
+invalid user>file
+invalid john.doe@realm
+invalid domain\user
+invalid jérôme

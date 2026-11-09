@@ -98,8 +98,10 @@ add_executable(test_home_dir test_home_dir.c)
 target_include_directories(test_home_dir PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_home_dir COMMAND test_home_dir)
 
-add_executable(test_username_validator test_username_validator.c)
+add_executable(test_username_validator test_username_validator.c ../src/str_utils.c)
 target_include_directories(test_username_validator PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_definitions(test_username_validator PRIVATE
+    OB_USERNAME_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/username_corpus.txt")
 add_test(NAME test_username_validator COMMAND test_username_validator)
 
 add_executable(test_ob_cert_proto test_ob_cert_proto.c ../src/ob_cert_proto.c)

@@ -193,11 +193,10 @@ static int test_expire_by_uid_then_evict_no_double_free(void)
 /* ===========================================================================
  * Name-keyed cross-process file cache
  *
- * These drive the REAL helpers from libnss_openbastion.c (valid_cache_name,
- * split_cache_line, open_cache_dir_read/write, open_cache_file_verified,
- * file_cache_save/_by_name, file_cache_load_by_uid/_by_name) through the
- * #include above, redirected at a temp directory by the CACHE_DIR /
- * CACHE_TRUSTED_UID overrides. Nothing here is a re-implementation: a test
+ * These drive the REAL helpers from libnss_openbastion.c (split_cache_line,
+ * open_cache_dir_read/write, open_cache_file_verified, file_cache_save/_by_name,
+ * file_cache_load_by_uid/_by_name) through the #include above, redirected at
+ * a temp directory by the CACHE_DIR / CACHE_TRUSTED_UID overrides. Nothing here is a re-implementation: a test
  * that passes against a copy proves nothing about the shipped module.
  * ========================================================================= */
 
@@ -267,50 +266,21 @@ static int entry_mode(const char *dir, const char *leaf, mode_t *out)
 }
 
 /*
- * valid_cache_name() must accept exactly what validate_username()
- * (src/pam_openbastion.c) accepts: `[a-z_][a-z0-9_-]{0,31}`. A name only one
- * of the two accepts would be written to the cache and then never invalidated
- * by the PAM side, leaving a stale record no code path can clear.
+ * A dotted name is a valid user name: the file cache stores it and gives it
+ * back. The grammar itself is tested in test_username_validator.
  */
-static int test_valid_cache_name_matches_pam_validator(void)
+static int test_name_roundtrip_dotted(void)
 {
-    /* Accepted by both. */
-    if (valid_cache_name("alice") != 0) return 0;
-    if (valid_cache_name("bob123") != 0) return 0;
-    if (valid_cache_name("svc_account") != 0) return 0;
-    if (valid_cache_name("with-dash") != 0) return 0;
-    if (valid_cache_name("_underscore") != 0) return 0;
-    if (valid_cache_name("a") != 0) return 0;
+    reset_cache_dirs();
+    struct passwd in = make_user("john.doe", 12346, "John Doe");
+    file_cache_save_by_name(&in);
 
-    /* Path traversal / charset. */
-    if (valid_cache_name(NULL) == 0) return 0;
-    if (valid_cache_name("") == 0) return 0;
-    if (valid_cache_name("/etc/passwd") == 0) return 0;
-    if (valid_cache_name("foo/bar") == 0) return 0;
-    if (valid_cache_name("../escape") == 0) return 0;
-    if (valid_cache_name(".hidden") == 0) return 0;
-    if (valid_cache_name(".") == 0) return 0;
-    if (valid_cache_name("..") == 0) return 0;
-    if (valid_cache_name("UPPER") == 0) return 0;
-    if (valid_cache_name("white space") == 0) return 0;
-    if (valid_cache_name("co:lon") == 0) return 0;
-    if (valid_cache_name("new\nline") == 0) return 0;
-
-    /* Rejected specifically because validate_username() rejects them: a
-     * leading digit or hyphen, and anything over 32 characters. */
-    if (valid_cache_name("0digitstart") == 0) return 0;
-    if (valid_cache_name("-dashstart") == 0) return 0;
-
-    char maxlen[CACHE_NAME_MAX + 1];
-    memset(maxlen, 'a', CACHE_NAME_MAX);
-    maxlen[CACHE_NAME_MAX] = '\0';
-    if (valid_cache_name(maxlen) != 0) return 0;       /* exactly 32: OK */
-
-    char toolong[CACHE_NAME_MAX + 2];
-    memset(toolong, 'a', CACHE_NAME_MAX + 1);
-    toolong[CACHE_NAME_MAX + 1] = '\0';
-    if (valid_cache_name(toolong) == 0) return 0;      /* 33: rejected */
-
+    struct passwd out = {0};
+    char buf[1024];
+    if (file_cache_load_by_name("john.doe", &out, buf, sizeof(buf), NULL) != 0) return 0;
+    if (strcmp(out.pw_name, "john.doe") != 0) return 0;
+    if (out.pw_uid != 12346) return 0;
+    if (strcmp(out.pw_dir, "/home/john.doe") != 0) return 0;
     return 1;
 }
 
@@ -1065,7 +1035,7 @@ int main(void)
     } while (0)
 
     printf("\n  Name-keyed file cache (real implementation):\n");
-    RUN(test_valid_cache_name_matches_pam_validator);
+    RUN(test_name_roundtrip_dotted);
     RUN(test_name_roundtrip);
     RUN(test_name_roundtrip_empty_gecos);
     RUN(test_uid_roundtrip_and_key_check);

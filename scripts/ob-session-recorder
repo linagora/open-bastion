@@ -52,7 +52,9 @@ CLIENT_IP="${CLIENT_IP:-unknown}"
 TTY_NAME="${SSH_TTY:-notty}"
 
 # Validated because it ends up in file paths.
-if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
+# Letters spelled out: in bash, [a-z] follows the collation of the locale and
+# matches accented letters in fr_FR.UTF-8.
+if [[ ! "$SESSION_USER" =~ ^[abcdefghijklmnopqrstuvwxyz_][abcdefghijklmnopqrstuvwxyz0123456789_.-]{0,31}$ ]]; then
     SAFE_USER=$(printf '%q' "$SESSION_USER")
     logger -t "$PROG_NAME" -p auth.err "Invalid session user: $SAFE_USER" 2>/dev/null || true
     echo "Error: invalid session user" >&2

@@ -519,7 +519,7 @@ install(TARGETS ob-client-jwt
 
 # ob-record-sink (root, socket-activated) writes recordings root-owned so the
 # recorded user cannot touch them. See doc/references/tamper-evident-session-recording.rst.
-add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c)
+add_executable(ob-record-sink src/ob-record-sink.c src/ob_cert_proto.c src/str_utils.c)
 target_include_directories(ob-record-sink PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${JSON_C_INCLUDE_DIRS}

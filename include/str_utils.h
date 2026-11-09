@@ -181,4 +181,17 @@ unsigned char *str_base64url_decode(const char *input, size_t input_len, size_t 
  */
 int str_cert_pin_valid(const char *pin);
 
+/*
+ * The one user-name grammar of Open Bastion: ^[a-z_][a-z0-9_.-]{0,31}$.
+ * Every component that writes, resolves or stores a user name uses this
+ * function (the shell scripts carry the same regular expression, kept in step
+ * by tests/test_ob_username_grammar.sh).
+ *
+ * The leading [a-z_] keeps "." and ".." out, and '/' is never accepted, so a
+ * valid name is a safe single path component. Bytes are compared as ASCII,
+ * independent of the locale of the calling process.
+ */
+#define OB_USERNAME_MAX 32
+bool ob_valid_username(const char *name);
+
 #endif /* STR_UTILS_H */

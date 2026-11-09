@@ -1419,8 +1419,9 @@ _ob_warn_missing_service_accounts() {
     local name missing="" shell="/bin/bash"
     [ -r "$conf" ] || return 0
     while IFS= read -r name; do
+        [[ "$name" =~ ^[abcdefghijklmnopqrstuvwxyz_][abcdefghijklmnopqrstuvwxyz0123456789_.-]{0,31}$ ]] || continue
         getent -s files passwd "$name" >/dev/null 2>&1 || missing="$missing $name"
-    done < <(sed -n 's/^[[:space:]]*\[[[:space:]]*\([a-z_][a-z0-9_-]*\)[[:space:]]*\][[:space:]]*$/\1/p' "$conf")
+    done < <(sed -n 's/^[[:space:]]*\[[[:space:]]*\([^][:space:]]*\)[[:space:]]*\][[:space:]]*$/\1/p' "$conf")
     [ -n "$missing" ] || return 0
     # bash reads ~/.bashrc before the recorder ForceCommand when sshd starts it.
     if records_sessions; then shell="/usr/sbin/ob-login-shell"; fi

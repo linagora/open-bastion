@@ -116,34 +116,6 @@ static void log_obsolete_keys(const char *filename, unsigned int seen)
 }
 
 /*
- * Validate username format
- * Returns 0 if valid, -1 if invalid
- */
-static int validate_username(const char *name)
-{
-    if (!name || !*name) return -1;
-
-    size_t len = strlen(name);
-    if (len > MAX_SERVICE_ACCOUNT_NAME) return -1;
-
-    /* First character must be lowercase letter or underscore */
-    if (!islower((unsigned char)name[0]) && name[0] != '_') {
-        return -1;
-    }
-
-    /* Remaining characters: lowercase, digits, underscore, hyphen */
-    for (size_t i = 1; i < len; i++) {
-        char c = name[i];
-        if (!islower((unsigned char)c) && !isdigit((unsigned char)c) &&
-            c != '_' && c != '-') {
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
-/*
  * Validate SSH key fingerprint format
  * Expected format: SHA256:base64string or MD5:hex:string
  */
@@ -336,7 +308,7 @@ int service_accounts_load(const char *filename, service_accounts_t *sa)
             char *section_name = trim(trimmed + 1);
 
             /* Validate account name */
-            if (validate_username(section_name) != 0) {
+            if (!ob_valid_username(section_name)) {
                 syslog(LOG_WARNING, "open-bastion: service_accounts: "
                        "invalid account name '%s' at line %d",
                        section_name, line_num);
@@ -491,7 +463,7 @@ int service_account_validate(const service_account_t *account)
     if (!account) return -1;
 
     /* Name is required */
-    if (!account->name || validate_username(account->name) != 0) {
+    if (!account->name || !ob_valid_username(account->name)) {
         return -1;
     }
 

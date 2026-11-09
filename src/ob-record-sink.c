@@ -67,8 +67,8 @@
 
 #include <json-c/json.h>
 
-#include "ob_cert_proto.h" /* ob_read_line, ob_valid_username */
-#include "str_utils.h"     /* str_json_has_embedded_nul */
+#include "ob_cert_proto.h" /* ob_read_line */
+#include "str_utils.h"      /* ob_valid_username, str_json_has_embedded_nul */
 
 #define OB_RECORD_SINK_VERSION "0.2.0"
 /* Wire protocol version: the header's "v". See feed_frames() for v2. */

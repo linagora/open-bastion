@@ -47,14 +47,6 @@ int main(void)
     char buf[64];
     ssize_t r;
 
-    printf("ob_valid_username:\n");
-    CHECK(ob_valid_username("french"), "lowercase login accepted");
-    CHECK(ob_valid_username("_svc-01.x"), "leading underscore + allowed chars");
-    CHECK(!ob_valid_username(""), "empty rejected");
-    CHECK(!ob_valid_username("Root"), "uppercase start rejected");
-    CHECK(!ob_valid_username("a b"), "space rejected");
-    CHECK(!ob_valid_username("a/b"), "slash rejected (passwd injection)");
-
     printf("ob_valid_host:\n");
     CHECK(ob_valid_host("backend-01.op.com"), "fqdn accepted");
     CHECK(ob_valid_host("[fe80::1]"), "bracketed ipv6 accepted");

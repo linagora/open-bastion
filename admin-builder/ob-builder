@@ -1047,7 +1047,7 @@ collect_service_accounts_interactive() {
             name=$(ask "  Account name (lowercase; empty to finish)" "")
             [ -z "$name" ] && return 0
             is_valid_service_username "$name" && break
-            log_warn "Invalid name. Start with a lowercase letter or '_', then [a-z0-9_-]."
+            log_warn "Invalid name. Start with a lowercase letter or '_', then [a-z0-9_.-], 32 characters at most."
         done
         while :; do
             explain "Get it with: ssh-keygen -lf key.pub  → use the 'SHA256:…' field."

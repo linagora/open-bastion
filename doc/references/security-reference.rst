@@ -386,6 +386,28 @@ Setting                        Default Description
 
 Lockout state is stored per-user in ``rate_limit_state_dir``.
 
+.. _security-reference-user-names:
+
+User names
+----------
+
+Every component checks a user name against one grammar before it writes,
+resolves or stores it:
+
+``^[a-z_][a-z0-9_.-]{0,31}$``
+
+That is a lowercase ASCII letter or an underscore, then up to 31 lowercase
+letters, digits, underscores, dots or hyphens. ``john.doe`` is valid;
+``.hidden``, ``John``, ``jérôme`` and ``john.doe@realm`` are not. The first
+character keeps ``.`` and ``..`` out and ``/`` is never accepted, so a valid
+name is always a single path component.
+
+The PAM module (account creation, group membership, invalidation of the NSS
+cache), the NSS module, service accounts, ``ob-cert-daemon``,
+``ob-record-sink``, ``ob-session-recorder``, ``ob-service-account-keys`` and
+``ob-builder`` apply it. A name outside the grammar is refused: the NSS module
+does not resolve it and its login fails.
+
 Auto-create user security
 -------------------------
 
@@ -611,7 +633,7 @@ Account validation
 +---------------------+------------------------------------------------------------------+
 | Field               | Validation                                                       |
 +=====================+==================================================================+
-| ``name``            | Lowercase letters, digits, underscore, hyphen; max 32 chars      |
+| ``name``            | The :ref:`user-name grammar <security-reference-user-names>`     |
 +---------------------+------------------------------------------------------------------+
 | ``key_fingerprint`` | Must start with ``SHA256:`` or ``MD5:``, valid base64 chars only |
 +---------------------+------------------------------------------------------------------+
