@@ -3803,10 +3803,20 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      * Extract certificate info to send to LLNG for authorization.
      */
     ob_ssh_cert_info_t ssh_cert_info = {0};
-    bool has_ssh_cert = false;
+    bool has_ssh_info = false;
 
     if (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0) {
-        has_ssh_cert = extract_ssh_cert_info(pamh, &ssh_cert_info);
+        has_ssh_info = extract_ssh_cert_info(pamh, &ssh_cert_info);
+    } else if (strcmp(service, "sudo") == 0) {
+        /*
+         * sudo runs the account phase without the auth phase while its
+         * timestamp is valid, so no token carries the session's key binding.
+         * Send the spool fingerprint anyway: LLNG's
+         * pamAccessRequireFingerprint answers 400 to /pam/authorize without
+         * one, and that refusal must not be mistaken for an outage.
+         */
+        ssh_cert_info.key_fingerprint = read_ssh_fp_from_spool(pamh);
+        has_ssh_info = ssh_cert_info.key_fingerprint != NULL;
     }
 
     /* Initialize audit event */
@@ -3837,13 +3847,13 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      */
     if (data->config.fingerprint_required
         && (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0)
-        && (!has_ssh_cert || !ssh_cert_info.key_fingerprint)) {
+        && (!has_ssh_info || !ssh_cert_info.key_fingerprint)) {
         OB_LOG_ERR(pamh,
                    "No SSH key fingerprint for %s and fingerprint_required is "
                    "set: refusing. Check that the AuthorizedPrincipalsCommand "
                    "helper runs and that /run/open-bastion/ssh-fp exists.",
                    user);
-        if (has_ssh_cert) {
+        if (has_ssh_info) {
             ob_ssh_cert_info_free(&ssh_cert_info);
         }
         if (audit_initialized) {
@@ -3867,13 +3877,13 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
     }
 
-    /* Call authorization endpoint (with or without SSH cert info) */
+    /* Call authorization endpoint (with or without SSH binding) */
     ob_response_t response = {0};
     int auth_result;
     bool from_cache = false;
 
-    if (has_ssh_cert) {
-        OB_LOG_DEBUG(pamh, "Authorizing with SSH certificate info");
+    if (has_ssh_info) {
+        OB_LOG_DEBUG(pamh, "Authorizing with SSH certificate or fingerprint");
         auth_result = ob_authorize_user_with_cert(data->client, user, hostname,
                                                      service, &ssh_cert_info, &response);
     } else {
@@ -3886,7 +3896,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
     if (auth_result != 0
         && ob_client_last_http_code(data->client) == 401
         && refresh_server_token_on_demand(pamh, data) == 0) {
-        if (has_ssh_cert) {
+        if (has_ssh_info) {
             auth_result = ob_authorize_user_with_cert(data->client, user, hostname,
                                                          service, &ssh_cert_info, &response);
         } else {
@@ -3894,11 +3904,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
     }
 
-    if (has_ssh_cert) {
+    if (has_ssh_info) {
         ob_ssh_cert_info_free(&ssh_cert_info);
     }
 
-    if (auth_result != 0) {
+    if (auth_result == OB_ERR_UNREACHABLE) {
         /*
          * Server unreachable - try offline cache if available.
          * This is the core of the offline mode feature (#36).
@@ -3952,7 +3962,7 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
 
                     /* Populate response from cache */
                     response.authorized = cache_entry.authorized;
-                    response.user = cache_entry.user ? strdup(cache_entry.user) : NULL;
+                    response.user = cache_entry.user;
                     cache_entry.user = NULL;  /* Ownership transferred */
 
                     response.has_permissions = true;
@@ -4004,6 +4014,24 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
 
             return PAM_AUTHINFO_UNAVAIL;
         }
+    } else if (auth_result != 0) {
+        /*
+         * The portal answered, or its answer cannot be trusted: the decision
+         * is authoritative, so neither the cache nor a tampered answer may
+         * turn a refusal into a grant.
+         */
+        OB_LOG_ERR(pamh, "Authorization refused: %s",
+                   ob_client_error(data->client));
+
+        if (audit_initialized) {
+            audit_event.event_type = AUDIT_AUTHZ_DENIED;
+            audit_event.result_code = PAM_PERM_DENIED;
+            audit_event.reason = ob_client_error(data->client);
+            audit_event_set_end_time(&audit_event);
+            audit_log_event(data->audit, &audit_event);
+        }
+
+        return PAM_PERM_DENIED;
     }
 
     /* Check result */
@@ -4011,6 +4039,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         OB_LOG_INFO(pamh, "User %s not authorized%s: %s", user,
                  from_cache ? " (from cache)" : "",
                  response.reason ? response.reason : "no reason given");
+
+        if (!from_cache && data->auth_cache) {
+            auth_cache_invalidate(data->auth_cache, user,
+                                  data->config.server_group, hostname);
+        }
 
         if (audit_initialized) {
             audit_event.result_code = PAM_PERM_DENIED;
@@ -4028,7 +4061,18 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
      * - Not already from cache
      * - Server indicates offline mode is allowed for this user
      * - Cache is available
+     *
+     * An online answer that withdraws offline mode (or a force-online run
+     * that skipped the cache) must also drop whatever entry a previous grant
+     * left behind, or an outage would restore an authorization the portal no
+     * longer allows.
      */
+    if (!from_cache && data->auth_cache &&
+        !(use_cache && response.has_offline && response.offline.enabled)) {
+        auth_cache_invalidate(data->auth_cache, user,
+                              data->config.server_group, hostname);
+    }
+
     if (!from_cache && use_cache && response.has_offline && response.offline.enabled) {
         int ttl = response.offline.ttl > 0 ? response.offline.ttl : DEFAULT_OFFLINE_CACHE_TTL;
         auth_cache_entry_t cache_entry = {

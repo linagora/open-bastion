@@ -11,6 +11,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/*
+ * Return codes of ob_authorize_user() and ob_authorize_user_with_cert().
+ *
+ * OB_ERR_REFUSED: the portal answered, or its answer cannot be trusted (bad
+ * signature, wrong audience, a TLS certificate or pin that does not verify, no
+ * answer where one is required). The verdict is authoritative: callers must
+ * not fall back to a cache.
+ *
+ * OB_ERR_UNREACHABLE: no answer arrived (transport failure, including a TLS
+ * handshake that could not complete, or a gateway that could not reach the
+ * portal). Only this code may fall back to the offline authorization cache.
+ */
+#define OB_ERR_REFUSED      (-1)
+#define OB_ERR_UNREACHABLE  (-2)
+
 /* Permissions structure from /pam/authorize response */
 typedef struct {
     bool sudo_allowed;      /* User is allowed to use sudo */
@@ -160,7 +175,9 @@ int ob_introspect_token(ob_client_t *client,
 
 /*
  * Check user authorization via /pam/authorize
- * Returns 0 on success, -1 on error
+ * Returns 0 on success, OB_ERR_REFUSED on an authoritative refusal, an
+ * untrusted answer or an untrusted TLS endpoint, OB_ERR_UNREACHABLE when the
+ * portal could not be reached.
  */
 int ob_authorize_user(ob_client_t *client,
                       const char *user,
@@ -171,7 +188,7 @@ int ob_authorize_user(ob_client_t *client,
 /*
  * Check user authorization with SSH certificate info via /pam/authorize
  * Same as ob_authorize_user but includes SSH certificate details
- * Returns 0 on success, -1 on error
+ * Returns the same codes as ob_authorize_user().
  */
 int ob_authorize_user_with_cert(ob_client_t *client,
                                 const char *user,

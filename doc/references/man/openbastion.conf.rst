@@ -167,9 +167,10 @@ Signed answers
    them against ``sso_jwks_file``. ``off``: do nothing. ``prefer``: verify,
    but accept an unsigned answer with a warning. ``required``: refuse an
    unsigned or invalid answer, and every answer when the JWKS is unusable.
-   A refused answer counts as a transport error. Any other value refuses
-   the configuration (the NSS module treats it as ``required``). Default:
-   ``off``.
+   A refused answer is a refusal, not a transport error: the PAM module does
+   not fall back to the offline authorization cache for it. Any other value
+   refuses the configuration (the NSS module treats it as ``required``).
+   Default: ``off``.
 
 .. option:: sso_jwks_file
 

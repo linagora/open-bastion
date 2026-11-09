@@ -22,10 +22,10 @@
  *   - off sends neither Accept nor X-Nonce; prefer and required send both,
  *     and with request_signing_secret one X-Nonce serves the HMAC and the
  *     signed answer;
- *   - required refuses an unsigned answer as a transport error (-1,
- *     last_http_code 0, so an unverified 401 triggers no token refresh),
- *     prefer accepts it; required without a usable JWKS sends nothing;
- *   - a signed valid:false is a refusal, not a transport error;
+ *   - required refuses an unsigned answer as a refusal (-1, last_http_code
+ *     0, so an unverified 401 triggers no token refresh), prefer accepts it;
+ *     required without a usable JWKS sends nothing;
+ *   - a signed valid:false denies, it is not a refusal;
  *   - a signed answer for another request (replayed, other nonce, other
  *     body), another client, another endpoint, another issuer, with a wrong
  *     key or kid, or whose HTTP status differs from the signed one, is
@@ -280,7 +280,7 @@ static void test_unsigned(void)
     mp_set(&a);
     rc = do_verify(c, &active, &http);
     CHECK(rc == -1 && !active, "required: unsigned valid:true refused");
-    CHECK(http == 0, "required: ... as a transport error (last_http_code 0)");
+    CHECK(http == 0, "required: ... as a refusal (last_http_code 0)");
     CHECK(strstr(ob_client_error(c), "Unsigned") != NULL, "required: ... and says why");
 
     /* A forged 401 must not send the module into a token refresh. */
@@ -340,7 +340,7 @@ static void test_signed_verify(void)
     mp_set(&a);
     rc = do_verify(c, &active, &http);
     CHECK(rc == 0 && !active && http == 200,
-          "signed valid:false is a refusal, not a transport error");
+          "signed valid:false denies, it is not a refusal");
 
     a = signed_answer("{\"error\":\"invalid token\"}");
     a.status = 401;
@@ -717,7 +717,7 @@ static void test_cert_pin(void)
     before = mt_requests();
     CHECK(c && do_authorize(c, &ok, &http) != 0 && mt_requests() == before,
           "another key's pin: nothing is sent");
-    CHECK(c && http == 0, "  ... a transport error, not an HTTP answer");
+    CHECK(c && http == 0, "  ... a refusal, not an HTTP answer");
     ob_client_destroy(c);
 
     snprintf(line, sizeof(line), "cert_pin = %s;%s\n", other, mt.pin);

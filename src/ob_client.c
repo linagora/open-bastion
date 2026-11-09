@@ -640,8 +640,9 @@ static int pam_call_headers(ob_client_t *client, pam_call_t *call,
  * status -- the signed one for a signed answer -- and *anonymous tells that a
  * signed answer carries no `aud`, so it must grant nothing.
  *
- * -1 is a transport error, like a network failure: client->error says why and
- * last_http_code stays 0, so an unverified 401 triggers no token refresh.
+ * -1 is a refusal: the answer is missing or cannot be trusted. client->error
+ * says why and last_http_code stays 0, so such an answer triggers no token
+ * refresh and must not be confused with an unreachable portal.
  */
 static int pam_call_answer(ob_client_t *client, const pam_call_t *call,
                            response_buffer_t *buf, long *http_code,
@@ -729,7 +730,8 @@ static int pam_call_answer(ob_client_t *client, const pam_call_t *call,
 
 /*
  * A granting answer must name this client. Refused like an answer that does
- * not verify: a transport error, so last_http_code goes back to 0.
+ * not verify: last_http_code goes back to 0 so no token refresh is attempted,
+ * and the caller treats the verdict as authoritative.
  */
 static int refuse_anonymous_grant(ob_client_t *client, const char *path)
 {
@@ -739,6 +741,30 @@ static int refuse_anonymous_grant(ob_client_t *client, const char *path)
     snprintf(client->error, sizeof(client->error),
              "Signed answer to %s grants access without aud", path);
     return -1;
+}
+
+/*
+ * curl_easy_perform() failed before any answer arrived. Most such failures
+ * are an outage: the name did not resolve, the connection timed out or was
+ * refused, the TLS handshake never completed. Only those may use the
+ * offline cache.
+ *
+ * A failed trust check is different. The peer did not prove that it is the
+ * portal: its certificate does not verify, its public key does not match
+ * cert_pin, or its stapled OCSP status is invalid. That is a verdict on the
+ * endpoint, not a lack of connectivity, so the cache must not turn it into
+ * a grant.
+ */
+static int curl_error_is_refusal(CURLcode res)
+{
+    switch (res) {
+    case CURLE_PEER_FAILED_VERIFICATION:
+    case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+    case CURLE_SSL_INVALIDCERTSTATUS:
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 /* Free a body that may carry a voucher or an access token. */
@@ -1257,7 +1283,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
                  "Curl error: %s", curl_easy_strerror(res));
         json_object_put(req_json);
         free_buffer(&buf);
-        return -1;
+        return curl_error_is_refusal(res) ? OB_ERR_REFUSED : OB_ERR_UNREACHABLE;
     }
 
     long http_code;
@@ -1269,7 +1295,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
     json_object_put(req_json);
     free_buffer(&buf);
     if (arc != 0) {
-        return -1;
+        return OB_ERR_REFUSED;
     }
     client->last_http_code = http_code;
 
@@ -1277,21 +1303,32 @@ static int ob_authorize_user_internal(ob_client_t *client,
         snprintf(client->error, sizeof(client->error),
                  "Server token invalid or expired. Re-enrollment required.");
         free_answer_body(body);
-        return -1;
+        return OB_ERR_REFUSED;
     }
 
     if (http_code == 403) {
         snprintf(client->error, sizeof(client->error),
                  "Server not enrolled. Run enrollment first.");
         free_answer_body(body);
-        return -1;
+        return OB_ERR_REFUSED;
+    }
+
+    /*
+     * A gateway that cannot reach the portal is an outage, not a verdict on
+     * this user: only these statuses may fall back to the offline cache.
+     */
+    if (http_code == 502 || http_code == 503 || http_code == 504) {
+        snprintf(client->error, sizeof(client->error),
+                 "Portal unreachable through an intermediary: HTTP %ld", http_code);
+        free_answer_body(body);
+        return OB_ERR_UNREACHABLE;
     }
 
     if (http_code != 200) {
         snprintf(client->error, sizeof(client->error),
                  "HTTP error: %ld", http_code);
         free_answer_body(body);
-        return -1;
+        return OB_ERR_REFUSED;
     }
 
     int prc = ob_parse_authorize_response(body, response,
