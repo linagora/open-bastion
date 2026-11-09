@@ -179,12 +179,32 @@
         });
       });
 
+      // Copy the selected field. navigator.clipboard only exists in a secure
+      // context (HTTPS or localhost), so a portal served over plain HTTP falls
+      // back to execCommand('copy') on the selection (#451). If both fail, the
+      // text stays selected for a manual copy.
+      function copyField(field, done) {
+        field.focus();
+        field.select();
+        field.setSelectionRange(0, field.value.length);
+        var legacy = function () {
+          var ok = false;
+          try {
+            ok = document.execCommand('copy');
+          } catch (e) {}
+          if (ok) done();
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(field.value).then(done, legacy);
+        } else {
+          legacy();
+        }
+      }
+
       // Copy button
       if (copyBtn) {
         copyBtn.addEventListener('click', function () {
-          certTextarea.select();
-          certTextarea.setSelectionRange(0, 99999);
-          navigator.clipboard.writeText(certTextarea.value).then(function () {
+          copyField(certTextarea, function () {
             var originalHtml = copyBtn.innerHTML;
             copyBtn.innerHTML = '<span class="fa fa-check"></span> Copied!';
             setTimeout(function () {
