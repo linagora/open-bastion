@@ -179,36 +179,44 @@
         });
       });
 
-      // Copy the selected field. navigator.clipboard only exists in a secure
-      // context (HTTPS or localhost), so a portal served over plain HTTP falls
-      // back to execCommand('copy') on the selection (#451). If both fail, the
-      // text stays selected for a manual copy.
+      // navigator.clipboard only exists in a secure context: over plain HTTP,
+      // copy the selection instead. When the API exists but rejects the write
+      // (Permissions-Policy clipboard-write, denied permission), honour that
+      // refusal and leave the field selected for a manual copy.
+      // execCommand('copy') also returns true for an empty selection, hence
+      // the check that the selection covers the whole value.
       function copyField(field, done) {
+        var scrollTop = field.scrollTop;
         field.focus();
         field.select();
         field.setSelectionRange(0, field.value.length);
-        var legacy = function () {
-          var ok = false;
-          try {
-            ok = document.execCommand('copy');
-          } catch (e) {}
-          if (ok) done();
-        };
+        field.scrollTop = scrollTop;
+        if (!field.value) return;
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(field.value).then(done, legacy);
-        } else {
-          legacy();
+          navigator.clipboard.writeText(field.value).then(done, function () {});
+          return;
         }
+        var ok = false;
+        try {
+          ok = field.selectionStart === 0
+            && field.selectionEnd === field.value.length
+            && document.execCommand('copy');
+        } catch (e) {}
+        if (ok) done();
       }
 
       // Copy button
       if (copyBtn) {
+        var copyTimer = null;
+        var copyLabel = null;
         copyBtn.addEventListener('click', function () {
           copyField(certTextarea, function () {
-            var originalHtml = copyBtn.innerHTML;
+            if (copyTimer === null) copyLabel = copyBtn.innerHTML;
             copyBtn.innerHTML = '<span class="fa fa-check"></span> Copied!';
-            setTimeout(function () {
-              copyBtn.innerHTML = originalHtml;
+            clearTimeout(copyTimer);
+            copyTimer = setTimeout(function () {
+              copyBtn.innerHTML = copyLabel;
+              copyTimer = null;
             }, 2000);
           });
         });
