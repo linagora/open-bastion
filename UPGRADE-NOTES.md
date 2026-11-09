@@ -245,8 +245,10 @@ ignored, and logged when it asks for anything but `13`.
 Until 0.7.0 nothing applied `cert_pin` (#332). It is now enforced by the PAM
 module, the NSS module and `ob-cert-daemon`, so a pin set long ago and never
 updated refuses every call to the portal after the upgrade: no SSH login, no
-`sudo`, no SSO user resolved. On a host with a `cert_pin` line in
-`/etc/open-bastion/openbastion.conf`, compare it with the portal's key first:
+`sudo`, no SSO user resolved. A pin mismatch is a refusal, not an outage, so
+the offline authorization cache does not answer it either. On a host with a
+`cert_pin` line in `/etc/open-bastion/openbastion.conf`, compare it with the
+portal's key first:
 
 ```sh
 openssl s_client -connect auth.example.com:443 -servername auth.example.com </dev/null 2>/dev/null \

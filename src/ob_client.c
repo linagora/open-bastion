@@ -743,6 +743,30 @@ static int refuse_anonymous_grant(ob_client_t *client, const char *path)
     return -1;
 }
 
+/*
+ * curl_easy_perform() failed before any answer arrived. Most such failures
+ * are an outage: the name did not resolve, the connection timed out or was
+ * refused, the TLS handshake never completed. Only those may use the
+ * offline cache.
+ *
+ * A failed trust check is different. The peer did not prove that it is the
+ * portal: its certificate does not verify, its public key does not match
+ * cert_pin, or its stapled OCSP status is invalid. That is a verdict on the
+ * endpoint, not a lack of connectivity, so the cache must not turn it into
+ * a grant.
+ */
+static int curl_error_is_refusal(CURLcode res)
+{
+    switch (res) {
+    case CURLE_PEER_FAILED_VERIFICATION:
+    case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
+    case CURLE_SSL_INVALIDCERTSTATUS:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* Free a body that may carry a voucher or an access token. */
 static void free_answer_body(char *body)
 {
@@ -1259,7 +1283,7 @@ static int ob_authorize_user_internal(ob_client_t *client,
                  "Curl error: %s", curl_easy_strerror(res));
         json_object_put(req_json);
         free_buffer(&buf);
-        return OB_ERR_UNREACHABLE;
+        return curl_error_is_refusal(res) ? OB_ERR_REFUSED : OB_ERR_UNREACHABLE;
     }
 
     long http_code;

@@ -4,12 +4,13 @@
  *
  * The PAM account phase falls back to the cache only when the client says the
  * portal is unreachable. Everything else -- an HTTP refusal, a malformed or
- * unsigned answer, a signature that does not verify -- is a verdict and must
- * not be answered from a cache entry: a user revoked in the portal would
- * otherwise keep their cached grant, `sudo` right included, until it expired.
+ * unsigned answer, a signature that does not verify, or a TLS certificate or
+ * pin that does not match -- is a verdict and must not be answered from a
+ * cache entry: a user revoked in the portal would otherwise keep their cached
+ * grant, `sudo` right included, until it expired.
  *
- * Drives ob_authorize_user() through mock_portal.h so each return code is
- * observed on the real HTTP path, not only in a helper.
+ * Drives ob_authorize_user() through mock_portal.h and mock_tls.h so each
+ * return code is observed on the real HTTP/TLS path, not only in a helper.
  *
  * Copyright (C) 2026 Linagora
  * License: AGPL-3.0
@@ -24,6 +25,7 @@
 
 #include "ob_client.h"
 #include "mock_portal.h"
+#include "mock_tls.h"
 
 #define CLIENT   "bastion-test"
 #define KID      "portal-sig-1"
@@ -71,8 +73,9 @@ static int load_conf(const char *path, pam_openbastion_config_t *config)
     return rc;
 }
 
-static ob_client_t *new_client(const char *url, const char *mode,
-                               const char *jwks)
+static ob_client_t *new_client_at(const char *url, const char *mode,
+                                  const char *jwks, bool verify_ssl,
+                                  const char *extra)
 {
     char conf[2048];
     snprintf(conf, sizeof(conf),
@@ -80,11 +83,13 @@ static ob_client_t *new_client(const char *url, const char *mode,
              "client_id = " CLIENT "\n"
              "client_secret = client-secret\n"
              "server_group = default\n"
-             "verify_ssl = false\n"
+             "verify_ssl = %s\n"
              "timeout = 5\n"
              "response_signing = %s\n"
-             "sso_jwks_file = %s\n",
-             url, mode, jwks);
+             "sso_jwks_file = %s\n"
+             "%s",
+             url, verify_ssl ? "true" : "false", mode, jwks,
+             extra ? extra : "");
     write_file(g_conf, conf, 0600);
 
     pam_openbastion_config_t cfg;
@@ -103,6 +108,13 @@ static ob_client_t *new_client(const char *url, const char *mode,
     config_free(&cfg);
     if (!client) printf("  FAIL ob_client_init (%s)\n", mode);
     return client;
+}
+
+/* The plain-HTTP mock portal always needs verify_ssl = false. */
+static ob_client_t *new_client(const char *url, const char *mode,
+                               const char *jwks)
+{
+    return new_client_at(url, mode, jwks, false, NULL);
 }
 
 static int authorize(ob_client_t *client)
@@ -207,6 +219,53 @@ static void test_transport(void)
     ob_client_destroy(client);
 }
 
+/*
+ * A TLS trust failure is not an outage: the host reached *something*, but
+ * that something did not prove it is the portal. mock_tls.h serves a fresh
+ * self-signed certificate, so verify_ssl = true fails the chain check and a
+ * cert_pin naming another key fails the pin check.
+ */
+static void test_tls_trust(void)
+{
+    char url[64], pin[64], extra[128];
+    ob_client_t *client;
+
+    mt_start(200, AUTHZ_OK);
+    snprintf(url, sizeof(url), "https://127.0.0.1:%d", mt.port);
+
+    printf("\nTLS trust failure:\n");
+    client = new_client_at(url, "off", g_jwks, true, NULL);
+    if (client) {
+        CHECK(authorize(client) == OB_ERR_REFUSED,
+              "an unverified server certificate is a refusal");
+        CHECK(ob_client_last_http_code(client) == 0,
+              "  ... with no HTTP status to refresh a token on");
+        ob_client_destroy(client);
+    }
+
+    mt_pin_of(k_rogue, pin, sizeof(pin));
+    snprintf(extra, sizeof(extra), "cert_pin = %s\n", pin);
+    client = new_client_at(url, "off", g_jwks, false, extra);
+    if (client) {
+        CHECK(authorize(client) == OB_ERR_REFUSED,
+              "a pinned key that does not match is a refusal");
+        CHECK(ob_client_last_http_code(client) == 0,
+              "  ... with no HTTP status to refresh a token on");
+        ob_client_destroy(client);
+    }
+
+    /* The control: the same TLS portal is reachable once the trust checks
+     * are off, so the two failures above are verdicts, not a broken setup. */
+    client = new_client_at(url, "off", g_jwks, false, NULL);
+    if (client) {
+        CHECK(authorize(client) == 0,
+              "with the checks off, the same portal is reached");
+        ob_client_destroy(client);
+    }
+
+    mt_stop();
+}
+
 int main(void)
 {
     char cmd[128];
@@ -233,6 +292,7 @@ int main(void)
     test_http_statuses();
     test_signatures();
     test_transport();
+    test_tls_trust();
 
     EVP_PKEY_free(k_portal);
     EVP_PKEY_free(k_rogue);

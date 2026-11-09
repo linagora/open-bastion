@@ -177,10 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/pam/authorize`, including a refusal or an untrusted answer, and a denial
   left the entry in place: a user revoked in the portal kept logging in, with
   their cached `sudo` right, until the entry expired. Only a transport
-  failure (or a `502`/`503`/`504`) may use the cache now, an online denial
-  deletes the entry, and the `sudo` account phase sends the session
-  fingerprint so `pamAccessRequireFingerprint` no longer forces a cache read.
-  See [offline mode](doc/offline-mode/index.rst).
+  failure (or a `502`/`503`/`504`) may use the cache now, never a TLS
+  certificate or `cert_pin` that does not verify: an online denial deletes the
+  entry, and the `sudo` account phase sends the session fingerprint so
+  `pamAccessRequireFingerprint` no longer forces a cache read. See
+  [offline mode](doc/offline-mode/index.rst).
 - A portal answering `"home":"/home"` or `"home":"/home/"` passed the home
   validation of both the PAM and the NSS module. With `create_user` enabled,
   the user's first login then made them the owner of the base directory

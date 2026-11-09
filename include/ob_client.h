@@ -15,12 +15,13 @@
  * Return codes of ob_authorize_user() and ob_authorize_user_with_cert().
  *
  * OB_ERR_REFUSED: the portal answered, or its answer cannot be trusted (bad
- * signature, wrong audience, no answer where one is required). The verdict is
- * authoritative: callers must not fall back to a cache.
+ * signature, wrong audience, a TLS certificate or pin that does not verify, no
+ * answer where one is required). The verdict is authoritative: callers must
+ * not fall back to a cache.
  *
- * OB_ERR_UNREACHABLE: no trustworthy answer arrived (transport failure, or a
- * gateway that could not reach the portal). Only this code may fall back to
- * the offline authorization cache.
+ * OB_ERR_UNREACHABLE: no answer arrived (transport failure, including a TLS
+ * handshake that could not complete, or a gateway that could not reach the
+ * portal). Only this code may fall back to the offline authorization cache.
  */
 #define OB_ERR_REFUSED      (-1)
 #define OB_ERR_UNREACHABLE  (-2)
@@ -174,8 +175,9 @@ int ob_introspect_token(ob_client_t *client,
 
 /*
  * Check user authorization via /pam/authorize
- * Returns 0 on success, OB_ERR_REFUSED on an authoritative refusal or an
- * untrusted answer, OB_ERR_UNREACHABLE when the portal could not be reached.
+ * Returns 0 on success, OB_ERR_REFUSED on an authoritative refusal, an
+ * untrusted answer or an untrusted TLS endpoint, OB_ERR_UNREACHABLE when the
+ * portal could not be reached.
  */
 int ob_authorize_user(ob_client_t *client,
                       const char *user,

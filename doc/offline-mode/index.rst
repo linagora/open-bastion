@@ -207,13 +207,16 @@ removed in the portal keeps logging in from the cache until their entry
 expires.
 
 The cache is consulted only when the portal cannot answer: a transport
-failure, or a ``502``/``503``/``504`` from an intermediary. Any other
-answer is a verdict, and a verdict never becomes a cache hit. A ``400``,
-a ``403``, a ``401`` that survives a token refresh, or an answer whose
-signature cannot be verified refuses the login on the spot. A ``200`` that
-denies the user, or that no longer carries ``offline.enabled``, also
-deletes the entry, so an outage cannot restore an authorization the portal
-has withdrawn.
+failure, or a ``502``/``503``/``504`` from an intermediary. A TLS
+certificate that does not verify, or a public key that does not match
+``cert_pin``, is a refusal: the host reached a peer, but that peer did not
+prove it is the portal, so the cache does not answer for it. Any other
+answer is a verdict too, and a verdict never becomes a cache hit. A
+``400``, a ``403``, a ``401`` that survives a token refresh, or an answer
+whose signature cannot be verified refuses the login on the spot. A
+``200`` that denies the user, or that no longer carries
+``offline.enabled``, also deletes the entry, so an outage cannot restore an
+authorization the portal has withdrawn.
 
 .. list-table::
    :header-rows: 1
