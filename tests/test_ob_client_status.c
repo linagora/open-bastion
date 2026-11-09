@@ -4,10 +4,11 @@
  *
  * The PAM account phase falls back to the cache only when the client says the
  * portal is unreachable. Everything else -- an HTTP refusal, a malformed or
- * unsigned answer, a signature that does not verify, or a TLS certificate or
- * pin that does not match -- is a verdict and must not be answered from a
- * cache entry: a user revoked in the portal would otherwise keep their cached
- * grant, `sudo` right included, until it expired.
+ * unsigned answer, a signature that does not verify, a TLS certificate, issuer
+ * or pin that does not match, or a local TLS misconfiguration -- is a verdict
+ * and must not be answered from a cache entry: a user revoked in the portal
+ * would otherwise keep their cached grant, `sudo` right included, until it
+ * expired.
  *
  * Drives ob_authorize_user() through mock_portal.h and mock_tls.h so each
  * return code is observed on the real HTTP/TLS path, not only in a helper.
@@ -18,6 +19,7 @@
 
 #include "../src/config.c"
 
+#include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -220,6 +222,116 @@ static void test_transport(void)
 }
 
 /*
+ * Only a failure that prevents the portal from answering may use the cache.
+ * A verdict and a local TLS or configuration problem must deny, so any code
+ * that is not clearly a lost connection falls back to refusal.
+ */
+static void test_curl_errors(void)
+{
+    struct {
+        int code;
+        bool cache;
+        const char *why;
+    } cases[] = {
+        { CURLE_COULDNT_RESOLVE_PROXY, true,
+          "a proxy name that does not resolve is an outage" },
+        { CURLE_COULDNT_RESOLVE_HOST, true,
+          "a portal name that does not resolve is an outage" },
+        { CURLE_COULDNT_CONNECT, true,
+          "a refused or unreachable portal is an outage" },
+        { CURLE_PARTIAL_FILE, true,
+          "a truncated answer is an outage" },
+        { CURLE_HTTP2, true,
+          "an HTTP/2 framing failure is an outage" },
+        { CURLE_OPERATION_TIMEDOUT, true,
+          "a timeout is an outage" },
+        { CURLE_SSL_CONNECT_ERROR, true,
+          "an incomplete TLS handshake is an outage" },
+        { CURLE_GOT_NOTHING, true,
+          "a closed connection without an answer is an outage" },
+        { CURLE_SEND_ERROR, true,
+          "a failed send is an outage" },
+        { CURLE_RECV_ERROR, true,
+          "a failed receive is an outage" },
+        { CURLE_NO_CONNECTION_AVAILABLE, true,
+          "no available connection is an outage" },
+        { CURLE_HTTP2_STREAM, true,
+          "an HTTP/2 stream failure is an outage" },
+        { CURLE_HTTP3, true,
+          "an HTTP/3 failure is an outage" },
+        { CURLE_QUIC_CONNECT_ERROR, true,
+          "a QUIC connection failure is an outage" },
+        { CURLE_PROXY, true,
+          "a proxy handshake failure is an outage" },
+
+        { CURLE_UNSUPPORTED_PROTOCOL, false,
+          "an unsupported scheme is a local configuration error" },
+        { CURLE_FAILED_INIT, false,
+          "a failed client initialisation is local" },
+        { CURLE_URL_MALFORMAT, false,
+          "a malformed portal URL is a local configuration error" },
+        { CURLE_NOT_BUILT_IN, false,
+          "a missing libcurl feature is local" },
+        { CURLE_WEIRD_SERVER_REPLY, false,
+          "a malformed answer is a refusal" },
+        { CURLE_REMOTE_ACCESS_DENIED, false,
+          "a denied request is a refusal" },
+        { CURLE_WRITE_ERROR, false,
+          "a failed or oversized response write is a refusal" },
+        { CURLE_OUT_OF_MEMORY, false,
+          "a local out-of-memory failure is not an outage" },
+        { CURLE_BAD_FUNCTION_ARGUMENT, false,
+          "a programming error is not an outage" },
+        { CURLE_INTERFACE_FAILED, false,
+          "a local interface problem is a configuration error" },
+        { CURLE_TOO_MANY_REDIRECTS, false,
+          "a redirect loop is a refusal" },
+        { CURLE_SSL_ENGINE_NOTFOUND, false,
+          "a missing TLS engine is a local configuration error" },
+        { CURLE_SSL_ENGINE_SETFAILED, false,
+          "a failed TLS engine selection is local" },
+        { CURLE_SSL_CERTPROBLEM, false,
+          "a client certificate problem is local, not an outage" },
+        { CURLE_SSL_CIPHER, false,
+          "an unusable cipher is a local configuration error" },
+        { CURLE_PEER_FAILED_VERIFICATION, false,
+          "an unverified peer certificate is a refusal" },
+        { CURLE_BAD_CONTENT_ENCODING, false,
+          "an undecodable answer is a refusal" },
+        { CURLE_USE_SSL_FAILED, false,
+          "a TLS level the client cannot use is local" },
+        { CURLE_SSL_ENGINE_INITFAILED, false,
+          "a failed TLS engine initialisation is local" },
+        { CURLE_SSL_CACERT_BADFILE, false,
+          "an unreadable ca_cert is a local configuration error" },
+        { CURLE_SSL_SHUTDOWN_FAILED, false,
+          "a failed TLS shutdown may follow an answer, so deny" },
+        { CURLE_SSL_CRL_BADFILE, false,
+          "an unreadable CRL is a local configuration error" },
+        { CURLE_SSL_ISSUER_ERROR, false,
+          "a failed issuer check is a refusal" },
+        { CURLE_SSL_PINNEDPUBKEYNOTMATCH, false,
+          "a mismatched cert_pin is a refusal" },
+        { CURLE_SSL_INVALIDCERTSTATUS, false,
+          "an invalid OCSP status is a refusal" },
+        { CURLE_SSL_CLIENTCERT, false,
+          "a missing client certificate is local" },
+        { CURLE_AUTH_ERROR, false,
+          "a failed authentication callback is local" },
+        { CURLE_UNRECOVERABLE_POLL, false,
+          "a fatal poll failure is local" },
+        { 999, false,
+          "an unknown code fails closed" },
+    };
+
+    printf("\nlibcurl failure -> cache eligibility:\n");
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CHECK(ob_curl_error_allows_offline_cache(cases[i].code) == cases[i].cache,
+              cases[i].why);
+    }
+}
+
+/*
  * A TLS trust failure is not an outage: the host reached *something*, but
  * that something did not prove it is the portal. mock_tls.h serves a fresh
  * self-signed certificate, so verify_ssl = true fails the chain check and a
@@ -249,6 +361,16 @@ static void test_tls_trust(void)
     if (client) {
         CHECK(authorize(client) == OB_ERR_REFUSED,
               "a pinned key that does not match is a refusal");
+        CHECK(ob_client_last_http_code(client) == 0,
+              "  ... with no HTTP status to refresh a token on");
+        ob_client_destroy(client);
+    }
+
+    snprintf(extra, sizeof(extra), "ca_cert = %s/missing-ca.pem\n", g_dir);
+    client = new_client_at(url, "off", g_jwks, true, extra);
+    if (client) {
+        CHECK(authorize(client) == OB_ERR_REFUSED,
+              "an unreadable ca_cert is a local misconfiguration, not an outage");
         CHECK(ob_client_last_http_code(client) == 0,
               "  ... with no HTTP status to refresh a token on");
         ob_client_destroy(client);
@@ -292,6 +414,7 @@ int main(void)
     test_http_statuses();
     test_signatures();
     test_transport();
+    test_curl_errors();
     test_tls_trust();
 
     EVP_PKEY_free(k_portal);

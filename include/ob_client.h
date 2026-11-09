@@ -15,13 +15,16 @@
  * Return codes of ob_authorize_user() and ob_authorize_user_with_cert().
  *
  * OB_ERR_REFUSED: the portal answered, or its answer cannot be trusted (bad
- * signature, wrong audience, a TLS certificate or pin that does not verify, no
- * answer where one is required). The verdict is authoritative: callers must
- * not fall back to a cache.
+ * signature, wrong audience, a TLS certificate, issuer or pin that does not
+ * verify, an unusable local CA or client certificate, no answer where one is
+ * required). The verdict is authoritative: callers must not fall back to a
+ * cache.
  *
- * OB_ERR_UNREACHABLE: no answer arrived (transport failure, including a TLS
- * handshake that could not complete, or a gateway that could not reach the
- * portal). Only this code may fall back to the offline authorization cache.
+ * OB_ERR_UNREACHABLE: the portal itself could not be reached (a name that does
+ * not resolve, a refused connection or timeout, a transfer interrupted by the
+ * network, a TLS handshake that never completed, or a gateway that could not
+ * reach the portal). Only this code may fall back to the offline authorization
+ * cache.
  */
 #define OB_ERR_REFUSED      (-1)
 #define OB_ERR_UNREACHABLE  (-2)
@@ -176,8 +179,8 @@ int ob_introspect_token(ob_client_t *client,
 /*
  * Check user authorization via /pam/authorize
  * Returns 0 on success, OB_ERR_REFUSED on an authoritative refusal, an
- * untrusted answer or an untrusted TLS endpoint, OB_ERR_UNREACHABLE when the
- * portal could not be reached.
+ * untrusted answer, an untrusted TLS endpoint or a local TLS misconfiguration,
+ * OB_ERR_UNREACHABLE when the portal could not be reached.
  */
 int ob_authorize_user(ob_client_t *client,
                       const char *user,
@@ -196,6 +199,14 @@ int ob_authorize_user_with_cert(ob_client_t *client,
                                 const char *service,
                                 const ob_ssh_cert_info_t *ssh_cert,
                                 ob_response_t *response);
+
+/*
+ * Whether a libcurl failure (`CURLcode`) means the portal could not be
+ * reached, so the offline authorization cache may answer. False for a verdict
+ * on the answer and for a local TLS or configuration failure. Exposed for the
+ * test suite; not part of the stable client API.
+ */
+bool ob_curl_error_allows_offline_cache(int curl_code);
 
 /*
  * Free SSH certificate info structure contents

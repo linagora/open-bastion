@@ -187,6 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry, and the `sudo` account phase sends the session fingerprint so
   `pamAccessRequireFingerprint` no longer forces a cache read. See
   [offline mode](doc/offline-mode/index.rst).
+- A local TLS misconfiguration was treated as a portal outage: an unreadable
+  `ca_cert`, a client certificate or cipher problem, and `curl`'s issuer-check
+  failure let the account phase answer `/pam/authorize` from the offline cache.
+  Only errors that mean the portal itself could not be reached now use the
+  cache; every other `curl` failure denies (#453).
 - A portal answering `"home":"/home"` or `"home":"/home/"` passed the home
   validation of both the PAM and the NSS module. With `create_user` enabled,
   the user's first login then made them the owner of the base directory

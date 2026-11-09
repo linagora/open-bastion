@@ -744,26 +744,38 @@ static int refuse_anonymous_grant(ob_client_t *client, const char *path)
 }
 
 /*
- * curl_easy_perform() failed before any answer arrived. Most such failures
- * are an outage: the name did not resolve, the connection timed out or was
- * refused, the TLS handshake never completed. Only those may use the
- * offline cache.
+ * True only when the portal itself could not be reached: resolution, connect
+ * or transfer failed, or the HTTP/2, HTTP/3 or proxy layer could not carry
+ * the request.
  *
- * A failed trust check is different. The peer did not prove that it is the
- * portal: its certificate does not verify, its public key does not match
- * cert_pin, or its stapled OCSP status is invalid. That is a verdict on the
- * endpoint, not a lack of connectivity, so the cache must not turn it into
- * a grant.
+ * The list is an allow-list because every other curl failure is either a
+ * verdict on the answer or a local misconfiguration, and the offline cache
+ * must not turn one into a grant. That covers a certificate chain or pin that
+ * does not verify, a failed issuer check, an unreadable ca_cert, a client
+ * certificate or cipher problem, a malformed or oversized answer, and any
+ * code this client cannot interpret.
  */
-static int curl_error_is_refusal(CURLcode res)
+bool ob_curl_error_allows_offline_cache(int curl_code)
 {
-    switch (res) {
-    case CURLE_PEER_FAILED_VERIFICATION:
-    case CURLE_SSL_PINNEDPUBKEYNOTMATCH:
-    case CURLE_SSL_INVALIDCERTSTATUS:
-        return 1;
+    switch (curl_code) {
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_HTTP2:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_GOT_NOTHING:
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_NO_CONNECTION_AVAILABLE:
+    case CURLE_HTTP2_STREAM:
+    case CURLE_HTTP3:
+    case CURLE_QUIC_CONNECT_ERROR:
+    case CURLE_PROXY:
+        return true;
     default:
-        return 0;
+        return false;
     }
 }
 
@@ -1283,7 +1295,8 @@ static int ob_authorize_user_internal(ob_client_t *client,
                  "Curl error: %s", curl_easy_strerror(res));
         json_object_put(req_json);
         free_buffer(&buf);
-        return curl_error_is_refusal(res) ? OB_ERR_REFUSED : OB_ERR_UNREACHABLE;
+        return ob_curl_error_allows_offline_cache(res) ? OB_ERR_UNREACHABLE
+                                                       : OB_ERR_REFUSED;
     }
 
     long http_code;
