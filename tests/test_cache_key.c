@@ -1,5 +1,6 @@
 /*
- * test_cache_key.c - what src/cache_key.c refuses to accept as a key file.
+ * test_cache_key.c - what src/cache_key.c refuses to accept as a key file, and
+ * what it accepts as a cache instance ID.
  *
  * `4cbe85c` added six refusals to the offline-cache key file and touched no
  * test (#268): not a regular file, not owned by root, setuid, setgid, any group
@@ -21,6 +22,7 @@
  */
 
 #include <fcntl.h>
+#include <glob.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -45,6 +47,15 @@ static int tests_passed = 0;
 
 static char dir[] = "/tmp/ob-cachekey-XXXXXX";
 static char keypath[256];
+
+/* Replace the file at `path` with `content`. */
+static int write_file(const char *path, const char *content)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    int ok = fputs(content, f) >= 0;
+    return (fclose(f) == 0 && ok) ? 0 : -1;
+}
 
 /* Write a 32-byte key file at `keypath` with exactly `mode`. */
 static int make_key_file(mode_t mode)
@@ -172,6 +183,80 @@ int main(void)
             CHECK(r == 0 && memcmp(buf, expect, sizeof(buf)) == 0,
                   "read_key_file() accepts a root-owned 0600 file and returns it");
         }
+    }
+
+    printf("\ninstance ID:\n");
+    {
+        const char id[] = "0123456789abcdef0123456789abcdef";
+        char idpath[256];
+        char buf[64];
+        snprintf(idpath, sizeof(idpath), "%s/.instance_id", dir);
+
+        unlink(idpath);
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
+              "read_instance_id() reports a missing file");
+
+        if (write_file(idpath, "0123456789abcdef0123456789abcdef\n") != 0) {
+            perror("write_file");
+            return 2;
+        }
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == 0 &&
+              strcmp(buf, id) == 0,
+              "read_instance_id() accepts 32 characters and drops the newline");
+
+        if (write_file(idpath, id) != 0) { perror("write_file"); return 2; }
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == 0 &&
+              strcmp(buf, id) == 0,
+              "read_instance_id() accepts 32 characters without a newline");
+
+        if (write_file(idpath, "0123456789abcdef0123456789abcde\n") != 0) {
+            perror("write_file");
+            return 2;
+        }
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
+              "read_instance_id() refuses 31 characters");
+
+        if (write_file(idpath, "") != 0) { perror("write_file"); return 2; }
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
+              "read_instance_id() refuses an empty file");
+
+        /* A directory opens, so the FILE pointer is valid and fgets() is what
+         * fails. It must be closed once on that path too. */
+        unlink(idpath);
+        if (mkdir(idpath, 0700) != 0) { perror("mkdir"); return 2; }
+        CHECK(read_instance_id(idpath, buf, sizeof(buf)) == -1,
+              "read_instance_id() refuses a directory");
+
+        /*
+         * The same directory also makes rename() fail (EISDIR): the only way
+         * into the recovery path an unprivileged suite can reach. It must
+         * report the failure and leave no temporary file behind.
+         */
+        CHECK(load_or_generate_instance_id(dir, buf, sizeof(buf)) == -1,
+              "load_or_generate_instance_id() fails when the ID is not renamed");
+        {
+            char pattern[300];
+            glob_t g;
+            snprintf(pattern, sizeof(pattern), "%s/.instance_id.tmp.*", dir);
+            CHECK(glob(pattern, 0, NULL, &g) == GLOB_NOMATCH,
+                  "a failed rename leaves no temporary file behind");
+            globfree(&g);
+        }
+        rmdir(idpath);
+
+        /* The fallback chain must leave a usable ID behind, and reuse it. */
+        if (write_file(idpath, "short\n") != 0) { perror("write_file"); return 2; }
+        char first[64];
+        CHECK(load_or_generate_instance_id(dir, buf, sizeof(buf)) == 0 &&
+              strlen(buf) == 32,
+              "load_or_generate_instance_id() replaces a truncated ID");
+        snprintf(first, sizeof(first), "%s", buf);
+        CHECK(load_or_generate_instance_id(dir, buf, sizeof(buf)) == 0 &&
+              strcmp(buf, first) == 0,
+              "load_or_generate_instance_id() reuses the generated ID");
+        CHECK(load_or_generate_instance_id(dir, buf, INSTANCE_ID_SIZE - 1) == -1,
+              "load_or_generate_instance_id() refuses a buffer too small");
+        unlink(idpath);
     }
 
     unlink(keypath);
