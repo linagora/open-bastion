@@ -20,6 +20,8 @@
 #           losing it, end to end through /pam/bastion-cert.
 #   PART 4  vouchers written before the upgrade are still honoured, and are
 #           left where they are (a cluster upgrades node by node).
+#   PART 5  (user, bastion_id) pairs that join to the same string no longer
+#           share a record, and a record naming another pair is ignored.
 
 use warnings;
 use Test::More;
@@ -292,26 +294,39 @@ count(2);
 # pair it was minted for.
 # ===========================================================================
 {
-    my ( $nonceC, $expC ) =
+    my %optsA = $plugin->_voucherStoreOpts( 'french', 'x:pam' );
+    my %optsB = $plugin->_voucherStoreOpts( 'french:x', 'pam' );
+    isnt( $optsA{id}, $optsB{id},
+        'the colliding pairs get distinct record ids' );
+
+    my ($nonceC) =
       $plugin->_mintBastionVoucher( undef, 'french', 'x:pam' );
     ok( $nonceC, 'a voucher is minted for (french, x:pam)' );
-
     is_deeply(
         $plugin->_readVoucherRecord( 'french:x', 'pam' ), {},
         'the colliding pair (french:x, pam) has no voucher'
     );
+    is( $plugin->_readVoucherRecord( 'french', 'x:pam' )->{nonce},
+        $nonceC, '  -> the minting pair still reads its own' );
 
-    my $entry = $plugin->_readVoucherRecord( 'french', 'x:pam' );
-    is( $entry->{nonce}, $nonceC, '  -> the minting pair still reads its own' );
-
-    ok(
-        !$plugin->_checkBastionVoucher(
+    my ($nonceD) =
+      $plugin->_mintBastionVoucher( undef, 'french:x', 'pam' );
+    ok( $nonceD, 'a voucher is minted for (french:x, pam)' );
+    is( $plugin->_readVoucherRecord( 'french', 'x:pam' )->{nonce},
+        $nonceC, '  -> minting the other pair does not overwrite it' );
+    is(
+        pam_lib::voucher_session( $op, 'french:x', 'pam' )->data->{nonce},
+        $nonceD, '  -> both records coexist'
+    );
+    is(
+        $plugin->_checkBastionVoucher(
             $op->p->getPersistentSession('french'),
             'french:x', 'pam', $nonceC
-        )->{ok},
-        '  -> and the voucher is refused for the colliding pair'
+        )->{reason},
+        'voucher_mismatch',
+        '  -> the voucher is refused for the colliding pair'
     );
-    count(4);
+    count(8);
 
     # A record whose stored identity disagrees with its id is ignored too.
     record('x:pam')->update( { user => 'french:x', bastion_id => 'pam' } );

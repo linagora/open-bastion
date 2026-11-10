@@ -289,7 +289,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bastion `pam` shared one record and `/pam/bastion-cert` accepted the other
   pair's voucher. The id now length-prefixes the user, and a record whose
   stored pair differs is ignored; a voucher in flight at the upgrade is
-  re-minted by the next `/pam/authorize` (#460).
+  re-minted by the next `/pam/authorize`, including during a node-by-node
+  upgrade (#460).
 
 ## [0.7.0] _(2026-10-20)_
 

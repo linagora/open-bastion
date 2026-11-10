@@ -224,6 +224,11 @@ so nothing breaks on upgrade, and the next `/pam/authorize` carries the nonce
 into a record. Neither is deleted: during a rolling upgrade an older node may
 still be minting into them.
 
+The record id also length-prefixes the user, so a voucher minted under the old
+id is read as absent. The next `/pam/authorize` re-mints it; during a
+node-by-node upgrade, a hop answered by a node of the other version may
+therefore see one `voucher_expired`.
+
 #### Hop-certificate binding window
 
 Two kinds of certificate can match the fingerprint:
