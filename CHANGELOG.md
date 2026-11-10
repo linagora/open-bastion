@@ -170,6 +170,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be renamed into place and the file found there held fewer than 32 characters:
   undefined behaviour, and a PAM module that could abort in the middle of a
   login (#445).
+- `ob-record-sink` crashed on a header without a `format` field when memory was
+  exhausted, because its default `script` format was an unchecked `strdup`.
+  The default is now a literal, so the session is recorded as `script` like
+  any other (#462).
 
 ### Security
 
