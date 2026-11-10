@@ -225,9 +225,11 @@ into a record. Neither is deleted: during a rolling upgrade an older node may
 still be minting into them.
 
 The record id also length-prefixes the user, so a voucher minted under the old
-id is read as absent. The next `/pam/authorize` re-mints it; during a
-node-by-node upgrade, a hop answered by a node of the other version may
-therefore see one `voucher_expired`.
+id is not seen by a node running this version, and a voucher minted under the
+new id is not seen by an older node. During a node-by-node upgrade, a hop
+authorized on one version and certified on the other therefore fails with
+`voucher_mismatch` until the next `/pam/authorize`. Upgrade every portal node
+together, and expect sessions open during the upgrade to reconnect once.
 
 #### Hop-certificate binding window
 

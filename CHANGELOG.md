@@ -288,9 +288,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bastion_id`, so a user `dwho` on a bastion `x:pam` and a user `dwho:x` on a
   bastion `pam` shared one record and `/pam/bastion-cert` accepted the other
   pair's voucher. The id now length-prefixes the user, and a record whose
-  stored pair differs is ignored; a voucher in flight at the upgrade is
-  re-minted by the next `/pam/authorize`, including during a node-by-node
-  upgrade (#460).
+  stored pair differs is ignored. Upgrade every portal node together: a
+  voucher minted by the other version is not seen, and a hop authorized on one
+  version then certified on the other fails with `voucher_mismatch` until its
+  next `/pam/authorize` (#460).
 
 ## [0.7.0] _(2026-10-20)_
 
