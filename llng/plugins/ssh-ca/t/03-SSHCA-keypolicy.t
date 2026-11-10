@@ -668,7 +668,7 @@ count(1);
 # PART 6: a principal must be one safe ssh-keygen argument
 # ============================================
 
-for my $case ( [ "a\0b", 'NUL' ], [ "a\x1bb", 'ESC' ] ) {
+for my $case ( [ "a\0b", 'NUL' ], [ "a\x1bb", 'ESC' ], [ "a\x7fb", 'DEL' ] ) {
     my ( $value, $name ) = @$case;
     local $Lemonldap::NG::Portal::UserDB::Demo::demoAccounts{dwho}{fuzzAttr} =
       $value;
@@ -710,7 +710,7 @@ for my $case ( [ "a\0b", 'NUL' ], [ "a\x1bb", 'ESC' ] ) {
         [ 'dwho', 'dwho@badwolf.org' ],
         '  -> and the comma yields two principals'
     );
-    count(2);
+    count(3);
 }
 
 # The key id is built from the same session value and reaches ssh-keygen -I

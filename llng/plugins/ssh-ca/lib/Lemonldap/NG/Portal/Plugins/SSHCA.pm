@@ -2788,7 +2788,8 @@ Fixed-size families are governed by C<sshCaAllowedKeyTypes> alone.
 
 =item sshCaPrincipalSources
 
-Expression to derive principals from session, e.g., '$uid' (default: '$uid')
+Expression to derive principals from session, separated by spaces or commas,
+e.g., '$uid' or '$uid,$mail' (default: '$uid')
 
 =item sshCaKrlPath
 

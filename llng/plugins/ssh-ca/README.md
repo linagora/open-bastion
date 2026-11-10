@@ -163,6 +163,8 @@ Examples:
 
 - `$uid` → principal is the user's uid (e.g. `john`)
 - `$uid $mail` → two principals: uid and email (e.g. `john`, `john@example.com`)
+- `$uid,$mail` → the same two principals: a comma separates sources like a
+  space does
 
 ## Endpoints
 
