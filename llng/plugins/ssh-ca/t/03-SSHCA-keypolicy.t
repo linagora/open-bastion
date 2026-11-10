@@ -664,5 +664,59 @@ like( error_of($res), qr/sk-ssh-ed25519\@openssh\.com.*not allowed/,
     'sk-ed25519 rejected by the configured allowlist' );
 count(1);
 
+# ============================================
+# PART 6: a principal must be one safe ssh-keygen argument
+# ============================================
+
+{
+    local $Lemonldap::NG::Portal::UserDB::Demo::demoAccounts{dwho}{fuzzAttr} =
+      "a\0b";
+    $portal = new_portal(
+        sshCaPrincipalSources => '$fuzzAttr $uid',
+        exportedVars          => {
+            uid      => 'uid',
+            cn       => 'cn',
+            mail     => 'mail',
+            fuzzAttr => 'fuzzAttr',
+        },
+    );
+    $id = $portal->login('dwho');
+
+    ok(
+        $res = sign_req( { public_key => $ed25519, label => 'nul-principal' } ),
+        'sign with a NUL in a principal source'
+    );
+    is( $res->[0], 400, 'a principal holding a NUL is refused' );
+    like( error_of($res), qr/principal/i,
+        '  -> with an invalid-principal error' );
+    count(2);
+}
+
+# The key id is built from the same session value and reaches ssh-keygen -I
+# through the same exec, so a NUL there must not truncate it either.
+{
+    local $Lemonldap::NG::Portal::UserDB::Demo::demoAccounts{dwho}{fuzzUser} =
+      "dwho\0x";
+    $portal = new_portal(
+        sshCaPrincipalSources => 'fixed',
+        whatToTrace           => 'fuzzUser',
+        exportedVars          => {
+            uid      => 'uid',
+            cn       => 'cn',
+            mail     => 'mail',
+            fuzzUser => 'fuzzUser',
+        },
+    );
+    $id = $portal->login('dwho');
+
+    ok(
+        $res = sign_req( { public_key => $ed25519, label => 'nul-keyid' } ),
+        'sign with a NUL in the user'
+    );
+    is( $res->[0], 400, 'a user holding a NUL is refused' );
+    like( error_of($res), qr/user/i, '  -> with an invalid-user error' );
+    count(2);
+}
+
 clean_sessions();
 done_testing();

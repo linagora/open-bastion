@@ -783,6 +783,19 @@ sub sshCaSign {
         return $self->p->sendError( $req, 'No principals available', 400 );
     }
 
+    # ssh-keygen receives -n and -I as C strings through exec: a NUL would
+    # truncate the argument, so the certificate could carry a principal (or a
+    # key id) that is not the one computed from the session. Control
+    # characters would also poison the logs and the audit trail. Refuse the
+    # request rather than sign something else.
+    for my $principal (@principals) {
+        next unless $principal =~ /[\x00-\x20\x7f,]/;
+        $self->logger->warn(
+            'SSH CA sign: refusing a principal with unsafe characters for user '
+              . ( $req->user || 'unknown' ) );
+        return $self->p->sendError( $req, 'Invalid principal', 400 );
+    }
+
     # Get user info for key_id
     my $whatToTrace = $self->conf->{whatToTrace} || 'uid';
     my $user =
@@ -792,6 +805,13 @@ sub sshCaSign {
       || $req->sessionInfo->{uid}
       || $req->user
       || 'unknown';
+
+    if ( $user =~ /[\x00-\x1f\x7f]/ ) {
+        $self->logger->warn(
+            'SSH CA sign: refusing a user with control characters');
+        return $self->p->sendError(
+            $req, 'Invalid user for SSH certificate', 400 );
+    }
 
     # Generate serial number
     my $serial = $self->_getNextSerial();
