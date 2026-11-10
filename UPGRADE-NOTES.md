@@ -8,6 +8,20 @@ Open Bastion and the LemonLDAP::NG plugins
 ([linagora/lemonldap-ng-plugins](https://github.com/linagora/lemonldap-ng-plugins))
 move independently, so each part below says when it applies.
 
+## Unreleased
+
+**The portal.** Upgrade every LemonLDAP::NG portal node together when deploying
+the `pam-access` plugin from this release. The bastion voucher record id now
+length-prefixes the user, so a node does not see the vouchers of another
+version:
+
+- a session open during the upgrade is answered `voucher_expired` until the
+  user reconnects;
+- if the user connects again meanwhile, the new nonce replaces the one the open
+  shell holds, and that shell gets `voucher_mismatch` until it reconnects.
+
+Both self-heal on the next login; a node-by-node rollout stretches the window.
+
 ## 0.7.0
 
 **Part A — on every bastion and backend.** Always required.

@@ -290,8 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pair's voucher. The id now length-prefixes the user, and a record whose
   stored pair differs is ignored. Upgrade every portal node together: a
   session open during the upgrade gets `voucher_expired` until the user
-  reconnects, and a session re-authorized through a node of the other version
-  gets `voucher_mismatch` (#460).
+  reconnects, or `voucher_mismatch` if a newer connection rotated its voucher
+  meanwhile (#460).
 
 ## [0.7.0] _(2026-10-20)_
 
