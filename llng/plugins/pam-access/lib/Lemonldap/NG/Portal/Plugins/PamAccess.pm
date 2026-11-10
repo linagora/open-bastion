@@ -2782,8 +2782,9 @@ sub _voucherStoreOpts {
         storageModuleOptions => $self->conf->{globalStorageOptions},
         hashStore            => 0,
         kind                 => $VOUCHER_KIND,
-        id                   =>
-          sha256_hex( 'pam-bastion-voucher:' . $user . ':' . $bastion_id ),
+        id => sha256_hex(
+            'pam-bastion-voucher:' . length($user) . ":$user:$bastion_id"
+        ),
     );
 }
 
@@ -2815,7 +2816,16 @@ sub _readVoucherRecord {
         return undef;
     }
     my $data = $s->data;
-    return {} unless ref $data eq 'HASH' and ( $data->{nonce} // '' ) ne '';
+
+    # The record names the pair it was minted for. Refuse one that names
+    # another, so a collision in the joined id cannot hand a voucher across.
+    return {}
+      unless ref $data eq 'HASH'
+      and ( $data->{nonce} // '' ) ne ''
+      and defined $data->{user}
+      and defined $data->{bastion_id}
+      and $data->{user} eq $user
+      and $data->{bastion_id} eq $bastion_id;
     return { nonce => $data->{nonce}, exp => $data->{exp} || 0 };
 }
 

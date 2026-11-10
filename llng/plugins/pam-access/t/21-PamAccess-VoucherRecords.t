@@ -283,5 +283,44 @@ count(2);
     count(4);
 }
 
+# ===========================================================================
+# PART 5: (user, bastion_id) pairs that join to the same string stay apart
+#
+# `french` + `:` + `x:pam` and `french:x` + `:` + `pam` used to address the
+# same record, so one pair's voucher was readable -- and overwritable -- by
+# the other. The id now length-prefixes the user, and the record carries the
+# pair it was minted for.
+# ===========================================================================
+{
+    my ( $nonceC, $expC ) =
+      $plugin->_mintBastionVoucher( undef, 'french', 'x:pam' );
+    ok( $nonceC, 'a voucher is minted for (french, x:pam)' );
+
+    is_deeply(
+        $plugin->_readVoucherRecord( 'french:x', 'pam' ), {},
+        'the colliding pair (french:x, pam) has no voucher'
+    );
+
+    my $entry = $plugin->_readVoucherRecord( 'french', 'x:pam' );
+    is( $entry->{nonce}, $nonceC, '  -> the minting pair still reads its own' );
+
+    ok(
+        !$plugin->_checkBastionVoucher(
+            $op->p->getPersistentSession('french'),
+            'french:x', 'pam', $nonceC
+        )->{ok},
+        '  -> and the voucher is refused for the colliding pair'
+    );
+    count(4);
+
+    # A record whose stored identity disagrees with its id is ignored too.
+    record('x:pam')->update( { user => 'french:x', bastion_id => 'pam' } );
+    is_deeply(
+        $plugin->_readVoucherRecord( 'french', 'x:pam' ), {},
+        'a record carrying another pair is ignored'
+    );
+    count(1);
+}
+
 clean_sessions();
 done_testing();
