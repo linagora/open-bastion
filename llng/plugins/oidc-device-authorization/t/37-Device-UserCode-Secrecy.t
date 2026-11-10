@@ -274,10 +274,10 @@ unlike( $res->[2]->[0], qr/invalidUserCode|deviceTooManyAttempts/,
     "  -> and it really is an approval, not a refusal" );
 count(2);
 
-# and a successful submission clears the budget
+# and the elapsed window cleared the budget
 my $ssoSession = getSession($id)->data;
 ok( !$ssoSession->{_deviceAuthFailures},
-    "Failure counter reset by a valid submission" );
+    "Failure counter cleared by the elapsed lockout window" );
 count(1);
 
 Time::Fake->reset();
