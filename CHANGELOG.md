@@ -236,6 +236,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-empty directory that appears at the home path meanwhile is refused
   rather than adopted. A `create_user_home_base` of `/` is refused, since the
   home cannot be staged beside a parent the root does not have (#414).
+- The LLNG `oidc-device-authorization` plugin cleared the invalid `user_code`
+  budget of a session whenever a submitted code resolved, including a code
+  already used and a fresh one a public RP hands out through `/oauth2/device`:
+  the lockout never bounded guessing from that session. The budget now only
+  resets when its window elapses (#459).
 
 ## [0.7.0] _(2026-10-20)_
 

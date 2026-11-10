@@ -580,9 +580,6 @@ sub submitVerification {
         return $self->_showVerificationError( $req, 'invalidUserCode' );
     }
 
-    # Valid code: clear the failure budget of this session
-    $self->_resetUserCodeFailures($req);
-
     # Check if already processed
     if ( $device_auth->{status} ne 'pending' ) {
         $self->logger->info(
