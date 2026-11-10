@@ -745,12 +745,12 @@ sub sshCaSign {
 
         # Strip characters that could turn a single attribute value into
         # multiple principals downstream: `,` is ssh-keygen -n's separator
-        # (`-n alice,root` = two principals), and any whitespace is the
-        # template's own separator (we split on /\s+/ below). CR/LF would
-        # additionally poison audit logs and any file handed to ssh-keygen.
-        # Each `$var` substitution must yield at most one principal token,
-        # so match the same `\s` class the split uses — `tr///` cannot do
-        # that, hence the regex.
+        # (`-n alice,root` = two principals), and both `,` and whitespace are
+        # the template's own separators (we split on /[\s,]+/ below). CR/LF
+        # would additionally poison audit logs and any file handed to
+        # ssh-keygen. Each `$var` substitution must yield at most one
+        # principal token, so match the same `\s` class the split uses --
+        # `tr///` cannot do that, hence the regex.
         if ( $val =~ s/[\s,]//g ) {
             $self->logger->warn(
                 "SSH CA sign: stripped separator chars from principal "
@@ -766,8 +766,8 @@ sub sshCaSign {
     $principal .= substr( $template, $pos ) if $pos < length($template);
     $principal =~ s/^\s+|\s+$//g;    # trim
 
-    # Split on whitespace if multiple principals
-    @principals = grep { $_ ne '' } split /\s+/, $principal;
+    # Split on whitespace or commas if multiple principals
+    @principals = grep { $_ ne '' } split /[\s,]+/, $principal;
 
   # Log warning if client tried to specify principals (potential attack attempt)
     if ( $body->{principals} && ref $body->{principals} eq 'ARRAY' ) {
@@ -789,7 +789,7 @@ sub sshCaSign {
     # characters would also poison the logs and the audit trail. Refuse the
     # request rather than sign something else.
     for my $principal (@principals) {
-        next unless $principal =~ /[\x00-\x20\x7f,]/;
+        next unless $principal =~ /[\x00-\x1f\x7f]/;
         $self->logger->warn(
             'SSH CA sign: refusing a principal with unsafe characters for user '
               . ( $req->user || 'unknown' ) );

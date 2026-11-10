@@ -668,9 +668,10 @@ count(1);
 # PART 6: a principal must be one safe ssh-keygen argument
 # ============================================
 
-{
+for my $case ( [ "a\0b", 'NUL' ], [ "a\x1bb", 'ESC' ] ) {
+    my ( $value, $name ) = @$case;
     local $Lemonldap::NG::Portal::UserDB::Demo::demoAccounts{dwho}{fuzzAttr} =
-      "a\0b";
+      $value;
     $portal = new_portal(
         sshCaPrincipalSources => '$fuzzAttr $uid',
         exportedVars          => {
@@ -683,20 +684,41 @@ count(1);
     $id = $portal->login('dwho');
 
     ok(
-        $res = sign_req( { public_key => $ed25519, label => 'nul-principal' } ),
-        'sign with a NUL in a principal source'
+        $res = sign_req(
+            { public_key => $ed25519, label => lc($name) . '-principal' }
+        ),
+        "sign with a $name in a principal source"
     );
-    is( $res->[0], 400, 'a principal holding a NUL is refused' );
+    is( $res->[0], 400, "a principal holding a $name is refused" );
     like( error_of($res), qr/principal/i,
         '  -> with an invalid-principal error' );
     count(2);
 }
 
-# The key id is built from the same session value and reaches ssh-keygen -I
-# through the same exec, so a NUL there must not truncate it either.
+# A literal comma separates principal sources, as a space does.
 {
+    $portal = new_portal( sshCaPrincipalSources => '$uid,$mail' );
+    $id     = $portal->login('dwho');
+
+    ok(
+        $res = sign_req( { public_key => $ed25519, label => 'comma-principal' } ),
+        'sign with comma-separated principal sources'
+    );
+    is( $res->[0], 200, '  -> the request is accepted' );
+    is_deeply(
+        from_json( $res->[2]->[0] )->{principals},
+        [ 'dwho', 'dwho@badwolf.org' ],
+        '  -> and the comma yields two principals'
+    );
+    count(2);
+}
+
+# The key id is built from the same session value and reaches ssh-keygen -I
+# through the same exec, so a control character there must not truncate it.
+for my $case ( [ "dwho\0x", 'NUL' ], [ "dwho\x01x", 'control' ] ) {
+    my ( $value, $name ) = @$case;
     local $Lemonldap::NG::Portal::UserDB::Demo::demoAccounts{dwho}{fuzzUser} =
-      "dwho\0x";
+      $value;
     $portal = new_portal(
         sshCaPrincipalSources => 'fixed',
         whatToTrace           => 'fuzzUser',
@@ -710,10 +732,12 @@ count(1);
     $id = $portal->login('dwho');
 
     ok(
-        $res = sign_req( { public_key => $ed25519, label => 'nul-keyid' } ),
-        'sign with a NUL in the user'
+        $res = sign_req(
+            { public_key => $ed25519, label => lc($name) . '-keyid' }
+        ),
+        "sign with a $name character in the user"
     );
-    is( $res->[0], 400, 'a user holding a NUL is refused' );
+    is( $res->[0], 400, "a user holding a $name character is refused" );
     like( error_of($res), qr/user/i, '  -> with an invalid-user error' );
     count(2);
 }
