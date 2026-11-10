@@ -498,33 +498,34 @@ static int test_overwrite(void)
 /* Test: Error string conversion */
 static int test_strerror(void)
 {
-    const char *msg;
+    static const struct {
+        int code;
+        const char *message;
+    } cases[] = {
+        { OFFLINE_CACHE_OK, "Success" },
+        { OFFLINE_CACHE_ERR_NOMEM, "Out of memory" },
+        { OFFLINE_CACHE_ERR_IO, "I/O error" },
+        { OFFLINE_CACHE_ERR_CRYPTO, "Cryptographic error" },
+        { OFFLINE_CACHE_ERR_NOTFOUND, "Entry not found" },
+        { OFFLINE_CACHE_ERR_EXPIRED, "Entry expired" },
+        { OFFLINE_CACHE_ERR_LOCKED, "Entry locked" },
+        { OFFLINE_CACHE_ERR_INVALID, "Invalid data" },
+        { OFFLINE_CACHE_ERR_PASSWORD, "Password mismatch" },
+    };
 
-    msg = offline_cache_strerror(OFFLINE_CACHE_OK);
-    ASSERT(msg != NULL);
-    ASSERT(strcmp(msg, "Success") == 0);
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const char *msg = offline_cache_strerror(cases[i].code);
+        ASSERT(msg != NULL);
+        ASSERT(strcmp(msg, cases[i].message) == 0);
+    }
 
-    msg = offline_cache_strerror(OFFLINE_CACHE_ERR_NOTFOUND);
+    const char *msg = offline_cache_strerror(-100);
     ASSERT(msg != NULL);
-    ASSERT(strstr(msg, "not found") != NULL);
-
-    msg = offline_cache_strerror(OFFLINE_CACHE_ERR_PASSWORD);
-    ASSERT(msg != NULL);
-    ASSERT(strstr(msg, "mismatch") != NULL);
-
-    msg = offline_cache_strerror(-100);
-    ASSERT(msg != NULL);
-    ASSERT(strstr(msg, "Unknown") != NULL);
+    ASSERT(strcmp(msg, "Unknown error") == 0);
 
     msg = offline_cache_strerror(1);
     ASSERT(msg != NULL);
-    ASSERT(strstr(msg, "Unknown") != NULL);
-
-    for (int code = OFFLINE_CACHE_ERR_NOMEM; code >= OFFLINE_CACHE_ERR_PASSWORD; code--) {
-        msg = offline_cache_strerror(code);
-        ASSERT(msg != NULL);
-        ASSERT(strcmp(msg, "Unknown error") != 0);
-    }
+    ASSERT(strcmp(msg, "Unknown error") == 0);
 
     return 1;
 }
