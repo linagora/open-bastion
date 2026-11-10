@@ -73,24 +73,30 @@ struct offline_cache {
 #endif
 };
 
-/* Error messages */
-static const char *error_messages[] = {
-    [0] = "Success",
-    [-OFFLINE_CACHE_ERR_NOMEM] = "Out of memory",
-    [-OFFLINE_CACHE_ERR_IO] = "I/O error",
-    [-OFFLINE_CACHE_ERR_CRYPTO] = "Cryptographic error",
-    [-OFFLINE_CACHE_ERR_NOTFOUND] = "Entry not found",
-    [-OFFLINE_CACHE_ERR_EXPIRED] = "Entry expired",
-    [-OFFLINE_CACHE_ERR_LOCKED] = "Entry locked",
-    [-OFFLINE_CACHE_ERR_INVALID] = "Invalid data",
-    [-OFFLINE_CACHE_ERR_PASSWORD] = "Password mismatch"
-};
-
 const char *offline_cache_strerror(int err)
 {
-    if (err == 0) return error_messages[0];
-    if (err > 0 || err < -8) return "Unknown error";
-    return error_messages[-err];
+    switch (err) {
+    case OFFLINE_CACHE_OK:
+        return "Success";
+    case OFFLINE_CACHE_ERR_NOMEM:
+        return "Out of memory";
+    case OFFLINE_CACHE_ERR_IO:
+        return "I/O error";
+    case OFFLINE_CACHE_ERR_CRYPTO:
+        return "Cryptographic error";
+    case OFFLINE_CACHE_ERR_NOTFOUND:
+        return "Entry not found";
+    case OFFLINE_CACHE_ERR_EXPIRED:
+        return "Entry expired";
+    case OFFLINE_CACHE_ERR_LOCKED:
+        return "Entry locked";
+    case OFFLINE_CACHE_ERR_INVALID:
+        return "Invalid data";
+    case OFFLINE_CACHE_ERR_PASSWORD:
+        return "Password mismatch";
+    default:
+        return "Unknown error";
+    }
 }
 
 /* Secure memory clear */

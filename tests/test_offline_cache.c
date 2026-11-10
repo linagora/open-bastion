@@ -516,6 +516,16 @@ static int test_strerror(void)
     ASSERT(msg != NULL);
     ASSERT(strstr(msg, "Unknown") != NULL);
 
+    msg = offline_cache_strerror(1);
+    ASSERT(msg != NULL);
+    ASSERT(strstr(msg, "Unknown") != NULL);
+
+    for (int code = OFFLINE_CACHE_ERR_NOMEM; code >= OFFLINE_CACHE_ERR_PASSWORD; code--) {
+        msg = offline_cache_strerror(code);
+        ASSERT(msg != NULL);
+        ASSERT(strcmp(msg, "Unknown error") != 0);
+    }
+
     return 1;
 }
 
