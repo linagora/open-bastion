@@ -225,11 +225,11 @@ into a record. Neither is deleted: during a rolling upgrade an older node may
 still be minting into them.
 
 The record id also length-prefixes the user, so a voucher minted under the old
-id is not seen by a node running this version, and a voucher minted under the
-new id is not seen by an older node. During a node-by-node upgrade, a hop
-authorized on one version and certified on the other therefore fails with
-`voucher_mismatch` until the next `/pam/authorize`. Upgrade every portal node
-together, and expect sessions open during the upgrade to reconnect once.
+id is not seen by a node running this version, and vice versa. A session open
+during the upgrade is therefore answered `voucher_expired` until the user
+reconnects. With nodes of both versions, a session re-authorized on one version
+and certified on the other additionally fails with `voucher_mismatch`, because
+each version holds its own nonce. Upgrade every portal node together.
 
 #### Hop-certificate binding window
 
