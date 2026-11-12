@@ -279,6 +279,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already used and a fresh one a public RP hands out through `/oauth2/device`:
   the lockout never bounded guessing from that session. The budget now only
   resets when its window elapses (#459).
+- The LLNG `ssh-ca` plugin passed principal and key identity values from the
+  session to `ssh-keygen` without rejecting control characters. A NUL
+  truncated the argument at `exec`, so an attribute `root\0x` signed a
+  certificate for `root` while the answer, `/ssh/mycerts` and the audit trail
+  named the untruncated value. Such a value is now refused with a 400 (#461).
 
 ## [0.7.0] _(2026-10-20)_
 

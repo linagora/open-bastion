@@ -745,12 +745,12 @@ sub sshCaSign {
 
         # Strip characters that could turn a single attribute value into
         # multiple principals downstream: `,` is ssh-keygen -n's separator
-        # (`-n alice,root` = two principals), and any whitespace is the
-        # template's own separator (we split on /\s+/ below). CR/LF would
-        # additionally poison audit logs and any file handed to ssh-keygen.
-        # Each `$var` substitution must yield at most one principal token,
-        # so match the same `\s` class the split uses — `tr///` cannot do
-        # that, hence the regex.
+        # (`-n alice,root` = two principals), and both `,` and whitespace are
+        # the template's own separators (we split on /[\s,]+/ below). CR/LF
+        # would additionally poison audit logs and any file handed to
+        # ssh-keygen. Each `$var` substitution must yield at most one
+        # principal token, so match the same `\s` class the split uses --
+        # `tr///` cannot do that, hence the regex.
         if ( $val =~ s/[\s,]//g ) {
             $self->logger->warn(
                 "SSH CA sign: stripped separator chars from principal "
@@ -766,8 +766,8 @@ sub sshCaSign {
     $principal .= substr( $template, $pos ) if $pos < length($template);
     $principal =~ s/^\s+|\s+$//g;    # trim
 
-    # Split on whitespace if multiple principals
-    @principals = grep { $_ ne '' } split /\s+/, $principal;
+    # Split on whitespace or commas if multiple principals
+    @principals = grep { $_ ne '' } split /[\s,]+/, $principal;
 
   # Log warning if client tried to specify principals (potential attack attempt)
     if ( $body->{principals} && ref $body->{principals} eq 'ARRAY' ) {
@@ -783,6 +783,19 @@ sub sshCaSign {
         return $self->p->sendError( $req, 'No principals available', 400 );
     }
 
+    # ssh-keygen receives -n and -I as C strings through exec: a NUL would
+    # truncate the argument, so the certificate could carry a principal (or a
+    # key id) that is not the one computed from the session. Control
+    # characters would also poison the logs and the audit trail. Refuse the
+    # request rather than sign something else.
+    for my $principal (@principals) {
+        next unless $principal =~ /[\x00-\x1f\x7f]/;
+        $self->logger->warn(
+            'SSH CA sign: refusing a principal with unsafe characters for user '
+              . ( $req->user || 'unknown' ) );
+        return $self->p->sendError( $req, 'Invalid principal', 400 );
+    }
+
     # Get user info for key_id
     my $whatToTrace = $self->conf->{whatToTrace} || 'uid';
     my $user =
@@ -792,6 +805,13 @@ sub sshCaSign {
       || $req->sessionInfo->{uid}
       || $req->user
       || 'unknown';
+
+    if ( $user =~ /[\x00-\x1f\x7f]/ ) {
+        $self->logger->warn(
+            'SSH CA sign: refusing a user with control characters');
+        return $self->p->sendError(
+            $req, 'Invalid user for SSH certificate', 400 );
+    }
 
     # Generate serial number
     my $serial = $self->_getNextSerial();
@@ -2768,7 +2788,8 @@ Fixed-size families are governed by C<sshCaAllowedKeyTypes> alone.
 
 =item sshCaPrincipalSources
 
-Expression to derive principals from session, e.g., '$uid' (default: '$uid')
+Expression to derive principals from session, separated by spaces or commas,
+e.g., '$uid' or '$uid,$mail' (default: '$uid')
 
 =item sshCaKrlPath
 
