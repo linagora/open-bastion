@@ -53,8 +53,9 @@ brute-forceable inside the code TTL.
 
 The lockout is per SSO session and independent of CrowdSec: after
 `MaxFailures` invalid codes, that session cannot submit any code — valid ones
-included — for `LockoutDelay` seconds. A valid submission clears the counter.
-CrowdSec, when configured, still gets an alert per invalid code
+included — for `LockoutDelay` seconds. Only the end of that window clears the
+counter; a valid code, or one already used, does not restore the budget in
+between. CrowdSec, when configured, still gets an alert per invalid code
 (`llng/device-auth-bruteforce` scenario) and adds IP-level protection.
 
 ### Per-RP Settings
