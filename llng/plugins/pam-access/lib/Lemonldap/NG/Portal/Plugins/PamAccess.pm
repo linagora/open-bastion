@@ -2782,8 +2782,14 @@ sub _voucherStoreOpts {
         storageModuleOptions => $self->conf->{globalStorageOptions},
         hashStore            => 0,
         kind                 => $VOUCHER_KIND,
-        id                   =>
-          sha256_hex( 'pam-bastion-voucher:' . $user . ':' . $bastion_id ),
+
+        # The length is load-bearing, not decoration: both $user and
+        # $bastion_id may contain ':', so (dwho, x:pam) and (dwho:x, pam)
+        # would otherwise join to the same id and share one record. Keep it
+        # even though nothing else reads it.
+        id => sha256_hex(
+            'pam-bastion-voucher:' . length($user) . ":$user:$bastion_id"
+        ),
     );
 }
 
@@ -2815,7 +2821,16 @@ sub _readVoucherRecord {
         return undef;
     }
     my $data = $s->data;
-    return {} unless ref $data eq 'HASH' and ( $data->{nonce} // '' ) ne '';
+
+    # The record names the pair it was minted for. Refuse one that names
+    # another, so a collision in the joined id cannot hand a voucher across.
+    return {}
+      unless ref $data eq 'HASH'
+      and ( $data->{nonce} // '' ) ne ''
+      and defined $data->{user}
+      and defined $data->{bastion_id}
+      and $data->{user} eq $user
+      and $data->{bastion_id} eq $bastion_id;
     return { nonce => $data->{nonce}, exp => $data->{exp} || 0 };
 }
 

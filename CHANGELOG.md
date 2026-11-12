@@ -284,6 +284,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncated the argument at `exec`, so an attribute `root\0x` signed a
   certificate for `root` while the answer, `/ssh/mycerts` and the audit trail
   named the untruncated value. Such a value is now refused with a 400 (#461).
+- The LLNG `pam-access` plugin keyed a bastion voucher on `user` + `:` +
+  `bastion_id`, so a user `dwho` on a bastion `x:pam` and a user `dwho:x` on a
+  bastion `pam` shared one record and `/pam/bastion-cert` accepted the other
+  pair's voucher. The id now length-prefixes the user, and a record whose
+  stored pair differs is ignored. Upgrade every portal node together: a
+  session open during the upgrade gets `voucher_expired` until the user
+  reconnects, or `voucher_mismatch` if a newer connection rotated its voucher
+  meanwhile (#460).
 
 ## [0.7.0] _(2026-10-20)_
 

@@ -224,6 +224,13 @@ so nothing breaks on upgrade, and the next `/pam/authorize` carries the nonce
 into a record. Neither is deleted: during a rolling upgrade an older node may
 still be minting into them.
 
+The record id also length-prefixes the user, so a voucher minted under the old
+id is not seen by a node running this version, and vice versa. A session open
+during the upgrade is therefore answered `voucher_expired` until the user
+reconnects. If the user connects again meanwhile, the new nonce replaces the one
+the open shell holds, and that shell gets `voucher_mismatch` until it too
+reconnects. Upgrade every portal node together.
+
 #### Hop-certificate binding window
 
 Two kinds of certificate can match the fingerprint:
