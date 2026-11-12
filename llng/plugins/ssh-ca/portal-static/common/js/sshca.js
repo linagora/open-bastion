@@ -179,16 +179,44 @@
         });
       });
 
+      // navigator.clipboard only exists in a secure context: over plain HTTP,
+      // copy the selection instead. When the API exists but rejects the write
+      // (Permissions-Policy clipboard-write, denied permission), honour that
+      // refusal and leave the field selected for a manual copy.
+      // execCommand('copy') also returns true for an empty selection, hence
+      // the check that the selection covers the whole value.
+      function copyField(field, done) {
+        var scrollTop = field.scrollTop;
+        field.focus();
+        field.select();
+        field.setSelectionRange(0, field.value.length);
+        field.scrollTop = scrollTop;
+        if (!field.value) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(field.value).then(done, function () {});
+          return;
+        }
+        var ok = false;
+        try {
+          ok = field.selectionStart === 0
+            && field.selectionEnd === field.value.length
+            && document.execCommand('copy');
+        } catch (e) {}
+        if (ok) done();
+      }
+
       // Copy button
       if (copyBtn) {
+        var copyTimer = null;
+        var copyLabel = null;
         copyBtn.addEventListener('click', function () {
-          certTextarea.select();
-          certTextarea.setSelectionRange(0, 99999);
-          navigator.clipboard.writeText(certTextarea.value).then(function () {
-            var originalHtml = copyBtn.innerHTML;
+          copyField(certTextarea, function () {
+            if (copyTimer === null) copyLabel = copyBtn.innerHTML;
             copyBtn.innerHTML = '<span class="fa fa-check"></span> Copied!';
-            setTimeout(function () {
-              copyBtn.innerHTML = originalHtml;
+            clearTimeout(copyTimer);
+            copyTimer = setTimeout(function () {
+              copyBtn.innerHTML = copyLabel;
+              copyTimer = null;
             }, 2000);
           });
         });

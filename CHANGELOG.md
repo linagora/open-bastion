@@ -78,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- pam-access, ssh-ca: the portal buttons that copy the PAM token and the SSH
+  certificate did nothing when the portal was served over plain HTTP. They
+  now work there too (#451).
 - pam-access: a malformed request to `/pam/authorize`, `/pam/verify`,
   `/pam/userinfo`, `/pam/bastion-cert` or `/pam/heartbeat` answered 500
   instead of 400, which let an unauthenticated client fill the portal error
