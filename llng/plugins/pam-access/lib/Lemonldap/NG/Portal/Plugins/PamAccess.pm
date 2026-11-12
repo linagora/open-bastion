@@ -2782,6 +2782,11 @@ sub _voucherStoreOpts {
         storageModuleOptions => $self->conf->{globalStorageOptions},
         hashStore            => 0,
         kind                 => $VOUCHER_KIND,
+
+        # The length is load-bearing, not decoration: both $user and
+        # $bastion_id may contain ':', so (dwho, x:pam) and (dwho:x, pam)
+        # would otherwise join to the same id and share one record. Keep it
+        # even though nothing else reads it.
         id => sha256_hex(
             'pam-bastion-voucher:' . length($user) . ":$user:$bastion_id"
         ),
