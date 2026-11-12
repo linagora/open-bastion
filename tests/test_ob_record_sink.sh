@@ -143,6 +143,17 @@ else
     bad "transfer session wrong (json=$tj typescript=$tt)"
 fi
 
+# ── Test 3b: a header without a format is recorded as a script session
+record_via_script \
+    '{"v":2,"session_id":"noformat1","client_ip":"x","ssh_tty":"x","original_command":"","start":"x"}' \
+    'printf "noformat\n"' 2>/dev/null
+nj=$(wait_done noformat1)
+if [ -n "$nj" ] && grep -q '"format": "script"' "$nj"; then
+    ok "missing format defaults to script"
+else
+    bad "missing format not recorded as script (json=$nj)"
+fi
+
 # ── Test 4: fail-closed — unreachable sink → connector exits non-zero before stream
 if OB_RECORD_SOCKET="$WORK/nope.sock" "$CONNECT" "$(hdr noid script)" /dev/null 2>/dev/null; then
     bad "connector returned 0 against an unreachable sink (should fail closed)"

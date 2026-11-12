@@ -509,7 +509,7 @@ int main(void)
     setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     char *session_id = hdr_str(hdr, "session_id", 64);
-    char *format = hdr_str(hdr, "format", 32);
+    char *format_hdr = hdr_str(hdr, "format", 32);
     char *client_ip = hdr_str(hdr, "client_ip", MAX_SHORT);
     char *tty = hdr_str(hdr, "ssh_tty", MAX_SHORT);
     char *command = hdr_str(hdr, "original_command", MAX_CMD);
@@ -527,8 +527,7 @@ int main(void)
         fail("missing/invalid session_id in header");
         goto reject;
     }
-    if (!format)
-        format = strdup("script");
+    const char *format = format_hdr ? format_hdr : "script";
     /* Allowlist of recording formats understood by v1. */
     int is_transfer = strcmp(format, "transfer") == 0;
     if (strcmp(format, "script") != 0 && !is_transfer) {
@@ -718,7 +717,7 @@ int main(void)
 
     close(dirfd);
     free(session_id);
-    free(format);
+    free(format_hdr);
     free(client_ip);
     free(tty);
     free(command);
@@ -729,7 +728,7 @@ reject_dir:
     close(dirfd);
 reject:
     free(session_id);
-    free(format);
+    free(format_hdr);
     free(client_ip);
     free(tty);
     free(command);
