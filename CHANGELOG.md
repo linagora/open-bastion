@@ -111,6 +111,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serial 1, and a KRL carrying a section type OpenSSH does not define is
   refused instead of served to hosts that would then fail closed on every
   key (#432, #433, #435, #437).
+- ob-client: a granting answer whose `user` string held an embedded NUL was
+  accepted with the name truncated at it, so an answer naming `alice\0x`
+  authorised the account `alice` and the audit log recorded the shorter name.
+  Both parsers now apply the rule the module already used for the group and
+  attribute fields — a JSON string whose decoded length differs from its
+  C-string length is refused. The same rule now guards the user name in the
+  authentication and offline caches, the heartbeat `access_token`, and the
+  session header fields the recorder copies into a record (#431).
+- The JSON answers read from the portal, the CrowdSec API and the token file
+  no longer accept a string field holding an embedded NUL: such a value was
+  read as the part before it, so a truncated `access_token` was sent as a
+  credential, and a `client_ip`, `fingerprint`, `aud`, `use` or `key_ops`
+  value could satisfy the `strcmp()` binding, audience or key-use check it
+  does not match (#431).
+- ob-client: a JSON string holding an embedded NUL was read as the part before
+  it wherever an answer from the portal, the CrowdSec API or the token file
+  becomes a C string. A granting answer naming `alice\0x` authorised the
+  account `alice` — the PAM module compares `user` with `strcmp()` — and the
+  audit log recorded the shorter name; a truncated `access_token`, `client_ip`
+  or `fingerprint` was used or stored as the credential or binding it only
+  prefix-matches; an `aud`, `use` or `key_ops` value satisfied the check it
+  does not match. Such a field is now refused when its decoded length differs
+  from its C-string length — the rule the module already applied to the group
+  and attribute fields — in both parsers, the authentication and offline
+  caches, the heartbeat and recorder fields, the token manager, the CrowdSec
+  and certificate-daemon tokens, and the JWS claims (#431).
 - pam: a token file whose `access_token` or `refresh_token` is a JSON `null`
   made `token_manager_load_file()` call `strdup(NULL)` and die — in the `sshd`
   PAM child and in `sudo`, so every SSO login and every elevation on that host

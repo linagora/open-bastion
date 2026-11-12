@@ -424,6 +424,19 @@ else
     bad "the sink accepted a v1 (unframed) header ($fv)"
 fi
 
+# ── A session_id holding an embedded NUL is not the id it looks like (#431).
+# json-c decodes \u0000 and keeps the decoded length, so reading the value as
+# a C string would name "badnul01" -- a session id the recorder never sent --
+# and the record would be filed under it. Refused before any file is created.
+frame_session 'badnul01\u0000x' end
+sleep 1
+bn=$(ls "$SESS/$USER_NAME"/*badnul01*.json 2>/dev/null | head -1)
+if [ -z "$bn" ]; then
+    ok "a session_id holding an embedded NUL is refused before any file"
+else
+    bad "the sink recorded a session_id holding an embedded NUL ($bn)"
+fi
+
 # ── Test 12: an oversized header is refused before any file is created, and the
 # connector fails closed (#287). The connector waits for the sink's ACK, which
 # the sink sends only after the metadata and recording file exist; a rejected

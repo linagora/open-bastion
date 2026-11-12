@@ -46,13 +46,29 @@ bool str_parse_bool_strict(const char *value, bool *out);
 bool str_parse_bool(const char *value);
 
 /*
+ * True when a JSON string holds an embedded NUL. json-c decodes \u0000 into
+ * the buffer and keeps the decoded length, while every C-string consumer --
+ * strlen(), strcmp(), strdup() -- stops there, so the value read back is
+ * shorter than the one the sender wrote. Callers that compare, store or
+ * record such a value must refuse it rather than act on the truncated form.
+ */
+#ifdef JSON_C_VERSION
+static inline bool str_json_has_embedded_nul(struct json_object *obj)
+{
+    if (!obj || !json_object_is_type(obj, json_type_string)) {
+        return false;
+    }
+    const char *str = json_object_get_string(obj);
+    return str && strlen(str) != (size_t)json_object_get_string_len(obj);
+}
+
+/*
  * Safely extract a string from a json-c object and duplicate it.
  * Returns NULL if the object is NULL, is not a JSON string, or holds an
  * embedded NUL. Caller must free the returned string.
  *
  * Note: Requires json-c to be included before using this function.
  */
-#ifdef JSON_C_VERSION
 static inline char *str_json_strdup(struct json_object *obj)
 {
     /* json_object_get_string() only returns NULL for a JSON null: it
@@ -68,7 +84,7 @@ static inline char *str_json_strdup(struct json_object *obj)
     }
     /* json-c keeps an embedded NUL; strdup() would store only the part before
      * it, a value the portal never sent. */
-    if (strlen(str) != (size_t)json_object_get_string_len(obj)) {
+    if (str_json_has_embedded_nul(obj)) {
         return NULL;
     }
     return strdup(str);
@@ -110,10 +126,10 @@ static inline char **str_json_parse_string_array(struct json_object *arr,
         /* Only accept string elements, skip non-strings. A string holding a
          * NUL byte is refused too: strdup() would silently shorten it, so
          * "admins\0-readonly" would become the group "admins". */
-        if (elem && json_object_is_type(elem, json_type_string)) {
-            int len = json_object_get_string_len(elem);
+        if (elem && json_object_is_type(elem, json_type_string) &&
+            !str_json_has_embedded_nul(elem)) {
             const char *str = json_object_get_string(elem);
-            if (str && len >= 0 && strlen(str) == (size_t)len) {
+            if (str) {
                 result[valid_count] = strdup(str);
                 if (result[valid_count]) {
                     valid_count++;
