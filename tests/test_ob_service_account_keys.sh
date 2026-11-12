@@ -264,6 +264,9 @@ test_helper_refusals() {
     echo "ssh-ed25519 AAAASEMI    semi@test"    > "$d/keys/sv;id.pub"
     echo "ssh-ed25519 AAAASPACE   space@test"   > "$d/keys/svc key.pub"
     echo "ssh-ed25519 AAAADASH    dash@test"    > "$d/keys/-svc.pub"
+    echo "ssh-ed25519 AAAADOT     dot@test"     > "$d/keys/.svc.pub"
+    local long33=abcdefghijklmnopqrstuvwxyz1234567
+    echo "ssh-ed25519 AAAALONG    long@test"    > "$d/keys/$long33.pub"
     if $as_root; then
         # Ownership then cannot be the reason for the refusal: only validation
         # can be. This is the strong form of the assertion, and it needs root.
@@ -271,11 +274,21 @@ test_helper_refusals() {
     fi
 
     local name
-    for name in "../escaped" "SVC" "sv;id" "svc key" "-svc" ""; do
+    for name in "../escaped" "SVC" "sv;id" "svc key" "-svc" ".svc" "$long33" ""; do
         out=$(OB_SERVICE_ACCOUNTS_KEYS_DIR="$d/keys" bash "$HELPER" "$name" 2>/dev/null); rc=$?
         [ "$rc" -eq 0 ] || bad="$bad nonzero-exit-on[$name]($rc)"
         [ -z "$out" ]   || bad="$bad served[$name]"
     done
+
+    # A dotted name is a valid account name. Only root can own the file the
+    # helper requires, so only a root run can see it served.
+    if $as_root; then
+        echo "ssh-ed25519 AAAAJOHNDOE john.doe@test" > "$d/keys/john.doe.pub"
+        chown root:root "$d/keys/john.doe.pub"
+        out=$(OB_SERVICE_ACCOUNTS_KEYS_DIR="$d/keys" bash "$HELPER" john.doe 2>/dev/null); rc=$?
+        [ "$rc" -eq 0 ] || bad="$bad nonzero-exit-on[john.doe]($rc)"
+        [[ "$out" == *AAAAJOHNDOE* ]] || bad="$bad did-not-serve[john.doe]"
+    fi
 
     # A well-formed name with no file: nothing, still zero.
     out=$(OB_SERVICE_ACCOUNTS_KEYS_DIR="$d/keys" bash "$HELPER" nosuchacct 2>/dev/null); rc=$?
@@ -416,7 +429,7 @@ test_missing_account_is_reported() {
     local conf out bad="" role
     SCRATCH=${SCRATCH:-$(mktemp -d)}
     conf="$SCRATCH/service-accounts.conf"
-    printf '[root]\nkey_fingerprint = SHA256:abc\n\n[ob-no-such-svc]\nkey_fingerprint = SHA256:def\nuid = 990\n' \
+    printf '[root]\nkey_fingerprint = SHA256:abc\n\n[ob-no-such-svc]\nkey_fingerprint = SHA256:def\nuid = 990\n\n[ob.no.such.svc]\nkey_fingerprint = SHA256:ghi\n\n[Ob.Bad.Name]\nkey_fingerprint = SHA256:jkl\n' \
         >"$conf"
 
     for role in ob-bastion-setup ob-backend-setup; do
@@ -429,6 +442,8 @@ test_missing_account_is_reported() {
             OB_SERVICE_ACCOUNTS_CONF="$conf" _ob_warn_missing_service_accounts 2>&1
         )
         case "$out" in *ob-no-such-svc*) ;; *) bad="$bad $role(missing-not-reported)" ;; esac
+        case "$out" in *ob.no.such.svc*) ;; *) bad="$bad $role(dotted-missing-not-reported)" ;; esac
+        case "$out" in *Ob.Bad.Name*) bad="$bad $role(invalid-name-reported)" ;; esac
         printf '%s\n' "$out" | grep 'not in /etc/passwd' | grep -qw root \
             && bad="$bad $role(existing-account-reported)"
         case "$out" in *CALLED*) bad="$bad $role(created-something)" ;; esac

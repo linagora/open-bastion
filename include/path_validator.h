@@ -38,9 +38,8 @@
  *
  * Checks for:
  * - Non-absolute paths
- * - Path traversal (..)
+ * - Components starting with a dot: ".", ".." (path traversal), hidden files
  * - Double slashes (//)
- * - Hidden paths (/.)
  * - Shell metacharacters
  */
 static inline int path_validator_is_dangerous(const char *path)
@@ -56,13 +55,14 @@ static inline int path_validator_is_dangerous(const char *path)
         return 1;
     }
 
-    /* Check for path traversal attempts */
-    if (strstr(path, "..") != NULL) return 1;
-
     /* Check for multiple consecutive slashes */
     if (strstr(path, "//") != NULL) return 1;
 
-    /* Check for hidden paths (starting with dot after slash) */
+    /*
+     * The path is absolute, so every component follows a '/': refusing "/."
+     * refuses "..", "." and hidden components. Two dots inside a component,
+     * as in the valid user name "a..b", are part of an ordinary name.
+     */
     if (strstr(path, "/.") != NULL) return 1;
 
     /* Check for dangerous characters */

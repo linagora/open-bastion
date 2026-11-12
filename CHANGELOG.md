@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- User names may contain a dot (`john.doe`). The PAM module and the NSS module
+  refused them while `ob-cert-daemon` and the session recorder accepted them,
+  so such a user got a certificate but could not log in. Every component now
+  applies the same grammar, `^[a-z_][a-z0-9_.-]{0,31}$`; see the
+  [security reference](doc/references/security-reference.rst) (#449).
 - `ob-post-upgrade` adds the missing `%t %k` to the `AuthorizedPrincipalsCommand`
   line of a pre-0.7.0 sshd drop-in and reloads sshd, instead of refusing.
 - The files `ob-bastion-setup` generates (`openbastion.conf`, the PAM stacks,

@@ -16,7 +16,6 @@
 
 /* Field validators (return 1 if acceptable, 0 otherwise). Bounds mirror the
  * per-field request limits enforced by the daemon. */
-int ob_valid_username(const char *s);
 int ob_valid_host(const char *s);
 int ob_valid_group(const char *s);
 int ob_valid_pubkey(const char *s);

@@ -272,6 +272,14 @@ check_user_valid() {
     esac
 }
 
+# The PAM module names each marker after the user (ob_valid_username(),
+# src/str_utils.c); any other file in the directory is not a session to manage.
+# Letters spelled out: in bash, [a-z] follows the collation of the locale and
+# matches accented letters in fr_FR.UTF-8.
+is_user_marker() {
+    [[ "$1" =~ ^[abcdefghijklmnopqrstuvwxyz_][abcdefghijklmnopqrstuvwxyz0123456789_.-]{0,31}$ ]]
+}
+
 get_cache_age() {
     local user="$1"
     local marker_file="$MARKER_DIR/$user"
@@ -309,9 +317,7 @@ revalidate_sessions() {
         local user_file
         user_file=$(basename "$marker_path")
 
-        case "$user_file" in
-            *.* ) continue ;;
-        esac
+        is_user_marker "$user_file" || continue
 
         local user="$user_file"
         log_debug "Checking offline session for user: $user"
@@ -400,9 +406,7 @@ handle_userinfo_unusable() {
         [ -e "$marker_path" ] || continue
         local user_file
         user_file=$(basename "$marker_path")
-        case "$user_file" in
-            *.* ) continue ;;
-        esac
+        is_user_marker "$user_file" || continue
 
         local user="$user_file"
         log_crit "Terminating offline session for $user (/pam/userinfo unusable for ${duration}s)"
@@ -441,9 +445,7 @@ handle_sso_unreachable() {
                 [ -e "$marker_path" ] || continue
                 local user_file
                 user_file=$(basename "$marker_path")
-                case "$user_file" in
-                    *.* ) continue ;;
-                esac
+                is_user_marker "$user_file" || continue
 
                 local user="$user_file"
                 log_crit "Terminating offline session for $user (SSO unreachable for ${unreachable_duration}s)"

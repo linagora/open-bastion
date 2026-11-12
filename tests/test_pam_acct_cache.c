@@ -18,6 +18,12 @@
 /* Redirect the fingerprint spool before the module sees its default. */
 #define OB_SSH_FP_SPOOL_DIR "/nonexistent/open-bastion-test-ssh-fp"
 
+#ifdef ENABLE_DESKTOP_SSO
+/* And the offline session markers, into the test directory. */
+static char g_marker_dir[160];
+#define OFFLINE_SESSION_MARKER_DIR g_marker_dir
+#endif
+
 #include "../src/pam_openbastion.c"
 
 #include <security/pam_appl.h>
@@ -257,6 +263,32 @@ int main(void)
     install_client(data, closed_port());
     CHECK(account_phase(pamh) == PAM_AUTHINFO_UNAVAIL,
           "a later outage has nothing left to replay");
+
+#ifdef ENABLE_DESKTOP_SSO
+    /* ob-session-monitor revalidates the sessions these markers name: a user
+     * the module cannot mark is never checked against the portal again. */
+    printf("\nOffline session markers follow the user-name grammar:\n");
+    snprintf(g_marker_dir, sizeof(g_marker_dir), "%s/markers", g_dir);
+    if (mkdir(g_marker_dir, 0700) != 0) {
+        perror("mkdir");
+        return 1;
+    }
+    create_offline_session_marker(pamh, "john.doe");
+    CHECK(has_offline_session_marker("john.doe"), "a dotted user gets a marker");
+    remove_offline_session_marker(pamh, "john.doe");
+    CHECK(!has_offline_session_marker("john.doe"), "  ... which is removed");
+
+    create_offline_session_marker(pamh, ".hidden");
+    char hidden[256];
+    snprintf(hidden, sizeof(hidden), "%s/.hidden", g_marker_dir);
+    CHECK(stat(hidden, &st) != 0, "a name outside the grammar gets none");
+    if (close(open(hidden, O_WRONLY | O_CREAT, 0600)) == 0) {
+        CHECK(!has_offline_session_marker(".hidden"),
+              "  ... and a file under such a name is not read as one");
+        remove_offline_session_marker(pamh, ".hidden");
+        CHECK(stat(hidden, &st) == 0, "  ... nor removed as one");
+    }
+#endif
 
     pam_end(pamh, PAM_SUCCESS);
     cleanup_data(pamh, g_data, 0);

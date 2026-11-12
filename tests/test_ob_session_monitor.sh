@@ -401,6 +401,55 @@ test_empty_token_not_sent() {
 }
 run_test test_empty_token_not_sent
 
+# --- A dotted user name is a user ----------------------------------------------
+# revalidate_sessions runs from the shipped script against a marker directory
+# holding john.doe's marker and two files that are not markers. The portal says
+# john.doe is revoked: their session must end and the marker go; the other two
+# files must be left alone. loginctl is a stub that logs what it is asked.
+test_dotted_user_is_revalidated() {
+    local dir="$WORK/markers"
+    rm -rf "$dir"; mkdir -p "$dir"
+    date +%s > "$dir/john.doe"
+    : > "$dir/.john.doe.tmp"
+    : > "$dir/John.Doe"
+    {
+        echo 'set -euo pipefail'
+        echo "MARKER_DIR='$dir'"
+        echo "LOG='$WORK/loginctl.log'"
+        echo 'REVALIDATION_GRACE=14400'
+        echo "FORCE_ONLINE_FILE='$WORK/force_online'"
+        echo "FORCE_ONLINE_LOCK='$WORK/force_online.lock'"
+        echo 'log_warn() { :; }; log_crit() { :; }; log_debug() { :; }; log_info() { :; }'
+        echo 'check_user_valid() { echo "checked $1" >> "$LOG"; return 1; }'
+        echo 'loginctl() {'
+        echo '    case "$1" in'
+        echo '        list-sessions) echo "7 1000 john.doe seat0" ;;'
+        echo '        show-session) echo "john.doe" ;;'
+        echo '        terminate-session) echo "terminated $2" >> "$LOG" ;;'
+        echo '    esac'
+        echo '}'
+        for f in is_user_marker get_cache_age revalidate_sessions; do
+            awk "/^$f\\(\\) \\{/{f=1} f{print} f&&/^\\}\$/{exit}" "$SCRIPT"
+        done
+        echo 'revalidate_sessions'
+    } > "$WORK/markers.sh"
+    : > "$WORK/loginctl.log"
+    bash "$WORK/markers.sh" 2>&1
+    local log; log=$(cat "$WORK/loginctl.log")
+    local bad=""
+    grep -qx 'checked john.doe' <<<"$log" || bad="$bad [john.doe not checked]"
+    grep -qx 'terminated 7' <<<"$log" || bad="$bad [session not terminated]"
+    [ ! -e "$dir/john.doe" ] || bad="$bad [marker kept]"
+    grep -q 'checked .*[.]tmp\|checked John' <<<"$log" && bad="$bad [non-marker file checked]"
+    [ -e "$dir/.john.doe.tmp" ] && [ -e "$dir/John.Doe" ] || bad="$bad [non-marker file removed]"
+    if [ -z "$bad" ]; then
+        pass "a revoked dotted user's offline session is terminated"
+    else
+        fail "a revoked dotted user's offline session is terminated" "$bad"
+    fi
+}
+run_test test_dotted_user_is_revalidated
+
 echo
 echo "Tests run: $((TESTS_PASSED + TESTS_FAILED)), passed: $TESTS_PASSED, failed: $TESTS_FAILED"
 [ "$TESTS_FAILED" -eq 0 ]

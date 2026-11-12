@@ -920,46 +920,6 @@ static cache_entry_t *cache_find_by_uid(uid_t uid)
  */
 
 /*
- * Validate that a username is safe to use as a single path component.
- *
- * Usernames are already validated upstream (the LLNG directory enforces
- * `[a-z_][a-z0-9_-]*`), but the file cache
- * turns the name into a filesystem path, so this is defense in depth against
- * path traversal and unexpected bytes.
- *
- * This deliberately enforces EXACTLY the grammar validate_username() enforces
- * in src/pam_openbastion.c (`[a-z_][a-z0-9_-]{0,31}`). The two must not drift:
- * a name this function accepts but the PAM validator refuses would be written
- * to the cache and then never invalidated by the PAM side, leaving a stale
- * record no code path can clear. Concretely that means, on top of rejecting
- * NULL/empty, '/', a leading '.' and anything outside [a-z0-9_-]:
- *   - the first character must be [a-z_] (a leading digit or '-' is refused,
- *     as it is by validate_username);
- *   - the total length is capped at 32, the same conservative POSIX-ish limit.
- *
- * Returns 0 if the name is a safe filename, -1 otherwise.
- */
-#define CACHE_NAME_MAX 32
-static int valid_cache_name(const char *name)
-{
-    if (!name || name[0] == '\0') return -1;
-    if (strlen(name) > CACHE_NAME_MAX) return -1;
-    /* First character: lowercase letter or underscore (rejects '.', '-', and
-     * any digit) — identical to validate_username()'s first-character rule. */
-    if (!((name[0] >= 'a' && name[0] <= 'z') || name[0] == '_')) return -1;
-    for (const char *c = name; *c; c++) {
-        unsigned char ch = (unsigned char)*c;
-        if (ch == '/') return -1;
-        if (!((ch >= 'a' && ch <= 'z') ||
-              (ch >= '0' && ch <= '9') ||
-              ch == '_' || ch == '-')) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-/*
  * Open a cache directory without creating it, and verify it is trustworthy.
  *
  * SECURITY: the cache files are consumed by privileged callers (sshd, sudo,
@@ -1468,7 +1428,7 @@ static void file_cache_save_by_name(const struct passwd *pw)
     if (geteuid() != CACHE_TRUSTED_UID) return;
 
     /* Defense in depth: never turn an unexpected name into a path. */
-    if (valid_cache_name(pw->pw_name) != 0) {
+    if (!ob_valid_username(pw->pw_name)) {
         syslog(LOG_WARNING,
                "libnss_openbastion: refusing to cache user with unsafe name");
         return;
@@ -1668,7 +1628,7 @@ static int file_cache_load_by_name(const char *name, struct passwd *pw,
 {
     /* Defense in depth: validate the name as a filename BEFORE building a
      * path, so a hostile or malformed lookup can never escape the cache dir. */
-    if (valid_cache_name(name) != 0) {
+    if (!ob_valid_username(name)) {
         return -1;
     }
 
@@ -2130,7 +2090,7 @@ static int query_llng_userinfo(const char *username, struct passwd *pw,
 {
     /* The entry point refuses such a name already; keep the guarantee here
      * too, since the fallback home below is built from it. */
-    if (valid_cache_name(username) != 0) {
+    if (!ob_valid_username(username)) {
         return 1;
     }
 
@@ -2547,7 +2507,7 @@ NSS_VISIBLE enum nss_status _nss_openbastion_getpwnam_r(const char *name,
      * refuses to create it. Refuse it before the portal round trip, and before
      * any code builds a home or a cache key from it.
      */
-    if (valid_cache_name(name) != 0) {
+    if (!ob_valid_username(name)) {
         *errnop = ENOENT;
         return NSS_STATUS_NOTFOUND;
     }

@@ -23,7 +23,6 @@
 #define MAX_SERVICE_ACCOUNTS 64
 
 /* Maximum length for service account fields */
-#define MAX_SERVICE_ACCOUNT_NAME 32
 #define MAX_SERVICE_ACCOUNT_FINGERPRINT 128
 
 /* Configuration for a single service account */

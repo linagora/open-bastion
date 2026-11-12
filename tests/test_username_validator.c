@@ -1,153 +1,97 @@
 /*
- * test_username_validator.c - Unit tests for username validation
+ * test_username_validator.c - ob_valid_username(), the one user-name grammar
  *
- * Tests the username validation to prevent /etc/passwd injection attacks.
+ * The named cases come from tests/username_corpus.txt, which
+ * test_ob_username_grammar.sh also runs through the regular expression of the
+ * shell scripts: both sides must give the same verdict on every line.
  */
 
+#include <locale.h>
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
+
+#include "str_utils.h"
 
 static int tests_run = 0;
-static int tests_passed = 0;
+static int tests_failed = 0;
 
-#define TEST(name) do { \
-    printf("  Testing %s... ", #name); \
-    tests_run++; \
-    if (test_##name()) { \
-        printf("PASS\n"); \
-        tests_passed++; \
-    } else { \
-        printf("FAIL\n"); \
-    } \
-} while(0)
-
-/*
- * Replicate validate_username from pam_llng.c for testing.
- * Returns 1 if valid, 0 if invalid.
- */
-static int validate_username(const char *user)
+static void check(int cond, const char *what, const char *name)
 {
-    if (!user || !*user) return 0;
-
-    size_t len = strlen(user);
-    /* POSIX username max is typically 32, be conservative */
-    if (len > 32) return 0;
-
-    /* First character must be lowercase letter or underscore */
-    if (!islower((unsigned char)user[0]) && user[0] != '_') return 0;
-
-    for (size_t i = 0; i < len; i++) {
-        char c = user[i];
-        /* Allow lowercase, digits, underscore, hyphen */
-        if (!islower((unsigned char)c) && !isdigit((unsigned char)c) &&
-            c != '_' && c != '-') {
-            return 0;
-        }
+    tests_run++;
+    if (!cond) {
+        tests_failed++;
+        printf("  FAIL: %s: \"%s\"\n", what, name);
     }
-
-    return 1;
 }
 
-/* Test valid usernames are accepted */
-static int test_valid_usernames(void)
+static void run_corpus(const char *path)
 {
-    if (validate_username("alice") != 1) return 0;
-    if (validate_username("bob_123") != 1) return 0;
-    if (validate_username("user-name") != 1) return 0;
-    if (validate_username("_service") != 1) return 0;
-    if (validate_username("a") != 1) return 0;
-    if (validate_username("user123") != 1) return 0;
-    return 1;
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        perror(path);
+        tests_failed++;
+        return;
+    }
+    char line[256];
+    int cases = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\n")] = '\0';
+        if (line[0] == '#' || line[0] == '\0') {
+            continue;
+        }
+        char *name = strchr(line, ' ');
+        if (!name) {
+            printf("  malformed corpus line: %s\n", line);
+            tests_failed++;
+            continue;
+        }
+        *name++ = '\0';
+        if (strcmp(line, "valid") == 0) {
+            check(ob_valid_username(name), "should be accepted", name);
+        } else if (strcmp(line, "invalid") == 0) {
+            check(!ob_valid_username(name), "should be refused", name);
+        } else {
+            printf("  unknown verdict: %s\n", line);
+            tests_failed++;
+        }
+        cases++;
+    }
+    fclose(f);
+    printf("  %d corpus cases\n", cases);
+    check(cases > 0, "the corpus is not empty", path);
 }
 
-/* Test usernames that are too long */
-static int test_username_too_long(void)
+int main(int argc, char **argv)
 {
-    /* 33 characters - should fail */
-    if (validate_username("abcdefghijklmnopqrstuvwxyz1234567") == 1) return 0;
-    /* 32 characters - should pass */
-    if (validate_username("abcdefghijklmnopqrstuvwxyz123456") != 1) return 0;
-    return 1;
-}
+    const char *corpus = argc > 1 ? argv[1] : OB_USERNAME_CORPUS;
 
-/* Test usernames with bad first character */
-static int test_username_bad_start(void)
-{
-    /* Cannot start with digit */
-    if (validate_username("1alice") == 1) return 0;
-    /* Cannot start with hyphen */
-    if (validate_username("-bob") == 1) return 0;
-    /* Cannot start with uppercase */
-    if (validate_username("Alice") == 1) return 0;
-    return 1;
-}
+    printf("Username grammar ^[a-z_][a-z0-9_.-]{0,31}$\n");
+    run_corpus(corpus);
 
-/* Test usernames with invalid characters */
-static int test_username_bad_chars(void)
-{
-    /* Colon would corrupt /etc/passwd format */
-    if (validate_username("alice:bob") == 1) return 0;
-    /* Newline would add extra line */
-    if (validate_username("alice\nroot:0:0") == 1) return 0;
-    /* Carriage return */
-    if (validate_username("alice\rroot") == 1) return 0;
-    /* Slash could be path traversal */
-    if (validate_username("alice/bob") == 1) return 0;
-    /* Space not allowed */
-    if (validate_username("alice bob") == 1) return 0;
-    /* Uppercase not allowed */
-    if (validate_username("aliceB") == 1) return 0;
-    return 1;
-}
+    /* Cases a line-based corpus cannot carry. */
+    check(!ob_valid_username(NULL), "NULL refused", "(null)");
+    check(!ob_valid_username(""), "empty refused", "");
+    check(!ob_valid_username("alice\nroot:0:0"), "newline refused",
+          "alice\\nroot:0:0");
+    check(!ob_valid_username("alice\rroot"), "carriage return refused",
+          "alice\\rroot");
+    check(!ob_valid_username("alice\tbob"), "tab refused", "alice\\tbob");
 
-/* Test shell metacharacters are rejected */
-static int test_username_shell_injection(void)
-{
-    if (validate_username("alice;id") == 1) return 0;
-    if (validate_username("bob|cat") == 1) return 0;
-    if (validate_username("user`whoami`") == 1) return 0;
-    if (validate_username("test$(id)") == 1) return 0;
-    if (validate_username("u&ser") == 1) return 0;
-    if (validate_username("user>file") == 1) return 0;
-    return 1;
-}
+    char huge[4096];
+    memset(huge, 'a', sizeof(huge) - 1);
+    huge[sizeof(huge) - 1] = '\0';
+    check(!ob_valid_username(huge), "4095 characters refused", "a...a");
 
-/* Test null and empty inputs */
-static int test_username_null_empty(void)
-{
-    if (validate_username(NULL) == 1) return 0;
-    if (validate_username("") == 1) return 0;
-    return 1;
-}
+    /* In a single-byte locale islower() accepts accented letters; the grammar
+     * must not depend on the locale of the process that loads the module. */
+    if (setlocale(LC_CTYPE, "fr_FR.ISO-8859-1") ||
+        setlocale(LC_CTYPE, "en_US.ISO-8859-1")) {
+        check(!ob_valid_username("j\xe9r\xf4me"), "Latin-1 letters refused",
+              "j\\xe9r\\xf4me");
+    }
+    check(!ob_valid_username("j\xe9r\xf4me"), "high bytes refused",
+          "j\\xe9r\\xf4me");
 
-/* Test common service accounts are valid */
-static int test_service_accounts(void)
-{
-    if (validate_username("www-data") != 1) return 0;
-    if (validate_username("_apt") != 1) return 0;
-    if (validate_username("nobody") != 1) return 0;
-    if (validate_username("systemd-network") != 1) return 0;
-    return 1;
-}
-
-int main(void)
-{
-    printf("Username Validator Tests\n");
-    printf("========================\n\n");
-
-    printf("Valid usernames:\n");
-    TEST(valid_usernames);
-    TEST(service_accounts);
-
-    printf("\nInvalid usernames:\n");
-    TEST(username_too_long);
-    TEST(username_bad_start);
-    TEST(username_bad_chars);
-    TEST(username_shell_injection);
-    TEST(username_null_empty);
-
-    printf("\n%d/%d tests passed\n", tests_passed, tests_run);
-
-    return (tests_passed == tests_run) ? 0 : 1;
+    printf("%d/%d checks passed\n", tests_run - tests_failed, tests_run);
+    return tests_failed == 0 ? 0 : 1;
 }

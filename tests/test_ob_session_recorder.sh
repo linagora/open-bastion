@@ -678,39 +678,39 @@ test_parse_args() {
     fi
 }
 
-# ── Test 13: Invalid SESSION_USER regex rejects path traversal ──
+# ── Tests 13-14: the SESSION_USER check of the shipped script ──
+# The expression is read out of scripts/ob-session-recorder, so these test
+# what ships; test_ob_username_grammar.sh runs the full corpus through it.
+session_user_re() {
+    sed -n 's/^if \[\[ ! "\$SESSION_USER" =~ \(.*\) \]\]; then$/\1/p' \
+        "$SCRIPT_DIR/ob-session-recorder"
+}
+
 test_invalid_session_user() {
-    # Test the validation regex directly (SESSION_USER is now derived from
-    # id -un, not $USER, so we can't inject via environment).
-    (
-        SESSION_USER="../../../etc/passwd"
-        if [[ ! "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
-            exit 0  # correctly rejected
-        else
-            exit 1  # incorrectly accepted
-        fi
-    )
-    if [ $? -eq 0 ]; then
-        pass "Invalid SESSION_USER (path traversal) is rejected by regex"
+    local re u bad=""
+    re=$(session_user_re)
+    [ -n "$re" ] || { fail "SESSION_USER check found in ob-session-recorder"; return; }
+    for u in "../../../etc/passwd" ".hidden" "John" "$(printf 'a%.0s' {1..33})"; do
+        [[ "$u" =~ $re ]] && bad="$bad [$u]"
+    done
+    if [ -z "$bad" ]; then
+        pass "Invalid SESSION_USER (traversal, hidden, upper case, 33 chars) is rejected"
     else
-        fail "Invalid SESSION_USER (path traversal) was unexpectedly accepted by regex"
+        fail "Invalid SESSION_USER was unexpectedly accepted:$bad"
     fi
 }
 
-# ── Test 14: Valid SESSION_USER passes regex validation ──
 test_valid_session_user() {
-    (
-        SESSION_USER="alice"
-        if [[ "$SESSION_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]]; then
-            exit 0  # correctly accepted
-        else
-            exit 1  # incorrectly rejected
-        fi
-    )
-    if [ $? -eq 0 ]; then
-        pass "Valid SESSION_USER passes regex validation"
+    local re u bad=""
+    re=$(session_user_re)
+    [ -n "$re" ] || { fail "SESSION_USER check found in ob-session-recorder"; return; }
+    for u in alice john.doe "$(printf 'a%.0s' {1..32})"; do
+        [[ "$u" =~ $re ]] || bad="$bad [$u]"
+    done
+    if [ -z "$bad" ]; then
+        pass "Valid SESSION_USER (alice, john.doe, 32 chars) passes"
     else
-        fail "Valid SESSION_USER was unexpectedly rejected by regex"
+        fail "Valid SESSION_USER was unexpectedly rejected:$bad"
     fi
 }
 

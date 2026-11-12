@@ -46,10 +46,11 @@ is_valid_client_id() {
 }
 
 # is_valid_service_username <s>
-# Mirrors validate_username() in src/service_account.c: first char a lowercase
-# letter or underscore, then lowercase letters, digits, underscore or hyphen.
+# The user-name grammar of ob_valid_username() (src/str_utils.c).
+# Letters spelled out: in bash, [a-z] follows the collation of the locale and
+# matches accented letters in fr_FR.UTF-8.
 is_valid_service_username() {
-    [[ "$1" =~ ^[a-z_][a-z0-9_-]*$ ]]
+    [[ "$1" =~ ^[abcdefghijklmnopqrstuvwxyz_][abcdefghijklmnopqrstuvwxyz0123456789_.-]{0,31}$ ]]
 }
 
 # is_valid_fingerprint <s>

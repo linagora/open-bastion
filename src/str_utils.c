@@ -211,3 +211,21 @@ int str_cert_pin_valid(const char *pin)
     free(pin_copy);
     return valid;
 }
+
+bool ob_valid_username(const char *name)
+{
+    if (!name || !((name[0] >= 'a' && name[0] <= 'z') || name[0] == '_')) {
+        return false;
+    }
+    for (size_t i = 1; name[i]; i++) {
+        char c = name[i];
+        if (i == OB_USERNAME_MAX) {
+            return false;
+        }
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+              c == '_' || c == '.' || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}

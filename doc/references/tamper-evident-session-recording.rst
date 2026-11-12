@@ -53,7 +53,7 @@ Why this satisfies the threat model
 
 The socket is world-connectable (``0666``) but the sink does **not** trust anything the client says about *who* it is. It calls ``getsockopt(SO_PEERCRED)`` to obtain the connecting process's kernel-verified ``uid``, resolves it to a username with ``getpwuid``, and derives the storage path **from that** — exactly as ``ob-cert-daemon`` derives the cert user. Therefore a user cannot write into another user's session directory, spoof the ``user`` field, or path-traverse: the ``<user>`` path component never comes from client input.
 
-The username is validated against ``^[a-z_][a-z0-9_.-]*$`` (same regex as the recorder/wrapper) before being used in a path; reject otherwise.
+The username must follow the :ref:`user-name grammar <security-reference-user-names>` before it is used in a path; any other name is refused.
 
 .. _design-tamper-evident-session-recording-2-wire-protocol:
 
@@ -212,7 +212,7 @@ What the framing does **not** give: the forwarder and ``script`` run as the reco
 | ``ob-record.socket`` / ``ob-record@.service`` (new) | —                       | socket activation                                                                |
 +-----------------------------------------------------+-------------------------+----------------------------------------------------------------------------------+
 
-Shared validators (``ob_valid_username``, ``ob_read_line``, size caps) reuse ``ob_cert_proto.c``/``.h``. CMake/debian/rpm install the new binary + units + man pages exactly like the ``ob-cert-*`` set (template already merged in #145).
+Shared validators reuse ``ob_valid_username`` (``str_utils.c``) and ``ob_read_line`` and the size caps (``ob_cert_proto.c``/``.h``). CMake/debian/rpm install the new binary + units + man pages exactly like the ``ob-cert-*`` set (template already merged in #145).
 
 .. _design-tamper-evident-session-recording-9-failure-mode-recording-is-mandatory-when-enabled-no-fail-open:
 
