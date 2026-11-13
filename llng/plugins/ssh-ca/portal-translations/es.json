@@ -30,5 +30,20 @@
   "sshPublicKeyMissing": "Pegue su clave pública SSH",
   "sshRevoke": "Revocar",
   "sshRevokeError": "No se pudo revocar el certificado",
-  "sshConfirmRevoke": "¿Revocar este certificado? La clave se publicará en la KRL y ya no podrá utilizarse."
+  "sshConfirmRevoke": "¿Revocar este certificado? La clave se publicará en la KRL y ya no podrá utilizarse.",
+  "sshCertStatus_superseded": "Sustituido",
+  "sshCaLastUsed": "Último uso",
+  "sshCaNeverUsed": "Nunca",
+  "sshCaActivity": "Última actividad",
+  "sshCaActivity_any": "Cualquiera",
+  "sshCaActivity_never": "Nunca usado",
+  "sshCaActivity_within1h": "Usado en la última hora",
+  "sshCaActivity_within1d": "Usado en el último día",
+  "sshCaActivity_within30d": "Usado en los últimos 30 días",
+  "sshCaActivity_idle1h": "Inactivo desde hace más de una hora",
+  "sshCaActivity_idle1d": "Inactivo desde hace más de un día",
+  "sshCaActivity_idle30d": "Inactivo desde hace más de 30 días",
+  "sshCaSort": "Ordenar por",
+  "sshCaSort_issued": "Fecha de emisión",
+  "sshCaSort_lastUsed": "Último uso"
 }

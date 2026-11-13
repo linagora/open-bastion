@@ -283,14 +283,25 @@ ok(
     'GET /ssh/mycerts after re-signature'
 );
 $payload = expectJSON($res);
-is( scalar @{ $payload->{certificates} }, 3,
-    'Still three records (re-signature replaced, not appended)' );
+
+# The replaced certificate stays listed, as superseded (issue #455).
+is(
+    scalar( grep { !$_->{superseded_at} }
+          @{ $payload->{certificates} } ),
+    3,
+    'Still three current records (re-signature replaced, not appended)'
+);
 my @key2_certs =
-  grep { ( $_->{fingerprint} || '' ) eq $user_fps[1] } @{ $payload->{certificates} };
-is( scalar @key2_certs, 1, 'Exactly one record for key2 fingerprint' );
+  grep { ( $_->{fingerprint} || '' ) eq $user_fps[1] }
+  grep { !$_->{superseded_at} } @{ $payload->{certificates} };
+is( scalar @key2_certs, 1, 'Exactly one current record for key2 fingerprint' );
 is( $key2_certs[0]->{serial}, $new_payload->{serial},
     'Record holds the new serial' );
-count(3);
+my ($key2_old) =
+  grep { $_->{serial} eq $prev_serial_key2 } @{ $payload->{certificates} };
+is( $key2_old && $key2_old->{status}, 'superseded',
+    'The replaced certificate is kept as superseded' );
+count(4);
 
 # Re-sign key2 yet again, but with a DIFFERENT label — allowed, label updates
 ok(
@@ -550,8 +561,14 @@ sub dwho_sessions {
         'GET /ssh/mycerts on a pre-upgrade session'
     );
     my $legacyPayload = expectJSON($res);
-    is( scalar @{ $legacyPayload->{certificates} },
-        scalar @legacy, '  -> the legacy array is still listed in full' );
+    # Superseded certificates live under their own keys (issue #455) and
+    # are listed next to the array.
+    is(
+        scalar( grep { !$_->{superseded_at} }
+              @{ $legacyPayload->{certificates} } ),
+        scalar @legacy,
+        '  -> the legacy array is still listed in full'
+    );
     count(1);
 
     # Any write drains it.

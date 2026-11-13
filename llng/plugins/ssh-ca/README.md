@@ -147,6 +147,31 @@ record a revocation would be a silent fail-open.
 > count — but it means a deployment relying on the rate limit must keep
 > persistent sessions enabled.
 
+### History and last use (`sshCaCertHistoryMax`, `sshCaCertHistoryRetention`)
+
+Re-signing a key you already hold replaces its certificate. The old record is
+no longer dropped: it is kept with the status `superseded`, so the
+administration page shows what a key was signed with before, and
+`sshca-rebuild-krl` still finds its serial (issue #455).
+
+| Setting                     | Default | Effect                                                                 |
+| --------------------------- | ------- | ---------------------------------------------------------------------- |
+| `sshCaCertHistoryMax`       | `50`    | Superseded certificates kept per user, most recent first. `0` keeps none. |
+| `sshCaCertHistoryRetention` | `30`    | Days a superseded certificate is kept after it expires.                |
+
+The history is trimmed on each signature. Dropping a superseded certificate
+that has not expired yet does not make it valid again, since its serial
+stays in the KRL. Only `sshca-rebuild-krl` stops seeing it.
+
+Each certificate also shows when it was **last used**, and on which host. The
+`pam-access` plugin records it when `/pam/authorize` or `/pam/verify` matches
+the certificate's fingerprint. That requires an Open Bastion client that
+sends the fingerprint, which it does for certificate logins. To keep
+persistent-session writes down, it records at most one use per certificate
+every `pamAccessSshCertUseInterval` seconds (300 by default, `0` turns
+recording off), so the time shown can be up to that much old. Bastion-hop
+certificates are not recorded.
+
 ### CA key setup
 
 The CA key must be configured in the LLNG keys store (Manager > Keys). Both
@@ -271,8 +296,8 @@ Request (JSON):
 Marks the cert as `revoked` in the caller's persistent session (keeping
 it visible in `/ssh/mycerts`) and publishes the serial in the KRL.
 
-Returns HTTP 400 if already revoked, HTTP 404 if the serial is not in the
-caller's own certs.
+Returns HTTP 400 if already revoked or superseded (a superseded serial is
+already in the KRL), HTTP 404 if the serial is not in the caller's own certs.
 
 ### GET /ssh/mycerts
 
@@ -295,18 +320,34 @@ Response (JSON):
 }
 ```
 
-Status is computed dynamically: `active`, `expired` (past `expires_at`), or
-`revoked` (has `revoked_at`). Entries are sorted newest-first.
+Status is computed dynamically: `revoked` (has `revoked_at`), `superseded`
+(the key was re-signed since, see `superseded_at` and `superseded_by`),
+`expired` (past `expires_at`), or `active`. `last_used_at` and
+`last_used_host` give the last recorded use (absent when it has never been
+used, see [History and last use](#history-and-last-use-sshcacerthistorymax-sshcacerthistoryretention)).
+Entries are sorted newest-first.
 
 ### GET /ssh/certs
 
-Query parameters: `user`, `serial`, `key_id`, `status`, `limit` (max 1000),
-`offset`. `limit` and `offset` must be non-negative integers; anything else
-falls back to the defaults (100 and 0).
+Query parameters: `user`, `serial`, `key_id`, `status`, `activity`, `sort`,
+`limit` (max 1000), `offset`. `limit` and `offset` must be non-negative
+integers; anything else falls back to the defaults (100 and 0).
 
-Response includes all fields from `/ssh/mycerts` (including `label` and
-`fingerprint`) plus: `session_id`, `user`, `revoked_at`, `revoked_by`,
-`revoke_reason`.
+`activity` filters on the last recorded use:
+
+| Value              | Matches                                                                 |
+| ------------------ | ----------------------------------------------------------------------- |
+| `never`            | never used                                                              |
+| `within:<seconds>` | used in the last `<seconds>`                                            |
+| `idle:<seconds>`   | neither used nor issued in the last `<seconds>`, never used included   |
+
+`idle` counts the issue date as activity, so a certificate signed a minute ago
+is not idle yet. `sort` is `issued` (newest first, the default) or
+`last_used` (most recently used first, never used last). Any other value of
+`activity` or `sort` is refused with HTTP 400.
+
+Response includes all fields from `/ssh/mycerts` plus: `session_id`, `user`,
+`revoked_by`, `revoke_reason`.
 
 ### POST /ssh/revoke
 
@@ -368,7 +409,11 @@ fi
 ## Storage
 
 Certificates are stored in each user's **persistent session**, one key per
-certificate: `_sshCert::<fingerprint>`, holding a JSON record. This means
+certificate: `_sshCert::<fingerprint>`, holding a JSON record. Superseded
+certificates move to `_sshCertOld::<serial>`. The last use of the certificate
+of a key is `_sshCertUse::<fingerprint>` (`{serial, at, host}`), written by
+`pam-access`; it is a key of its own so that recording a use can never write
+back a certificate record and lose a concurrent revocation. This means
 certificates survive across SSO sessions. The admin search endpoint
 (`/ssh/certs`) scans all persistent sessions to find certificates.
 
@@ -422,8 +467,8 @@ the event. Schedule the `sshca-rebuild-krl` script (shipped in
 ```
 
 The script scans the persistent sessions (which are shared across
-portals via the session backend), collects every certificate with a
-`revoked_at` timestamp, and rewrites the local KRL with
+portals via the session backend), collects every revoked or superseded
+certificate (see [History and last use](#history-and-last-use-sshcacerthistorymax-sshcacerthistoryretention)), and rewrites the local KRL with
 `ssh-keygen -k`. Safe to run on a single-node setup too — it just
 becomes a no-op when nothing is out of sync.
 

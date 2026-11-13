@@ -65,6 +65,7 @@ In the Manager under **General Parameters** > **Plugins** > **PAM Access**:
 | `pamAccessChoice`                      | Choice sub-module (must match an `authChoiceModules` entry, e.g. `1_LDAP`) used by `/pam/authorize` and `/pam/userinfo`. Leave empty when Choice auth is not used. | `""`      |
 | `pamAccessBastionCertPinSourceAddress` | Pin the ephemeral cert issued by `/pam/bastion-cert` to the bastion's IP (`source-address` critical option). When set and the observed address is unusable, the request is refused rather than served unpinned. See the note below. | `0`       |
 | `pamAccessRequireFingerprint`          | Refuse `/pam/verify` and `/pam/authorize` when the caller supplies no SSH fingerprint, instead of falling back to the unbound behaviour.                                                  | `0`       |
+| `pamAccessSshCertUseInterval`          | Record the last use of an SSO certificate (shown on the SSH CA administration page) at most once per this many seconds per certificate. `0` turns recording off.                       | `300`     |
 | `pamAccessBastionVoucherUnboundTtl`    | Maximum lifetime of a voucher minted without a fingerprint, i.e. one that nothing binds to the user's SSO certificate expiry (seconds).                                                        | `900`     |
 
 > **Recommendation — `pamAccessBastionCertPinSourceAddress`**

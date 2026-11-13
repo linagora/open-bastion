@@ -32,6 +32,27 @@
             <option value="active" trspan="active">Active</option>
             <option value="expired" trspan="expired">Expired</option>
             <option value="revoked" trspan="revoked">Revoked</option>
+            <option value="superseded" trspan="sshCertStatus_superseded">Superseded</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="searchActivity" class="form-label" trspan="sshCaActivity">Last activity</label>
+          <select class="form-select" id="searchActivity" name="activity">
+            <option value="" trspan="sshCaActivity_any">Any</option>
+            <option value="never" trspan="sshCaActivity_never">Never used</option>
+            <option value="within:3600" trspan="sshCaActivity_within1h">Used in the last hour</option>
+            <option value="within:86400" trspan="sshCaActivity_within1d">Used in the last day</option>
+            <option value="within:2592000" trspan="sshCaActivity_within30d">Used in the last 30 days</option>
+            <option value="idle:3600" trspan="sshCaActivity_idle1h">Idle for over an hour</option>
+            <option value="idle:86400" trspan="sshCaActivity_idle1d">Idle for over a day</option>
+            <option value="idle:2592000" trspan="sshCaActivity_idle30d">Idle for over 30 days</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="searchSort" class="form-label" trspan="sshCaSort">Sort by</label>
+          <select class="form-select" id="searchSort" name="sort">
+            <option value="issued" trspan="sshCaSort_issued">Issue date</option>
+            <option value="last_used" trspan="sshCaSort_lastUsed">Last use</option>
           </select>
         </div>
         <div class="col-12">
@@ -64,22 +85,23 @@
               <th trspan="principals">Principals</th>
               <th trspan="issuedAt">Issued</th>
               <th trspan="expiresAt">Expires</th>
+              <th trspan="sshCaLastUsed">Last used</th>
               <th trspan="status">Status</th>
               <th trspan="actions">Actions</th>
             </tr>
           </thead>
           <tbody id="certsTable">
             <tr id="loadingRow" class="d-none">
-              <td colspan="7" class="text-center">
+              <td colspan="8" class="text-center">
                 <span class="spinner-border spinner-border-sm" role="status"></span>
                 <span trspan="loading">Loading...</span>
               </td>
             </tr>
             <tr id="noResultsRow" class="d-none">
-              <td colspan="7" class="text-center text-muted" trspan="noResults">No certificates found</td>
+              <td colspan="8" class="text-center text-muted" trspan="noResults">No certificates found</td>
             </tr>
             <tr id="searchPromptRow">
-              <td colspan="7" class="text-center text-muted" trspan="sshCaSearchPrompt">Enter search criteria and click Search</td>
+              <td colspan="8" class="text-center text-muted" trspan="sshCaSearchPrompt">Enter search criteria and click Search</td>
             </tr>
           </tbody>
         </table>
