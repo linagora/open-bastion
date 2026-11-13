@@ -160,7 +160,7 @@ add_test(NAME test_ob_client_signed COMMAND test_ob_client_signed)
 # Which /pam/authorize failures may fall back to the offline cache: the same
 # mock portal, driven per HTTP status and per signature outcome.
 add_executable(test_ob_client_status test_ob_client_status.c
-    ../src/ob_client.c ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c
+    ../src/ob_jws.c ../src/jwt_utils.c ../src/ob_sign.c
     ../src/str_utils.c)
 target_compile_definitions(test_ob_client_status PRIVATE _GNU_SOURCE)
 target_include_directories(test_ob_client_status PRIVATE
