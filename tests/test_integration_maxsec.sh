@@ -252,6 +252,24 @@ wait_for_backend() {
 # Test Cases
 # =============================================================================
 
+# Send a /pam/* call signed with the bastion's request_signing_secret. The
+# portal runs pamAccessRequestSigningMode = required (#262), so an unsigned
+# call is refused. ob-sign-request reads the secret inside the container and
+# prints the three headers; the body must reach curl byte for byte.
+# Usage: pam_curl PATH BODY [curl options...]
+pam_curl() {
+    local path="$1" body="$2"
+    shift 2
+    local -a hdrs=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && hdrs+=(-H "$line")
+    done < <(printf '%s' "$body" |
+        docker exec -i ob-maxsec-bastion ob-sign-request --method POST --path "$path")
+    curl "$@" -X POST "$PORTAL_URL$path" "${hdrs[@]}" \
+        -H "Content-Type: application/json" --data-binary "$body"
+}
+
 test_llng_authentication() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing LLNG authentication via llng CLI..."
@@ -352,9 +370,86 @@ test_ssh_certificate_signing() {
     fi
 }
 
+# This demo runs the current pam-access generation: the one with /pam/whoami,
+# the request-signature check (_checkCaller) and pamAccessRequireFingerprint
+# (#262). docker-demo-cert stays pinned on the
+# old one to cover ob-bastion-id's fallback, so check which one runs here
+# rather than assume it: the assertions below would otherwise prove nothing.
+test_portal_new_generation() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Checking that the portal runs the current pam-access generation..."
+
+    local counts
+    counts=$(docker exec ob-maxsec-sso sh -c '
+        f=$(find /usr/share/perl5 /usr/local/share/perl -name PamAccess.pm 2>/dev/null | head -1)
+        [ -n "$f" ] || exit 1
+        printf "%s %s %s\n" "$(grep -c "/pam/whoami\|whoami =>" "$f")" \
+            "$(grep -c "sub _checkCaller\b" "$f")" \
+            "$(grep -c "pamAccessRequireFingerprint" "$f")"' 2>&1) || {
+        fail "PamAccess.pm not found in the portal image" "$counts"
+        return 1
+    }
+    local whoami caller fp
+    read -r whoami caller fp <<<"$counts"
+    if [[ "$whoami" -gt 0 && "$caller" -gt 0 && "$fp" -gt 0 ]]; then
+        pass "Portal pam-access has /pam/whoami, _checkCaller and pamAccessRequireFingerprint"
+        return 0
+    fi
+    fail "Portal pam-access predates the generation this suite tests" \
+        "whoami=$whoami _checkCaller=$caller requireFingerprint=$fp"
+    return 1
+}
+
+# pamAccessRequestSigningMode = required: an unsigned call, or one whose body
+# differs from what was signed, is refused with 403 before anything else.
+test_request_signing_enforced() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing that the portal refuses unsigned /pam/* calls..."
+
+    local server_token
+    server_token=$(docker exec ob-maxsec-bastion cat /etc/open-bastion/server_token.json 2>/dev/null | jq -r '.access_token // empty') || true
+    if [[ -z "$server_token" ]]; then
+        fail "Could not get server token from bastion"
+        return 1
+    fi
+
+    local body="{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\"}"
+    local code
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
+        -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" --data-binary "$body")
+    if [[ "$code" != "403" ]]; then
+        fail "unsigned /pam/authorize: expected 403, got $code"
+        return 1
+    fi
+
+    # Headers signed for one body, sent with another.
+    local -a hdrs=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && hdrs+=(-H "$line")
+    done < <(printf '%s' "$body" |
+        docker exec -i ob-maxsec-bastion ob-sign-request --method POST --path /pam/authorize)
+    if [[ ${#hdrs[@]} -ne 6 ]]; then
+        fail "ob-sign-request did not print three headers on the bastion" "${hdrs[*]}"
+        return 1
+    fi
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
+        "${hdrs[@]}" -H "Authorization: Bearer $server_token" \
+        -H "Content-Type: application/json" \
+        --data-binary "{\"user\":\"rtyler\",\"server_group\":\"bastion\"}")
+    if [[ "$code" != "403" ]]; then
+        fail "/pam/authorize with a signature over another body: expected 403, got $code"
+        return 1
+    fi
+
+    pass "Unsigned and mis-signed /pam/authorize calls are refused (403)"
+    return 0
+}
+
 test_pam_authorize_endpoint() {
     TESTS_RUN=$((TESTS_RUN + 1))
-    log "Testing PAM authorize endpoint..."
+    log "Testing PAM authorize endpoint (signed)..."
 
     # Get server token from bastion
     local server_token
@@ -369,15 +464,13 @@ test_pam_authorize_endpoint() {
 
     # Call PAM authorize endpoint
     local response
-    response=$(curl -sf -X POST "$PORTAL_URL/pam/authorize" \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\"}" 2>&1) || true
+    response=$(pam_curl /pam/authorize "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\"}" \
+        -sf -H "Authorization: Bearer $server_token" 2>&1) || true
 
     log_verbose "PAM authorize response: $response"
 
     if echo "$response" | jq -e '.authorized == true' >/dev/null 2>&1; then
-        pass "PAM authorize endpoint works"
+        pass "PAM authorize endpoint works (signed request)"
         return 0
     else
         fail "PAM authorize endpoint failed" "$response"
@@ -417,10 +510,8 @@ test_pam_authorize_fingerprint_binding() {
     body_tmp=$(mktemp)
 
     # 1. Matching fingerprint must be accepted (HTTP 200 + authorized:true)
-    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}")
+    http_code=$(pam_curl /pam/authorize "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" \
+        -s -o "$body_tmp" -w '%{http_code}' -H "Authorization: Bearer $server_token")
     response=$(cat "$body_tmp")
     log_verbose "authorize(match) HTTP=$http_code body=$response"
     if [[ "$http_code" != "200" ]]; then
@@ -437,10 +528,8 @@ test_pam_authorize_fingerprint_binding() {
     # 2. Well-formed but unknown fingerprint must be refused
     #    (HTTP 200 + authorized:false explicitly)
     local bogus="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$bogus\"}")
+    http_code=$(pam_curl /pam/authorize "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$bogus\"}" \
+        -s -o "$body_tmp" -w '%{http_code}' -H "Authorization: Bearer $server_token")
     response=$(cat "$body_tmp")
     log_verbose "authorize(unknown) HTTP=$http_code body=$response"
     if [[ "$http_code" != "200" ]]; then
@@ -455,10 +544,8 @@ test_pam_authorize_fingerprint_binding() {
     fi
 
     # 3. Malformed fingerprint must be rejected with HTTP 400
-    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"not-a-fingerprint\"}")
+    http_code=$(pam_curl /pam/authorize "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"not-a-fingerprint\"}" \
+        -s -o "$body_tmp" -w '%{http_code}' -H "Authorization: Bearer $server_token")
     response=$(cat "$body_tmp")
     log_verbose "authorize(malformed) HTTP=$http_code body=$response"
     if [[ "$http_code" != "400" ]]; then
@@ -520,10 +607,8 @@ test_pam_authorize_rejects_revoked_cert() {
 
     local body_tmp http_code response
     body_tmp=$(mktemp)
-    http_code=$(curl -s -o "$body_tmp" -w '%{http_code}' -X POST "$PORTAL_URL/pam/authorize" \
-        -H "Authorization: Bearer $server_token" \
-        -H "Content-Type: application/json" \
-        -d "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}")
+    http_code=$(pam_curl /pam/authorize "{\"user\":\"$TEST_USER\",\"server_group\":\"bastion\",\"fingerprint\":\"$fingerprint\"}" \
+        -s -o "$body_tmp" -w '%{http_code}' -H "Authorization: Bearer $server_token")
     response=$(cat "$body_tmp")
     rm -f "$body_tmp"
     log_verbose "authorize(revoked) HTTP=$http_code body=$response"
@@ -841,6 +926,39 @@ test_bastion_to_backend_hop() {
 # systemd unit does: same path, and a mode that lets an unprivileged user
 # connect. Checked separately from the hop so a missing socket is reported as
 # a missing socket rather than as a failed SSH.
+# ob-bastion-id asks POST /pam/whoami and falls back to the legacy
+# /pam/bastion-token probe only on a portal without it (#262). This portal has
+# it: the primary path must be the one taken. docker-demo-cert covers the
+# fallback.
+test_ob_bastion_id_whoami() {
+    TESTS_RUN=$((TESTS_RUN + 1))
+    log "Testing ob-bastion-id against /pam/whoami..."
+
+    # The log goes to stderr, the id alone to stdout.
+    local out id rc=0
+    out=$(docker exec ob-maxsec-bastion ob-bastion-id 2>&1 >/dev/null) || rc=$?
+    log_verbose "ob-bastion-id: $out"
+    if [[ $rc -ne 0 ]]; then
+        fail "ob-bastion-id exited $rc" "$out"
+        return 1
+    fi
+    id=$(docker exec ob-maxsec-bastion ob-bastion-id --quiet 2>/dev/null) || true
+    if ! grep -q 'Asking .*/pam/whoami' <<<"$out"; then
+        fail "ob-bastion-id did not ask /pam/whoami" "$out"
+        return 1
+    fi
+    if grep -q 'falling back' <<<"$out"; then
+        fail "ob-bastion-id fell back to the legacy probe on a portal with /pam/whoami" "$out"
+        return 1
+    fi
+    if [[ ! "$id" =~ ^[A-Za-z0-9._:@-]+$ ]]; then
+        fail "ob-bastion-id printed no usable id" "$out"
+        return 1
+    fi
+    pass "ob-bastion-id took /pam/whoami (signed) and returned $id"
+    return 0
+}
+
 test_cert_socket_present() {
     TESTS_RUN=$((TESTS_RUN + 1))
     log "Testing the bastion cert socket exists..."
@@ -1462,6 +1580,8 @@ main() {
 
     echo ""
     echo "=== Phase 3: SSH Certificate Tests ==="
+    test_portal_new_generation
+    test_request_signing_enforced
     test_ssh_ca_endpoint
     test_ssh_certificate_signing
 
@@ -1476,6 +1596,7 @@ main() {
     echo ""
     echo "=== Phase 5: End-to-End Tests ==="
     test_ssh_connection_bastion
+    test_ob_bastion_id_whoami
     test_cert_socket_present
     test_rec_socket_present
     test_heartbeat_stand_in
