@@ -15,7 +15,6 @@
 
 use strict;
 use Getopt::Long;
-use JSON qw(from_json);
 use File::Basename qw(dirname);
 use File::Path;
 use File::Temp;
@@ -95,10 +94,14 @@ sub rebuild_krl {
         return 0;
     }
 
+    # No field restriction: certificates live one per key
+    # (`_sshCert::<fingerprint>`, superseded ones under `_sshCertOld::<serial>`)
+    # and their names are not known in advance. Asking for `_sshCerts` only
+    # saw the pre-upgrade array, so a rebuild dropped every serial revoked
+    # since the per-key layout, and every superseded one.
     my $res = eval {
         Lemonldap::NG::Common::Apache::Session->searchOnExpr( $moduleOptions,
-            '_session_kind', 'Persistent',
-            qw(_session_kind _sshCerts) );
+            '_session_kind', 'Persistent' );
     };
     if ($@) {
         $log->error("SSH CA: persistent session scan failed: $@");
@@ -107,13 +110,8 @@ sub rebuild_krl {
 
     my %serials;
     for my $sessionId ( keys %{ $res || {} } ) {
-        my $raw = $res->{$sessionId}->{_sshCerts} or next;
-        my $certs = eval { from_json($raw) };
-        next if $@ || ref($certs) ne 'ARRAY';
-        for my $c (@$certs) {
-            next unless $c->{revoked_at} && $c->{serial};
-            $serials{ $c->{serial} } = 1;
-        }
+        $serials{$_} = 1
+          for $plugin->_krlSerialsFromData( $res->{$sessionId} );
     }
 
     unless (%serials) {

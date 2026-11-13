@@ -43,8 +43,23 @@
         case 'revoked':
           badgeClass = 'bg-danger';
           break;
+        case 'superseded':
+          badgeClass = 'bg-warning text-dark';
+          break;
       }
       return '<span class="badge ' + badgeClass + '">' + text + '</span>';
+    }
+
+    // Last use: date, and the host underneath when it is known
+    function formatLastUse(cert) {
+      if (!cert.last_used_at) {
+        return '<span class="text-muted" trspan="sshCaNeverUsed">Never</span>';
+      }
+      var html = escapeHtml(formatDate(cert.last_used_at));
+      if (cert.last_used_host) {
+        html += '<br><small class="text-muted">' + escapeHtml(cert.last_used_host) + '</small>';
+      }
+      return html;
     }
 
     // Show toast notification
@@ -81,10 +96,14 @@
       var serial = document.getElementById('searchSerial').value.trim();
       var keyId = document.getElementById('searchKeyId').value.trim();
       var status = document.getElementById('searchStatus').value;
+      var activity = document.getElementById('searchActivity').value;
+      var sort = document.getElementById('searchSort').value;
       if (user) params.set('user', user);
       if (serial) params.set('serial', serial);
       if (keyId) params.set('key_id', keyId);
       if (status) params.set('status', status);
+      if (activity) params.set('activity', activity);
+      if (sort) params.set('sort', sort);
       var tableBody = document.getElementById('certsTable');
       var loadingRow = document.getElementById('loadingRow');
       var noResultsRow = document.getElementById('noResultsRow');
@@ -118,9 +137,13 @@
           data.certificates.forEach(function (cert) {
             var row = document.createElement('tr');
             row.className = 'cert-row';
-            row.innerHTML = '<td>' + escapeHtml(cert.serial || '-') + '</td>' + '<td>' + escapeHtml(cert.user || '-') + '</td>' + '<td><code>' + escapeHtml(cert.principals || '-') + '</code></td>' + '<td>' + escapeHtml(formatDate(cert.issued_at)) + '</td>' + '<td>' + escapeHtml(formatDate(cert.expires_at)) + '</td>' + '<td>' + getStatusBadge(cert.status) + '</td>' + '<td>' + getActionButtons(cert) + '</td>';
+            row.innerHTML = '<td>' + escapeHtml(cert.serial || '-') + '</td>' + '<td>' + escapeHtml(cert.user || '-') + '</td>' + '<td><code>' + escapeHtml(cert.principals || '-') + '</code></td>' + '<td>' + escapeHtml(formatDate(cert.issued_at)) + '</td>' + '<td>' + escapeHtml(formatDate(cert.expires_at)) + '</td>' + '<td>' + formatLastUse(cert) + '</td>' + '<td>' + getStatusBadge(cert.status) + '</td>' + '<td>' + getActionButtons(cert) + '</td>';
             tableBody.appendChild(row);
           });
+
+          if (window.translatePage && window.currentLanguage) {
+            window.translatePage(window.currentLanguage);
+          }
 
           // Bind revoke buttons
           tableBody.querySelectorAll('.btn-revoke').forEach(function (btn) {
@@ -144,6 +167,10 @@
     function getActionButtons(cert) {
       if (cert.status === 'revoked') {
         return '<span class="text-muted" title="Revoked by ' + escapeHtml(cert.revoked_by || 'unknown') + ' at ' + escapeHtml(formatDate(cert.revoked_at)) + '">' + '<span class="fa fa-ban"></span> Revoked</span>';
+      }
+      // Its serial went into the KRL when the key was re-signed
+      if (cert.status === 'superseded') {
+        return '<span class="text-muted" title="Superseded by ' + escapeHtml(cert.superseded_by || '?') + ' at ' + escapeHtml(formatDate(cert.superseded_at)) + '">' + '<span class="fa fa-history"></span> Superseded</span>';
       }
       return '<button class="btn btn-sm btn-outline-danger btn-revoke" ' + 'data-session-id="' + escapeHtml(cert.session_id) + '" ' + 'data-serial="' + escapeHtml(cert.serial || '') + '" ' + 'data-user="' + escapeHtml(cert.user || '') + '" ' + 'data-key-id="' + escapeHtml(cert.key_id || '') + '">' + '<span class="fa fa-ban"></span> Revoke</button>';
     }
@@ -254,6 +281,8 @@
         document.getElementById('searchSerial').value = '';
         document.getElementById('searchKeyId').value = '';
         document.getElementById('searchStatus').value = '';
+        document.getElementById('searchActivity').value = '';
+        document.getElementById('searchSort').value = 'issued';
         // Clear results
         var tableBody = document.getElementById('certsTable');
         var existingRows = tableBody.querySelectorAll('.cert-row');

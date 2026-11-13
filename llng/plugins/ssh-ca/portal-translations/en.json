@@ -30,5 +30,20 @@
   "sshPublicKeyMissing": "Please paste your SSH public key",
   "sshRevoke": "Revoke",
   "sshRevokeError": "Failed to revoke certificate",
-  "sshConfirmRevoke": "Revoke this certificate? The key will be published in the KRL and cannot be used anymore."
+  "sshConfirmRevoke": "Revoke this certificate? The key will be published in the KRL and cannot be used anymore.",
+  "sshCertStatus_superseded": "Superseded",
+  "sshCaLastUsed": "Last used",
+  "sshCaNeverUsed": "Never",
+  "sshCaActivity": "Last activity",
+  "sshCaActivity_any": "Any",
+  "sshCaActivity_never": "Never used",
+  "sshCaActivity_within1h": "Used in the last hour",
+  "sshCaActivity_within1d": "Used in the last day",
+  "sshCaActivity_within30d": "Used in the last 30 days",
+  "sshCaActivity_idle1h": "Idle for over an hour",
+  "sshCaActivity_idle1d": "Idle for over a day",
+  "sshCaActivity_idle30d": "Idle for over 30 days",
+  "sshCaSort": "Sort by",
+  "sshCaSort_issued": "Issue date",
+  "sshCaSort_lastUsed": "Last use"
 }

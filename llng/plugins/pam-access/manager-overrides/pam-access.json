@@ -85,6 +85,11 @@
       "default": 0,
       "documentation": "Refuse /pam/verify and /pam/authorize when the caller supplies no SSH fingerprint, instead of falling back to the unbound behaviour"
     },
+    "pamAccessSshCertUseInterval": {
+      "type": "int",
+      "default": 300,
+      "documentation": "Record the last use of an SSO certificate (shown on the SSH CA administration page) at most once per this many seconds per certificate. 0 turns recording off."
+    },
     "pamAccessBastionVoucherUnboundTtl": {
       "type": "int",
       "default": 900,
@@ -216,6 +221,7 @@
             "pamAccessServerGroups",
             "pamAccessBastionGroups",
             "pamAccessRequireFingerprint",
+            "pamAccessSshCertUseInterval",
             "pamAccessBastionVoucherUnboundTtl",
             "pamAccessChoice",
             "pamAccessBastionCertPinSourceAddress"
@@ -338,6 +344,12 @@
       "fr": "Exiger une empreinte SSH",
       "es": "Exigir una huella SSH",
       "it": "Richiedi un'impronta SSH"
+    },
+    "pamAccessSshCertUseInterval": {
+      "en": "SSH certificate use recording interval (s)",
+      "fr": "Intervalle d'enregistrement de l'usage des certificats SSH (s)",
+      "es": "Intervalo de registro del uso de los certificados SSH (s)",
+      "it": "Intervallo di registrazione dell'uso dei certificati SSH (s)"
     },
     "pamAccessBastionVoucherUnboundTtl": {
       "en": "Unbound voucher TTL (s)",

@@ -68,7 +68,8 @@
               var tr = document.createElement('tr');
               var issuedDate = cert.issued_at ? new Date(cert.issued_at * 1000).toLocaleDateString() : '-';
               var expiresDate = cert.expires_at ? new Date(cert.expires_at * 1000).toLocaleDateString() : '-';
-              var statusClass = cert.status === 'active' ? 'text-success' : (cert.status === 'expired' ? 'text-muted' : 'text-danger');
+              var statusClass = cert.status === 'active' ? 'text-success'
+                : (cert.status === 'revoked' ? 'text-danger' : 'text-muted');
               var statusText = window.translate('sshCertStatus_' + cert.status);
               var labelText = cert.label || cert.key_id || '-';
               var labelCell = $('<span>').text(labelText).html();
