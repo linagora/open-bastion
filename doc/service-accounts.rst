@@ -329,10 +329,9 @@ Whether the rule is enough depends on the ``sudo`` PAM stack:
   standalone host keeps the distribution's stack, and the backend stack
   passes an account of ``/etc/passwd`` with
   ``account sufficient pam_localuser.so``; ``sudoers`` alone decides.
-  Except for a member of ``open-bastion-sudo``: the stack sends it to
-  ``pam_openbastion``, which neither grants nor denies a service
-  account, and the stack then refuses. One more reason to keep service
-  accounts out of that group.
+  A member of ``open-bastion-sudo`` is first sent to ``pam_openbastion``
+  (#359); the module neither grants nor denies a service account, which
+  then reaches ``pam_localuser`` as any other local account.
 - **Maximum security**: it is not. That stack is ``pam_openbastion``
   alone and refuses every local account, service accounts included (see
   :ref:`max-security-scenario-sudo`). Giving one ``sudo`` there means
