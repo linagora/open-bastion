@@ -97,6 +97,7 @@ set_baseline() {
     SELF_DELETE="no"
     ENABLE_HARDENING="no"
     ENABLE_AUDIT_TRACE="no"
+    ENABLE_AUTHORIZED_KEYS_FILE="no"
     DISABLE_SESSION_RECORDER="no"
     ANSIBLE_AUTO_APPROVE="no"
     SERVICE_ACCOUNTS_RECORDS=()
@@ -554,6 +555,7 @@ test_questionnaire_full() {
         CLIENT_SECRET_MODE=""; SERVER_GROUP_POLICY=""; unset SERVER_GROUP
         TARGET_ROLE=""; AUTO_ENROLL_SETUP=""; SELF_DELETE=""; ENABLE_HARDENING=""
         ENABLE_AUDIT_TRACE=""; DISABLE_SESSION_RECORDER=""; ANSIBLE_AUTO_APPROVE=""
+        ENABLE_AUTHORIZED_KEYS_FILE=""
         unset ALLOWED_BASTIONS
         REPO_KEYRING=""; INSECURE=0
         local -a a=(
@@ -570,6 +572,7 @@ test_questionnaire_full() {
             "b1"                    # allowed bastions (backend present)
             "" ""                   # hardening, audit trace
             "yes"                   # disable recorder (bastion present)
+            "yes"                   # authorized_keys group (max-security, bastion present)
             "n"                     # no service accounts
             "yes" ""                # auto enroll (the cookie question needs it), self-delete
             ""                      # ansible auto-approve
@@ -582,9 +585,9 @@ test_questionnaire_full() {
         build_output_plan
         printf '%s|' "$OUTPUT_SHELL" "$OUTPUT_ANSIBLE" "$INSECURE" "${OB_BUILDER_INSECURE:-}" \
             "$PORTAL_URL" "$EMBEDDED_CLIENT_SECRET" "${TARGET_ROLES[*]}" "$ALLOWED_BASTIONS" \
-            "$DISABLE_SESSION_RECORDER" "$APT_URL" "$REPO_KEYRING" "${_PLAN_SHELL[*]}" "$(answers_left)"
+            "$DISABLE_SESSION_RECORDER" "$ENABLE_AUTHORIZED_KEYS_FILE" "$APT_URL" "$REPO_KEYRING" "${_PLAN_SHELL[*]}" "$(answers_left)"
     )
-    local want=".|./ansible-lab|1|1|http://sso.lab|x|bastion backend|b1|yes|$DEFAULT_APT_URL|$FAKE_KEYRING|./bootstrap-lab-bastion.sh ./bootstrap-lab-backend.sh|0|"
+    local want=".|./ansible-lab|1|1|http://sso.lab|x|bastion backend|b1|yes|yes|$DEFAULT_APT_URL|$FAKE_KEYRING|./bootstrap-lab-bastion.sh ./bootstrap-lab-backend.sh|0|"
     if [ "$got" = "$want" ]; then
         test_pass "questionnaire: outputs, http -> --insecure, confirmed secret, two roles, repo options"
     else
