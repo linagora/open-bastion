@@ -335,7 +335,7 @@ Les comptes de service (ansible, backup, deploy, etc.) **ne passent pas par LLNG
 
 **Conséquence importante :** La révocation du compte LLNG (Phase 1.1) ne bloque **pas** les comptes de service.
 
-**Ce qui coupe l'accès :** retirer le ``.pub`` de ``service-accounts.d/`` (et toute clé de l'``authorized_keys`` du compte) coupe l'accès SSH dès la connexion suivante ; retirer l'entrée de ``service-accounts.conf`` renvoie en outre le nom vers le portail, qui le refuse. Changer seulement ``key_fingerprint`` **ne coupe rien** : l'empreinte n'est pas comparée lors d'une connexion par clé nue, c'est la clé servie à sshd qui ouvre l'accès. Le compte local lui-même, sa règle ``sudoers`` éventuelle et ses groupes ne sont pas gérés par Open Bastion : l'exploitant les retire (``userdel``, ``/etc/sudoers.d/``). Les sessions déjà ouvertes survivent (``pkill -u <nom>`` pour les fermer).
+**Ce qui coupe l'accès :** retirer le ``.pub`` de ``service-accounts.d/`` (et toute clé de l'``authorized_keys`` du compte) coupe l'accès SSH dès la connexion suivante ; retirer l'entrée de ``service-accounts.conf`` renvoie en outre le nom vers le portail, qui le refuse. Changer seulement ``key_fingerprint`` coupe aussi l'accès (#358) : l'ancienne clé est refusée à la connexion si le ``.pub`` la sert encore, à l'ouverture de session si elle vient d'un ``authorized_keys``. Le compte local lui-même, sa règle ``sudoers`` éventuelle et ses groupes ne sont pas gérés par Open Bastion : l'exploitant les retire (``userdel``, ``/etc/sudoers.d/``). Les sessions déjà ouvertes survivent (``pkill -u <nom>`` pour les fermer).
 
 .. mermaid::
 
@@ -412,7 +412,9 @@ Phase 1 : Actions Immédiates (Jour J)
       ssh-keygen -lf /secure/ansible_new_key.pub
       # Exemple: 256 SHA256:NEW_FINGERPRINT ansible@server (ED25519)
 
-3. **Remplacer la clé servie à sshd**, c'est elle qui ouvre l'accès :
+3. **Remplacer la clé servie à sshd**. Faire les étapes 3 et 4 à la suite :
+   tant que la clé servie et ``key_fingerprint`` diffèrent, le compte ne peut
+   plus se connecter (#358).
 
    .. code:: bash
 

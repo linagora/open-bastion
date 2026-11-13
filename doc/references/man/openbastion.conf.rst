@@ -382,6 +382,14 @@ Service accounts
    portal. Default: ``/etc/open-bastion/service-accounts.conf``. Alias:
    ``service_accounts``. Format: :doc:`/service-accounts`.
 
+.. option:: service_accounts_keys_dir
+
+   Directory of the keys ``ob-service-account-keys`` serves to ``sshd``,
+   one ``<name>.pub`` per account. At login every key in an account's
+   file must match its ``key_fingerprint``. Default:
+   ``/etc/open-bastion/service-accounts.d``. Change it only together
+   with the helper's ``OB_SERVICE_ACCOUNTS_KEYS_DIR``.
+
 Notifications
 ~~~~~~~~~~~~~
 
@@ -501,9 +509,10 @@ SSH key policy
    Refuse an SSH login whose key fingerprint cannot be recovered, instead
    of authorizing it without the binding. Only for hosts that run the
    principals helper (the certificate scenarios): where there is never a
-   fingerprint, every login would be denied. The helper runs for
-   certificates only, so a service account's plain-key login is denied
-   too. Default: ``false``. Alias: ``ssh_fingerprint_required``.
+   fingerprint, every login would be denied. A service account is checked
+   when its session opens, where a plain key always has a fingerprint: it
+   is refused only when it logged in without a key. Default: ``false``.
+   Alias: ``ssh_fingerprint_required``.
 
 Cache brute-force protection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

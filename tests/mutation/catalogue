@@ -298,6 +298,50 @@ why     || #453: the helper only matters if /pam/authorize obeys it. A TLS chain
 why     || or pin that does not verify must come back OB_ERR_REFUSED on the real
 why     || HTTP/TLS path, or the PAM account phase answers from the cache.
 
+id      || sa-key-fingerprint-compared
+file    || src/service_account.c
+search  || if (!service_account_fingerprint_equal(expected, fp)) {
+replace || if (0 && !service_account_fingerprint_equal(expected, fp)) {
+suite   || tests/test_ob_service_account_keycheck.sh
+why     || #358: the key a service account may use (its .pub) and the key it
+why     || did use (SSH_AUTH_INFO_0 at session open) must have key_fingerprint.
+why     || Without the comparison, any key sshd accepts opens the session.
+
+id      || sa-session-every-key
+file    || src/service_account.c
+search  || int r = compare_key(tok[1], tok[2], expected, got, got_sz);\n        if (r != SA_KEYCHECK_OK) {\n            result = r;\n            break;\n        }\n        result = SA_KEYCHECK_OK;\n    }\n    free(copy);
+replace || result = compare_key(tok[1], tok[2], expected, got, got_sz);\n    }\n    free(copy);
+suite   || tests/test_ob_service_account_keycheck.sh
+why     || #358: with several publickey methods, every key must match; keeping
+why     || only the last verdict lets an undeclared key through when it is not
+why     || the last one used.
+
+id      || sa-key-file-unreadable-line
+file    || src/service_account.c
+search  || return SA_KEYCHECK_MALFORMED;\n}\n\nint service_account_check_key_file
+replace || return SA_KEYCHECK_OK;\n}\n\nint service_account_check_key_file
+suite   || tests/test_ob_service_account_keycheck.sh
+why     || #358: a .pub line this cannot read may still be a key sshd accepts;
+why     || passing it would vouch for a key nobody compared.
+
+id      || setup-bastion-session-refusal-fatal
+file    || scripts/ob-bastion-setup
+search  || session    [success=ok perm_denied=die default=ignore]  pam_openbastion.so"
+replace || session    optional     pam_openbastion.so"
+suite   || tests/test_ob_bastion_setup.sh
+why     || #358: the session-open check of a service account's key refuses with
+why     || PAM_PERM_DENIED; on an `optional` line PAM drops it and the session
+why     || opens with an undeclared key.
+
+id      || setup-authkeys-one-group
+file    || scripts/ob-bastion-setup
+search  || Match Group $OB_AUTHKEYS_GROUP\n
+replace || 
+suite   || tests/test_ob_bastion_setup.sh
+why     || #358: --enable-authorized-keys-file gives authorized_keys back to one
+why     || group under Mode E; without the Match it is back for every user, and
+why     || unsigned keys with it.
+
 id      || setup-node-role-drives-stack
 file    || scripts/ob-bastion-setup
 search  || is_backend() { [ "$NODE_ROLE" = "backend" ]; }

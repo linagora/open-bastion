@@ -76,7 +76,7 @@ account    required     pam_openbastion.so\n\
 \n\
 # Session - standard Unix\n\
 session    required     pam_unix.so\n\
-session    optional     pam_openbastion.so\n\
+session    [success=ok perm_denied=die default=ignore]  pam_openbastion.so\n\
 ' > /etc/pam.d/sshd
 
 # Configure PAM for sudo (Open Bastion authorization)

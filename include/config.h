@@ -86,6 +86,7 @@ typedef struct {
 
     /* Service accounts (local accounts like ansible, backup, etc.) */
     char *service_accounts_file;    /* Path to service accounts config (default: /etc/open-bastion/service-accounts.conf) */
+    char *service_accounts_keys_dir; /* Keys served by ob-service-account-keys (default: /etc/open-bastion/service-accounts.d) */
 
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication (for LightDM greeter) */
@@ -252,6 +253,7 @@ int config_validate_skel(const char *skel_path);
 
 /* Default service accounts configuration file */
 #define DEFAULT_SERVICE_ACCOUNTS_FILE "/etc/open-bastion/service-accounts.conf"
+#define DEFAULT_SERVICE_ACCOUNTS_KEYS_DIR "/etc/open-bastion/service-accounts.d"
 
 /* Default JWKS the portal's signed answers are checked against */
 #define DEFAULT_SSO_JWKS_FILE "/var/lib/open-bastion/jwks/sso-jwks.json"

@@ -130,4 +130,53 @@ int service_accounts_validate_key(const service_accounts_t *sa,
  */
 int service_account_validate(const service_account_t *account);
 
+/*
+ * Result of comparing the key(s) a service account may use or did use with
+ * its key_fingerprint (#358).
+ */
+#define SA_KEYCHECK_OK         0   /* every key compared has the fingerprint */
+#define SA_KEYCHECK_NONE       1   /* no plain key to compare */
+#define SA_KEYCHECK_MISMATCH (-1)  /* a key has another fingerprint */
+#define SA_KEYCHECK_MALFORMED (-2) /* a line that may carry a key cannot be read */
+
+/*
+ * Whether `fp`, as ssh-keygen prints it, is the fingerprint `expected` names.
+ * SHA256 is compared exactly (base64 padding aside), MD5 without regard to
+ * case. False when either is NULL or they use different hashes.
+ */
+bool service_account_fingerprint_equal(const char *expected, const char *fp);
+
+/*
+ * Check the key file of a service account -- the NAME.pub that
+ * ob-service-account-keys serves to sshd -- against key_fingerprint.
+ *
+ * The file is considered only when it is a regular file owned by root, as
+ * read through the descriptor (a symlink is followed, like the helper's
+ * `cat`, and its target is what is checked). Each
+ * non-empty, non-comment line is read as an authorized_keys line (options
+ * allowed): "<type> <base64>", whose blob must carry that type.
+ *
+ * Returns SA_KEYCHECK_OK when every key has the fingerprint, SA_KEYCHECK_NONE
+ * when the helper serves nothing from this path, SA_KEYCHECK_MISMATCH or
+ * SA_KEYCHECK_MALFORMED otherwise. got/got_sz (may be NULL) receive the first
+ * fingerprint that differs.
+ */
+int service_account_check_key_file(const char *path, const char *expected,
+                                   char *got, size_t got_sz);
+
+/*
+ * Check SSH_AUTH_INFO_0 against key_fingerprint. OpenSSH sets it in the PAM
+ * environment, filled, only when the session opens -- during pam_acct_mgmt it
+ * does not hold the method that just succeeded yet. One line per method that
+ * succeeded: "publickey <type> <base64> [details]" for a key.
+ *
+ * Every plain key must have the fingerprint. A certificate is skipped: its
+ * binding is checked in the account phase, through the principals spool.
+ *
+ * Returns SA_KEYCHECK_OK, SA_KEYCHECK_NONE (no plain key: other methods, or
+ * certificates only), SA_KEYCHECK_MISMATCH or SA_KEYCHECK_MALFORMED.
+ */
+int service_account_check_auth_info(const char *auth_info, const char *expected,
+                                    char *got, size_t got_sz);
+
 #endif /* SERVICE_ACCOUNT_H */

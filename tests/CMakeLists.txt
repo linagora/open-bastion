@@ -288,8 +288,11 @@ target_link_libraries(test_crowdsec
 add_test(NAME test_crowdsec COMMAND test_crowdsec)
 
 # The parser is included by the test (SA_TRUSTED_UID), not linked.
-add_executable(test_service_account test_service_account.c ../src/str_utils.c)
-target_include_directories(test_service_account PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_executable(test_service_account test_service_account.c ../src/str_utils.c
+    ../src/ssh_key_policy.c)
+target_include_directories(test_service_account PRIVATE
+    ${CMAKE_SOURCE_DIR}/include ${OPENSSL_INCLUDE_DIRS})
+target_link_libraries(test_service_account ${OPENSSL_LIBRARIES})
 add_test(NAME test_service_account COMMAND test_service_account)
 
 add_executable(test_token_manager_io test_token_manager_io.c ../src/token_manager.c ../src/jwt_utils.c)
@@ -329,7 +332,9 @@ target_include_directories(test_sshd_anchor PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME test_sshd_anchor COMMAND test_sshd_anchor)
 
 add_executable(test_ssh_key_policy test_ssh_key_policy.c ../src/ssh_key_policy.c)
-target_include_directories(test_ssh_key_policy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_ssh_key_policy PRIVATE
+    ${CMAKE_SOURCE_DIR}/include ${OPENSSL_INCLUDE_DIRS})
+target_link_libraries(test_ssh_key_policy ${OPENSSL_LIBRARIES})
 add_test(NAME test_ssh_key_policy COMMAND test_ssh_key_policy)
 
 # Includes pam_openbastion.c to install its module data on a real PAM handle,
