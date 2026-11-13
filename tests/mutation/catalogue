@@ -270,6 +270,25 @@ why     || reporting success would hand the caller an ID that is not on disk.
 why     || The next call generates another one, and every cache entry encrypted
 why     || under the first becomes undecryptable.
 
+id      || curl-error-unknown-denies
+file    || src/ob_client.c
+search  || default:\n        return false;\n    }\n}
+replace || default:\n        return true;\n    }\n}
+suite   || tests/test_ob_client_status.sh
+why     || #453: a curl failure the allow-list does not name (a verdict on the
+why     || answer, a local TLS problem, a code added by a later libcurl) must not
+why     || reach the offline cache. Defaulting to "outage" is the old deny-list,
+why     || where any failure it forgot turned a revoked user's cached grant back on.
+
+id      || curl-error-refusal-at-call-site
+file    || src/ob_client.c
+search  || return ob_curl_error_allows_offline_cache(res) ? OB_ERR_UNREACHABLE
+replace || return (ob_curl_error_allows_offline_cache(res) || 1) ? OB_ERR_UNREACHABLE
+suite   || tests/test_ob_client_status.sh
+why     || #453: the helper only matters if /pam/authorize obeys it. A TLS chain
+why     || or pin that does not verify must come back OB_ERR_REFUSED on the real
+why     || HTTP/TLS path, or the PAM account phase answers from the cache.
+
 id      || setup-node-role-drives-stack
 file    || scripts/ob-bastion-setup
 search  || is_backend() { [ "$NODE_ROLE" = "backend" ]; }
