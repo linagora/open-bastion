@@ -439,5 +439,149 @@ $res = _authorize('not-a-fingerprint');
 is( $res->[0], 400, 'authorize with malformed fingerprint returns 400' );
 count(1);
 
+# ------------------------------------------------------------------
+# Case 6: the last use of an SSO certificate is recorded (issue #455)
+# ------------------------------------------------------------------
+{
+    no warnings 'once';
+    my $USE = $Lemonldap::NG::Portal::Plugins::PamAccess::SSO_CERT_USE_PREFIX;
+
+    # The SSHCA.pm loaded may be LLNG's own, which knows nothing of the use
+    # stamps: only the checks that read them through ssh-ca depend on it.
+    my $sshcaReadsUse =
+      defined $Lemonldap::NG::Portal::Plugins::SSHCA::CERT_USE_PREFIX;
+    SKIP: {
+        skip 'the SSHCA.pm loaded does not read use stamps', 1
+          unless $sshcaReadsUse;
+        is( $USE, $Lemonldap::NG::Portal::Plugins::SSHCA::CERT_USE_PREFIX,
+            'pam-access and ssh-ca agree on the use key' );
+    }
+    my $conf = $op->p->conf;
+    my $key  = $USE . $fp2;
+
+    my $stamp = sub {
+        my $raw = $op->p->getPersistentSession('french')->data->{$key};
+        return $raw ? from_json($raw) : undef;
+    };
+    my $setAt = sub {
+        my ($at) = @_;
+        my $s = $stamp->();
+        $s->{at} = $at;
+        $op->p->getPersistentSession('french')->update( { $key => to_json($s) } );
+    };
+
+    my $u = $stamp->();
+    ok( $u, 'a granted authorize recorded the use' );
+    my $rec = from_json( $op->p->getPersistentSession('french')
+          ->data->{ $Lemonldap::NG::Portal::Plugins::PamAccess::SSO_CERT_PREFIX
+              . $fp2 } );
+    is( $u->{serial}, $rec->{serial}, '  -> of this certificate' );
+    is( $u->{host}, 'host.example.com', '  -> and the host' );
+    cmp_ok( abs( $u->{at} - time ), '<', 30, '  -> just now' );
+    count(5);
+
+    # Within pamAccessSshCertUseInterval: no new write.
+    my $t = time - 100;
+    $setAt->($t);
+    expectJSON( _authorize($fp2) );
+    is( $stamp->()->{at}, $t,
+        'a use within the interval is not written again' );
+    count(1);
+
+    # Past it: written again.
+    $setAt->( time - 1000 );
+    expectJSON( _authorize($fp2) );
+    cmp_ok( time - $stamp->()->{at}, '<', 30, 'a later use is written again' );
+    count(1);
+
+    # 0 turns recording off.
+    {
+        local $conf->{pamAccessSshCertUseInterval} = 0;
+        $setAt->( time - 1000 );
+        expectJSON( _authorize($fp2) );
+        cmp_ok( time - $stamp->()->{at},
+            '>=', 999, 'pamAccessSshCertUseInterval = 0 records nothing' );
+        count(1);
+    }
+
+    # A refused authorization is not activity of the certificate: an
+    # unknown service is denied by rule, the fingerprint still matching.
+    {
+        $setAt->( time - 1000 );
+        my $body = to_json( {
+                user         => 'french',
+                host         => 'host.example.com',
+                service      => 'ftp',
+                server_group => 'default',
+                fingerprint  => $fp2,
+            }
+        );
+        my $denied = expectJSON(
+            $op->_post(
+                '/pam/authorize',
+                IO::String->new($body),
+                accept => 'application/json',
+                type   => 'application/json',
+                length => length($body),
+                custom => { HTTP_AUTHORIZATION => "Bearer $server_token" },
+            )
+        );
+        ok( !$denied->{authorized}, 'authorize refused by rule' );
+        cmp_ok( time - $stamp->()->{at},
+            '>=', 999, '  -> records no use' );
+        count(2);
+    }
+
+    # Bastion-hop certificates are not recorded.
+    {
+        my $pa = $op->p->loadedModules->{
+            'Lemonldap::NG::Portal::Plugins::PamAccess'};
+        my $ps = $op->p->getPersistentSession('french');
+        is_deeply(
+            $pa->_sshCertUseUpdate(
+                $ps, $fp2, { ok => 1, ephemeral => 1, serial => '9' }, 'h'
+            ),
+            {},
+            'an ephemeral certificate is not recorded'
+        );
+        ok(
+            $pa->_sshCertUseUpdate( $ps, $fp2, { ok => 1, serial => '9' },
+                'h' )->{$key},
+            '  -> an SSO certificate is'
+        );
+        count(2);
+    }
+
+    # /pam/verify records it too, without a host.
+    $setAt->( time - 1000 );
+    $json = expectJSON( _verify( _new_pam_token(), $fp2 ) );
+    ok( $json->{valid}, 'verify with the certificate' );
+    $u = $stamp->();
+    cmp_ok( time - $u->{at}, '<', 30, '  -> records the use' );
+    ok( !exists $u->{host}, '  -> with no host' );
+    count(3);
+
+    # The ssh-ca listing shows it.
+    SKIP: {
+        skip 'the SSHCA.pm loaded does not read use stamps', 8
+          unless $sshcaReadsUse;
+        $setAt->( time - 1000 );
+        expectJSON( _authorize($fp2) );
+        my $list = expectJSON(
+            $op->_get(
+                '/ssh/mycerts',
+                cookie => "lemonldap=$sid",
+                accept => 'application/json',
+            )
+        );
+        my ($c) = grep { ( $_->{fingerprint} // '' ) eq $fp2 }
+          @{ $list->{certificates} };
+        is( $c->{last_used_host}, 'host.example.com',
+            '/ssh/mycerts shows where the certificate was last used' );
+        cmp_ok( time - $c->{last_used_at}, '<', 30, '  -> and when' );
+    }
+    count(2);
+}
+
 clean_sessions();
 done_testing();

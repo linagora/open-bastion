@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token file itself, so `sudo` keeps working on a locked host played again,
   instead of losing it until the setup puts it back. Without the option it
   is still skipped with a warning (#377).
+- ssh-ca, pam-access: the SSH CA administration page shows when and on which
+  host each certificate was last used, and filters and sorts on it: never
+  used, used in the last hour, day or 30 days, or idle for longer. pam-access
+  records the use when `/pam/authorize` or `/pam/verify` matches the
+  certificate's fingerprint, at most once per certificate every
+  `pamAccessSshCertUseInterval` seconds (300; 0 turns it off). Re-signing a
+  key keeps the replaced certificate, with the status `superseded`, instead
+  of deleting it; `sshCaCertHistoryMax` (50 per user) and
+  `sshCaCertHistoryRetention` (30 days after expiry) bound that history
+  (#455).
 
 ### Changed
 
@@ -211,6 +221,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- ssh-ca: `sshca-rebuild-krl` read only the pre-upgrade `_sshCerts` array.
+  Since certificates moved to one session key each, a rebuild left out every
+  serial revoked after that change, and every serial superseded by a
+  re-signature, so those certificates became valid again on the node. It now
+  reads the per-key records and the superseded ones (#455).
 - The PAM and NSS modules and `ob-verify-response` refuse a JWKS where any key
   holds private key material (`d`, or the RSA CRT members), as the
   `ob-builder` and setup filters already did. Such a JWKS discloses the
