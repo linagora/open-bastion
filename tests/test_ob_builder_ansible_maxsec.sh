@@ -347,7 +347,7 @@ test_lock_detection_runs() {
     printf '#%%PAM-1.0\nsession required pam_limits.so\n@include common-auth\n@include common-account\n@include common-session-noninteractive\n' \
         > "$d/distro"
     # The backend stack of the other scenarios: local accounts keep sudo.
-    printf 'auth sufficient pam_unix.so\nauth required pam_openbastion.so service_type=sudo\naccount sufficient pam_localuser.so\naccount required pam_openbastion.so service_type=sudo\nsession required pam_unix.so\n' \
+    printf 'auth sufficient pam_unix.so\nauth required pam_openbastion.so service_type=sudo\naccount [success=1 default=ignore] pam_succeed_if.so quiet user notingroup open-bastion-sudo\naccount [success=done ignore=ignore default=die] pam_openbastion.so service_type=sudo\naccount sufficient pam_localuser.so\naccount required pam_openbastion.so service_type=sudo\nsession required pam_unix.so\n' \
         > "$d/backend"
     # The two detection tasks of the generated role, reading a fixture.
     python3 - "$BR/tasks/main.yml" "$d/detect.yml" <<'PY' || { test_fail "detection tasks not found"; return; }
