@@ -150,8 +150,9 @@ bool service_account_fingerprint_equal(const char *expected, const char *fp);
  * Check the key file of a service account -- the NAME.pub that
  * ob-service-account-keys serves to sshd -- against key_fingerprint.
  *
- * The file is considered only when the helper would serve it: its own owner
- * (not a symlink target's) is root, and it resolves to a regular file. Each
+ * The file is considered only when it is a regular file owned by root, as
+ * read through the descriptor (a symlink is followed, like the helper's
+ * `cat`, and its target is what is checked). Each
  * non-empty, non-comment line is read as an authorized_keys line (options
  * allowed): "<type> <base64>", whose blob must carry that type.
  *
