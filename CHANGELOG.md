@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ob-bastion-setup --enable-authorized-keys-file`: under maximum security,
+  `~/.ssh/authorized_keys` comes back for the members of the
+  `open-bastion-authorized-keys` group only, through a `Match Group` drop-in,
+  so service accounts can keep their keys there. A session key that is not
+  the account's `key_fingerprint` is still refused (#358).
+
 - Test runs can produce JUnit reports for certification:
   `tests/run-tests-junit.sh` writes `ctest.xml` for the C tests and
   `shell-tests.xml` for the `tests/test_ob_*.sh` suites, both naming the
@@ -210,6 +216,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any other (#462).
 
 ### Security
+
+- A service account's `key_fingerprint` was never checked on a plain-key
+  login, the normal case: OpenSSH names no plain key to PAM during the
+  account phase, so any key `sshd` accepted for the account opened the
+  session, one the account added to its own `authorized_keys` included. It
+  is now checked twice: at login, every key of the served
+  `service-accounts.d/<name>.pub` must have it; when the session opens, the
+  key actually used (`SSH_AUTH_INFO_0`) must have it, whatever served it.
+  The bastion and standalone `sshd` stack now ends with
+  `session [success=ok perm_denied=die default=ignore] pam_openbastion.so`,
+  as `optional` would drop that refusal. `fingerprint_required = true` no
+  longer refuses a service account's plain-key login. See
+  [service accounts](doc/service-accounts.rst) (#358).
 
 - The PAM and NSS modules and `ob-verify-response` refuse a JWKS where any key
   holds private key material (`d`, or the RSA CRT members), as the

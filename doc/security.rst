@@ -129,11 +129,13 @@ logged. Consequences:
 
 ``ExposeAuthInfo yes`` in ``sshd_config`` remains useful as a fallback
 for sshd variants that do propagate the information. It does not give
-PAM the fingerprint of a plain key on a stock OpenSSH, so it does not make
-the ``key_fingerprint`` of a :doc:`service account </service-accounts>`
-checked either (see :ref:`service-accounts-fingerprint`). For the same
-reason, a service account's plain-key login is refused while the policy is
-enabled: the helper above runs for certificates only.
+PAM the fingerprint of a plain key during the ``account`` phase on a stock
+OpenSSH, so a service account's plain-key login is refused while the
+policy is enabled: the helper above runs for certificates only. The
+``key_fingerprint`` of a :doc:`service account </service-accounts>` does
+not depend on it: it is checked against the served key file at login and
+against the key used when the session opens (see
+:ref:`service-accounts-fingerprint`).
 
 Rejections
 ~~~~~~~~~~
