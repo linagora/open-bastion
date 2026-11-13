@@ -60,6 +60,12 @@ Besides enrolling the host with LLNG, the setup writes:
   keys (``AuthorizedKeysFile none``), requires the revocation list
   (``RevokedKeys``) and exposes certificate info for audit
   (``ExposeAuthInfo``).
+* ``/etc/ssh/sshd_config.d/61-open-bastion-authorized-keys.conf``, only
+  with ``--enable-authorized-keys-file`` — gives ``~/.ssh/authorized_keys``
+  back to the members of the ``open-bastion-authorized-keys`` group, meant
+  for :doc:`service accounts </service-accounts>` whose keys are managed
+  there. Their session key must still match ``key_fingerprint``; everyone
+  else keeps certificates only.
 * ``/etc/ssh/sshd_config.d/00-open-bastion-bastion.conf`` (bastion and
   standalone) or ``00-open-bastion-backend.conf`` (backend) — configures
   certificate-only authentication, no passwords, and the principals
@@ -100,7 +106,7 @@ hosts, in every scenario:
 
    session    optional     pam_mkhomedir.so skel=/etc/skel umask=0077
    session    required     pam_unix.so
-   session    optional     pam_openbastion.so
+   session    [success=ok perm_denied=die default=ignore]  pam_openbastion.so
    session    optional     pam_systemd.so
 
 On a backend the session block differs, because the module creates the
@@ -119,7 +125,10 @@ reaching it is a password attempt, which this scenario refuses.
 
 Two session lines are load-bearing. ``pam_openbastion`` manages the
 ``open-bastion-sudo`` group from the SSO's ``sudo_allowed`` flag, so
-dropping it breaks ``sudo`` for SSO users. ``pam_systemd`` registers the
+dropping it breaks ``sudo`` for SSO users. It also refuses the session of
+a service account whose key is not its ``key_fingerprint``, which is why
+its bastion line makes ``PAM_PERM_DENIED`` fatal and ignores any other
+failure (see :ref:`service-accounts-fingerprint`). ``pam_systemd`` registers the
 session with ``systemd-logind``; without it, ``who``, ``w``,
 ``loginctl`` and the heartbeat's connected-users report do not see the
 session.

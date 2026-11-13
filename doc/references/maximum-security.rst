@@ -46,6 +46,13 @@ standalone hosts) or ``00-open-bastion-backend.conf`` (backend);
 
 .. code:: text
 
+   # 61-open-bastion-authorized-keys.conf   (--enable-authorized-keys-file)
+   # Service accounts that keep their keys in authorized_keys
+   Match Group open-bastion-authorized-keys
+       AuthorizedKeysFile .ssh/authorized_keys
+
+.. code:: text
+
    # 00-open-bastion-bastion.conf on a bastion or standalone host,
    # 00-open-bastion-backend.conf on a backend
    UsePAM yes
