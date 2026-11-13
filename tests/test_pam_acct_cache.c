@@ -185,6 +185,68 @@ static void answer(int status, const char *body)
     mp_set(&a);
 }
 
+/*
+ * A service account's session key against key_fingerprint (#358). sshd fills
+ * SSH_AUTH_INFO_0 only when the session opens, so this is where the key that
+ * was actually used -- from authorized_keys too -- is compared.
+ */
+#define SVC_KEY_A "publickey ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC900KjDRAzVlZr3rDQ9XXeJQZiSIUyziBCho1uOtq1K\n"
+#define SVC_KEY_B "publickey ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIXLxJxwudMwBiK9k15FMh7wLJb1ZtENI0rc9pVZVGAe\n"
+#define SVC_FP_A  "SHA256:Z5nlcWmfGvIbemPetkhxnentYaDYsHjOAstACMVb4SI"
+
+static void test_service_account_session(pam_openbastion_data_t *data,
+                                         struct pam_conv *conv)
+{
+    printf("\nA service account's session key must be its key_fingerprint:\n");
+
+    data->service_accounts.accounts = calloc(1, sizeof(service_account_t));
+    if (!data->service_accounts.accounts) exit(1);
+    data->service_accounts.accounts[0].name = strdup("svc");
+    data->service_accounts.accounts[0].key_fingerprint = strdup(SVC_FP_A);
+    data->service_accounts.count = 1;
+    data->service_accounts.capacity = 1;
+
+    pam_handle_t *pamh = NULL;
+    if (pam_start("sshd", "svc", conv, &pamh) != PAM_SUCCESS) {
+        printf("  FAIL pam_start for the service account\n");
+        exit(1);
+    }
+
+    pam_putenv(pamh, "SSH_AUTH_INFO_0=" SVC_KEY_A);
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_SUCCESS,
+          "the declared key opens the session");
+
+    pam_putenv(pamh, "SSH_AUTH_INFO_0=" SVC_KEY_B);
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_PERM_DENIED,
+          "another key (authorized_keys, say) is refused at session open");
+
+    pam_putenv(pamh, "SSH_AUTH_INFO_0=" SVC_KEY_A SVC_KEY_B);
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_PERM_DENIED,
+          "  ... also as the second of two keys");
+
+    pam_putenv(pamh, "SSH_AUTH_INFO_0=password\n");
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_SUCCESS,
+          "no key to compare: left to the account phase");
+
+    data->config.fingerprint_required = true;
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_PERM_DENIED,
+          "  ... unless fingerprint_required is set");
+    pam_putenv(pamh, "SSH_AUTH_INFO_0=" SVC_KEY_A);
+    CHECK(pam_sm_open_session(pamh, 0, 0, NULL) == PAM_SUCCESS,
+          "fingerprint_required: a plain key now satisfies it");
+    data->config.fingerprint_required = false;
+
+    pam_end(pamh, PAM_SUCCESS);
+
+    pam_handle_t *sudoh = NULL;
+    if (pam_start("sudo", "svc", conv, &sudoh) == PAM_SUCCESS) {
+        pam_putenv(sudoh, "SSH_AUTH_INFO_0=" SVC_KEY_B);
+        CHECK(pam_sm_open_session(sudoh, 0, 0, NULL) == PAM_SUCCESS,
+              "only an SSH session is checked");
+        pam_end(sudoh, PAM_SUCCESS);
+    }
+}
+
 int main(void)
 {
     char cmd[128];
@@ -289,6 +351,8 @@ int main(void)
         CHECK(stat(hidden, &st) == 0, "  ... nor removed as one");
     }
 #endif
+
+    test_service_account_session(data, &conv);
 
     pam_end(pamh, PAM_SUCCESS);
     cleanup_data(pamh, g_data, 0);

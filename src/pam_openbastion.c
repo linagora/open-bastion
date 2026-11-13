@@ -64,6 +64,13 @@
 /* Security: Maximum length for SSH_USER_AUTH environment variable */
 #define MAX_SSH_AUTH_LEN 8192
 
+/*
+ * PAM data set in the account phase when a service account's fingerprint was
+ * bound there (a certificate, through the spool), for the session-open check
+ * of fingerprint_required (#358).
+ */
+#define OB_SA_FP_BOUND "ob_sa_fp_bound"
+
 /* Buffer for "LLNG_BASTION_VOUCHER=<nonce>" (nonce is a UUID; allow slack) */
 #define OB_MAX_VOUCHER_ENV 256
 
@@ -2256,8 +2263,9 @@ static char *extract_ssh_key_fingerprint(pam_handle_t *pamh)
  * pam_acct_mgmt. The out-of-band spool written by the principals helper is
  * keyed on the sshd-session anchor of the process tree (#194), but only the
  * AuthorizedPrincipalsCommand feeds it, i.e. certificate logins: a plain-key
- * login usually has neither source, and the root-owned key served by
- * AuthorizedKeysCommand is then the only control.
+ * login has neither source. For a service account, its key is checked
+ * against the served key file here and against SSH_AUTH_INFO_0 when the
+ * session opens (#358).
  *
  * Returns an allocated string (caller frees), or NULL when neither source has
  * one.
@@ -3666,63 +3674,86 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh,
         }
 
         /*
-         * Fingerprint check for SSH sessions, and for a public-key login it is
-         * the ONLY one that runs: sshd does not call pam_authenticate() on that
-         * path, so the check in pam_sm_authenticate() never fires there.
+         * key_fingerprint (#358). OpenSSH gives the account phase no
+         * fingerprint for a plain key: SSH_AUTH_INFO_0 does not hold the
+         * method that just succeeded until the session opens, SSH_USER_AUTH
+         * is never in the PAM environment, and only the principals helper --
+         * a certificate login -- feeds the spool. sshd does not call
+         * pam_authenticate() on the public-key path either. So the check is
+         * made of three parts:
          *
-         * It resolves through the spool as well as SSH_USER_AUTH. Reading only
-         * SSH_USER_AUTH meant that on a modern OpenSSH, which does not set it
-         * for a plain public key, this check silently did nothing at all.
+         *  - here, the key file ob-service-account-keys serves: every key in
+         *    it must have the fingerprint, so a key sshd accepted through it
+         *    has it;
+         *  - here, a fingerprint the spool or SSH_USER_AUTH does give;
+         *  - at session open, the key that was really used, whatever served
+         *    it, an authorized_keys file included (sa_check_session_key()).
          *
-         * Absence is still not fatal by default -- some OpenSSH builds omit
-         * SSH_USER_AUTH and some hosts have no principals helper -- but
-         * `fingerprint_required` now makes it fatal here too, which is what
-         * that setting says it does. Enforced before the PAM_SUCCESS below,
-         * because that early return used to skip the enforcement block at the
-         * end of this function entirely.
+         * fingerprint_required is enforced at session open, where a plain key
+         * always has a fingerprint; a binding made here, from a certificate,
+         * is recorded for it. All of it runs before the PAM_SUCCESS below.
          */
         if (strcmp(service, "sshd") == 0 || strcmp(service, "ssh") == 0) {
-            bool sa_fp_from_spool = false;
-            char *ssh_fp = resolve_ssh_key_fingerprint(pamh, &sa_fp_from_spool);
-            if (!ssh_fp && data->config.fingerprint_required) {
+            const char *deny_reason = NULL;
+            char got[128] = "";
+            char key_path[PATH_MAX];
+            const char *keys_dir = data->config.service_accounts_keys_dir
+                                       ? data->config.service_accounts_keys_dir
+                                       : DEFAULT_SERVICE_ACCOUNTS_KEYS_DIR;
+            int kf;
+            if ((size_t)snprintf(key_path, sizeof(key_path), "%s/%s.pub",
+                                 keys_dir, user) >= sizeof(key_path)) {
+                kf = SA_KEYCHECK_MALFORMED;
+            } else {
+                kf = service_account_check_key_file(key_path, sa->key_fingerprint,
+                                                    got, sizeof(got));
+            }
+            if (kf == SA_KEYCHECK_MISMATCH) {
                 OB_LOG_ERR(pamh,
-                           "Service account %s: no SSH key fingerprint and "
-                           "fingerprint_required is set: refusing. Check that "
-                           "the AuthorizedPrincipalsCommand helper runs and that "
-                           "/run/open-bastion/ssh-fp exists.", user);
+                           "Service account %s: %s serves a key whose fingerprint "
+                           "is %s, not key_fingerprint: refusing", user,
+                           key_path, got);
+                deny_reason = "Service account key file holds a key that does "
+                              "not match key_fingerprint";
+            } else if (kf == SA_KEYCHECK_MALFORMED) {
+                OB_LOG_ERR(pamh,
+                           "Service account %s: %s has a line that cannot be "
+                           "read as a key: refusing", user, key_path);
+                deny_reason = "Service account key file unreadable";
+            }
+
+            if (!deny_reason) {
+                bool sa_fp_from_spool = false;
+                char *ssh_fp = resolve_ssh_key_fingerprint(pamh, &sa_fp_from_spool);
+                if (ssh_fp && sa_fp_from_spool) {
+                    OB_LOG_WARN(pamh,
+                                "Service account %s: SSH fingerprint taken from the "
+                                "principals spool, not from sshd", user);
+                }
+                if (ssh_fp) {
+                    if (service_accounts_validate_key(&data->service_accounts,
+                                                      user, ssh_fp) != 0) {
+                        OB_LOG_ERR(pamh,
+                                   "Service account %s: fingerprint mismatch in "
+                                   "account phase (got %s)", user, ssh_fp);
+                        deny_reason = "Service account fingerprint mismatch";
+                    } else {
+                        pam_set_data(pamh, OB_SA_FP_BOUND, (void *)OB_SA_FP_BOUND,
+                                     NULL);
+                    }
+                    free(ssh_fp);
+                }
+            }
+
+            if (deny_reason) {
                 if (audit_initialized) {
                     audit_event.event_type = AUDIT_AUTHZ_DENIED;
                     audit_event.result_code = PAM_PERM_DENIED;
-                    audit_event.reason =
-                        "Service account: fingerprint_required with no binding";
+                    audit_event.reason = deny_reason;
                     audit_event_set_end_time(&audit_event);
                     audit_log_event(data->audit, &audit_event);
                 }
                 return PAM_PERM_DENIED;
-            }
-            if (ssh_fp && sa_fp_from_spool) {
-                OB_LOG_WARN(pamh,
-                            "Service account %s: SSH fingerprint taken from the "
-                            "principals spool, not from sshd", user);
-            }
-            if (ssh_fp) {
-                int fp_result = service_accounts_validate_key(
-                    &data->service_accounts, user, ssh_fp);
-                if (fp_result != 0) {
-                    OB_LOG_ERR(pamh,
-                               "Service account %s: fingerprint mismatch in account phase "
-                               "(got %s)", user, ssh_fp);
-                    free(ssh_fp);
-                    if (audit_initialized) {
-                        audit_event.event_type = AUDIT_AUTHZ_DENIED;
-                        audit_event.result_code = PAM_PERM_DENIED;
-                        audit_event.reason = "Service account fingerprint mismatch";
-                        audit_event_set_end_time(&audit_event);
-                        audit_log_event(data->audit, &audit_event);
-                    }
-                    return PAM_PERM_DENIED;
-                }
-                free(ssh_fp);
             }
         }
 
@@ -4519,6 +4550,82 @@ cleanup:
 }
 
 /*
+ * key_fingerprint against the key that opened a service account's SSH
+ * session (#358). sshd fills SSH_AUTH_INFO_0 only now, after the account
+ * phase, so this is the one place that sees the key actually used, whichever
+ * file or command served it -- an authorized_keys file the account can write
+ * included.
+ *
+ * Refusing here is enough: sshd then restricts the connection
+ * (auth_restrict_session()) and runs no command, shell or forwarding. The
+ * session line of the stack must let PAM_PERM_DENIED through
+ * ([perm_denied=die] or required); `optional` would drop it.
+ *
+ * Returns PAM_SUCCESS or PAM_PERM_DENIED.
+ */
+static int sa_check_session_key(pam_handle_t *pamh,
+                                pam_openbastion_data_t *data,
+                                const service_account_t *sa,
+                                const char *user)
+{
+    const char *service = NULL;
+    if (pam_get_item(pamh, PAM_SERVICE, (const void **)&service) != PAM_SUCCESS ||
+        !service ||
+        (strcmp(service, "sshd") != 0 && strcmp(service, "ssh") != 0)) {
+        return PAM_SUCCESS;
+    }
+
+    char got[128] = "";
+    const char *reason = NULL;
+    int r = service_account_check_auth_info(pam_getenv(pamh, "SSH_AUTH_INFO_0"),
+                                            sa->key_fingerprint,
+                                            got, sizeof(got));
+    switch (r) {
+    case SA_KEYCHECK_OK:
+        OB_LOG_DEBUG(pamh, "Service account %s: session key matches "
+                     "key_fingerprint", user);
+        return PAM_SUCCESS;
+    case SA_KEYCHECK_MISMATCH:
+        OB_LOG_ERR(pamh, "Service account %s: the session key has fingerprint "
+                   "%s, not key_fingerprint: refusing the session", user, got);
+        reason = "Service account session key does not match key_fingerprint";
+        break;
+    case SA_KEYCHECK_MALFORMED:
+        OB_LOG_ERR(pamh, "Service account %s: SSH_AUTH_INFO_0 cannot be read: "
+                   "refusing the session", user);
+        reason = "Service account session key unreadable";
+        break;
+    default: {
+        /* No plain key: another method, or a certificate checked earlier. */
+        if (!data->config.fingerprint_required) {
+            return PAM_SUCCESS;
+        }
+        const void *bound = NULL;
+        if (pam_get_data(pamh, OB_SA_FP_BOUND, &bound) == PAM_SUCCESS && bound) {
+            return PAM_SUCCESS;
+        }
+        OB_LOG_ERR(pamh, "Service account %s: no SSH key fingerprint and "
+                   "fingerprint_required is set: refusing the session", user);
+        reason = "Service account: fingerprint_required with no binding";
+        break;
+    }
+    }
+
+    if (data->audit) {
+        audit_event_t ev;
+        audit_event_init(&ev, AUDIT_AUTHZ_DENIED);
+        ev.user = user;
+        ev.service = service;
+        ev.client_ip = get_client_ip(pamh);
+        ev.result_code = PAM_PERM_DENIED;
+        ev.reason = reason;
+        audit_event_set_end_time(&ev);
+        audit_log_event(data->audit, &ev);
+    }
+    return PAM_PERM_DENIED;
+}
+
+/*
  * pam_sm_open_session - Open session (create user if needed)
  *
  * If create_user is enabled and the user doesn't exist in /etc/passwd,
@@ -4566,7 +4673,12 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
      * included. The sudo sync below would otherwise REMOVE it from that group
      * on every login, since no SSO answer ever sets LLNG_SUDO_ALLOWED for it.
      */
-    if (service_accounts_is_service_account(&data->service_accounts, user)) {
+    const service_account_t *session_sa =
+        service_accounts_find(&data->service_accounts, user);
+    if (session_sa) {
+        if (sa_check_session_key(pamh, data, session_sa, user) != PAM_SUCCESS) {
+            return PAM_PERM_DENIED;
+        }
         OB_LOG_DEBUG(pamh, "Service account %s: session left untouched", user);
         return PAM_SUCCESS;
     }

@@ -466,6 +466,179 @@ static int test_null_handling(void)
     return ok;
 }
 
+/* ---------------------------------------------------------------------------
+ * key_fingerprint against the keys themselves (#358). Vectors from
+ * `ssh-keygen -l` and `ssh-keygen -E md5 -l` on the keys below.
+ * ------------------------------------------------------------------------ */
+
+#define KEY_A_BLOB "AAAAC3NzaC1lZDI1NTE5AAAAIC900KjDRAzVlZr3rDQ9XXeJQZiSIUyziBCho1uOtq1K"
+#define KEY_A_SHA256 "SHA256:Z5nlcWmfGvIbemPetkhxnentYaDYsHjOAstACMVb4SI"
+#define KEY_A_MD5 "MD5:66:cf:8c:10:72:08:3e:59:82:bc:7b:c9:11:2e:4d:30"
+#define KEY_B_BLOB "AAAAC3NzaC1lZDI1NTE5AAAAIIXLxJxwudMwBiK9k15FMh7wLJb1ZtENI0rc9pVZVGAe"
+#define KEY_B_SHA256 "SHA256:BwQyoPyP3rzSOWVEpanRNsaYR6TKIwj29E1EadeGR9I"
+#define KEY_R_BLOB "AAAAB3NzaC1yc2EAAAADAQABAAABAQCKaA4/f2eWOIaNYiBEUmnjHvPDUaK1drfgja5WvNbz20Ehyum5q1l0MmlnsW7wJvA0Nv2gkjxGUf+4g0QBHYVUDiwoJE5T46nMBCr0g4ZVRKcIdzSLKQ26EItCtrB/1SE+kLEBgrVLjb5/Y7OXm0L3oEIrc9qGTdOHKTmITeiDRdm3MuTwrf0Qq9fGnNb3mjZBohnLrxIk5N78nq/TImNSfo9Glqh1m+JYCYF5xzXLan1hAKwVI4p7/4DKXRY2QKTA2wI6NANMmaVrmT64S8Qsj8JGEz4vE0kBnnjtF2X90bxGHTUmfp8rXUp0hEwv3xePVSHfXUAHquYqXxkRUBlD"
+#define KEY_R_SHA256 "SHA256:BEhv9DDiv0B29G4T9M0S7t/6BDDD7T9MP8Ayksia9Mw"
+#define KEY_R_MD5 "MD5:c4:4b:04:7d:5d:bd:ec:f5:68:9a:b6:2c:ab:52:f0:b4"
+
+static int test_blob_fingerprint_vectors(void)
+{
+    char type[64], fp[128];
+    int ok = 1;
+    ok = ok && ssh_key_blob_fingerprint(KEY_A_BLOB, "SHA256", type, sizeof(type),
+                                        fp, sizeof(fp))
+            && strcmp(type, "ssh-ed25519") == 0 && strcmp(fp, KEY_A_SHA256) == 0;
+    ok = ok && ssh_key_blob_fingerprint(KEY_A_BLOB, "MD5", NULL, 0, fp, sizeof(fp))
+            && strcmp(fp, KEY_A_MD5) == 0;
+    ok = ok && ssh_key_blob_fingerprint(KEY_R_BLOB, "SHA256", type, sizeof(type),
+                                        fp, sizeof(fp))
+            && strcmp(type, "ssh-rsa") == 0 && strcmp(fp, KEY_R_SHA256) == 0;
+    ok = ok && ssh_key_blob_fingerprint(KEY_R_BLOB, "MD5", NULL, 0, fp, sizeof(fp))
+            && strcmp(fp, KEY_R_MD5) == 0;
+    /* not base64, unknown hash, buffer too small */
+    ok = ok && !ssh_key_blob_fingerprint("not*base64", "SHA256", NULL, 0, fp, sizeof(fp));
+    ok = ok && !ssh_key_blob_fingerprint(KEY_A_BLOB, "SHA1", NULL, 0, fp, sizeof(fp));
+    ok = ok && !ssh_key_blob_fingerprint(KEY_A_BLOB, "SHA256", NULL, 0, fp, 20);
+    return ok;
+}
+
+static int test_fingerprint_equal(void)
+{
+    int ok = 1;
+    ok = ok && service_account_fingerprint_equal(KEY_A_SHA256, KEY_A_SHA256);
+    ok = ok && service_account_fingerprint_equal(KEY_A_SHA256 "=", KEY_A_SHA256);
+    ok = ok && !service_account_fingerprint_equal(KEY_A_SHA256, KEY_B_SHA256);
+    /* base64 is case-sensitive, MD5 hex is not */
+    ok = ok && !service_account_fingerprint_equal(
+        "SHA256:z5nlcWmfGvIbemPetkhxnentYaDYsHjOAstACMVb4SI", KEY_A_SHA256);
+    ok = ok && service_account_fingerprint_equal(
+        "MD5:66:CF:8C:10:72:08:3E:59:82:BC:7B:C9:11:2E:4D:30", KEY_A_MD5);
+    ok = ok && !service_account_fingerprint_equal(KEY_A_SHA256, KEY_A_MD5);
+    ok = ok && !service_account_fingerprint_equal(NULL, KEY_A_SHA256);
+    return ok;
+}
+
+/* Key file helper: a file the test owns (SA_TRUSTED_UID is getuid()). */
+static int key_file_result(const char *content, const char *expected,
+                           char *got, size_t got_sz)
+{
+    char *path = create_temp_config_mode(content, 0644);
+    if (!path) return 99;
+    int r = service_account_check_key_file(path, expected, got, got_sz);
+    cleanup_temp_file(path);
+    return r;
+}
+
+static int test_key_file_match(void)
+{
+    int ok = 1;
+    ok = ok && key_file_result("ssh-ed25519 " KEY_A_BLOB " ci@ops\n",
+                               KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_OK;
+    /* comments, blank lines, CRLF, authorized_keys options with a quoted space */
+    ok = ok && key_file_result("# deploy key\n\n"
+                               "from=\"10.0.0.1\",command=\"/usr/bin/run a b\" "
+                               "ssh-ed25519 " KEY_A_BLOB " ci@ops\r\n",
+                               KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_OK;
+    ok = ok && key_file_result("ssh-rsa " KEY_R_BLOB "\n",
+                               KEY_R_MD5, NULL, 0) == SA_KEYCHECK_OK;
+    return ok;
+}
+
+static int test_key_file_extra_key_refused(void)
+{
+    char got[128] = "";
+    int ok = key_file_result("ssh-ed25519 " KEY_A_BLOB " a\n"
+                             "ssh-ed25519 " KEY_B_BLOB " b\n",
+                             KEY_A_SHA256, got, sizeof(got)) == SA_KEYCHECK_MISMATCH;
+    return ok && strcmp(got, KEY_B_SHA256) == 0;
+}
+
+static int test_key_file_malformed_refused(void)
+{
+    int ok = 1;
+    /* a line that sshd might read but this cannot */
+    ok = ok && key_file_result("ssh-ed25519 " KEY_A_BLOB "\ngarbage line\n",
+                               KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_MALFORMED;
+    /* the blob carries another type than the one written before it */
+    ok = ok && key_file_result("ssh-rsa " KEY_A_BLOB "\n",
+                               KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_MALFORMED;
+    ok = ok && key_file_result("ssh-ed25519 AAAA!!!!\n",
+                               KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_MALFORMED;
+    return ok;
+}
+
+static int test_key_file_nothing_served(void)
+{
+    int ok = 1;
+    ok = ok && service_account_check_key_file("/nonexistent/ci.pub", KEY_A_SHA256,
+                                              NULL, 0) == SA_KEYCHECK_NONE;
+    ok = ok && service_account_check_key_file("/tmp", KEY_A_SHA256,
+                                              NULL, 0) == SA_KEYCHECK_NONE;
+    ok = ok && key_file_result("# no key yet\n", KEY_A_SHA256, NULL, 0)
+               == SA_KEYCHECK_NONE;
+    return ok;
+}
+
+static int test_auth_info_match(void)
+{
+    int ok = 1;
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-ed25519 " KEY_A_BLOB "\n", KEY_A_SHA256, NULL, 0)
+        == SA_KEYCHECK_OK;
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-rsa " KEY_R_BLOB "\n", KEY_R_MD5, NULL, 0)
+        == SA_KEYCHECK_OK;
+    /* a second method after the key */
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-ed25519 " KEY_A_BLOB "\nkeyboard-interactive/pam\n",
+        KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_OK;
+    return ok;
+}
+
+static int test_auth_info_other_key_refused(void)
+{
+    char got[128] = "";
+    int ok = service_account_check_auth_info(
+        "publickey ssh-ed25519 " KEY_B_BLOB "\n", KEY_A_SHA256, got, sizeof(got))
+        == SA_KEYCHECK_MISMATCH && strcmp(got, KEY_B_SHA256) == 0;
+    /* every key must match, not only the first or the last */
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-ed25519 " KEY_A_BLOB "\npublickey ssh-ed25519 " KEY_B_BLOB "\n",
+        KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_MISMATCH;
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-ed25519 " KEY_B_BLOB "\npublickey ssh-ed25519 " KEY_A_BLOB "\n",
+        KEY_A_SHA256, NULL, 0) == SA_KEYCHECK_MISMATCH;
+    return ok;
+}
+
+static int test_auth_info_no_plain_key(void)
+{
+    int ok = 1;
+    ok = ok && service_account_check_auth_info(NULL, KEY_A_SHA256, NULL, 0)
+               == SA_KEYCHECK_NONE;
+    ok = ok && service_account_check_auth_info("", KEY_A_SHA256, NULL, 0)
+               == SA_KEYCHECK_NONE;
+    ok = ok && service_account_check_auth_info("password\n", KEY_A_SHA256, NULL, 0)
+               == SA_KEYCHECK_NONE;
+    /* a certificate is bound in the account phase, through the spool */
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5LWNlcnQ= "
+        "ID ci (serial 7) CA ED25519 SHA256:x\n", KEY_A_SHA256, NULL, 0)
+        == SA_KEYCHECK_NONE;
+    return ok;
+}
+
+static int test_auth_info_malformed_refused(void)
+{
+    int ok = 1;
+    ok = ok && service_account_check_auth_info("publickey ssh-ed25519\n",
+                                               KEY_A_SHA256, NULL, 0)
+               == SA_KEYCHECK_MALFORMED;
+    ok = ok && service_account_check_auth_info(
+        "publickey ssh-rsa " KEY_A_BLOB "\n", KEY_A_SHA256, NULL, 0)
+        == SA_KEYCHECK_MALFORMED;
+    return ok;
+}
+
 int main(void)
 {
     printf("Running service_account tests...\n");
@@ -489,6 +662,16 @@ int main(void)
     TEST(account_validate_missing_fingerprint);
     TEST(account_validate_invalid_fingerprint);
     TEST(null_handling);
+    TEST(blob_fingerprint_vectors);
+    TEST(fingerprint_equal);
+    TEST(key_file_match);
+    TEST(key_file_extra_key_refused);
+    TEST(key_file_malformed_refused);
+    TEST(key_file_nothing_served);
+    TEST(auth_info_match);
+    TEST(auth_info_other_key_refused);
+    TEST(auth_info_no_plain_key);
+    TEST(auth_info_malformed_refused);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
