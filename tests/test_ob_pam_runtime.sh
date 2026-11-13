@@ -31,7 +31,10 @@
 #
 # Stacks built from pam_openbastion.so (modes a/b/d, the Mode E sudo stack) are
 # deliberately out of scope: the module is not installed in a test environment,
-# so running them would measure dlopen failure, not the stack.
+# so running them would measure dlopen failure, not the stack. The one
+# exception is the backend sudo account phase (#359), where the question is
+# which accounts reach the module at all: pam_deny/pam_permit stand in for it,
+# and pam_acct_mgmt() runs instead of pam_authenticate().
 set -uo pipefail
 
 TESTS_PASSED=0
@@ -195,6 +198,81 @@ for spec in "ob-bastion-setup:-p https://x --dry-run" \
             "obprobe_${script//-/_}" "$out"
     fi
 done
+
+# ── The backend sudo account phase (#359) ──
+# Outside Mode E the backend's sudo stack lets local accounts through
+# pam_localuser, so the machine's break-glass admin keeps Unix sudo. With
+# create_user an SSO user is a local account too, so a member of
+# open-bastion-sudo must skip pam_localuser and reach pam_openbastion, where
+# sudo_allowed is checked live. The module is not installed here: pam_deny
+# stands in for a refusal (a right revoked in the portal), pam_permit for a
+# grant, and the group is one the user running the test is (or is not) in,
+# since a test cannot create open-bastion-sudo.
+echo "--- scripts/ob-bastion-setup, backend sudo account phase (#359) ---"
+
+pam_account_lines() {
+    sed -e 's/\\n\\[[:space:]]*$//' \
+        -e 's/^[[:space:]]*//' | grep -E '^account[[:space:]]' || true
+}
+
+# run_account <service> <stack text> <user> -> echoes the pam_acct_mgmt() rc
+run_account() {
+    printf '%s\n' "$2" | pam_account_lines >"$CONFDIR/$1"
+    "$PROBE" "$CONFDIR" "$1" "$3" account 2>/dev/null
+}
+
+# assert_account <label> <service> <expected: allow|deny> <stack> <user>
+assert_account() {
+    local label="$1" service="$2" expected="$3" content="$4" user="$5" got ok=false
+    got=$(run_account "$service" "$content" "$user")
+    case "$expected:$got" in
+        allow:"$PAM_SUCCESS") ok=true ;;
+        deny:"$PAM_PERM_DENIED"|deny:"$PAM_AUTH_ERR") ok=true ;;
+    esac
+    if $ok; then
+        pass "$label -> $got ($(rc_name "$got"))"
+    else
+        fail "$label" "expected $expected, got ${got:-<none>} ($(rc_name "${got:-none}"))
+stack:
+$(printf '%s\n' "$content" | pam_account_lines)"
+    fi
+}
+
+SUDO_STACK=$(
+    load_setup_as ob-backend-setup || exit 1
+    parse_args -p https://x -g g --dry-run >/dev/null 2>&1
+    configure_pam_sudo 2>/dev/null
+)
+ME=$(id -un)
+MY_GROUP=$(id -gn)
+# A name no host has: the test user is not in it, and getgrnam finds nothing.
+NOT_MY_GROUP=ob-test-no-such-group-359
+
+if ! printf '%s\n' "$SUDO_STACK" | pam_account_lines | grep -q 'pam_openbastion.so service_type=sudo'; then
+    fail "ob-backend-setup sudo account stack generated" "no pam_openbastion account line in dry-run output"
+elif ! grep -q "^$ME:" /etc/passwd; then
+    # pam_localuser reads /etc/passwd itself: a user only NSS resolves (a CI
+    # container with a dynamic uid) cannot stand for a local account.
+    fail "the test user is in /etc/passwd" "$ME is not; pam_localuser cannot be exercised"
+else
+    pass "ob-backend-setup sudo account stack generated"
+    # stack_for <group> <module standing in for pam_openbastion>
+    stack_for() {
+        printf '%s\n' "$SUDO_STACK" |
+            sed -e "s/ingroup open-bastion-sudo/ingroup $1/" \
+                -e "s/pam_openbastion\.so service_type=sudo/$2/"
+    }
+    assert_account "local admin outside open-bastion-sudo keeps Unix sudo (portal refuses)" \
+        obprobe_sudo_local "allow" "$(stack_for "$NOT_MY_GROUP" pam_deny.so)" "$ME"
+    assert_account "local member of open-bastion-sudo is refused when the portal refuses" \
+        obprobe_sudo_member_revoked "deny" "$(stack_for "$MY_GROUP" pam_deny.so)" "$ME"
+    assert_account "local member of open-bastion-sudo passes when the portal grants" \
+        obprobe_sudo_member_granted "allow" "$(stack_for "$MY_GROUP" pam_permit.so)" "$ME"
+    assert_account "SSO-only user is refused when the portal refuses" \
+        obprobe_sudo_sso_revoked "deny" "$(stack_for "$NOT_MY_GROUP" pam_deny.so)" ob-test-no-such-user-359
+    assert_account "SSO-only user passes when the portal grants" \
+        obprobe_sudo_sso_granted "allow" "$(stack_for "$NOT_MY_GROUP" pam_permit.so)" ob-test-no-such-user-359
+fi
 
 # ── The demo images and the stacks documented for copy-paste ──
 # These files hold several stacks each (sshd + sudo, or one per mode). Run every
