@@ -38,6 +38,9 @@
         + (['--enable-hardening'] if ob_enable_hardening else [])
         + (['--enable-audit-trace'] if ob_enable_audit_trace else [])
         + (['--disable-session-recorder'] if ob_disable_session_recorder else [])
+        + (['--enable-authorized-keys-file']
+           if ob_max_security and ob_enable_authorized_keys_file | default(false) | bool
+           else [])
         + ['--response-signing', ob_response_signing | default('off')]
         + (['--sso-jwks', ob_sso_jwks_file]
            if ob_sso_jwks_deploy | default(false) | bool else [])

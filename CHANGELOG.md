@@ -13,7 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.ssh/authorized_keys` comes back for the members of the
   `open-bastion-authorized-keys` group only, through a `Match Group` drop-in,
   so service accounts can keep their keys there. A session key that is not
-  the account's `key_fingerprint` is still refused (#358).
+  the account's `key_fingerprint` is still refused (#358). `ob-builder`
+  offers it for a `max-security` bastion or standalone
+  (`enable_authorized_keys_file`, off by default, refused with any other
+  scenario) and passes it to the setup from the shell installer and the
+  Ansible role.
 
 - Test runs can produce JUnit reports for certification:
   `tests/run-tests-junit.sh` writes `ctest.xml` for the C tests and

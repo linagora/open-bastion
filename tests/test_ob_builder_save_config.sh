@@ -90,6 +90,7 @@ reset_state() {
     ALLOWED_BASTIONS_COLLECT=0
     ANSIBLE_AUTO_APPROVE=""; ENABLE_HARDENING=""; ENABLE_AUDIT_TRACE=""
     DISABLE_SESSION_RECORDER=""; SERVICE_ACCOUNTS_RECORDS=()
+    ENABLE_AUTHORIZED_KEYS_FILE=""
     REPO_KEYRING=""; REPO_KEYRING_SET=0
     APT_URL="$DEFAULT_APT_URL"; APT_URL_SET=0
     APT_SUITE="$DEFAULT_APT_SUITE"; APT_SUITE_SET=0
@@ -136,7 +137,7 @@ snapshot() {
         "$CLIENT_ID" "$CLIENT_ID_POLICY" "$CLIENT_SECRET_MODE" "$EMBEDDED_CLIENT_SECRET" \
         "$SERVER_GROUP" "$SERVER_GROUP_POLICY" "${TARGET_ROLES[*]}" "$ALLOWED_BASTIONS" \
         "$ENABLE_HARDENING" "$ENABLE_AUDIT_TRACE" "$DISABLE_SESSION_RECORDER" \
-        "$AUTO_ENROLL_SETUP" "$SELF_DELETE" "$ANSIBLE_AUTO_APPROVE" "$SERVICE_KEYS_SETUP" \
+        "$ENABLE_AUTHORIZED_KEYS_FILE" "$AUTO_ENROLL_SETUP" "$SELF_DELETE" "$ANSIBLE_AUTO_APPROVE" "$SERVICE_KEYS_SETUP" \
         "$APT_URL" "$APT_SUITE" "$APT_COMPONENT" "$REPO_KEYRING" "$SIGN_WITH"
     for r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do
         printf '%s\n' "${r//$_OB_SA_US/|}"
@@ -195,6 +196,7 @@ test_defaults_written() {
     )
     for k in client_id_policy client_secret_mode server_group_policy auto_enroll_setup \
              self_delete enable_hardening enable_audit_trace disable_session_recorder \
+             enable_authorized_keys_file \
              ansible_auto_approve insecure apt_url apt_suite apt_component sign_with; do
         grep -q "^$k: " "$cfg" 2>/dev/null || { ok=false; echo "  missing $k"; }
     done
@@ -297,6 +299,32 @@ test_insecure_key() {
     [ "$( reset_state; INSECURE=1; load_with awk "$cfg" 2>/dev/null; echo "$INSECURE" )" = 1 ] || ok=false
     $ok && test_pass "insecure: invalid value refused, 'no' does not undo --insecure" \
          || test_fail "insecure key handling"
+}
+
+# enable_authorized_keys_file: saved and replayed under max-security, refused
+# with any other scenario (the setup would ignore it there).
+test_authorized_keys_file_key() {
+    local ok=true cfg="$TEST_TMPDIR/akf.yml" got
+    (
+        reset_state
+        DEPLOYMENT_SLUG="d"; SCENARIO="max-security"; PORTAL_URL="https://sso.test"
+        TARGET_ROLE="bastion"; REPO_KEYRING="$DEFAULT_REPO_KEYRING"
+        ENABLE_AUTHORIZED_KEYS_FILE="yes"
+        validate_inputs >/dev/null 2>&1
+        save_config "$cfg" >/dev/null 2>&1
+    )
+    grep -q '^enable_authorized_keys_file: "\?yes"\?$' "$cfg" || { ok=false; echo "  not saved"; }
+    got=$( reset_state; load_with awk "$cfg" 2>/dev/null; validate_inputs >/dev/null 2>&1
+           echo "$ENABLE_AUTHORIZED_KEYS_FILE" )
+    [ "$got" = "yes" ] || { ok=false; echo "  replayed as '$got'"; }
+    if ( reset_state; DEPLOYMENT_SLUG="d"; SCENARIO="token+unix"
+         PORTAL_URL="https://sso.test"; TARGET_ROLE="bastion"
+         REPO_KEYRING="$DEFAULT_REPO_KEYRING"; ENABLE_AUTHORIZED_KEYS_FILE="yes"
+         validate_inputs ) >/dev/null 2>&1; then
+        ok=false; echo "  accepted outside max-security"
+    fi
+    $ok && test_pass "enable_authorized_keys_file: round trip under max-security, refused elsewhere" \
+         || test_fail "enable_authorized_keys_file key handling"
 }
 
 test_sign_with_cli_wins() {
@@ -606,6 +634,7 @@ test_yaml_str
 test_unwritable_value_fails
 test_yaml_booleans
 test_insecure_key
+test_authorized_keys_file_key
 test_sign_with_cli_wins
 test_target_role_list
 test_allowed_bastions_null

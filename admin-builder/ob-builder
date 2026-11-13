@@ -138,6 +138,10 @@ ANSIBLE_AUTO_APPROVE=""
 ENABLE_HARDENING=""
 ENABLE_AUDIT_TRACE=""
 DISABLE_SESSION_RECORDER=""
+# max-security only, bastion/standalone: give ~/.ssh/authorized_keys back to
+# the members of open-bastion-authorized-keys (ob-bastion-setup
+# --enable-authorized-keys-file). OFF by default.
+ENABLE_AUTHORIZED_KEYS_FILE=""
 
 # Service accounts (SSH-key-only local accounts: ansible, backup, …). Each entry
 # is one account encoded as a single record whose fields are joined by the ASCII
@@ -497,6 +501,7 @@ _load_config_yq() {
     v=$(_yq_get enable_hardening);    [ -n "$v" ] && ENABLE_HARDENING="$v"
     v=$(_yq_get enable_audit_trace);  [ -n "$v" ] && ENABLE_AUDIT_TRACE="$v"
     v=$(_yq_get disable_session_recorder); [ -n "$v" ] && DISABLE_SESSION_RECORDER="$v"
+    v=$(_yq_get enable_authorized_keys_file); [ -n "$v" ] && ENABLE_AUTHORIZED_KEYS_FILE="$v"
     v=$(_yq_get insecure);            [ -n "$v" ] && CONFIG_INSECURE="$v"
     v=$(_yq_get response_signing);    [ -n "$v" ] && [ "$RESPONSE_SIGNING_SET" = 0 ] && RESPONSE_SIGNING="$v"
     v=$(_yq_get sign_with);           [ -n "$v" ] && [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$v"
@@ -564,6 +569,7 @@ _load_config_awk() {
                 enable_hardening)    ENABLE_HARDENING="$val" ;;
                 enable_audit_trace)  ENABLE_AUDIT_TRACE="$val" ;;
                 disable_session_recorder) DISABLE_SESSION_RECORDER="$val" ;;
+                enable_authorized_keys_file) ENABLE_AUTHORIZED_KEYS_FILE="$val" ;;
                 insecure)            CONFIG_INSECURE="$val" ;;
                 response_signing)    [ "$RESPONSE_SIGNING_SET" = 0 ] && RESPONSE_SIGNING="$val" ;;
                 sign_with)           [ "$SIGN_WITH_SET" = 0 ] && SIGN_WITH="$val" ;;
@@ -598,6 +604,7 @@ _normalise_config_values() {
     ENABLE_HARDENING=$(_cfg_yesno "$ENABLE_HARDENING")
     ENABLE_AUDIT_TRACE=$(_cfg_yesno "$ENABLE_AUDIT_TRACE")
     DISABLE_SESSION_RECORDER=$(_cfg_yesno "$DISABLE_SESSION_RECORDER")
+    ENABLE_AUTHORIZED_KEYS_FILE=$(_cfg_yesno "$ENABLE_AUTHORIZED_KEYS_FILE")
     ANSIBLE_AUTO_APPROVE=$(_cfg_yesno "$ANSIBLE_AUTO_APPROVE")
     # `insecure: yes` is the config form of --insecure, which a config saved
     # from a questionnaire that switched to it for an http:// portal needs to
@@ -1278,6 +1285,11 @@ EOF
         explain "A bastion records every session by default (sshd ForceCommand -> ob-session-recorder). Disable this only when session capture is handled by another mechanism — turning it off weakens the audit guarantee. Backends never record sessions, so this does not apply to them."
         DISABLE_SESSION_RECORDER=$(ask_choice "Disable session recording on this bastion/standalone (--disable-session-recorder)?" "yes|no" "no")
     fi
+    if [ "$SCENARIO" = "max-security" ] && _has_non_backend_role \
+        && [ -z "$ENABLE_AUTHORIZED_KEYS_FILE" ]; then
+        explain "Maximum security turns ~/.ssh/authorized_keys off: only SSO certificates and the declared service-account keys log in. This gives authorized_keys back to the members of the open-bastion-authorized-keys group only, for service accounts whose keys you manage yourself. Their key must still match key_fingerprint. OFF by default."
+        ENABLE_AUTHORIZED_KEYS_FILE=$(ask_choice "Allow authorized_keys for the open-bastion-authorized-keys group (--enable-authorized-keys-file)?" "yes|no" "no")
+    fi
 
     # q7d. Service accounts (SSH-key-only local accounts). Applies to every role.
     # Only prompt when none were supplied (e.g. via a partial config); a config
@@ -1647,6 +1659,13 @@ validate_inputs() {
     case "$ENABLE_AUDIT_TRACE" in yes|no) ;; *) die "Invalid enable_audit_trace: $ENABLE_AUDIT_TRACE" ;; esac
     : "${DISABLE_SESSION_RECORDER:=no}"
     case "$DISABLE_SESSION_RECORDER" in yes|no) ;; *) die "Invalid disable_session_recorder: $DISABLE_SESSION_RECORDER" ;; esac
+    : "${ENABLE_AUTHORIZED_KEYS_FILE:=no}"
+    case "$ENABLE_AUTHORIZED_KEYS_FILE" in yes|no) ;; *) die "Invalid enable_authorized_keys_file: $ENABLE_AUTHORIZED_KEYS_FILE" ;; esac
+    # authorized_keys is only turned off under maximum security: elsewhere the
+    # setup ignores the flag, so a config asking for it is a mistake to report.
+    if [ "$ENABLE_AUTHORIZED_KEYS_FILE" = "yes" ] && [ "$SCENARIO" != "max-security" ]; then
+        die "enable_authorized_keys_file only applies to the max-security scenario (authorized_keys is not disabled in '$SCENARIO')"
+    fi
     # (Backend artefacts never carry the opt-out: see build_placeholder_map.)
 
     : "${ANSIBLE_AUTO_APPROVE:=no}"
@@ -1793,6 +1812,7 @@ print_recap() {
   Hardening:           $ENABLE_HARDENING
   Audit trace:         $ENABLE_AUDIT_TRACE
   Session recording:   $rec
+  authorized_keys:     $([ "$ENABLE_AUTHORIZED_KEYS_FILE" = "yes" ] && echo "open-bastion-authorized-keys group only" || echo "off under max-security")
   Allowed bastions:    $([ "$ALLOWED_BASTIONS_COLLECT" = 1 ] && echo "<collected from the bastions>" || echo "${ALLOWED_BASTIONS:-<any bastion of the project>}")
   Service accounts:    $([ "${#SERVICE_ACCOUNTS_RECORDS[@]}" -gt 0 ] && { _names=""; for _r in "${SERVICE_ACCOUNTS_RECORDS[@]}"; do _names="${_names:+$_names, }$(_sa_field 1 "$_r")"; done; echo "$_names"; } || echo "<none>")
   Ansible auto-approve: $ANSIBLE_AUTO_APPROVE
@@ -1957,6 +1977,8 @@ render_config_yaml() {
     _yaml_kv enable_audit_trace "$ENABLE_AUDIT_TRACE"
     printf '# yes | no: bastion/standalone only, yes opts out of session recording\n'
     _yaml_kv disable_session_recorder "$DISABLE_SESSION_RECORDER"
+    printf '# yes | no: max-security, bastion/standalone only: authorized_keys for the open-bastion-authorized-keys group\n'
+    _yaml_kv enable_authorized_keys_file "$ENABLE_AUTHORIZED_KEYS_FILE"
 
     printf '\n# yes | no | prompt: the installer runs ob-enroll and ob-*-setup\n'
     _yaml_kv auto_enroll_setup "$AUTO_ENROLL_SETUP"
@@ -2414,16 +2436,19 @@ build_placeholder_map() {
 
     # Optional opt-in features. Shell installer consumes the yes/no strings;
     # the Ansible role consumes the true/false boolean variants.
-    local _harden_bool="false" _audit_bool="false" _norec_bool="false"
+    local _harden_bool="false" _audit_bool="false" _norec_bool="false" _akf_bool="false"
     [ "$ENABLE_HARDENING" = "yes" ]         && _harden_bool="true"
     [ "$ENABLE_AUDIT_TRACE" = "yes" ]       && _audit_bool="true"
     [ "$norec" = "yes" ]                    && _norec_bool="true"
+    [ "$ENABLE_AUTHORIZED_KEYS_FILE" = "yes" ] && _akf_bool="true"
     ph_set ENABLE_HARDENING              "$ENABLE_HARDENING"
     ph_set ENABLE_AUDIT_TRACE            "$ENABLE_AUDIT_TRACE"
     ph_set DISABLE_SESSION_RECORDER      "$norec"
     ph_set ENABLE_HARDENING_BOOL         "$_harden_bool"
     ph_set ENABLE_AUDIT_TRACE_BOOL       "$_audit_bool"
     ph_set DISABLE_SESSION_RECORDER_BOOL "$_norec_bool"
+    ph_set ENABLE_AUTHORIZED_KEYS_FILE      "$ENABLE_AUTHORIZED_KEYS_FILE"
+    ph_set ENABLE_AUTHORIZED_KEYS_FILE_BOOL "$_akf_bool"
 
     # Service accounts. Applies to every role. The shell installer embeds the
     # rendered service-accounts.conf base64-encoded and writes it at 0600; the

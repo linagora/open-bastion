@@ -119,6 +119,10 @@ ansible_become_token_cmd: ""
 ob_enable_hardening: @@ENABLE_HARDENING_BOOL@@
 ob_enable_audit_trace: @@ENABLE_AUDIT_TRACE_BOOL@@
 ob_disable_session_recorder: @@DISABLE_SESSION_RECORDER_BOOL@@
+# Maximum security only, bastion/standalone: give ~/.ssh/authorized_keys back
+# to the members of the open-bastion-authorized-keys group (service accounts
+# whose keys you manage yourself; their key must still match key_fingerprint).
+ob_enable_authorized_keys_file: @@ENABLE_AUTHORIZED_KEYS_FILE_BOOL@@
 
 # ── Service accounts (SSH-key-only local accounts) ────────────────────────────
 # Baked in at build time. ob_service_accounts_content is the full INI body of
