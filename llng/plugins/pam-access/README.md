@@ -298,50 +298,59 @@ JSON.
 | `pamAccessRequestSigningSecret` | `''` | Must equal the client's `request_signing_secret` |
 | `pamAccessRequestSigningWindow` | `300` | Accepted `X-Timestamp` skew, and the nonce cache lifetime |
 
-**What the client signs today.** The gate covers all six `/pam/*` endpoints,
-but the Open Bastion client does **not** sign all six. As of this writing it
-signs exactly two:
+**What the client signs.** Since Open Bastion 0.7.0 (linagora/open-bastion#332)
+every caller signs every `/pam/*` call when `request_signing_secret` is set:
 
-| Endpoint | Signed by the client? |
+| Endpoint | Signed by |
 | --- | --- |
-| `/pam/verify` | yes (`ob_client.c`) |
-| `/pam/authorize` | yes (`ob_client.c`) |
-| `/pam/heartbeat` | **no** — authenticates by the `refresh_token` in its body |
-| `/pam/bastion-cert` | **no** (`ob-cert-daemon.c` sends Bearer only) |
-| `/pam/userinfo` | **no** |
-| `/pam/whoami` | **no** |
+| `/pam/verify` | the PAM module (`ob_client.c`) |
+| `/pam/authorize` | the PAM module, `ob-enroll` |
+| `/pam/heartbeat` | the PAM module (token refresh on demand), `ob-heartbeat` |
+| `/pam/bastion-cert` | `ob-cert-daemon` |
+| `/pam/userinfo` | the NSS module, `ob-session-monitor` |
+| `/pam/whoami` | `ob-bastion-id` |
 
-**So `required` is not deployable yet, and the failure is a nasty one.** It
-would 403 `/pam/heartbeat`, which is how every enrolled host renews its access
-token. Nothing breaks at the moment you flip the switch: hosts keep working on
-the tokens they already hold, and the fleet goes down hours later, all at once,
-when those expire. `/pam/bastion-cert` would stop minting hop certificates at
-the same time.
+A host older than 0.7.0 sends `/pam/verify`, `/pam/authorize`,
+`/pam/heartbeat` and `/pam/userinfo` unsigned from its modules, whatever its
+configuration, while its commands sign. It looks fine (`ob-heartbeat`
+succeeds) until `required` refuses every login on it.
 
 **Rollout order.** Turning verification on is a breaking change for a fleet
 where some hosts have the secret and some do not, so:
 
-1. Deploy with `optional`.
-2. Roll the secret out to every host.
-3. **Wait for the client to sign the remaining endpoints** — heartbeat first,
-   since it is the one that takes the fleet down, then bastion-cert. Until
-   that ships, stay on `optional`.
-4. Only then switch to `required`.
+1. Upgrade every host to 0.7.0 or later.
+2. Deploy with `optional`.
+3. Roll the secret out to every host. `ob-builder` does not carry it: neither
+   the shell installer nor the Ansible role deploys it, so it is a manual step
+   after installation (linagora/open-bastion#368).
+4. Check that every host signs. `optional` does not log unsigned calls, so
+   check each host's version and configuration rather than the portal's log.
+5. Only then switch to `required`.
+
+Getting step 4 wrong is costly. `required` refuses `/pam/heartbeat` from an
+unsigned host, and the heartbeat is how an enrolled host renews its access
+token. Nothing breaks when you flip the switch. The host keeps working on the
+token it already holds, then fails hours later, when that token expires.
 
 `optional` waives the requirement to *sign* — never the requirement to sign
-*correctly*: a bad signature is refused in every mode but `off`. So `optional`
-already protects the two endpoints the client signs, which are the two that
-consume credentials; it is a useful destination in its own right, not merely a
-staging post.
+*correctly*: a bad signature is refused in every mode but `off`.
+
+**What it does not protect.** The secret is fleet-wide. A valid signature
+proves that the caller holds the fleet secret. It does not prove which host is
+calling, and one compromised host gives the secret away for all of them. The
+secret is read from a root-only file, just like the host's access and refresh
+tokens, so whoever can steal a token can steal the secret too: it adds
+nothing against token theft. Integrity and confidentiality on the wire are
+TLS's job. A per-host, sender-constrained token (DPoP, RFC 9449) is the
+planned replacement (linagora/open-bastion#368).
 
 **Sizing.** Every *signed* request costs two round-trips to the global session
 store (a read to detect a replay, a write to claim the nonce), and the store
-holds one record per nonce for the length of the window. Today that is bounded
-by `/pam/verify` and `/pam/authorize` traffic. Once heartbeat is signed it
-becomes the steady-state load, since every host beats on a timer whether or not
-anyone logs in: budget roughly *fleet size × beats per window* records
-resident, and the same number of round-trip pairs per window. The purge bounds
-the storage, not the request rate.
+holds one record per nonce for the length of the window. The heartbeat sets the
+steady-state load, since every host beats on a timer whether or not anyone
+logs in: budget roughly *fleet size × beats per window* records resident, and
+the same number of round-trip pairs per window, on top of the login traffic.
+The purge bounds the storage, not the request rate.
 
 Checks run **timestamp, then HMAC, then nonce**. The timestamp is first because
 it is the cheapest and bounds both the replay window and the size of the nonce
