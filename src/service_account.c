@@ -595,19 +595,30 @@ int service_account_check_key_file(const char *path, const char *expected,
     if (!path || !expected) return SA_KEYCHECK_MALFORMED;
 
     /*
-     * What ob-service-account-keys serves: `stat -c %u` (the path itself,
-     * not a symlink target) must be root, and `[ -f ]` (which follows) a
-     * regular file. Anything else gives sshd nothing from here.
+     * What ob-service-account-keys serves: a regular file owned by root.
+     * Everything is checked on the descriptor, so the file read is the file
+     * checked. A symlink is followed, as the helper's `cat` does; the
+     * target's owner is what counts here. Anything else gives sshd nothing
+     * from this path -- and the session-open check still sees the key used.
      */
-    struct stat lst, st;
-    if (lstat(path, &lst) != 0 || lst.st_uid != SA_TRUSTED_UID ||
-        stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOCTTY);
+    if (fd < 0) return SA_KEYCHECK_NONE;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_uid != SA_TRUSTED_UID) {
+        close(fd);
         return SA_KEYCHECK_NONE;
     }
-    if (st.st_size > SA_KEY_FILE_MAX) return SA_KEYCHECK_MALFORMED;
+    if (st.st_size > SA_KEY_FILE_MAX) {
+        close(fd);
+        return SA_KEYCHECK_MALFORMED;
+    }
 
-    FILE *f = fopen(path, "re");
-    if (!f) return SA_KEYCHECK_MALFORMED;
+    FILE *f = fdopen(fd, "r");
+    if (!f) {
+        close(fd);
+        return SA_KEYCHECK_MALFORMED;
+    }
 
     char *line = malloc(SA_KEY_LINE_MAX);
     if (!line) {

@@ -734,13 +734,18 @@ bool ssh_key_blob_fingerprint(const char *blob_b64, const char *hash,
         if ((size_t)snprintf(out, out_sz, "SHA256:%s", (char *)b64) >= out_sz)
             goto out;
     } else {
-        size_t need = 4 + digest_len * 3;  /* "MD5:" + "xx:" per byte, last ':' -> NUL */
-        if (need > out_sz) goto out;
-        size_t o = (size_t)snprintf(out, out_sz, "MD5:");
+        /* "MD5:" + "xx" per byte, ':' between them, NUL */
+        static const char hex[] = "0123456789abcdef";
+        size_t need = 4 + (size_t)digest_len * 3;
+        if (digest_len == 0 || need > out_sz) goto out;
+        memcpy(out, "MD5:", 4);
+        size_t o = 4;
         for (unsigned int i = 0; i < digest_len; i++) {
-            o += (size_t)snprintf(out + o, out_sz - o, i ? ":%02x" : "%02x",
-                                  digest[i]);
+            if (i) out[o++] = ':';
+            out[o++] = hex[digest[i] >> 4];
+            out[o++] = hex[digest[i] & 0x0f];
         }
+        out[o] = '\0';
     }
     ok = true;
 

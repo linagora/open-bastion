@@ -4659,7 +4659,11 @@ PAM_VISIBLE PAM_EXTERN int pam_sm_open_session(pam_handle_t *pamh,
         OB_LOG_ERR(pamh, "Out of memory storing session user");
         return PAM_BUF_ERR;
     }
-    pam_set_data(pamh, "ob_session_user", session_user, cleanup_string);
+    if (pam_set_data(pamh, "ob_session_user", session_user,
+                     cleanup_string) != PAM_SUCCESS) {
+        /* Not stored, so no cleanup will ever free it. */
+        free(session_user);
+    }
 
     /* Initialize module */
     pam_openbastion_data_t *data = get_module_data(pamh, argc, argv);
