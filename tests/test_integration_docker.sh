@@ -1403,6 +1403,17 @@ test_ob_bastion_id() {
     fi
     log_verbose "bastion_id: $id"
 
+    # docker-demo-cert/sso is pinned on a portal without /pam/whoami: this is
+    # the run that covers the legacy fallback, docker-demo-maxsec the primary
+    # path (#262). Assert the branch, or a regression in either direction
+    # would pass unnoticed.
+    local log_out
+    log_out=$(docker exec ob-cert-bastion ob-bastion-id 2>&1 >/dev/null) || true
+    if ! echo "$log_out" | grep -q 'falling back to the legacy'; then
+        fail "ob-bastion-id did not take the legacy fallback on the pinned portal" "$log_out"
+        return 1
+    fi
+
     # Verify --verbose returns valid JSON with at least one expected claim.
     local verbose_out
     if ! verbose_out=$(docker exec ob-cert-bastion ob-bastion-id --verbose --quiet 2>&1); then

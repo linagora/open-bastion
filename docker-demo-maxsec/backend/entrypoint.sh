@@ -12,6 +12,7 @@ PORTAL_URL="${LLNG_PORTAL_URL:-http://sso}"
 SERVER_GROUP="${LLNG_SERVER_GROUP:-backend}"
 CLIENT_ID="${LLNG_CLIENT_ID:-pam-access}"
 CLIENT_SECRET="${LLNG_CLIENT_SECRET:-pamsecret}"
+REQUEST_SIGNING_SECRET="${LLNG_REQUEST_SIGNING_SECRET:-}"
 ADMIN_USER="${LLNG_ADMIN_USER:-dwho}"
 ADMIN_PASSWORD="${LLNG_ADMIN_PASSWORD:-dwho}"
 SSH_CA_FILE="/etc/ssh/open-bastion_ca.pub"
@@ -255,6 +256,12 @@ default_shell = /bin/bash
 
 log_level = info
 EOF
+
+# The portal of this demo refuses unsigned /pam/* calls
+# (pamAccessRequestSigningMode = required, #262).
+if [ -n "$REQUEST_SIGNING_SECRET" ]; then
+    echo "request_signing_secret = $REQUEST_SIGNING_SECRET" >> /etc/open-bastion/openbastion.conf
+fi
 
 chmod 600 /etc/open-bastion/openbastion.conf
 
