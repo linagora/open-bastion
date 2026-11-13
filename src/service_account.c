@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -17,6 +18,7 @@
 #include <syslog.h>
 
 #include "service_account.h"
+#include "ssh_key_policy.h"
 #include "str_utils.h"
 
 /* Initial capacity for accounts array */
@@ -450,8 +452,8 @@ int service_accounts_validate_key(const service_accounts_t *sa,
         return -2;  /* No fingerprint provided */
     }
 
-    /* Compare fingerprints (case-sensitive for base64) */
-    if (strcmp(account->key_fingerprint, fingerprint) != 0) {
+    /* SHA256 exactly (base64 is case-sensitive), MD5 hex in any case */
+    if (!service_account_fingerprint_equal(account->key_fingerprint, fingerprint)) {
         return -2;  /* Fingerprint mismatch */
     }
 
@@ -476,4 +478,209 @@ int service_account_validate(const service_account_t *account)
     }
 
     return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * key_fingerprint against the keys themselves (#358)
+ * ------------------------------------------------------------------------ */
+
+/* Longest key line read from a key file or SSH_AUTH_INFO_0. */
+#define SA_KEY_LINE_MAX 16384
+/* Largest key file read. */
+#define SA_KEY_FILE_MAX (256 * 1024)
+
+bool service_account_fingerprint_equal(const char *expected, const char *fp)
+{
+    if (!expected || !fp) return false;
+
+    if (strncmp(expected, "SHA256:", 7) == 0) {
+        if (strncmp(fp, "SHA256:", 7) != 0) return false;
+        size_t le = strlen(expected), lf = strlen(fp);
+        while (le > 7 && expected[le - 1] == '=') le--;
+        while (lf > 7 && fp[lf - 1] == '=') lf--;
+        return le == lf && memcmp(expected, fp, le) == 0;
+    }
+    if (strncasecmp(expected, "MD5:", 4) == 0) {
+        return strncasecmp(fp, "MD5:", 4) == 0 && strcasecmp(expected, fp) == 0;
+    }
+    return false;
+}
+
+/* The hash key_fingerprint is written with: "SHA256" or "MD5". */
+static const char *fingerprint_hash(const char *expected)
+{
+    if (strncmp(expected, "SHA256:", 7) == 0) return "SHA256";
+    if (strncasecmp(expected, "MD5:", 4) == 0) return "MD5";
+    return NULL;
+}
+
+/*
+ * Split `line` in place into whitespace-separated tokens, a double-quoted
+ * run staying inside one token (authorized_keys options such as
+ * command="a b"). Returns the number of tokens, at most max.
+ */
+static size_t split_tokens(char *line, char **tok, size_t max)
+{
+    size_t n = 0;
+    char *p = line;
+    while (*p && n < max) {
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        tok[n++] = p;
+        bool quoted = false;
+        while (*p && (quoted || (*p != ' ' && *p != '\t'))) {
+            if (*p == '\\' && quoted && p[1]) {
+                p += 2;
+                continue;
+            }
+            if (*p == '"') quoted = !quoted;
+            p++;
+        }
+        if (*p) *p++ = '\0';
+    }
+    return n;
+}
+
+/*
+ * Compare the key "<type> <blob>" with expected. A blob that does not decode,
+ * or that carries another type than the one written before it, is malformed.
+ */
+static int compare_key(const char *type, const char *blob, const char *expected,
+                       char *got, size_t got_sz)
+{
+    const char *hash = fingerprint_hash(expected);
+    char blob_type[128];
+    char fp[128];
+    if (!hash ||
+        !ssh_key_blob_fingerprint(blob, hash, blob_type, sizeof(blob_type),
+                                  fp, sizeof(fp)) ||
+        strcmp(blob_type, type) != 0) {
+        return SA_KEYCHECK_MALFORMED;
+    }
+    if (!service_account_fingerprint_equal(expected, fp)) {
+        if (got && got_sz) snprintf(got, got_sz, "%s", fp);
+        return SA_KEYCHECK_MISMATCH;
+    }
+    return SA_KEYCHECK_OK;
+}
+
+/* Whether a token reads as an SSH key type name. */
+static bool looks_like_key_type(const char *t)
+{
+    return strncmp(t, "ssh-", 4) == 0 || strncmp(t, "ecdsa-", 6) == 0 ||
+           strncmp(t, "sk-", 3) == 0;
+}
+
+/*
+ * One authorized_keys line: the key is the first "<type> <blob>" pair, after
+ * any options.
+ */
+static int check_key_line(char *line, const char *expected,
+                          char *got, size_t got_sz)
+{
+    char *tok[64];
+    size_t n = split_tokens(line, tok, sizeof(tok) / sizeof(tok[0]));
+    for (size_t i = 0; i + 1 < n; i++) {
+        if (looks_like_key_type(tok[i])) {
+            return compare_key(tok[i], tok[i + 1], expected, got, got_sz);
+        }
+    }
+    return SA_KEYCHECK_MALFORMED;
+}
+
+int service_account_check_key_file(const char *path, const char *expected,
+                                   char *got, size_t got_sz)
+{
+    if (got && got_sz) got[0] = '\0';
+    if (!path || !expected) return SA_KEYCHECK_MALFORMED;
+
+    /*
+     * What ob-service-account-keys serves: `stat -c %u` (the path itself,
+     * not a symlink target) must be root, and `[ -f ]` (which follows) a
+     * regular file. Anything else gives sshd nothing from here.
+     */
+    struct stat lst, st;
+    if (lstat(path, &lst) != 0 || lst.st_uid != SA_TRUSTED_UID ||
+        stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        return SA_KEYCHECK_NONE;
+    }
+    if (st.st_size > SA_KEY_FILE_MAX) return SA_KEYCHECK_MALFORMED;
+
+    FILE *f = fopen(path, "re");
+    if (!f) return SA_KEYCHECK_MALFORMED;
+
+    char *line = malloc(SA_KEY_LINE_MAX);
+    if (!line) {
+        fclose(f);
+        return SA_KEYCHECK_MALFORMED;
+    }
+
+    int result = SA_KEYCHECK_NONE;
+    while (fgets(line, SA_KEY_LINE_MAX, f)) {
+        size_t len = strlen(line);
+        if (len == SA_KEY_LINE_MAX - 1 && line[len - 1] != '\n') {
+            result = SA_KEYCHECK_MALFORMED;  /* longer than any key */
+            break;
+        }
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p || *p == '#') continue;
+
+        int r = check_key_line(line, expected, got, got_sz);
+        if (r != SA_KEYCHECK_OK) {
+            result = r;
+            break;
+        }
+        result = SA_KEYCHECK_OK;
+    }
+    free(line);
+    fclose(f);
+    return result;
+}
+
+int service_account_check_auth_info(const char *auth_info, const char *expected,
+                                    char *got, size_t got_sz)
+{
+    if (got && got_sz) got[0] = '\0';
+    if (!expected) return SA_KEYCHECK_MALFORMED;
+    if (!auth_info || !*auth_info) return SA_KEYCHECK_NONE;
+    if (strlen(auth_info) >= SA_KEY_LINE_MAX) return SA_KEYCHECK_MALFORMED;
+
+    char *copy = strdup(auth_info);
+    if (!copy) return SA_KEYCHECK_MALFORMED;
+
+    int result = SA_KEYCHECK_NONE;
+    char *save = NULL;
+    for (char *line = strtok_r(copy, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        char *tok[3];
+        size_t n = 0;
+        char *p = line;
+        /* method, key type, blob; the details after them are not needed */
+        while (n < 3 && *p) {
+            while (*p == ' ') p++;
+            if (!*p) break;
+            tok[n++] = p;
+            while (*p && *p != ' ') p++;
+            if (*p) *p++ = '\0';
+        }
+        if (n == 0 || strcmp(tok[0], "publickey") != 0) continue;
+        if (n < 3) {
+            result = SA_KEYCHECK_MALFORMED;
+            break;
+        }
+        if (strstr(tok[1], "-cert-v01@openssh.com") != NULL) continue;
+
+        int r = compare_key(tok[1], tok[2], expected, got, got_sz);
+        if (r != SA_KEYCHECK_OK) {
+            result = r;
+            break;
+        }
+        result = SA_KEYCHECK_OK;
+    }
+    free(copy);
+    return result;
 }
