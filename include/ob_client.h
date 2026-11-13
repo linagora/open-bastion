@@ -201,17 +201,6 @@ int ob_authorize_user_with_cert(ob_client_t *client,
                                 ob_response_t *response);
 
 /*
- * Whether a libcurl failure (`CURLcode`) means the portal could not be
- * reached, so the offline authorization cache may answer. False for a verdict
- * on the answer and for a local TLS or configuration failure. Exposed for the
- * test suite; not part of the stable client API.
- *
- * Takes an int rather than a CURLcode so this header stays free of libcurl:
- * the enum promotes to int, and the function only switches on it.
- */
-bool ob_curl_error_allows_offline_cache(int curl_code);
-
-/*
  * Free SSH certificate info structure contents
  */
 void ob_ssh_cert_info_free(ob_ssh_cert_info_t *cert_info);

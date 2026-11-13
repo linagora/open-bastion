@@ -761,9 +761,9 @@ static int refuse_anonymous_grant(ob_client_t *client, const char *path)
  * from a cut connection, so it stays a cache-eligible outage. Only a local TLS
  * problem reported outside the handshake is guaranteed to be a refusal.
  */
-bool ob_curl_error_allows_offline_cache(int curl_code)
+static bool ob_curl_error_allows_offline_cache(CURLcode res)
 {
-    switch (curl_code) {
+    switch (res) {
     case CURLE_COULDNT_RESOLVE_PROXY:
     case CURLE_COULDNT_RESOLVE_HOST:
     case CURLE_COULDNT_CONNECT:

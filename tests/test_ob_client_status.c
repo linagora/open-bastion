@@ -17,7 +17,15 @@
  * License: AGPL-3.0
  */
 
+/*
+ * ob_client.c is included rather than linked: the curl-error helper
+ * ob_curl_error_allows_offline_cache() is static, and test_curl_errors()
+ * calls it directly. json-c comes first so
+ * that str_utils.h, first reached through config.c, defines its json helpers.
+ */
+#include <json-c/json.h>
 #include "../src/config.c"
+#include "../src/ob_client.c"
 
 #include <curl/curl.h>
 #include <stdio.h>
