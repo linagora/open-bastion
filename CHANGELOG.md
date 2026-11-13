@@ -297,6 +297,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session open during the upgrade gets `voucher_expired` until the user
   reconnects, or `voucher_mismatch` if a newer connection rotated its voucher
   meanwhile (#460).
+- The backend `sudo` stack written outside Mode E passed every account of
+  `/etc/passwd` through `pam_localuser`, and with `create_user` an SSO user is
+  one after their first login: their `sudo` skipped the live `sudo_allowed`
+  check, and a right revoked in the portal kept working until their next SSH
+  login removed them from `open-bastion-sudo`. A member of `open-bastion-sudo`
+  now skips `pam_localuser` and is checked by `pam_openbastion`; a local admin
+  outside that group keeps Unix `sudo`. Re-run `ob-backend-setup` on existing
+  backends (#359).
 
 ## [0.7.0] _(2026-10-20)_
 

@@ -83,10 +83,12 @@ session    optional     pam_openbastion.so\n\
 # SSO users authenticate with an LLNG token. Local accounts -- service
 # accounts included -- pass the account phase through pam_localuser, and
 # pam_openbastion ignores service accounts under sudo (#353): whether one may
-# sudo is the operator's sudoers rule.
+# sudo is the operator's sudoers rule. A member of open-bastion-sudo skips
+# pam_localuser, so an SSO user created locally is still checked live (#359).
 RUN echo '# PAM configuration for sudo with Open Bastion\n\
 auth       sufficient   pam_unix.so\n\
 auth       required     pam_openbastion.so service_type=sudo\n\
+account    [success=1 default=ignore]  pam_succeed_if.so quiet user ingroup open-bastion-sudo\n\
 account    sufficient   pam_localuser.so\n\
 account    required     pam_openbastion.so service_type=sudo\n\
 session    required     pam_unix.so\n\
