@@ -715,6 +715,48 @@ EOF
                   || test_fail "the role overwrites a KRL ob-krl-refresh keeps current" "$bad"
 }
 
+# --enable-authorized-keys-file reaches the bastion and standalone setups,
+# Ansible and shell alike, only when asked for; never the backend, whose setup
+# has no such option.
+test_authorized_keys_file_option() {
+    local cfg="$TEST_TMPDIR/akf.yml" tree="$TEST_TMPDIR/akf-tree" sh="$TEST_TMPDIR/akf-sh"
+    local bad="" r rc=0
+    for r in bastion standalone; do
+        grep -q '^ob_enable_authorized_keys_file: false$' "$TREE/roles/open-bastion-$r/defaults/main.yml" \
+            || bad="$bad default-$r"
+        grep -q "'--enable-authorized-keys-file'" "$TREE/roles/open-bastion-$r/tasks/$r.yml" \
+            || bad="$bad task-$r"
+    done
+    grep -rq -- '--enable-authorized-keys-file' "$TREE/roles/open-bastion-backend/tasks/" \
+        && bad="$bad backend-task"
+
+    sed 's/^target_role: .*/target_role: "bastion,backend"/' "$TEST_TMPDIR/build.yml" > "$cfg"
+    printf 'enable_authorized_keys_file: "yes"\n' >> "$cfg"
+    (
+        fetch_sso_assets() {
+            WORK_DIR="$FAKE_WORK"; SSO_CA_FINGERPRINT="SHA256:fake"
+            printf '{"keys":[]}\n' > "$WORK_DIR/jwks.json"
+        }
+        main --config "$cfg" --repo-keyring "$FAKE_KEYRING" \
+            --output-ansible "$tree" --output-shell "$sh"
+    ) >"$TEST_TMPDIR/akf.log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        test_fail "ob-builder could not render with enable_authorized_keys_file" "$(tail -5 "$TEST_TMPDIR/akf.log")"
+        return
+    fi
+    grep -q '^ob_enable_authorized_keys_file: true$' "$tree/roles/open-bastion-bastion/defaults/main.yml" \
+        || bad="$bad ansible-true"
+    grep -q '^ENABLE_AUTHORIZED_KEYS_FILE="yes"$' "$sh/bootstrap-demo-bastion.sh" || bad="$bad shell-bastion"
+    grep -q '^ENABLE_AUTHORIZED_KEYS_FILE="yes"$' "$sh/bootstrap-demo-backend.sh" || bad="$bad shell-backend-var"
+    bash -n "$sh/bootstrap-demo-bastion.sh" 2>/dev/null || bad="$bad shell-syntax"
+    # The backend installer carries the variable but never passes the flag.
+    [ "$(grep -c -- '--enable-authorized-keys-file' "$sh/bootstrap-demo-backend.sh")" -eq 1 ] \
+        || bad="$bad shell-backend-flag"
+
+    [ -z "$bad" ] && test_pass "--enable-authorized-keys-file: off by default, passed to bastion/standalone only when asked" \
+                  || test_fail "--enable-authorized-keys-file wiring" "$bad"
+}
+
 if ! render_tree; then
     test_fail "ob-builder could not render the max-security tree" "$(tail -5 "$TEST_TMPDIR/render.log")"
 else
@@ -731,6 +773,7 @@ else
     test_backend_collection_runs
     test_become_token_runs
     test_krl_kept_on_later_runs
+    test_authorized_keys_file_option
 fi
 
 echo ""

@@ -39,7 +39,10 @@ asked again):
 8. Target role(s): `bastion`, `standalone`, `backend` — one or more. With
    several roles, each Ansible role tree is suffixed with the role
    (`ansible-<slug>-backend`, …)
-9. Allowed bastions (backend), hardening, audit trace, session recording
+9. Allowed bastions (backend), hardening, audit trace, session recording, and
+   with `max-security` on a bastion or standalone, whether the members of
+   `open-bastion-authorized-keys` may log in with `~/.ssh/authorized_keys`
+   (`enable_authorized_keys_file`, off by default)
 10. Service accounts — optional SSH-key-only local accounts (ansible, backup, …),
     which you create by hand on the targets
 11. Auto-launch enrollment/setup on target (`yes`, `no`, or `prompt`), self-delete
@@ -112,6 +115,10 @@ ansible_auto_approve: no # yes = Ansible role can approve device codes via LLNG 
 # insecure: "yes"   # same as --insecure: http:// portal, no TLS verification (tests only)
 # sign_with: "0xKEYID"  # same as --sign-with (the command line wins); keep the quotes
 response_signing: prefer # off | prefer | required, same as --response-signing (see Signed portal answers)
+# max-security, bastion/standalone only: authorized_keys for the members of the
+# open-bastion-authorized-keys group (ob-bastion-setup --enable-authorized-keys-file).
+# Refused with any other scenario.
+# enable_authorized_keys_file: "no"
 apt_url: https://linagora.github.io/open-bastion
 apt_suite: trixie
 apt_component: main
