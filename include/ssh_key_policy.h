@@ -154,6 +154,22 @@ bool ssh_key_blob_info(const char *blob_b64,
                        int *bits_out);
 
 /*
+ * Fingerprint of a base64-encoded SSH public key blob, in the form
+ * `ssh-keygen -l` prints it: "SHA256:<base64 without padding>" when hash is
+ * "SHA256", "MD5:<lowercase hex pairs joined by ':'>" when hash is "MD5".
+ * The digest covers the decoded blob, as OpenSSH's does for a plain key.
+ *
+ * type_out (may be NULL) receives the key type name the blob carries, so a
+ * caller can check it against the type written next to the blob.
+ *
+ * Returns false on a blob that does not decode, an unknown hash name, or a
+ * buffer too small.
+ */
+bool ssh_key_blob_fingerprint(const char *blob_b64, const char *hash,
+                              char *type_out, size_t type_sz,
+                              char *out, size_t out_sz);
+
+/*
  * Get human-readable name for a key type.
  */
 const char *ssh_key_type_name(ssh_key_type_t type);

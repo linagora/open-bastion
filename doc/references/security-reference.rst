@@ -644,9 +644,9 @@ An entry that fails validation is dropped at load. The keys of earlier releases 
 SSH server requirement
 ~~~~~~~~~~~~~~~~~~~~~~
 
-sshd must accept the key: ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (written by ``--enable-service-keys``, and the only way under maximum security, which sets ``AuthorizedKeysFile none``), or an ``authorized_keys`` file in the account's home.
+sshd must accept the key: ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (written by ``--enable-service-keys``), or an ``authorized_keys`` file in the account's home. Maximum security sets ``AuthorizedKeysFile none``; ``--enable-authorized-keys-file`` gives ``authorized_keys`` back to the members of ``open-bastion-authorized-keys`` only.
 
-``ExposeAuthInfo yes`` does not make the fingerprint check work. On current OpenSSH, sshd does not propagate ``SSH_USER_AUTH`` to the PAM environment during ``pam_acct_mgmt``, and the spool under ``/run/open-bastion/ssh-fp/`` is written by the ``AuthorizedPrincipalsCommand`` helper, which sshd runs for certificates only. A service account logs in with a plain key, so no fingerprint reaches PAM and ``key_fingerprint`` is not compared: the access control is the key sshd accepts. ``fingerprint_required = true`` and ``ssh_key_policy_enabled = true``, which both need that spool, refuse a service account's plain-key login.
+During ``pam_acct_mgmt`` OpenSSH names no plain key to PAM: ``SSH_AUTH_INFO_0`` does not yet hold the method that just succeeded, ``SSH_USER_AUTH`` is not in the PAM environment, and the spool under ``/run/open-bastion/ssh-fp/`` is written by the ``AuthorizedPrincipalsCommand`` helper, which sshd runs for certificates only. ``key_fingerprint`` is therefore checked twice (#358): at login, every key of the served ``service-accounts.d/<name>.pub`` must have it; when the session opens, ``SSH_AUTH_INFO_0`` names the key actually used, from whichever source, and another key is refused (sshd then runs nothing and forwards nothing). The second check needs the ``session`` line the setup writes (``required`` on a backend, ``[success=ok perm_denied=die default=ignore]`` elsewhere). ``fingerprint_required = true`` is satisfied by a plain key at session open; ``ssh_key_policy_enabled = true``, which needs the spool, still refuses a service account's plain-key login.
 
 Authentication flow
 ~~~~~~~~~~~~~~~~~~~
@@ -666,14 +666,18 @@ Authentication flow
        Note over SSH: Key accepted
        SSH->>PAM: pam_sm_acct_mgmt
        PAM->>PAM: Name listed in service-accounts.conf
+       PAM->>PAM: Every key of <name>.pub has key_fingerprint
        Note over PAM: Authorized locally, no LLNG call
+       PAM-->>SSH: PAM_SUCCESS
+       SSH->>PAM: pam_sm_open_session (SSH_AUTH_INFO_0)
+       PAM->>PAM: The key used has key_fingerprint
        PAM-->>SSH: PAM_SUCCESS
        SSH-->>SA: Session established (recorded on a recording host)
 
 1. sshd resolves the account from ``/etc/passwd``; an unknown user is refused before any key is looked at
 2. sshd gets the account's key from ``ob-service-account-keys`` (or ``authorized_keys``) and checks the client holds it
 3. The PAM module finds the name in ``service-accounts.conf`` and authorizes it locally (no LLNG call)
-4. A fingerprint, if one reaches PAM, is compared with ``key_fingerprint``; on a plain-key login none does
+4. Every key the served ``<name>.pub`` holds must have ``key_fingerprint``; when the session opens, so must the key actually used (``SSH_AUTH_INFO_0``), an ``authorized_keys`` one included
 5. On a recording host the session runs through the recorder; the account's login shell must be ``/usr/sbin/ob-login-shell`` for nothing to run before it
 6. ``sudo`` is not decided by the module (``PAM_IGNORE``): the local PAM stack and ``sudoers`` decide
 

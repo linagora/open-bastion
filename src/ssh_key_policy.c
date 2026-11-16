@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+#include <openssl/evp.h>
+
 #include "ssh_key_policy.h"
 
 /* Default minimum key sizes */
@@ -680,6 +682,78 @@ bool ssh_key_blob_info(const char *blob_b64,
     ok = true;
 
 out:
+    free(raw);
+    return ok;
+}
+
+bool ssh_key_blob_fingerprint(const char *blob_b64, const char *hash,
+                              char *type_out, size_t type_sz,
+                              char *out, size_t out_sz)
+{
+    if (type_out && type_sz) type_out[0] = '\0';
+    if (out && out_sz) out[0] = '\0';
+    if (!blob_b64 || !hash || !out || out_sz == 0) return false;
+
+    const EVP_MD *md;
+    bool sha256;
+    if (strcmp(hash, "SHA256") == 0) {
+        md = EVP_sha256();
+        sha256 = true;
+    } else if (strcmp(hash, "MD5") == 0) {
+        md = EVP_md5();
+        sha256 = false;
+    } else {
+        return false;
+    }
+
+    size_t raw_len = 0;
+    unsigned char *raw = b64_decode(blob_b64, &raw_len);
+    if (!raw) return false;
+
+    bool ok = false;
+    ssh_blob_reader_t r = { raw, raw_len, 0 };
+    const unsigned char *name;
+    size_t name_len;
+    if (!blob_get_string(&r, &name, &name_len) || name_len == 0) goto out;
+    if (type_out && type_sz) {
+        if (name_len >= type_sz) goto out;
+        memcpy(type_out, name, name_len);
+        type_out[name_len] = '\0';
+    }
+
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len = 0;
+    if (EVP_Digest(raw, raw_len, digest, &digest_len, md, NULL) != 1) goto out;
+
+    if (sha256) {
+        /* "SHA256:" + base64 of 32 bytes (44 chars with padding, 43 without) */
+        unsigned char b64[4 * ((EVP_MAX_MD_SIZE + 2) / 3) + 1];
+        int n = EVP_EncodeBlock(b64, digest, (int)digest_len);
+        if (n <= 0) goto out;
+        while (n > 0 && b64[n - 1] == '=') b64[--n] = '\0';
+        if ((size_t)snprintf(out, out_sz, "SHA256:%s", (char *)b64) >= out_sz)
+            goto out;
+    } else {
+        /* "MD5:" + "xx" per byte, ':' between them, NUL */
+        static const char hex[] = "0123456789abcdef";
+        size_t need = 4 + (size_t)digest_len * 3;
+        if (digest_len == 0 || need > out_sz) goto out;
+        memcpy(out, "MD5:", 4);
+        size_t o = 4;
+        for (unsigned int i = 0; i < digest_len; i++) {
+            if (i) out[o++] = ':';
+            out[o++] = hex[digest[i] >> 4];
+            out[o++] = hex[digest[i] & 0x0f];
+        }
+        out[o] = '\0';
+    }
+    ok = true;
+
+out:
+    if (!ok) {
+        if (type_out && type_sz) type_out[0] = '\0';
+        out[0] = '\0';
+    }
     free(raw);
     return ok;
 }

@@ -662,9 +662,9 @@ Une entrée invalide est écartée au chargement. Les clés des versions antéri
 Exigence du Serveur SSH
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-sshd doit accepter la clé : ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (écrit par ``--enable-service-keys`` ; seule voie en Mode E, qui pose ``AuthorizedKeysFile none``), ou un fichier ``authorized_keys`` dans le home du compte — que le compte peut alors modifier lui-même.
+sshd doit accepter la clé : ``AuthorizedKeysCommand /usr/sbin/ob-service-account-keys %u`` (écrit par ``--enable-service-keys``), ou un fichier ``authorized_keys`` dans le home du compte — que le compte peut alors modifier lui-même, sans pouvoir ouvrir de session avec une autre clé que ``key_fingerprint``. Le Mode E pose ``AuthorizedKeysFile none`` ; ``--enable-authorized-keys-file`` ne rend ``authorized_keys`` qu'aux membres du groupe ``open-bastion-authorized-keys``.
 
-``ExposeAuthInfo yes`` ne suffit pas à faire vérifier l'empreinte. Sur un OpenSSH actuel, sshd ne transmet pas ``SSH_USER_AUTH`` à l'environnement PAM pendant ``pam_acct_mgmt``, et le spool ``/run/open-bastion/ssh-fp/`` n'est alimenté que par l'``AuthorizedPrincipalsCommand``, que sshd n'exécute que pour un certificat. Un compte de service se connecte avec une clé nue : aucune empreinte n'atteint PAM et ``key_fingerprint`` n'est pas comparé. **Le contrôle d'accès effectif est la clé publique propriété de root** que sert l'``AuthorizedKeysCommand``. Pour la même raison, ``fingerprint_required = true`` et ``ssh_key_policy_enabled = true`` refusent la connexion par clé nue d'un compte de service.
+Pendant ``pam_acct_mgmt``, OpenSSH ne désigne à PAM aucune clé nue : ``SSH_AUTH_INFO_0`` ne contient pas encore la méthode qui vient de réussir, ``SSH_USER_AUTH`` est absent de l'environnement PAM, et le spool ``/run/open-bastion/ssh-fp/`` n'est alimenté que par l'``AuthorizedPrincipalsCommand``, que sshd n'exécute que pour un certificat. ``key_fingerprint`` est donc vérifié deux fois (#358) : à la connexion, chaque clé du ``service-accounts.d/<nom>.pub`` servi doit l'avoir ; à l'ouverture de session, ``SSH_AUTH_INFO_0`` désigne la clé réellement utilisée, quelle qu'en soit la source, et une autre clé est refusée (sshd n'exécute alors rien et ne relaie aucun port). Ce second contrôle suppose la ligne ``session`` qu'écrit le setup (``required`` sur un backend, ``[success=ok perm_denied=die default=ignore]`` ailleurs). ``fingerprint_required = true`` est satisfait par une clé nue à l'ouverture de session ; ``ssh_key_policy_enabled = true``, qui a besoin du spool, refuse toujours la connexion par clé nue d'un compte de service.
 
 .. _security-00-architecture-flux-dauthentification-1:
 
@@ -686,14 +686,18 @@ Flux d'Authentification
        Note over SSH: Clé acceptée
        SSH->>PAM: pam_sm_acct_mgmt
        PAM->>PAM: Nom présent dans service-accounts.conf
+       PAM->>PAM: Chaque clé de <nom>.pub a key_fingerprint
        Note over PAM: Autorisé localement, pas d'appel LLNG
+       PAM-->>SSH: PAM_SUCCESS
+       SSH->>PAM: pam_sm_open_session (SSH_AUTH_INFO_0)
+       PAM->>PAM: La clé utilisée a key_fingerprint
        PAM-->>SSH: PAM_SUCCESS
        SSH-->>SA: Session établie (enregistrée sur un hôte qui enregistre)
 
 1. sshd résout le compte depuis ``/etc/passwd`` ; un utilisateur inconnu est refusé avant tout examen de clé
 2. sshd obtient la clé du compte par ``ob-service-account-keys`` (ou ``authorized_keys``) et vérifie que le client la détient
 3. Le module PAM trouve le nom dans ``service-accounts.conf`` et l'autorise localement (pas d'appel LLNG)
-4. Une empreinte, si elle parvient à PAM, est comparée à ``key_fingerprint`` ; lors d'une connexion par clé nue, aucune n'y parvient
+4. Chaque clé du ``<nom>.pub`` servi doit avoir ``key_fingerprint`` ; à l'ouverture de session, la clé réellement utilisée (``SSH_AUTH_INFO_0``) aussi, y compris une clé d'``authorized_keys``
 5. Sur un hôte qui enregistre, la session passe par l'enregistreur ; le shell de connexion du compte doit être ``/usr/sbin/ob-login-shell`` pour que rien ne s'exécute avant lui (responsabilité de l'exploitant, rien ne l'impose)
 6. ``sudo`` n'est pas décidé par le module (``PAM_IGNORE``) : la pile PAM locale et ``sudoers`` décident
 

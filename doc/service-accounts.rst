@@ -164,31 +164,41 @@ lines once that is done.
 
 .. _service-accounts-fingerprint:
 
-What ``key_fingerprint`` does, and does not do
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+What ``key_fingerprint`` does
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``pam_openbastion`` compares ``key_fingerprint`` with the fingerprint of
-the key that opened the session only when it learns that fingerprint. It
-has two sources: ``SSH_USER_AUTH`` in the PAM environment, which OpenSSH
-does not set during the ``account`` phase, and the spool under
-``/run/open-bastion/ssh-fp``, which the ``AuthorizedPrincipalsCommand``
-helper writes, and which ``sshd`` runs only for a certificate. A service
-account logs in with a plain key, so in practice there is nothing to
-compare, and the check is skipped.
+``key_fingerprint`` is the only key the account may log in with.
+``pam_openbastion`` checks it twice:
 
-What controls access is the key ``sshd`` accepts: the root-owned
-``service-accounts.d/<name>.pub`` served by ``AuthorizedKeysCommand``, or
-an ``authorized_keys`` file. Treat that file as the credential, and keep
-``key_fingerprint`` equal to it.
+- **At login** (PAM ``account``), against the key file
+  ``service-accounts.d/<name>.pub`` that ``ob-service-account-keys``
+  serves to ``sshd``: every key in it must have that fingerprint. A file
+  holding another key, or a line that cannot be read as a key, refuses the
+  login.
+- **When the session opens**, against the key that was actually used,
+  whatever served it: the ``.pub``, or an ``authorized_keys`` file. OpenSSH
+  names that key to PAM only at this point (``SSH_AUTH_INFO_0``); during the
+  ``account`` phase it does not yet. Another key is refused there: ``sshd``
+  then runs no command or shell and allows no forwarding.
 
-The same absence has two consequences:
+The second check needs a ``session`` line that lets a refusal through.
+:doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>` writes
+``session required pam_openbastion.so`` on a backend and
 
-- ``fingerprint_required = true`` in ``openbastion.conf`` refuses a login
-  whose fingerprint cannot be determined. On a host that sets it, service
-  accounts cannot log in with a plain key.
-- ``ssh_key_policy_enabled = true`` refuses a key it cannot identify, for
-  the same reason (see :ref:`the SSH key policy
-  <security-ssh-key-policy>`).
+::
+
+   session    [success=ok perm_denied=die default=ignore]  pam_openbastion.so
+
+on a bastion or standalone host. A stack written by hand with
+``session optional pam_openbastion.so`` ignores the refusal.
+
+``fingerprint_required = true`` in ``openbastion.conf`` refuses a service
+account's session when no key could be compared: a login by another
+method than a key. A plain key always has a fingerprint at session open,
+so it satisfies the setting.
+
+``ssh_key_policy_enabled = true`` still refuses a plain key it cannot
+identify (see :ref:`the SSH key policy <security-ssh-key-policy>`).
 
 Generating with ob-builder
 --------------------------
@@ -244,14 +254,26 @@ Authorizing the public key at the SSH layer
   /etc/open-bastion/service-accounts.d/<name>.pub``); ``sshd`` runs the
   helper at every login, so no restart is needed for a new key.
   ``ExposeAuthInfo yes`` exposes the authentication details to the
-  session (``SSH_USER_AUTH``); it does not bring the fingerprint to the
-  PAM ``account`` phase (see :ref:`service-accounts-fingerprint`).
+  session (``SSH_USER_AUTH``). ``key_fingerprint`` does not depend on it
+  (see :ref:`service-accounts-fingerprint`).
 
-- ``authorized_keys`` — works with every security scenario but maximum
-  security. Put the key in ``~<name>/.ssh/authorized_keys`` (``0600``,
-  owned by the account). The account owns that file and can add keys to
-  it, and since ``key_fingerprint`` is not compared on a plain-key login,
-  such a key works too: prefer ``AuthorizedKeysCommand``.
+- ``authorized_keys`` — put the key in ``~<name>/.ssh/authorized_keys``
+  (``0600``, owned by the account). The account owns that file and can add
+  keys to it, but a session opened with a key that is not its
+  ``key_fingerprint`` is refused (see :ref:`service-accounts-fingerprint`).
+  Maximum security disables ``authorized_keys`` (``AuthorizedKeysFile
+  none``); ``--enable-authorized-keys-file`` gives it back to the members of
+  the ``open-bastion-authorized-keys`` group only, through
+  ``/etc/ssh/sshd_config.d/61-open-bastion-authorized-keys.conf``:
+
+  ::
+
+     Match Group open-bastion-authorized-keys
+         AuthorizedKeysFile .ssh/authorized_keys
+
+  The setup creates the group; add each account that uses the file with
+  ``usermod -aG open-bastion-authorized-keys <name>``. Everyone else keeps
+  certificates only.
 
 The command :doc:`ob-bastion-setup(8) </references/man/ob-bastion-setup>`
 ``--enable-service-keys`` (and the same flag on
@@ -276,8 +298,9 @@ installer says so if it finds sshd not serving the keys.
 ``key_fingerprint`` alone is not an alternative to the key: it gives
 ``sshd`` nothing to accept. The account can log in only if its key reaches
 ``sshd`` some other way, an ``authorized_keys`` file you deploy yourself.
-Under maximum security (``AuthorizedKeysFile none``) there is no other way,
-so give the key.
+Under maximum security that file is ignored unless the setup ran with
+``--enable-authorized-keys-file`` and the account is in the
+``open-bastion-authorized-keys`` group; otherwise give the key.
 
 Reaching servers through a bastion
 ----------------------------------

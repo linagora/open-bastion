@@ -103,8 +103,12 @@ int main(int argc, char **argv)
     return 0;
 }
 C
+    # ssh_key_policy.c computes fingerprints with libcrypto (#358).
+    local crypto
+    crypto=$(pkg-config --cflags --libs libcrypto 2>/dev/null || echo -lcrypto)
+    # shellcheck disable=SC2086 # pkg-config output is a word list
     "$CC_BIN" -I"$ROOT_DIR/include" -o "$SCRATCH/driver" \
-        "$SCRATCH/driver.c" "$ROOT_DIR/src/ssh_key_policy.c" || return 1
+        "$SCRATCH/driver.c" "$ROOT_DIR/src/ssh_key_policy.c" $crypto || return 1
     build_fixtures
 }
 

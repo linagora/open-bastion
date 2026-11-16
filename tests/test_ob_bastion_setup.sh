@@ -516,6 +516,96 @@ test_pam_sudo_max_security_fail_closed() {
     assert_auth_stack_fail_closed "generated Mode E /etc/pam.d/sudo auth stack is fail-closed" "$out"
 }
 
+# ── #358: the bastion's session line lets a key_fingerprint refusal through ──
+# pam_openbastion refuses a service account's session whose key is not its
+# key_fingerprint; `optional` would drop that verdict.
+test_pam_sshd_session_refusal_effective() {
+    local out
+    out=$(
+        source_script "ob-bastion-setup"
+        parse_args -p "https://x" --dry-run
+        configure_pam_sshd 2>&1
+    )
+    if grep -qE '^session +\[success=ok perm_denied=die default=ignore\] +pam_openbastion\.so$' <<<"$out" &&
+       ! grep -qE '^session +optional +pam_openbastion\.so' <<<"$out"; then
+        pass "bastion sshd stack: a session refusal of pam_openbastion is fatal"
+    else
+        fail "bastion sshd stack: a session refusal of pam_openbastion is fatal" \
+             "$(grep -E '^session' <<<"$out")"
+    fi
+}
+
+# ── #358: --enable-authorized-keys-file, Mode E, one group only ──
+test_authorized_keys_file_optin() {
+    local d out rc
+    d=$(mktemp -d)
+    out=$(
+        source_script "ob-bastion-setup"
+        step() { :; }; info() { :; }; warn() { :; }
+        getent() { return 0; }; groupadd() { return 1; }
+        sshd() { return 0; }
+        track_created() { :; }; backup_file() { :; }
+        parse_args -p "https://x" --max-security --enable-authorized-keys-file
+        SSHD_CONFIG_DIR="$d" DRY_RUN=false
+        configure_authorized_keys_file || exit 1
+        cat "$d/61-open-bastion-authorized-keys.conf"
+    )
+    rc=$?
+    if [ "$rc" -eq 0 ] &&
+       grep -qx 'Match Group open-bastion-authorized-keys' <<<"$out" &&
+       grep -qx '    AuthorizedKeysFile .ssh/authorized_keys' <<<"$out" &&
+       [ "$(grep -c '^Match' <<<"$out")" = "1" ] &&
+       [ "$(tail -n 1 <<<"$out")" = "    AuthorizedKeysFile .ssh/authorized_keys" ]; then
+        pass "--enable-authorized-keys-file: authorized_keys back for one group, in its own drop-in"
+    else
+        fail "--enable-authorized-keys-file: authorized_keys back for one group, in its own drop-in" \
+             "rc=$rc $out"
+    fi
+
+    # A run without the flag removes our drop-in, never a foreign one.
+    (
+        source_script "ob-bastion-setup"
+        step() { :; }; info() { :; }; warn() { :; }; backup_file() { :; }
+        parse_args -p "https://x" --max-security
+        SSHD_CONFIG_DIR="$d" DRY_RUN=false
+        configure_authorized_keys_file
+    )
+    if [ ! -e "$d/61-open-bastion-authorized-keys.conf" ]; then
+        pass "a run without --enable-authorized-keys-file removes the drop-in"
+    else
+        fail "a run without --enable-authorized-keys-file removes the drop-in"
+    fi
+    printf 'Match Group ops\n    AuthorizedKeysFile .ssh/k\n' > "$d/61-open-bastion-authorized-keys.conf"
+    (
+        source_script "ob-bastion-setup"
+        step() { :; }; info() { :; }; warn() { :; }; backup_file() { :; }
+        parse_args -p "https://x" --max-security
+        SSHD_CONFIG_DIR="$d" DRY_RUN=false
+        configure_authorized_keys_file
+    )
+    if [ -e "$d/61-open-bastion-authorized-keys.conf" ]; then
+        pass "  ... but leaves a file it did not write"
+    else
+        fail "  ... but leaves a file it did not write"
+    fi
+    rm -f "$d/61-open-bastion-authorized-keys.conf"
+
+    # Without Mode E, authorized_keys is not disabled: nothing to write.
+    (
+        source_script "ob-bastion-setup"
+        step() { :; }; info() { :; }; warn() { :; }
+        parse_args -p "https://x" --enable-authorized-keys-file
+        SSHD_CONFIG_DIR="$d" DRY_RUN=false
+        configure_authorized_keys_file
+    )
+    if [ -z "$(ls -A "$d")" ]; then
+        pass "--enable-authorized-keys-file writes nothing without --max-security"
+    else
+        fail "--enable-authorized-keys-file writes nothing without --max-security" "$(ls -A "$d")"
+    fi
+    rm -rf "$d"
+}
+
 # ── #377: a provided token may be another device; its kept id goes ──
 test_provided_token_drops_kept_id() {
     local d rc
@@ -630,6 +720,8 @@ run_test test_sudoers_rule_is_valid
 
 run_test test_pam_sshd_fail_closed
 run_test test_pam_sudo_max_security_fail_closed
+run_test test_pam_sshd_session_refusal_effective
+run_test test_authorized_keys_file_optin
 run_test test_provided_token_drops_kept_id
 run_test test_generated_files_are_stable
 

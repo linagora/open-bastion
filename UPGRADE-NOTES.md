@@ -10,6 +10,21 @@ move independently, so each part below says when it applies.
 
 ## Unreleased
 
+**Service accounts (#358).** `key_fingerprint` is now enforced. Before
+upgrading, check on each host that every key a service account can log in
+with has it, or the account is locked out:
+
+```sh
+for f in /etc/open-bastion/service-accounts.d/*.pub; do ssh-keygen -lf "$f"; done
+grep -E '^\[|key_fingerprint' /etc/open-bastion/service-accounts.conf
+```
+
+and the same for any `~<name>/.ssh/authorized_keys`. Then re-run the setup
+on each bastion and standalone host: its `sshd` PAM stack must end with
+`session [success=ok perm_denied=die default=ignore] pam_openbastion.so`
+(a hand-written `session optional pam_openbastion.so` ignores the refusal
+of an undeclared key). Backends already have `session required`.
+
 **The portal.** Upgrade every LemonLDAP::NG portal node together when deploying
 the `pam-access` plugin from this release. The bastion voucher record id now
 length-prefixes the user, so a node does not see the vouchers of another

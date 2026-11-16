@@ -255,6 +255,10 @@
 # sudoers rules: Open Bastion manages neither. Alias: service_accounts
 # service_accounts_file = /etc/open-bastion/service-accounts.conf
 
+# Where ob-service-account-keys reads each account's NAME.pub. At login every
+# key in it must match the account's key_fingerprint.
+# service_accounts_keys_dir = /etc/open-bastion/service-accounts.d
+
 # ==============================================================================
 # Notifications
 # ==============================================================================

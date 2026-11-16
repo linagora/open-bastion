@@ -125,6 +125,20 @@ Common options
    ``/etc/passwd``, with ``/usr/sbin/ob-login-shell`` as its shell on a
    host that records.
 
+.. option:: --enable-authorized-keys-file
+
+   With ``--max-security``: give ``~/.ssh/authorized_keys`` back to the
+   members of the ``open-bastion-authorized-keys`` group, which the run
+   creates, through
+   ``/etc/ssh/sshd_config.d/61-open-bastion-authorized-keys.conf``
+   (``Match Group``). Meant for service accounts whose keys you manage
+   there: add them with ``usermod -aG open-bastion-authorized-keys
+   <name>``; a session key that is not the account's ``key_fingerprint``
+   is still refused. Everyone else keeps certificates only. Off by
+   default; a run without it removes a drop-in it generated earlier.
+   Without ``--max-security`` it does nothing, ``authorized_keys`` being
+   left enabled.
+
 .. option:: --enable-sudo-fresh-otp
 
    Require a fresh LemonLDAP::NG token on every sudo for SSO users

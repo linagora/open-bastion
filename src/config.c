@@ -113,6 +113,7 @@ void config_init(pam_openbastion_config_t *config)
 
     /* Service accounts */
     config->service_accounts_file = strdup(DEFAULT_SERVICE_ACCOUNTS_FILE);
+    config->service_accounts_keys_dir = strdup(DEFAULT_SERVICE_ACCOUNTS_KEYS_DIR);
 
     /* Signed answers: response_signing stays off (0) */
     config->sso_jwks_file = strdup(DEFAULT_SSO_JWKS_FILE);
@@ -226,6 +227,7 @@ void config_free(pam_openbastion_config_t *config)
 
     /* Service accounts */
     free(config->service_accounts_file);
+    free(config->service_accounts_keys_dir);
 
     /* CrowdSec integration */
     free(config->crowdsec_url);
@@ -716,6 +718,9 @@ static int parse_line(const char *key, const char *value, pam_openbastion_config
     else if (strcmp(key, "service_accounts_file") == 0 ||
              strcmp(key, "service_accounts") == 0) {
         SET_STRING_FIELD(config->service_accounts_file, value, key);
+    }
+    else if (strcmp(key, "service_accounts_keys_dir") == 0) {
+        SET_STRING_FIELD(config->service_accounts_keys_dir, value, key);
     }
 #ifdef ENABLE_DESKTOP_SSO  /* Desktop SSO features only: see CONTRIBUTING.md */
     /* Desktop SSO / OAuth2 token authentication */
