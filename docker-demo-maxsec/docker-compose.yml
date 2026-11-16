@@ -59,6 +59,9 @@ services:
       - LLNG_SERVER_GROUP=bastion
       - LLNG_CLIENT_ID=pam-access
       - LLNG_CLIENT_SECRET=pamsecret
+      # Equal to the portal's pamAccessRequestSigningSecret: the portal runs
+      # pamAccessRequestSigningMode = required (#262).
+      - LLNG_REQUEST_SIGNING_SECRET=maxsec-demo-request-signing-secret-not-for-production
       - LLNG_ADMIN_USER=dwho
       - LLNG_ADMIN_PASSWORD=dwho
     networks:
@@ -81,6 +84,9 @@ services:
       - LLNG_SERVER_GROUP=backend
       - LLNG_CLIENT_ID=pam-access
       - LLNG_CLIENT_SECRET=pamsecret
+      # Equal to the portal's pamAccessRequestSigningSecret: the portal runs
+      # pamAccessRequestSigningMode = required (#262).
+      - LLNG_REQUEST_SIGNING_SECRET=maxsec-demo-request-signing-secret-not-for-production
       - LLNG_ADMIN_USER=dwho
       - LLNG_ADMIN_PASSWORD=dwho
     networks:

@@ -162,6 +162,8 @@
 
   "pamAccessOfflineEnabled": "1",
   "pamAccessOfflineTtl": 86400,
+  "pamAccessRequestSigningMode": "required",
+  "pamAccessRequestSigningSecret": "maxsec-demo-request-signing-secret-not-for-production",
 
   "sshCaActivation": 1,
   "sshCaAdminRule": "$uid eq 'dwho'",
