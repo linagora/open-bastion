@@ -1735,12 +1735,23 @@ configure_pam_sudo() {
 # /etc/passwd, e.g. the machine's break-glass admin) keep standard Unix sudo:
 # without these fallbacks a 'required pam_openbastion' line locks every local
 # admin out of sudo, since LLNG cannot authorize users it does not know.
+#
+# A member of open-bastion-sudo asks LLNG before pam_localuser: with
+# create_user an SSO user is in /etc/passwd too, and pam_localuser would let
+# them past the live sudo_allowed check (#359). Membership is synced only at SSH
+# login, so a user whose right was revoked is still a member here and is
+# refused live. The module ignores only a service account (its sudo is the
+# operator's sudoers rule), which then falls to pam_localuser; any other answer,
+# an unreachable portal included, is final.
 
 # Authentication - local Unix password first, then LLNG
 auth       sufficient   pam_unix.so
 auth       required     pam_openbastion.so service_type=sudo
 
-# Account - local users (in /etc/passwd) pass; SSO users checked with LLNG
+# Account - members of open-bastion-sudo: LLNG decides; then local users (in
+# /etc/passwd) pass; SSO users checked with LLNG
+account    [success=1 default=ignore]               pam_succeed_if.so quiet user notingroup open-bastion-sudo
+account    [success=done ignore=ignore default=die]  pam_openbastion.so service_type=sudo
 account    sufficient   pam_localuser.so
 account    required     pam_openbastion.so service_type=sudo
 

@@ -1,7 +1,10 @@
 /*
  * pam_stack_probe — run pam_authenticate() against a PAM stack in a directory.
  *
- *   usage: pam_stack_probe <confdir> <service> [user]
+ *   usage: pam_stack_probe <confdir> <service> [user] [auth|account]
+ *
+ * The fourth argument picks the phase: pam_authenticate() (the default) or
+ * pam_acct_mgmt(), for the account stacks (#359).
  *
  * Prints the numeric PAM return code on stdout (nothing else) and exits 0, so
  * a shell test can compare it against the expected verdict. Exits 2 if
@@ -58,13 +61,23 @@ int main(int argc, char **argv)
     pam_handle_t *pamh = NULL;
     struct pam_conv conv = { probe_conv, NULL };
     const char *user;
+    int account;
     int rc;
 
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <confdir> <service> [user]\n", argv[0]);
+        fprintf(stderr, "usage: %s <confdir> <service> [user] [auth|account]\n",
+                argv[0]);
         return 2;
     }
     user = (argc > 3) ? argv[3] : "obpamtest";
+    if (argc > 4 && strcmp(argv[4], "account") == 0) {
+        account = 1;
+    } else if (argc > 4 && strcmp(argv[4], "auth") != 0) {
+        fprintf(stderr, "unknown phase: %s\n", argv[4]);
+        return 2;
+    } else {
+        account = 0;
+    }
 
     rc = pam_start_confdir(argv[2], user, &conv, argv[1], &pamh);
     if (rc != PAM_SUCCESS) {
@@ -73,10 +86,11 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    rc = pam_authenticate(pamh, 0);
+    rc = account ? pam_acct_mgmt(pamh, 0) : pam_authenticate(pamh, 0);
     printf("%d\n", rc);
-    fprintf(stderr, "%s/%s: pam_authenticate -> %d (%s)\n",
-            argv[1], argv[2], rc, pam_strerror(pamh, rc));
+    fprintf(stderr, "%s/%s: %s -> %d (%s)\n", argv[1], argv[2],
+            account ? "pam_acct_mgmt" : "pam_authenticate",
+            rc, pam_strerror(pamh, rc));
     pam_end(pamh, rc);
     return 0;
 }

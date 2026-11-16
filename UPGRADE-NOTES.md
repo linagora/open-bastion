@@ -22,6 +22,16 @@ version:
 
 Both self-heal on the next login; a node-by-node rollout stretches the window.
 
+**Backends outside maximum security.** Re-run `ob-backend-setup` (or replay
+the Ansible role) so `/etc/pam.d/sudo` and `/etc/pam.d/sudo-i` get the two
+new account lines in front of `pam_localuser` (#359). Until then an SSO user
+that `create_user` put in `/etc/passwd` keeps a `sudo` right revoked in the
+portal until their next SSH login. A local admin who is a member of
+`open-bastion-sudo` is now checked by the portal, which refuses an account it
+does not know: take them out of that group (`gpasswd -d <name>
+open-bastion-sudo`) and give them their own `sudoers` rule. Service accounts
+are not affected: the module leaves them to `pam_localuser` and `sudoers`.
+
 ## 0.7.0
 
 **Part A — on every bastion and backend.** Always required.
