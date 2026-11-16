@@ -48,6 +48,16 @@
       "type": "int",
       "default": 20,
       "documentation": "Maximum active (non-revoked, non-expired) certificates per user. 0 disables the limit. Re-signing an existing key replaces its record and is not counted."
+    },
+    "sshCaCertHistoryMax": {
+      "type": "int",
+      "default": 50,
+      "documentation": "Superseded certificates kept per user: re-signing a key keeps the old record, marked superseded, for the administration page and sshca-rebuild-krl. The most recently superseded are kept. 0 keeps none."
+    },
+    "sshCaCertHistoryRetention": {
+      "type": "int",
+      "default": 30,
+      "documentation": "Days a superseded certificate is kept after it expires."
     }
   },
   "tree": [
@@ -68,6 +78,8 @@
             "sshCaMinKeyBits",
             "sshCaSignMaxPerHour",
             "sshCaMaxCertsPerUser",
+            "sshCaCertHistoryMax",
+            "sshCaCertHistoryRetention",
             "sshCaPrincipalSources",
             "sshCaKrlPath"
           ]
@@ -141,6 +153,18 @@
       "fr": "Certificats actifs par utilisateur",
       "es": "Certificados activos por usuario",
       "it": "Certificati attivi per utente"
+    },
+    "sshCaCertHistoryMax": {
+      "en": "Superseded certificates kept per user",
+      "fr": "Certificats remplacés conservés par utilisateur",
+      "es": "Certificados sustituidos conservados por usuario",
+      "it": "Certificati sostituiti conservati per utente"
+    },
+    "sshCaCertHistoryRetention": {
+      "en": "Superseded certificate retention after expiry (days)",
+      "fr": "Conservation des certificats remplacés après expiration (jours)",
+      "es": "Conservación de los certificados sustituidos tras su caducidad (días)",
+      "it": "Conservazione dei certificati sostituiti dopo la scadenza (giorni)"
     }
   }
 }

@@ -67,6 +67,13 @@ our $LEGACY_VOUCHER_KEY = '_pamBastionVouchers'; # legacy, read-only
 # SSHCA.pm. `_sshCerts` is the pre-upgrade array, still read as a fallback.
 our $SSO_CERT_PREFIX = '_sshCert::';
 
+# Last use of an SSO certificate, one key per fingerprint: { serial, at,
+# host } (issue #455). The ssh-ca administration page reads it
+# ($CERT_USE_PREFIX in SSHCA.pm, keep in sync). A key of its own rather than
+# a field of the certificate record, so that a stamp can never race a
+# revocation and write back a record without its `revoked_at`.
+our $SSO_CERT_USE_PREFIX = '_sshCertUse::';
+
 # Signed answers of the /pam/* endpoints (issue #100). A caller asks for one
 # with `Accept: $SIGNED_RESPONSE_TYPE`; the JWS carries `typ: $SIGNED_RESPONSE_TYP`
 # so that no other token signed by the same key (ID token, logout token,
@@ -484,9 +491,12 @@ sub authorize {
     );
     return $fp_bail if $fp_bail;
     my $sshCheck;    # captured for the bastion-voucher cap below
+    my $ps;          # reused to record the certificate's use (issue #455)
     if ( defined $fingerprint ) {
 
-        $sshCheck = $self->_checkSshFingerprint( $user, $fingerprint );
+        $ps = $self->p->getPersistentSession($user);
+        $sshCheck =
+          $self->_checkSshFingerprint( $user, $fingerprint, ps => $ps );
         unless ( $sshCheck->{ok} ) {
             $self->logger->info(
                 "PAM authorize: SSH fingerprint check failed for user '$user' "
@@ -575,6 +585,13 @@ sub authorize {
     if ($authorized) {
         $response->{permissions} =
           { sudo_allowed => $sudo_allowed ? JSON::true : JSON::false, };
+
+        # Record that the SSO certificate was used, for the ssh-ca
+        # administration page (issue #455). Only once authorized: a refused
+        # login is not activity of the certificate.
+        my $use =
+          $self->_sshCertUseUpdate( $ps, $fingerprint, $sshCheck, $host );
+        $ps->update($use) if %$use;
 
         # Surface the matched SSH cert details when fingerprint binding was
         # used, so the caller can log/cache which key was actually checked.
@@ -1827,13 +1844,14 @@ sub verifyToken {
     return $fp_bail if $fp_bail;
 
     my $ps;
+    my $sshCheck;
     if ( defined $fingerprint ) {
 
         # Load the persistent session once; the _pamSeen stamp below
         # reuses the same $ps instead of going through
         # updatePersistentSession (which would re-read it).
         $ps = $self->p->getPersistentSession($user);
-        my $sshCheck =
+        $sshCheck =
           $self->_checkSshFingerprint( $user, $fingerprint, ps => $ps );
         unless ( $sshCheck->{ok} ) {
             $self->logger->info(
@@ -1874,7 +1892,16 @@ sub verifyToken {
     # In the no-fingerprint branch $ps is undef and we fall back to the core
     # helper which also handles the disablePersistentStorage case.
     if ( $ps && !$ps->error ) {
-        $ps->update( { _pamSeen => time() } );
+
+        # The certificate's last use rides on the same write (issue #455).
+        $ps->update( {
+                _pamSeen => time(),
+                %{
+                    $self->_sshCertUseUpdate( $ps, $fingerprint, $sshCheck,
+                        undef )
+                },
+            }
+        );
     }
     else {
         $self->p->updatePersistentSession( $req, { _pamSeen => time() },
@@ -2626,6 +2653,50 @@ sub _checkSshFingerprint {
         };
     }
     return { ok => 0, reason => 'not-found' };
+}
+
+# HELPER: the persistent-session update recording that the SSO certificate
+# $sshCheck matched has just been used (issue #455), or {} when there is
+# nothing to write.
+#
+# Ephemeral bastion-hop certificates are not recorded: they live two minutes
+# and the administration page does not list them. To keep a busy account from
+# rewriting its persistent session on every login, a stamp for the same
+# certificate is skipped while the previous one is younger than
+# pamAccessSshCertUseInterval seconds (300 by default; 0 turns recording
+# off). The stamp is read from $ps as loaded for this request, so two
+# concurrent logins may both write: harmless, the later one wins.
+sub _sshCertUseUpdate {
+    my ( $self, $ps, $fingerprint, $sshCheck, $host ) = @_;
+
+    return {} unless $ps && !$ps->error;
+    return {} unless defined $fingerprint && $fingerprint ne '';
+    return {} unless $sshCheck && $sshCheck->{ok} && !$sshCheck->{ephemeral};
+    my $serial = $sshCheck->{serial};
+    return {} unless defined $serial && $serial ne '';
+
+    my $interval = $self->conf->{pamAccessSshCertUseInterval};
+    $interval = 300
+      unless defined $interval && $interval =~ /\A[0-9]+\z/;
+    return {} unless $interval;
+
+    my $key  = $SSO_CERT_USE_PREFIX . $fingerprint;
+    my $now  = time();
+    my $prev = eval { from_json( $ps->data->{$key} // '' ) };
+    return {}
+      if ref $prev eq 'HASH'
+      and ( $prev->{serial} // '' ) eq $serial
+      and ( $prev->{at} // '' ) =~ /\A[0-9]+\z/
+      and $now - $prev->{at} < $interval;
+
+    return {
+        $key => to_json( {
+                serial => "$serial",
+                at     => $now,
+                ( defined $host && $host ne '' ? ( host => $host ) : () ),
+            }
+        )
+    };
 }
 
 # Is $server_group one of the configured bastion groups?
@@ -3576,6 +3647,14 @@ supplies no SSH fingerprint (default: 0). Off by default because the
 fingerprint is optional by contract; turn it on once the client-side spool is
 deployed everywhere, to make the binding a requirement rather than a
 best effort.
+
+=item pamAccessSshCertUseInterval
+
+Record the last use of an SSO certificate, which the ssh-ca administration
+page shows, at most once per this many seconds per certificate (default:
+300). C<0> turns recording off. The use is stamped on a successful
+C</pam/authorize> or C</pam/verify> whose fingerprint matches an ssh-ca
+certificate; bastion-hop certificates are not recorded.
 
 =item pamAccessBastionCertTtl
 

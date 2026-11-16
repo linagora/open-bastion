@@ -55,6 +55,20 @@ our $VERSION = '2.23.0';
 # and drained into per-key records on the next write.
 our $CERT_PREFIX = '_sshCert::';
 
+# A re-signed key used to lose its old record. It is now kept, marked
+# `superseded_at`, under its serial: the fingerprint key belongs to the record
+# that replaced it (issue #455). sshCaCertHistoryMax and
+# sshCaCertHistoryRetention bound how many are kept and for how long.
+our $CERT_OLD_PREFIX = '_sshCertOld::';
+
+# Last use of the certificate behind a fingerprint, written by pam-access
+# ($SSO_CERT_USE_PREFIX there) when /pam/authorize or /pam/verify matches it:
+# { serial, at, host }. A key of its own, so pam-access never rewrites a
+# certificate record (a stamp racing a revocation would otherwise be able to
+# lose `revoked_at`). The serial tells which certificate of that key it
+# belongs to.
+our $CERT_USE_PREFIX = '_sshCertUse::';
+
 extends 'Lemonldap::NG::Portal::Main::Plugin';
 
 use constant name => 'SSHCA';
@@ -658,6 +672,7 @@ sub sshCaSign {
     my $resign = 0;
     for my $c (@$existingCerts) {
         next if $c->{revoked_at};
+        next if $c->{superseded_at};
         next if $c->{expires_at} && $c->{expires_at} < $now;
         $active++;
         $resign = 1 if ( $c->{fingerprint} || '' ) eq $fingerprint;
@@ -1273,27 +1288,15 @@ sub sshMyCerts {
 
     my $sshCerts = $self->_certsFromData( $req->userData );
 
-    my $now = time();
+    my $now     = time();
+    my $useData = $self->_liveData($req);
     my @certs;
     for my $cert (@$sshCerts) {
-        my $status = 'active';
-        if ( $cert->{revoked_at} ) {
-            $status = 'revoked';
-        }
-        elsif ( $cert->{expires_at} && $cert->{expires_at} < $now ) {
-            $status = 'expired';
-        }
-        push @certs,
-          {
-            serial      => $cert->{serial},
-            key_id      => $cert->{key_id},
-            label       => $cert->{label},
-            fingerprint => $cert->{fingerprint},
-            principals  => $cert->{principals},
-            issued_at   => $cert->{issued_at},
-            expires_at  => $cert->{expires_at},
-            status      => $status,
-          };
+        my $v = $self->_certView( $useData, $cert, $now );
+
+        # Revocation details stay on the administration side.
+        delete @$v{qw(revoked_by revoke_reason)};
+        push @certs, $v;
     }
 
     # Sort by issued_at descending (newest first)
@@ -1349,6 +1352,15 @@ sub sshMyCertRevoke {
                 return $self->p->sendJSONresponse(
                     $req,
                     { error => 'Certificate already revoked' },
+                    code => 400
+                );
+            }
+
+            # Its serial went into the KRL when it was replaced.
+            if ( $cert->{superseded_at} ) {
+                return $self->p->sendJSONresponse(
+                    $req,
+                    { error => 'Certificate already superseded' },
                     code => 400
                 );
             }
@@ -1465,7 +1477,34 @@ sub sshCertsList {
     my $userFilter   = $req->param('user')   || '';
     my $serialFilter = $req->param('serial') || '';
     my $keyIdFilter  = $req->param('key_id') || '';
-    my $statusFilter = $req->param('status') || '';   # active, revoked, expired
+    my $statusFilter = $req->param('status') || '';    # see _certStatus
+
+    # Last activity (issue #455): `never` (never used), `within:<seconds>`
+    # (used in the last <seconds>) or `idle:<seconds>` (neither used nor
+    # issued in the last <seconds>: a certificate issued a minute ago is not
+    # idle yet). Anything else is a client error rather than "no filter",
+    # which would list everything an administrator meant to narrow down.
+    my $activity = $req->param('activity') // '';
+    my ( $actKind, $actSecs ) = ( '', 0 );
+    if ( $activity ne '' ) {
+        if ( $activity eq 'never' ) {
+            $actKind = 'never';
+        }
+        elsif ( $activity =~ /\A(within|idle):([0-9]{1,10})\z/ ) {
+            ( $actKind, $actSecs ) = ( $1, $2 + 0 );
+        }
+        else {
+            return $self->p->sendError( $req, 'Invalid activity filter',
+                400 );
+        }
+    }
+
+    # Sort order: `issued` (newest first, the default) or `last_used` (most
+    # recently used first, never-used certificates last).
+    my $sort = $req->param('sort') || 'issued';
+    unless ( $sort eq 'issued' or $sort eq 'last_used' ) {
+        return $self->p->sendError( $req, 'Invalid sort order', 400 );
+    }
 
     # Pagination: bound below as well as above. `int()` alone turned a
     # negative limit into a negative `splice` length (which silently drops
@@ -1531,40 +1570,45 @@ sub sshCertsList {
                 next;
             }
 
-            # Determine status
-            my $certStatus = 'active';
-            if ( $cert->{revoked_at} ) {
-                $certStatus = 'revoked';
-            }
-            elsif ( $cert->{expires_at} && $cert->{expires_at} < $now ) {
-                $certStatus = 'expired';
-            }
+            my $v = $self->_certView( $session, $cert, $now );
 
             # Apply status filter
-            if ( $statusFilter && $certStatus ne $statusFilter ) {
+            if ( $statusFilter && $v->{status} ne $statusFilter ) {
                 next;
             }
 
-            push @certs,
-              {
-                session_id    => $sessionId,
-                serial        => $cert->{serial},
-                key_id        => $cert->{key_id},
-                user          => $user,
-                principals    => $cert->{principals},
-                issued_at     => $cert->{issued_at},
-                expires_at    => $cert->{expires_at},
-                revoked_at    => $cert->{revoked_at},
-                revoked_by    => $cert->{revoked_by},
-                revoke_reason => $cert->{revoke_reason},
-                status        => $certStatus,
-              };
+            # Apply activity filter
+            if ($actKind) {
+                my $last = $v->{last_used_at};
+                if ( $actKind eq 'never' ) {
+                    next if $last;
+                }
+                elsif ( $actKind eq 'within' ) {
+                    next unless $last and $last >= $now - $actSecs;
+                }
+                else {
+                    my $seen = $last || $v->{issued_at} || 0;
+                    next unless $seen < $now - $actSecs;
+                }
+            }
+
+            push @certs, { session_id => $sessionId, user => $user, %$v };
         }
     }
 
-    # Sort by issued_at descending (newest first)
-    @certs =
-      sort { ( $b->{issued_at} || 0 ) <=> ( $a->{issued_at} || 0 ) } @certs;
+    # Newest first, by issue date or by last use; ties by issue date so that
+    # pages stay stable.
+    if ( $sort eq 'last_used' ) {
+        @certs = sort {
+                 ( $b->{last_used_at} || 0 ) <=> ( $a->{last_used_at} || 0 )
+              or ( $b->{issued_at}    || 0 ) <=> ( $a->{issued_at}    || 0 )
+        } @certs;
+    }
+    else {
+        @certs =
+          sort { ( $b->{issued_at} || 0 ) <=> ( $a->{issued_at} || 0 ) }
+          @certs;
+    }
 
     my $total = scalar @certs;
 
@@ -1587,6 +1631,7 @@ sub sshCertsList {
             total        => $total,
             limit        => $limit,
             offset       => $offset,
+            sort         => $sort,
         }
     );
 }
@@ -1704,6 +1749,15 @@ sub sshCertRevoke {
                     code => 400
                 );
             }
+
+            # Its serial went into the KRL when it was replaced.
+            if ( $cert->{superseded_at} ) {
+                return $self->p->sendJSONresponse(
+                    $req,
+                    { error => 'Certificate already superseded' },
+                    code => 400
+                );
+            }
             $cert->{revoked_at}    = time();
             $cert->{revoked_by}    = $adminUser;
             $cert->{revoke_reason} = $reason;
@@ -1777,6 +1831,13 @@ sub _certKey {
     my ( $self, $cert ) = @_;
 
     return undef unless ref $cert eq 'HASH';
+
+    # A superseded record shares its fingerprint with the one that replaced
+    # it, so it lives under its serial.
+    if ( $cert->{superseded_at} ) {
+        return undef unless ( $cert->{serial} // '' ) ne '';
+        return $CERT_OLD_PREFIX . $cert->{serial};
+    }
     return $CERT_PREFIX . $cert->{fingerprint}
       if ( $cert->{fingerprint} // '' ) ne '';
     return $CERT_PREFIX . 'serial:' . $cert->{serial}
@@ -1802,13 +1863,16 @@ sub _legacyCerts {
 }
 
 # HELPER: every certificate record a session hash holds — per-key records
-# first, then whatever a not-yet-drained `_sshCerts` array still carries.
+# (superseded ones included) first, then whatever a not-yet-drained
+# `_sshCerts` array still carries.
 sub _certsFromData {
     my ( $self, $data ) = @_;
 
     my ( @certs, %seen );
     for my $k ( sort keys %$data ) {
-        next unless index( $k, $CERT_PREFIX ) == 0;
+        next
+          unless index( $k, $CERT_PREFIX ) == 0
+          or index( $k, $CERT_OLD_PREFIX ) == 0;
         my $rec = eval { from_json( $data->{$k} // '' ) };
         if ( $@ or ref $rec ne 'HASH' ) {
             $self->logger->warn("SSH CA: Corrupted certificate record $k");
@@ -1825,6 +1889,100 @@ sub _certsFromData {
     }
 
     return \@certs;
+}
+
+# HELPER: the last recorded use of $cert, { at, host }, or undef.
+#
+# A superseded record carries the use it had when it was replaced. A current
+# one reads the stamp pam-access keeps per fingerprint, which counts only
+# when it names this certificate's serial: after a re-signature the stamp
+# still describes the previous certificate until the new one is used.
+sub _certUse {
+    my ( $self, $data, $cert ) = @_;
+
+    return undef unless ref $cert eq 'HASH';
+    if ( $cert->{superseded_at} ) {
+        return undef unless $cert->{last_used_at};
+        return { at => $cert->{last_used_at}, host => $cert->{last_used_host} };
+    }
+    my $fp = $cert->{fingerprint} // '';
+    return undef if $fp eq '';
+    my $raw = $data->{ $CERT_USE_PREFIX . $fp } // '';
+    return undef if $raw eq '';
+    my $use = eval { from_json($raw) };
+    return undef if $@ or ref $use ne 'HASH';
+    return undef
+      unless ( $use->{serial} // '' ) ne ''
+      and ( $cert->{serial} // '' ) eq $use->{serial}
+      and ( $use->{at} // '' ) =~ /\A[0-9]+\z/;
+    return { at => $use->{at} + 0, host => $use->{host} };
+}
+
+# HELPER: the caller's persistent session hash, falling back to
+# $req->userData. pam-access writes use stamps in the persistent session only,
+# and other SSO sessions of the same user write history there too:
+# $req->userData is the copy this SSO session took at login, and stays behind
+# both.
+sub _liveData {
+    my ( $self, $req ) = @_;
+
+    my $uid = $req->userData->{ $self->conf->{whatToTrace} || 'uid' };
+    if ( defined $uid and $uid ne '' ) {
+        my $ps = $self->p->getPersistentSession($uid);
+        return $ps->data if $ps and !$ps->error;
+    }
+    return $req->userData;
+}
+
+# HELPER: status of a certificate record. A revocation wins: an administrator
+# may revoke a superseded serial explicitly, and that is what to show.
+sub _certStatus {
+    my ( $self, $cert, $now ) = @_;
+
+    return 'revoked'    if $cert->{revoked_at};
+    return 'superseded' if $cert->{superseded_at};
+    return 'expired' if $cert->{expires_at} && $cert->{expires_at} < $now;
+    return 'active';
+}
+
+# HELPER: the public view of a certificate record, as /ssh/mycerts and
+# /ssh/certs return it. $useData is the session hash holding the use stamps.
+sub _certView {
+    my ( $self, $useData, $cert, $now ) = @_;
+
+    my $use = $self->_certUse( $useData, $cert );
+    return {
+        serial         => $cert->{serial},
+        key_id         => $cert->{key_id},
+        label          => $cert->{label},
+        fingerprint    => $cert->{fingerprint},
+        principals     => $cert->{principals},
+        issued_at      => $cert->{issued_at},
+        expires_at     => $cert->{expires_at},
+        revoked_at     => $cert->{revoked_at},
+        revoked_by     => $cert->{revoked_by},
+        revoke_reason  => $cert->{revoke_reason},
+        superseded_at  => $cert->{superseded_at},
+        superseded_by  => $cert->{superseded_by},
+        last_used_at   => $use ? $use->{at}   : undef,
+        last_used_host => $use ? $use->{host} : undef,
+        status         => $self->_certStatus( $cert, $now ),
+    };
+}
+
+# HELPER: the serials of a session hash that belong in the KRL, as
+# sshca-rebuild-krl collects them: revoked certificates, and superseded ones,
+# whose serial went into the KRL when their key was re-signed.
+sub _krlSerialsFromData {
+    my ( $self, $data ) = @_;
+
+    my %serials;
+    for my $c ( @{ $self->_certsFromData($data) } ) {
+        next unless ( $c->{serial} // '' ) ne '';
+        next unless $c->{revoked_at} || $c->{superseded_at};
+        $serials{ $c->{serial} } = 1;
+    }
+    return sort keys %serials;
 }
 
 # HELPER: schedule the migration of a session's `_sshCerts` array into the
@@ -1863,17 +2021,22 @@ sub _storeCertificate {
       ? $args{existing}
       : $self->_certsFromData( $req->userData );
 
-    # Only two keys are touched: this certificate's, and (when the same SSH
-    # key is being re-signed under a record that predates the per-key layout)
-    # the superseded record's. Everything else the user holds is left alone,
+    # Only the keys of this SSH key are touched: this certificate's, the
+    # superseded record's (its old key, and its history key), and history
+    # records being trimmed. Every other key the user holds is left alone,
     # so a concurrent sign or revocation of another key cannot be lost.
     my $now = time();
     my %upd;
     $self->_drainLegacyCerts( $req->userData, \%upd );
 
     # Revoke the superseded serial in the KRL so the old certificate cannot be
-    # used even if it is still within its validity window.
+    # used even if it is still within its validity window. Its record moves
+    # to the history (issue #455) instead of being dropped.
+    my $histMax = $self->_positiveIntConf( 'sshCaCertHistoryMax', 50 );
+    my $live    = $self->_liveData($req);
+    my @history = grep { $_->{superseded_at} } @{ $self->_certsFromData($live) };
     for my $c (@$sshCerts) {
+        next if $c->{superseded_at};
         next
           unless $args{fingerprint}
           && ( $c->{fingerprint} || '' ) eq $args{fingerprint};
@@ -1890,6 +2053,43 @@ sub _storeCertificate {
             }
         }
         if ( my $k = $self->_certKey($c) ) { $upd{$k} = undef }
+
+        my $old = {
+            %$c,
+            superseded_at => $now,
+            superseded_by => $args{serial},
+        };
+        if ( my $use = $self->_certUse( $live, $c ) ) {
+            $old->{last_used_at}   = $use->{at};
+            $old->{last_used_host} = $use->{host} if defined $use->{host};
+        }
+        if ( my $k = $self->_certKey($old) ) {
+            $upd{$k} = to_json($old);
+            push @history, $old;
+        }
+    }
+
+    # Bound the history: drop what expired more than sshCaCertHistoryRetention
+    # days ago, then keep the sshCaCertHistoryMax most recently superseded.
+    # sshCaCertHistoryMax = 0 keeps none, which was the behaviour before.
+    # Dropping a record that has not expired yet does not un-revoke it: its
+    # serial stays in the KRL. Only sshca-rebuild-krl would no longer see it.
+    my $retention =
+      $self->_positiveIntConf( 'sshCaCertHistoryRetention', 30 ) * 86400;
+    my $kept = 0;
+    # Ties (several re-signatures in the same second) go to the later
+    # serial: serials grow with time, and may exceed a native integer.
+    for my $h (
+        sort {
+                 ( $b->{superseded_at} || 0 ) <=> ( $a->{superseded_at} || 0 )
+              or length( $b->{serial} // '' ) <=> length( $a->{serial} // '' )
+              or ( $b->{serial} // '' ) cmp( $a->{serial} // '' )
+        } @history
+      )
+    {
+        my $k = $self->_certKey($h) or next;
+        my $stale = $h->{expires_at} && $h->{expires_at} + $retention < $now;
+        $upd{$k} = undef if $stale or ++$kept > $histMax;
     }
 
     # Last, so it wins over the `undef` a superseded record with the same
@@ -2683,7 +2883,14 @@ Parameters:
 
 =item * key_id - Filter by key ID (partial match)
 
-=item * status - Filter by status: active, revoked, expired
+=item * status - Filter by status: active, revoked, superseded, expired
+
+=item * activity - Filter by last recorded use: C<never>, C<within:SECONDS>
+(used in the last SECONDS) or C<idle:SECONDS> (neither used nor issued in the
+last SECONDS). Anything else is refused with 400.
+
+=item * sort - C<issued> (newest first, the default) or C<last_used> (most
+recently used first, never used last). Anything else is refused with 400.
 
 =item * limit - Maximum number of results (default: 100, max: 1000). Must be
 a non-negative integer; anything else falls back to the default.
@@ -2785,6 +2992,16 @@ Minimum key size in bits (default: 2048). Only applies to families whose
 size varies, i.e. RSA and DSA: an Ed25519 key is always 256 bits and is
 stronger than RSA-3072, so comparing the two counts would be meaningless.
 Fixed-size families are governed by C<sshCaAllowedKeyTypes> alone.
+
+=item sshCaCertHistoryMax
+
+Superseded certificates kept per user (default: 50). Re-signing a key keeps
+the old record, marked C<superseded>, for the administration page and for
+C<sshca-rebuild-krl>; the most recently superseded are kept. 0 keeps none.
+
+=item sshCaCertHistoryRetention
+
+Days a superseded certificate is kept after it expires (default: 30).
 
 =item sshCaPrincipalSources
 
