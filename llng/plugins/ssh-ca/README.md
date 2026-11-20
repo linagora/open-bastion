@@ -297,12 +297,13 @@ before it is handed out. It must be a user certificate that certifies the
 submitted key, and it must be signed by the pinned CA key. Its principals and
 key ID must be exactly the requested ones, and it must carry `source-address`
 if and only if it was requested. It may carry no other critical option and
-no extension beyond the five above. Its validity must match the requested TTL,
-within 5 minutes of clock skew. The serial is read from the certificate. It
-must equal OpenBao's `serial_number` and must not be 0, which could not be
-revoked. If any check fails, the answer is **500** and the failure is logged:
-a misconfigured role never silently produces a broader certificate. At
-startup, the plugin also compares OpenBao's CA key (`GET
+no extension beyond the five above. Its validity must end at most 60 seconds
+after the requested TTL (a bastion hop lives 120 seconds), and at most 5
+minutes before it, to allow for clock skew. The serial is read from the
+certificate. It must equal OpenBao's `serial_number` and must not be 0, which
+could not be revoked. If any check fails, the answer is **500** and the
+failure is logged: a misconfigured role never silently produces a broader
+certificate. At startup, the plugin also compares OpenBao's CA key (`GET
 /v1/<mount>/public_key`) with the pinned one and logs an error if they differ.
 
 #### Serials and key IDs
@@ -319,9 +320,11 @@ longer form ranges in it.
 If OpenBao cannot be reached, is sealed, or refuses to sign, `/ssh/sign`
 answers **503** and `/pam/bastion-cert` answers **500**. The plugin **never
 falls back to a local key**. A token refused with 403 triggers one new login
-and one retry. Since every bastion hop needs a signature, OpenBao becomes a
-critical dependency: deploy it in HA, and keep `sshCaOpenBaoTimeout` short,
-as portal workers wait for it.
+and one retry. Redirects are not followed, since they would carry the token
+(and the AppRole `secret_id`) to another host: point `sshCaOpenBaoUrl` at a
+node or load balancer that answers directly. Since every bastion hop needs a
+signature, OpenBao becomes a critical dependency: deploy it in HA, and keep
+`sshCaOpenBaoTimeout` short, as portal workers wait for it.
 
 ### Principal sources
 

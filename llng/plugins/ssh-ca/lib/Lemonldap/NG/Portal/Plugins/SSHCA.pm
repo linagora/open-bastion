@@ -24,6 +24,7 @@ use POSIX ();
 use JSON qw(from_json to_json);
 use Time::HiRes qw(gettimeofday);
 use Digest::SHA qw(sha256);
+use Encode ();
 use MIME::Base64 qw(decode_base64 encode_base64);
 use URI;
 use Lemonldap::NG::Common::Apache::Session;
@@ -161,11 +162,23 @@ has ua => (
         $lwp{timeout} = $bao->{timeout} || 5;
         my %ssl = %{ $self->conf->{lwpSslOpts} || {} };
         $ssl{SSL_ca_file} = $bao->{caFile} if $bao->{caFile};
-        return Lemonldap::NG::Common::UserAgent->new( {
+        my $ua = Lemonldap::NG::Common::UserAgent->new( {
                 lwpOpts => \%lwp,
                 ( %ssl ? ( lwpSslOpts => \%ssl ) : () ),
             }
         );
+
+        # No redirects. Common::UserAgent makes POST redirectable, and LWP
+        # resends the X-Vault-Token header (and, on 307/308, the body with the
+        # AppRole secret_id) to whatever host the Location names. A 3xx is
+        # then just a failed request.
+        $ua->max_redirect(0);
+        $ua->requests_redirectable( [] );
+
+        # OpenBao answers are small: a hostile or broken endpoint must not
+        # make a portal worker buffer an unbounded body.
+        $ua->max_size( 1024 * 1024 );
+        return $ua;
     },
 );
 
@@ -1083,7 +1096,8 @@ sub canSign {
 #
 # Returns { certificate, serial } where `serial` is the serial the certificate
 # carries, in decimal (a string with `openbao`, since it may not fit a native
-# signed integer): callers must record that one, not the one they passed. On failure, undef or a hashref without `certificate`; `error =>
+# signed integer): callers must record that one, not the one they passed.
+# On failure, undef or a hashref without `certificate`; `error =>
 # 'unavailable'` then means OpenBao could not be reached or refused to sign.
 sub _signSshKey {
     my $self = shift;
@@ -1239,8 +1253,11 @@ my %BAO_ALLOWED_EXTENSIONS = map { $_ => 1 } qw(
 );
 
 # Clock difference tolerated between OpenBao and the portal when checking the
-# end of validity of a certificate against the requested TTL.
-use constant SSHCA_BAO_CLOCK_SKEW => 300;
+# end of validity of a certificate against the requested TTL: at most 60s
+# later than requested (less than a 120s hop TTL), up to 300s sooner (a
+# shorter certificate grants less).
+use constant SSHCA_BAO_LATE_SKEW  => 60;
+use constant SSHCA_BAO_EARLY_SKEW => 300;
 
 # Number of key fields following the nonce in a certificate, per key type:
 # the same fields, in the same order, as in the plain public key blob
@@ -1368,6 +1385,17 @@ sub _openBaoConf {
     };
 }
 
+# HELPER: a string as characters. A string flagged as characters, or pure
+# ASCII, is returned as is. Unflagged bytes >= 0x80 are UTF-8 when they decode
+# as such (what some backends store in the session); otherwise they already
+# are Latin-1 characters.
+sub _toChars {
+    my ($s) = @_;
+    return $s if !defined $s or utf8::is_utf8($s) or $s !~ /[\x80-\xff]/;
+    my $chars = eval { Encode::decode( 'UTF-8', "$s", Encode::FB_CROAK ) };
+    return defined $chars ? $chars : $s;
+}
+
 # HELPER: random hexadecimal string of $bytes bytes (key ID nonce).
 sub _nonceHex {
     my ($bytes) = @_;
@@ -1383,14 +1411,23 @@ sub _nonceHex {
 sub _baoRequest {
     my ( $self, $method, $path, $body, $token ) = @_;
     require HTTP::Request;
-    my $req =
-      HTTP::Request->new( $method, $self->baoConf->{url} . "/v1/$path" );
-    $req->header( 'X-Vault-Token' => $token ) if defined $token;
-    if ( defined $body ) {
-        $req->header( 'Content-Type' => 'application/json' );
-        $req->content( to_json($body) );
-    }
-    my $resp = eval { $self->ua->request($req) };
+
+    # Everything in the eval: HTTP::Message croaks on a body that is not
+    # bytes, and a die here would escape through the route handler.
+    my $resp = eval {
+        my $req =
+          HTTP::Request->new( $method, $self->baoConf->{url} . "/v1/$path" );
+        $req->header( 'X-Vault-Token' => $token ) if defined $token;
+        if ( defined $body ) {
+
+            # UTF-8 bytes. to_json() returns characters: a key ID or a
+            # principal with "é" went out as Latin-1 (OpenBao then reads
+            # U+FFFD), and one with "ł" made HTTP::Message die.
+            $req->header( 'Content-Type' => 'application/json' );
+            $req->content( JSON->new->utf8->canonical->encode($body) );
+        }
+        $self->ua->request($req);
+    };
     unless ($resp) {
         require HTTP::Response;
         my $err = $@ || 'no response';
@@ -1591,10 +1628,22 @@ sub _signOpenBao {
         return $invalid;
     }
 
+    # Key ID and principals as character strings: they come from session
+    # attributes, which are decoded strings with some backends and UTF-8
+    # bytes with others. They are sent as UTF-8 (_baoRequest) and the
+    # certificate carries UTF-8 bytes, compared below with their encoding.
+    # Duplicates are dropped: the certificate must then carry each principal
+    # exactly once.
+    $keyId = _toChars($keyId);
+    my ( %seen, @principals );
+    for ( @{ $principals || [] } ) {
+        my $p = _toChars($_);
+        push @principals, $p unless $seen{$p}++;
+    }
+
     # valid_principals is a comma-separated list: a comma inside a principal
     # would make OpenBao certify two. The callers never produce one, refuse
     # rather than trust it.
-    my @principals = @{ $principals || [] };
     if ( !@principals or grep { !length || /[,\x00-\x1f\x7f]/ } @principals ) {
         $self->logger->error(
             'SSH CA: refusing to sign with unusable principals');
@@ -1670,8 +1719,8 @@ sub _signOpenBao {
     # The certificate must be exactly the one requested.
     my ($pinB64) = ( $self->sshPubKey // '' ) =~ /\A\s*\S+\s+(\S+)/;
     my $now      = time;
-    my %want     = map { $_ => 1 } @principals;
-    my %got      = map { $_ => 1 } @{ $cert->{principals} };
+    my @want     = sort map { Encode::encode_utf8($_) } @principals;
+    my @got      = sort @{ $cert->{principals} };
     my $crit     = $cert->{critical_options};
     my @problems;
     push @problems, 'not a user certificate' unless $cert->{cert_type} == 1;
@@ -1680,9 +1729,14 @@ sub _signOpenBao {
     push @problems, 'it is signed by another CA than the pinned one'
       unless defined $pinB64
       and $cert->{signature_key} eq decode_base64($pinB64);
-    push @problems, 'its key ID differs' unless $cert->{key_id} eq $keyId;
+    push @problems, 'its key ID differs'
+      unless $cert->{key_id} eq Encode::encode_utf8($keyId);
+
+    # Same list, element by element: a principal missing, added or repeated
+    # is a difference.
     push @problems, 'its principals differ'
-      unless join( "\0", sort keys %want ) eq join( "\0", sort keys %got );
+      unless @want == @got
+      and !grep { $want[$_] ne $got[$_] } 0 .. $#want;
     my $gotSource = $crit->{'source-address'};
     push @problems, 'its source-address differs'
       unless ( !defined $source && !defined $gotSource )
@@ -1693,8 +1747,12 @@ sub _signOpenBao {
       if grep { $_ ne 'source-address' } keys %$crit;
     push @problems, 'it carries unexpected extensions'
       if grep { !$BAO_ALLOWED_EXTENSIONS{$_} } keys %{ $cert->{extensions} };
+
+    # Tight on the late side (a hop certificate lives 120s), lenient on the
+    # early side: a certificate ending sooner than requested is narrower.
     push @problems, 'its validity does not match the requested TTL'
-      if abs( $cert->{valid_before} - ( $now + $ttl ) ) > SSHCA_BAO_CLOCK_SKEW;
+      if $cert->{valid_before} > $now + $ttl + SSHCA_BAO_LATE_SKEW
+      or $cert->{valid_before} < $now + $ttl - SSHCA_BAO_EARLY_SKEW;
 
     # The serial goes into the records and the KRL. Read it from the
     # certificate (that is what sshd and the KRL see), cross-check it with
@@ -2863,8 +2921,11 @@ sub _storeCertificate {
     my $retention =
       $self->_positiveIntConf( 'sshCaCertHistoryRetention', 30 ) * 86400;
     my $kept = 0;
-    # Ties (several re-signatures in the same second) go to the later
-    # serial: serials grow with time, and may exceed a native integer.
+    # Ties (several re-signatures in the same second) are broken on the
+    # serial, compared as a decimal string (it may exceed a native integer),
+    # so that the order is deterministic. With the local signer serials grow
+    # with time and the later one wins; OpenBao serials are random, so with
+    # `openbao` the tie-break is arbitrary, only stable.
     for my $h (
         sort {
                  ( $b->{superseded_at} || 0 ) <=> ( $a->{superseded_at} || 0 )

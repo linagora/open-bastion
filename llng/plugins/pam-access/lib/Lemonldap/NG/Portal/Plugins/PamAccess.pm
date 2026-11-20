@@ -3537,6 +3537,9 @@ Response:
   "key_id": "bastion=...;user=...;target=..."
 }
 
+(with the ssh-ca signer C<openbao>: C<"serial": "18364758544493064720">, a
+string)
+
 On voucher rejection, returns 403 with a machine-readable reason
 (C<no_voucher_supplied>, C<voucher_expired>, C<voucher_mismatch>); internal
 failures (session backend error, corrupted voucher map) return 500.

@@ -8,8 +8,12 @@
 # random 64-bit serial (-z) and answers like OpenBao:
 #   {"data":{"serial_number":"<hex>","signed_key":"<type> <base64>\n"}}
 #
-# The same file is shipped in ssh-ca/t and pam-access/t: keep both copies
-# identical.
+# Shipped in ssh-ca/t only: the pam-access tests load it from
+# ../../ssh-ca/t (the sibling plugin directory) and skip when it is missing.
+#
+# Any other host can be routed to the mock too (route_host), to check that
+# nothing is sent there (redirect tests): its requests land in
+# $S{foreign}.
 package openbao_lib;
 
 use strict;
@@ -17,6 +21,7 @@ use warnings;
 use JSON       qw(to_json from_json);
 use File::Temp qw(tempdir);
 use Math::BigInt;
+use Encode ();
 
 our $HOST = 'bao.test';
 our $URL  = "http://$HOST";
@@ -26,7 +31,10 @@ our $URL  = "http://$HOST";
 #   lease              : lease_duration announced for the tokens it issues
 #   token_ttl          : how long they are really accepted
 #   tokens             : token => expiry
-#   requests           : [ { method, path, body, token } ]
+#   requests           : [ { method, path, body, raw, token } ]
+#   redirect_login     : URL, answer logins with a 307 there
+#   redirect_sign      : URL, answer signatures with a 307 there
+#   foreign            : requests that reached a route_host() host
 #   signed             : [ { serial (decimal), ... } ] what was really signed
 #   fail_login         : [ code, body ] answered to every login
 #   fail_sign          : [ code, body ] answered to every sign
@@ -112,11 +120,36 @@ sub _json {
     ];
 }
 
+# Route another host to a sink recording what reaches it in $S{foreign}.
+sub route_host {
+    my ($host) = @_;
+    LWP::Protocol::PSGI->register(
+        sub {
+            my $req = Plack::Request->new( $_[0] );
+            push @{ $S{foreign} },
+              {
+                uri   => $req->uri->as_string,
+                token => $req->header('X-Vault-Token'),
+                raw   => $req->content // '',
+              };
+            return _json( 200, { auth => { client_token => 'stolen' } } );
+        },
+        host => $host
+    );
+}
+
+sub _redirect {
+    my ($to) = @_;
+    return [ 307, [ Location => $to ], [''] ];
+}
+
 sub app {
     my ($env) = @_;
     my $req   = Plack::Request->new($env);
-    my $raw   = $req->content            // '';
-    my $body  = eval { from_json($raw) } // $raw;
+    my $raw   = $req->content // '';
+
+    # The body as OpenBao reads it: UTF-8 bytes. Invalid UTF-8 is not JSON.
+    my $body  = eval { JSON::decode_json($raw) } // $raw;
     my $token = $req->header('X-Vault-Token');
     my $path  = $req->path_info;
     push @{ $S{requests} },
@@ -124,11 +157,13 @@ sub app {
         method => $req->method,
         path   => $path,
         body   => $body,
+        raw    => $raw,
         token  => $token,
       };
 
     if ( $req->method eq 'POST' and $path =~ m{\A/v1/auth/([^/]+)/login\z} ) {
-        return _json( @{ $S{fail_login} } ) if $S{fail_login};
+        return _redirect( $S{redirect_login} ) if $S{redirect_login};
+        return _json( @{ $S{fail_login} } )    if $S{fail_login};
         unless ( ref $body eq 'HASH'
             and ( $body->{role_id}   // '' ) eq $S{role_id}
             and ( $body->{secret_id} // '' ) eq $S{secret_id} )
@@ -166,6 +201,7 @@ sub app {
         {
             return _json( 403, { errors => ['permission denied'] } );
         }
+        return _redirect( $S{redirect_sign} )          if $S{redirect_sign};
         return _json( @{ delete $S{fail_sign_once} } ) if $S{fail_sign_once};
         return _json( @{ $S{fail_sign} } )             if $S{fail_sign};
         return sign($body);
@@ -206,13 +242,20 @@ sub sign {
     my $serial = $t->{serial} // Math::BigInt->from_hex( join '',
         map { sprintf '%02x', int rand 256 } 1 .. 8 )->bstr;
 
+    # Decoded JSON strings are characters; ssh-keygen gets their UTF-8 bytes,
+    # as OpenBao (Go strings) writes them into the certificate.
+    my $bytes = sub {
+        my $s = shift;
+        return utf8::is_utf8($s) ? Encode::encode_utf8($s) : $s;
+    };
     my @cmd = (
         'ssh-keygen', '-q',
         '-s',         $ca{ $t->{ca} || 'main' },
-        '-I',         $t->{key_id} // $body->{key_id} // 'token-display-name',
-        '-n',         $t->{principals} // $body->{valid_principals},
-        '-V',         $t->{ttl}        // "+$ttl",
-        '-z',         $serial,
+        '-I',
+        $bytes->( $t->{key_id} // $body->{key_id} // 'token-display-name' ),
+        '-n', $bytes->( $t->{principals} // $body->{valid_principals} ),
+        '-V', $t->{ttl} // "+$ttl",
+        '-z', $serial,
     );
     my $source =
       exists $t->{source} ? $t->{source}

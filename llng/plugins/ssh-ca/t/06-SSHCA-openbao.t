@@ -6,6 +6,7 @@ use JSON;
 use File::Temp qw(tempdir);
 use IO::Socket::INET;
 use MIME::Base64 qw(decode_base64);
+use Encode       ();
 
 BEGIN {
     require 't/test-lib.pm';
@@ -230,6 +231,124 @@ is_deeply(
     ['POST /v1/ssh/sign/llng-portal'],
     '  -> no new login, the token is reused'
 );
+
+# ============================================================================
+# Non-ASCII key ID and principals: sent as UTF-8, compared as UTF-8
+# ============================================================================
+{
+    # "José" (é is in the Latin-1 range) and "Michał" (ł is above U+00FF),
+    # as character strings, which is what most backends put in the session.
+    #
+    # whatToTrace (the key ID's user) is only set to the non-ASCII attribute
+    # for José: LLNG core itself (getPSessionID's md5_hex) dies on a
+    # whatToTrace above U+00FF, before and independently of this plugin.
+    # Michał's key ID goes through _signSshKey directly below.
+    my $conf = $portal->p->conf;
+    local $conf->{sshCaPrincipalSources} = '$cn';
+    my $i = 0;
+    for my $name ( "Jos\x{e9}", "Micha\x{142}" ) {
+        local $conf->{whatToTrace} = $name =~ /[^\x00-\xff]/ ? 'uid' : 'cn';
+        my $user = $conf->{whatToTrace} eq 'cn' ? $name : 'dwho';
+        $portal->p->getApacheSession( $id, kind => 'SSO' )
+          ->update( { cn => $name } );
+        openbao_lib::clear_requests();
+        my $label = 'utf8-' . $i++;
+        $res = eval { sign( $pub{ed3}, $label ) };
+        is( $res && $res->[0], 200, "user $label (non-ASCII) signed -> 200" )
+          or diag $@;
+        my ($req) = grep { $_->{path} =~ m{/sign/} } openbao_lib::requests();
+        my $sent =
+          eval { Encode::decode( 'UTF-8', $req->{raw}, Encode::FB_CROAK ) };
+        ok( defined $sent, '  -> the body sent is valid UTF-8' );
+        my $json = defined $sent ? from_json($sent) : {};
+        is( $json->{valid_principals}, $name, '  -> with the principal' );
+        like(
+            $json->{key_id} // '',
+            qr/\A\Q$user\E\@llng-\d+-[0-9a-f]{16}\z/,
+            '  -> and the key ID'
+        );
+
+        # The PSGI body is UTF-8 bytes.
+        my $c =
+          $res && $res->[0] == 200
+          ? JSON::decode_json( $res->[2]->[0] )
+          : {};
+        my $p =
+          $c->{certificate}
+          ? $sshca->_parseSshCert(
+            decode_base64( ( split / /, $c->{certificate} )[1] ) )
+          : {};
+        is_deeply(
+            $p->{principals},
+            [ Encode::encode_utf8($name) ],
+            '  -> the certificate carries the UTF-8 principal'
+        );
+        is(
+            $p->{key_id},
+            Encode::encode_utf8( $c->{key_id} // '' ),
+            '  -> and the UTF-8 key ID'
+        );
+    }
+    $portal->p->getApacheSession( $id, kind => 'SSO' )
+      ->update( { cn => 'Doctor who' } );
+}
+
+# _toChars: characters and ASCII unchanged, UTF-8 bytes decoded, other
+# bytes read as Latin-1.
+{
+    my $t = \&Lemonldap::NG::Portal::Plugins::SSHCA::_toChars;
+    is( $t->('dwho'),          'dwho',         '_toChars: ASCII' );
+    is( $t->("Micha\x{142}"),  "Micha\x{142}", '_toChars: characters' );
+    is( $t->("Jos\xc3\xa9"),   "Jos\x{e9}",    '_toChars: UTF-8 bytes' );
+    is( $t->("Jos\xe9"),       "Jos\x{e9}",    '_toChars: Latin-1 bytes' );
+    is( $t->("Micha\xc5\x82"), "Micha\x{142}", '_toChars: UTF-8 bytes > FF' );
+}
+
+# Key ID above U+00FF, and a session holding UTF-8 bytes rather than
+# characters: the same certificate.
+for my $v ( "Micha\x{142}", "Micha\xc5\x82" ) {
+    my $kind = utf8::is_utf8($v) ? 'characters' : 'UTF-8 bytes';
+    my $r =
+      eval { $sshca->_signSshKey( $pub{ed3}, [$v], 5, undef, "$v\@llng-1-00" ) };
+    ok( $r && $r->{certificate}, "$kind principal and key ID signed" )
+      or diag $@;
+    my $body = ( openbao_lib::requests() )[-1]{body};
+    is( $body->{valid_principals}, "Micha\x{142}",  '  -> sent decoded once' );
+    is( $body->{key_id}, "Micha\x{142}\@llng-1-00", '  -> key ID too' );
+    my $p = $r
+      && $sshca->_parseSshCert(
+        decode_base64( ( split / /, $r->{certificate} )[1] ) );
+    is( $p && $p->{key_id},
+        "Micha\xc5\x82\@llng-1-00",
+        '  -> the certificate carries it in UTF-8' );
+}
+
+# ============================================================================
+# Redirects are not followed: the token and the secret_id stay home
+# ============================================================================
+openbao_lib::route_host('evil.test');
+{
+    local $openbao_lib::S{redirect_login} =
+      'http://evil.test/v1/auth/approle/login';
+    local $openbao_lib::S{foreign} = [];
+    $sshca->_baoToken(undef);
+    is( sign( $pub{ed3}, 'redir' )->[0], 503, 'login redirected -> 503' );
+    is_deeply( $openbao_lib::S{foreign},
+        [], '  -> nothing reached the other host' );
+}
+{
+    local $openbao_lib::S{redirect_sign} =
+      'http://evil.test/v1/ssh/sign/llng-portal';
+    local $openbao_lib::S{foreign} = [];
+    $sshca->_baoToken(undef);
+    openbao_lib::clear_requests();
+    is( sign( $pub{ed3}, 'redir' )->[0], 503, 'sign redirected -> 503' );
+    is( scalar( grep { /login/ } openbao_lib::paths() ),
+        1, '  -> after a real login' );
+    is_deeply( $openbao_lib::S{foreign},
+        [], '  -> nothing reached the other host' );
+}
+is( $sshca->ua->max_size, 1024 * 1024, 'OpenBao answers capped to 1 MiB' );
 
 # ============================================================================
 # Revocation through the KRL with an OpenBao serial, above 2^63
@@ -471,6 +590,8 @@ my %tampers = (
       [ { principals => 'dwho,root' }, qr/principals differ/ ],
     'principal missing' =>
       [ { principals => 'nobody' }, qr/principals differ/ ],
+    'principal repeated' =>
+      [ { principals => 'dwho,dwho' }, qr/principals differ/ ],
     'key id differs' => [ { key_id => 'something-else' }, qr/key ID differs/ ],
     'source-address not requested' =>
       [ { source => '10.0.0.1' }, qr/source-address differs/ ],
@@ -544,6 +665,24 @@ is( scalar @{ mycerts() }, $nbCerts + 1, 'none of them was recorded' );
         ok( !( $r && $r->{certificate} ),
             "  -> refused when OpenBao sets source-address '$t->{source}'" );
         is( $r && $r->{error}, 'invalid', '  -> as invalid, not unavailable' );
+    }
+
+    # The end of validity: at most 60s late (a hop lives 120s), up to 300s
+    # early (a shorter certificate grants less).
+    for my $case ( [ '+190s', 0 ], [ '+300s', 0 ], [ '+60s', 1 ] ) {
+        my ( $ttl, $ok ) = @$case;
+        local $openbao_lib::S{tamper} = { ttl => $ttl };
+        my $r = $sshca->_signSshKey(
+            $pub{ed3}, ['french'], 2, 42,
+            'bastion=b;user=french;target=t',
+            { validity => '+120s', source_address => '192.0.2.7' }
+        );
+        is(
+            !!( $r && $r->{certificate} ),
+            !!$ok,
+            "  -> 120s requested, $ttl signed: "
+              . ( $ok ? 'accepted' : 'refused' )
+        );
     }
 
     my $bad = $sshca->_signSshKey( $pub{ed3}, ['french'], 2, 42, 'k',
