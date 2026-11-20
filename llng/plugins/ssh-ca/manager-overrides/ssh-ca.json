@@ -14,6 +14,64 @@
       "type": "text",
       "documentation": "SSH CA key reference (key ID from LLNG keys)"
     },
+    "sshCaSigner": {
+      "type": "select",
+      "select": [
+        {
+          "k": "local",
+          "v": "Local (CA private key in the LLNG configuration)"
+        },
+        {
+          "k": "openbao",
+          "v": "OpenBao SSH secrets engine"
+        }
+      ],
+      "default": "local",
+      "documentation": "Who signs the certificates. 'local' runs ssh-keygen with the private key of sshCaKeyRef. 'openbao' sends every signature to OpenBao's SSH secrets engine, which holds the private key: only keyPublic is then needed in sshCaKeyRef, the plugin refuses to load if the OpenBao parameters are incomplete, and it never falls back to a local key."
+    },
+    "sshCaOpenBaoUrl": {
+      "type": "text",
+      "documentation": "OpenBao base URL, e.g. https://bao.example.com:8200 (sshCaSigner = openbao)"
+    },
+    "sshCaOpenBaoMount": {
+      "type": "text",
+      "default": "ssh",
+      "documentation": "Mount path of OpenBao's SSH secrets engine"
+    },
+    "sshCaOpenBaoRole": {
+      "type": "text",
+      "documentation": "OpenBao SSH role used to sign user certificates"
+    },
+    "sshCaOpenBaoAppRoleMount": {
+      "type": "text",
+      "default": "approle",
+      "documentation": "Mount path of OpenBao's AppRole auth method"
+    },
+    "sshCaOpenBaoRoleId": {
+      "type": "text",
+      "documentation": "AppRole role_id of the portal"
+    },
+    "sshCaOpenBaoSecretId": {
+      "type": "password",
+      "documentation": "AppRole secret_id. Prefer sshCaOpenBaoSecretIdFile or sshCaOpenBaoSecretIdEnv, which keep it out of the LLNG configuration. Exactly one of the three must be set."
+    },
+    "sshCaOpenBaoSecretIdFile": {
+      "type": "text",
+      "documentation": "File holding the AppRole secret_id, read at each login, so a rotated secret is picked up without a reload"
+    },
+    "sshCaOpenBaoSecretIdEnv": {
+      "type": "text",
+      "documentation": "Name of the environment variable holding the AppRole secret_id"
+    },
+    "sshCaOpenBaoCaFile": {
+      "type": "text",
+      "documentation": "CA bundle used to check OpenBao's TLS certificate (default: system store)"
+    },
+    "sshCaOpenBaoTimeout": {
+      "type": "int",
+      "default": 5,
+      "documentation": "Timeout of each OpenBao request (seconds). Portal workers block on it: keep it short."
+    },
     "sshCaCertMaxValidity": {
       "type": "int",
       "default": 365,
@@ -73,6 +131,23 @@
             "sshCaActivation",
             "sshCaAdminRule",
             "sshCaKeyRef",
+            "sshCaSigner",
+            {
+              "title": "sshCaOpenBao",
+              "form": "simpleInputContainer",
+              "nodes": [
+                "sshCaOpenBaoUrl",
+                "sshCaOpenBaoMount",
+                "sshCaOpenBaoRole",
+                "sshCaOpenBaoAppRoleMount",
+                "sshCaOpenBaoRoleId",
+                "sshCaOpenBaoSecretId",
+                "sshCaOpenBaoSecretIdFile",
+                "sshCaOpenBaoSecretIdEnv",
+                "sshCaOpenBaoCaFile",
+                "sshCaOpenBaoTimeout"
+              ]
+            },
             "sshCaCertMaxValidity",
             "sshCaAllowedKeyTypes",
             "sshCaMinKeyBits",
@@ -111,6 +186,78 @@
       "fr": "Référence de la clé CA",
       "es": "Referencia de la clave de la CA",
       "it": "Riferimento della chiave della CA"
+    },
+    "sshCaSigner": {
+      "en": "Signer",
+      "fr": "Signataire",
+      "es": "Firmante",
+      "it": "Firmatario"
+    },
+    "sshCaOpenBao": {
+      "en": "OpenBao",
+      "fr": "OpenBao",
+      "es": "OpenBao",
+      "it": "OpenBao"
+    },
+    "sshCaOpenBaoUrl": {
+      "en": "OpenBao URL",
+      "fr": "URL d'OpenBao",
+      "es": "URL de OpenBao",
+      "it": "URL di OpenBao"
+    },
+    "sshCaOpenBaoMount": {
+      "en": "SSH engine mount",
+      "fr": "Point de montage du moteur SSH",
+      "es": "Punto de montaje del motor SSH",
+      "it": "Punto di montaggio del motore SSH"
+    },
+    "sshCaOpenBaoRole": {
+      "en": "SSH role",
+      "fr": "Rôle SSH",
+      "es": "Rol SSH",
+      "it": "Ruolo SSH"
+    },
+    "sshCaOpenBaoAppRoleMount": {
+      "en": "AppRole mount",
+      "fr": "Point de montage AppRole",
+      "es": "Punto de montaje AppRole",
+      "it": "Punto di montaggio AppRole"
+    },
+    "sshCaOpenBaoRoleId": {
+      "en": "AppRole role_id",
+      "fr": "role_id AppRole",
+      "es": "role_id de AppRole",
+      "it": "role_id AppRole"
+    },
+    "sshCaOpenBaoSecretId": {
+      "en": "AppRole secret_id",
+      "fr": "secret_id AppRole",
+      "es": "secret_id de AppRole",
+      "it": "secret_id AppRole"
+    },
+    "sshCaOpenBaoSecretIdFile": {
+      "en": "AppRole secret_id file",
+      "fr": "Fichier du secret_id AppRole",
+      "es": "Archivo del secret_id de AppRole",
+      "it": "File del secret_id AppRole"
+    },
+    "sshCaOpenBaoSecretIdEnv": {
+      "en": "AppRole secret_id environment variable",
+      "fr": "Variable d'environnement du secret_id AppRole",
+      "es": "Variable de entorno del secret_id de AppRole",
+      "it": "Variabile d'ambiente del secret_id AppRole"
+    },
+    "sshCaOpenBaoCaFile": {
+      "en": "TLS CA file",
+      "fr": "Fichier de l'AC TLS",
+      "es": "Archivo de la CA TLS",
+      "it": "File della CA TLS"
+    },
+    "sshCaOpenBaoTimeout": {
+      "en": "Timeout (seconds)",
+      "fr": "Délai d'attente (secondes)",
+      "es": "Tiempo de espera (segundos)",
+      "it": "Timeout (secondi)"
     },
     "sshCaCertMaxValidity": {
       "en": "Maximum validity (days)",

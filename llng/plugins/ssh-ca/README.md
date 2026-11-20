@@ -29,6 +29,9 @@ passwordless authentication on servers that trust the CA.
 - LemonLDAP::NG >= 2.23.2
 - `ssh-keygen` available on the system
 - `Crypt::PK::Ed25519` (for Ed25519 CA keys) or `Crypt::PK::RSA` (for RSA CA keys)
+- With `sshCaSigner = openbao`: an [OpenBao](https://openbao.org/) server with
+  the SSH secrets engine, and `LWP::UserAgent` (already required by
+  LemonLDAP::NG)
 
 ## Installation
 
@@ -47,15 +50,16 @@ into `/etc/lemonldap-ng/manager-overrides.d/`, add `::Plugins::SSHCA` to
 
 In the Manager under **General Parameters** > **Plugins** > **SSH CA**:
 
-| Parameter               | Description                                                               | Default                                  |
-| ----------------------- | ------------------------------------------------------------------------- | ---------------------------------------- |
-| `sshCaKeyRef`           | Reference to the SSH CA key in LLNG keys store                            | _(required)_                             |
-| `sshCaAdminRule`        | Rule granting access to the admin endpoints (boolOrExpr)                  | _(empty — denies everyone)_              |
-| `sshCaKrlPath`          | Path to the KRL file on disk                                              | `/var/lib/lemonldap-ng/ssh/revoked_keys` |
-| `sshCaCertMaxValidity`  | Maximum certificate validity in days                                      | `365`                                    |
-| `sshCaAllowedKeyTypes`  | Key families accepted for signing (comma/space separated)                 | `ed25519,ecdsa,sk-ed25519,sk-ecdsa,rsa`  |
-| `sshCaMinKeyBits`       | Minimum key size in bits, RSA/DSA only                                    | `2048`                                   |
-| `sshCaPrincipalSources` | Session attributes to use as principals (space-separated `$var` template) | `$uid`                                   |
+| Parameter               | Description                                                                         | Default                                  |
+| ----------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------- |
+| `sshCaKeyRef`           | Reference to the SSH CA key in LLNG keys store                                      | _(required)_                             |
+| `sshCaSigner`           | `local` or `openbao`, see [Signing with OpenBao](#signing-with-openbao-sshcasigner) | `local`                                  |
+| `sshCaAdminRule`        | Rule granting access to the admin endpoints (boolOrExpr)                            | _(empty — denies everyone)_              |
+| `sshCaKrlPath`          | Path to the KRL file on disk                                                        | `/var/lib/lemonldap-ng/ssh/revoked_keys` |
+| `sshCaCertMaxValidity`  | Maximum certificate validity in days                                                | `365`                                    |
+| `sshCaAllowedKeyTypes`  | Key families accepted for signing (comma/space separated)                           | `ed25519,ecdsa,sk-ed25519,sk-ecdsa,rsa`  |
+| `sshCaMinKeyBits`       | Minimum key size in bits, RSA/DSA only                                              | `2048`                                   |
+| `sshCaPrincipalSources` | Session attributes to use as principals (space-separated `$var` template)           | `$uid`                                   |
 
 ### Administration rule (`sshCaAdminRule`)
 
@@ -79,6 +83,7 @@ certificate estate. The per-user endpoints (`/ssh/sign`, `/ssh/mycerts`,
 
 Denials are logged (`userLogger->warn`) and audited under the
 `SSH_CA_ADMIN_DENIED` code.
+
 ### Key policy
 
 Before anything is signed, the submitted public key is checked against
@@ -108,7 +113,6 @@ families are governed by the allowlist alone.
 Rejected keys get HTTP 400 with the reason (`SSH key type '<type>' is not
 allowed`, `SSH key is too small (<n> bits, minimum <m>)`).
 
-
 ### Limits (`sshCaSignMaxPerHour`, `sshCaMaxCertsPerUser`)
 
 Every `/ssh/sign` forks `ssh-keygen` twice and rewrites the **whole** KRL, and
@@ -117,10 +121,10 @@ allowed on purpose, so nothing stopped a shell loop from growing the KRL
 without bound. The cost per call grows with the KRL, and every appended serial
 is then loaded by every `sshd` on every backend (issue #63).
 
-| Setting                | Default | Effect                                                            |
-| ---------------------- | ------- | ----------------------------------------------------------------- |
-| `sshCaSignMaxPerHour`  | `20`    | `/ssh/sign` calls per user per hour. `0` disables the limit.       |
-| `sshCaMaxCertsPerUser` | `20`    | Active (non-revoked, non-expired) certificates. `0` disables it.   |
+| Setting                | Default | Effect                                                           |
+| ---------------------- | ------- | ---------------------------------------------------------------- |
+| `sshCaSignMaxPerHour`  | `20`    | `/ssh/sign` calls per user per hour. `0` disables the limit.     |
+| `sshCaMaxCertsPerUser` | `20`    | Active (non-revoked, non-expired) certificates. `0` disables it. |
 
 Over the rate limit, `/ssh/sign` answers **429** with a `Retry-After` header
 and `retry_after` in the body, audited as `SSH_CA_SIGN_RATE_LIMITED`. The
@@ -131,7 +135,7 @@ under-count by one, which does not matter for bounding a loop.
 Over the certificate quota, `/ssh/sign` answers **409**, audited as
 `SSH_CA_CERT_QUOTA_EXCEEDED`. A **re-signature of a key you already hold
 replaces its record and is never counted**, so a user sitting at the quota can
-still rotate; a new key needs a `/ssh/myrevoke` first. Only *active* records
+still rotate; a new key needs a `/ssh/myrevoke` first. Only _active_ records
 grant that exemption: at the quota, re-signing a key whose certificate has
 already expired is refused like a new one, even though it would replace the
 expired record rather than grow the set. Revoke or wait for the counter to
@@ -141,8 +145,8 @@ Together these bound KRL growth. The KRL itself is never capped: refusing to
 record a revocation would be a silent fail-open.
 
 > **`disablePersistentStorage`.** Both limits live in the user's session, so
-> with persistent storage disabled the counter is never written and *neither
-> limit applies*. This matches the rest of the plugin — certificates are not
+> with persistent storage disabled the counter is never written and _neither
+> limit applies_. This matches the rest of the plugin — certificates are not
 > persisted either, so `/ssh/mycerts` is empty and the quota has nothing to
 > count — but it means a deployment relying on the rate limit must keep
 > persistent sessions enabled.
@@ -154,10 +158,10 @@ no longer dropped: it is kept with the status `superseded`, so the
 administration page shows what a key was signed with before, and
 `sshca-rebuild-krl` still finds its serial (issue #455).
 
-| Setting                     | Default | Effect                                                                 |
-| --------------------------- | ------- | ---------------------------------------------------------------------- |
+| Setting                     | Default | Effect                                                                    |
+| --------------------------- | ------- | ------------------------------------------------------------------------- |
 | `sshCaCertHistoryMax`       | `50`    | Superseded certificates kept per user, most recent first. `0` keeps none. |
-| `sshCaCertHistoryRetention` | `30`    | Days a superseded certificate is kept after it expires.                |
+| `sshCaCertHistoryRetention` | `30`    | Days a superseded certificate is kept after it expires.                   |
 
 The history is trimmed on each signature. Dropping a superseded certificate
 that has not expired yet does not make it valid again, since its serial
@@ -176,7 +180,148 @@ certificates are not recorded.
 
 The CA key must be configured in the LLNG keys store (Manager > Keys). Both
 Ed25519 and RSA keys are supported. The plugin converts PEM keys to OpenSSH
-format internally.
+format internally. With `sshCaSigner = openbao`, only the public key is
+needed, and it may also be given as an OpenSSH line (`ssh-ed25519 AAAA...`).
+
+### Signing with OpenBao (`sshCaSigner`)
+
+By default (`local`) the plugin signs with `ssh-keygen -s` and the private
+key of `sshCaKeyRef`. That key is then copied to every portal node through
+the LLNG configuration, written unencrypted to a temporary file for each
+signature, and held by every configuration backup.
+
+With `sshCaSigner = openbao`, every signature (`/ssh/sign` and the
+`pam-access` bastion hops) goes to the
+[SSH secrets engine](https://openbao.org/docs/secrets/ssh/signed-ssh-certificates/)
+of OpenBao, which holds the private key. The portal only holds an AppRole
+credential that can do nothing but sign with one role, and OpenBao audits
+each signature. LLNG still decides everything else: principals, validity,
+`source-address`, key ID. The CA **public** key stays pinned in
+`keys/<sshCaKeyRef>/keyPublic`: `/ssh/ca` serves it, and the KRL and
+`sshca-rebuild-krl` are built from it.
+
+| Parameter                  | Description                                      | Default          |
+| -------------------------- | ------------------------------------------------ | ---------------- |
+| `sshCaOpenBaoUrl`          | OpenBao URL, e.g. `https://bao.example.com:8200` | _(required)_     |
+| `sshCaOpenBaoMount`        | Mount path of the SSH secrets engine             | `ssh`            |
+| `sshCaOpenBaoRole`         | SSH role used to sign                            | _(required)_     |
+| `sshCaOpenBaoAppRoleMount` | Mount path of the AppRole auth method            | `approle`        |
+| `sshCaOpenBaoRoleId`       | AppRole `role_id`                                | _(required)_     |
+| `sshCaOpenBaoSecretId`     | AppRole `secret_id`                              | _(one of three)_ |
+| `sshCaOpenBaoSecretIdFile` | File holding the `secret_id`, read at each login | _(one of three)_ |
+| `sshCaOpenBaoSecretIdEnv`  | Environment variable holding the `secret_id`     | _(one of three)_ |
+| `sshCaOpenBaoCaFile`       | CA bundle to check OpenBao's TLS certificate     | system store     |
+| `sshCaOpenBaoTimeout`      | Timeout of each OpenBao request, in seconds      | `5`              |
+
+Exactly one of the three `secret_id` parameters must be set. Prefer the file
+(readable by the portal user only) or the environment variable: they keep the
+secret out of the LLNG configuration. The file is read at each login, so a
+rotated `secret_id` is picked up without a reload. If the OpenBao parameters
+are incomplete, the plugin refuses to load. A `keyPrivate` left in
+`sshCaKeyRef` is ignored, with a warning: remove it.
+
+#### OpenBao side
+
+```sh
+bao secrets enable ssh
+bao write ssh/config/ca generate_signing_key=true key_type=ssh-ed25519
+bao write ssh/roles/llng-portal - <<'JSON'
+{
+  "key_type": "ca",
+  "allow_user_certificates": true,
+  "allowed_users": "*",
+  "allow_user_key_ids": true,
+  "allowed_critical_options": "source-address",
+  "allowed_extensions": "",
+  "default_extensions": {
+    "permit-pty": "", "permit-agent-forwarding": "", "permit-port-forwarding": "",
+    "permit-X11-forwarding": "", "permit-user-rc": ""
+  },
+  "max_ttl": "8760h",
+  "not_before_duration": "30s"
+}
+JSON
+
+# Policy of the portal's AppRole: nothing but signing
+bao policy write llng-portal-ssh - <<'HCL'
+path "ssh/sign/llng-portal" { capabilities = ["create", "update"] }
+HCL
+
+bao auth enable approle
+bao write auth/approle/role/llng-portal token_policies=llng-portal-ssh \
+    token_ttl=20m token_max_ttl=1h \
+    secret_id_bound_cidrs=192.0.2.0/24 token_bound_cidrs=192.0.2.0/24
+bao read -field=role_id auth/approle/role/llng-portal/role-id
+bao write -f -field=secret_id auth/approle/role/llng-portal/secret-id \
+    > /etc/lemonldap-ng/openbao-secret-id  # mode 0600, owned by the portal user
+
+# The public key to pin in keys/<sshCaKeyRef>/keyPublic
+bao read -field=public_key ssh/config/ca
+```
+
+To keep the CA that backends already trust, import its key instead of
+generating one (`bao write ssh/config/ca private_key=@ca.key
+public_key=@ca.pub`), then remove `keyPrivate` from the LLNG configuration.
+A new CA key has to be distributed to every backend (`TrustedUserCAKeys`),
+and certificates signed by the old key can then no longer be revoked: the KRL
+is built against the pinned key.
+
+Pitfalls:
+
+- `allowed_users: "*"` is required, because LLNG computes the principals. An
+  empty value allows **no** user for a CA role.
+- `allowed_critical_options` must be `source-address`. An empty value allows
+  **every** critical option.
+- `default_extensions` is empty by default, and OpenBao then adds no
+  `permit-pty`. The list above is what `ssh-keygen -s` grants by default, i.e.
+  what certificates got so far. `allowed_extensions: ""` prevents the caller
+  from choosing extensions.
+- `allow_user_key_ids: true` is needed, otherwise the key ID becomes the token
+  display name, and the plugin refuses the certificate.
+- `max_ttl` must be at least `sshCaCertMaxValidity` days: OpenBao refuses a
+  longer `ttl` instead of shortening it. Above 768h, the maximum lease TTL of
+  the mount may need raising too (`bao secrets tune -max-lease-ttl=8760h ssh`).
+- With an RSA CA key, make sure the role signs with `rsa-sha2-256` or
+  `rsa-sha2-512` (`algorithm_signer`): OpenSSH refuses `ssh-rsa` (SHA-1)
+  signatures.
+- Leave `token_num_uses` at 0: a token limited in uses makes the plugin log in
+  again for nearly every signature.
+- Bind the AppRole to the portal nodes (`secret_id_bound_cidrs`,
+  `token_bound_cidrs`), keep token TTLs short, and enable an OpenBao audit
+  device.
+
+#### What the plugin checks
+
+Each certificate OpenBao returns is parsed and compared with the request
+before it is handed out. It must be a user certificate that certifies the
+submitted key, and it must be signed by the pinned CA key. Its principals and
+key ID must be exactly the requested ones, and it must carry `source-address`
+if and only if it was requested. It may carry no other critical option and
+no extension beyond the five above. Its validity must match the requested TTL,
+within 5 minutes of clock skew. The serial is read from the certificate. It
+must equal OpenBao's `serial_number` and must not be 0, which could not be
+revoked. If any check fails, the answer is **500** and the failure is logged:
+a misconfigured role never silently produces a broader certificate. At
+startup, the plugin also compares OpenBao's CA key (`GET
+/v1/<mount>/public_key`) with the pinned one and logs an error if they differ.
+
+#### Serials and key IDs
+
+OpenBao chooses the serial, a random 64-bit number that cannot be imposed. It
+is stored in decimal, like local serials, and returned as a string in the
+`serial` field of the responses. The key ID of `/ssh/sign` certificates is
+`<user>@llng-<timestamp>-<random nonce>`. It cannot end with the serial, which
+is unknown before signing. The KRL is unchanged: random serials simply no
+longer form ranges in it.
+
+#### When OpenBao is unavailable
+
+If OpenBao cannot be reached, is sealed, or refuses to sign, `/ssh/sign`
+answers **503** and `/pam/bastion-cert` answers **500**. The plugin **never
+falls back to a local key**. A token refused with 403 triggers one new login
+and one retry. Since every bastion hop needs a signature, OpenBao becomes a
+critical dependency: deploy it in HA, and keep `sshCaOpenBaoTimeout` short,
+as portal workers wait for it.
 
 ### Principal sources
 
@@ -195,9 +340,9 @@ Examples:
 
 ### Public endpoints (no authentication)
 
-| Method | Path           | Description                                                                                                        |
-| ------ | -------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/ssh/ca`      | Returns the CA public key in SSH format. Servers use this to configure `TrustedUserCAKeys`.                        |
+| Method | Path           | Description                                                                                                                                                                                  |
+| ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/ssh/ca`      | Returns the CA public key in SSH format. Servers use this to configure `TrustedUserCAKeys`.                                                                                                  |
 | GET    | `/ssh/revoked` | Returns the binary KRL file. Servers use this to configure `RevokedKeys`. Always a valid KRL — an empty one when nothing is revoked yet; HTTP 500 rather than a KRL the portal cannot parse. |
 
 ### User endpoints (authentication required)
@@ -279,6 +424,9 @@ Response (JSON):
   request is ignored (and logged as a warning).
 - `fingerprint` is the SHA256 of the signed key, stored with the cert and
   used by the `pam-access` plugin to bind PAM tokens to a specific key.
+- With `sshCaSigner = openbao`, `serial` is a decimal string chosen by
+  OpenBao, `key_id` ends with a random nonce, and an unavailable OpenBao
+  answers 503 (see [When OpenBao is unavailable](#when-openbao-is-unavailable)).
 
 **Re-signing the same SSH public key** (same fingerprint) replaces the
 previous record in the user's persistent session and revokes the
@@ -335,11 +483,11 @@ integers; anything else falls back to the defaults (100 and 0).
 
 `activity` filters on the last recorded use:
 
-| Value              | Matches                                                                 |
-| ------------------ | ----------------------------------------------------------------------- |
-| `never`            | never used                                                              |
-| `within:<seconds>` | used in the last `<seconds>`                                            |
-| `idle:<seconds>`   | neither used nor issued in the last `<seconds>`, never used included   |
+| Value              | Matches                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `never`            | never used                                                           |
+| `within:<seconds>` | used in the last `<seconds>`                                         |
+| `idle:<seconds>`   | neither used nor issued in the last `<seconds>`, never used included |
 
 `idle` counts the issue date as activity, so a certificate signed a minute ago
 is not idle yet. `sort` is `issued` (newest first, the default) or
@@ -431,7 +579,8 @@ migrated by hand.
 
 Serial numbers are stateless: they are derived from the current
 microsecond-precision wall clock plus a small random tail, so two portals
-can issue in parallel without coordination and without collisions.
+can issue in parallel without coordination and without collisions. With
+`sshCaSigner = openbao`, OpenBao chooses them (random 64-bit).
 
 ## Multi-portal deployments (issue #9)
 

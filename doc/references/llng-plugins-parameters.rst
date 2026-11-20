@@ -94,6 +94,9 @@ SSH CA parameters (optional)
 +---------------------------+--------------+-------------------------------------------+
 | ``sshCaCertMaxValidity``  | ``365`` (1y) | Maximum certificate validity              |
 +---------------------------+--------------+-------------------------------------------+
+| ``sshCaSigner``           | ``local``    | ``local`` or ``openbao`` (OpenBao signs,  |
+|                           |              | ``sshCaOpenBao*`` parameters)             |
++---------------------------+--------------+-------------------------------------------+
 | ``sshCaSerialPath``       | ``""``       | Path for certificate serial storage       |
 +---------------------------+--------------+-------------------------------------------+
 | ``sshCaPrincipalSources`` | ``$uid``     | Principal sources                         |

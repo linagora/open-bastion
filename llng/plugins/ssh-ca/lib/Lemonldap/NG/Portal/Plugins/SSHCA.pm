@@ -36,6 +36,19 @@ use Lemonldap::NG::Portal::Main::Constants qw(
 
 our $VERSION = '2.23.0';
 
+# Who signs the certificates (sshCaSigner):
+#   local   : ssh-keygen -s with the CA private key held in the LLNG
+#             configuration (keys/<sshCaKeyRef>/keyPrivate). The historical
+#             mode, and the default.
+#   openbao : POST <url>/v1/<mount>/sign/<role> on OpenBao's SSH secrets
+#             engine, which holds the CA private key (issue #476). LLNG still
+#             decides the principals, the validity and the source-address;
+#             OpenBao only signs, and the answer is checked against the
+#             request before it is handed out.
+# The CA public key stays pinned in keys/<sshCaKeyRef>/keyPublic in both
+# modes: /ssh/ca, the KRL and sshca-rebuild-krl are built from it.
+our %SIGNERS = map { $_ => 1 } qw(local openbao);
+
 # Persistent-session key prefix for issued certificate records, one key per
 # certificate ($CERT_PREFIX.<fingerprint>).
 #
@@ -119,6 +132,43 @@ has key => (
 has sshPubKey  => ( is => 'rw' );
 has sshPrivKey => ( is => 'rw' );
 
+# `local` or `openbao`, set by init(). Anything that runs before init (or
+# without it) signs locally, as the plugin always did.
+has signer => ( is => 'rw', default => 'local' );
+
+# Validated OpenBao settings (openbao mode only), see _openBaoConf. Undefined
+# when the signer is `local`, or when the OpenBao configuration is incomplete,
+# in which case init() refuses to load the plugin anyway.
+has baoConf => ( is => 'rw' );
+
+# AppRole token, cached per worker with its expiry (epoch). Never logged.
+has _baoToken    => ( is => 'rw' );
+has _baoTokenExp => ( is => 'rw', default => 0 );
+
+# HTTP client for OpenBao. Built on first use so that the `local` signer
+# never loads LWP.
+has ua => (
+    is      => 'rw',
+    lazy    => 1,
+    builder => sub {
+        my ($self) = @_;
+        require Lemonldap::NG::Common::UserAgent;
+        my $bao = $self->baoConf || {};
+
+        # Copies: Common::UserAgent writes its defaults into the lwpOpts hash
+        # it is given, which must not leak into the shared configuration.
+        my %lwp = %{ $self->conf->{lwpOpts} || {} };
+        $lwp{timeout} = $bao->{timeout} || 5;
+        my %ssl = %{ $self->conf->{lwpSslOpts} || {} };
+        $ssl{SSL_ca_file} = $bao->{caFile} if $bao->{caFile};
+        return Lemonldap::NG::Common::UserAgent->new( {
+                lwpOpts => \%lwp,
+                ( %ssl ? ( lwpSslOpts => \%ssl ) : () ),
+            }
+        );
+    },
+);
+
 # Compiled `sshCaAdminRule`. Always a code ref after init(): when the
 # parameter is unset or does not compile, it is the constant-false sub, so
 # every code path that consults it fails closed.
@@ -129,11 +179,25 @@ has adminRule => ( is => 'rw' );
 sub init {
     my ($self) = @_;
 
-    # Check parameters
+    # Select the signer (issue #476)
+    my $signer = $self->conf->{sshCaSigner};
+    $signer = '' unless defined $signer && !ref $signer;
+    $signer =~ s/^\s+|\s+$//g;
+    $signer = lc( $signer || 'local' );
+    unless ( $SIGNERS{$signer} ) {
+        $self->logger->error(
+            "SSH CA: unknown sshCaSigner '$signer' (expected local or openbao)"
+        );
+        return 0;
+    }
+    $self->signer($signer);
+
+    # Check parameters. OpenBao holds the private key in `openbao` mode, so
+    # only the public half is needed there.
     unless ( $self->key
         and ref $self->key
         and $self->key->{keyPublic}
-        and $self->key->{keyPrivate} )
+        and ( $signer eq 'openbao' or $self->key->{keyPrivate} ) )
     {
         $self->logger->error('SSH CA Key not configured');
         return 0;
@@ -152,18 +216,43 @@ sub init {
             'SSH CA: Failed to convert public key to SSH format');
         return 0;
     }
-    unless (
-        $self->sshPrivKey(
-            $self->_pemToOpenSSHPrivateKey( $self->key->{keyPrivate} )
-        )
-      )
-    {
-        $self->logger->error(
-            'SSH CA: Failed to convert private key to SSH format');
-        return 0;
+
+    if ( $signer eq 'openbao' ) {
+
+        # Fail closed: an incomplete OpenBao configuration must not leave a
+        # plugin that answers every signature with an error, and must never
+        # fall back to a local key.
+        my $bao = $self->_openBaoConf or return 0;
+        $self->baoConf($bao);
+
+        # The point of this mode is that the private key leaves the LLNG
+        # configuration: say so if it is still there. It is never used.
+        $self->logger->warn( 'SSH CA: sshCaSigner is openbao, the private key '
+              . 'of keys/'
+              . $self->conf->{sshCaKeyRef}
+              . ' is ignored and should be removed from the configuration' )
+          if $self->key->{keyPrivate};
+
+        # A role pointing at the wrong issuer would only show at the first
+        # signature (every certificate refused). Ask OpenBao for its CA key
+        # now; a network failure is not fatal, OpenBao may simply be down
+        # while the portal starts.
+        $self->_checkOpenBaoPublicKey;
     }
-    $self->sshPrivKey( $self->sshPrivKey . "\n" )
-      unless $self->sshPrivKey =~ /\n$/s;
+    else {
+        unless (
+            $self->sshPrivKey(
+                $self->_pemToOpenSSHPrivateKey( $self->key->{keyPrivate} )
+            )
+          )
+        {
+            $self->logger->error(
+                'SSH CA: Failed to convert private key to SSH format');
+            return 0;
+        }
+        $self->sshPrivKey( $self->sshPrivKey . "\n" )
+          unless $self->sshPrivKey =~ /\n$/s;
+    }
 
     # Build the administration rule (issue #58).
     #
@@ -828,12 +917,18 @@ sub sshCaSign {
             $req, 'Invalid user for SSH certificate', 400 );
     }
 
-    # Generate serial number
-    my $serial = $self->_getNextSerial();
-
-    # Generate key_id
+    # Generate serial number and key_id. OpenBao chooses the serial itself
+    # (random 64-bit, it cannot be imposed), so it is only known once the
+    # certificate is back: the key_id carries a random nonce instead.
     my $timestamp = time();
-    my $keyId     = sprintf( "%s\@llng-%d-%06d", $user, $timestamp, $serial );
+    my ( $serial, $keyId );
+    if ( $self->signer eq 'openbao' ) {
+        $keyId = sprintf( "%s\@llng-%d-%s", $user, $timestamp, _nonceHex(8) );
+    }
+    else {
+        $serial = $self->_getNextSerial();
+        $keyId  = sprintf( "%s\@llng-%d-%06d", $user, $timestamp, $serial );
+    }
 
     # Sign the certificate
     my $result =
@@ -842,6 +937,24 @@ sub sshCaSign {
 
     unless ( $result && $result->{certificate} ) {
         $self->logger->error('SSH CA sign: Failed to sign key');
+
+        # OpenBao unreachable, sealed or refusing: a dependency is down, not
+        # a bug of this portal (issue #476).
+        my $unavailable =
+          $result && ( $result->{error} || '' ) eq 'unavailable';
+        return $self->p->sendJSONresponse(
+            $req,
+            { error => 'Failed to sign SSH key' },
+            code => $unavailable ? 503 : 500
+        );
+    }
+
+    # The serial the certificate really carries: the one generated above in
+    # local mode, the one OpenBao chose otherwise. It is recorded and goes
+    # into the KRL, so never record anything else.
+    $serial = $result->{serial};
+    unless ( $self->_validSerial($serial) ) {
+        $self->logger->error('SSH CA sign: signer returned no usable serial');
         return $self->p->sendJSONresponse(
             $req,
             { error => 'Failed to sign SSH key' },
@@ -943,17 +1056,45 @@ sub sshCaSign {
     }
 }
 
-# HELPER: Sign SSH key using ssh-keygen
+# Is the configured signer usable? pam-access asks before minting a bastion
+# hop certificate. `local` needs the converted CA private key, `openbao` a
+# complete OpenBao configuration (whether OpenBao answers is only known when
+# signing).
+sub canSign {
+    my ($self) = @_;
+    if ( $self->signer eq 'openbao' ) {
+        return $self->baoConf ? 1 : 0;
+    }
+    return $self->sshPrivKey ? 1 : 0;
+}
+
+# HELPER: Sign an SSH key with the configured signer.
 #
+# $serial is the serial to impose; OpenBao chooses its own and ignores it.
 # $opts (optional hashref) lets callers other than the interactive /ssh/sign
 # route (e.g. pam-access bastion-cert vouching) tighten the certificate:
 #   - validity       : explicit ssh-keygen -V spec (e.g. "+120s"), overrides
 #                      the $validityMinutes argument. Enables sub-minute TTLs.
+#                      Only `+<n>s` and `+<n>m` are understood by `openbao`.
 #   - source_address : value for the `source-address` critical option. sshd
 #                      itself then refuses the cert unless the connection comes
 #                      from that address/CIDR. MUST be pre-validated by the
 #                      caller (passed verbatim to ssh-keygen -O).
+#
+# Returns { certificate, serial } where `serial` is the serial the certificate
+# carries, in decimal (a string with `openbao`, since it may not fit a native
+# signed integer): callers must record that one, not the one they passed. On failure, undef or a hashref without `certificate`; `error =>
+# 'unavailable'` then means OpenBao could not be reached or refused to sign.
 sub _signSshKey {
+    my $self = shift;
+    return $self->signer eq 'openbao'
+      ? $self->_signOpenBao(@_)
+      : $self->_signLocal(@_);
+}
+
+# HELPER: Sign SSH key using ssh-keygen and the CA private key of the LLNG
+# configuration (sshCaSigner = local).
+sub _signLocal {
     my ( $self, $userPubKey, $principals, $validityMinutes, $serial, $keyId,
         $opts )
       = @_;
@@ -1065,7 +1206,632 @@ sub _signSshKey {
     close $fh;
     chomp $certificate;
 
-    return { certificate => $certificate };
+    return { certificate => $certificate, serial => $serial };
+}
+
+# =============================================================================
+# OPENBAO SIGNER (sshCaSigner = openbao, issue #476)
+# =============================================================================
+#
+# OpenBao's SSH secrets engine holds the CA private key and signs; the portal
+# only holds an AppRole credential limited to one signing role. LLNG keeps
+# every decision (principals, validity, source-address, key ID) and checks
+# that the certificate it gets back is exactly the one it asked for: a role
+# configured too broadly must never silently hand out a broader certificate.
+# There is no fallback to a local key: when OpenBao cannot sign, nothing is
+# signed.
+
+# Characters allowed in the mount and role path segments. They are pasted
+# into the request URL, so anything else (`?`, `#`, `%`, `..`) is refused at
+# init rather than escaped into a path nobody meant.
+my $BAO_SEGMENTS = qr{\A[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\z};
+
+# Extensions `ssh-keygen -s` grants by default, i.e. what a locally signed
+# certificate carries. An OpenBao certificate may carry fewer (the role's
+# default_extensions), never another one: `no-touch-required` would for
+# instance waive the FIDO touch of an sk- key.
+my %BAO_ALLOWED_EXTENSIONS = map { $_ => 1 } qw(
+  permit-X11-forwarding
+  permit-agent-forwarding
+  permit-port-forwarding
+  permit-pty
+  permit-user-rc
+);
+
+# Clock difference tolerated between OpenBao and the portal when checking the
+# end of validity of a certificate against the requested TTL.
+use constant SSHCA_BAO_CLOCK_SKEW => 300;
+
+# Number of key fields following the nonce in a certificate, per key type:
+# the same fields, in the same order, as in the plain public key blob
+# (PROTOCOL.certkeys).
+my %SSHCA_CERT_KEY_FIELDS = (
+    'ssh-ed25519'                        => 1,    # pk
+    'sk-ssh-ed25519@openssh.com'         => 2,    # pk, application
+    'ssh-rsa'                            => 2,    # e, n
+    'ssh-dss'                            => 4,    # p, q, g, y
+    'ecdsa-sha2-nistp256'                => 2,    # curve, Q
+    'ecdsa-sha2-nistp384'                => 2,
+    'ecdsa-sha2-nistp521'                => 2,
+    'sk-ecdsa-sha2-nistp256@openssh.com' => 3,    # curve, Q, application
+);
+
+# HELPER: read and check the OpenBao parameters. Returns the hashref stored in
+# baoConf, or undef (after logging why) when they are incomplete or invalid.
+sub _openBaoConf {
+    my ($self) = @_;
+    my $conf = $self->conf;
+
+    my $str = sub {
+        my $v = $conf->{ $_[0] };
+        return '' unless defined $v && !ref $v;
+        $v =~ s/^\s+|\s+$//g;
+        return $v;
+    };
+    my $fail = sub {
+        $self->logger->error("SSH CA: sshCaSigner is openbao but $_[0]");
+        return undef;
+    };
+
+    # Base URL: scheme and authority, optionally a path prefix (OpenBao
+    # behind a reverse proxy). No credentials, query or fragment: they would
+    # end up in every request line and in the logs.
+    my $url = $str->('sshCaOpenBaoUrl');
+    return $fail->('sshCaOpenBaoUrl is not set') unless length $url;
+    my $uri = URI->new($url);
+    unless ( ( $uri->scheme // '' ) =~ /\Ahttps?\z/
+        and $uri->can('host')
+        and length( $uri->host // '' )
+        and !defined $uri->userinfo
+        and !defined $uri->query
+        and !defined $uri->fragment
+        and $url !~ /[\s\x00-\x1f\x7f]/ )
+    {
+        return $fail->('sshCaOpenBaoUrl is not a valid http(s) URL');
+    }
+    my $path = $uri->path // '';
+    $path =~ s{/+\z}{};
+    $url = $uri->scheme . '://' . $uri->authority . $path;
+    $self->logger->warn( 'SSH CA: sshCaOpenBaoUrl is not https, the OpenBao '
+          . 'token and the AppRole secret travel in clear' )
+      if $uri->scheme eq 'http';
+
+    my $mount = $str->('sshCaOpenBaoMount');
+    $mount = 'ssh' unless length $mount;
+    my $role         = $str->('sshCaOpenBaoRole');
+    my $approleMount = $str->('sshCaOpenBaoAppRoleMount');
+    $approleMount = 'approle' unless length $approleMount;
+    return $fail->('sshCaOpenBaoRole is not set') unless length $role;
+    for (
+        [ sshCaOpenBaoMount        => $mount ],
+        [ sshCaOpenBaoRole         => $role ],
+        [ sshCaOpenBaoAppRoleMount => $approleMount ],
+      )
+    {
+        my ( $name, $v ) = @$_;
+        return $fail->("$name contains characters not allowed in a path")
+          unless $v =~ $BAO_SEGMENTS
+          and !grep { $_ eq '.' || $_ eq '..' } split m{/}, $v;
+    }
+    return $fail->('sshCaOpenBaoRole must be a single path segment')
+      if $role =~ m{/};
+
+    my $roleId = $str->('sshCaOpenBaoRoleId');
+    return $fail->('sshCaOpenBaoRoleId is not set') unless length $roleId;
+
+    # Exactly one source for the secret_id. The file and the environment
+    # variable keep it out of the LLNG configuration, which every portal node
+    # and every configuration backup holds. Several sources would leave the
+    # operator guessing which one is used.
+    my %secret = (
+        value => $str->('sshCaOpenBaoSecretId'),
+        file  => $str->('sshCaOpenBaoSecretIdFile'),
+        env   => $str->('sshCaOpenBaoSecretIdEnv'),
+    );
+    my @sources = grep { length $secret{$_} } sort keys %secret;
+    return $fail->( 'none of sshCaOpenBaoSecretId, sshCaOpenBaoSecretIdFile '
+          . 'and sshCaOpenBaoSecretIdEnv is set' )
+      unless @sources;
+    return $fail->( 'only one of sshCaOpenBaoSecretId, '
+          . 'sshCaOpenBaoSecretIdFile and sshCaOpenBaoSecretIdEnv may be set' )
+      if @sources > 1;
+
+    # Read at each login, so that a rotated secret_id is picked up without a
+    # configuration reload. Only warn here: the portal may start before the
+    # file is deployed.
+    $self->logger->warn( "SSH CA: sshCaOpenBaoSecretIdFile $secret{file} "
+          . 'is not readable (yet)' )
+      if length $secret{file} and !-r $secret{file};
+    $self->logger->warn( "SSH CA: environment variable $secret{env} "
+          . '(sshCaOpenBaoSecretIdEnv) is not set (yet)' )
+      if length $secret{env}
+      and !( defined $ENV{ $secret{env} } && length $ENV{ $secret{env} } );
+
+    my $caFile = $str->('sshCaOpenBaoCaFile');
+    if ( length $caFile and !-r $caFile ) {
+        return $fail->("sshCaOpenBaoCaFile $caFile is not readable");
+    }
+
+    return {
+        url          => $url,
+        mount        => $mount,
+        role         => $role,
+        approleMount => $approleMount,
+        roleId       => $roleId,
+        secretId     => $secret{value},
+        secretIdFile => $secret{file},
+        secretIdEnv  => $secret{env},
+        caFile       => $caFile,
+
+        # Every portal worker blocks on this call: keep it short.
+        timeout => $self->_positiveIntConf( 'sshCaOpenBaoTimeout', 5 ) || 5,
+    };
+}
+
+# HELPER: random hexadecimal string of $bytes bytes (key ID nonce).
+sub _nonceHex {
+    my ($bytes) = @_;
+    my $raw = eval { require Crypt::URandom; Crypt::URandom::urandom($bytes) };
+    $raw = join '', map { chr int rand 256 } 1 .. $bytes
+      unless defined $raw && length $raw == $bytes;
+    return unpack 'H*', $raw;
+}
+
+# HELPER: send one request to OpenBao. $path is relative to /v1/. Returns the
+# HTTP::Response; LWP turns connection failures and timeouts into a 5xx
+# response, so the caller only has to look at the status.
+sub _baoRequest {
+    my ( $self, $method, $path, $body, $token ) = @_;
+    require HTTP::Request;
+    my $req =
+      HTTP::Request->new( $method, $self->baoConf->{url} . "/v1/$path" );
+    $req->header( 'X-Vault-Token' => $token ) if defined $token;
+    if ( defined $body ) {
+        $req->header( 'Content-Type' => 'application/json' );
+        $req->content( to_json($body) );
+    }
+    my $resp = eval { $self->ua->request($req) };
+    unless ($resp) {
+        require HTTP::Response;
+        my $err = $@ || 'no response';
+        $err =~ s/[\r\n]+/ /g;
+        $resp = HTTP::Response->new( 500, "Request failed: $err" );
+    }
+    return $resp;
+}
+
+# HELPER: decode an OpenBao JSON answer. Returns a hashref, or undef when the
+# body is not a JSON object.
+sub _baoJson {
+    my ( $self, $resp ) = @_;
+    my $data = eval { JSON::decode_json( $resp->content // '' ) };
+    return ref $data eq 'HASH' ? $data : undef;
+}
+
+# HELPER: one-line description of a failed OpenBao answer for the logs: the
+# status line, and OpenBao's `errors` messages when it sent some. Never the
+# body as such, which could carry a token.
+sub _baoFailure {
+    my ( $self, $resp ) = @_;
+    my $msg  = $resp->status_line;
+    my $data = $self->_baoJson($resp);
+    if ( $data and ref $data->{errors} eq 'ARRAY' ) {
+        my $errors = join '; ', grep { defined && !ref } @{ $data->{errors} };
+        $errors =~ s/[\x00-\x1f\x7f]+/ /g;
+        $errors = substr( $errors, 0, 300 );
+        $msg .= " ($errors)" if length $errors;
+    }
+    $msg =~ s/[\x00-\x1f\x7f]+/ /g;
+    return $msg;
+}
+
+# HELPER: the AppRole secret_id, from wherever the configuration says.
+sub _baoSecretId {
+    my ($self) = @_;
+    my $bao = $self->baoConf;
+    return $bao->{secretId} if length $bao->{secretId};
+    if ( length $bao->{secretIdEnv} ) {
+        my $v = $ENV{ $bao->{secretIdEnv} };
+        $v = '' unless defined $v;
+        $v =~ s/^\s+|\s+$//g;
+        return $v if length $v;
+        $self->logger->error( 'SSH CA: environment variable '
+              . "$bao->{secretIdEnv} (sshCaOpenBaoSecretIdEnv) is empty" );
+        return undef;
+    }
+    my $file = $bao->{secretIdFile};
+    my $fh;
+    unless ( open $fh, '<', $file ) {
+        $self->logger->error("SSH CA: cannot read $file: $!");
+        return undef;
+    }
+    local $/;
+    my $v = <$fh>;
+    close $fh;
+    $v = '' unless defined $v;
+    $v =~ s/^\s+|\s+$//g;
+    unless ( length $v ) {
+        $self->logger->error("SSH CA: $file holds no AppRole secret_id");
+        return undef;
+    }
+    return $v;
+}
+
+# HELPER: AppRole login. Caches the token and its expiry on the plugin object,
+# i.e. per worker. Returns the token, or undef after logging why.
+sub _baoLogin {
+    my ($self) = @_;
+    my $bao = $self->baoConf;
+
+    $self->_baoToken(undef);
+    $self->_baoTokenExp(0);
+
+    my $secretId = $self->_baoSecretId;
+    return undef unless defined $secretId;
+
+    my $resp = $self->_baoRequest(
+        'POST',
+        "auth/$bao->{approleMount}/login",
+        { role_id => $bao->{roleId}, secret_id => $secretId }
+    );
+    unless ( $resp->is_success ) {
+        $self->logger->error( 'SSH CA: OpenBao AppRole login failed: '
+              . $self->_baoFailure($resp) );
+        return undef;
+    }
+
+    # Every level is checked: a proxy answering 200 with an HTML page, or an
+    # unexpected shape, must not die or end up in a request header.
+    my $data = $self->_baoJson($resp);
+    my $auth = $data ? $data->{auth} : undef;
+    my $token =
+      ref $auth eq 'HASH' && defined $auth->{client_token}
+      ? $auth->{client_token}
+      : undef;
+    unless ( defined $token and !ref $token and $token =~ /\A[\x21-\x7e]+\z/ ) {
+        $self->logger->error(
+            'SSH CA: OpenBao AppRole login: unexpected response');
+        return undef;
+    }
+
+    # Unknown or absent lease: treat the token as already expiring, so the
+    # next signature logs in again rather than using a dead token.
+    my $lease = $auth->{lease_duration};
+    $lease = 0
+      unless defined $lease && !ref $lease && $lease =~ /\A[0-9]{1,10}\z/;
+
+    $self->_baoToken($token);
+    $self->_baoTokenExp( time + $lease );
+    return $token;
+}
+
+# HELPER: a usable token: the cached one while it has more than 30s left,
+# otherwise (or with $force) a fresh login.
+sub _baoTokenGet {
+    my ( $self, $force ) = @_;
+    return $self->_baoToken
+      if !$force
+      and defined $self->_baoToken
+      and $self->_baoTokenExp - time >= 30;
+    return $self->_baoLogin;
+}
+
+# HELPER: compare OpenBao's CA public key with the pinned one, at init. Only
+# logs: a failure to reach OpenBao must not keep the portal from starting.
+sub _checkOpenBaoPublicKey {
+    my ($self) = @_;
+    my $bao    = $self->baoConf;
+    my $resp   = $self->_baoRequest( 'GET', "$bao->{mount}/public_key" );
+    unless ( $resp->is_success ) {
+        $self->logger->warn( 'SSH CA: could not fetch the CA public key from '
+              . 'OpenBao to check it against keys/'
+              . $self->conf->{sshCaKeyRef} . ': '
+              . $self->_baoFailure($resp) );
+        return undef;
+    }
+    my ($bao_b64) = ( $resp->content // '' ) =~ /\A\s*\S+\s+(\S+)/;
+    my ($pin_b64) = $self->sshPubKey         =~ /\A\s*\S+\s+(\S+)/;
+    if (    defined $bao_b64
+        and defined $pin_b64
+        and decode_base64($bao_b64) eq decode_base64($pin_b64) )
+    {
+        $self->logger->debug('SSH CA: OpenBao CA public key matches the pin');
+        return 1;
+    }
+    $self->logger->error( 'SSH CA: the CA public key of OpenBao mount '
+          . "'$bao->{mount}' differs from keys/"
+          . $self->conf->{sshCaKeyRef}
+          . '/keyPublic: every certificate it signs will be refused' );
+    return 0;
+}
+
+# HELPER: Sign SSH key through OpenBao's SSH secrets engine
+# (sshCaSigner = openbao). Same arguments as _signSshKey; $serial is ignored.
+sub _signOpenBao {
+    my ( $self, $userPubKey, $principals, $validityMinutes, undef, $keyId,
+        $opts )
+      = @_;
+    $opts = {} unless ref $opts eq 'HASH';
+    my $bao         = $self->baoConf;
+    my $unavailable = { error => 'unavailable' };
+    my $invalid     = { error => 'invalid' };
+
+    unless ($bao) {
+        $self->logger->error('SSH CA: OpenBao signer is not configured');
+        return $unavailable;
+    }
+
+    # TTL: the explicit validity spec when given (hop certificates, "+120s"),
+    # otherwise the validity in minutes. Kept in seconds for the check below.
+    my ( $ttl, $ttlSpec );
+    if ( defined $opts->{validity} && $opts->{validity} ne '' ) {
+        unless ( $opts->{validity} =~ /\A\+([0-9]{1,9})([sm])\z/ ) {
+            $self->logger->error( 'SSH CA: validity spec not supported by '
+                  . "the OpenBao signer: $opts->{validity}" );
+            return $invalid;
+        }
+        $ttl     = $2 eq 'm' ? $1 * 60 : $1 + 0;
+        $ttlSpec = "${ttl}s";
+    }
+    elsif ( defined $validityMinutes && $validityMinutes =~ /\A[0-9]{1,9}\z/ ) {
+        $ttl     = $validityMinutes * 60;
+        $ttlSpec = ( $validityMinutes + 0 ) . 'm';
+    }
+    unless ($ttl) {
+        $self->logger->error('SSH CA: no usable validity to sign with');
+        return $invalid;
+    }
+
+    # The submitted key, as the blob the certificate must certify.
+    my ( $keyType, $keyB64 ) =
+      ( $userPubKey // '' ) =~ /\A\s*(\S+)\s+([A-Za-z0-9+\/]+={0,2})(?:\s|\z)/;
+    my $keyBlob = defined $keyB64 ? decode_base64($keyB64) : '';
+    unless ( length $keyBlob ) {
+        $self->logger->error('SSH CA: cannot decode the key to sign');
+        return $invalid;
+    }
+
+    # valid_principals is a comma-separated list: a comma inside a principal
+    # would make OpenBao certify two. The callers never produce one, refuse
+    # rather than trust it.
+    my @principals = @{ $principals || [] };
+    if ( !@principals or grep { !length || /[,\x00-\x1f\x7f]/ } @principals ) {
+        $self->logger->error(
+            'SSH CA: refusing to sign with unusable principals');
+        return $invalid;
+    }
+
+    my $source =
+      defined $opts->{source_address} && $opts->{source_address} ne ''
+      ? $opts->{source_address}
+      : undef;
+
+    my $body = {
+        public_key       => "$keyType $keyB64",
+        valid_principals => join( ',', @principals ),
+        cert_type        => 'user',
+        key_id           => $keyId,
+        ttl              => $ttlSpec,
+        (
+            $source
+            ? ( critical_options => { 'source-address' => $source } )
+            : ()
+        ),
+    };
+
+    my $path  = "$bao->{mount}/sign/$bao->{role}";
+    my $token = $self->_baoTokenGet;
+    return $unavailable unless defined $token;
+    $self->logger->debug(
+        "SSH CA: asking OpenBao to sign ($path, key_id=$keyId)");
+    my $resp = $self->_baoRequest( 'POST', $path, $body, $token );
+
+    # 403: the token was revoked, has used up its uses, or expired earlier
+    # than announced. Log in again, once, and retry once.
+    if ( $resp->code == 403 ) {
+        $self->logger->info(
+            'SSH CA: OpenBao refused the token, logging in again');
+        $token = $self->_baoTokenGet(1);
+        return $unavailable unless defined $token;
+        $resp = $self->_baoRequest( 'POST', $path, $body, $token );
+    }
+    unless ( $resp->is_success ) {
+        $self->_baoToken(undef) if $resp->code == 403;
+        $self->logger->error(
+            'SSH CA: OpenBao did not sign: ' . $self->_baoFailure($resp) );
+        return $unavailable;
+    }
+
+    # From here on, OpenBao answered: anything unexpected is refused (500),
+    # never handed out.
+    my $data = $self->_baoJson($resp);
+    $data = $data->{data} if $data;
+    unless (ref $data eq 'HASH'
+        and defined $data->{serial_number}
+        and !ref $data->{serial_number}
+        and defined $data->{signed_key}
+        and !ref $data->{signed_key} )
+    {
+        $self->logger->error('SSH CA: OpenBao sign: unexpected response');
+        return $invalid;
+    }
+    my ( $certType, $certB64 ) = $data->{signed_key} =~
+      m{\A\s*(\S+-cert-v01\@openssh\.com)\s+([A-Za-z0-9+/]+={0,2})\s*\z};
+    my $cert =
+      defined $certB64
+      ? $self->_parseSshCert( decode_base64($certB64) )
+      : undef;
+    unless ( $cert and $cert->{type} eq $certType ) {
+        $self->logger->error(
+            'SSH CA: OpenBao returned an unparsable certificate');
+        return $invalid;
+    }
+
+    # The certificate must be exactly the one requested.
+    my ($pinB64) = ( $self->sshPubKey // '' ) =~ /\A\s*\S+\s+(\S+)/;
+    my $now      = time;
+    my %want     = map { $_ => 1 } @principals;
+    my %got      = map { $_ => 1 } @{ $cert->{principals} };
+    my $crit     = $cert->{critical_options};
+    my @problems;
+    push @problems, 'not a user certificate' unless $cert->{cert_type} == 1;
+    push @problems, 'it certifies another key'
+      unless $cert->{key_blob} eq $keyBlob;
+    push @problems, 'it is signed by another CA than the pinned one'
+      unless defined $pinB64
+      and $cert->{signature_key} eq decode_base64($pinB64);
+    push @problems, 'its key ID differs' unless $cert->{key_id} eq $keyId;
+    push @problems, 'its principals differ'
+      unless join( "\0", sort keys %want ) eq join( "\0", sort keys %got );
+    my $gotSource = $crit->{'source-address'};
+    push @problems, 'its source-address differs'
+      unless ( !defined $source && !defined $gotSource )
+      or (  defined $source
+        and defined $gotSource
+        and $gotSource eq $source );
+    push @problems, 'it carries unexpected critical options'
+      if grep { $_ ne 'source-address' } keys %$crit;
+    push @problems, 'it carries unexpected extensions'
+      if grep { !$BAO_ALLOWED_EXTENSIONS{$_} } keys %{ $cert->{extensions} };
+    push @problems, 'its validity does not match the requested TTL'
+      if abs( $cert->{valid_before} - ( $now + $ttl ) ) > SSHCA_BAO_CLOCK_SKEW;
+
+    # The serial goes into the records and the KRL. Read it from the
+    # certificate (that is what sshd and the KRL see), cross-check it with
+    # OpenBao's answer, and keep it in decimal. 0 cannot be revoked by serial
+    # in a KRL, so a certificate carrying it could never be revoked.
+    my $serial    = $cert->{serial};
+    my $announced = $data->{serial_number};
+    if ( $announced =~ /\A(?:0x)?([0-9a-fA-F]{1,16})\z/ ) {
+        require Math::BigInt;
+        push @problems, 'its serial differs from serial_number'
+          unless Math::BigInt->from_hex($1)->bstr eq $serial;
+    }
+    else {
+        push @problems, 'serial_number is not a 64-bit hexadecimal number';
+    }
+    push @problems, 'its serial is unusable'
+      unless $self->_validSerial($serial)
+      and $serial ne '0';
+
+    if (@problems) {
+        $self->logger->error( 'SSH CA: refusing the certificate signed by '
+              . "OpenBao for key_id=$keyId: "
+              . join( ', ', @problems ) );
+        return $invalid;
+    }
+
+    return { certificate => "$certType $certB64", serial => $serial };
+}
+
+# HELPER: parse an OpenSSH certificate blob (PROTOCOL.certkeys):
+#   string type, string nonce, <key fields>, uint64 serial, uint32 type,
+#   string key id, string valid principals, uint64 valid after,
+#   uint64 valid before, string critical options, string extensions,
+#   string reserved, string signature key, string signature
+# Returns undef unless the whole blob parses (no trailing bytes), otherwise a
+# hashref: type, key_type, key_blob (the certified key as a plain public key
+# blob), serial (decimal string), cert_type, key_id, principals (arrayref),
+# valid_after, valid_before, critical_options and extensions (hashrefs, the
+# value of an option being its inner string, '' when it has none),
+# signature_key (blob) and signature.
+#
+# The signature itself is not verified: the signature key is compared with
+# the pinned CA key, and sshd refuses a certificate whose signature does not
+# match it.
+sub _parseSshCert {
+    my ( $self, $blob ) = @_;
+    return undef unless defined $blob && length $blob;
+
+    my $pos  = 0;
+    my $read = sub {
+        my $n = shift;
+        return undef if $n > length($blob) - $pos;
+        my $v = substr( $blob, $pos, $n );
+        $pos += $n;
+        return $v;
+    };
+    my $string = sub {
+        my $l = $read->(4);
+        return defined $l ? $read->( unpack 'N', $l ) : undef;
+    };
+
+    my %c;
+    defined( $c{type} = $string->() ) or return undef;
+    my ($keyType) = $c{type} =~ /\A(.+)-cert-v01\@openssh\.com\z/
+      or return undef;
+    $keyType .= '@openssh.com' if $keyType =~ /\Ask-/;
+    my $fields = $SSHCA_CERT_KEY_FIELDS{$keyType} or return undef;
+    $c{key_type} = $keyType;
+
+    defined $string->() or return undef;    # nonce
+    my $start = $pos;
+    for ( 1 .. $fields ) { defined $string->() or return undef }
+    $c{key_blob} =
+        pack( 'N', length $keyType )
+      . $keyType
+      . substr( $blob, $start, $pos - $start );
+
+    my $serial = $read->(8) // return undef;
+    require Math::BigInt;
+    $c{serial} = Math::BigInt->from_hex( unpack 'H*', $serial )->bstr;
+    my $certType = $read->(4) // return undef;
+    $c{cert_type} = unpack 'N', $certType;
+    defined( $c{key_id} = $string->() ) or return undef;
+    my $principals = $string->() // return undef;
+    for my $k (qw(valid_after valid_before)) {
+        my $v = $read->(8) // return undef;
+        my ( $hi, $lo ) = unpack 'NN', $v;
+        $c{$k} = $hi * 4294967296 + $lo;
+    }
+    my $critical   = $string->() // return undef;
+    my $extensions = $string->() // return undef;
+    defined $string->() or return undef;    # reserved
+    defined( $c{signature_key} = $string->() ) or return undef;
+    defined( $c{signature}     = $string->() ) or return undef;
+    return undef unless $pos == length $blob;
+
+    $c{principals}       = _sshStringList($principals)   // return undef;
+    $c{critical_options} = _sshOptionMap( $critical, 1 ) // return undef;
+    $c{extensions}       = _sshOptionMap($extensions)    // return undef;
+    return \%c;
+}
+
+# HELPER: split a buffer made of consecutive SSH strings. Undef when it does
+# not split exactly.
+sub _sshStringList {
+    my ($buf) = @_;
+    my ( $pos, @list ) = (0);
+    while ( $pos < length $buf ) {
+        return undef if length($buf) - $pos < 4;
+        my $l = unpack 'N', substr( $buf, $pos, 4 );
+        $pos += 4;
+        return undef if $l > length($buf) - $pos;
+        push @list, substr( $buf, $pos, $l );
+        $pos += $l;
+    }
+    return \@list;
+}
+
+# HELPER: decode a certificate's critical options or extensions: pairs of
+# (string name, string data). With $inner, a non-empty data is itself one SSH
+# string (critical options), which is returned. Undef on any framing error or
+# duplicate name.
+sub _sshOptionMap {
+    my ( $buf, $inner ) = @_;
+    my $list = _sshStringList($buf) or return undef;
+    return undef if @$list % 2;
+    my %map;
+    while ( my ( $name, $data ) = splice @$list, 0, 2 ) {
+        return undef if exists $map{$name};
+        if ( $inner and length $data ) {
+            my $v = _sshStringList($data);
+            return undef unless $v and @$v == 1;
+            $data = $v->[0];
+        }
+        $map{$name} = $data;
+    }
+    return \%map;
 }
 
 # HELPER: Convert PEM private key to OpenSSH format
@@ -1211,6 +1977,26 @@ sub _pemToSshPublicKey {
     my ( $self, $pemKey, $comment ) = @_;
 
     require MIME::Base64;
+
+    # Already an OpenSSH public key line, which is what OpenBao serves on
+    # /v1/<mount>/public_key (issue #476): pinning it does not require a
+    # conversion to PEM, which ssh-keygen cannot do for every key type. Taken
+    # as is once its blob parses as a key of the type it announces.
+    if ( defined $pemKey
+        and $pemKey =~
+m{\A\s*((?:ssh|ecdsa-sha2)-[\w-]+)\s+([A-Za-z0-9+/]+={0,2})(?:[ \t]+([^\r\n]*?))?\s*\z}
+      )
+    {
+        my ( $type, $b64, $keyComment ) = ( $1, $2, $3 );
+        unless ( $self->_parseSshPubKey("$type $b64") ) {
+            $self->logger->error(
+                "SSH CA: the CA public key is not a valid $type key");
+            return undef;
+        }
+        $keyComment = "LLNG-SSH-CA-$comment"
+          unless defined $keyComment && length $keyComment;
+        return "$type $b64 $keyComment\n";
+    }
 
     my $sshKey;
 
@@ -2140,13 +2926,22 @@ sub _sshKeyFingerprint {
 }
 
 # HELPER: Validate a certificate serial.
-# Serials are produced by _getNextSerial as plain decimal integers and are
-# handed verbatim to ssh-keygen through the KRL spec file, one directive per
-# line. Anything else (in particular anything containing a newline) would let
-# a caller inject arbitrary KRL spec directives — `id:`, `key:`, `hash:` —
-# and revoke certificates it has no business revoking (issue #65).
+# Serials are plain decimal integers, produced by _getNextSerial or read from
+# an OpenBao-signed certificate (_signOpenBao), and are handed verbatim to
+# ssh-keygen through the KRL spec file, one directive per line. Anything else
+# (in particular anything containing a newline) would let a caller inject
+# arbitrary KRL spec directives — `id:`, `key:`, `hash:` — and revoke
+# certificates it has no business revoking (issue #65).
 # ssh-keygen accepts serials up to 2^64-1, i.e. at most 20 digits.
 sub _validSerial {
+    my ( $self, $serial ) = @_;
+    return 0 unless defined $serial;
+
+    # A JSON boolean stringifies to "1" and would otherwise match the pattern.
+    return 0 if ref $serial;
+    return $serial =~ /\A[0-9]{1,20}\z/ ? 1 : 0;
+}
+
 # HELPER: Bit length of an SSH "mpint" (RFC 4251 §5): a big-endian integer
 # carrying a leading 0x00 byte whenever its top bit would otherwise be read
 # as a sign bit. OpenSSH reports the significant bit count (a 2048-bit RSA
@@ -2377,15 +3172,6 @@ sub _checkKeyPolicy {
     }
 
     return { ok => 1, info => $info };
-}
-
-
-    my ( $self, $serial ) = @_;
-    return 0 unless defined $serial;
-
-    # A JSON boolean stringifies to "1" and would otherwise match the pattern.
-    return 0 if ref $serial;
-    return $serial =~ /\A[0-9]{1,20}\z/ ? 1 : 0;
 }
 
 # Section types this plugin can publish. OpenSSH also defines
@@ -2861,6 +3647,11 @@ Response:
         "key_id": "user1@llng-1234567890-000001"
     }
 
+With C<sshCaSigner> = C<openbao>, OpenBao chooses the serial (random 64-bit)
+and C<serial> is a decimal string; the key ID then ends with a random nonce
+instead of the serial (C<user1@llng-1234567890-9f86d081884c7d65>). If OpenBao
+cannot be reached, is sealed or refuses to sign, the answer is 503.
+
 =head2 GET /ssh/admin
 
 Displays the SSH CA administration interface for searching and revoking
@@ -2952,7 +3743,56 @@ still supported and still recommended as defence in depth.
 
 =item sshCaKeyRef
 
-Reference to the SSH CA key in the LLNG keys store (required)
+Reference to the SSH CA key in the LLNG keys store (required). With
+C<sshCaSigner> = C<openbao> only its C<keyPublic> is needed: the PEM public
+key, or the OpenSSH line OpenBao serves on C</v1/E<lt>mountE<gt>/public_key>.
+
+=item sshCaSigner
+
+C<local> (default) signs with C<ssh-keygen -s> and the private key of
+C<sshCaKeyRef>. C<openbao> sends every signature to OpenBao's SSH secrets
+engine (C<POST /v1/E<lt>mountE<gt>/sign/E<lt>roleE<gt>>, AppRole
+authentication), which holds the private key; the plugin then refuses to load
+if the OpenBao parameters below are incomplete, never falls back to a local
+key, and checks every certificate OpenBao returns (CA key, certified key,
+principals, key ID, C<source-address>, extensions, validity, serial) before
+handing it out.
+
+=item sshCaOpenBaoUrl
+
+OpenBao base URL, e.g. C<https://bao.example.com:8200> (required with
+C<openbao>).
+
+=item sshCaOpenBaoMount
+
+Mount path of the SSH secrets engine (default: C<ssh>).
+
+=item sshCaOpenBaoRole
+
+SSH engine role used to sign (required with C<openbao>).
+
+=item sshCaOpenBaoAppRoleMount
+
+Mount path of the AppRole auth method (default: C<approle>).
+
+=item sshCaOpenBaoRoleId
+
+AppRole role_id (required with C<openbao>).
+
+=item sshCaOpenBaoSecretId, sshCaOpenBaoSecretIdFile, sshCaOpenBaoSecretIdEnv
+
+AppRole secret_id: the value itself, a file holding it (read at each login),
+or the name of an environment variable holding it. Exactly one must be set.
+
+=item sshCaOpenBaoCaFile
+
+CA bundle used to check OpenBao's TLS certificate (default: the system
+store, or C<lwpSslOpts>).
+
+=item sshCaOpenBaoTimeout
+
+Timeout of each OpenBao request, in seconds (default: 5). Portal workers
+block on it.
 
 =item sshCaCertMaxValidity
 

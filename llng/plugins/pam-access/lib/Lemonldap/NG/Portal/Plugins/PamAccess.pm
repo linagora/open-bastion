@@ -3130,10 +3130,16 @@ sub bastionCert {
         );
     }
 
-    # 7. Reach the ssh-ca plugin to sign with the CA key.
+    # 7. Reach the ssh-ca plugin to sign with the CA key. Ask it whether its
+    #    signer is usable: with sshCaSigner = openbao there is no local
+    #    private key at all (issue #476). An ssh-ca older than canSign() only
+    #    signs locally.
     my $sshca =
       $self->p->loadedModules->{'Lemonldap::NG::Portal::Plugins::SSHCA'};
-    unless ( $sshca && $sshca->can('_signSshKey') && $sshca->sshPrivKey ) {
+    unless ( $sshca
+        && $sshca->can('_signSshKey')
+        && ( $sshca->can('canSign') ? $sshca->canSign : $sshca->sshPrivKey ) )
+    {
         $self->logger->error(
             'PAM bastion-cert: SSHCA plugin not available/initialised');
         return $self->p->sendJSONresponse(
@@ -3174,6 +3180,8 @@ sub bastionCert {
       $self->_confPositiveInt( 'pamAccessBastionBindingTtl', 86400 );
     $bindingTtl = $ttl if $bindingTtl < $ttl;
 
+    # The serial to impose in local mode. OpenBao chooses its own: the one
+    # the certificate carries comes back from _signSshKey and replaces it.
     my $serial = $sshca->_getNextSerial;
     my %signOpts = ( validity => "+${ttl}s" );
 
@@ -3224,6 +3232,11 @@ sub bastionCert {
             code => 500
         );
     }
+
+    # Record, log and return the serial the certificate really carries. An
+    # ssh-ca older than issue #476 does not return it, and then signed with
+    # the one given.
+    $serial = $result->{serial} if defined $result->{serial};
 
     # Register the ephemeral cert's public-key fingerprint so the backend this
     # hop targets accepts it: its /pam/authorize SSH-fingerprint binding
@@ -3527,6 +3540,11 @@ Response:
 On voucher rejection, returns 403 with a machine-readable reason
 (C<no_voucher_supplied>, C<voucher_expired>, C<voucher_mismatch>); internal
 failures (session backend error, corrupted voucher map) return 500.
+
+C<serial> is the serial the certificate carries. With the ssh-ca signer
+C<openbao>, OpenBao chooses it (random 64-bit) and it is returned as a
+decimal string; a signing failure there, OpenBao being unreachable included,
+returns 500 as any other.
 
 =head2 POST /pam/heartbeat
 
