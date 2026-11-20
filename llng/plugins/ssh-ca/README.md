@@ -429,7 +429,7 @@ Response (JSON):
   used by the `pam-access` plugin to bind PAM tokens to a specific key.
 - With `sshCaSigner = openbao`, `serial` is a decimal string chosen by
   OpenBao, `key_id` ends with a random nonce, and an unavailable OpenBao
-  answers 503 (see [When OpenBao is unavailable](#when-openbao-is-unavailable)).
+  answers 503 (see [Signing with OpenBao](#signing-with-openbao-sshcasigner)).
 
 **Re-signing the same SSH public key** (same fingerprint) replaces the
 previous record in the user's persistent session and revokes the
