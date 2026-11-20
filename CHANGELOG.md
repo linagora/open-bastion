@@ -77,6 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of deleting it; `sshCaCertHistoryMax` (50 per user) and
   `sshCaCertHistoryRetention` (30 days after expiry) bound that history
   (#455).
+- ssh-ca, pam-access: the SSH CA private key can stay in OpenBao. With
+  `sshCaSigner = openbao`, `/ssh/sign` and the `/pam/bastion-cert` hops are
+  signed by the SSH secrets engine of OpenBao (AppRole authentication,
+  `sshCaOpenBao*` parameters), and only the CA public key stays pinned in
+  `sshCaKeyRef`. LLNG still sets the principals, the validity and
+  `source-address`, and checks every certificate OpenBao returns against the
+  request: signing CA, certified key, principals, key ID, critical options,
+  extensions, validity and serial. A misconfigured role cannot produce a
+  broader certificate. OpenBao chooses the serial: it is recorded in decimal
+  and revoked through the KRL as before, and the `/ssh/sign` key ID ends with
+  a random nonce instead of the serial. There is no fallback to a local key:
+  when OpenBao is unavailable, `/ssh/sign` answers 503 and
+  `/pam/bastion-cert` 500. `sshCaSigner = local`, the default, is unchanged
+  (#476).
 
 ### Changed
 
